@@ -27,8 +27,17 @@ else
   git clone --quiet "$REPO_URL" "$CACHE_DIR"
 fi
 
-# Prefer the newest release tag; fall back to the default branch.
-ref="$(git -C "$CACHE_DIR" tag --list --sort=-v:refname | head -n1)"
+# Honor an explicit `--ref` (tag or branch); otherwise prefer the newest
+# release tag, falling back to the default branch. This determines which
+# version of the playbook the cache is checked out to before new-vm.sh runs
+# against it in repo mode.
+ref=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--ref" ] && ref="$a"
+  prev="$a"
+done
+[ -n "$ref" ] || ref="$(git -C "$CACHE_DIR" tag --list --sort=-v:refname | head -n1)"
 if [ -n "$ref" ]; then
   git -C "$CACHE_DIR" checkout --quiet "$ref"
 else
