@@ -299,6 +299,5 @@ cat >&2 <<EOF
 The VM has no writable host mount, so 'limactl delete $NAME' removes
 everything it produced. Use 'limactl copy' to move files in or out.
 
-Re-running this script (or 'limactl start $NAME') re-applies the playbook —
-Ansible is idempotent, so it just re-converges the VM.
+Re-running this script (or 'limactl start $NAME') re-applies the playbook.
 EOF
