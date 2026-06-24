@@ -88,20 +88,12 @@ default_cpus() {
   printf '%s' "$n"
 }
 
-default_keys_url() {
-  local login=""
-  if command -v gh >/dev/null 2>&1; then
-    login="$(gh api user --jq .login 2>/dev/null || true)"
-  fi
-  [ -n "$login" ] && printf 'https://github.com/%s.keys' "$login"
-}
-
 # ---------------------------------------------------------------------------
 # CLI flags (all optional; anything not supplied is prompted for)
 # ---------------------------------------------------------------------------
 ASSUME_YES=0
 REF=""
-NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL="" KEYS_URL=""
+NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" LOCALE="" DOMAIN=""
 OAUTH_TOKEN="" WEBHOOK_URL=""
 GH_ORG="" GH_ORG_EMAIL="" GH_ORG_TOKEN=""
@@ -119,7 +111,6 @@ Options:
   --user USER              Primary VM user (default: current user, matching Lima)
   --git-name NAME          git user.name        (default: host git config)
   --git-email EMAIL        git user.email       (default: host git config)
-  --keys-url URL           authorized_keys URL  (default: from `gh` login)
   --cpus N                 vCPUs                 (default: half of host)
   --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
   --locale LOCALE          System locale         (default: host $LANG)
@@ -133,7 +124,7 @@ Options:
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
 
-Required (prompted if absent): --git-name, --git-email, --keys-url
+Required (prompted if absent): --git-name, --git-email
 EOF
 }
 
@@ -144,7 +135,6 @@ while [ $# -gt 0 ]; do
     --user) USER_NAME="$2"; shift 2;;
     --git-name) GIT_NAME="$2"; shift 2;;
     --git-email) GIT_EMAIL="$2"; shift 2;;
-    --keys-url) KEYS_URL="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
     --memory) MEMORY="$2"; shift 2;;
     --locale) LOCALE="$2"; shift 2;;
@@ -225,8 +215,6 @@ ask USER_NAME "Primary VM user" "$USER_NAME"
 ask GIT_NAME "git user.name" "$GIT_NAME"
 [ -n "$GIT_EMAIL" ] || GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
 ask GIT_EMAIL "git user.email" "$GIT_EMAIL"
-[ -n "$KEYS_URL" ]  || KEYS_URL="$(default_keys_url || true)"
-ask KEYS_URL "SSH authorized_keys URL" "$KEYS_URL"
 
 [ -n "$CPUS" ]   || CPUS="$(default_cpus)"
 ask CPUS "vCPUs" "$CPUS"
@@ -250,10 +238,6 @@ fi
 # Validate required values
 [ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
 [ -n "$GIT_EMAIL" ] || die "git user.email is required (--git-email)"
-[ -n "$KEYS_URL" ]  || die "authorized_keys URL is required (--keys-url)"
-case "$KEYS_URL" in
-  *your-username*) warn "keys URL still contains a placeholder: $KEYS_URL";;
-esac
 
 # ---------------------------------------------------------------------------
 # Build the Ansible vars file (written into the guest as /root/all.yml)
@@ -265,7 +249,6 @@ build_allyml() {
   printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
   printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
   printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
-  printf 'user_github_keys_url: %s\n'   "$(yaml_str "$KEYS_URL")"
   [ -n "$GH_ORG" ]       && printf 'user_github_org: %s\n'       "$(yaml_str "$GH_ORG")"
   [ -n "$GH_ORG_EMAIL" ] && printf 'user_github_org_email: %s\n' "$(yaml_str "$GH_ORG_EMAIL")"
   [ -n "$GH_ORG_TOKEN" ] && printf 'user_github_org_token: %s\n' "$(yaml_str "$GH_ORG_TOKEN")"

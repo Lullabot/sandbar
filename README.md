@@ -83,8 +83,7 @@ Non-interactive use (CI, scripting) is supported via flags — see
 
 ```bash
 ./scripts/new-vm.sh --yes --name claude \
-  --git-name "Your Name" --git-email you@example.com \
-  --keys-url https://github.com/your-username.keys
+  --git-name "Your Name" --git-email you@example.com
 ```
 
 How it spins up the VM:
@@ -117,7 +116,7 @@ $ limactl create --name claude --cpus=8 --memory=32 template:debian-13
 ## What It Does
 
 - Sets hostname to `claude.lan` (configurable)
-- Creates a user (default: `claude`) with passwordless sudo and SSH key access
+- Creates a user (default: the current host user) with passwordless sudo
 - Installs development tools: Docker CE, ddev, Node.js, Go, Python 3, uv, mkcert, Java, and CLI utilities
 - Installs the [GitHub CLI (`gh`)](https://cli.github.com/) and configures it as the git credential helper for HTTPS authentication
 - Installs Claude Code CLI configured for autonomous operation
@@ -227,7 +226,6 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `base_locale` | `en_CA.UTF-8` | System locale |
 | `user_git_user_name` | `Your Name` | Git user.name |
 | `user_git_user_email` | `you@example.com` | Git user.email (default) |
-| `user_github_keys_url` | `https://github.com/your-username.keys` | SSH authorized_keys source |
 | `user_github_org` | _(empty)_ | GitHub organization name for initial setup (e.g. `lullabot`) |
 | `user_github_org_email` | _(empty)_ | Git commit email for the initial org |
 | `user_github_org_token` | _(empty)_ | GitHub PAT for the initial org (fine-grained PATs recommended) |

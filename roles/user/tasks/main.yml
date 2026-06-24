@@ -36,12 +36,6 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
 
-- name: Fetch SSH authorized_keys from GitHub
-  ansible.posix.authorized_key:
-    user: "{{ user_name }}"
-    key: "{{ user_github_keys_url }}"
-    exclusive: false
-
 - name: Deploy ~/.ssh/rc
   ansible.builtin.template:
     src: ssh_rc.j2
