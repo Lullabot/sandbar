@@ -2,63 +2,13 @@
 
 Ansible playbook to provision a Debian 13 (trixie) VM as a Claude Code development environment.
 
-## Prerequisites
+## Quick start with Lima (recommended)
 
-- A fresh Debian 13 (trixie) minimal installation with SSH access as root
-- Ansible installed on the control machine (`apt install ansible`)
-- SSH key access to the target VM's root user
-
-## Running the Playbook Directly on the Target Host
-
-If you are running the playbook on the same machine you want to provision (i.e. no SSH hop), use Ansible's local connection mode. This is useful when bootstrapping the VM from within a post-install script or when SSH is not available.
-
-1. Install Ansible on the target host:
-   ```bash
-   apt install ansible
-   ```
-
-2. Copy the example variables file and fill in your details:
-   ```bash
-   cp group_vars/all.yml.example group_vars/all.yml
-   ```
-
-3. Run the playbook with a local inventory and `--connection=local`:
-   ```bash
-   ansible-playbook -i localhost, --connection=local site.yml
-   ```
-
-   The trailing comma after `localhost` tells Ansible to treat the value as an inline inventory rather than a file path.
-
-   When done, run `source ~/.bashrc` or create a new shell to get updated PATH settings.
-
-## Running against a remote host
-
-1. Copy the example variables file and fill in your details:
-   ```bash
-   cp group_vars/all.yml.example group_vars/all.yml
-   ```
-   Edit `group_vars/all.yml` with your Git identity and network settings. For
-   SSH key access to the provisioned user, set `user_github_keys_url` (e.g.
-   `https://github.com/your-username.keys`) — this is needed only on this
-   non-Lima path; the Lima quick-start uses `limactl shell` instead.
-
-2. Edit `inventory` and replace `CHANGE_ME` with the target VM's IP address:
-   ```
-   claude.example ansible_host=192.168.1.100 ansible_user=debian
-   ```
-
-3. Run the playbook:
-   ```bash
-   ansible-playbook -i inventory site.yml
-   ```
-   
-## Quick start with Lima
-
-The fastest way to get a VM is `scripts/new-vm.sh`. It prompts for the
-required settings (with sensible autodetected defaults), then starts a Lima
-instance that installs Ansible and runs this playbook against itself with
-`--connection=local` — no manual cloning, inventory editing, or `ansible`
-install required.
+The fastest and recommended way to get a VM is `scripts/new-vm.sh`. It prompts
+for the required settings (with sensible autodetected defaults), then starts a
+[Lima](https://lima-vm.io/docs/installation/) instance that installs Ansible and
+runs this playbook against itself with `--connection=local` — no manual cloning,
+inventory editing, or `ansible` install required.
 
 It works two ways from the same script:
 
@@ -70,6 +20,14 @@ It works two ways from the same script:
 
   This clones the playbook into `~/.local/share/claude-code-ansible` (pinned
   to the latest release tag when one exists) and launches the VM from there.
+
+  To pass flags on this path, put them **after `bash -s --`** — a pipe sends
+  everything after `| bash` to bash, not to the script. For example, to rebuild
+  an existing VM:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash -s -- --recreate
+  ```
 
 - **Hacking on the playbook** — from a checkout, run the script directly:
 
@@ -87,6 +45,10 @@ It works two ways from the same script:
   (cpus/memory/disk/mounts) or the generated provisioning means rebuilding the
   instance: `./scripts/new-vm.sh --recreate` (this destroys and recreates the
   VM). Re-running the script against an existing instance is refused otherwise.
+
+After provisioning, the script restarts the VM once so your first shell lands
+with the right group membership (e.g. `docker`) and any kernel/library updates
+the provision installed.
 
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:
@@ -122,6 +84,61 @@ $ limactl create --name claude --cpus=8 --memory=32 template:debian-13
 ```
 
 **It is highly recommended** to edit or disable the default mount of your home directory. Otherwise, nothing will stop Claude from making changes there.
+
+## Other provisioning methods
+
+These paths run the playbook against an existing host (no Lima). They require a
+bit more setup than the quick start above.
+
+### Prerequisites
+
+- A fresh Debian 13 (trixie) minimal installation with SSH access as root
+- Ansible installed on the control machine (`apt install ansible`)
+- SSH key access to the target VM's root user
+
+### Running the Playbook Directly on the Target Host
+
+If you are running the playbook on the same machine you want to provision (i.e. no SSH hop), use Ansible's local connection mode. This is useful when bootstrapping the VM from within a post-install script or when SSH is not available.
+
+1. Install Ansible on the target host:
+   ```bash
+   apt install ansible
+   ```
+
+2. Copy the example variables file and fill in your details:
+   ```bash
+   cp group_vars/all.yml.example group_vars/all.yml
+   ```
+
+3. Run the playbook with a local inventory and `--connection=local`:
+   ```bash
+   ansible-playbook -i localhost, --connection=local site.yml
+   ```
+
+   The trailing comma after `localhost` tells Ansible to treat the value as an inline inventory rather than a file path.
+
+   When done, run `source ~/.bashrc` or create a new shell to get updated PATH settings.
+
+### Running against a remote host
+
+1. Copy the example variables file and fill in your details:
+   ```bash
+   cp group_vars/all.yml.example group_vars/all.yml
+   ```
+   Edit `group_vars/all.yml` with your Git identity and network settings. For
+   SSH key access to the provisioned user, set `user_github_keys_url` (e.g.
+   `https://github.com/your-username.keys`) — this is needed only on this
+   non-Lima path; the Lima quick-start uses `limactl shell` instead.
+
+2. Edit `inventory` and replace `CHANGE_ME` with the target VM's IP address:
+   ```
+   claude.example ansible_host=192.168.1.100 ansible_user=debian
+   ```
+
+3. Run the playbook:
+   ```bash
+   ansible-playbook -i inventory site.yml
+   ```
 
 ## What It Does
 
