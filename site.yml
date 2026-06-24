@@ -5,6 +5,9 @@
   roles:
     - base
     - user
-    - samba
+    # Samba is for non-Lima / remote-host deployments. The Lima flow sets
+    # samba_enabled=false (use a bind mount or `limactl copy` instead).
+    - role: samba
+      when: samba_enabled | default(true) | bool
     - dev-tools
     - claude-code

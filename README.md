@@ -188,6 +188,7 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `user_git_user_name` | `Your Name` | Git user.name |
 | `user_git_user_email` | `you@example.com` | Git user.email (default) |
 | `user_github_keys_url` | _(empty)_ | Optional SSH authorized_keys source (e.g. `https://github.com/<user>.keys`). Only needed for non-Lima / remote-host deployments; Lima uses `limactl shell` |
+| `samba_enabled` | `true` | Run the Samba role. The Lima flow sets this to `false` (no host-home mount to share); set it for remote-host deployments that want file sharing |
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
@@ -212,6 +213,6 @@ finishes — no webhook configuration required.
 
 - **base** — Hostname, locale, APT packages
 - **user** — User creation, sudo, SSH, tmux, git, bashrc
-- **samba** — Samba file sharing for the user's home directory
+- **samba** — Samba file sharing for the user's home directory (skipped by the Lima flow; `samba_enabled: false`)
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
 - **claude-code** — Claude Code CLI installation and configuration

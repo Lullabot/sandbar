@@ -220,6 +220,8 @@ build_allyml() {
   printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
   printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
   printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
+  # Lima VMs have no host-home mount to share, so skip Samba.
+  printf 'samba_enabled: false\n'
 }
 ALLYML="$(build_allyml)"
 
@@ -280,24 +282,34 @@ info "Starting Lima instance '$NAME' (this provisions the VM; first run takes a 
 info "Rendered config: $OVERLAY"
 limactl start --name "$NAME" --tty=false "$OVERLAY"
 
-# `limactl shell` logs in as the host-matching Lima user. If that is also the
-# configured user, Claude is right there; otherwise sudo into the right account.
-if [ "$USER_NAME" = "$LIMA_USER" ]; then
-  run_claude="limactl shell $NAME claude"
-else
-  run_claude="limactl shell $NAME sudo -iu $USER_NAME claude"
-fi
-
 printf '\n' >&2
 info "VM '$NAME' is up."
 cat >&2 <<EOF
   Shell in:     limactl shell $NAME
-  Run Claude:   $run_claude
   Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
   Stop / del:   limactl stop $NAME   |   limactl delete $NAME
 
+A typical workflow is:
+
+ - Create a directory for your project or organization to store git checkouts
+   in. For example, `mkdir -p github.com/lullabot`, and then check out projects
+   there.
+ - Create a fine-grained token in GitHub scoped to relevant repoitories with the
+   following permissions:
+
+   - Contents: Read and Write
+   - Pull Requests: Read
+   - Issues: Read
+   - Actions: Read and Write
+   - Workflows: Read and Write
+ 
+ - Make sure branch protection rules are enabled to prevent merges without a
+   pull request. Do not allow administrators to bypass the rules.
+ - Save the generated token in the VM as GH_TOKEN in `github.com/<org>/.env`
+   and run `direnv allow`.
+ - Clone your project using the https URL.
+ - cd into the project and run `claude`.
+
 The VM has no writable host mount, so 'limactl delete $NAME' removes
 everything it produced. Use 'limactl copy' to move files in or out.
-
-Re-running this script (or 'limactl start $NAME') re-applies the playbook.
 EOF
