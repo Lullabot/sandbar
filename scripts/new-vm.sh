@@ -288,9 +288,9 @@ else
   run_claude="limactl shell $NAME sudo -iu $USER_NAME claude"
 fi
 
+printf '\n' >&2
+info "VM '$NAME' is up."
 cat >&2 <<EOF
-
-$(info "VM '$NAME' is up.")
   Shell in:     limactl shell $NAME
   Run Claude:   $run_claude
   Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
