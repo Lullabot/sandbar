@@ -220,6 +220,10 @@ ask MEMORY "Memory" "$MEMORY"
 # Validate required values
 [ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
 [ -n "$GIT_EMAIL" ] || die "git user.email is required (--git-email)"
+case "$CPUS" in
+  ''|*[!0-9]*) die "cpus must be a positive integer (got: '$CPUS')";;
+esac
+[ "$CPUS" -ge 1 ] || die "cpus must be a positive integer (got: '$CPUS')"
 
 # ---------------------------------------------------------------------------
 # Build the Ansible vars file (written into the guest as /root/all.yml)
