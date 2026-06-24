@@ -57,6 +57,31 @@ ask() {
   eval "$__var=\$__ans"
 }
 
+# ask_secret VAR "Prompt"  (no echo, optional, no default)
+ask_secret() {
+  local __var="$1" __prompt="$2" __ans=""
+  if [ "$ASSUME_YES" = "1" ]; then eval "$__var=\"\""; return; fi
+  printf '%s: ' "$__prompt" >&2
+  if [ -r /dev/tty ]; then IFS= read -rs __ans </dev/tty || __ans=""; fi
+  printf '\n' >&2
+  eval "$__var=\$__ans"
+}
+
+# Print the recommended fine-grained GitHub token permissions.
+github_token_help() {
+  cat >&2 <<'TXT'
+  Create a fine-grained token scoped to this repo at:
+    https://github.com/settings/personal-access-tokens/new
+  Recommended permissions (PRs/Issues stay read-only so the agent can't
+  self-merge to main without human review):
+    Contents:       Read and write
+    Pull requests:  Read
+    Issues:         Read
+    Actions:        Read and write
+    Workflows:      Read and write
+TXT
+}
+
 # Quote an arbitrary string as a double-quoted YAML scalar.
 yaml_str() {
   printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
@@ -79,7 +104,9 @@ default_cpus() {
 ASSUME_YES=0
 REF=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
-CPUS="" MEMORY="" LOCALE="" DOMAIN=""
+CPUS="" MEMORY="" DISK="" LOCALE="" DOMAIN=""
+DOCKER_PROXY_HOST=""
+CLONE_URL="" CLONE_TOKEN=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -96,8 +123,12 @@ Options:
   --git-email EMAIL        git user.email       (default: host git config)
   --cpus N                 vCPUs                 (default: half of host)
   --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
+  --disk SIZE              Disk size, e.g. 100GiB (default: 100GiB)
   --locale LOCALE          System locale         (default: host $LANG)
   --domain DOMAIN          Domain suffix         (default: lan)
+  --docker-proxy-host HOST Docker registry pull-through proxy host (optional)
+  --clone-url URL          HTTPS repo to clone into the VM (optional)
+  --clone-token TOKEN      Token for the repo above (optional; GitHub uses it)
   --ref REF                Git tag/branch to use in standalone mode
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
@@ -110,7 +141,7 @@ while [ $# -gt 0 ]; do
   # Guard value-taking flags so a missing value gives a clear error instead of
   # an "unbound variable" crash from "$2" under `set -u`.
   case "$1" in
-    --name|--hostname|--user|--git-name|--git-email|--cpus|--memory|--locale|--domain|--ref)
+    --name|--hostname|--user|--git-name|--git-email|--cpus|--memory|--disk|--locale|--domain|--docker-proxy-host|--clone-url|--clone-token|--ref)
       [ $# -ge 2 ] || die "$1 requires a value" ;;
   esac
   case "$1" in
@@ -121,8 +152,12 @@ while [ $# -gt 0 ]; do
     --git-email) GIT_EMAIL="$2"; shift 2;;
     --cpus) CPUS="$2"; shift 2;;
     --memory) MEMORY="$2"; shift 2;;
+    --disk) DISK="$2"; shift 2;;
     --locale) LOCALE="$2"; shift 2;;
     --domain) DOMAIN="$2"; shift 2;;
+    --docker-proxy-host) DOCKER_PROXY_HOST="$2"; shift 2;;
+    --clone-url) CLONE_URL="$2"; shift 2;;
+    --clone-token) CLONE_TOKEN="$2"; shift 2;;
     --ref) REF="$2"; shift 2;;
     -y|--yes) ASSUME_YES=1; shift;;
     -h|--help) usage; exit 0;;
@@ -199,8 +234,23 @@ ask GIT_EMAIL "git user.email" "$GIT_EMAIL"
 ask CPUS "vCPUs" "$CPUS"
 [ -n "$MEMORY" ] || MEMORY="8GiB"
 ask MEMORY "Memory" "$MEMORY"
+[ -n "$DISK" ] || DISK="100GiB"
+ask DISK "Disk size" "$DISK"
 [ -n "$LOCALE" ] || LOCALE="${LANG:-en_US.UTF-8}"
 [ -n "$DOMAIN" ] || DOMAIN="lan"
+
+# Optional: Docker registry pull-through proxy (blank to skip).
+ask DOCKER_PROXY_HOST "Docker registry proxy host (blank to skip)" "$DOCKER_PROXY_HOST"
+
+# Optional: clone a project into the VM now (blank to skip — e.g. no repo
+# access yet, or a non-HTTPS / unsupported host).
+ask CLONE_URL "Clone a project? HTTPS repo URL (blank to skip)" "$CLONE_URL"
+if [ -n "$CLONE_URL" ] && [ -z "$CLONE_TOKEN" ]; then
+  case "$CLONE_URL" in
+    *github.com*) github_token_help ;;
+  esac
+  ask_secret CLONE_TOKEN "Paste a token for this repo (blank for a public repo / set up later)"
+fi
 
 # Validate required values
 [ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
@@ -222,6 +272,14 @@ build_allyml() {
   printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
   # Lima VMs have no host-home mount to share, so skip Samba.
   printf 'samba_enabled: false\n'
+  if [ -n "$DOCKER_PROXY_HOST" ]; then
+    printf 'devtools_docker_registry_proxy_enabled: true\n'
+    printf 'devtools_docker_registry_proxy_host: %s\n' "$(yaml_str "$DOCKER_PROXY_HOST")"
+  fi
+  if [ -n "$CLONE_URL" ]; then
+    printf 'project_clone_url: %s\n' "$(yaml_str "$CLONE_URL")"
+    [ -n "$CLONE_TOKEN" ] && printf 'project_clone_token: %s\n' "$(yaml_str "$CLONE_TOKEN")"
+  fi
 }
 ALLYML="$(build_allyml)"
 
@@ -245,6 +303,7 @@ base:
 YAML
   printf 'cpus: %s\n' "$CPUS"
   printf 'memory: %s\n' "$(yaml_str "$MEMORY")"
+  printf 'disk: %s\n' "$(yaml_str "$DISK")"
   printf 'mounts:\n'
   printf -- '- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n' "$(yaml_str "$PLAYBOOK_DIR")"
   printf 'provision:\n'
