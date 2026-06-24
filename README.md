@@ -235,39 +235,18 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
-| `claude_code_oauth_token` | _(empty)_ | Long-lived OAuth token for headless Claude Code auth. Generate with `claude setup-token`. Treat as a secret — supply via `--extra-vars` or an Ansible vault, not source control |
 | `claude_code_notifications_enabled` | `false` | Install Claude Code Stop / UserPromptSubmit / SessionEnd hooks that POST to a webhook |
 | `claude_code_notifications_webhook_url` | _(empty)_ | Webhook URL the hooks POST to. Treat as a secret — supply via `--extra-vars` or an Ansible vault, not source control |
 
-### Headless Claude Code authentication (optional)
+### Authenticating Claude Code
 
-By default the playbook does **not** provision a Claude Code credential — after provisioning you can SSH in and run `claude` to complete the normal interactive browser login, and `claude_code_oauth_token` can be left unset.
+The playbook does **not** provision a Claude Code credential. After provisioning,
+shell into the VM and run `claude` once to complete the normal interactive login.
 
-If you'd rather skip the interactive login (e.g. for fully unattended provisioning or CI), generate a long-lived OAuth token on an interactive machine and pass it to the playbook:
-
-1. On any machine where you're already logged into Claude Code, run:
-
-   ```bash
-   claude setup-token
-   ```
-
-   This walks you through an OAuth authorization and prints a token (roughly one-year TTL) to the terminal. It is **not** saved anywhere — copy it immediately.
-
-2. Supply it to the playbook via vault or `--extra-vars`:
-
-   ```bash
-   ansible-playbook -i inventory site.yml \
-     --extra-vars "claude_code_oauth_token=sk-ant-oat01-..."
-   ```
-
-   The token is written to `~/.claude/claude-code.env` with mode `0600` and sourced from `~/.bashrc`, so every new shell exports `CLAUDE_CODE_OAUTH_TOKEN` and Claude Code authenticates without a browser round-trip. The playbook also pre-seeds `~/.claude.json` with `hasCompletedOnboarding: true` so the first `claude` invocation skips the theme / trust / login flow entirely.
-
-Notes:
-
-- This is a distinct token from anything in `~/.claude/.credentials.json`. You cannot reuse an existing `accessToken` / `refreshToken` pair as `CLAUDE_CODE_OAUTH_TOKEN` — only the output of `claude setup-token` works.
-- `CLAUDE_CODE_OAUTH_TOKEN` takes precedence over any credentials stored on disk, so re-running `claude login` is not needed.
-- The token is bound to the account that ran `setup-token`. Revoke it from your Claude account settings if the VM is compromised or decommissioned.
-- Do **not** commit the token to `group_vars/all.yml`. Use an Ansible vault (`ansible-vault encrypt_string`) or pass it on the command line.
+A full interactive login is required because remote control is enabled by
+default (`remoteControlAtStartup`), and remote control sessions need a
+full-scope OAuth login — the inference-only token from `claude setup-token`
+cannot establish them, so headless token auth is intentionally not supported.
 
 ### Webhook notifications (optional)
 

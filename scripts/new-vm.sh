@@ -95,7 +95,7 @@ ASSUME_YES=0
 REF=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" LOCALE="" DOMAIN=""
-OAUTH_TOKEN="" WEBHOOK_URL=""
+WEBHOOK_URL=""
 GH_ORG="" GH_ORG_EMAIL="" GH_ORG_TOKEN=""
 
 usage() {
@@ -115,7 +115,6 @@ Options:
   --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
   --locale LOCALE          System locale         (default: host $LANG)
   --domain DOMAIN          Domain suffix         (default: lan)
-  --oauth-token TOKEN      Claude Code headless OAuth token (claude setup-token)
   --webhook-url URL        Notification webhook URL
   --github-org ORG         Set up a GitHub org during provisioning
   --github-org-email EMAIL Commit email for that org
@@ -139,7 +138,6 @@ while [ $# -gt 0 ]; do
     --memory) MEMORY="$2"; shift 2;;
     --locale) LOCALE="$2"; shift 2;;
     --domain) DOMAIN="$2"; shift 2;;
-    --oauth-token) OAUTH_TOKEN="$2"; shift 2;;
     --webhook-url) WEBHOOK_URL="$2"; shift 2;;
     --github-org) GH_ORG="$2"; shift 2;;
     --github-org-email) GH_ORG_EMAIL="$2"; shift 2;;
@@ -224,9 +222,6 @@ ask MEMORY "Memory" "$MEMORY"
 [ -n "$DOMAIN" ] || DOMAIN="lan"
 
 # Optional extras
-if [ -z "$OAUTH_TOKEN" ]; then
-  ask_secret OAUTH_TOKEN "Claude Code OAuth token (from 'claude setup-token')"
-fi
 if [ -z "$GH_ORG_TOKEN" ] && [ "$ASSUME_YES" != "1" ]; then
   ask_secret GH_ORG_TOKEN "GitHub org PAT to set up now"
   if [ -n "$GH_ORG_TOKEN" ]; then
@@ -252,7 +247,6 @@ build_allyml() {
   [ -n "$GH_ORG" ]       && printf 'user_github_org: %s\n'       "$(yaml_str "$GH_ORG")"
   [ -n "$GH_ORG_EMAIL" ] && printf 'user_github_org_email: %s\n' "$(yaml_str "$GH_ORG_EMAIL")"
   [ -n "$GH_ORG_TOKEN" ] && printf 'user_github_org_token: %s\n' "$(yaml_str "$GH_ORG_TOKEN")"
-  [ -n "$OAUTH_TOKEN" ]  && printf 'claude_code_oauth_token: %s\n' "$(yaml_str "$OAUTH_TOKEN")"
   if [ -n "$WEBHOOK_URL" ]; then
     printf 'claude_code_notifications_enabled: true\n'
     printf 'claude_code_notifications_webhook_url: %s\n' "$(yaml_str "$WEBHOOK_URL")"

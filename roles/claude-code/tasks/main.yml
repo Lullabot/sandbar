@@ -43,45 +43,6 @@
     group: "{{ user_name }}"
     mode: "0644"
 
-# Headless OAuth token (optional). When claude_code_oauth_token is set,
-# write it to ~/.claude/claude-code.env (mode 0600) and source it from
-# ~/.bashrc so CLAUDE_CODE_OAUTH_TOKEN is available to every shell.
-# This skips the interactive `claude login` on freshly provisioned VMs.
-# We also pre-seed ~/.claude.json with hasCompletedOnboarding=true so
-# the first `claude` invocation skips the theme / trust / login flow.
-- name: Mark Claude Code onboarding as complete
-  ansible.builtin.copy:
-    dest: "{{ user_home }}/.claude.json"
-    content: |
-      {
-        "hasCompletedOnboarding": true
-      }
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0600"
-    force: false
-  when: claude_code_oauth_token | length > 0
-
-- name: Deploy Claude Code OAuth token env file
-  ansible.builtin.template:
-    src: claude-code.env.j2
-    dest: "{{ user_home }}/.claude/claude-code.env"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0600"
-  when: claude_code_oauth_token | length > 0
-  no_log: true
-
-- name: Source ~/.claude/claude-code.env from ~/.bashrc
-  ansible.builtin.lineinfile:
-    path: "{{ user_home }}/.bashrc"
-    line: '[ -f "$HOME/.claude/claude-code.env" ] && . "$HOME/.claude/claude-code.env"'
-    regexp: '\.claude/claude-code\.env'
-    create: true
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
-
 # Notification hooks (optional). When enabled, Claude Code's Stop hook
 # POSTs a notification to a webhook (e.g. a Home Assistant webhook) and
 # the UserPromptSubmit / SessionEnd hooks clear it.

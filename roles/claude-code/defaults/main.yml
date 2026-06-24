@@ -1,15 +1,4 @@
 ---
-# Long-lived OAuth token for headless Claude Code authentication.
-# Generate on an interactive machine with `claude setup-token` and
-# supply via an Ansible vault, --extra-vars, or host_vars — never commit
-# the value to source control. When set, the token is written to
-# ~/.claude/claude-code.env (mode 0600) and sourced from ~/.bashrc, so
-# Claude Code picks it up via the CLAUDE_CODE_OAUTH_TOKEN environment
-# variable without an interactive browser login. The playbook also
-# pre-seeds ~/.claude.json with hasCompletedOnboarding=true so the
-# first `claude` invocation skips the theme / trust / login flow.
-claude_code_oauth_token: ""
-
 # When true, deploy hook scripts that POST a notification to a webhook
 # (e.g. a Home Assistant webhook consumed by the HA Companion app) when
 # Claude Code finishes a turn, and clear the pending notification when
