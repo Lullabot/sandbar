@@ -344,10 +344,17 @@ YAML
       echo "Already provisioned; rm $marker and restart to re-provision."
       exit 0
     fi
+    log=/var/log/claude-vm-provision.log
     rsync -a --delete /mnt/playbook/ /root/playbook/
     cd /root/playbook
-    ansible-playbook -i localhost, --connection=local site.yml \
-      --extra-vars @/root/all.yml
+    # Tee Ansible's output to a fixed log so new-vm.sh can show it on failure.
+    # pipefail makes the playbook's exit status win, so a failed task still
+    # aborts here and the success marker below is not written.
+    if ! ansible-playbook -i localhost, --connection=local site.yml \
+        --extra-vars @/root/all.yml 2>&1 | tee "$log"; then
+      echo "claude-vm: PROVISIONING FAILED (see $log)" | tee -a "$log" >&2
+      exit 1
+    fi
     mkdir -p "$(dirname "$marker")"
     touch "$marker"
 YAML
@@ -372,6 +379,17 @@ fi
 info "Starting Lima instance '$NAME' (this provisions the VM; first run takes a while)…"
 info "Rendered config: $OVERLAY"
 limactl start --name "$NAME" --tty=false "$OVERLAY"
+
+# `limactl start` exits 0 even when a provision script fails, so the playbook
+# can abort (e.g. an unreachable package/proxy host) without any visible error.
+# Confirm provisioning actually finished — the marker is written only after a
+# fully successful run — and surface the log if it did not.
+if ! limactl shell "$NAME" ls /var/lib/claude-vm/provisioned >/dev/null 2>&1; then
+  warn "Provisioning did NOT complete — the playbook failed partway through."
+  warn "Last 40 lines of /var/log/claude-vm-provision.log (in the VM):"
+  limactl shell "$NAME" sudo tail -n 40 /var/log/claude-vm-provision.log >&2 2>/dev/null || true
+  die "Provisioning failed (see the log above). Fix the cause, then rebuild: ./scripts/new-vm.sh --recreate --name $NAME …"
+fi
 
 printf '\n' >&2
 info "VM '$NAME' is up."
