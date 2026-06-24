@@ -30,6 +30,21 @@
     state: present
     update_cache: true
 
+# `limactl shell` (and ssh) forward COLORTERM from the host when present, but
+# Debian's sshd only accepts LANG/LC_* by default, so truecolor terminals
+# (iTerm2, WezTerm, kitty, Ghostty, …) get downgraded to 256-color inside the
+# VM. Accepting COLORTERM restores 24-bit color for Claude Code's UI. This
+# forwards the host's actual capability — terminals that don't set COLORTERM
+# (e.g. Terminal.app) are unaffected.
+- name: Accept COLORTERM over SSH for truecolor terminals
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-colorterm.conf
+    content: "AcceptEnv COLORTERM\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sshd
+
 # Node.js from NodeSource
 - name: Ensure /etc/apt/keyrings directory exists
   ansible.builtin.file:
