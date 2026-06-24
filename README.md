@@ -119,7 +119,10 @@ $ limactl create --name claude --cpus=8 --memory=32 template:debian-13
 - Creates a user (default: the current host user) with passwordless sudo
 - Installs development tools: Docker CE, ddev, Node.js, Go, Python 3, uv, mkcert, Java, and CLI utilities
 - Installs the [GitHub CLI (`gh`)](https://cli.github.com/) and configures it as the git credential helper for HTTPS authentication
-- Installs Claude Code CLI configured for autonomous operation
+- Installs Claude Code CLI configured for autonomous operation, with remote
+  control enabled at startup (`remoteControlAtStartup`) so you can drive and
+  monitor sessions from the Claude app — this requires an interactive
+  `claude` login (see below)
 - Optionally configures a Docker registry proxy for caching pulls
 - Deploys tmux, git, and bashrc configurations
 
