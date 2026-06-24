@@ -37,7 +37,10 @@ If you are running the playbook on the same machine you want to provision (i.e. 
    ```bash
    cp group_vars/all.yml.example group_vars/all.yml
    ```
-   Edit `group_vars/all.yml` with your Git identity, GitHub username, and network settings.
+   Edit `group_vars/all.yml` with your Git identity and network settings. For
+   SSH key access to the provisioned user, set `user_github_keys_url` (e.g.
+   `https://github.com/your-username.keys`) — this is needed only on this
+   non-Lima path; the Lima quick-start uses `limactl shell` instead.
 
 2. Edit `inventory` and replace `CHANGE_ME` with the target VM's IP address:
    ```
@@ -184,6 +187,7 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `base_locale` | `en_CA.UTF-8` | System locale |
 | `user_git_user_name` | `Your Name` | Git user.name |
 | `user_git_user_email` | `you@example.com` | Git user.email (default) |
+| `user_github_keys_url` | _(empty)_ | Optional SSH authorized_keys source (e.g. `https://github.com/<user>.keys`). Only needed for non-Lima / remote-host deployments; Lima uses `limactl shell` |
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |

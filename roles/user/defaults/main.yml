@@ -2,3 +2,7 @@ user_name: claude
 user_shell: /bin/bash
 user_git_user_name: "Your Name"
 user_git_user_email: "you@example.com"
+# Optional SSH authorized_keys source (e.g. https://github.com/<user>.keys).
+# Empty by default: Lima provides its own key for `limactl shell`, so this is
+# only needed for non-Lima / remote-host deployments that SSH in as the user.
+user_github_keys_url: ""

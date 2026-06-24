@@ -4,6 +4,9 @@ base_domain: lan
 base_locale: en_CA.UTF-8
 user_git_user_name: "Your Name"
 user_git_user_email: "you@example.com"
+# SSH key access for the user. Only needed for non-Lima / remote-host
+# deployments; Lima uses `limactl shell` and does not need this.
+# user_github_keys_url: "https://github.com/your-username.keys"
 # devtools_docker_registry_proxy_enabled: true
 # devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 # devtools_docker_registry_proxy_port: 3128
