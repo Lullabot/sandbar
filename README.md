@@ -49,7 +49,64 @@ If you are running the playbook on the same machine you want to provision (i.e. 
    ansible-playbook -i inventory site.yml
    ```
    
-### Running with lima-vm
+## Quick start with Lima
+
+The fastest way to get a VM is `scripts/new-vm.sh`. It prompts for the
+required settings (with sensible autodetected defaults), then starts a Lima
+instance that installs Ansible and runs this playbook against itself with
+`--connection=local` — no manual cloning, inventory editing, or `ansible`
+install required.
+
+It works two ways from the same script:
+
+- **Just want a VM** — run it without checking the repo out:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash
+  ```
+
+  This clones the playbook into `~/.local/share/claude-code-ansible` (pinned
+  to the latest release tag when one exists) and launches the VM from there.
+
+- **Hacking on the playbook** — from a checkout, run the script directly:
+
+  ```bash
+  ./scripts/new-vm.sh
+  ```
+
+  In this mode the script mounts your **working tree**, so uncommitted edits
+  provision the VM. Re-run it (or `limactl start <name>`) to re-apply the
+  playbook; Ansible is idempotent, so it just re-converges.
+
+Non-interactive use (CI, scripting) is supported via flags — see
+`./scripts/new-vm.sh --help`. For example:
+
+```bash
+./scripts/new-vm.sh --yes --name claude \
+  --git-name "Your Name" --git-email you@example.com \
+  --keys-url https://github.com/your-username.keys
+```
+
+How it spins up the VM:
+
+- It inherits Lima's shipped **`template:_images/debian-13`**, so Lima manages
+  the image, architecture, and download cache. Nothing image-specific is
+  committed to this repo.
+- The VM is fully **ephemeral**: the only mount is the playbook, read-only.
+  There is **no writable host mount** (not even the stock Lima host-home
+  mount), so the VM cannot modify anything on your machine and
+  `limactl delete <name>` provably removes everything it produced — important
+  when the whole point is to throw away potentially compromised code. Move
+  files in or out with `limactl copy`.
+- Your answers are passed to Ansible as `--extra-vars`, so there is no
+  `group_vars/all.yml` to maintain per VM; each instance is independent.
+
+Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`), and
+`git` for the `curl | bash` path.
+
+### Running with lima-vm manually
+
+If you prefer to drive Lima yourself instead of using the script:
 
 ```console
 $ limactl create --name claude --cpus=8 --memory=32 template:debian-13

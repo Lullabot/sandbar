@@ -1,1 +1,3 @@
 group_vars/all.yml
+# Personal Lima config (image digests, paths) — generate VMs with scripts/new-vm.sh
+/lima.yaml

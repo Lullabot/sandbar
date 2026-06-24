@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+#
+# new-vm.sh — spin up a Claude Code development VM with Lima.
+#
+# Works two ways from a single code path:
+#
+#   * Run from a checkout (./scripts/new-vm.sh) -> mounts your working tree,
+#     so uncommitted edits to the playbook provision the VM. This is the
+#     dev loop for hacking on the playbook itself.
+#
+#   * Run with no checkout (curl ... | bash, or Homebrew) -> clones the repo
+#     once to a cache dir and mounts that.
+#
+# Both paths converge on the same thing: mount a host copy of the playbook
+# into the guest and run it with `ansible-playbook --connection=local`.
+#
+# The generated Lima config does NOT pin image digests. It inherits the
+# shipped `template:_images/debian-13` (so Lima handles arch + image cache),
+# and intentionally skips the default host-home mount.
+
+set -euo pipefail
+
+REPO_URL="https://github.com/deviantintegral/claude-code-ansible.git"
+CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+info() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Read a line from the controlling terminal even when the script is piped
+# from curl (in which case stdin is the script body, not the keyboard).
+read_tty() {
+  local __ans=""
+  if [ -r /dev/tty ]; then
+    IFS= read -r __ans </dev/tty || __ans=""
+  fi
+  printf '%s' "$__ans"
+}
+
+# ask VAR "Prompt" "default"
+ask() {
+  local __var="$1" __prompt="$2" __default="${3:-}" __ans
+  if [ "$ASSUME_YES" = "1" ]; then
+    eval "$__var=\$__default"
+    return
+  fi
+  if [ -n "$__default" ]; then
+    printf '%s [%s]: ' "$__prompt" "$__default" >&2
+  else
+    printf '%s: ' "$__prompt" >&2
+  fi
+  __ans="$(read_tty)"
+  [ -z "$__ans" ] && __ans="$__default"
+  eval "$__var=\$__ans"
+}
+
+# ask_secret VAR "Prompt"  (no echo, no default)
+ask_secret() {
+  local __var="$1" __prompt="$2" __ans=""
+  if [ "$ASSUME_YES" = "1" ]; then
+    eval "$__var=\"\""
+    return
+  fi
+  printf '%s (leave blank to skip): ' "$__prompt" >&2
+  if [ -r /dev/tty ]; then
+    IFS= read -rs __ans </dev/tty || __ans=""
+  fi
+  printf '\n' >&2
+  eval "$__var=\$__ans"
+}
+
+# Quote an arbitrary string as a double-quoted YAML scalar.
+yaml_str() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
+# ---------------------------------------------------------------------------
+# Defaults / autodetection
+# ---------------------------------------------------------------------------
+default_cpus() {
+  local n
+  n="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+  n=$(( n / 2 ))
+  [ "$n" -lt 2 ] && n=2
+  printf '%s' "$n"
+}
+
+default_keys_url() {
+  local login=""
+  if command -v gh >/dev/null 2>&1; then
+    login="$(gh api user --jq .login 2>/dev/null || true)"
+  fi
+  [ -n "$login" ] && printf 'https://github.com/%s.keys' "$login"
+}
+
+# ---------------------------------------------------------------------------
+# CLI flags (all optional; anything not supplied is prompted for)
+# ---------------------------------------------------------------------------
+ASSUME_YES=0
+REF=""
+NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL="" KEYS_URL=""
+CPUS="" MEMORY="" LOCALE="" DOMAIN=""
+OAUTH_TOKEN="" WEBHOOK_URL=""
+GH_ORG="" GH_ORG_EMAIL="" GH_ORG_TOKEN=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: new-vm.sh [options]
+
+Spins up a Claude Code development VM with Lima. With no options it prompts
+interactively (using sensible autodetected defaults).
+
+Options:
+  --name NAME              Lima instance name (default: claude)
+  --hostname HOST          VM hostname (default: same as --name)
+  --user USER              Primary VM user (default: current user, matching Lima)
+  --git-name NAME          git user.name        (default: host git config)
+  --git-email EMAIL        git user.email       (default: host git config)
+  --keys-url URL           authorized_keys URL  (default: from `gh` login)
+  --cpus N                 vCPUs                 (default: half of host)
+  --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
+  --locale LOCALE          System locale         (default: host $LANG)
+  --domain DOMAIN          Domain suffix         (default: lan)
+  --oauth-token TOKEN      Claude Code headless OAuth token (claude setup-token)
+  --webhook-url URL        Notification webhook URL
+  --github-org ORG         Set up a GitHub org during provisioning
+  --github-org-email EMAIL Commit email for that org
+  --github-org-token TOKEN PAT for that org
+  --ref REF                Git tag/branch to use in standalone mode
+  -y, --yes                Accept all defaults, never prompt
+  -h, --help               Show this help
+
+Required (prompted if absent): --git-name, --git-email, --keys-url
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) NAME="$2"; shift 2;;
+    --hostname) HOSTNAME_="$2"; shift 2;;
+    --user) USER_NAME="$2"; shift 2;;
+    --git-name) GIT_NAME="$2"; shift 2;;
+    --git-email) GIT_EMAIL="$2"; shift 2;;
+    --keys-url) KEYS_URL="$2"; shift 2;;
+    --cpus) CPUS="$2"; shift 2;;
+    --memory) MEMORY="$2"; shift 2;;
+    --locale) LOCALE="$2"; shift 2;;
+    --domain) DOMAIN="$2"; shift 2;;
+    --oauth-token) OAUTH_TOKEN="$2"; shift 2;;
+    --webhook-url) WEBHOOK_URL="$2"; shift 2;;
+    --github-org) GH_ORG="$2"; shift 2;;
+    --github-org-email) GH_ORG_EMAIL="$2"; shift 2;;
+    --github-org-token) GH_ORG_TOKEN="$2"; shift 2;;
+    --ref) REF="$2"; shift 2;;
+    -y|--yes) ASSUME_YES=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) die "unknown option: $1 (see --help)";;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+command -v limactl >/dev/null 2>&1 || die "limactl not found. Install Lima: https://lima-vm.io/docs/installation/"
+
+# ---------------------------------------------------------------------------
+# Locate the playbook (repo mode vs standalone cache mode)
+# ---------------------------------------------------------------------------
+SELF_DIR=""
+if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+PLAYBOOK_DIR=""
+if [ -n "$SELF_DIR" ]; then
+  TOP="$(git -C "$SELF_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$TOP" ] && [ -f "$TOP/site.yml" ]; then
+    PLAYBOOK_DIR="$TOP"
+    info "Using the checkout at $PLAYBOOK_DIR (your working tree provisions the VM)."
+  fi
+fi
+
+if [ -z "$PLAYBOOK_DIR" ]; then
+  command -v git >/dev/null 2>&1 || die "git not found (needed to fetch the playbook)."
+  if [ -d "$CACHE_DIR/.git" ]; then
+    info "Updating cached playbook in $CACHE_DIR"
+    git -C "$CACHE_DIR" fetch --tags --quiet || warn "fetch failed; using cached copy"
+  else
+    info "Cloning playbook to $CACHE_DIR"
+    git clone --quiet "$REPO_URL" "$CACHE_DIR"
+  fi
+  # Pin to the newest release tag for stability; fall back to the default branch.
+  if [ -z "$REF" ]; then
+    REF="$(git -C "$CACHE_DIR" tag --list --sort=-v:refname | head -n1)"
+  fi
+  if [ -n "$REF" ]; then
+    git -C "$CACHE_DIR" checkout --quiet "$REF" || warn "could not check out $REF"
+    info "Using ref: $REF"
+  else
+    git -C "$CACHE_DIR" pull --ff-only --quiet || true
+    warn "No release tags yet — tracking the default branch."
+  fi
+  PLAYBOOK_DIR="$CACHE_DIR"
+fi
+
+[ -f "$PLAYBOOK_DIR/site.yml" ] || die "playbook not found at $PLAYBOOK_DIR (no site.yml)"
+
+# ---------------------------------------------------------------------------
+# Gather configuration
+# ---------------------------------------------------------------------------
+: "${NAME:=claude}"
+ask NAME "Instance name" "$NAME"
+: "${HOSTNAME_:=$NAME}"
+ask HOSTNAME_ "VM hostname" "$HOSTNAME_"
+# Lima creates a guest user matching the host username by default; default to
+# it so `limactl shell <vm>` lands directly in the fully-configured account.
+LIMA_USER="$(id -un 2>/dev/null || echo "${USER:-claude}")"
+: "${USER_NAME:=$LIMA_USER}"
+ask USER_NAME "Primary VM user" "$USER_NAME"
+
+[ -n "$GIT_NAME" ]  || GIT_NAME="$(git config --get user.name 2>/dev/null || true)"
+ask GIT_NAME "git user.name" "$GIT_NAME"
+[ -n "$GIT_EMAIL" ] || GIT_EMAIL="$(git config --get user.email 2>/dev/null || true)"
+ask GIT_EMAIL "git user.email" "$GIT_EMAIL"
+[ -n "$KEYS_URL" ]  || KEYS_URL="$(default_keys_url || true)"
+ask KEYS_URL "SSH authorized_keys URL" "$KEYS_URL"
+
+[ -n "$CPUS" ]   || CPUS="$(default_cpus)"
+ask CPUS "vCPUs" "$CPUS"
+[ -n "$MEMORY" ] || MEMORY="8GiB"
+ask MEMORY "Memory" "$MEMORY"
+[ -n "$LOCALE" ] || LOCALE="${LANG:-en_US.UTF-8}"
+[ -n "$DOMAIN" ] || DOMAIN="lan"
+
+# Optional extras
+if [ -z "$OAUTH_TOKEN" ]; then
+  ask_secret OAUTH_TOKEN "Claude Code OAuth token (from 'claude setup-token')"
+fi
+if [ -z "$GH_ORG_TOKEN" ] && [ "$ASSUME_YES" != "1" ]; then
+  ask_secret GH_ORG_TOKEN "GitHub org PAT to set up now"
+  if [ -n "$GH_ORG_TOKEN" ]; then
+    ask GH_ORG "  org name" "$GH_ORG"
+    ask GH_ORG_EMAIL "  org commit email" "${GH_ORG_EMAIL:-$GIT_EMAIL}"
+  fi
+fi
+
+# Validate required values
+[ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
+[ -n "$GIT_EMAIL" ] || die "git user.email is required (--git-email)"
+[ -n "$KEYS_URL" ]  || die "authorized_keys URL is required (--keys-url)"
+case "$KEYS_URL" in
+  *your-username*) warn "keys URL still contains a placeholder: $KEYS_URL";;
+esac
+
+# ---------------------------------------------------------------------------
+# Build the Ansible vars file (written into the guest as /root/all.yml)
+# ---------------------------------------------------------------------------
+build_allyml() {
+  printf 'user_name: %s\n'              "$(yaml_str "$USER_NAME")"
+  printf 'base_hostname: %s\n'          "$(yaml_str "$HOSTNAME_")"
+  printf 'base_domain: %s\n'            "$(yaml_str "$DOMAIN")"
+  printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
+  printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
+  printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
+  printf 'user_github_keys_url: %s\n'   "$(yaml_str "$KEYS_URL")"
+  [ -n "$GH_ORG" ]       && printf 'user_github_org: %s\n'       "$(yaml_str "$GH_ORG")"
+  [ -n "$GH_ORG_EMAIL" ] && printf 'user_github_org_email: %s\n' "$(yaml_str "$GH_ORG_EMAIL")"
+  [ -n "$GH_ORG_TOKEN" ] && printf 'user_github_org_token: %s\n' "$(yaml_str "$GH_ORG_TOKEN")"
+  [ -n "$OAUTH_TOKEN" ]  && printf 'claude_code_oauth_token: %s\n' "$(yaml_str "$OAUTH_TOKEN")"
+  if [ -n "$WEBHOOK_URL" ]; then
+    printf 'claude_code_notifications_enabled: true\n'
+    printf 'claude_code_notifications_webhook_url: %s\n' "$(yaml_str "$WEBHOOK_URL")"
+  fi
+}
+ALLYML="$(build_allyml)"
+
+# ---------------------------------------------------------------------------
+# Render the Lima overlay (inherits the stock image only; adds our bits)
+# ---------------------------------------------------------------------------
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/claude-vm.XXXXXX")"
+chmod 700 "$WORKDIR"
+OVERLAY="$WORKDIR/lima.yaml"
+
+{
+  cat <<'YAML'
+# Generated by new-vm.sh — inherits the shipped Debian 13 image template so
+# Lima manages image selection, arch, and caching. The default host-home
+# mount is intentionally NOT inherited (this VM runs Claude unsupervised).
+# The only mount is the playbook, read-only: there is NO writable host mount,
+# so deleting the VM provably removes everything it produced. Move files in or
+# out with `limactl copy`.
+base:
+- template:_images/debian-13
+YAML
+  printf 'cpus: %s\n' "$CPUS"
+  printf 'memory: %s\n' "$(yaml_str "$MEMORY")"
+  printf 'mounts:\n'
+  printf -- '- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n' "$(yaml_str "$PLAYBOOK_DIR")"
+  printf 'provision:\n'
+  cat <<'YAML'
+- mode: dependency
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y ansible rsync
+- mode: data
+  path: /root/all.yml
+  permissions: "0600"
+  content: |
+YAML
+  printf '%s\n' "$ALLYML" | sed 's/^/    /'
+  cat <<'YAML'
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    rsync -a --delete /mnt/playbook/ /root/playbook/
+    cd /root/playbook
+    ansible-playbook -i localhost, --connection=local site.yml \
+      --extra-vars @/root/all.yml
+YAML
+} > "$OVERLAY"
+chmod 600 "$OVERLAY"
+
+# ---------------------------------------------------------------------------
+# Launch
+# ---------------------------------------------------------------------------
+info "Starting Lima instance '$NAME' (this provisions the VM; first run takes a while)…"
+info "Rendered config: $OVERLAY"
+limactl start --name "$NAME" --tty=false "$OVERLAY"
+
+# `limactl shell` logs in as the host-matching Lima user. If that is also the
+# configured user, Claude is right there; otherwise sudo into the right account.
+if [ "$USER_NAME" = "$LIMA_USER" ]; then
+  run_claude="limactl shell $NAME claude"
+else
+  run_claude="limactl shell $NAME sudo -iu $USER_NAME claude"
+fi
+
+cat >&2 <<EOF
+
+$(info "VM '$NAME' is up.")
+  Shell in:     limactl shell $NAME
+  Run Claude:   $run_claude
+  Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
+  Stop / del:   limactl stop $NAME   |   limactl delete $NAME
+
+The VM has no writable host mount, so 'limactl delete $NAME' removes
+everything it produced. Use 'limactl copy' to move files in or out.
+
+Re-running this script (or 'limactl start $NAME') re-applies the playbook —
+Ansible is idempotent, so it just re-converges the VM.
+EOF
