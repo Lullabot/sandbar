@@ -303,6 +303,10 @@ cat >&2 <<EOF
   Shell in:     limactl shell $NAME
   Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
   Stop / del:   limactl stop $NAME   |   limactl delete $NAME
+EOF
+# Static prose below: quoted heredoc so backticks/`$` are literal, not run as
+# command substitution. Keep $NAME lines in the unquoted blocks above/below.
+cat >&2 <<'EOF'
 
 A typical workflow is:
 
@@ -324,6 +328,8 @@ A typical workflow is:
    and run `direnv allow`.
  - Clone your project using the https URL.
  - cd into the project and run `claude`.
+EOF
+cat >&2 <<EOF
 
 The VM has no writable host mount, so 'limactl delete $NAME' removes
 everything it produced. Use 'limactl copy' to move files in or out.
