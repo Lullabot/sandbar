@@ -122,6 +122,12 @@ EOF
 }
 
 while [ $# -gt 0 ]; do
+  # Guard value-taking flags so a missing value gives a clear error instead of
+  # an "unbound variable" crash from "$2" under `set -u`.
+  case "$1" in
+    --name|--hostname|--user|--git-name|--git-email|--cpus|--memory|--locale|--domain|--ref)
+      [ $# -ge 2 ] || die "$1 requires a value" ;;
+  esac
   case "$1" in
     --name) NAME="$2"; shift 2;;
     --hostname) HOSTNAME_="$2"; shift 2;;
