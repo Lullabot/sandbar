@@ -57,21 +57,6 @@ ask() {
   eval "$__var=\$__ans"
 }
 
-# ask_secret VAR "Prompt"  (no echo, no default)
-ask_secret() {
-  local __var="$1" __prompt="$2" __ans=""
-  if [ "$ASSUME_YES" = "1" ]; then
-    eval "$__var=\"\""
-    return
-  fi
-  printf '%s (leave blank to skip): ' "$__prompt" >&2
-  if [ -r /dev/tty ]; then
-    IFS= read -rs __ans </dev/tty || __ans=""
-  fi
-  printf '\n' >&2
-  eval "$__var=\$__ans"
-}
-
 # Quote an arbitrary string as a double-quoted YAML scalar.
 yaml_str() {
   printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
