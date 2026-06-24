@@ -413,6 +413,16 @@ if ! limactl shell "$NAME" ls /var/lib/claude-vm/provisioned >/dev/null 2>&1; th
   die "Provisioning failed (see the log above). Fix the cause, then rebuild: ./scripts/new-vm.sh --recreate --name $NAME …"
 fi
 
+# Lima keeps a single guest session alive across `limactl shell`, and it was
+# established at boot — before provisioning created the `docker` group and added
+# the user to it, so the first shell would land without docker access. Bounce
+# the VM so the login session is rebuilt with the new group membership; the
+# restart also boots any kernel/library updates the provision installed.
+# Provisioning is marker-guarded, so this second start is fast and is a no-op.
+info "Restarting '$NAME' so the first shell has docker group access and any kernel/library updates…"
+limactl stop "$NAME"
+limactl start "$NAME"
+
 printf '\n' >&2
 info "VM '$NAME' is up."
 cat >&2 <<EOF
