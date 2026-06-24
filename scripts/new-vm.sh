@@ -22,6 +22,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/deviantintegral/claude-code-ansible.git"
 CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
+INSTALL_URL="https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh"
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -29,6 +30,20 @@ CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# Print the command a user should run to re-invoke this tool with extra flags,
+# matched to how they launched it. Under `curl ... | bash` the flags have to be
+# threaded through `bash -s --` (a frequent gotcha — a bare `--recreate` after a
+# pipe goes to bash, not to us), so spell out the whole command. install.sh sets
+# CLAUDE_VM_CURL=1 when it bootstrapped us from a pipe; otherwise a missing
+# SELF_DIR (script body piped straight to bash) is the fallback signal.
+rerun_cmd() {
+  if [ -z "${CLAUDE_VM_CURL:-}" ] && [ -n "${SELF_DIR:-}" ]; then
+    printf './scripts/new-vm.sh %s' "$*"
+  else
+    printf 'curl -fsSL %s | bash -s -- %s' "$INSTALL_URL" "$*"
+  fi
+}
 
 # Read a line from the controlling terminal even when the script is piped
 # from curl (in which case stdin is the script body, not the keyboard).
@@ -138,6 +153,11 @@ Options:
   -h, --help               Show this help
 
 Required (prompted if absent): --git-name, --git-email
+
+Passing flags over curl: a pipe sends stdin to bash, so flags must go after
+`bash -s --`, not after the pipe. For example, to rebuild an existing VM:
+
+  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash -s -- --recreate
 EOF
 }
 
@@ -372,7 +392,9 @@ if limactl list -q 2>/dev/null | grep -qx "$NAME"; then
     info "Deleting existing instance '$NAME' to apply changes (--recreate)…"
     limactl delete -f "$NAME"
   else
-    die "instance '$NAME' already exists — Lima won't apply config/playbook changes to it. Run 'limactl start $NAME' to use it as-is, or pass --recreate to delete and rebuild it (destroys the VM)."
+    die "instance '$NAME' already exists — Lima won't apply config/playbook changes to it.
+  Use it as-is:                  limactl start $NAME
+  Rebuild it (destroys the VM):  $(rerun_cmd --recreate)"
   fi
 fi
 

@@ -44,4 +44,7 @@ else
   git -C "$CACHE_DIR" pull --ff-only --quiet || true
 fi
 
+# Signal the curl|bash origin so new-vm.sh's "re-run with this flag" hints use
+# the `curl ... | bash -s -- <flag>` form instead of `./scripts/new-vm.sh`.
+export CLAUDE_VM_CURL=1
 exec bash "$CACHE_DIR/scripts/new-vm.sh" "$@"
