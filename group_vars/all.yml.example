@@ -4,9 +4,6 @@ base_domain: lan
 base_locale: en_CA.UTF-8
 user_git_user_name: "Your Name"
 user_git_user_email: "you@example.com"
-# user_github_org: "my-org"
-# user_github_org_email: "you@my-org.com"
-# user_github_org_token: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 # devtools_docker_registry_proxy_enabled: true
 # devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 # devtools_docker_registry_proxy_port: 3128

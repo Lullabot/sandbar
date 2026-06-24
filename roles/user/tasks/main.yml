@@ -68,32 +68,6 @@
     group: "{{ user_name }}"
     mode: "0755"
 
-- name: Deploy github-org-setup script
-  ansible.builtin.copy:
-    src: github-org-setup.sh
-    dest: "{{ user_home }}/.local/bin/github-org-setup"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0755"
-
-- name: Create ~/github.com directory
-  ansible.builtin.file:
-    path: "{{ user_home }}/github.com"
-    state: directory
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0755"
-
-- name: Set up initial GitHub organization
-  ansible.builtin.command:
-    cmd: "{{ user_home }}/.local/bin/github-org-setup --org {{ user_github_org }} --email {{ user_github_org_email }}"
-    stdin: "{{ user_github_org_token }}"
-  become: true
-  become_user: "{{ user_name }}"
-  when: user_github_org | length > 0 and user_github_org_email | length > 0 and user_github_org_token | length > 0
-  no_log: true
-  changed_when: true
-
 - name: Ensure ~/.config/direnv directory exists
   ansible.builtin.file:
     path: "{{ user_home }}/.config/direnv"

@@ -96,7 +96,6 @@ REF=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" LOCALE="" DOMAIN=""
 WEBHOOK_URL=""
-GH_ORG="" GH_ORG_EMAIL="" GH_ORG_TOKEN=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -116,9 +115,6 @@ Options:
   --locale LOCALE          System locale         (default: host $LANG)
   --domain DOMAIN          Domain suffix         (default: lan)
   --webhook-url URL        Notification webhook URL
-  --github-org ORG         Set up a GitHub org during provisioning
-  --github-org-email EMAIL Commit email for that org
-  --github-org-token TOKEN PAT for that org
   --ref REF                Git tag/branch to use in standalone mode
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
@@ -139,9 +135,6 @@ while [ $# -gt 0 ]; do
     --locale) LOCALE="$2"; shift 2;;
     --domain) DOMAIN="$2"; shift 2;;
     --webhook-url) WEBHOOK_URL="$2"; shift 2;;
-    --github-org) GH_ORG="$2"; shift 2;;
-    --github-org-email) GH_ORG_EMAIL="$2"; shift 2;;
-    --github-org-token) GH_ORG_TOKEN="$2"; shift 2;;
     --ref) REF="$2"; shift 2;;
     -y|--yes) ASSUME_YES=1; shift;;
     -h|--help) usage; exit 0;;
@@ -221,15 +214,6 @@ ask MEMORY "Memory" "$MEMORY"
 [ -n "$LOCALE" ] || LOCALE="${LANG:-en_US.UTF-8}"
 [ -n "$DOMAIN" ] || DOMAIN="lan"
 
-# Optional extras
-if [ -z "$GH_ORG_TOKEN" ] && [ "$ASSUME_YES" != "1" ]; then
-  ask_secret GH_ORG_TOKEN "GitHub org PAT to set up now"
-  if [ -n "$GH_ORG_TOKEN" ]; then
-    ask GH_ORG "  org name" "$GH_ORG"
-    ask GH_ORG_EMAIL "  org commit email" "${GH_ORG_EMAIL:-$GIT_EMAIL}"
-  fi
-fi
-
 # Validate required values
 [ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
 [ -n "$GIT_EMAIL" ] || die "git user.email is required (--git-email)"
@@ -244,9 +228,6 @@ build_allyml() {
   printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
   printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
   printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
-  [ -n "$GH_ORG" ]       && printf 'user_github_org: %s\n'       "$(yaml_str "$GH_ORG")"
-  [ -n "$GH_ORG_EMAIL" ] && printf 'user_github_org_email: %s\n' "$(yaml_str "$GH_ORG_EMAIL")"
-  [ -n "$GH_ORG_TOKEN" ] && printf 'user_github_org_token: %s\n' "$(yaml_str "$GH_ORG_TOKEN")"
   if [ -n "$WEBHOOK_URL" ]; then
     printf 'claude_code_notifications_enabled: true\n'
     printf 'claude_code_notifications_webhook_url: %s\n' "$(yaml_str "$WEBHOOK_URL")"

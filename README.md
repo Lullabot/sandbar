@@ -128,63 +128,18 @@ $ limactl create --name claude --cpus=8 --memory=32 template:debian-13
 
 ## GitHub Authentication
 
-The playbook installs `gh` and configures it as the git credential helper so that `git push` and `git pull` over HTTPS work automatically. GitHub tokens are managed per-organization using direnv and the `github-org-setup` script.
+The playbook installs the [GitHub CLI (`gh`)](https://cli.github.com/) and
+configures it as the git credential helper, so `git push` / `git pull` over
+HTTPS authenticate against whatever token is in the environment.
 
-### How it works
+Supply tokens per directory with `.env` files. direnv is installed and
+configured with `load_dotenv = true`, so a `GH_TOKEN=...` line in a `.env`
+file is loaded when you `cd` into that directory and unloaded when you leave.
+`GH_TOKEN` takes precedence over any token stored by `gh auth login`.
 
-Each GitHub organization gets its own directory under `~/github.com/<org>/`. Inside that directory:
-
-- A `.env` file sets `GH_TOKEN` for that org's repositories (loaded automatically by direnv)
-- A `.gitconfig-<org>` file sets the git commit email for that org
-- A gitconfig `includeIf` entry activates the per-org email when working in that directory
-
-When you `cd` into `~/github.com/<org>/` (or any subdirectory), direnv loads the `.env` file and `GH_TOKEN` is set automatically. When you leave, it is unloaded. `GH_TOKEN` takes precedence over the credential stored by `gh auth login`, so per-org tokens work without conflicting with any default token.
-
-### Setting up an organization during provisioning
-
-Set the org variables in `group_vars/all.yml` or pass them on the command line:
-
-```bash
-ansible-playbook -i inventory site.yml \
-  --extra-vars "user_github_org=my-org user_github_org_email=me@my-org.com user_github_org_token=ghp_xxxx"
-```
-
-The playbook runs `github-org-setup` non-interactively to create the directory, token, email config, and direnv approval.
-
-### Adding or updating organizations after deployment
-
-SSH into the VM and run `github-org-setup`:
-
-```bash
-# Interactive mode — prompts for org, email, and token:
-github-org-setup
-
-# Non-interactive mode — org and email as flags, token via stdin:
-echo "ghp_xxxx" | github-org-setup --org my-org --email me@my-org.com
-```
-
-Running the script again for an existing org overwrites the token and email configuration.
-
-### Multiple organizations
-
-You can set up as many organizations as you need. Each gets its own isolated directory and token:
-
-```bash
-github-org-setup   # set up lullabot
-github-org-setup   # set up personal
-```
-
-This creates:
-
-```
-~/github.com/
-  lullabot/
-    .env           # GH_TOKEN for lullabot repos
-  personal/
-    .env           # GH_TOKEN for personal repos
-```
-
-Switching between directories automatically swaps the active token and git commit email.
+For multiple organizations or clients, use a **separate VM per org/context**
+rather than juggling several tokens on one machine. The VMs are disposable,
+and this keeps each context's credentials and code fully isolated.
 
 ### Recommended: Fine-grained Personal Access Tokens
 
@@ -229,9 +184,6 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `base_locale` | `en_CA.UTF-8` | System locale |
 | `user_git_user_name` | `Your Name` | Git user.name |
 | `user_git_user_email` | `you@example.com` | Git user.email (default) |
-| `user_github_org` | _(empty)_ | GitHub organization name for initial setup (e.g. `lullabot`) |
-| `user_github_org_email` | _(empty)_ | Git commit email for the initial org |
-| `user_github_org_token` | _(empty)_ | GitHub PAT for the initial org (fine-grained PATs recommended) |
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
