@@ -156,14 +156,21 @@ Fine-grained PATs are recommended over classic PATs. They offer several advantag
 
 Create them at: **Settings > Developer settings > Personal access tokens > Fine-grained tokens**.
 
-Commonly needed permissions:
+Recommended permissions (this is the set `new-vm.sh` shows when prompting for a
+token):
 
 | Permission | Access | Purpose |
 |------------|--------|---------|
 | Contents | Read and write | Push and pull code |
-| Pull requests | Read and write | Create and manage PRs |
-| Issues | Read and write | Create and manage issues (if needed) |
+| Pull requests | **Read** | Read PRs without letting the agent self-merge to `main` without human review |
+| Issues | **Read** | Read issues without write access |
+| Actions | Read and write | Inspect and trigger CI |
+| Workflows | Read and write | Update workflow files |
 | Metadata | Read-only | Always required (automatically included) |
+
+Pull requests and Issues are deliberately **read-only** so an autonomous agent
+cannot merge its own PRs or close issues without a human in the loop. Bump them
+to write only if your workflow needs the agent to open/manage them directly.
 
 For the best security posture, create a separate fine-grained token per organization or client.
 
@@ -194,6 +201,8 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
+| `project_clone_url` | _(empty)_ | Optional HTTPS repo to clone on first provision, into `~/<host>/<org>/<repo>` |
+| `project_clone_token` | _(empty)_ | Optional token for the clone. For `github.com` URLs it is written to the per-org `.env` as `GH_TOKEN` (loaded by direnv); treat as a secret |
 
 ### Authenticating Claude Code
 
@@ -218,3 +227,4 @@ finishes — no webhook configuration required.
 - **samba** — Samba file sharing for the user's home directory (skipped by the Lima flow; `samba_enabled: false`)
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
 - **claude-code** — Claude Code CLI installation and configuration
+- **project** — Optional initial repo clone + per-org `.env`/direnv setup (only runs when `project_clone_url` is set)

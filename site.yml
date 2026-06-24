@@ -11,3 +11,4 @@
       when: samba_enabled | default(true) | bool
     - dev-tools
     - claude-code
+    - project
