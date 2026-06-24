@@ -78,8 +78,10 @@ It works two ways from the same script:
   ```
 
   In this mode the script mounts your **working tree**, so uncommitted edits
-  provision the VM. Re-run it (or `limactl start <name>`) to re-apply the
-  playbook; Ansible is idempotent, so it just re-converges.
+  provision the VM. Provisioning runs **once** per VM (a marker at
+  `/var/lib/claude-vm/provisioned` short-circuits Lima's per-boot re-runs, so
+  restarts are fast). To re-apply the playbook after editing it, either re-run
+  `ansible-playbook` inside the VM, or `sudo rm` the marker and restart.
 
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:

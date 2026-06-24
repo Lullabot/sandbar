@@ -253,6 +253,11 @@ YAML
   script: |
     #!/bin/bash
     set -eux -o pipefail
+    # Lima re-runs provision scripts on every boot; skip the apt work once the
+    # tools are present so restarts stay fast.
+    if command -v ansible >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
+      exit 0
+    fi
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y ansible rsync
@@ -267,10 +272,20 @@ YAML
   script: |
     #!/bin/bash
     set -eux -o pipefail
+    # Provision once. Lima re-runs this on every boot, so guard with a marker;
+    # the marker is written only after a successful run (set -e aborts first on
+    # failure, so a failed provision retries on the next start).
+    marker=/var/lib/claude-vm/provisioned
+    if [ -f "$marker" ]; then
+      echo "Already provisioned; rm $marker and restart to re-provision."
+      exit 0
+    fi
     rsync -a --delete /mnt/playbook/ /root/playbook/
     cd /root/playbook
     ansible-playbook -i localhost, --connection=local site.yml \
       --extra-vars @/root/all.yml
+    mkdir -p "$(dirname "$marker")"
+    touch "$marker"
 YAML
 } > "$OVERLAY"
 chmod 600 "$OVERLAY"
@@ -312,4 +327,8 @@ A typical workflow is:
 
 The VM has no writable host mount, so 'limactl delete $NAME' removes
 everything it produced. Use 'limactl copy' to move files in or out.
+
+Provisioning runs once; restarts are fast. To re-provision:
+  limactl shell $NAME sudo rm -f /var/lib/claude-vm/provisioned
+  limactl stop $NAME && limactl start $NAME
 EOF
