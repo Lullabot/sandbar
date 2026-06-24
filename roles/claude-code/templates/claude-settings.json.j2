@@ -1,28 +1,4 @@
 {
   "skipDangerousModePermissionPrompt": true,
-  "remoteControlAtStartup": true{% if claude_code_notifications_enabled %},
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/notify-stop.sh" }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/notify-clear.sh" }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/notify-clear.sh" }
-        ]
-      }
-    ]
-  }
-{% endif %}
+  "remoteControlAtStartup": true
 }

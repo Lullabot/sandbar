@@ -7,8 +7,3 @@ user_git_user_email: "you@example.com"
 # devtools_docker_registry_proxy_enabled: true
 # devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 # devtools_docker_registry_proxy_port: 3128
-# Webhook notifications (e.g. Home Assistant Companion). Disabled by
-# default. The webhook URL is a secret — provide it via --extra-vars or
-# an Ansible vault rather than committing it to source control.
-# claude_code_notifications_enabled: true
-# claude_code_notifications_webhook_url: "https://example.ui.nabu.casa/api/webhook/your-webhook-id"

@@ -1,11 +1,3 @@
 ---
-# When true, deploy hook scripts that POST a notification to a webhook
-# (e.g. a Home Assistant webhook consumed by the HA Companion app) when
-# Claude Code finishes a turn, and clear the pending notification when
-# the user submits a new prompt or the session ends.
-claude_code_notifications_enabled: false
-
-# Webhook URL the hook scripts POST to. Treat as a secret — supply via
-# group_vars, host_vars, --extra-vars, or an Ansible vault rather than
-# committing it to source control.
-claude_code_notifications_webhook_url: ""
+# No tunable defaults: Claude Code is installed and configured with remote
+# control enabled at startup. Authenticate by running `claude` once in the VM.

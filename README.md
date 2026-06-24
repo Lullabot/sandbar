@@ -187,8 +187,6 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `devtools_docker_registry_proxy_enabled` | `false` | Enable Docker registry proxy |
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
-| `claude_code_notifications_enabled` | `false` | Install Claude Code Stop / UserPromptSubmit / SessionEnd hooks that POST to a webhook |
-| `claude_code_notifications_webhook_url` | _(empty)_ | Webhook URL the hooks POST to. Treat as a secret — supply via `--extra-vars` or an Ansible vault, not source control |
 
 ### Authenticating Claude Code
 
@@ -200,21 +198,11 @@ default (`remoteControlAtStartup`), and remote control sessions need a
 full-scope OAuth login — the inference-only token from `claude setup-token`
 cannot establish them, so headless token auth is intentionally not supported.
 
-### Webhook notifications (optional)
+### Notifications
 
-When `claude_code_notifications_enabled` is true, the playbook installs three hooks under `~/.claude/hooks/`:
-
-- `notify-stop.sh` — fires on Claude Code's `Stop` event and POSTs a notification with the host, project, and last assistant message.
-- `notify-clear.sh` — fires on `UserPromptSubmit` and `SessionEnd` and POSTs a `clear_notification` with the same `tag` so the prior notification is dismissed (Home Assistant Companion convention).
-
-Each notification is tagged `claude-<host>-<session8>` so multiple concurrent sessions don't clobber each other. The webhook URL is read at runtime from `~/.claude/hooks/notify.env` (rendered from `claude_code_notifications_webhook_url`, mode `0600`); if the env file is missing or empty, the hooks exit silently.
-
-To enable for a single run without committing the secret:
-
-```bash
-ansible-playbook -i inventory site.yml \
-  --extra-vars "claude_code_notifications_enabled=true claude_code_notifications_webhook_url=https://example.ui.nabu.casa/api/webhook/your-webhook-id"
-```
+Notifications are delivered through Claude Code's remote control (enabled by
+default), so you're alerted in the Claude app when a session needs input or
+finishes — no webhook configuration required.
 
 ## Roles
 

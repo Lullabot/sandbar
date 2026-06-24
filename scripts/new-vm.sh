@@ -95,7 +95,6 @@ ASSUME_YES=0
 REF=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" LOCALE="" DOMAIN=""
-WEBHOOK_URL=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -114,7 +113,6 @@ Options:
   --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
   --locale LOCALE          System locale         (default: host $LANG)
   --domain DOMAIN          Domain suffix         (default: lan)
-  --webhook-url URL        Notification webhook URL
   --ref REF                Git tag/branch to use in standalone mode
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
@@ -134,7 +132,6 @@ while [ $# -gt 0 ]; do
     --memory) MEMORY="$2"; shift 2;;
     --locale) LOCALE="$2"; shift 2;;
     --domain) DOMAIN="$2"; shift 2;;
-    --webhook-url) WEBHOOK_URL="$2"; shift 2;;
     --ref) REF="$2"; shift 2;;
     -y|--yes) ASSUME_YES=1; shift;;
     -h|--help) usage; exit 0;;
@@ -228,10 +225,6 @@ build_allyml() {
   printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
   printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
   printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
-  if [ -n "$WEBHOOK_URL" ]; then
-    printf 'claude_code_notifications_enabled: true\n'
-    printf 'claude_code_notifications_webhook_url: %s\n' "$(yaml_str "$WEBHOOK_URL")"
-  fi
 }
 ALLYML="$(build_allyml)"
 
