@@ -74,10 +74,10 @@ github_token_help() {
     https://github.com/settings/personal-access-tokens/new
   Recommended permissions (PRs/Issues stay read-only so the agent can't
   self-merge to main without human review):
-    Contents:       Read and write
-    Pull requests:  Read
-    Issues:         Read
     Actions:        Read and write
+    Contents:       Read and write
+    Issues:         Read
+    Pull requests:  Read
     Workflows:      Read and write
 TXT
 }
@@ -380,31 +380,7 @@ cat >&2 <<EOF
   Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
   Stop / del:   limactl stop $NAME   |   limactl delete $NAME
 EOF
-# Static prose below: quoted heredoc so backticks/`$` are literal, not run as
-# command substitution. Keep $NAME lines in the unquoted blocks above/below.
-cat >&2 <<'EOF'
 
-A typical workflow is:
-
- - Create a directory for your project or organization to store git checkouts
-   in. For example, `mkdir -p github.com/lullabot`, and then check out projects
-   there.
- - Create a fine-grained token in GitHub scoped to relevant repoitories with the
-   following permissions:
-
-   - Contents: Read and Write
-   - Pull Requests: Read
-   - Issues: Read
-   - Actions: Read and Write
-   - Workflows: Read and Write
- 
- - Make sure branch protection rules are enabled to prevent merges without a
-   pull request. Do not allow administrators to bypass the rules.
- - Save the generated token in the VM as GH_TOKEN in `github.com/<org>/.env`
-   and run `direnv allow`.
- - Clone your project using the https URL.
- - cd into the project and run `claude`.
-EOF
 cat >&2 <<EOF
 
 The VM has no writable host mount, so 'limactl delete $NAME' removes
