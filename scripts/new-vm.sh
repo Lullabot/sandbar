@@ -102,6 +102,7 @@ default_cpus() {
 # CLI flags (all optional; anything not supplied is prompted for)
 # ---------------------------------------------------------------------------
 ASSUME_YES=0
+RECREATE=0
 REF=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" DISK="" LOCALE="" DOMAIN=""
@@ -130,6 +131,9 @@ Options:
   --clone-url URL          HTTPS repo to clone into the VM (optional)
   --clone-token TOKEN      Token for the repo above (optional; GitHub uses it)
   --ref REF                Git tag/branch to use in standalone mode
+  --recreate               If the instance exists, delete and rebuild it
+                           (Lima bakes provisioning at creation, so this is the
+                           only way to apply playbook/config changes to a VM)
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
 
@@ -159,6 +163,7 @@ while [ $# -gt 0 ]; do
     --clone-url) CLONE_URL="$2"; shift 2;;
     --clone-token) CLONE_TOKEN="$2"; shift 2;;
     --ref) REF="$2"; shift 2;;
+    --recreate) RECREATE=1; shift;;
     -y|--yes) ASSUME_YES=1; shift;;
     -h|--help) usage; exit 0;;
     *) die "unknown option: $1 (see --help)";;
@@ -352,6 +357,18 @@ chmod 600 "$OVERLAY"
 # ---------------------------------------------------------------------------
 # Launch
 # ---------------------------------------------------------------------------
+# Lima bakes the merged config into the instance at creation; `limactl start`
+# on an existing instance reuses that baked config and ignores this freshly
+# rendered overlay. So changes only take effect on a brand-new instance.
+if limactl list -q 2>/dev/null | grep -qx "$NAME"; then
+  if [ "$RECREATE" = "1" ]; then
+    info "Deleting existing instance '$NAME' to apply changes (--recreate)…"
+    limactl delete -f "$NAME"
+  else
+    die "instance '$NAME' already exists — Lima won't apply config/playbook changes to it. Run 'limactl start $NAME' to use it as-is, or pass --recreate to delete and rebuild it (destroys the VM)."
+  fi
+fi
+
 info "Starting Lima instance '$NAME' (this provisions the VM; first run takes a while)…"
 info "Rendered config: $OVERLAY"
 limactl start --name "$NAME" --tty=false "$OVERLAY"

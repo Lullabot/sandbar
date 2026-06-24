@@ -83,6 +83,11 @@ It works two ways from the same script:
   restarts are fast). To re-apply the playbook after editing it, either re-run
   `ansible-playbook` inside the VM, or `sudo rm` the marker and restart.
 
+  Lima bakes the instance config in at creation, so changing the VM's shape
+  (cpus/memory/disk/mounts) or the generated provisioning means rebuilding the
+  instance: `./scripts/new-vm.sh --recreate` (this destroys and recreates the
+  VM). Re-running the script against an existing instance is refused otherwise.
+
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:
 
