@@ -10,3 +10,8 @@ user_git_user_email: "you@example.com"
 # devtools_docker_registry_proxy_enabled: true
 # devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 # devtools_docker_registry_proxy_port: 3128
+# Provisioning phase, used by scripts/new-vm.sh's base-image + clone flow:
+#   full     - run everything in one pass (default; direct/non-clone runs)
+#   base     - heavy, identity-free install baked into a reusable base image
+#   finalize - light per-clone pass (hostname, git identity, apt upgrade, repo)
+# provision_phase: full

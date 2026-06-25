@@ -11,10 +11,25 @@
     group: root
     mode: "0644"
 
+# Clones boot from a base image that may be days old; refresh every apt package
+# so a freshly cloned VM is not carrying stale (and possibly insecure) builds.
+# Finalize-only: the base build and the single-pass `full` flow install current
+# versions directly, so there is nothing to catch up there.
+- name: Upgrade all apt packages
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: true
+  register: _apt_upgrade
+  until: _apt_upgrade is succeeded
+  retries: 3
+  delay: 5
+  when: provision_phase | default('full') == 'finalize'
+
 - name: Generate locale
   community.general.locale_gen:
     name: "{{ base_locale }}"
     state: present
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Set default locale
   ansible.builtin.copy:
@@ -23,12 +38,14 @@
     owner: root
     group: root
     mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Install base packages
   ansible.builtin.apt:
     name: "{{ base_packages }}"
     state: present
     update_cache: true
+  when: provision_phase | default('full') != 'finalize'
 
 # `limactl shell` (and ssh) forward COLORTERM from the host when present, but
 # Debian's sshd only accepts LANG/LC_* by default, so truecolor terminals
@@ -44,6 +61,7 @@
     group: root
     mode: "0644"
   notify: Reload sshd
+  when: provision_phase | default('full') != 'finalize'
 
 # Node.js from NodeSource
 - name: Ensure /etc/apt/keyrings directory exists
@@ -51,23 +69,27 @@
     path: /etc/apt/keyrings
     state: directory
     mode: "0755"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Download NodeSource GPG key
   ansible.builtin.get_url:
     url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
     dest: /tmp/nodesource.gpg.key
     mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Dearmor NodeSource GPG key
   ansible.builtin.command:
     cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource.gpg.key
   args:
     creates: /etc/apt/keyrings/nodesource.gpg
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Remove temporary NodeSource GPG key file
   ansible.builtin.file:
     path: /tmp/nodesource.gpg.key
     state: absent
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy NodeSource APT repository
   ansible.builtin.copy:
@@ -76,9 +98,11 @@
     owner: root
     group: root
     mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Install Node.js
   ansible.builtin.apt:
     name: nodejs
     state: present
     update_cache: true
+  when: provision_phase | default('full') != 'finalize'

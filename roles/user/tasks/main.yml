@@ -1,7 +1,12 @@
 ---
+# The bulk of this role is heavy, identity-free account setup that belongs in
+# the base image (skipped in the finalize phase). The exceptions are the
+# home-directory lookup, which both phases need, and ~/.gitconfig, which carries
+# the per-clone git identity and so runs in finalize (and the single-pass full).
 - name: Generate a secure random password
   ansible.builtin.set_fact:
     user_password: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits', 'punctuation'], length=24) }}"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Create user {{ user_name }}
   ansible.builtin.user:
@@ -11,6 +16,7 @@
     groups: sudo
     append: true
     password: "{{ user_password | password_hash('sha512') }}"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
@@ -27,6 +33,7 @@
     dest: /etc/sudoers.d/nopasswd-sudo
     mode: "0440"
     validate: "visudo -cf %s"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Ensure ~/.ssh directory exists
   ansible.builtin.file:
@@ -35,6 +42,7 @@
     mode: "0700"
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
+  when: provision_phase | default('full') != 'finalize'
 
 # Optional: only for non-Lima / remote-host deployments that SSH in as the
 # user. Lima injects its own key for `limactl shell`, so user_github_keys_url
@@ -44,7 +52,9 @@
     user: "{{ user_name }}"
     key: "{{ user_github_keys_url }}"
     exclusive: false
-  when: user_github_keys_url | length > 0
+  when:
+    - user_github_keys_url | length > 0
+    - provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.ssh/rc
   ansible.builtin.template:
@@ -53,6 +63,7 @@
     mode: "0755"
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.tmux.conf
   ansible.builtin.template:
@@ -61,6 +72,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.gitconfig
   ansible.builtin.template:
@@ -69,6 +81,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: provision_phase | default('full') != 'base'
 
 - name: Ensure ~/.local/bin directory exists
   ansible.builtin.file:
@@ -77,6 +90,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Ensure ~/.config/direnv directory exists
   ansible.builtin.file:
@@ -85,6 +99,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.config/direnv/direnv.toml
   ansible.builtin.copy:
@@ -95,6 +110,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy bashrc customizations
   ansible.builtin.blockinfile:
@@ -107,10 +123,12 @@
       export VISUAL=vim
       export EDITOR=vim
       eval "$(direnv hook bash)"
+  when: provision_phase | default('full') != 'finalize'
 
 - name: Display generated password for {{ user_name }}
   ansible.builtin.debug:
     msg: >-
       Password for user '{{ user_name }}': {{ user_password }}
       (use for SSH and Samba access)
+  when: provision_phase | default('full') != 'finalize'
 

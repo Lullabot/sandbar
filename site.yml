@@ -2,13 +2,26 @@
 - name: Provision Claude Code development VM
   hosts: all
   become: true
+  # provision_phase splits the run so a generic "base" VM can be built once and
+  # cloned cheaply (see scripts/new-vm.sh):
+  #   full     - everything in one pass (default; the non-clone / curl|bash flow)
+  #   base     - heavy, identity-free setup baked into the clone source
+  #   finalize - light per-clone work (hostname, git identity, apt upgrade, repo)
+  # Tasks gate on this with `when:`; fact-gathering stays ungated so both phases
+  # see it. dev-tools/claude-code are heavy (skip in finalize); project is
+  # per-clone (skip in base).
   roles:
     - base
     - user
     # Samba is for non-Lima / remote-host deployments. The Lima flow sets
     # samba_enabled=false (use a bind mount or `limactl copy` instead).
     - role: samba
-      when: samba_enabled | default(true) | bool
-    - dev-tools
-    - claude-code
-    - project
+      when:
+        - samba_enabled | default(true) | bool
+        - provision_phase | default('full') != 'finalize'
+    - role: dev-tools
+      when: provision_phase | default('full') != 'finalize'
+    - role: claude-code
+      when: provision_phase | default('full') != 'finalize'
+    - role: project
+      when: provision_phase | default('full') != 'base'
