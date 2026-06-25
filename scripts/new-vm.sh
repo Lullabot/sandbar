@@ -118,7 +118,9 @@ default_cpus() {
 # ---------------------------------------------------------------------------
 ASSUME_YES=0
 RECREATE=0
+REBUILD=0
 REF=""
+BASE_NAME=""
 NAME="" HOSTNAME_="" USER_NAME="" GIT_NAME="" GIT_EMAIL=""
 CPUS="" MEMORY="" DISK="" LOCALE="" DOMAIN=""
 DOCKER_PROXY_HOST=""
@@ -131,6 +133,12 @@ Usage: new-vm.sh [options]
 Spins up a Claude Code development VM with Lima. With no options it prompts
 interactively (using sensible autodetected defaults).
 
+How it works: the heavy, identity-free setup (packages, Docker, Node, Claude
+Code, …) is provisioned once into a stopped base image, then each VM is a cheap
+`limactl clone` of it plus a light "finalize" pass (hostname, git identity, an
+apt upgrade, optional repo clone). The base is built automatically the first
+time; use --rebuild to refresh it.
+
 Options:
   --name NAME              Lima instance name (default: claude)
   --hostname HOST          VM hostname (default: same as --name)
@@ -140,15 +148,20 @@ Options:
   --cpus N                 vCPUs                 (default: half of host)
   --memory SIZE            RAM, e.g. 8GiB        (default: 8GiB)
   --disk SIZE              Disk size, e.g. 100GiB (default: 100GiB)
+                           (cpus/memory/disk are set when the base image is
+                           built; clones inherit them — pass with --rebuild to
+                           change)
   --locale LOCALE          System locale         (default: host $LANG)
   --domain DOMAIN          Domain suffix         (default: lan)
   --docker-proxy-host HOST Docker registry pull-through proxy host (optional)
   --clone-url URL          HTTPS repo to clone into the VM (optional)
   --clone-token TOKEN      Token for the repo above (optional; GitHub uses it)
   --ref REF                Git tag/branch to use in standalone mode
-  --recreate               If the instance exists, delete and rebuild it
-                           (Lima bakes provisioning at creation, so this is the
-                           only way to apply playbook/config changes to a VM)
+  --recreate               If the named instance exists, delete and re-clone it
+                           from the base image (a fast way to reset one VM)
+  --rebuild                Delete and rebuild the base image first, then create
+                           the VM (use after playbook/package changes)
+  --base-name NAME         Base image instance name (default: claude-base)
   -y, --yes                Accept all defaults, never prompt
   -h, --help               Show this help
 
@@ -165,11 +178,12 @@ while [ $# -gt 0 ]; do
   # Guard value-taking flags so a missing value gives a clear error instead of
   # an "unbound variable" crash from "$2" under `set -u`.
   case "$1" in
-    --name|--hostname|--user|--git-name|--git-email|--cpus|--memory|--disk|--locale|--domain|--docker-proxy-host|--clone-url|--clone-token|--ref)
+    --name|--hostname|--user|--git-name|--git-email|--cpus|--memory|--disk|--locale|--domain|--docker-proxy-host|--clone-url|--clone-token|--ref|--base-name)
       [ $# -ge 2 ] || die "$1 requires a value" ;;
   esac
   case "$1" in
     --name) NAME="$2"; shift 2;;
+    --base-name) BASE_NAME="$2"; shift 2;;
     --hostname) HOSTNAME_="$2"; shift 2;;
     --user) USER_NAME="$2"; shift 2;;
     --git-name) GIT_NAME="$2"; shift 2;;
@@ -184,6 +198,7 @@ while [ $# -gt 0 ]; do
     --clone-token) CLONE_TOKEN="$2"; shift 2;;
     --ref) REF="$2"; shift 2;;
     --recreate) RECREATE=1; shift;;
+    --rebuild) REBUILD=1; shift;;
     -y|--yes) ASSUME_YES=1; shift;;
     -h|--help) usage; exit 0;;
     *) die "unknown option: $1 (see --help)";;
@@ -194,6 +209,8 @@ done
 # Preflight
 # ---------------------------------------------------------------------------
 command -v limactl >/dev/null 2>&1 || die "limactl not found. Install Lima: https://lima-vm.io/docs/installation/"
+# Each VM is a `limactl clone` of a base image; bail early on a Lima too old for it.
+limactl clone --help >/dev/null 2>&1 || die "your Lima is too old: 'limactl clone' is required. Upgrade Lima: https://lima-vm.io/docs/installation/"
 
 # ---------------------------------------------------------------------------
 # Locate the playbook (repo mode vs standalone cache mode)
@@ -242,6 +259,7 @@ fi
 # ---------------------------------------------------------------------------
 : "${NAME:=claude}"
 ask NAME "Instance name" "$NAME"
+: "${BASE_NAME:=claude-base}"
 : "${HOSTNAME_:=$NAME}"
 ask HOSTNAME_ "VM hostname" "$HOSTNAME_"
 # Lima creates a guest user matching the host username by default; default to
@@ -280,6 +298,7 @@ fi
 # Validate required values
 [ -n "$GIT_NAME" ]  || die "git user.name is required (--git-name)"
 [ -n "$GIT_EMAIL" ] || die "git user.email is required (--git-email)"
+[ "$NAME" != "$BASE_NAME" ] || die "--name must differ from the base image name '$BASE_NAME' (set a different --name or --base-name)"
 case "$CPUS" in
   ''|*[!0-9]*) die "cpus must be a positive integer (got: '$CPUS')";;
 esac
@@ -288,51 +307,60 @@ esac
 # ---------------------------------------------------------------------------
 # Build the Ansible vars file (written into the guest as /root/all.yml)
 # ---------------------------------------------------------------------------
+# phase is one of base|finalize|full and drives which tasks site.yml runs.
+# The base image is identity-free, so the git identity and the project-clone
+# vars (which include a token) are emitted only for the finalize/full phases —
+# they are neither needed nor wanted baked into the long-lived base disk.
 build_allyml() {
+  local phase="$1" hostname="$2"
   printf 'user_name: %s\n'              "$(yaml_str "$USER_NAME")"
-  printf 'base_hostname: %s\n'          "$(yaml_str "$HOSTNAME_")"
+  printf 'base_hostname: %s\n'          "$(yaml_str "$hostname")"
   printf 'base_domain: %s\n'            "$(yaml_str "$DOMAIN")"
   printf 'base_locale: %s\n'            "$(yaml_str "$LOCALE")"
-  printf 'user_git_user_name: %s\n'     "$(yaml_str "$GIT_NAME")"
-  printf 'user_git_user_email: %s\n'    "$(yaml_str "$GIT_EMAIL")"
+  printf 'provision_phase: %s\n'        "$phase"
   # Lima VMs have no host-home mount to share, so skip Samba.
   printf 'samba_enabled: false\n'
   if [ -n "$DOCKER_PROXY_HOST" ]; then
     printf 'devtools_docker_registry_proxy_enabled: true\n'
     printf 'devtools_docker_registry_proxy_host: %s\n' "$(yaml_str "$DOCKER_PROXY_HOST")"
   fi
-  if [ -n "$CLONE_URL" ]; then
-    printf 'project_clone_url: %s\n' "$(yaml_str "$CLONE_URL")"
-    [ -n "$CLONE_TOKEN" ] && printf 'project_clone_token: %s\n' "$(yaml_str "$CLONE_TOKEN")"
+  if [ "$phase" != "base" ]; then
+    printf 'user_git_user_name: %s\n'   "$(yaml_str "$GIT_NAME")"
+    printf 'user_git_user_email: %s\n'  "$(yaml_str "$GIT_EMAIL")"
+    if [ -n "$CLONE_URL" ]; then
+      printf 'project_clone_url: %s\n' "$(yaml_str "$CLONE_URL")"
+      [ -n "$CLONE_TOKEN" ] && printf 'project_clone_token: %s\n' "$(yaml_str "$CLONE_TOKEN")"
+    fi
   fi
 }
-ALLYML="$(build_allyml)"
 
-# ---------------------------------------------------------------------------
-# Render the Lima overlay (inherits the stock image only; adds our bits)
-# ---------------------------------------------------------------------------
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/claude-vm.XXXXXX")"
 chmod 700 "$WORKDIR"
-OVERLAY="$WORKDIR/lima.yaml"
 
-{
-  cat <<'YAML'
+# ---------------------------------------------------------------------------
+# Render the Lima overlay for the BASE image (heavy, identity-free install).
+# Inherits the stock image only; clones reuse this baked config and disk.
+# ---------------------------------------------------------------------------
+render_base_overlay() {
+  local outfile="$1"
+  {
+    cat <<'YAML'
 # Generated by new-vm.sh — inherits the shipped Debian 13 image template so
 # Lima manages image selection, arch, and caching. The default host-home
-# mount is intentionally NOT inherited (this VM runs Claude unsupervised).
+# mount is intentionally NOT inherited (these VMs run Claude unsupervised).
 # The only mount is the playbook, read-only: there is NO writable host mount,
-# so deleting the VM provably removes everything it produced. Move files in or
+# so deleting a VM provably removes everything it produced. Move files in or
 # out with `limactl copy`.
 base:
 - template:_images/debian-13
 YAML
-  printf 'cpus: %s\n' "$CPUS"
-  printf 'memory: %s\n' "$(yaml_str "$MEMORY")"
-  printf 'disk: %s\n' "$(yaml_str "$DISK")"
-  printf 'mounts:\n'
-  printf -- '- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n' "$(yaml_str "$PLAYBOOK_DIR")"
-  printf 'provision:\n'
-  cat <<'YAML'
+    printf 'cpus: %s\n' "$CPUS"
+    printf 'memory: %s\n' "$(yaml_str "$MEMORY")"
+    printf 'disk: %s\n' "$(yaml_str "$DISK")"
+    printf 'mounts:\n'
+    printf -- '- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n' "$(yaml_str "$PLAYBOOK_DIR")"
+    printf 'provision:\n'
+    cat <<'YAML'
 - mode: dependency
   script: |
     #!/bin/bash
@@ -350,15 +378,16 @@ YAML
   permissions: "0600"
   content: |
 YAML
-  printf '%s\n' "$ALLYML" | sed 's/^/    /'
-  cat <<'YAML'
+    build_allyml base "$BASE_NAME" | sed 's/^/    /'
+    cat <<'YAML'
 - mode: system
   script: |
     #!/bin/bash
     set -eux -o pipefail
     # Provision once. Lima re-runs this on every boot, so guard with a marker;
     # the marker is written only after a successful run (set -e aborts first on
-    # failure, so a failed provision retries on the next start).
+    # failure, so a failed provision retries on the next start). Clones inherit
+    # this marker, so the heavy install never re-runs on a cloned VM.
     marker=/var/lib/claude-vm/provisioned
     if [ -f "$marker" ]; then
       echo "Already provisioned; rm $marker and restart to re-provision."
@@ -378,53 +407,123 @@ YAML
     mkdir -p "$(dirname "$marker")"
     touch "$marker"
 YAML
-} > "$OVERLAY"
-chmod 600 "$OVERLAY"
+  } > "$outfile"
+  chmod 600 "$outfile"
+}
 
 # ---------------------------------------------------------------------------
-# Launch
+# Base image lifecycle helpers
 # ---------------------------------------------------------------------------
-# Lima bakes the merged config into the instance at creation; `limactl start`
-# on an existing instance reuses that baked config and ignores this freshly
-# rendered overlay. So changes only take effect on a brand-new instance.
-if limactl list -q 2>/dev/null | grep -qx "$NAME"; then
-  if [ "$RECREATE" = "1" ]; then
-    info "Deleting existing instance '$NAME' to apply changes (--recreate)…"
+instance_exists() { limactl list -q 2>/dev/null | grep -qx "$1"; }
+
+instance_status() { limactl list "$1" --format '{{.Status}}' 2>/dev/null || true; }
+
+ensure_stopped() {
+  # `limactl clone` needs a quiescent source disk, so stop the base unless it is
+  # already Stopped. Matching != "Stopped" (rather than == "Running") also
+  # covers Paused/Broken states left by an interrupted run; the stop is
+  # best-effort so a benign "already stopped" race never aborts the script.
+  if [ "$(instance_status "$1")" != "Stopped" ]; then
+    limactl stop "$1" 2>/dev/null || true
+  fi
+}
+
+build_base() {
+  info "Building base image '$BASE_NAME' (one-time, heavy install — first run takes a while)…"
+  local overlay="$WORKDIR/base.yaml"
+  render_base_overlay "$overlay"
+  info "Rendered base config: $overlay"
+  limactl start --name "$BASE_NAME" --tty=false "$overlay"
+
+  # `limactl start` exits 0 even when a provision script fails; the marker is
+  # written only after a fully successful run, so check it and surface the log.
+  if ! limactl shell "$BASE_NAME" ls /var/lib/claude-vm/provisioned >/dev/null 2>&1; then
+    warn "Base provisioning did NOT complete — the playbook failed partway through."
+    warn "Last 40 lines of /var/log/claude-vm-provision.log (in the base VM):"
+    limactl shell "$BASE_NAME" sudo tail -n 40 /var/log/claude-vm-provision.log >&2 2>/dev/null || true
+    die "Base build failed (see the log above). Fix the cause, then retry: $(rerun_cmd --rebuild)"
+  fi
+
+  # Keep the base stopped: it is never used directly, only cloned. A clone needs
+  # a quiescent source disk, so a stopped base is also a prerequisite for that.
+  info "Base image '$BASE_NAME' is ready; stopping it (kept as the clone source)."
+  limactl stop "$BASE_NAME"
+}
+
+# Run the light, per-clone finalize pass inside an already-started clone.
+finalize_clone() {
+  local name="$1"
+  info "Finalizing '$name' (hostname, git identity, apt upgrade${CLONE_URL:+, repo clone})…"
+  # Everything runs in ONE guest session, fed the per-clone vars over stdin so
+  # the clone token never appears in argv / the process list. The vars go to
+  # tmpfs (/dev/shm) and a trap removes them on exit, so the token never touches
+  # the clone's persistent disk even if the playbook fails partway through.
+  # We re-sync the playbook from the still-mounted host copy first, so finalize
+  # reflects the current working tree even when the base image is older, then
+  # run only the finalize-phase tasks (heavy roles are skipped by phase).
+  if ! build_allyml finalize "$HOSTNAME_" | limactl shell "$name" sudo bash -c '
+        set -eu -o pipefail
+        umask 077
+        vars=/dev/shm/claude-vm-finalize.yml
+        trap "rm -f \"$vars\"" EXIT
+        cat > "$vars"
+        rsync -a --delete /mnt/playbook/ /root/playbook/
+        cd /root/playbook
+        ansible-playbook -i localhost, --connection=local site.yml \
+          --extra-vars @"$vars" 2>&1 | tee /var/log/claude-vm-finalize.log'; then
+    warn "Finalize did NOT complete — the playbook failed partway through."
+    warn "Last 40 lines of /var/log/claude-vm-finalize.log (in the VM):"
+    limactl shell "$name" sudo tail -n 40 /var/log/claude-vm-finalize.log >&2 2>/dev/null || true
+    die "Finalize failed (see the log above). Fix the cause, then re-clone: $(rerun_cmd --recreate --name "$name")"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Launch: ensure a base image exists, then clone + finalize the target VM
+# ---------------------------------------------------------------------------
+# Resolve the target instance FIRST, before any (expensive) base build/rebuild,
+# so we never rebuild the base only to abort on an existing VM. A clone is cheap
+# to recreate, so refuse an existing target unless asked to reset it — and
+# --rebuild implies that reset, since it exists to rebuild the base for this VM.
+if instance_exists "$NAME"; then
+  if [ "$RECREATE" = "1" ] || [ "$REBUILD" = "1" ]; then
+    info "Deleting existing instance '$NAME' to re-clone it…"
     limactl delete -f "$NAME"
   else
-    die "instance '$NAME' already exists — Lima won't apply config/playbook changes to it.
-  Use it as-is:                  limactl start $NAME
-  Rebuild it (destroys the VM):  $(rerun_cmd --recreate)"
+    die "instance '$NAME' already exists.
+  Use it as-is:                limactl start $NAME
+  Reset it (destroys the VM):  $(rerun_cmd --recreate --name "$NAME")"
   fi
 fi
 
-info "Starting Lima instance '$NAME' (this provisions the VM; first run takes a while)…"
-info "Rendered config: $OVERLAY"
-limactl start --name "$NAME" --tty=false "$OVERLAY"
-
-# `limactl start` exits 0 even when a provision script fails, so the playbook
-# can abort (e.g. an unreachable package/proxy host) without any visible error.
-# Confirm provisioning actually finished — the marker is written only after a
-# fully successful run — and surface the log if it did not.
-if ! limactl shell "$NAME" ls /var/lib/claude-vm/provisioned >/dev/null 2>&1; then
-  warn "Provisioning did NOT complete — the playbook failed partway through."
-  warn "Last 40 lines of /var/log/claude-vm-provision.log (in the VM):"
-  limactl shell "$NAME" sudo tail -n 40 /var/log/claude-vm-provision.log >&2 2>/dev/null || true
-  die "Provisioning failed (see the log above). Fix the cause, then rebuild: ./scripts/new-vm.sh --recreate --name $NAME …"
+if [ "$REBUILD" = "1" ] && instance_exists "$BASE_NAME"; then
+  info "Rebuilding base image '$BASE_NAME' (--rebuild)…"
+  limactl delete -f "$BASE_NAME"
 fi
 
-# Lima keeps a single guest session alive across `limactl shell`, and it was
-# established at boot — before provisioning created the `docker` group and added
-# the user to it, so the first shell would land without docker access. Bounce
-# the VM so the login session is rebuilt with the new group membership; the
-# restart also boots any kernel/library updates the provision installed.
-# Provisioning is marker-guarded, so this second start is fast and is a no-op.
-info "Restarting '$NAME' so the first shell has docker group access and any kernel/library updates…"
+if instance_exists "$BASE_NAME"; then
+  info "Reusing base image '$BASE_NAME' (refresh it with $(rerun_cmd --rebuild))."
+  ensure_stopped "$BASE_NAME"
+else
+  build_base
+fi
+
+info "Cloning '$BASE_NAME' → '$NAME'…"
+limactl clone "$BASE_NAME" "$NAME"
+info "Starting '$NAME'…"
+limactl start "$NAME"
+finalize_clone "$NAME"
+
+# Bounce the VM so the first interactive shell starts cleanly: the finalize
+# apt upgrade may have pulled a new kernel/libraries, and the hostname change
+# takes full effect on a fresh boot. The base provision marker is inherited, so
+# this restart is fast (no re-provision).
+info "Restarting '$NAME' so the first shell picks up any kernel/library updates and the new hostname…"
 limactl stop "$NAME"
 limactl start "$NAME"
 
 printf '\n' >&2
-info "VM '$NAME' is up."
+info "VM '$NAME' is up (cloned from '$BASE_NAME')."
 cat >&2 <<EOF
   Shell in:     limactl shell $NAME
   Copy files:   limactl copy <src> $NAME:<dest>   (and the reverse)
@@ -436,7 +535,7 @@ cat >&2 <<EOF
 The VM has no writable host mount, so 'limactl delete $NAME' removes
 everything it produced. Use 'limactl copy' to move files in or out.
 
-Provisioning runs once; restarts are fast. To re-provision:
-  limactl shell $NAME sudo rm -f /var/lib/claude-vm/provisioned
-  limactl stop $NAME && limactl start $NAME
+Each VM is a clone of the base image '$BASE_NAME'. To pick up playbook or
+package changes, rebuild the base and re-clone:
+  $(rerun_cmd --rebuild --name "$NAME")
 EOF
