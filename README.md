@@ -36,19 +36,35 @@ It works two ways from the same script:
   ```
 
   In this mode the script mounts your **working tree**, so uncommitted edits
-  provision the VM. Provisioning runs **once** per VM (a marker at
-  `/var/lib/claude-vm/provisioned` short-circuits Lima's per-boot re-runs, so
-  restarts are fast). To re-apply the playbook after editing it, either re-run
-  `ansible-playbook` inside the VM, or `sudo rm` the marker and restart.
+  provision the VM.
 
-  Lima bakes the instance config in at creation, so changing the VM's shape
-  (cpus/memory/disk/mounts) or the generated provisioning means rebuilding the
-  instance: `./scripts/new-vm.sh --recreate` (this destroys and recreates the
-  VM). Re-running the script against an existing instance is refused otherwise.
+### Base image and clones
 
-After provisioning, the script restarts the VM once so your first shell lands
-with the right group membership (e.g. `docker`) and any kernel/library updates
-the provision installed.
+To avoid re-running the heavy install (packages, Docker, Node, Claude Code, …)
+for every VM, the script provisions that identity-free work **once** into a
+stopped base image (`claude-base` by default), then makes each VM a fast
+[`limactl clone`](https://lima-vm.io/docs/) of it. Cloning copies the
+provisioned disk (near-instant on a copy-on-write filesystem), so a new VM is
+ready in seconds instead of minutes.
+
+After cloning, a light **finalize** pass applies the per-VM bits: hostname, your
+git identity, an `apt upgrade` (so a clone off an older base isn't carrying
+stale packages), and the optional repo clone. The split is driven by the
+`provision_phase` variable (`base` / `finalize` / `full`); heavy roles are
+skipped on `finalize`, the `project` role is skipped on `base`.
+
+- The base is built automatically the first time. Use `--rebuild` to recreate
+  it after changing the playbook or to refresh installed packages — this rebuilds
+  the base, then makes the VM.
+- `--recreate` deletes and re-clones the **named** VM from the existing base (a
+  fast reset of one VM, without rebuilding the base).
+- `cpus` / `memory` / `disk` are set when the base is built and inherited by
+  clones; pass them with `--rebuild` to change. (`disk` is baked into the disk
+  image, so growing it on a clone needs `limactl disk resize`.)
+
+After cloning, the script restarts the VM once so your first shell lands with
+the right group membership (e.g. `docker`), the new hostname, and any kernel or
+library updates the finalize `apt upgrade` installed.
 
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:
@@ -202,7 +218,7 @@ This playbook creates a **disposable, single-purpose development VM** intended t
 
 - **Passwordless sudo** is enabled for the configured user (default: `claude`). The VM is not intended to host multiple users or untrusted workloads.
 - **Claude Code runs with `--dangerously-skip-permissions`**, allowing it to operate without interactive approval prompts. This is appropriate because the VM is ephemeral and isolated — it can be torn down and reprovisioned at any time.
-- **A random password** is generated on each provision for SSH and Samba access. It is not stored persistently.
+- **A random password** is generated for SSH and Samba access and is not stored persistently. With the Lima base-image flow it is generated once when the base is built, so clones of that base share it; this is immaterial in practice because Lima access is over `limactl shell` with an injected key, not the password. Direct (non-Lima) `full` provisioning still gets a fresh password per run.
 
 **Do not use this playbook to provision machines that hold sensitive data or are exposed to the public internet.** It is designed for an isolated LAN or virtual network where the VM is treated as disposable.
 
