@@ -305,7 +305,7 @@ esac
 [ "$CPUS" -ge 1 ] || die "cpus must be a positive integer (got: '$CPUS')"
 
 # ---------------------------------------------------------------------------
-# Build the Ansible vars file (written into the guest as /root/all.yml)
+# Build the Ansible vars file (streamed into the guest over stdin by run_provision)
 # ---------------------------------------------------------------------------
 # phase is one of base|finalize|full and drives which tasks site.yml runs.
 # The base image is identity-free, so the git identity and the project-clone
@@ -338,8 +338,11 @@ WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/claude-vm.XXXXXX")"
 chmod 700 "$WORKDIR"
 
 # ---------------------------------------------------------------------------
-# Render the Lima overlay for the BASE image (heavy, identity-free install).
-# Inherits the stock image only; clones reuse this baked config and disk.
+# Render the Lima overlay for the BASE image: the stock Debian image, our
+# read-only playbook mount, and a dependency script that installs Ansible. The
+# heavy playbook itself is NOT a provision script — new-vm.sh runs it over
+# `limactl shell` (see run_provision) so its output streams to the terminal.
+# Clones reuse this baked config and disk.
 # ---------------------------------------------------------------------------
 render_base_overlay() {
   local outfile="$1"
@@ -365,47 +368,15 @@ YAML
   script: |
     #!/bin/bash
     set -eux -o pipefail
-    # Lima re-runs provision scripts on every boot; skip the apt work once the
-    # tools are present so restarts stay fast.
+    # Install just enough for new-vm.sh to run the playbook over `limactl shell`;
+    # skip the apt work once present so restarts stay fast. The playbook itself
+    # is run by run_provision, not here, so its output is visible.
     if command -v ansible >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
       exit 0
     fi
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y ansible rsync
-- mode: data
-  path: /root/all.yml
-  permissions: "0600"
-  content: |
-YAML
-    build_allyml base "$BASE_NAME" | sed 's/^/    /'
-    cat <<'YAML'
-- mode: system
-  script: |
-    #!/bin/bash
-    set -eux -o pipefail
-    # Provision once. Lima re-runs this on every boot, so guard with a marker;
-    # the marker is written only after a successful run (set -e aborts first on
-    # failure, so a failed provision retries on the next start). Clones inherit
-    # this marker, so the heavy install never re-runs on a cloned VM.
-    marker=/var/lib/claude-vm/provisioned
-    if [ -f "$marker" ]; then
-      echo "Already provisioned; rm $marker and restart to re-provision."
-      exit 0
-    fi
-    log=/var/log/claude-vm-provision.log
-    rsync -a --delete /mnt/playbook/ /root/playbook/
-    cd /root/playbook
-    # Tee Ansible's output to a fixed log so new-vm.sh can show it on failure.
-    # pipefail makes the playbook's exit status win, so a failed task still
-    # aborts here and the success marker below is not written.
-    if ! ansible-playbook -i localhost, --connection=local site.yml \
-        --extra-vars @/root/all.yml 2>&1 | tee "$log"; then
-      echo "claude-vm: PROVISIONING FAILED (see $log)" | tee -a "$log" >&2
-      exit 1
-    fi
-    mkdir -p "$(dirname "$marker")"
-    touch "$marker"
 YAML
   } > "$outfile"
   chmod 600 "$outfile"
@@ -428,19 +399,44 @@ ensure_stopped() {
   fi
 }
 
+# Run one provisioning phase inside an already-started instance, with the
+# playbook output streaming live to the terminal (and teed to a log). The phase
+# vars are fed over stdin into tmpfs and removed via an EXIT trap, so a finalize
+# token never appears in argv and never touches the persistent disk; nothing
+# phase-specific is left in /root either. We re-sync the playbook from the
+# still-mounted host copy first, so a run always reflects the current working
+# tree even when an older base image is involved. Returns non-zero (after
+# surfacing the log) if the playbook fails; the caller prints the next step.
+run_provision() {
+  local name="$1" phase="$2" hostname="$3" log="$4"
+  if ! build_allyml "$phase" "$hostname" | limactl shell "$name" sudo bash -c '
+        set -eu -o pipefail
+        umask 077
+        log="$1"
+        vars=/dev/shm/claude-vm-vars.yml
+        trap "rm -f \"$vars\"" EXIT
+        cat > "$vars"
+        rsync -a --delete /mnt/playbook/ /root/playbook/
+        cd /root/playbook
+        ansible-playbook -i localhost, --connection=local site.yml \
+          --extra-vars @"$vars" 2>&1 | tee "$log"' _ "$log"; then
+    warn "Provisioning ($phase) did NOT complete — the playbook failed partway through."
+    warn "Last 40 lines of $log (in the VM):"
+    limactl shell "$name" sudo tail -n 40 "$log" >&2 2>/dev/null || true
+    return 1
+  fi
+}
+
 build_base() {
   info "Building base image '$BASE_NAME' (one-time, heavy install — first run takes a while)…"
   local overlay="$WORKDIR/base.yaml"
   render_base_overlay "$overlay"
   info "Rendered base config: $overlay"
+  # `limactl start` runs only the lightweight dependency script (installing
+  # Ansible); the heavy base-phase playbook is run by run_provision over
+  # `limactl shell` so its output streams to the terminal, just like finalize.
   limactl start --name "$BASE_NAME" --tty=false "$overlay"
-
-  # `limactl start` exits 0 even when a provision script fails; the marker is
-  # written only after a fully successful run, so check it and surface the log.
-  if ! limactl shell "$BASE_NAME" ls /var/lib/claude-vm/provisioned >/dev/null 2>&1; then
-    warn "Base provisioning did NOT complete — the playbook failed partway through."
-    warn "Last 40 lines of /var/log/claude-vm-provision.log (in the base VM):"
-    limactl shell "$BASE_NAME" sudo tail -n 40 /var/log/claude-vm-provision.log >&2 2>/dev/null || true
+  if ! run_provision "$BASE_NAME" base "$BASE_NAME" /var/log/claude-vm-provision.log; then
     die "Base build failed (see the log above). Fix the cause, then retry: $(rerun_cmd --rebuild)"
   fi
 
@@ -450,30 +446,12 @@ build_base() {
   limactl stop "$BASE_NAME"
 }
 
-# Run the light, per-clone finalize pass inside an already-started clone.
+# Run the light, per-clone finalize pass inside an already-started clone (heavy
+# roles are skipped by provision_phase=finalize).
 finalize_clone() {
   local name="$1"
   info "Finalizing '$name' (hostname, git identity, apt upgrade${CLONE_URL:+, repo clone})…"
-  # Everything runs in ONE guest session, fed the per-clone vars over stdin so
-  # the clone token never appears in argv / the process list. The vars go to
-  # tmpfs (/dev/shm) and a trap removes them on exit, so the token never touches
-  # the clone's persistent disk even if the playbook fails partway through.
-  # We re-sync the playbook from the still-mounted host copy first, so finalize
-  # reflects the current working tree even when the base image is older, then
-  # run only the finalize-phase tasks (heavy roles are skipped by phase).
-  if ! build_allyml finalize "$HOSTNAME_" | limactl shell "$name" sudo bash -c '
-        set -eu -o pipefail
-        umask 077
-        vars=/dev/shm/claude-vm-finalize.yml
-        trap "rm -f \"$vars\"" EXIT
-        cat > "$vars"
-        rsync -a --delete /mnt/playbook/ /root/playbook/
-        cd /root/playbook
-        ansible-playbook -i localhost, --connection=local site.yml \
-          --extra-vars @"$vars" 2>&1 | tee /var/log/claude-vm-finalize.log'; then
-    warn "Finalize did NOT complete — the playbook failed partway through."
-    warn "Last 40 lines of /var/log/claude-vm-finalize.log (in the VM):"
-    limactl shell "$name" sudo tail -n 40 /var/log/claude-vm-finalize.log >&2 2>/dev/null || true
+  if ! run_provision "$name" finalize "$HOSTNAME_" /var/log/claude-vm-finalize.log; then
     die "Finalize failed (see the log above). Fix the cause, then re-clone: $(rerun_cmd --recreate --name "$name")"
   fi
 }
@@ -516,8 +494,8 @@ finalize_clone "$NAME"
 
 # Bounce the VM so the first interactive shell starts cleanly: the finalize
 # apt upgrade may have pulled a new kernel/libraries, and the hostname change
-# takes full effect on a fresh boot. The base provision marker is inherited, so
-# this restart is fast (no re-provision).
+# takes full effect on a fresh boot. The clone inherits only the lightweight
+# dependency script (a no-op once Ansible is present), so this restart is fast.
 info "Restarting '$NAME' so the first shell picks up any kernel/library updates and the new hostname…"
 limactl stop "$NAME"
 limactl start "$NAME"
