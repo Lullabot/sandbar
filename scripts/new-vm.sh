@@ -411,10 +411,14 @@ run_provision() {
   local name="$1" phase="$2" hostname="$3" log="$4"
   if ! build_allyml "$phase" "$hostname" | limactl shell "$name" sudo bash -c '
         set -eu -o pipefail
-        umask 077
         log="$1"
         vars=/dev/shm/claude-vm-vars.yml
         trap "rm -f \"$vars\"" EXIT
+        # Keep the vars file private (it may carry a token) with an explicit
+        # mode rather than a global umask: a restrictive umask would also make
+        # mode-less files the playbook creates — notably the apt keyrings — root
+        # only, which breaks apt signature verification by the _apt sandbox user.
+        install -m 600 /dev/null "$vars"
         cat > "$vars"
         rsync -a --delete /mnt/playbook/ /root/playbook/
         cd /root/playbook
