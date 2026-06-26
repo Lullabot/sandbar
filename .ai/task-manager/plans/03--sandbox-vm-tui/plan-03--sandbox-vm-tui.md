@@ -293,9 +293,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 002: Implement the `lima` client and `Runner` abstraction (depends on: 001)
 
-### Phase 3: Ported orchestration core
+### Phase 3: Ported orchestration core ✅
 **Parallel Tasks:**
-- Task 003: Port the base/clone/finalize orchestration into `provision` (depends on: 001, 002)
+- ✔️ Task 003: Port the base/clone/finalize orchestration into `provision` (depends on: 001, 002)
 
 ### Phase 4: Interactive UI
 **Parallel Tasks:**

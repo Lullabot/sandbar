@@ -1,3 +1,5 @@
-// Package provision renders the Lima overlay and runs the Ansible playbook
-// phases (base build and per-clone finalize). It is implemented in a later task.
+// Package provision ports new-vm.sh's provisioning orchestration into Go: it
+// renders the Lima base overlay, builds the phased Ansible extra-vars, locates
+// the playbook, and drives the base-build -> clone -> finalize -> bounce
+// sequence through a lima.Client while streaming output.
 package provision
