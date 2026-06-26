@@ -409,6 +409,10 @@ ensure_stopped() {
 # surfacing the log) if the playbook fails; the caller prints the next step.
 run_provision() {
   local name="$1" phase="$2" hostname="$3" log="$4"
+  # The bash -c body is single-quoted on purpose: $1/$log/$vars must expand in
+  # the guest shell, not on the host. Double-quoting (what SC2016 suggests)
+  # would expand them here — emptying them and breaking provisioning.
+  # shellcheck disable=SC2016
   if ! build_allyml "$phase" "$hostname" | limactl shell "$name" sudo bash -c '
         set -eu -o pipefail
         log="$1"

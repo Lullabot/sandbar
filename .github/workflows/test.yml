@@ -1,0 +1,119 @@
+name: test
+
+# Two jobs:
+#   * lint     — fast, no VM: shellcheck the bash + ansible syntax check. Runs
+#                on every push so most mistakes fail in ~30s.
+#   * lima-e2e — the real thing: run scripts/new-vm.sh end to end on a Lima VM.
+#                GitHub's hosted ubuntu runners expose /dev/kvm (nested virt for
+#                Linux guests), so Lima runs under QEMU+KVM here — this is the
+#                only place the Lima orchestration (base build, `limactl clone`,
+#                finalize) can be exercised. macOS runners lack nested virt, so
+#                the Mac `vz` driver is intentionally not covered; the driver is
+#                Lima's concern, not this repo's.
+
+# push only on main (post-merge); feature branches run once via pull_request,
+# not twice from a matching push event.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck the install/provision scripts
+        run: shellcheck install.sh scripts/new-vm.sh
+
+      - name: Ansible syntax check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+          ansible-playbook -i localhost, --connection=local site.yml --syntax-check
+
+  lima-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # `limactl clone` copies the provisioned qcow2 (the runner's ext4 isn't
+      # copy-on-write), so base + clone roughly double the disk footprint.
+      # Reclaim the preinstalled toolchains we don't use to avoid disk-full.
+      - name: Free up runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/powershell /usr/share/swift || true
+          df -h /
+
+      - name: Set up Lima (installs QEMU, configures KVM + SSH)
+        id: lima
+        uses: lima-vm/lima-actions/setup@v1
+
+      # Cache the downloaded Debian cloud image across runs so repeat builds
+      # don't re-download it. Keyed on the Lima version from the setup step.
+      - name: Cache Lima image downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/lima
+          key: lima-${{ steps.lima.outputs.version }}
+
+      # Run the actual entrypoint, non-interactively. This builds the base
+      # image, clones it to `claude-ci`, finalizes, and restarts — the full
+      # path that can't run inside the nested-virt-less dev VM. Modest resources
+      # to fit the hosted runner (4 vCPU / 16 GB).
+      - name: Provision a VM with new-vm.sh
+        run: |
+          ./scripts/new-vm.sh --yes \
+            --name claude-ci \
+            --git-name "CI Bot" --git-email ci@example.com \
+            --cpus 2 --memory 6GiB --disk 30GiB
+
+      # The reason this branch exists: keyrings created by `gpg --dearmor`
+      # (ddev.gpg, nodesource.gpg) obey the provisioning shell's umask. A global
+      # umask 077 left them root-only, so the _apt sandbox user (uid 42) could
+      # not read them and signature verification broke. Assert every keyring is
+      # readable as _apt, then prove `apt-get update` verifies cleanly.
+      - name: Assert apt keyrings are readable by the _apt sandbox user
+        run: |
+          limactl shell claude-ci sudo bash -euo pipefail -c '
+            shopt -s nullglob
+            fail=0
+            for f in /etc/apt/keyrings/*; do
+              if ! sudo -u _apt test -r "$f"; then
+                echo "::error::keyring not readable by _apt: $f"
+                ls -l "$f"
+                fail=1
+              fi
+            done
+            exit $fail
+          '
+
+      - name: Assert apt update verifies signatures cleanly
+        run: limactl shell claude-ci sudo apt-get update
+
+      - name: Smoke-test the installed toolchain
+        run: |
+          limactl shell claude-ci bash -lc '
+            set -e
+            docker --version
+            gh --version
+            node --version
+          '
+
+      # On failure, surface the in-VM provisioning log for debugging.
+      - name: Dump provisioning logs on failure
+        if: failure()
+        run: |
+          limactl shell claude-ci sudo tail -n 100 /var/log/claude-vm-provision.log || true
+          limactl shell claude-ci sudo tail -n 100 /var/log/claude-vm-finalize.log || true
