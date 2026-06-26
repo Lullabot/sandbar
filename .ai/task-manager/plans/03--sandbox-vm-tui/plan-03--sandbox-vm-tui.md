@@ -301,9 +301,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 004: Build the Bubble Tea TUI and `claude-vm` entry point (depends on: 002, 003)
 
-### Phase 5: Documentation
+### Phase 5: Documentation ✅
 **Parallel Tasks:**
-- Task 005: Document the TUI (`tui/README.md` + root README subsection) (depends on: 004)
+- ✔️ Task 005: Document the TUI (`tui/README.md` + root README subsection) (depends on: 004)
 
 ### Post-phase Actions
 After each phase: ensure `cd tui && go build ./... && go vet ./... && go test ./...`

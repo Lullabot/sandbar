@@ -91,6 +91,15 @@ How it spins up the VM:
 Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`), and
 `git` for the `curl | bash` path.
 
+### Interactive TUI (`tui/`)
+
+For an interactive alternative, the `tui/` directory ships `claude-vm`, a Bubble
+Tea terminal UI that manages these VMs (list, create, start/stop/restart, and
+delete/recreate) using the same base-image / clone / finalize flow. See
+[`tui/README.md`](tui/README.md) for build and usage. `scripts/new-vm.sh` is
+unchanged and remains the scripted entry point — the `curl | bash` and CI paths
+still go through it.
+
 ### Running with lima-vm manually
 
 If you prefer to drive Lima yourself instead of using the script:
