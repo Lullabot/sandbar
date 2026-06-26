@@ -68,8 +68,7 @@ type model struct {
 	running       bool
 	doneErr       error
 	reader        *readPipe
-	provName      string // instance being provisioned (for the managed registry)
-	provBase      string // its base image
+	provCfg       vm.CreateConfig // config of the instance being provisioned (for the managed registry)
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -77,9 +76,10 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	// Load the managed-VM index best-effort: a missing/corrupt file degrades to
-	// an empty (still usable) registry — LoadFrom always returns a non-nil one.
-	reg, _ := registry.Load()
+	// Load the managed-VM index. LoadFrom always returns a usable (non-nil)
+	// registry; a corrupt/unreadable file surfaces as a warning rather than
+	// silently demoting every managed VM.
+	reg, loadErr := registry.Load()
 	if reg == nil {
 		reg = registry.NewEmpty()
 	}
@@ -94,6 +94,9 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		table:    newTable(),
 		viewport: viewport.New(80, 18),
 		spinner:  sp,
+	}
+	if loadErr != nil {
+		m.status = "warning: " + loadErr.Error()
 	}
 	return m
 }
@@ -131,19 +134,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.vms = msg.vms
+		// Reconcile the managed index against reality so a VM deleted outside the
+		// TUI stops being flagged managed (and recreate-able).
+		present := make(map[string]bool, len(msg.vms))
+		for _, v := range msg.vms {
+			present[v.Name] = true
+		}
+		if _, err := m.reg.Reconcile(present); err != nil {
+			m.status = "warning: could not update managed index: " + err.Error()
+		}
 		m.refreshRows()
 		return m, nil
 
 	case actionDoneMsg:
 		label := msg.action + " " + msg.name
-		if msg.err != nil {
+		switch {
+		case msg.err != nil:
 			m.status = label + " failed: " + msg.err.Error()
-		} else {
-			m.status = label + " ok"
+		case msg.action == "delete":
 			// A deleted VM is no longer managed; drop it from the index.
-			if msg.action == "delete" {
-				_ = m.reg.Remove(msg.name)
+			if err := m.reg.Remove(msg.name); err != nil {
+				m.status = label + " ok (warning: managed index not updated: " + err.Error() + ")"
+			} else {
+				m.status = label + " ok"
 			}
+		default:
+			m.status = label + " ok"
 		}
 		return m, listCmd(m.cli) // refresh after every action
 
@@ -158,10 +174,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case provisionDoneMsg:
 		m.running = false
 		m.doneErr = msg.err
-		// A successful create/recreate yields a claude-vm-managed VM; record it so
-		// the list marks it and recreate stays available for it.
-		if msg.err == nil && m.provName != "" {
-			_ = m.reg.Add(m.provName, m.provBase)
+		// A successful create/recreate yields a claude-vm-managed VM; record it
+		// (with its config, for a faithful future recreate) so the list marks it
+		// and recreate stays available for it.
+		if msg.err == nil && m.provCfg.Name != "" {
+			if err := m.reg.Add(m.provCfg); err != nil {
+				m.status = "VM ready, but recording it as managed failed: " + err.Error()
+			}
 		}
 		return m, listCmd(m.cli) // refresh the list the user returns to
 

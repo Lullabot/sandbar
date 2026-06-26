@@ -100,12 +100,19 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	// Refuse an existing target rather than colliding on clone — new-vm.sh has the
 	// same guard. A definite status (no error, non-empty) means the instance is
-	// already there. Recreate deletes first, so this only blocks an accidental
-	// create over a live VM.
+	// already there. Recreate calls createVM directly (it just deleted the
+	// target), so it bypasses this check instead of racing a just-removed VM.
 	if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
-		return fmt.Errorf("instance %q already exists — delete it, or recreate it to reset from the base image", cfg.Name)
+		return fmt.Errorf("instance %q already exists — delete it first, or choose a different name", cfg.Name)
 	}
+	return p.createVM(ctx, cfg, out)
+}
 
+// createVM clones and finalizes the target, building the base image first if
+// absent. It does NOT check whether the target already exists; callers that need
+// that guard use CreateVM. Recreate uses createVM directly because it has just
+// force-deleted the target.
+func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	// Ensure the base image exists and is stopped (a clone needs a quiescent
 	// source disk). An empty/error status means the instance is absent.
 	status, err := p.Lima.Status(cfg.BaseName)
@@ -148,5 +155,7 @@ func (p *Provisioner) Recreate(ctx context.Context, cfg vm.CreateConfig, out io.
 	if err := p.Lima.Delete(cfg.Name, true); err != nil {
 		return fmt.Errorf("delete %q: %w", cfg.Name, err)
 	}
-	return p.CreateVM(ctx, cfg, out)
+	// Skip CreateVM's exists-guard: we just deleted the target, and re-querying it
+	// could spuriously refuse the recreate if the delete hasn't fully settled.
+	return p.createVM(ctx, cfg, out)
 }

@@ -112,8 +112,15 @@ To prevent this, `claude-vm` records the instances **it** creates and:
 The index of managed VMs is a small JSON file at
 `${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible/managed-vms.json` (the
 same data dir `new-vm.sh` uses). It is updated when you create, recreate, or delete
-a VM from the TUI. VMs created outside the TUI (e.g. directly via `new-vm.sh` or
-`limactl`) are treated as unmanaged; delete still works, recreate does not.
+a VM from the TUI, and reconciled against `limactl list` on each refresh so an
+instance deleted outside the TUI stops being flagged managed. VMs created outside
+the TUI (e.g. directly via `new-vm.sh` or `limactl`) are treated as unmanaged;
+delete still works, recreate does not.
+
+The index also stores each managed VM's create configuration (CPUs, memory, disk,
+hostname, git identity, …) so **recreate reproduces the VM faithfully** instead of
+resetting it to defaults. The **clone token is never stored** — recreating a VM
+that had cloned a private repo will need the token re-supplied.
 
 Creating a VM whose name already exists is refused with a clear message rather than
 colliding — delete it, or recreate it to reset it.

@@ -1,12 +1,16 @@
 package registry
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 )
 
 // TestRoundTrip exercises the custom persistence: add -> reload -> remove must
-// survive across separate LoadFrom calls (i.e. it is actually written to disk).
+// survive across separate LoadFrom calls (i.e. it is actually written to disk),
+// and the stored config (sizing/identity) must come back intact.
 func TestRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 
@@ -18,11 +22,12 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("empty registry should not report claude as managed")
 	}
 
-	if err := r.Add("claude", "claude-base"); err != nil {
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}
+	if err := r.Add(cfg); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 
-	// Reload from disk: the entry and its base must persist.
+	// Reload from disk: the entry, its base, and the stored config must persist.
 	r2, err := LoadFrom(path)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
@@ -33,6 +38,10 @@ func TestRoundTrip(t *testing.T) {
 	if got := r2.Base("claude"); got != "claude-base" {
 		t.Fatalf("base = %q, want claude-base", got)
 	}
+	got, ok := r2.Config("claude")
+	if !ok || got.CPUs != 8 || got.Memory != "32GiB" || got.Hostname != "dev" {
+		t.Fatalf("stored config not restored: %+v (ok=%v)", got, ok)
+	}
 
 	if err := r2.Remove("claude"); err != nil {
 		t.Fatalf("remove: %v", err)
@@ -40,6 +49,54 @@ func TestRoundTrip(t *testing.T) {
 	r3, _ := LoadFrom(path)
 	if r3.IsManaged("claude") {
 		t.Fatal("claude should be gone after remove")
+	}
+}
+
+// TestTokenNeverPersisted: a clone token must never be written to the index.
+func TestTokenNeverPersisted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	r, _ := LoadFrom(path)
+	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CloneToken: "ghp_secret"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("index not written")
+	}
+	if containsStr(string(data), "ghp_secret") {
+		t.Fatalf("clone token leaked into the index:\n%s", data)
+	}
+	cfg, _ := r.Config("claude")
+	if cfg.CloneToken != "" {
+		t.Fatalf("in-memory config retained the token: %q", cfg.CloneToken)
+	}
+}
+
+// TestReconcilePrunesAbsent: entries for VMs no longer present must be dropped.
+func TestReconcilePrunesAbsent(t *testing.T) {
+	r := NewEmpty()
+	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	_ = r.Add(vm.CreateConfig{Name: "gone", BaseName: "claude-base"})
+
+	changed, err := r.Reconcile(map[string]bool{"claude": true})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !changed {
+		t.Fatal("reconcile should report a change when pruning")
+	}
+	if r.IsManaged("gone") {
+		t.Fatal("absent VM should be pruned")
+	}
+	if !r.IsManaged("claude") {
+		t.Fatal("present VM should be kept")
+	}
+
+	if changed, _ := r.Reconcile(map[string]bool{"claude": true}); changed {
+		t.Fatal("second reconcile with no diff should report no change")
 	}
 }
 
@@ -54,14 +111,30 @@ func TestMissingFileIsEmptyNotError(t *testing.T) {
 	}
 }
 
-// TestEmptyIsInMemory: NewEmpty never persists, so Add/Remove are safe no-ops
-// against disk.
-func TestEmptyIsInMemory(t *testing.T) {
-	r := NewEmpty()
-	if err := r.Add("x", "base"); err != nil {
-		t.Fatalf("in-memory add should not error: %v", err)
+// TestCorruptFileMovedAside: a corrupt index is reported AND preserved so a
+// later save() cannot silently clobber it.
+func TestCorruptFileMovedAside(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("seed corrupt file: %v", err)
 	}
-	if !r.IsManaged("x") {
-		t.Fatal("in-memory add should be visible")
+	r, err := LoadFrom(path)
+	if err == nil {
+		t.Fatal("corrupt index should return an error")
 	}
+	if r == nil || r.IsManaged("x") {
+		t.Fatal("should still return a usable empty registry")
+	}
+	if _, statErr := os.Stat(path + ".corrupt"); statErr != nil {
+		t.Fatalf("corrupt file should be preserved at %s.corrupt: %v", path, statErr)
+	}
+}
+
+func containsStr(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }

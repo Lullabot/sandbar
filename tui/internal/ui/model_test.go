@@ -92,7 +92,7 @@ func TestRecreateGatedForUnmanagedVM(t *testing.T) {
 // For a managed VM, recreate is available: 'r' starts provisioning.
 func TestRecreateAllowedForManagedVM(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.reg.Add("claude", "claude-base"); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 

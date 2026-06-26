@@ -9,18 +9,24 @@ package registry
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 )
 
-// entry is the per-VM record. Base is the base image the VM was cloned from, so
-// a later recreate can clone from the same base.
+// entry is the per-VM record. Config is the (secret-free) create configuration
+// so a later recreate reproduces the VM's sizing and identity instead of
+// silently resetting them to defaults. Base mirrors Config.BaseName and is kept
+// as a small, stable field for callers that only need the clone source.
 type entry struct {
-	Base string `json:"base"`
+	Base   string          `json:"base"`
+	Config vm.CreateConfig `json:"config"`
 }
 
-// fileSchema is the on-disk JSON shape: {"vms": {"<name>": {"base": "..."}}}.
+// fileSchema is the on-disk JSON shape: {"vms": {"<name>": {...}}}.
 type fileSchema struct {
 	VMs map[string]entry `json:"vms"`
 }
@@ -57,8 +63,10 @@ func Load() (*Registry, error) {
 }
 
 // LoadFrom reads the registry from an explicit path. A missing or empty file
-// yields an empty registry (not an error); a corrupt file returns an error
-// alongside a usable empty registry so callers can degrade gracefully.
+// yields an empty registry (not an error). A corrupt file is moved aside to
+// "<path>.corrupt" — so a later save() cannot silently clobber recoverable
+// data — and the error is returned for the caller to surface; the returned
+// registry is always non-nil and usable.
 func LoadFrom(path string) (*Registry, error) {
 	r := &Registry{path: path, vms: map[string]entry{}}
 	data, err := os.ReadFile(path)
@@ -73,7 +81,8 @@ func LoadFrom(path string) (*Registry, error) {
 	}
 	var parsed fileSchema
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return r, err
+		_ = os.Rename(path, path+".corrupt")
+		return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
 	if parsed.VMs != nil {
 		r.vms = parsed.VMs
@@ -92,9 +101,18 @@ func (r *Registry) Base(name string) string {
 	return r.vms[name].Base
 }
 
-// Add records name (cloned from base) as managed and persists the change.
-func (r *Registry) Add(name, base string) error {
-	r.vms[name] = entry{Base: base}
+// Config returns the stored create configuration for a managed VM (with its
+// clone token stripped) and whether the VM is managed.
+func (r *Registry) Config(name string) (vm.CreateConfig, bool) {
+	e, ok := r.vms[name]
+	return e.Config, ok
+}
+
+// Add records cfg as a managed VM keyed by cfg.Name and persists the change. The
+// clone token is stripped first: secrets never touch the on-disk index.
+func (r *Registry) Add(cfg vm.CreateConfig) error {
+	cfg.CloneToken = ""
+	r.vms[cfg.Name] = entry{Base: cfg.BaseName, Config: cfg}
 	return r.save()
 }
 
@@ -104,22 +122,55 @@ func (r *Registry) Remove(name string) error {
 	return r.save()
 }
 
-// save writes the index atomically (temp file + rename). With an empty path it
-// is a no-op, so an in-memory registry never touches disk.
+// Reconcile drops managed entries whose VM no longer exists; present is the set
+// of live instance names. It returns whether anything was pruned. This keeps a
+// stale entry from lingering after a VM is deleted outside the TUI. It cannot
+// detect a name being *reused* by an unrelated VM — provenance is not
+// recoverable from limactl — which is why recreate still requires an explicit
+// confirmation.
+func (r *Registry) Reconcile(present map[string]bool) (bool, error) {
+	changed := false
+	for name := range r.vms {
+		if !present[name] {
+			delete(r.vms, name)
+			changed = true
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	return true, r.save()
+}
+
+// save writes the index atomically (unique temp file + rename). With an empty
+// path it is a no-op, so an in-memory registry never touches disk. The temp file
+// is unique per write so two TUI processes sharing a data dir don't race on a
+// shared name.
 func (r *Registry) save() error {
 	if r.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
+	dir := filepath.Dir(r.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(fileSchema{VMs: r.vms}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, ".managed-vms-*.json.tmp") // 0600 by default
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, r.path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, r.path)
 }

@@ -52,6 +52,12 @@ func (m *model) refreshRows() {
 		})
 	}
 	m.table.SetRows(rows)
+	// SetRows only clamps the cursor downward, so emptying the list (e.g. the
+	// managed-only filter matching nothing) leaves it at -1; refilling never
+	// reseats it, leaving the selection — and every action key — dead. Reseat it.
+	if len(rows) > 0 && m.table.Cursor() < 0 {
+		m.table.SetCursor(0)
+	}
 }
 
 // selectedName returns the highlighted VM's name, or "" when the list is empty.
@@ -168,13 +174,19 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := m.confirmName
-		base := m.confirmBase
 		m.confirming = false
-		cfg := vm.DefaultCreateConfig()
-		cfg.Name = name
-		cfg.BaseName = base
-		cfg.GitName = hostGit("user.name")
-		cfg.GitEmail = hostGit("user.email")
+		// Reproduce the VM from its recorded config (sizing, hostname, identity)
+		// rather than resetting to defaults. The clone token is not stored, so a
+		// VM that cloned a private repo will need it re-supplied. Fall back to a
+		// minimal config if no snapshot exists (e.g. a pre-snapshot index entry).
+		cfg, ok := m.reg.Config(name)
+		if !ok || cfg.Name == "" {
+			cfg = vm.DefaultCreateConfig()
+			cfg.Name = name
+			cfg.GitName = hostGit("user.name")
+			cfg.GitEmail = hostGit("user.email")
+		}
+		cfg.BaseName = m.confirmBase
 		cmd := m.beginProvision("Recreating "+name, m.prov.Recreate, cfg)
 		return m, cmd
 

@@ -172,15 +172,15 @@ func TestRecreate(t *testing.T) {
 		t.Fatalf("Recreate: %v", err)
 	}
 
-	if len(f.calls) < 4 {
+	if len(f.calls) < 3 {
 		t.Fatalf("Recreate made too few calls: %v", f.calls)
 	}
 	if got, want := f.calls[0], []string{"delete", "claude", "-f"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Recreate first call = %v, want %v", got, want)
 	}
-	// Then the CreateVM sequence: exists-guard (target now absent), base status,
-	// then clone.
-	if got, want := f.calls[3], []string{"clone", "claude-base", "claude"}; !reflect.DeepEqual(got, want) {
+	// Recreate skips CreateVM's exists-guard (no Status(claude) re-check of the
+	// just-deleted target): base status check, then clone.
+	if got, want := f.calls[2], []string{"clone", "claude-base", "claude"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Recreate did not proceed to clone: calls=%v", f.calls)
 	}
 }
