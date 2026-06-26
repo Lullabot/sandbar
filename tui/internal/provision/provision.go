@@ -98,6 +98,14 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 // clone), then bounces the VM so the first shell starts cleanly. Mirrors
 // new-vm.sh's launch sequence.
 func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	// Refuse an existing target rather than colliding on clone — new-vm.sh has the
+	// same guard. A definite status (no error, non-empty) means the instance is
+	// already there. Recreate deletes first, so this only blocks an accidental
+	// create over a live VM.
+	if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
+		return fmt.Errorf("instance %q already exists — delete it, or recreate it to reset from the base image", cfg.Name)
+	}
+
 	// Ensure the base image exists and is stopped (a clone needs a quiescent
 	// source disk). An empty/error status means the instance is absent.
 	status, err := p.Lima.Status(cfg.BaseName)

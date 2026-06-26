@@ -15,9 +15,11 @@ type (
 		vms []vm.VM
 		err error
 	}
-	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete).
+	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
+	// is the affected instance, so the model can update the managed registry.
 	actionDoneMsg struct {
 		action string
+		name   string
 		err    error
 	}
 	// provisionOutputMsg is one chunk of streamed provisioner output.
@@ -37,14 +39,14 @@ func listCmd(cli *lima.Client) tea.Cmd {
 // startCmd boots a stopped VM.
 func startCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "start " + name, err: cli.Start(name)}
+		return actionDoneMsg{action: "start", name: name, err: cli.Start(name)}
 	}
 }
 
 // stopCmd shuts a running VM down.
 func stopCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "stop " + name, err: cli.Stop(name)}
+		return actionDoneMsg{action: "stop", name: name, err: cli.Stop(name)}
 	}
 }
 
@@ -52,15 +54,15 @@ func stopCmd(cli *lima.Client, name string) tea.Cmd {
 func restartCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
 		if err := cli.Stop(name); err != nil {
-			return actionDoneMsg{action: "restart " + name, err: err}
+			return actionDoneMsg{action: "restart", name: name, err: err}
 		}
-		return actionDoneMsg{action: "restart " + name, err: cli.Start(name)}
+		return actionDoneMsg{action: "restart", name: name, err: cli.Start(name)}
 	}
 }
 
 // deleteCmd force-removes a VM.
 func deleteCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "delete " + name, err: cli.Delete(name, true)}
+		return actionDoneMsg{action: "delete", name: name, err: cli.Delete(name, true)}
 	}
 }

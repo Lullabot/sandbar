@@ -11,6 +11,7 @@ type keyMap struct {
 	Stop     key.Binding
 	Restart  key.Binding
 	Delete   key.Binding
+	Filter   key.Binding
 	Back     key.Binding
 	Quit     key.Binding
 	Tab      key.Binding
@@ -29,6 +30,7 @@ func defaultKeys() keyMap {
 		Stop:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
 		Restart:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 		Delete:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Filter:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter managed")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
@@ -51,11 +53,15 @@ func (m model) viewHelp() []key.Binding {
 		return []key.Binding{m.keys.Back, m.keys.Quit}
 	default: // viewList
 		if m.confirming {
-			return []key.Binding{m.keys.Confirm, m.keys.Recreate, m.keys.Cancel}
+			// Recreate is only shown (and accepted) for managed VMs.
+			if m.confirmBase != "" {
+				return []key.Binding{m.keys.Confirm, m.keys.Recreate, m.keys.Cancel}
+			}
+			return []key.Binding{m.keys.Confirm, m.keys.Cancel}
 		}
 		return []key.Binding{
 			m.keys.Enter, m.keys.New, m.keys.Start, m.keys.Stop,
-			m.keys.Restart, m.keys.Delete, m.keys.Quit,
+			m.keys.Restart, m.keys.Delete, m.keys.Filter, m.keys.Quit,
 		}
 	}
 }

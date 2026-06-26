@@ -16,13 +16,19 @@ import (
 // orchestration's ordered calls without spawning a real limactl/ansible.
 type fakeRunner struct {
 	calls   [][]string
-	streams []string // stdin contents captured from Stream calls, in order
-	outputs map[string][]byte
+	streams []string          // stdin contents captured from Stream calls, in order
+	status  map[string][]byte // per-instance canned `list <name> --format` output
+	outputs map[string][]byte // canned output keyed by the first argv token
 	err     error
 }
 
 func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
+	// Status queries look like `list <name> --format {{.Status}}`. Return the
+	// per-instance canned status; an unset instance reads as absent (empty).
+	if len(args) >= 2 && args[0] == "list" && args[1] != "--format" {
+		return f.status[args[1]], f.err
+	}
 	return f.outputs[args[0]], f.err
 }
 
@@ -48,7 +54,8 @@ func testConfig() vm.CreateConfig {
 // already-stopped base image, CreateVM must clone -> start -> shell(finalize) ->
 // stop -> start, in that exact order.
 func TestCreateVM_StoppedBase(t *testing.T) {
-	f := &fakeRunner{outputs: map[string][]byte{"list": []byte("Stopped\n")}}
+	// Base is stopped; target "claude" is absent so the exists-guard passes.
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
@@ -56,6 +63,7 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 
 	want := [][]string{
+		{"list", "claude", "--format", "{{.Status}}"},            // exists-guard: target absent
 		{"list", "claude-base", "--format", "{{.Status}}"},       // Status(base) -> Stopped
 		{"clone", "claude-base", "claude"},                       // Clone
 		{"start", "claude"},                                      // Start
@@ -84,7 +92,7 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 // and finalizes. The base provision must NOT carry the git identity; the
 // finalize provision must.
 func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
-	f := &fakeRunner{outputs: map[string][]byte{}} // list -> "" => base absent
+	f := &fakeRunner{} // no canned status => target and base both absent
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
@@ -103,6 +111,7 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 		got = append(got, cl)
 	}
 	want := []call{
+		{"list", "claude"},       // exists-guard: target absent
 		{"list", "claude-base"},  // Status(base) -> absent
 		{"start", "--name"},      // BuildBase: Create(base)
 		{"shell", "claude-base"}, // BuildBase: base provision
@@ -132,24 +141,46 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestCreateVM_RefusesExistingTarget: when the named instance already exists,
+// CreateVM bails out before touching the base image or cloning.
+func TestCreateVM_RefusesExistingTarget(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude": []byte("Running\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	err := p.CreateVM(context.Background(), testConfig(), io.Discard)
+	if err == nil {
+		t.Fatal("CreateVM should refuse an existing target")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("error = %v, want an 'already exists' message", err)
+	}
+	// Only the guard's status check ran — no clone/start/shell.
+	for _, c := range f.calls {
+		switch c[0] {
+		case "clone", "start", "shell", "stop":
+			t.Fatalf("CreateVM took a destructive/creative action despite existing target: %v", f.calls)
+		}
+	}
+}
+
 // TestRecreate deletes (force) then runs the full CreateVM sequence.
 func TestRecreate(t *testing.T) {
-	f := &fakeRunner{outputs: map[string][]byte{"list": []byte("Stopped\n")}}
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	if err := p.Recreate(context.Background(), testConfig(), io.Discard); err != nil {
 		t.Fatalf("Recreate: %v", err)
 	}
 
-	if len(f.calls) == 0 {
-		t.Fatal("Recreate made no calls")
+	if len(f.calls) < 4 {
+		t.Fatalf("Recreate made too few calls: %v", f.calls)
 	}
 	if got, want := f.calls[0], []string{"delete", "claude", "-f"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Recreate first call = %v, want %v", got, want)
 	}
-	// Followed by the CreateVM sequence (clone is the first lifecycle op after the
-	// stopped-base status check).
-	if got, want := f.calls[2], []string{"clone", "claude-base", "claude"}; !reflect.DeepEqual(got, want) {
+	// Then the CreateVM sequence: exists-guard (target now absent), base status,
+	// then clone.
+	if got, want := f.calls[3], []string{"clone", "claude-base", "claude"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Recreate did not proceed to clone: calls=%v", f.calls)
 	}
 }

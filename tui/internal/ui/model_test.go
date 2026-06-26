@@ -21,6 +21,9 @@ func (fakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error
 
 func newTestModel(t *testing.T) model {
 	t.Helper()
+	// Isolate the managed-VM registry to a temp dir so tests never read or write
+	// the developer's real index.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	cli := lima.New(fakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
 	m, ok := New(cli, prov).(model)
@@ -56,6 +59,58 @@ func TestDeleteKeyEntersConfirm(t *testing.T) {
 	}
 	if m.confirmName != "claude" {
 		t.Fatalf("confirmName = %q, want %q", m.confirmName, "claude")
+	}
+}
+
+// Recreate must be gated to claude-vm-managed VMs: pressing 'r' in the confirm
+// overlay on an UNMANAGED VM is a no-op (it must never replace an unrelated VM
+// with a Claude sandbox).
+func TestRecreateGatedForUnmanagedVM(t *testing.T) {
+	m := newTestModel(t) // empty (temp) registry => nothing is managed
+
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "default", Status: "Running", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	confirm, _ := m.Update(runeKey('d'))
+	m = confirm.(model)
+	if !m.confirming {
+		t.Fatal("'d' should enter confirm state")
+	}
+	if m.confirmBase != "" {
+		t.Fatalf("unmanaged VM must have no recreate base, got %q", m.confirmBase)
+	}
+
+	after, _ := m.Update(runeKey('r'))
+	m = after.(model)
+	if m.view == viewProgress || m.running {
+		t.Fatal("recreate on an unmanaged VM must not start provisioning")
+	}
+}
+
+// For a managed VM, recreate is available: 'r' starts provisioning.
+func TestRecreateAllowedForManagedVM(t *testing.T) {
+	m := newTestModel(t)
+	if err := m.reg.Add("claude", "claude-base"); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Stopped", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	confirm, _ := m.Update(runeKey('d'))
+	m = confirm.(model)
+	if m.confirmBase != "claude-base" {
+		t.Fatalf("managed VM should carry its recreate base, got %q", m.confirmBase)
+	}
+
+	after, _ := m.Update(runeKey('r'))
+	m = after.(model)
+	if m.view != viewProgress || !m.running {
+		t.Fatalf("recreate on a managed VM should start provisioning (view=%v running=%v)", m.view, m.running)
 	}
 }
 

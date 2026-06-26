@@ -34,6 +34,9 @@ func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateCon
 	m.progressTitle = title
 	m.view = viewProgress
 	m.viewport.SetContent("")
+	// Remember the target so a successful run can be recorded as managed.
+	m.provName = cfg.Name
+	m.provBase = cfg.BaseName
 
 	go func() {
 		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the

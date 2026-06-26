@@ -27,6 +27,10 @@ func (m model) detailView() string {
 	b.WriteString(titleStyle.Render("VM: " + v.Name))
 	b.WriteString("\n\n")
 
+	managed := "no"
+	if m.reg.IsManaged(v.Name) {
+		managed = "yes (claude-vm)"
+	}
 	fields := [][2]string{
 		{"Name", v.Name},
 		{"Status", v.Status},
@@ -36,6 +40,7 @@ func (m model) detailView() string {
 		{"Arch", v.Arch},
 		{"IP", v.IP},
 		{"Dir", v.Dir},
+		{"Managed", managed},
 	}
 	for _, f := range fields {
 		b.WriteString(labelStyle.Render(f[0]+":") + " " + f[1] + "\n")

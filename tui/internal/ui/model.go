@@ -8,6 +8,7 @@ package ui
 import (
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
+	"github.com/deviantintegral/claude-code-ansible/tui/internal/registry"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -34,6 +35,7 @@ const (
 type model struct {
 	cli  *lima.Client
 	prov *provision.Provisioner
+	reg  *registry.Registry
 	keys keyMap
 	help help.Model
 
@@ -43,13 +45,15 @@ type model struct {
 	status string
 
 	// List + detail.
-	table  table.Model
-	vms    []vm.VM
-	detail vm.VM
+	table       table.Model
+	vms         []vm.VM
+	detail      vm.VM
+	managedOnly bool // when true, the list shows only claude-vm-managed VMs
 
 	// Delete/recreate confirmation overlay on the list.
 	confirming  bool
 	confirmName string
+	confirmBase string // recreate base for a managed VM; "" disables recreate
 
 	// Create form.
 	inputs   []textinput.Model
@@ -64,6 +68,8 @@ type model struct {
 	running       bool
 	doneErr       error
 	reader        *readPipe
+	provName      string // instance being provisioned (for the managed registry)
+	provBase      string // its base image
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -71,9 +77,17 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	// Load the managed-VM index best-effort: a missing/corrupt file degrades to
+	// an empty (still usable) registry — LoadFrom always returns a non-nil one.
+	reg, _ := registry.Load()
+	if reg == nil {
+		reg = registry.NewEmpty()
+	}
+
 	m := model{
 		cli:      cli,
 		prov:     prov,
+		reg:      reg,
 		keys:     defaultKeys(),
 		help:     help.New(),
 		view:     viewList,
@@ -117,14 +131,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.vms = msg.vms
-		m.setTableRows(msg.vms)
+		m.refreshRows()
 		return m, nil
 
 	case actionDoneMsg:
+		label := msg.action + " " + msg.name
 		if msg.err != nil {
-			m.status = msg.action + " failed: " + msg.err.Error()
+			m.status = label + " failed: " + msg.err.Error()
 		} else {
-			m.status = msg.action + " ok"
+			m.status = label + " ok"
+			// A deleted VM is no longer managed; drop it from the index.
+			if msg.action == "delete" {
+				_ = m.reg.Remove(msg.name)
+			}
 		}
 		return m, listCmd(m.cli) // refresh after every action
 
@@ -139,6 +158,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case provisionDoneMsg:
 		m.running = false
 		m.doneErr = msg.err
+		// A successful create/recreate yields a claude-vm-managed VM; record it so
+		// the list marks it and recreate stays available for it.
+		if msg.err == nil && m.provName != "" {
+			_ = m.reg.Add(m.provName, m.provBase)
+		}
 		return m, listCmd(m.cli) // refresh the list the user returns to
 
 	case tea.KeyMsg:

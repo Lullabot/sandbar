@@ -12,7 +12,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// newTable builds the VM list table with its column layout.
+// newTable builds the VM list table with its column layout. Name stays the
+// first column so SelectedRow()[0] is always the instance name. The trailing
+// "Managed" column flags VMs claude-vm created, which is what makes recreate
+// safe to gate.
 func newTable() table.Model {
 	cols := []table.Column{
 		{Title: "Name", Width: 20},
@@ -20,6 +23,7 @@ func newTable() table.Model {
 		{Title: "CPUs", Width: 6},
 		{Title: "Memory", Width: 14},
 		{Title: "Disk", Width: 14},
+		{Title: "Managed", Width: 8},
 	}
 	t := table.New(
 		table.WithColumns(cols),
@@ -29,12 +33,22 @@ func newTable() table.Model {
 	return t
 }
 
-// setTableRows reflects the loaded VMs into the table.
-func (m *model) setTableRows(vms []vm.VM) {
-	rows := make([]table.Row, 0, len(vms))
-	for _, v := range vms {
+// refreshRows rebuilds the table from m.vms, applying the managed-only filter
+// and marking each VM's managed status. Call it after loading or toggling the
+// filter.
+func (m *model) refreshRows() {
+	rows := make([]table.Row, 0, len(m.vms))
+	for _, v := range m.vms {
+		managed := m.reg.IsManaged(v.Name)
+		if m.managedOnly && !managed {
+			continue
+		}
+		owner := "no"
+		if managed {
+			owner = "yes"
+		}
 		rows = append(rows, table.Row{
-			v.Name, v.Status, strconv.Itoa(v.CPUs), v.Memory, v.Disk,
+			v.Name, v.Status, strconv.Itoa(v.CPUs), v.Memory, v.Disk, owner,
 		})
 	}
 	m.table.SetRows(rows)
@@ -68,6 +82,16 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
+
+	case key.Matches(msg, m.keys.Filter):
+		m.managedOnly = !m.managedOnly
+		m.refreshRows()
+		if m.managedOnly {
+			m.status = "showing claude-vm-managed VMs only"
+		} else {
+			m.status = "showing all VMs"
+		}
+		return m, nil
 
 	case key.Matches(msg, m.keys.New):
 		cmd := m.openForm()
@@ -107,6 +131,16 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := m.selectedName(); n != "" {
 			m.confirming = true
 			m.confirmName = n
+			// Recreate clones from a Claude base, so it is only offered for VMs we
+			// created — otherwise it would replace an unrelated VM with a sandbox.
+			m.confirmBase = ""
+			if m.reg.IsManaged(n) {
+				if base := m.reg.Base(n); base != "" {
+					m.confirmBase = base
+				} else {
+					m.confirmBase = vm.DefaultCreateConfig().BaseName
+				}
+			}
 		}
 		return m, nil
 	}
@@ -126,10 +160,19 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, deleteCmd(m.cli, name)
 
 	case "r":
+		// Recreate is gated to claude-vm-managed VMs (confirmBase is set only for
+		// them); ignore it otherwise so a stray 'r' can't replace an unrelated VM.
+		if m.confirmBase == "" {
+			m.confirming = false
+			m.status = "recreate is only available for claude-vm-managed VMs"
+			return m, nil
+		}
 		name := m.confirmName
+		base := m.confirmBase
 		m.confirming = false
 		cfg := vm.DefaultCreateConfig()
 		cfg.Name = name
+		cfg.BaseName = base
 		cfg.GitName = hostGit("user.name")
 		cfg.GitEmail = hostGit("user.email")
 		cmd := m.beginProvision("Recreating "+name, m.prov.Recreate, cfg)
@@ -152,8 +195,12 @@ func (m model) listView() string {
 
 	switch {
 	case m.confirming:
-		b.WriteString("\n" + errStyle.Render(
-			fmt.Sprintf("Delete %q?  [y] yes   [r] recreate   [n] cancel", m.confirmName)))
+		prompt := fmt.Sprintf("Delete %q?  [y] yes", m.confirmName)
+		if m.confirmBase != "" {
+			prompt += fmt.Sprintf("   [r] recreate from %s", m.confirmBase)
+		}
+		prompt += "   [n] cancel"
+		b.WriteString("\n" + errStyle.Render(prompt))
 	case m.status != "":
 		b.WriteString("\n" + statusStyle.Render(m.status))
 	}

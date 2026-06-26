@@ -49,16 +49,22 @@ The active view's keys are also shown in the help bar at the bottom of the scree
 | `x` | Stop the selected VM |
 | `r` | Restart the selected VM |
 | `d` | Delete the selected VM (opens a confirmation) |
+| `f` | Toggle the filter: show all VMs ↔ only claude-vm-managed VMs |
 | `q` | Quit |
+
+The **Managed** column marks which VMs `claude-vm` created (see
+[Managed VMs and safety](#managed-vms-and-safety) below).
 
 ### Delete / recreate confirmation (on the list)
 
-Pressing `d` on the list opens an inline prompt: `[y] yes  [r] recreate  [n] cancel`.
+Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appears
+**only for managed VMs**, and names the base it would clone from, e.g.
+`Delete "claude"?  [y] yes   [r] recreate from claude-base   [n] cancel`.
 
 | Key | Action |
 |-----|--------|
 | `y` (also `d`) | Confirm: delete the VM |
-| `r` | Recreate: delete and re-clone the VM from the base image (streams the provisioner) |
+| `r` | Recreate: delete and re-clone the VM from its base image (managed VMs only; streams the provisioner) |
 | `n` (also `esc`) | Cancel |
 
 ### Detail view
@@ -88,6 +94,29 @@ quits from the form.
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
 | `q` | Quit |
 | `esc` / `backspace`, `enter` | Return to the list (after the run finishes) |
+
+## Managed VMs and safety
+
+`limactl` lists **every** Lima instance on your machine, not just the ones this
+tool created — your `default` template VM, a Colima docker VM, and so on all show
+up in the list. You can safely list, inspect, start, stop, restart, and (with a
+confirmation) delete any of them; those are ordinary `limactl` operations.
+
+**Recreate is different**: it deletes the instance and re-clones it from a Claude
+base image, so pointing it at an unrelated VM would replace that VM with a sandbox.
+To prevent this, `claude-vm` records the instances **it** creates and:
+
+- marks them in the **Managed** column (and the detail view), and
+- offers **recreate only for managed VMs** (`f` filters the list down to them).
+
+The index of managed VMs is a small JSON file at
+`${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible/managed-vms.json` (the
+same data dir `new-vm.sh` uses). It is updated when you create, recreate, or delete
+a VM from the TUI. VMs created outside the TUI (e.g. directly via `new-vm.sh` or
+`limactl`) are treated as unmanaged; delete still works, recreate does not.
+
+Creating a VM whose name already exists is refused with a clear message rather than
+colliding — delete it, or recreate it to reset it.
 
 ## Relationship to `new-vm.sh`
 
