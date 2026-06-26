@@ -75,6 +75,52 @@ func TestListParsesFixture(t *testing.T) {
 	}
 }
 
+// TestListIgnoresNonJSONLines guards the parser hardening: a stray non-JSON line
+// on stdout (a leaked log line, a deprecation notice) must be skipped rather than
+// failing the whole listing.
+func TestListIgnoresNonJSONLines(t *testing.T) {
+	noisy := []byte(`time="2026-06-26T00:00:00Z" level=info msg="loading config"
+{"name":"claude","status":"Running","cpus":2,"memory":42,"disk":99}
+
+some trailing warning
+`)
+	f := &fakeRunner{outputs: map[string][]byte{"list": noisy}}
+
+	vms, err := New(f).List()
+	if err != nil {
+		t.Fatalf("List() should skip non-JSON noise, got error: %v", err)
+	}
+	if len(vms) != 1 || vms[0].Name != "claude" {
+		t.Fatalf("got %+v, want a single VM named claude", vms)
+	}
+}
+
+// TestExecRunnerSeparatesStderr is the regression test for the original bug
+// report: limactl logs to stderr ("time=… level=… msg=…"), and merging that into
+// stdout corrupted the JSON the List parser consumed. We stand up a tiny stub
+// that mimics limactl — a logrus line on stderr, the JSON object on stdout — and
+// assert the real execRunner returns clean stdout so List parses it.
+func TestExecRunnerSeparatesStderr(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "limactl-stub.sh")
+	script := `#!/bin/sh
+echo 'time="2026-06-26T00:00:00Z" level=info msg="something on stderr"' >&2
+echo '{"name":"claude","status":"Running","cpus":4,"memory":8589934592,"disk":107374182400,"arch":"aarch64"}'
+`
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+
+	c := New(&execRunner{bin: stub})
+	vms, err := c.List()
+	if err != nil {
+		t.Fatalf("List() against stub limactl: %v", err)
+	}
+	if len(vms) != 1 || vms[0].Name != "claude" || vms[0].Status != "Running" {
+		t.Fatalf("got %+v, want one Running VM named claude", vms)
+	}
+}
+
 func TestMethodArgv(t *testing.T) {
 	cases := []struct {
 		name string

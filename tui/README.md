@@ -125,6 +125,22 @@ that had cloned a private repo will need the token re-supplied.
 Creating a VM whose name already exists is refused with a clear message rather than
 colliding — delete it, or recreate it to reset it.
 
+## Why the `limactl` CLI (not a Go API)
+
+Lima is written in Go, but it does **not** publish a stable public Go API:
+its `pkg/…` packages are internal, change between releases, and importing them
+would pull Lima's whole dependency tree in and pin us to a single Lima version.
+The supported, documented integration surface is the `limactl` CLI with
+structured output — `--format json` for `list` and `--format '{{ .Field }}'`
+templates for single values — which is what this tool uses (see
+[`internal/lima`](internal/lima)).
+
+Because `limactl` logs to **stderr** (logrus `time=… level=… msg=…` lines) and
+writes its JSON/template output to **stdout**, the runner captures the two
+streams separately: only stdout is parsed, and stderr is surfaced as diagnostics
+on failure. The list parser also skips any line that is not a JSON object, so a
+stray notice on stdout degrades to "ignored" rather than failing the listing.
+
 ## Relationship to `new-vm.sh`
 
 The TUI and [`scripts/new-vm.sh`](../scripts/new-vm.sh) share the same model and

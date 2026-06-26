@@ -5,6 +5,7 @@
 package lima
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -37,22 +38,28 @@ type listEntry struct {
 }
 
 // List parses `limactl list --format json`, which emits one JSON object per
-// line, into a slice of vm.VM. It decodes with a streaming json.Decoder so the
-// newline-delimited stream is handled without splitting lines by hand.
+// line, into a slice of vm.VM. It decodes line by line and skips any line that
+// is not a JSON object, so a stray non-JSON line on stdout (a deprecation
+// notice, a leaked log line) degrades to "ignored" rather than failing the
+// whole listing.
 func (c *Client) List() ([]vm.VM, error) {
 	out, err := c.r.Output(context.Background(), "list", "--format", "json")
 	if err != nil {
-		return nil, fmt.Errorf("limactl list: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("limactl list: %w", err)
 	}
 
 	var vms []vm.VM
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for {
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	// Instance dirs and JSON can be long; raise the line limit well above the
+	// default 64 KiB so a fat entry is not silently truncated.
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 || line[0] != '{' {
+			continue // blank line or non-JSON noise (e.g. a logrus line)
+		}
 		var e listEntry
-		if err := dec.Decode(&e); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
+		if err := json.Unmarshal(line, &e); err != nil {
 			return nil, fmt.Errorf("parse limactl list output: %w", err)
 		}
 		vms = append(vms, vm.VM{
@@ -65,6 +72,9 @@ func (c *Client) List() ([]vm.VM, error) {
 			Arch:   e.Arch,
 		})
 	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("read limactl list output: %w", err)
+	}
 	return vms, nil
 }
 
@@ -72,7 +82,7 @@ func (c *Client) List() ([]vm.VM, error) {
 func (c *Client) Status(name string) (string, error) {
 	out, err := c.r.Output(context.Background(), "list", name, "--format", "{{.Status}}")
 	if err != nil {
-		return "", fmt.Errorf("limactl status %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("limactl status %s: %w", name, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -126,9 +136,8 @@ func (c *Client) Preflight() error {
 // run executes a fire-and-forget limactl command, folding any captured output
 // into the error for diagnostics.
 func (c *Client) run(args ...string) error {
-	out, err := c.r.Output(context.Background(), args...)
-	if err != nil {
-		return fmt.Errorf("limactl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	if _, err := c.r.Output(context.Background(), args...); err != nil {
+		return fmt.Errorf("limactl %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
 }
