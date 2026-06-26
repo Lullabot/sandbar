@@ -314,3 +314,37 @@ passes (where Go code exists), then create a conventional-commit for the phase.
 - Total Tasks: 5
 - Maximum Parallelism: 1 task per phase (inherent to the layered dependency chain)
 - Critical Path Length: 5 phases
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-06-26
+
+### Results
+
+Delivered a self-contained Go TUI (`tui/`, module
+`github.com/deviantintegral/claude-code-ansible/tui`, binary `claude-vm`) built on
+Charm's Bubble Tea stack, implementing full VM CRUD over the project's Lima
+sandboxes. All five phases landed on the `feature/3--sandbox-vm-tui` branch, one
+conventional-commit per phase:
+
+- **`vm`** — domain model (`VM`, `CreateConfig`, `DefaultCreateConfig`, `Validate`, `EffectiveHostname`, `ParseCPUs`) with unit tests.
+- **`lima`** — a `Runner`-abstracted `limactl` client (List/Status/Start/Stop/Delete/Clone/Create/Shell/Preflight); `List` parses `--format json`; fixture + argv tests via a fake runner.
+- **`provision`** — a faithful Go port of `new-vm.sh`'s orchestration: `RenderBaseOverlay`, phased `BuildExtraVars`, `LocatePlaybook`, and `BuildBase`/`CreateVM`/`Recreate`. The in-guest command preserves the script's secret hygiene (vars over stdin into `/dev/shm`, `install -m 600`, EXIT-trap cleanup, no global umask). Unit + ordered-call integration tests.
+- **`ui` + `cmd/claude-vm`** — Bubble Tea list/detail (Read), create form with masked token (Create), `s`/`x`/`r` lifecycle (Update), `d` delete/recreate behind a confirm (Delete). Long-running provisioning streams through an `io.Pipe`→`viewport` via a self-reissuing `readNextCmd`, so `Update` never blocks. `main` runs `Preflight`/`LocatePlaybook` and exits cleanly when `limactl` is absent.
+- **Docs** — `tui/README.md` (overview, prerequisites, build/run, keybindings table, relationship to `new-vm.sh`) and a root-README subsection.
+
+Validation gates: `gofmt` clean, `go vet ./...` clean, `go build ./...` and
+`go test ./...` green. The built binary runs and degrades gracefully without Lima.
+
+### Noteworthy Events
+
+- **"BubbleWrap" clarified to Bubble Tea.** The work order named "BubbleWrap" (a Linux sandboxing tool, not a TUI library); confirmed with the user it meant Charm's Bubble Tea. Other clarifications: reimplement orchestration fully in Go, all four CRUD operations, new `tui/` subdir keeping `new-vm.sh` unchanged.
+- **`limactl`/`ansible` absent in this environment.** All process spawning sits behind the `Runner` interface; every test uses fakes and never spawns real binaries. A live end-to-end VM provision could not be exercised here and remains a manual / CI-with-nested-virt step (the existing CI already covers the live Bash path) — this is the one item not automatically verified.
+- **Faithful Bash port.** The in-guest provisioning command, base/clone/finalize ordering, and security posture (ephemeral VM, read-only playbook mount, secrets in tmpfs) mirror `scripts/new-vm.sh` exactly. One intentional deviation: the in-guest `tee`-to-log was dropped since `Lima.Shell` streams combined output directly to the UI.
+- `new-vm.sh` and the Ansible roles were left untouched; the TUI is purely additive.
+
+### Recommendations
+
+- Run a live smoke test on a host with Lima installed (create → list → start/stop/restart → delete) before tagging a release; consider extending the CI nested-virt workflow to cover the `claude-vm` create path.
+- Optional follow-ups (out of scope here): port `new-vm.sh`'s standalone cache-clone playbook-location fallback (currently a `// TODO`), and surface `limactl copy` for moving files in/out of a VM.
