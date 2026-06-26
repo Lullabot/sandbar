@@ -297,9 +297,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 003: Port the base/clone/finalize orchestration into `provision` (depends on: 001, 002)
 
-### Phase 4: Interactive UI
+### Phase 4: Interactive UI ✅
 **Parallel Tasks:**
-- Task 004: Build the Bubble Tea TUI and `claude-vm` entry point (depends on: 002, 003)
+- ✔️ Task 004: Build the Bubble Tea TUI and `claude-vm` entry point (depends on: 002, 003)
 
 ### Phase 5: Documentation
 **Parallel Tasks:**
