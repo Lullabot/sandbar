@@ -2,7 +2,7 @@
 id: 2
 group: "core"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-06-26
 skills:
   - golang

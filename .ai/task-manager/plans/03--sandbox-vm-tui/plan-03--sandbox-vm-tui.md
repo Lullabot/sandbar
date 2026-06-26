@@ -289,9 +289,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 001: Scaffold the `tui/` Go module and VM domain model
 
-### Phase 2: External-tool boundary
+### Phase 2: External-tool boundary ✅
 **Parallel Tasks:**
-- Task 002: Implement the `lima` client and `Runner` abstraction (depends on: 001)
+- ✔️ Task 002: Implement the `lima` client and `Runner` abstraction (depends on: 001)
 
 ### Phase 3: Ported orchestration core
 **Parallel Tasks:**
