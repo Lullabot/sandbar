@@ -285,9 +285,9 @@ graph TD
 
 No circular dependencies.
 
-### Phase 1: Foundation
+### Phase 1: Foundation ✅
 **Parallel Tasks:**
-- Task 001: Scaffold the `tui/` Go module and VM domain model
+- ✔️ Task 001: Scaffold the `tui/` Go module and VM domain model
 
 ### Phase 2: External-tool boundary
 **Parallel Tasks:**
