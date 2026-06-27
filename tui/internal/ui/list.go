@@ -62,7 +62,8 @@ func (m *model) refreshRows() {
 			owner = "yes"
 		}
 		rows = append(rows, table.Row{
-			v.Name, v.Status, strconv.Itoa(v.CPUs), v.Memory, v.Disk, owner,
+			v.Name, v.Status, strconv.Itoa(v.CPUs),
+			humanizeBytes(v.Memory), humanizeBytes(v.Disk), owner,
 		})
 	}
 	m.table.SetRows(rows)
