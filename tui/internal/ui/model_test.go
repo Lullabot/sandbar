@@ -261,6 +261,107 @@ func TestParseLimaSize(t *testing.T) {
 	}
 }
 
+// Tab navigation in the reset form skips the locked Name, walks every editable
+// field then both toggles, and wraps back to Hostname — never focusing Name.
+func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	sawToggle0, sawToggle1, wrapped := false, false, false
+	for i := 0; i < 40; i++ {
+		if m.toggleFocus == -1 && m.focusIdx == fName {
+			t.Fatalf("focus landed on the locked Name field")
+		}
+		switch m.toggleFocus {
+		case 0:
+			sawToggle0 = true
+		case 1:
+			sawToggle1 = true
+		}
+		// A full cycle is complete once we return to Hostname after seeing a toggle.
+		if sawToggle1 && m.toggleFocus == -1 && m.focusIdx == fHostname {
+			wrapped = true
+			break
+		}
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(model)
+	}
+	if !sawToggle0 || !sawToggle1 {
+		t.Fatalf("tab cycle missed a toggle (claude=%v project=%v)", sawToggle0, sawToggle1)
+	}
+	if !wrapped {
+		t.Fatalf("tab navigation never wrapped back to the first editable field")
+	}
+
+	// Shift+tab from the first editable field wraps up to the last toggle.
+	for m.focusIdx != fHostname || m.toggleFocus != -1 {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(model)
+	}
+	prev, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = prev.(model)
+	if m.toggleFocus != 1 {
+		t.Fatalf("shift+tab from Hostname should wrap to the last toggle, got toggleFocus=%d", m.toggleFocus)
+	}
+}
+
+// When the project toggle is disabled (no CloneURL), tab navigation reaches the
+// Claude toggle but never the inert project toggle, and the Claude toggle still
+// flips.
+func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
+	cfg := resetConfig()
+	cfg.CloneURL = ""
+	m := openReset(t, cfg)
+
+	sawClaude := false
+	for i := 0; i < 40; i++ {
+		if m.toggleFocus == 1 {
+			t.Fatalf("navigation must skip the disabled project toggle")
+		}
+		if m.toggleFocus == 0 {
+			sawClaude = true
+			break
+		}
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(model)
+	}
+	if !sawClaude {
+		t.Fatalf("navigation never reached the Claude toggle")
+	}
+	// Space still flips the Claude toggle even with the project toggle disabled.
+	sp, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = sp.(model)
+	if !m.preserveClaude {
+		t.Fatalf("space on the Claude toggle should enable preserveClaude")
+	}
+}
+
+// Leaving the reset form via esc returns to the list and clears reset state, so a
+// later create form ('n') is a clean, non-reset form with no preserve toggles.
+func TestResetEscClearsResetMode(t *testing.T) {
+	m := openReset(t, resetConfig())
+	if !m.resetMode {
+		t.Fatalf("precondition: form should be in reset mode")
+	}
+
+	back, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = back.(model)
+	if m.view != viewList {
+		t.Fatalf("esc should return to the list, got view %v", m.view)
+	}
+	if m.resetMode {
+		t.Fatalf("esc must clear reset mode")
+	}
+
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+	if m.resetMode {
+		t.Fatalf("a fresh create form must not inherit reset mode")
+	}
+	if strings.Contains(m.formView(), "Preserve Claude") {
+		t.Fatalf("a create form must not render preserve toggles")
+	}
+}
+
 // Backspace inside the create form must edit the focused field, not navigate
 // back to the list. (The shared Back binding also matches backspace, so the form
 // has to special-case it.)

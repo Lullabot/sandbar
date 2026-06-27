@@ -2,7 +2,10 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,10 +23,30 @@ type fakeRunner struct {
 	status  map[string][]byte // per-instance canned `list <name> --format` output
 	outputs map[string][]byte // canned output keyed by the first argv token
 	err     error
+	// failOn, when non-nil, makes the matching call (and only it) fail with
+	// failErr. It lets a test inject a fault at one specific step — e.g. the
+	// stage-out tar — while every other call still succeeds.
+	failOn  func([]string) bool
+	failErr error
+}
+
+// callErr returns the error a given call should produce: failErr for a call the
+// test singled out via failOn, otherwise the runner-wide err (usually nil).
+func (f *fakeRunner) callErr(args []string) error {
+	if f.failOn != nil && f.failOn(args) {
+		if f.failErr != nil {
+			return f.failErr
+		}
+		return errors.New("injected failure")
+	}
+	return f.err
 }
 
 func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
+	if err := f.callErr(args); err != nil {
+		return nil, err
+	}
 	// Status queries look like `list <name> --format {{.Status}}`. Return the
 	// per-instance canned status; an unset instance reads as absent (empty).
 	if len(args) >= 2 && args[0] == "list" && args[1] != "--format" {
@@ -49,7 +72,7 @@ func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, a
 			}
 		}
 	}
-	return f.err
+	return f.callErr(args)
 }
 
 func testConfig() vm.CreateConfig {
@@ -337,5 +360,227 @@ func TestReset_BothPreserve(t *testing.T) {
 	}
 	if strings.Contains(finStream, "project_clone_url") {
 		t.Errorf("preserve-project finalize must skip project_clone_url:\n%s", finStream)
+	}
+}
+
+// countCalls reports how many recorded calls satisfy match.
+func countCalls(calls [][]string, match func([]string) bool) int {
+	n := 0
+	for _, c := range calls {
+		if match(c) {
+			n++
+		}
+	}
+	return n
+}
+
+func isTarOut(c []string) bool { return hasTok(c, "-czf") }
+func isTarIn(c []string) bool  { return hasTok(c, "-xzf") }
+
+// finalizeStream returns the streamed stdin of the finalize provision (the one
+// carrying provision_phase: finalize), failing the test if none was captured.
+func finalizeStream(t *testing.T, streams []string) string {
+	t.Helper()
+	for _, s := range streams {
+		if strings.Contains(s, "provision_phase: finalize") {
+			return s
+		}
+	}
+	t.Fatalf("no finalize stdin captured; streams=%v", streams)
+	return ""
+}
+
+// stageDirs lists the leaked host staging directories (claude-vm-reset-*) so a
+// test can assert the reset cleans up after itself on success or leaves the dir
+// (for recovery) on a post-staging failure.
+func stageDirs(t *testing.T) []string {
+	t.Helper()
+	g, err := filepath.Glob(filepath.Join(os.TempDir(), "claude-vm-reset-*"))
+	if err != nil {
+		t.Fatalf("glob stage dirs: %v", err)
+	}
+	return g
+}
+
+// TestReset_ClaudeOnly: preserving only the Claude login stages out ~/.claude
+// (one tar archive, no project archive), restores it BEFORE finalize, and leaves
+// the finalize project_clone_url in place (the repo is re-cloned, not preserved).
+func TestReset_ClaudeOnly(t *testing.T) {
+	before := len(stageDirs(t))
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	// Exactly one stage-out (claude) and one stage-in (claude); the project tree
+	// is never archived.
+	if n := countCalls(f.calls, isTarOut); n != 1 {
+		t.Fatalf("claude-only reset should stage out exactly once, got %d", n)
+	}
+	if n := countCalls(f.calls, isTarIn); n != 1 {
+		t.Fatalf("claude-only reset should stage in exactly once, got %d", n)
+	}
+	for _, c := range f.calls {
+		if hasTok(c, "-czf") && hasTok(c, "github.com/deviantintegral") {
+			t.Fatalf("claude-only reset must not stage out the project tree: %v", c)
+		}
+		if hasTok(c, "direnv") {
+			t.Fatalf("claude-only reset must not run direnv: %v", c)
+		}
+	}
+
+	// Claude restore (-xzf) must land BEFORE finalize so the playbook re-applies
+	// settings.json on top.
+	inClaude := findCall(t, f.calls, 0, "stage-in claude", isTarIn)
+	findCall(t, f.calls, inClaude+1, "finalize after restore", func(c []string) bool {
+		return hasTok(c, "bash") && hasTok(c, "-c")
+	})
+
+	// The repo is re-cloned (not preserved), so finalize keeps project_clone_url.
+	if !strings.Contains(finalizeStream(t, f.streams), "project_clone_url") {
+		t.Errorf("claude-only finalize should keep project_clone_url (repo re-cloned)")
+	}
+
+	// The host staging dir is removed after a successful reset.
+	if after := len(stageDirs(t)); after != before {
+		t.Errorf("stage dir leaked after success: had %d, now %d", before, after)
+	}
+}
+
+// TestReset_ProjectOnly: preserving only the project tree stages it out (no
+// Claude archive), skips the finalize clone (restored tree is authoritative),
+// restores AFTER finalize, and re-approves the .env via direnv.
+func TestReset_ProjectOnly(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveProject: true}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	// One project stage-out, no Claude stage-out (.claude is never archived).
+	if n := countCalls(f.calls, isTarOut); n != 1 {
+		t.Fatalf("project-only reset should stage out exactly once, got %d", n)
+	}
+	for _, c := range f.calls {
+		if hasTok(c, "-czf") && hasTok(c, ".claude") {
+			t.Fatalf("project-only reset must not stage out ~/.claude: %v", c)
+		}
+	}
+
+	// The project restore (-xzf) must land AFTER finalize, followed by direnv allow.
+	finalize := findCall(t, f.calls, 0, "finalize", func(c []string) bool {
+		return hasTok(c, "bash") && hasTok(c, "-c")
+	})
+	inProject := findCall(t, f.calls, finalize+1, "stage-in project after finalize", isTarIn)
+	findCall(t, f.calls, inProject+1, "direnv allow", func(c []string) bool {
+		return hasTok(c, "direnv") && hasTok(c, "allow")
+	})
+
+	// Preserving the tree means finalize must NOT re-clone over it.
+	if strings.Contains(finalizeStream(t, f.streams), "project_clone_url") {
+		t.Errorf("project-only finalize must skip project_clone_url (tree preserved)")
+	}
+}
+
+// TestReset_PreserveProject_NoOrgURL guards the coordinator-applied fix: when
+// PreserveProject is requested but the CloneURL has no org component (nothing to
+// stage), the reset stages nothing for the project AND keeps project_clone_url so
+// the finalize role re-clones normally instead of silently dropping the repo.
+func TestReset_PreserveProject_NoOrgURL(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	cfg.CloneURL = "https://github.com/justrepo" // no org segment => cloneOrgRelDir ok=false
+
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveProject: true}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	// Nothing was archived (no org dir to stage), and nothing restored.
+	if n := countCalls(f.calls, isTarOut); n != 0 {
+		t.Fatalf("no-org reset must not stage out anything, got %d tar archives", n)
+	}
+	if n := countCalls(f.calls, isTarIn); n != 0 {
+		t.Fatalf("no-org reset must not stage in anything, got %d extracts", n)
+	}
+	for _, c := range f.calls {
+		if hasTok(c, "direnv") {
+			t.Fatalf("no-org reset must not run direnv: %v", c)
+		}
+	}
+	// The repo must still be cloned by finalize (fallback to the role's clone).
+	if !strings.Contains(finalizeStream(t, f.streams), "project_clone_url") {
+		t.Errorf("no-org PreserveProject must fall back to the role's clone (keep project_clone_url)")
+	}
+}
+
+// TestReset_StageOutFailureAbortsWithoutDelete is the load-bearing safety
+// property: if stage-out fails, the reset must NOT delete the source VM (its data
+// is still only inside it), and the error must name the host staging dir so the
+// user can recover whatever was written.
+func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
+	f := &fakeRunner{
+		status:  map[string][]byte{"claude-base": []byte("Stopped\n")},
+		failOn:  isTarOut, // the stage-out tar fails
+		failErr: errors.New("disk full on host"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard)
+	if err == nil {
+		t.Fatal("Reset should fail when stage-out fails")
+	}
+	// The VM must not have been deleted — losing data we failed to copy out.
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("stage-out failure must not delete the source VM; calls=%v", f.calls)
+		}
+	}
+	// The error must point the user at the preserved staging dir, and it must exist.
+	const marker = "your data is preserved at "
+	i := strings.Index(err.Error(), marker)
+	if i < 0 {
+		t.Fatalf("error must name the recovery dir, got %q", err.Error())
+	}
+	path := strings.TrimSpace(strings.SplitN(err.Error()[i+len(marker):], ":", 2)[0])
+	if st, statErr := os.Stat(path); statErr != nil || !st.IsDir() {
+		t.Fatalf("named recovery dir %q should exist: %v", path, statErr)
+	}
+	_ = os.RemoveAll(path) // this failure path intentionally leaves the dir; clean up the test artifact
+}
+
+// TestReset_StartsStoppedSourceForStaging: when a preserve option is set but the
+// source VM is stopped, the reset must start it before staging (tar reads from a
+// live guest), and that start must precede both the stage-out and the delete.
+func TestReset_StartsStoppedSourceForStaging(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{
+		"claude-base": []byte("Stopped\n"),
+		"claude":      []byte("Stopped\n"), // source VM is down
+	}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	startSrc := findCall(t, f.calls, 0, "start stopped source", func(c []string) bool {
+		return c[0] == "start" && hasTok(c, "claude")
+	})
+	stageOut := findCall(t, f.calls, 0, "stage-out", isTarOut)
+	del := findCall(t, f.calls, 0, "delete", func(c []string) bool { return c[0] == "delete" })
+	if !(startSrc < stageOut && startSrc < del) {
+		t.Fatalf("source start (idx %d) must precede stage-out (%d) and delete (%d)", startSrc, stageOut, del)
 	}
 }
