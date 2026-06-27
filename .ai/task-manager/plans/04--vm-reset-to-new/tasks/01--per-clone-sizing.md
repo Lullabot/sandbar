@@ -2,7 +2,7 @@
 id: 1
 group: "per-vm-sizing"
 dependencies: []
-status: "pending"
+status: "completed"
 created: "2026-06-27"
 skills:
   - go

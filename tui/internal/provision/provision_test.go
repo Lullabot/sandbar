@@ -63,13 +63,14 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"list", "claude", "--format", "{{.Status}}"},            // exists-guard: target absent
-		{"list", "claude-base", "--format", "{{.Status}}"},       // Status(base) -> Stopped
-		{"clone", "claude-base", "claude"},                       // Clone
-		{"start", "claude"},                                      // Start
+		{"list", "claude", "--format", "{{.Status}}"},                            // exists-guard: target absent
+		{"list", "claude-base", "--format", "{{.Status}}"},                       // Status(base) -> Stopped
+		{"clone", "claude-base", "claude"},                                       // Clone
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "claude"}, // Configure clone sizes
+		{"start", "claude"}, // Start
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript}, // finalize provision
-		{"stop", "claude"},                                       // bounce: stop
-		{"start", "claude"},                                      // bounce: start
+		{"stop", "claude"},  // bounce: stop
+		{"start", "claude"}, // bounce: start
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("CreateVM call sequence mismatch:\n got %v\nwant %v", f.calls, want)
@@ -117,6 +118,7 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 		{"shell", "claude-base"}, // BuildBase: base provision
 		{"stop", "claude-base"},  // BuildBase: stop base
 		{"clone", "claude-base"}, // Clone
+		{"edit", "--set"},        // Configure clone sizes
 		{"start", "claude"},      // Start clone
 		{"shell", "claude"},      // finalize provision
 		{"stop", "claude"},       // bounce: stop

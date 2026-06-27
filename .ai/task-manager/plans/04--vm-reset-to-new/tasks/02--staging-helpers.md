@@ -2,7 +2,7 @@
 id: 2
 group: "reset-flow"
 dependencies: []
-status: "pending"
+status: "completed"
 created: "2026-06-27"
 skills:
   - go

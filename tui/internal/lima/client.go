@@ -105,6 +105,16 @@ func (c *Client) Delete(name string, force bool) error {
 // Clone creates a new instance as a copy of an existing base image.
 func (c *Client) Clone(base, name string) error { return c.run("clone", base, name) }
 
+// Configure sets a STOPPED instance's cpus/memory/disk via `limactl edit --set`.
+// Applied on next start; disk may only grow (qcow2 cannot shrink live). memory
+// and disk are Lima size strings (e.g. "8GiB", "100GiB"). The grow-on-start
+// behaviour (qcow2 resize + the Debian image's growpart) is validated manually
+// on a real Lima host; the tests only cover command construction.
+func (c *Client) Configure(name string, cpus int, memory, disk string) error {
+	expr := fmt.Sprintf(`.cpus=%d | .memory=%q | .disk=%q`, cpus, memory, disk)
+	return c.run("edit", "--set", expr, name)
+}
+
 // Create builds and starts a new instance from an overlay/template file.
 func (c *Client) Create(name, overlayPath string) error {
 	return c.run("start", "--name", name, "--tty=false", overlayPath)

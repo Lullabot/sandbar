@@ -8,6 +8,12 @@ import (
 	"strconv"
 )
 
+// BaseDiskFloor is the virtual disk size the base image is built at. Clones are
+// grown from this floor to their requested size; qcow2 can grow but not shrink
+// live, so a small floor is what lets each VM pick (and effectively "shrink" to)
+// any size >= the floor without rebuilding the base.
+const BaseDiskFloor = "20GiB"
+
 // VM is one Lima instance as reported by `limactl list`.
 type VM struct {
 	Name   string

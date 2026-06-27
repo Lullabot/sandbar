@@ -236,10 +236,10 @@ graph TD
 
 No circular dependencies.
 
-### Phase 1: Foundations (no dependencies — run in parallel)
+### ✅ Phase 1: Foundations (no dependencies — run in parallel)
 **Parallel Tasks:**
-- Task 1: Per-clone sizing — small base floor + grow/configure clone
-- Task 2: Staging helpers — tar-out/in + guest path resolution
+- ✔️ Task 1: Per-clone sizing — small base floor + grow/configure clone
+- ✔️ Task 2: Staging helpers — tar-out/in + guest path resolution
 
 ### Phase 2: Reset engine
 **Parallel Tasks:**

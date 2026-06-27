@@ -130,6 +130,11 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	if err := p.Lima.Clone(cfg.BaseName, cfg.Name); err != nil {
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
+	// Size the clone before its first start: the base is built at a small disk
+	// floor, so this grows the disk (and applies cpus/memory) for this VM.
+	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+		return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
+	}
 	if err := p.Lima.Start(cfg.Name); err != nil {
 		return fmt.Errorf("start %q: %w", cfg.Name, err)
 	}

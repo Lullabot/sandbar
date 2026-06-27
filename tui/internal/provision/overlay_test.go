@@ -22,7 +22,9 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"- template:_images/debian-13",
 		"cpus: 4",
 		`memory: "8GiB"`,
-		`disk: "100GiB"`,
+		// The base overlay always pins disk to the floor, not cfg.Disk (100GiB
+		// above); clones are grown to the requested size after cloning.
+		`disk: "20GiB"`,
 		`- location: "` + playbookDir + `"`,
 		"mountPoint: /mnt/playbook",
 		"writable: false",
@@ -58,7 +60,7 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if len(doc.Base) != 1 || doc.Base[0] != "template:_images/debian-13" {
 		t.Errorf("base = %v, want [template:_images/debian-13]", doc.Base)
 	}
-	if doc.CPUs != 4 || doc.Memory != "8GiB" || doc.Disk != "100GiB" {
+	if doc.CPUs != 4 || doc.Memory != "8GiB" || doc.Disk != "20GiB" {
 		t.Errorf("cpus/memory/disk = %d/%q/%q", doc.CPUs, doc.Memory, doc.Disk)
 	}
 	if len(doc.Mounts) != 1 {

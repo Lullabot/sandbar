@@ -133,6 +133,8 @@ func TestMethodArgv(t *testing.T) {
 		{"delete", func(c *Client) { _ = c.Delete("vm1", false) }, []string{"delete", "vm1"}},
 		{"delete-force", func(c *Client) { _ = c.Delete("vm1", true) }, []string{"delete", "vm1", "-f"}},
 		{"clone", func(c *Client) { _ = c.Clone("base", "vm1") }, []string{"clone", "base", "vm1"}},
+		{"configure", func(c *Client) { _ = c.Configure("vm1", 4, "8GiB", "100GiB") },
+			[]string{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "vm1"}},
 		{"create", func(c *Client) { _ = c.Create("vm1", "/tmp/overlay.yaml") }, []string{"start", "--name", "vm1", "--tty=false", "/tmp/overlay.yaml"}},
 		{"shell", func(c *Client) { _ = c.Shell(context.Background(), "vm1", nil, io.Discard, "ls", "-la") }, []string{"shell", "vm1", "ls", "-la"}},
 	}
