@@ -114,6 +114,49 @@ func TestRecreateAllowedForManagedVM(t *testing.T) {
 	}
 }
 
+// Backspace inside the create form must edit the focused field, not navigate
+// back to the list. (The shared Back binding also matches backspace, so the form
+// has to special-case it.)
+func TestBackspaceEditsFieldInForm(t *testing.T) {
+	m := newTestModel(t)
+
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+	if m.view != viewForm {
+		t.Fatalf("'n' should open the form, view = %v", m.view)
+	}
+
+	// Put a known value in the focused field (cursor lands at the end).
+	m.inputs[m.focusIdx].SetValue("claude")
+
+	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = after.(model)
+
+	if m.view != viewForm {
+		t.Fatalf("backspace must stay on the form, got view %v", m.view)
+	}
+	if got := m.inputs[m.focusIdx].Value(); got != "claud" {
+		t.Fatalf("backspace should delete the last char: got %q, want %q", got, "claud")
+	}
+}
+
+// Esc inside the create form returns to the list.
+func TestEscLeavesForm(t *testing.T) {
+	m := newTestModel(t)
+
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+	if m.view != viewForm {
+		t.Fatalf("'n' should open the form, view = %v", m.view)
+	}
+
+	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = after.(model)
+	if m.view != viewList {
+		t.Fatalf("esc should return to the list, got view %v", m.view)
+	}
+}
+
 // Submitting the create form with an empty git name fails validation: the model
 // stays on the form and surfaces the error instead of starting provisioning.
 func TestSubmitFormValidationKeepsForm(t *testing.T) {

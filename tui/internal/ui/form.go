@@ -149,8 +149,10 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 // updateForm handles keys while the create form is active.
 func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Note: 'q' is a text character here, so only ctrl+c (handled globally) quits.
+	// Only esc (not the shared Back binding) leaves the form: Back also matches
+	// backspace, which here must edit the focused field, not navigate away.
 	switch {
-	case key.Matches(msg, m.keys.Back):
+	case msg.Type == tea.KeyEsc:
 		m.view = viewList
 		return m, nil
 	case key.Matches(msg, m.keys.Submit):
