@@ -100,6 +100,24 @@ func TestReconcilePrunesAbsent(t *testing.T) {
 	}
 }
 
+func TestIsBase(t *testing.T) {
+	r := NewEmpty()
+	if r.IsBase("claude-base") {
+		t.Error("empty registry: no base images recorded yet")
+	}
+	if r.IsBase("") {
+		t.Error("empty name is never a base image")
+	}
+
+	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	if !r.IsBase("claude-base") {
+		t.Error("a recorded clone source should be a base image")
+	}
+	if r.IsBase("claude") {
+		t.Error("the clone itself is not a base image")
+	}
+}
+
 // TestMissingFileIsEmptyNotError: a first run with no index file is normal.
 func TestMissingFileIsEmptyNotError(t *testing.T) {
 	r, err := LoadFrom(filepath.Join(t.TempDir(), "does-not-exist.json"))

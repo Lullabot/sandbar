@@ -16,6 +16,8 @@ type keyMap struct {
 	Quit     key.Binding
 	Tab      key.Binding
 	ShiftTab key.Binding
+	Up       key.Binding
+	Down     key.Binding
 	Submit   key.Binding
 	Confirm  key.Binding
 	Recreate key.Binding
@@ -35,7 +37,9 @@ func defaultKeys() keyMap {
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
 		ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
-		Submit:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
+		Up:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "prev field")),
+		Down:     key.NewBinding(key.WithKeys("down", "enter"), key.WithHelp("↓/enter", "next field")),
+		Submit:   key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "create")),
 		Confirm:  key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "delete")),
 		Recreate: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recreate")),
 		Cancel:   key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n", "cancel")),
@@ -46,7 +50,9 @@ func defaultKeys() keyMap {
 func (m model) viewHelp() []key.Binding {
 	switch m.view {
 	case viewForm:
-		return []key.Binding{m.keys.Tab, m.keys.ShiftTab, m.keys.Submit, m.keys.Back, m.keys.Quit}
+		// 'q' is a text character in the form, so Quit is intentionally omitted
+		// (only ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
+		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewDetail:
 		return []key.Binding{m.keys.Back, m.keys.Quit}
 	case viewProgress:

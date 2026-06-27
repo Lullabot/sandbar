@@ -28,7 +28,10 @@ func (m model) detailView() string {
 	b.WriteString("\n\n")
 
 	managed := "no"
-	if m.reg.IsManaged(v.Name) {
+	switch {
+	case m.isBaseImage(v.Name):
+		managed = "base image (clone source)"
+	case m.reg.IsManaged(v.Name):
 		managed = "yes (claude-vm)"
 	}
 	fields := [][2]string{

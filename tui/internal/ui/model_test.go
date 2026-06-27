@@ -157,32 +157,58 @@ func TestEscLeavesForm(t *testing.T) {
 	}
 }
 
-// The create form must open pre-populated with the script's defaults — notably
-// hostname, primary user, CPUs, memory, and disk — not blank fields.
+// Base images are distinguished from ordinary VMs: the default base name is
+// recognised even with an empty registry, and any recorded clone source counts.
+func TestBaseImageDetection(t *testing.T) {
+	m := newTestModel(t)
+
+	if !m.isBaseImage(vm.DefaultCreateConfig().BaseName) {
+		t.Errorf("the default base name should be detected as a base image")
+	}
+	if m.isBaseImage("some-unrelated-vm") {
+		t.Errorf("an unrelated VM must not be flagged as a base image")
+	}
+
+	if err := m.reg.Add(vm.CreateConfig{Name: "claude", BaseName: "my-base"}); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	if !m.isBaseImage("my-base") {
+		t.Errorf("a recorded clone source should be detected as a base image")
+	}
+	if m.isBaseImage("claude") {
+		t.Errorf("a managed clone is not itself a base image")
+	}
+}
+
+// The create form opens with the script's defaults pre-filled for hostname-less
+// fields (user, CPUs, memory, disk), but Name is intentionally left blank so it
+// does not silently default to "claude".
 func TestNewInputsSeedsDefaults(t *testing.T) {
 	in := newInputs()
 	for _, f := range []struct {
 		idx  int
 		name string
 	}{
-		{fName, "name"}, {fHostname, "hostname"}, {fUser, "user"},
-		{fCPUs, "cpus"}, {fMemory, "memory"}, {fDisk, "disk"},
+		{fUser, "user"}, {fCPUs, "cpus"}, {fMemory, "memory"}, {fDisk, "disk"},
 	} {
 		if in[f.idx].Value() == "" {
 			t.Errorf("%s field should be seeded with a default, got empty", f.name)
 		}
 	}
+	if in[fName].Value() != "" {
+		t.Errorf("name field must start empty (no claude default), got %q", in[fName].Value())
+	}
 }
 
-// A blank field must fall back to its default (mirroring new-vm.sh) rather than
-// being accepted empty: clearing name/hostname/user/memory/disk yields a valid,
-// fully-populated config.
+// A blank optional field must fall back to its default (mirroring new-vm.sh):
+// clearing hostname/user/memory/disk on a named VM yields a valid, fully
+// populated config. Name has no default and is covered separately.
 func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	m := newTestModel(t)
 	opened, _ := m.Update(runeKey('n'))
 	m = opened.(model)
 
-	m.inputs[fName].SetValue("")
+	m.inputs[fName].SetValue("myvm")
 	m.inputs[fHostname].SetValue("")
 	m.inputs[fUser].SetValue("   ") // whitespace-only counts as blank
 	m.inputs[fMemory].SetValue("")
@@ -194,10 +220,10 @@ func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	if cfg.Name != "claude" {
-		t.Errorf("Name = %q, want default %q", cfg.Name, "claude")
+	if cfg.Name != "myvm" {
+		t.Errorf("Name = %q, want %q", cfg.Name, "myvm")
 	}
-	if cfg.Hostname != "claude" {
+	if cfg.Hostname != "myvm" {
 		t.Errorf("Hostname = %q, want it to default to the name", cfg.Hostname)
 	}
 	if cfg.User == "" {
@@ -217,8 +243,48 @@ func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	}
 }
 
-// Submitting the create form with an empty git name fails validation: the model
-// stays on the form and surfaces the error instead of starting provisioning.
+// An empty Name must fail validation (no silent claude default): ctrl+s on a
+// nameless form keeps the form and surfaces the error.
+func TestEmptyNameFailsValidation(t *testing.T) {
+	m := newTestModel(t)
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+
+	m.inputs[fName].SetValue("")
+	m.inputs[fGitName].SetValue("Ada")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
+
+	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = submitted.(model)
+
+	if m.view != viewForm {
+		t.Fatalf("nameless submit should keep the form, view = %v", m.view)
+	}
+	if m.formErr == nil {
+		t.Fatalf("nameless submit should surface a validation error")
+	}
+}
+
+// Enter advances to the next field rather than creating; ctrl+s creates.
+func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
+	m := newTestModel(t)
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+	if m.focusIdx != 0 {
+		t.Fatalf("form should open focused on the first field, got %d", m.focusIdx)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.focusIdx != 1 {
+		t.Fatalf("enter should advance to the next field, got focus %d", m.focusIdx)
+	}
+	if m.view != viewForm || m.running {
+		t.Fatalf("enter must not start provisioning (view=%v running=%v)", m.view, m.running)
+	}
+}
+
+// Submitting a fully valid form with ctrl+s starts provisioning.
 func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	m := newTestModel(t)
 
@@ -228,11 +294,12 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 		t.Fatalf("'n' should open the form, view = %v", m.view)
 	}
 
-	// Force the validation failure deterministically (the host git config may
-	// otherwise seed a non-empty name).
+	// Valid name, but force a git-name validation failure deterministically (the
+	// host git config may otherwise seed a non-empty name).
+	m.inputs[fName].SetValue("myvm")
 	m.inputs[fGitName].SetValue("")
 
-	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = submitted.(model)
 
 	if m.view != viewForm {

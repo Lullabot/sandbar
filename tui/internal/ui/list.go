@@ -33,18 +33,32 @@ func newTable() table.Model {
 	return t
 }
 
+// isBaseImage reports whether name is a claude-vm base image: a clone source for
+// a managed VM, or the default base name even before any clone exists. Base
+// images are the heavy, identity-free images each VM is cloned from, so the list
+// marks them distinctly from ordinary VMs.
+func (m model) isBaseImage(name string) bool {
+	return m.reg.IsBase(name) || name == vm.DefaultCreateConfig().BaseName
+}
+
 // refreshRows rebuilds the table from m.vms, applying the managed-only filter
-// and marking each VM's managed status. Call it after loading or toggling the
-// filter.
+// and marking each VM as a managed clone, a base image, or unrelated. Call it
+// after loading or toggling the filter.
 func (m *model) refreshRows() {
 	rows := make([]table.Row, 0, len(m.vms))
 	for _, v := range m.vms {
 		managed := m.reg.IsManaged(v.Name)
-		if m.managedOnly && !managed {
+		base := m.isBaseImage(v.Name)
+		// The managed-only view shows claude-vm's own instances: managed clones
+		// and the base image(s) they are cloned from.
+		if m.managedOnly && !managed && !base {
 			continue
 		}
 		owner := "no"
-		if managed {
+		switch {
+		case base:
+			owner = "base"
+		case managed:
 			owner = "yes"
 		}
 		rows = append(rows, table.Row{
@@ -93,7 +107,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.managedOnly = !m.managedOnly
 		m.refreshRows()
 		if m.managedOnly {
-			m.status = "showing claude-vm-managed VMs only"
+			m.status = "showing claude-vm instances only (managed + base)"
 		} else {
 			m.status = "showing all VMs"
 		}

@@ -52,8 +52,9 @@ The active view's keys are also shown in the help bar at the bottom of the scree
 | `f` | Toggle the filter: show all VMs ↔ only claude-vm-managed VMs |
 | `q` | Quit |
 
-The **Managed** column marks which VMs `claude-vm` created (see
-[Managed VMs and safety](#managed-vms-and-safety) below).
+The **Managed** column marks which VMs `claude-vm` created: `yes` for a managed
+clone, `base` for a base image other VMs are cloned from (e.g. `claude-base`), and
+`no` otherwise. See [Managed VMs and safety](#managed-vms-and-safety) below.
 
 ### Delete / recreate confirmation (on the list)
 
@@ -79,13 +80,21 @@ Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appea
 
 | Key | Action |
 |-----|--------|
-| `tab` | Next field |
-| `shift+tab` | Previous field |
-| `enter` | Create the VM (validates, then switches to the progress view) |
-| `esc` / `backspace` | Cancel, back to the list |
+| `↑` / `↓` (also `tab` / `shift+tab`) | Move between fields |
+| `enter` | Move to the next field (it does **not** create) |
+| `ctrl+s` | Create the VM (validates, then switches to the progress view) |
+| `esc` | Cancel, back to the list |
 
-Typing edits the focused field; `q` is a literal character here, so only `ctrl+c`
-quits from the form.
+Typing edits the focused field and `backspace` deletes a character; `q` is a
+literal character here, so only `ctrl+c` quits. Help for the focused field — its
+default, whether it is required, and (for the token) where to create a GitHub
+fine-grained token with the recommended scopes — is shown beneath the form.
+
+Most fields default like `new-vm.sh` when left blank (hostname → the instance
+name, user → your host username, CPUs → half the host's cores, memory/disk →
+`8GiB`/`100GiB`). **`Name` is required** and starts empty — it does not silently
+default. `GitHub repo URL` and `GitHub token` are optional and used only to clone
+a private repo into the VM.
 
 ### Progress / streaming view
 
@@ -107,7 +116,13 @@ base image, so pointing it at an unrelated VM would replace that VM with a sandb
 To prevent this, `claude-vm` records the instances **it** creates and:
 
 - marks them in the **Managed** column (and the detail view), and
-- offers **recreate only for managed VMs** (`f` filters the list down to them).
+- offers **recreate only for managed VMs** (`f` filters the list down to
+  claude-vm's own instances — managed clones and base images).
+
+Base images (the heavy, identity-free images each VM is cloned from, such as
+`claude-base`) are shown as `base` in the **Managed** column and labelled "base
+image (clone source)" in the detail view, so they stand out from the disposable
+VMs cloned from them.
 
 The index of managed VMs is a small JSON file at
 `${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible/managed-vms.json` (the

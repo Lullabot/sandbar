@@ -24,4 +24,14 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("63")).
 			Padding(0, 1)
+
+	// fieldInfoStyle renders the focused field's help under the create form: a
+	// dim, left-bordered block so multi-line help (the GitHub token guidance)
+	// reads as an aside rather than part of the form.
+	fieldInfoStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("63")).
+			PaddingLeft(1)
 )

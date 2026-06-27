@@ -101,6 +101,21 @@ func (r *Registry) Base(name string) string {
 	return r.vms[name].Base
 }
 
+// IsBase reports whether name is a base image that at least one managed VM was
+// cloned from. (The default base name is also treated as a base by the UI even
+// before any clone records it.)
+func (r *Registry) IsBase(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, e := range r.vms {
+		if e.Base == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Config returns the stored create configuration for a managed VM (with its
 // clone token stripped) and whether the VM is managed.
 func (r *Registry) Config(name string) (vm.CreateConfig, bool) {

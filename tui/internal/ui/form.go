@@ -39,8 +39,31 @@ var fieldLabels = []string{
 	"Memory",
 	"Disk",
 	"Docker proxy host",
-	"Clone URL",
-	"Clone token",
+	"GitHub repo URL",
+	"GitHub token",
+}
+
+// fieldInfo is the per-field help shown for the focused field. The GitHub token
+// entry mirrors new-vm.sh's github_token_help: where to create a fine-grained
+// token and the recommended (deliberately limited) permissions.
+var fieldInfo = []string{
+	"Required. Lima instance name — also the VM you'll `limactl shell` into. Must differ from the base image.",
+	"VM hostname inside the guest. Blank → same as the instance name.",
+	"Primary VM user. Blank → your host username (Lima creates a matching user).",
+	"Required. git user.name written into the VM's git config.",
+	"Required. git user.email written into the VM's git config.",
+	"vCPUs for the VM. Blank → half your host's cores (minimum 2).",
+	"RAM for the VM, e.g. 8GiB. Blank → 8GiB.",
+	"Disk size for the VM, e.g. 100GiB. Blank → 100GiB.",
+	"Optional. Docker registry pull-through proxy host. Blank to skip.",
+	"Optional. HTTPS repo to clone into the VM now (GitHub-oriented). Blank to skip.",
+	"Optional. Token for a private GitHub repo (blank = public / set up later).\n" +
+		"Create a fine-grained token scoped to the repo at:\n" +
+		"  https://github.com/settings/personal-access-tokens/new\n" +
+		"Recommended permissions (PRs/Issues stay read-only so the agent can't\n" +
+		"self-merge to main without human review):\n" +
+		"  Actions: Read and write    Contents: Read and write\n" +
+		"  Issues: Read    Pull requests: Read    Workflows: Read and write",
 }
 
 // hostGit reads a single value from the host git config, best-effort: any error
@@ -91,8 +114,8 @@ func orDefault(v, def string) string {
 func newInputs() []textinput.Model {
 	def := vm.DefaultCreateConfig()
 	seeds := []string{
-		def.Name,                    // fName
-		def.Name,                    // fHostname  (defaults to the instance name)
+		"",                          // fName      (required; no default — user must name it)
+		"",                          // fHostname  (defaults to the instance name at submit)
 		hostUser(),                  // fUser      (host username, like Lima)
 		hostGit("user.name"),        // fGitName
 		hostGit("user.email"),       // fGitEmail
@@ -151,7 +174,7 @@ func (m model) field(i int) string { return strings.TrimSpace(m.inputs[i].Value(
 // the git identity has no default and is required (enforced by Validate).
 func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg := vm.DefaultCreateConfig()
-	cfg.Name = orDefault(m.field(fName), cfg.Name)
+	cfg.Name = m.field(fName)                              // required; Validate rejects empty
 	cfg.Hostname = orDefault(m.field(fHostname), cfg.Name) // hostname defaults to the name
 	cfg.User = orDefault(m.field(fUser), hostUser())
 	cfg.GitName = m.field(fGitName)
@@ -204,12 +227,13 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyEsc:
 		m.view = viewList
 		return m, nil
-	case key.Matches(msg, m.keys.Submit):
+	case key.Matches(msg, m.keys.Submit): // ctrl+s — create from any field
 		return m.submitForm()
-	case key.Matches(msg, m.keys.Tab):
-		return m, m.focusNext()
-	case key.Matches(msg, m.keys.ShiftTab):
+	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
 		return m, m.focusPrev()
+	// Down/Tab/enter all advance to the next field; enter no longer creates.
+	case key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.Tab):
+		return m, m.focusNext()
 	}
 
 	cmds := make([]tea.Cmd, len(m.inputs))
@@ -231,6 +255,12 @@ func (m model) formView() string {
 			ls = focusedLabelStyle
 		}
 		b.WriteString(ls.Render(fieldLabels[i]+":") + " " + m.inputs[i].View() + "\n")
+	}
+
+	// Help for the focused field (where to get a GitHub token, what defaults
+	// apply, which fields are required).
+	if m.focusIdx >= 0 && m.focusIdx < len(fieldInfo) {
+		b.WriteString("\n" + fieldInfoStyle.Render(fieldInfo[m.focusIdx]) + "\n")
 	}
 
 	if m.formErr != nil {
