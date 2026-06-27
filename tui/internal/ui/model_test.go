@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
@@ -89,28 +90,174 @@ func TestRecreateGatedForUnmanagedVM(t *testing.T) {
 	}
 }
 
-// For a managed VM, recreate is available: 'r' starts provisioning.
-func TestRecreateAllowedForManagedVM(t *testing.T) {
+// resetConfig is a fully-populated managed config used to seed reset-flow tests.
+func resetConfig() vm.CreateConfig {
+	return vm.CreateConfig{
+		Name:     "claude",
+		BaseName: "claude-base",
+		Hostname: "claude-host",
+		User:     "ada",
+		GitName:  "Ada Lovelace",
+		GitEmail: "ada@example.com",
+		CPUs:     4,
+		Memory:   "8GiB",
+		Disk:     "100GiB",
+		CloneURL: "https://github.com/org/repo",
+	}
+}
+
+// openReset seeds the registry with cfg, loads it as a VM, and drives `d` then
+// `r` so the model lands on the pre-filled reset form.
+func openReset(t *testing.T, cfg vm.CreateConfig) model {
+	t.Helper()
 	m := newTestModel(t)
-	if err := m.reg.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(cfg); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Stopped", CPUs: 2},
+		{Name: cfg.Name, Status: "Stopped", CPUs: cfg.CPUs},
 	}})
 	m = loaded.(model)
 
 	confirm, _ := m.Update(runeKey('d'))
 	m = confirm.(model)
-	if m.confirmBase != "claude-base" {
+	if m.confirmBase != cfg.BaseName {
 		t.Fatalf("managed VM should carry its recreate base, got %q", m.confirmBase)
 	}
 
 	after, _ := m.Update(runeKey('r'))
-	m = after.(model)
+	return after.(model)
+}
+
+// For a managed VM, recreate now opens the pre-filled reset form (instead of
+// provisioning immediately): Name is locked and the editable fields hold the
+// VM's recorded settings.
+func TestRecreateOpensResetForm(t *testing.T) {
+	cfg := resetConfig()
+	m := openReset(t, cfg)
+
+	if m.view != viewForm {
+		t.Fatalf("recreate should open the form, view = %v", m.view)
+	}
+	if !m.resetMode {
+		t.Fatalf("the form should be in reset mode")
+	}
+	if m.running || m.view == viewProgress {
+		t.Fatalf("recreate must no longer provision immediately")
+	}
+	if m.resetName != cfg.Name {
+		t.Fatalf("resetName = %q, want %q", m.resetName, cfg.Name)
+	}
+	if got := m.inputs[fHostname].Value(); got != cfg.Hostname {
+		t.Fatalf("Hostname input = %q, want %q", got, cfg.Hostname)
+	}
+	if got := m.inputs[fDisk].Value(); got != cfg.Disk {
+		t.Fatalf("Disk input = %q, want %q", got, cfg.Disk)
+	}
+	if !m.projectToggleEnabled {
+		t.Fatalf("project toggle should be enabled when the config has a CloneURL")
+	}
+	// Focus must start on the first editable field, never the locked Name.
+	if m.focusIdx == fName {
+		t.Fatalf("focus must not start on the locked Name field")
+	}
+}
+
+// Navigating onto a preserve toggle and pressing space flips its bool and shows
+// the compromise warning.
+func TestResetToggleFlipsAndWarns(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	// Tab through the inputs until focus lands on the first toggle.
+	for i := 0; i < 20 && m.toggleFocus != 0; i++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(model)
+	}
+	if m.toggleFocus != 0 {
+		t.Fatalf("could not navigate to the first toggle (toggleFocus=%d)", m.toggleFocus)
+	}
+	if m.preserveClaude {
+		t.Fatalf("preserveClaude should start false")
+	}
+	if strings.Contains(m.formView(), "compromised") {
+		t.Fatalf("the warning must not show before any toggle is on")
+	}
+
+	sp, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = sp.(model)
+	if !m.preserveClaude {
+		t.Fatalf("space on the first toggle should enable preserveClaude")
+	}
+	if !strings.Contains(m.formView(), "compromised") {
+		t.Fatalf("the compromise warning should appear once a toggle is on")
+	}
+}
+
+// The project toggle is disabled when the seeded config cloned no repo.
+func TestResetProjectToggleDisabledWithoutCloneURL(t *testing.T) {
+	cfg := resetConfig()
+	cfg.CloneURL = ""
+	m := openReset(t, cfg)
+
+	if m.projectToggleEnabled {
+		t.Fatalf("project toggle should be disabled when CloneURL is empty")
+	}
+	if !strings.Contains(m.formView(), "no project cloned") {
+		t.Fatalf("the disabled project toggle should be annotated")
+	}
+}
+
+// A reset whose disk is below the base floor is rejected (the form stays put with
+// an error); a valid reset dispatches and switches to the progress view.
+func TestResetDiskFloorAndDispatch(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	// Below the floor: keep the form and surface an error, do not provision.
+	m.inputs[fDisk].SetValue("10GiB")
+	rejected, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = rejected.(model)
+	if m.view == viewProgress || m.running {
+		t.Fatalf("a sub-floor disk must not provision (view=%v running=%v)", m.view, m.running)
+	}
+	if m.formErr == nil {
+		t.Fatalf("a sub-floor disk should surface a validation error")
+	}
+
+	// At/above the floor: dispatch the reset and switch to the progress view.
+	m.inputs[fDisk].SetValue("100GiB")
+	accepted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = accepted.(model)
 	if m.view != viewProgress || !m.running {
-		t.Fatalf("recreate on a managed VM should start provisioning (view=%v running=%v)", m.view, m.running)
+		t.Fatalf("a valid reset should provision (view=%v running=%v)", m.view, m.running)
+	}
+}
+
+// parseLimaSize parses binary Lima sizes and bare-byte numbers, rejecting blanks
+// and garbage.
+func TestParseLimaSize(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+		ok   bool
+	}{
+		{"20GiB", 20 << 30, true},
+		{"512MiB", 512 << 20, true},
+		{"2TiB", 2 << 40, true},
+		{"1024", 1024, true}, // bare number = bytes
+		{"", 0, false},
+		{"abc", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := parseLimaSize(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseLimaSize(%q) = (%d,%v), want (%d,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+	// A 100GiB reset disk must compare as larger than the 20GiB floor.
+	floor, _ := parseLimaSize(vm.BaseDiskFloor)
+	big, _ := parseLimaSize("100GiB")
+	if !(big > floor) {
+		t.Errorf("100GiB (%d) should exceed the floor %s (%d)", big, vm.BaseDiskFloor, floor)
 	}
 }
 

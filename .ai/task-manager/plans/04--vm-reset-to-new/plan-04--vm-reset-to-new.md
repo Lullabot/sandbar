@@ -245,9 +245,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 3: Reset orchestration (depends on: 1, 2)
 
-### Phase 3: Reset UI
+### ✅ Phase 3: Reset UI
 **Parallel Tasks:**
-- Task 4: TUI reset flow — pre-filled form + preserve toggles + dispatch (depends on: 1, 3)
+- ✔️ Task 4: TUI reset flow — pre-filled form + preserve toggles + dispatch (depends on: 1, 3)
 
 ### Phase 4: Documentation
 **Parallel Tasks:**

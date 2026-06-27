@@ -203,10 +203,11 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		name := m.confirmName
 		m.confirming = false
-		// Reproduce the VM from its recorded config (sizing, hostname, identity)
-		// rather than resetting to defaults. The clone token is not stored, so a
-		// VM that cloned a private repo will need it re-supplied. Fall back to a
-		// minimal config if no snapshot exists (e.g. a pre-snapshot index entry).
+		// Pre-fill the reset form from the VM's recorded config (sizing, hostname,
+		// identity) rather than resetting to defaults. The clone token is not
+		// stored, so a VM that cloned a private repo will need it re-supplied. Fall
+		// back to a minimal config if no snapshot exists (e.g. a pre-snapshot index
+		// entry).
 		cfg, ok := m.reg.Config(name)
 		if !ok || cfg.Name == "" {
 			cfg = vm.DefaultCreateConfig()
@@ -216,8 +217,9 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cfg.GitEmail = hostGit("user.email")
 		}
 		cfg.BaseName = m.confirmBase
-		cmd := m.beginProvision("Recreating "+name, m.prov.Recreate, cfg)
-		return m, cmd
+		// Open the editable reset form (with preserve toggles) instead of
+		// provisioning immediately; submit dispatches provision.Reset.
+		return m, m.openResetForm(name, cfg)
 
 	case "n", "esc":
 		m.confirming = false

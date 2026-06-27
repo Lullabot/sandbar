@@ -60,6 +60,16 @@ type model struct {
 	focusIdx int
 	formErr  error
 
+	// Reset mode reuses the create form to reset a managed VM: the Name is locked
+	// to the target and two preserve toggles follow the inputs.
+	resetMode            bool
+	resetName            string // locked Name when in reset mode
+	resetBaseName        string // base image the reset clones from
+	preserveClaude       bool
+	preserveProject      bool
+	projectToggleEnabled bool // false when the VM has no CloneURL (nothing to preserve)
+	toggleFocus          int  // -1 = focus is in the text inputs; 0/1 = a toggle is focused
+
 	// Progress / streaming.
 	viewport      viewport.Model
 	spinner       spinner.Model
