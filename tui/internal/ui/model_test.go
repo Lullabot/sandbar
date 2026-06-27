@@ -157,6 +157,66 @@ func TestEscLeavesForm(t *testing.T) {
 	}
 }
 
+// The create form must open pre-populated with the script's defaults — notably
+// hostname, primary user, CPUs, memory, and disk — not blank fields.
+func TestNewInputsSeedsDefaults(t *testing.T) {
+	in := newInputs()
+	for _, f := range []struct {
+		idx  int
+		name string
+	}{
+		{fName, "name"}, {fHostname, "hostname"}, {fUser, "user"},
+		{fCPUs, "cpus"}, {fMemory, "memory"}, {fDisk, "disk"},
+	} {
+		if in[f.idx].Value() == "" {
+			t.Errorf("%s field should be seeded with a default, got empty", f.name)
+		}
+	}
+}
+
+// A blank field must fall back to its default (mirroring new-vm.sh) rather than
+// being accepted empty: clearing name/hostname/user/memory/disk yields a valid,
+// fully-populated config.
+func TestBlankFieldsFallBackToDefaults(t *testing.T) {
+	m := newTestModel(t)
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+
+	m.inputs[fName].SetValue("")
+	m.inputs[fHostname].SetValue("")
+	m.inputs[fUser].SetValue("   ") // whitespace-only counts as blank
+	m.inputs[fMemory].SetValue("")
+	m.inputs[fDisk].SetValue("")
+	m.inputs[fGitName].SetValue("Ada Lovelace")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if cfg.Name != "claude" {
+		t.Errorf("Name = %q, want default %q", cfg.Name, "claude")
+	}
+	if cfg.Hostname != "claude" {
+		t.Errorf("Hostname = %q, want it to default to the name", cfg.Hostname)
+	}
+	if cfg.User == "" {
+		t.Errorf("User should default to the host user, got empty")
+	}
+	if cfg.Memory != "8GiB" {
+		t.Errorf("Memory = %q, want %q", cfg.Memory, "8GiB")
+	}
+	if cfg.Disk != "100GiB" {
+		t.Errorf("Disk = %q, want %q", cfg.Disk, "100GiB")
+	}
+	if cfg.CPUs < 1 {
+		t.Errorf("CPUs = %d, want a positive default", cfg.CPUs)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("a fully-defaulted config should validate, got %v", err)
+	}
+}
+
 // Submitting the create form with an empty git name fails validation: the model
 // stays on the form and surfaces the error instead of starting provisioning.
 func TestSubmitFormValidationKeepsForm(t *testing.T) {

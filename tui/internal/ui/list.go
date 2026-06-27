@@ -183,6 +183,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok || cfg.Name == "" {
 			cfg = vm.DefaultCreateConfig()
 			cfg.Name = name
+			cfg.User = hostUser()
 			cfg.GitName = hostGit("user.name")
 			cfg.GitEmail = hostGit("user.email")
 		}

@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -51,22 +53,55 @@ func hostGit(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// hostUser mirrors new-vm.sh's default primary user: Lima creates a guest user
+// matching the host username, so default to it (best-effort), falling back to
+// $USER and then "claude".
+func hostUser() string {
+	if out, err := exec.Command("id", "-un").Output(); err == nil {
+		if u := strings.TrimSpace(string(out)); u != "" {
+			return u
+		}
+	}
+	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
+		return u
+	}
+	return "claude"
+}
+
+// defaultCPUs mirrors new-vm.sh's default_cpus(): half the host's logical CPUs,
+// with a floor of 2.
+func defaultCPUs() int {
+	if n := runtime.NumCPU() / 2; n >= 2 {
+		return n
+	}
+	return 2
+}
+
+// orDefault returns v when it has content, else def — the Go analogue of the
+// script's `: "${VAR:=default}"`.
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
 // newInputs builds the form's text inputs, seeded from DefaultCreateConfig and
 // the host git identity. The clone token is masked.
 func newInputs() []textinput.Model {
 	def := vm.DefaultCreateConfig()
 	seeds := []string{
-		def.Name,               // fName
-		"",                     // fHostname
-		"",                     // fUser
-		hostGit("user.name"),   // fGitName
-		hostGit("user.email"),  // fGitEmail
-		strconv.Itoa(def.CPUs), // fCPUs
-		def.Memory,             // fMemory
-		def.Disk,               // fDisk
-		"",                     // fDockerProxyHost
-		"",                     // fCloneURL
-		"",                     // fCloneToken
+		def.Name,                    // fName
+		def.Name,                    // fHostname  (defaults to the instance name)
+		hostUser(),                  // fUser      (host username, like Lima)
+		hostGit("user.name"),        // fGitName
+		hostGit("user.email"),       // fGitEmail
+		strconv.Itoa(defaultCPUs()), // fCPUs      (half the host cores, floor 2)
+		def.Memory,                  // fMemory
+		def.Disk,                    // fDisk
+		"",                          // fDockerProxyHost
+		"",                          // fCloneURL
+		"",                          // fCloneToken
 	}
 
 	inputs := make([]textinput.Model, len(fieldLabels))
@@ -106,26 +141,40 @@ func (m *model) focusPrev() tea.Cmd {
 	return m.inputs[m.focusIdx].Focus()
 }
 
-// buildConfig assembles a CreateConfig from the form fields, parsing CPUs.
+// field returns a trimmed form value, so a field holding only whitespace counts
+// as blank for defaulting.
+func (m model) field(i int) string { return strings.TrimSpace(m.inputs[i].Value()) }
+
+// buildConfig assembles a CreateConfig from the form fields. Like new-vm.sh, a
+// blank field falls back to its default rather than producing an empty-named VM,
+// an empty primary user, or an empty memory/disk that Lima would reject. Only
+// the git identity has no default and is required (enforced by Validate).
 func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg := vm.DefaultCreateConfig()
-	cfg.Name = m.inputs[fName].Value()
-	cfg.Hostname = m.inputs[fHostname].Value()
-	cfg.User = m.inputs[fUser].Value()
-	cfg.GitName = m.inputs[fGitName].Value()
-	cfg.GitEmail = m.inputs[fGitEmail].Value()
+	cfg.Name = orDefault(m.field(fName), cfg.Name)
+	cfg.Hostname = orDefault(m.field(fHostname), cfg.Name) // hostname defaults to the name
+	cfg.User = orDefault(m.field(fUser), hostUser())
+	cfg.GitName = m.field(fGitName)
+	cfg.GitEmail = m.field(fGitEmail)
 
-	cpus, err := vm.ParseCPUs(m.inputs[fCPUs].Value())
-	if err != nil {
-		return cfg, err
+	if cpuStr := m.field(fCPUs); cpuStr == "" {
+		cfg.CPUs = defaultCPUs()
+	} else {
+		cpus, err := vm.ParseCPUs(cpuStr)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.CPUs = cpus
 	}
-	cfg.CPUs = cpus
 
-	cfg.Memory = m.inputs[fMemory].Value()
-	cfg.Disk = m.inputs[fDisk].Value()
-	cfg.DockerProxyHost = m.inputs[fDockerProxyHost].Value()
-	cfg.CloneURL = m.inputs[fCloneURL].Value()
-	cfg.CloneToken = m.inputs[fCloneToken].Value()
+	cfg.Memory = orDefault(m.field(fMemory), cfg.Memory)
+	cfg.Disk = orDefault(m.field(fDisk), cfg.Disk)
+	if lang := strings.TrimSpace(os.Getenv("LANG")); lang != "" {
+		cfg.Locale = lang // matches the script's LOCALE="${LANG:-en_US.UTF-8}"
+	}
+	cfg.DockerProxyHost = m.field(fDockerProxyHost)
+	cfg.CloneURL = m.field(fCloneURL)
+	cfg.CloneToken = m.field(fCloneToken)
 	return cfg, nil
 }
 

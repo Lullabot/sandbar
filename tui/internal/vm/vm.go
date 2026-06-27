@@ -55,6 +55,9 @@ func DefaultCreateConfig() CreateConfig {
 // a git identity is required, the instance name must differ from the base image
 // name, and CPUs must be a positive integer.
 func (c CreateConfig) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("instance name is required")
+	}
 	if c.GitName == "" {
 		return fmt.Errorf("git user.name is required")
 	}
