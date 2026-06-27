@@ -241,9 +241,9 @@ No circular dependencies.
 - ✔️ Task 1: Per-clone sizing — small base floor + grow/configure clone
 - ✔️ Task 2: Staging helpers — tar-out/in + guest path resolution
 
-### Phase 2: Reset engine
+### ✅ Phase 2: Reset engine
 **Parallel Tasks:**
-- Task 3: Reset orchestration (depends on: 1, 2)
+- ✔️ Task 3: Reset orchestration (depends on: 1, 2)
 
 ### Phase 3: Reset UI
 **Parallel Tasks:**

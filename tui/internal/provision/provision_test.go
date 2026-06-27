@@ -32,11 +32,22 @@ func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	return f.outputs[args[0]], f.err
 }
 
-func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, _ io.Writer, args ...string) error {
+func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, args ...string) error {
 	f.calls = append(f.calls, args)
 	if stdin != nil {
 		data, _ := io.ReadAll(stdin)
 		f.streams = append(f.streams, string(data))
+	}
+	// guestHome reads the home dir from stdout of `shell <name> getent passwd <user>`
+	// (fields user:x:uid:gid:gecos:home:shell); emit a canned passwd line so the
+	// staging path resolves to /home/andrew in the reset tests.
+	if out != nil {
+		for _, a := range args {
+			if a == "getent" {
+				_, _ = io.WriteString(out, "andrew:x:1000:1000::/home/andrew:/bin/bash\n")
+				break
+			}
+		}
 	}
 	return f.err
 }
@@ -184,5 +195,147 @@ func TestRecreate(t *testing.T) {
 	// just-deleted target): base status check, then clone.
 	if got, want := f.calls[2], []string{"clone", "claude-base", "claude"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Recreate did not proceed to clone: calls=%v", f.calls)
+	}
+}
+
+// hasTok reports whether argv contains the exact token tok.
+func hasTok(argv []string, tok string) bool {
+	for _, a := range argv {
+		if a == tok {
+			return true
+		}
+	}
+	return false
+}
+
+// findCall returns the index of the first call at or after `from` for which
+// match returns true, failing the test (with a label) when none matches. It is
+// used to assert ordering by scanning for distinctive argv tokens.
+func findCall(t *testing.T, calls [][]string, from int, what string, match func([]string) bool) int {
+	t.Helper()
+	for i := from; i < len(calls); i++ {
+		if match(calls[i]) {
+			return i
+		}
+	}
+	t.Fatalf("could not find call %q at/after index %d in %v", what, from, calls)
+	return -1
+}
+
+// TestReset_NoPreserve: a reset with no preservation is a clean recreate. With a
+// stopped base and CloneURL set, it must delete -> ensure base -> clone ->
+// configure -> start -> finalize -> stop -> start, and the finalize vars keep
+// project_clone_url (the role re-clones the repo).
+func TestReset_NoPreserve(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+
+	if err := p.Reset(context.Background(), cfg, ResetOptions{}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	want := [][]string{
+		{"delete", "claude", "-f"},                                               // destroy
+		{"list", "claude-base", "--format", "{{.Status}}"},                       // ensureBaseStopped
+		{"clone", "claude-base", "claude"},                                       // re-clone
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "claude"}, // configure size
+		{"start", "claude"},                                                      // start clone
+		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},                 // finalize
+		{"stop", "claude"},                                                       // bounce: stop
+		{"start", "claude"},                                                      // bounce: start
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("Reset(no preserve) call sequence mismatch:\n got %v\nwant %v", f.calls, want)
+	}
+
+	// Only finalize streamed stdin, and it keeps the clone URL.
+	if len(f.streams) != 1 {
+		t.Fatalf("got %d streamed stdins, want 1 (finalize)", len(f.streams))
+	}
+	if !strings.Contains(f.streams[0], "project_clone_url") {
+		t.Errorf("no-preserve finalize must keep project_clone_url:\n%s", f.streams[0])
+	}
+}
+
+// TestReset_BothPreserve: with both preserves on, the reset stages out the
+// Claude login and the project tree, recreates the VM, restores Claude BEFORE
+// finalize, finalizes WITHOUT project_clone_url (so the role skips its clone over
+// the restored tree), restores the project AFTER finalize, re-approves its .env
+// via direnv, then bounces. Assertions focus on ordering and the clone-skip.
+func TestReset_BothPreserve(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	cfg.User = "andrew"
+	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+	opts := ResetOptions{PreserveClaude: true, PreserveProject: true}
+
+	if err := p.Reset(context.Background(), cfg, opts, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	calls := f.calls
+
+	// Stage-out: getent resolves home, then two `tar -czf -` archives (claude,
+	// then project under github.com/deviantintegral).
+	getent := findCall(t, calls, 0, "getent", func(c []string) bool { return hasTok(c, "getent") })
+	outClaude := findCall(t, calls, getent+1, "stage-out claude (-czf .claude)", func(c []string) bool {
+		return hasTok(c, "-czf") && hasTok(c, ".claude")
+	})
+	outProject := findCall(t, calls, outClaude+1, "stage-out project (-czf github.com/deviantintegral)", func(c []string) bool {
+		return hasTok(c, "-czf") && hasTok(c, "github.com/deviantintegral")
+	})
+
+	// Recreate sized: delete -> ensure base -> clone -> configure -> start.
+	del := findCall(t, calls, outProject+1, "delete", func(c []string) bool { return c[0] == "delete" })
+	clone := findCall(t, calls, del+1, "clone", func(c []string) bool { return c[0] == "clone" })
+	configure := findCall(t, calls, clone+1, "configure (edit --set)", func(c []string) bool {
+		return c[0] == "edit" && hasTok(c, "--set")
+	})
+	startClone := findCall(t, calls, configure+1, "start clone", func(c []string) bool {
+		return c[0] == "start" && hasTok(c, "claude")
+	})
+
+	// Claude restore (extract + chown) BEFORE finalize.
+	inClaude := findCall(t, calls, startClone+1, "stage-in claude (-xzf)", func(c []string) bool {
+		return hasTok(c, "-xzf")
+	})
+	chownClaude := findCall(t, calls, inClaude+1, "chown claude", func(c []string) bool {
+		return hasTok(c, "chown") && hasTok(c, "/home/andrew/.claude")
+	})
+	finalize := findCall(t, calls, chownClaude+1, "finalize (bash -c)", func(c []string) bool {
+		return hasTok(c, "bash") && hasTok(c, "-c")
+	})
+
+	// Project restore AFTER finalize: extract + chown + direnv allow.
+	inProject := findCall(t, calls, finalize+1, "stage-in project (-xzf)", func(c []string) bool {
+		return hasTok(c, "-xzf")
+	})
+	chownProject := findCall(t, calls, inProject+1, "chown project", func(c []string) bool {
+		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/deviantintegral")
+	})
+	direnv := findCall(t, calls, chownProject+1, "direnv allow", func(c []string) bool {
+		return hasTok(c, "direnv") && hasTok(c, "allow")
+	})
+
+	// Bounce: stop -> start.
+	stop := findCall(t, calls, direnv+1, "stop", func(c []string) bool { return c[0] == "stop" })
+	findCall(t, calls, stop+1, "start (bounce)", func(c []string) bool { return c[0] == "start" })
+
+	// The finalize vars must NOT carry project_clone_url (clone is skipped).
+	var finStream string
+	for _, s := range f.streams {
+		if strings.Contains(s, "provision_phase: finalize") {
+			finStream = s
+		}
+	}
+	if finStream == "" {
+		t.Fatalf("no finalize stdin captured; streams=%v", f.streams)
+	}
+	if strings.Contains(finStream, "project_clone_url") {
+		t.Errorf("preserve-project finalize must skip project_clone_url:\n%s", finStream)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
@@ -113,18 +114,8 @@ func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // that guard use CreateVM. Recreate uses createVM directly because it has just
 // force-deleted the target.
 func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
-	// Ensure the base image exists and is stopped (a clone needs a quiescent
-	// source disk). An empty/error status means the instance is absent.
-	status, err := p.Lima.Status(cfg.BaseName)
-	switch {
-	case err != nil || status == "":
-		if err := p.BuildBase(ctx, cfg, out); err != nil {
-			return err
-		}
-	case status != "Stopped":
-		if err := p.Lima.Stop(cfg.BaseName); err != nil {
-			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
-		}
+	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+		return err
 	}
 
 	if err := p.Lima.Clone(cfg.BaseName, cfg.Name); err != nil {
@@ -150,6 +141,157 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	}
 	if err := p.Lima.Start(cfg.Name); err != nil {
 		return fmt.Errorf("restart %q: %w", cfg.Name, err)
+	}
+	return nil
+}
+
+// ensureBaseStopped makes sure the base image exists and is stopped — a clone
+// needs a quiescent source disk. An empty/error status means the instance is
+// absent, so the heavy base build runs; an existing but running base is stopped.
+func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	status, err := p.Lima.Status(cfg.BaseName)
+	switch {
+	case err != nil || status == "":
+		if err := p.BuildBase(ctx, cfg, out); err != nil {
+			return err
+		}
+	case status != "Stopped":
+		if err := p.Lima.Stop(cfg.BaseName); err != nil {
+			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
+		}
+	}
+	return nil
+}
+
+// ResetOptions selects which of a VM's local state survives a reset. When both
+// are false a reset is a clean recreate from the base image.
+type ResetOptions struct {
+	PreserveClaude  bool // keep ~/.claude and ~/.claude.json (login + history)
+	PreserveProject bool // keep the per-org checkout + restored .env
+}
+
+// Reset recreates a managed VM from a (possibly edited) config, optionally
+// preserving the Claude login and/or the per-org project tree across the
+// destroy/recreate by staging them on the host and restoring them in the right
+// order relative to the finalize playbook.
+//
+// Ordering is load-bearing: the Claude restore runs BEFORE finalize so the
+// playbook re-applies ~/.claude/settings.json on top of the restored
+// credentials/history; the project restore runs AFTER finalize and the finalize
+// pass omits project_clone_url (CloneURL cleared) so the project role's clone
+// step does not clobber the restored tree.
+//
+// Once stage-out has begun, no later error removes the staging dir — the error
+// is wrapped with its path so the user can recover their data manually.
+func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts ResetOptions, out io.Writer) error {
+	// stageDir is only set once staging actually runs; an empty value means there
+	// is nothing on the host to preserve or clean up.
+	var stageDir string
+	var home string
+	var orgRel string
+	var ok bool
+
+	// 1. Stage out the selected state while the source VM is still alive.
+	if opts.PreserveClaude || opts.PreserveProject {
+		// Ensure the source VM is running so tar can read from it.
+		if status, _ := p.Lima.Status(cfg.Name); status != "Running" {
+			if err := p.Lima.Start(cfg.Name); err != nil {
+				return fmt.Errorf("start %q for staging: %w", cfg.Name, err)
+			}
+		}
+		var err error
+		if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
+			return fmt.Errorf("resolve home for %q: %w", cfg.Name, err)
+		}
+		if stageDir, err = newStageDir(); err != nil {
+			return err
+		}
+		// From here on, errors must keep stageDir and surface its path.
+		if opts.PreserveClaude {
+			if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
+				return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+			}
+		}
+		if opts.PreserveProject {
+			if orgRel, ok = cloneOrgRelDir(cfg.CloneURL); ok {
+				if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
+					return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+				}
+			}
+		}
+	}
+
+	// staged reports whether host data exists; staged errors are wrapped with the
+	// recovery path so the user can retrieve it.
+	staged := stageDir != ""
+	wrap := func(err error) error {
+		if err == nil {
+			return nil
+		}
+		if staged {
+			return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+		}
+		return err
+	}
+
+	// 2. Delete the existing VM.
+	if err := p.Lima.Delete(cfg.Name, true); err != nil {
+		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
+	}
+
+	// 3. Recreate sized from the base image.
+	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+		return wrap(err)
+	}
+	if err := p.Lima.Clone(cfg.BaseName, cfg.Name); err != nil {
+		return wrap(fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err))
+	}
+	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
+	}
+	if err := p.Lima.Start(cfg.Name); err != nil {
+		return wrap(fmt.Errorf("start %q: %w", cfg.Name, err))
+	}
+
+	// 4. Restore Claude BEFORE finalize so the playbook layers settings on top.
+	if opts.PreserveClaude {
+		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
+			return wrap(fmt.Errorf("restore Claude into %q: %w", cfg.Name, err))
+		}
+	}
+
+	// 5. Finalize, skipping the project clone only when a tree was actually
+	// staged for restore (ok). If PreserveProject was requested but the URL had
+	// no org component (nothing staged), fall back to the role's normal clone.
+	finCfg := cfg
+	if opts.PreserveProject && ok {
+		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
+	}
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, out); err != nil {
+		return wrap(err)
+	}
+
+	// 6. Restore the project tree AFTER finalize, then re-approve its .env.
+	if opts.PreserveProject && ok {
+		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
+			return wrap(fmt.Errorf("restore project into %q: %w", cfg.Name, err))
+		}
+		if err := p.Lima.Shell(ctx, cfg.Name, nil, out, "sudo", "-iu", cfg.User, "direnv", "allow", home+"/"+orgRel); err != nil {
+			return wrap(fmt.Errorf("direnv allow in %q: %w", cfg.Name, err))
+		}
+	}
+
+	// 7. Bounce so the first interactive shell starts cleanly (mirror createVM).
+	if err := p.Lima.Stop(cfg.Name); err != nil {
+		return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
+	}
+	if err := p.Lima.Start(cfg.Name); err != nil {
+		return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
+	}
+
+	// 8. Full success: drop the host staging dir.
+	if staged {
+		removeStageDir(stageDir)
 	}
 	return nil
 }
