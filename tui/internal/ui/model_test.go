@@ -157,6 +157,41 @@ func TestEscLeavesForm(t *testing.T) {
 	}
 }
 
+// Shell is guarded to running VMs: pressing 'S' on a stopped VM explains why and
+// issues no command, so the user never sees a raw limactl error.
+func TestShellRequiresRunningVM(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Stopped", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	after, cmd := m.Update(runeKey('S'))
+	m = after.(model)
+	if cmd != nil {
+		t.Fatal("shell on a stopped VM should not issue a command")
+	}
+	if m.view == viewProgress || m.running {
+		t.Fatal("shell on a stopped VM must not start anything")
+	}
+	if m.status == "" {
+		t.Fatal("shell on a stopped VM should explain why it can't open")
+	}
+}
+
+// On a running VM, 'S' issues the (TTY-handover) shell command.
+func TestShellRunsForRunningVM(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Running", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	if _, cmd := m.Update(runeKey('S')); cmd == nil {
+		t.Fatal("shell on a running VM should issue a command")
+	}
+}
+
 // Base images are distinguished from ordinary VMs: the default base name is
 // recognised even with an empty registry, and any recorded clone source counts.
 func TestBaseImageDetection(t *testing.T) {

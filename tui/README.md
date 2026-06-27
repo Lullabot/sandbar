@@ -44,13 +44,17 @@ The active view's keys are also shown in the help bar at the bottom of the scree
 |-----|--------|
 | `↑` / `↓` (also `k` / `j`) | Move the selection |
 | `enter` | Open the selected VM's detail view |
+| `S` | Open an interactive shell in the selected VM (must be running) |
 | `n` | Open the create-VM form |
 | `s` | Start the selected VM |
 | `x` | Stop the selected VM |
 | `r` | Restart the selected VM |
 | `d` | Delete the selected VM (opens a confirmation) |
-| `f` | Toggle the filter: show all VMs ↔ only claude-vm-managed VMs |
+| `f` | Toggle the filter: show all VMs ↔ only claude-vm instances (managed + base) |
 | `q` | Quit |
+
+Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
+the TUI resumes when you exit the shell.
 
 The **Managed** column marks which VMs `claude-vm` created: `yes` for a managed
 clone, `base` for a base image other VMs are cloned from (e.g. `claude-base`), and

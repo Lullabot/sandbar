@@ -16,7 +16,6 @@ type VM struct {
 	Memory string
 	Disk   string
 	Dir    string
-	IP     string
 	Arch   string
 }
 

@@ -151,6 +151,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.err != nil:
 			m.status = label + " failed: " + msg.err.Error()
+		case msg.action == "shell":
+			m.status = "" // returned from the interactive shell; nothing to report
 		case msg.action == "delete":
 			// A deleted VM is no longer managed; drop it from the index.
 			if err := m.reg.Remove(msg.name); err != nil {

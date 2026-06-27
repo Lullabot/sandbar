@@ -148,6 +148,19 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.Shell):
+		if n := m.selectedName(); n != "" {
+			// limactl shell needs a running instance; guard so the key gives a
+			// clear message instead of a raw limactl error.
+			if m.vmByName(n).Status != "Running" {
+				m.status = n + " must be running to open a shell (press s to start it)"
+				return m, nil
+			}
+			m.status = "opening a shell in " + n + " — the TUI resumes when you exit"
+			return m, shellCmd(n)
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.Delete):
 		if n := m.selectedName(); n != "" {
 			m.confirming = true

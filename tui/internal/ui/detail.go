@@ -41,7 +41,6 @@ func (m model) detailView() string {
 		{"Memory", humanizeBytes(v.Memory)},
 		{"Disk", humanizeBytes(v.Disk)},
 		{"Arch", v.Arch},
-		{"IP", v.IP},
 		{"Dir", v.Dir},
 		{"Managed", managed},
 	}

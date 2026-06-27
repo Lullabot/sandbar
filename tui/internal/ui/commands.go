@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os/exec"
+
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 
@@ -65,4 +67,16 @@ func deleteCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
 		return actionDoneMsg{action: "delete", name: name, err: cli.Delete(name, true)}
 	}
+}
+
+// shellCmd opens an interactive shell inside a VM. It uses tea.ExecProcess to
+// suspend the TUI and hand the real terminal to `limactl shell <name>`, then
+// resumes the TUI when the shell exits. This deliberately bypasses lima.Runner
+// (which captures output) — an interactive session needs the actual TTY, which
+// only the real process attached to stdin/stdout can provide.
+func shellCmd(name string) tea.Cmd {
+	c := exec.Command("limactl", "shell", name)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return actionDoneMsg{action: "shell", name: name, err: err}
+	})
 }
