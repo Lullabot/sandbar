@@ -261,3 +261,31 @@ After each phase, run the package test suite (`cd tui && go test ./...`) as the 
 - Total Tasks: 5
 - Maximum Parallelism: 2 tasks (in Phase 1)
 - Critical Path Length: 4 phases (1/2 → 3 → 4 → 5)
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-06-27
+
+### Results
+All 5 tasks across 4 phases were implemented, validated, and committed on `feature/04--vm-reset-to-new`. Delivered:
+
+- **Per-VM sizing** — `vm.BaseDiskFloor` (`20GiB`); the base overlay now builds at the floor and `lima.Client.Configure` (`limactl edit --set`) sizes each clone (cpus/memory/disk) between `Clone` and `Start`, so disk/cpu/memory are chosen per VM and an effective "shrink" is a fresh clone grown to a smaller number.
+- **Staging helpers** — `provision/staging.go`: `cloneOrgRelDir` (URL→per-org dir), `guestHome` (getent over `limactl shell`), a private `0700` host stage dir, and `StageOut`/`StageIn` (tar over shell, chown on restore).
+- **Reset orchestration** — `provision.Reset` + `ResetOptions`: stage out → delete → ensure base stopped → clone → size → start → restore Claude *before* finalize → finalize (project clone skipped when a tree was staged) → restore project + `direnv allow` → bounce → cleanup. Once staging begins, no error path deletes the stage dir; errors carry its recovery path. `ensureBaseStopped` was extracted and shared with `createVM`.
+- **Reset UI** — recreate (`r`) on a managed VM now opens the create form in reset mode, pre-filled from the registry with `Name` locked, two navigable preserve toggles, a compromise warning, and a disk-floor guard (`parseLimaSize`); submit dispatches `Reset` and records the edited config.
+- **Docs** — README.md and tui/README.md document the reset flow, per-VM disk sizing + one-time base-rebuild migration, and the opt-in staging security exception.
+
+Validation gates (gofmt, `go vet`, `go build`, `go test ./...`, plus shellcheck + ansible `--syntax-check` on unchanged files) passed at every phase. A commit was created per phase.
+
+### Noteworthy Events
+- **Phase 1 run sequentially, not in parallel.** Tasks 1 and 2 both live in the Go `provision` package; to honor task-isolation/fail-safe rules and avoid same-package compile races between parallel agents, they were executed one after the other in the working tree (disjoint file sets, so correctness was unaffected — only wall-clock).
+- **Design refinement during planning (disk).** The original "rebuild the base to change disk" idea was replaced — at the user's prompting — with the small-base-floor + grow-on-clone model, which gives true per-VM sizing without rebuilding the shared base. cpus/memory were also moved to per-clone configuration.
+- **One coordinator-applied fix.** In `Reset`, the finalize clone-skip was tightened from `if opts.PreserveProject` to `if opts.PreserveProject && ok`, so a `PreserveProject` request whose URL has no org component (nothing staged) falls back to the role's normal clone instead of dropping the repo.
+- **Obsolete test replaced.** Task 4 replaced the old "recreate provisions immediately" UI test, since `r` now opens the reset form rather than provisioning directly.
+- **`new-vm.sh` intentionally unchanged.** Per the user's decision, the per-clone sizing/reset plumbing is TUI-only; a shared `claude-base` built by `new-vm.sh` keeps its old behavior, documented as a known cross-tool caveat with a one-time migration (delete `claude-base`).
+
+### Recommendations
+- **Manual Lima validation** (not possible in this Linux/no-nested-virt dev env): on a macOS/Lima host, confirm that growing a clone's `disk` via `limactl edit --set` actually resizes the qcow2 and the guest's growpart extends the root FS on first start; and exercise a full reset with both preserve options end-to-end (Claude login survives without re-login; the `.env` + checkout, including uncommitted changes, are restored and direnv loads).
+- Consider extending the CI `lima-e2e` job (or adding a Go job) to cover the TUI reset path if/when nested-virt budget allows.
+- If cross-tool consistency becomes a pain point, revisit porting the small-base-floor + grow-on-clone plumbing into `new-vm.sh`.
