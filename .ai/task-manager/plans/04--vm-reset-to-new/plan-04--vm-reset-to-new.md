@@ -249,9 +249,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 4: TUI reset flow — pre-filled form + preserve toggles + dispatch (depends on: 1, 3)
 
-### Phase 4: Documentation
+### ✅ Phase 4: Documentation
 **Parallel Tasks:**
-- Task 5: Documentation — reset flow, disk sizing, staging security note (depends on: 1, 3, 4)
+- ✔️ Task 5: Documentation — reset flow, disk sizing, staging security note (depends on: 1, 3, 4)
 
 ### Post-phase Actions
 After each phase, run the package test suite (`cd tui && go test ./...`) as the validation gate before starting the next phase.

@@ -69,7 +69,7 @@ Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appea
 | Key | Action |
 |-----|--------|
 | `y` (also `d`) | Confirm: delete the VM |
-| `r` | Recreate: delete and re-clone the VM from its base image (managed VMs only; streams the provisioner) |
+| `r` | Recreate: open the pre-filled reset form to re-clone the VM from its base image (managed VMs only) — see [Reset a VM](#reset-a-vm) |
 | `n` (also `esc`) | Cancel |
 
 ### Detail view
@@ -108,6 +108,37 @@ a private repo into the VM.
 | `q` | Quit |
 | `esc` / `backspace`, `enter` | Return to the list (after the run finishes) |
 
+## Reset a VM
+
+Pressing `r` on the delete/recreate confirmation (managed VMs only) opens the
+create form **pre-filled** with the VM's recorded settings, titled *Reset VM*.
+The `Name` is locked to the VM being reset; every other field is editable, so a
+reset doubles as the way to change a VM's CPUs, memory, disk, hostname, git
+identity, or clone URL. Submit with `ctrl+s` to delete the VM and re-clone it
+from the base with the edited settings (the new settings are then recorded, so
+the next reset defaults to them).
+
+Two **preserve toggles** follow the fields (space/enter flips the focused one;
+both default off):
+
+- **Preserve Claude Code settings** — keeps `~/.claude` and `~/.claude.json`
+  (your Claude login and history) across the recreate.
+- **Preserve project .env + checkout** — keeps the per-org directory (the cloned
+  repo and its `.env`). It is disabled when the VM cloned no repo. When enabled it
+  **skips the re-clone**, so you do **not** need to re-supply a token to reset a
+  VM that had cloned a private repo (the clone token is never stored).
+
+Enabling either toggle copies that data out of the VM to a private temp dir on
+your host and restores it after the recreate. The form warns that this moves your
+Claude login and `.env` token off the VM: **do not preserve if you suspect the VM
+is compromised.** See the main [Security Model](../README.md#security-model).
+
+**Disk sizing.** A VM's disk can **grow** from the base floor (`20GiB`) but
+cannot **shrink** below the current base's virtual size — qcow2 cannot shrink a
+live disk — so the form enforces a minimum of the floor. A base built before
+per-VM sizing keeps its old (larger) size and clones can't go under it; delete
+`claude-base` to rebuild the base at the floor on the next create/reset.
+
 ## Managed VMs and safety
 
 `limactl` lists **every** Lima instance on your machine, not just the ones this
@@ -137,9 +168,11 @@ the TUI (e.g. directly via `new-vm.sh` or `limactl`) are treated as unmanaged;
 delete still works, recreate does not.
 
 The index also stores each managed VM's create configuration (CPUs, memory, disk,
-hostname, git identity, …) so **recreate reproduces the VM faithfully** instead of
-resetting it to defaults. The **clone token is never stored** — recreating a VM
-that had cloned a private repo will need the token re-supplied.
+hostname, git identity, …) so **recreate pre-fills the reset form faithfully**
+instead of resetting it to defaults (see [Reset a VM](#reset-a-vm)). The **clone
+token is never stored** — recreating a VM that had cloned a private repo will need
+the token re-supplied, unless you enable *Preserve project .env + checkout*, which
+keeps the existing checkout and skips the re-clone.
 
 Creating a VM whose name already exists is refused with a clear message rather than
 colliding — delete it, or recreate it to reset it.

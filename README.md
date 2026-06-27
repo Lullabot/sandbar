@@ -58,13 +58,25 @@ skipped on `finalize`, the `project` role is skipped on `base`.
   the base, then makes the VM.
 - `--recreate` deletes and re-clones the **named** VM from the existing base (a
   fast reset of one VM, without rebuilding the base).
-- `cpus` / `memory` / `disk` are set when the base is built and inherited by
-  clones; pass them with `--rebuild` to change. (`disk` is baked into the disk
-  image, so growing it on a clone needs `limactl disk resize`.)
+- With `new-vm.sh`, `cpus` / `memory` / `disk` are set when the base is built and
+  inherited by clones; pass them with `--rebuild` to change. (`disk` is baked into
+  the base image, so growing it on a clone built by the script needs
+  `limactl disk resize`.)
 
 After cloning, the script restarts the VM once so your first shell lands with
 the right group membership (e.g. `docker`), the new hostname, and any kernel or
 library updates the finalize `apt upgrade` installed.
+
+**Per-VM disk sizing (TUI).** The `tui/` `claude-vm` sizes each VM individually
+rather than inheriting the base's size. It builds the base at a small virtual-disk
+floor (`20GiB`) and grows every clone to its requested size (`cpus` and `memory`
+are likewise applied per clone), so disk size is chosen per VM. A clone can grow
+from the floor but never below it, so an effective "shrink" is simply a fresh
+clone grown to a smaller number than the old VM. **One-time migration:** a base
+built before this change keeps its old (larger) virtual size, and clones can't go
+below it until the base is rebuilt — delete `claude-base` so the next TUI
+create/reset rebuilds it at the floor. This per-clone sizing (and the reset flow)
+is TUI-only; `new-vm.sh` keeps the inherited-from-base behavior described above.
 
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:
@@ -99,6 +111,13 @@ delete/recreate) using the same base-image / clone / finalize flow. See
 [`tui/README.md`](tui/README.md) for build and usage. `scripts/new-vm.sh` is
 unchanged and remains the scripted entry point — the `curl | bash` and CI paths
 still go through it.
+
+**Reset a VM.** On a managed VM, the recreate action opens the create form
+**pre-filled** with the VM's last-used settings, with `Name` locked. Edit any
+field — for example a smaller `disk` — then optionally toggle **Preserve Claude
+Code settings** and/or **Preserve project .env + checkout**, and submit. The VM
+is deleted and re-cloned from the base with the edited settings, and those
+settings are recorded so the next reset defaults to them.
 
 ### Running with lima-vm manually
 
@@ -228,6 +247,7 @@ This playbook creates a **disposable, single-purpose development VM** intended t
 - **Passwordless sudo** is enabled for the configured user (default: `claude`). The VM is not intended to host multiple users or untrusted workloads.
 - **Claude Code runs with `--dangerously-skip-permissions`**, allowing it to operate without interactive approval prompts. This is appropriate because the VM is ephemeral and isolated — it can be torn down and reprovisioned at any time.
 - **A random password** is generated for SSH and Samba access and is not stored persistently. With the Lima base-image flow it is generated once when the base is built, so clones of that base share it; this is immaterial in practice because Lima access is over `limactl shell` with an injected key, not the password. Direct (non-Lima) `full` provisioning still gets a fresh password per run.
+- **The TUI reset preserve options are a deliberate, opt-in exception** to "nothing leaves the VM". When you enable them, the selected data — the Claude login under `~/.claude` plus `~/.claude.json`, and/or the per-org `.env` (which holds `GH_TOKEN`) together with the checkout — is copied to a private host temp dir, restored into the recreated VM, then deleted. They default off; **do not** use preserve if you suspect the VM is compromised.
 
 **Do not use this playbook to provision machines that hold sensitive data or are exposed to the public internet.** It is designed for an isolated LAN or virtual network where the VM is treated as disposable.
 
