@@ -567,6 +567,86 @@ func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
 	}
 }
 
+// isQuitCmd reports whether cmd is tea.Quit (it produces a tea.QuitMsg). The
+// fake runner makes any incidental command this triggers a harmless no-op.
+func isQuitCmd(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+// Idle (on the list), ctrl+c quits the whole TUI as usual.
+func TestCtrlCQuitsWhenIdle(t *testing.T) {
+	m := newTestModel(t)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); !isQuitCmd(cmd) {
+		t.Fatal("ctrl+c on the list should quit the TUI")
+	}
+}
+
+// While a build is in flight, ctrl+c cancels the provisioner (cancels its
+// context) and stays on the progress view to show the result — it must NOT quit
+// the whole TUI and orphan a half-built VM.
+func TestCtrlCCancelsRunningProvision(t *testing.T) {
+	m := newTestModel(t)
+	called := false
+	m.view = viewProgress
+	m.running = true
+	m.cancel = func() { called = true }
+
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = after.(model)
+
+	if !called {
+		t.Fatal("ctrl+c during a build should cancel the provisioner context")
+	}
+	if !m.canceled {
+		t.Fatal("ctrl+c during a build should mark the run canceled")
+	}
+	if m.view != viewProgress {
+		t.Fatalf("ctrl+c during a build should stay on the progress view, got %v", m.view)
+	}
+	if isQuitCmd(cmd) {
+		t.Fatal("ctrl+c during a build must not quit the whole TUI")
+	}
+}
+
+// q must not quit (nor navigate away) while a build runs — only ctrl+c cancels.
+// This guards the footgun where q (the global quit) abandoned a running build.
+func TestQDoesNotQuitDuringProvision(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewProgress
+	m.running = true
+
+	if _, cmd := m.Update(runeKey('q')); isQuitCmd(cmd) {
+		t.Fatal("q during a build must not quit; only ctrl+c cancels")
+	}
+}
+
+// A canceled run leaves partial state, so its done message must neither record
+// the VM as managed nor surface the (kill-induced) error as a failure.
+func TestCanceledRunIsNotRecordedManaged(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewProgress
+	m.running = true
+	m.canceled = true
+	m.provCfg = vm.CreateConfig{Name: "myvm", BaseName: "claude-base"}
+
+	done, _ := m.Update(provisionDoneMsg{err: context.Canceled})
+	m = done.(model)
+
+	if m.running {
+		t.Fatal("a done message should clear running")
+	}
+	if m.doneErr != nil {
+		t.Fatalf("a canceled run should not surface a failure, got %v", m.doneErr)
+	}
+	if m.reg.IsManaged("myvm") {
+		t.Fatal("a canceled run must not be recorded as managed")
+	}
+}
+
 // Submitting a fully valid form with ctrl+s starts provisioning.
 func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	m := newTestModel(t)

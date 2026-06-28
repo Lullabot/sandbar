@@ -6,6 +6,8 @@
 package ui
 
 import (
+	"context"
+
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/registry"
@@ -78,7 +80,9 @@ type model struct {
 	running       bool
 	doneErr       error
 	reader        *readPipe
-	provCfg       vm.CreateConfig // config of the instance being provisioned (for the managed registry)
+	provCfg       vm.CreateConfig    // config of the instance being provisioned (for the managed registry)
+	cancel        context.CancelFunc // cancels the in-flight provisioner (ctrl+c on the progress view)
+	canceled      bool               // the current/last run was canceled by the user
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -185,6 +189,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case provisionDoneMsg:
 		m.running = false
+		// A user-canceled run leaves partial state behind; don't record it as
+		// managed and don't surface its (kill-induced) error as a failure.
+		if m.canceled {
+			m.doneErr = nil
+			return m, listCmd(m.cli)
+		}
 		m.doneErr = msg.err
 		// A successful create/recreate yields a claude-vm-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
@@ -198,6 +208,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
+			// While a build is in flight, ctrl+c cancels it (killing the underlying
+			// limactl via the provisioner's context) and shows the result, rather
+			// than quitting the whole TUI and orphaning a half-built VM. Everywhere
+			// else — including the finished progress screen — ctrl+c quits.
+			if m.view == viewProgress && m.running {
+				if m.cancel != nil {
+					m.cancel()
+				}
+				m.canceled = true
+				m.output += "\n^C — canceling, cleaning up…\n"
+				m.viewport.SetContent(m.output)
+				m.viewport.GotoBottom()
+				return m, nil
+			}
 			return m, tea.Quit
 		}
 		switch m.view {

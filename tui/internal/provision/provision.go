@@ -40,6 +40,13 @@ type Provisioner struct {
 	PlaybookDir string
 }
 
+// step writes a phase banner to the streamed output so the user sees which
+// lifecycle stage is running even before limactl/ansible prints anything — the
+// slow base build and boots are otherwise long stretches of silence.
+func step(out io.Writer, format string, args ...any) {
+	fmt.Fprintf(out, "\n==> "+format+"\n", args...)
+}
+
 // runProvision streams one phase's extra-vars into the guest over stdin and runs
 // the playbook there. Mirrors new-vm.sh's run_provision.
 func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, out io.Writer) error {
@@ -47,6 +54,7 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
+	step(out, "Provisioning %q (%s phase, Ansible)…", name, phase)
 	// Vars go over STDIN, never argv (secret hygiene).
 	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", inGuestScript); err != nil {
 		return fmt.Errorf("provisioning (%s) failed for %q: %w", phase, name, err)
@@ -80,7 +88,8 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 		return fmt.Errorf("close overlay temp file: %w", err)
 	}
 
-	if err := p.Lima.Create(cfg.BaseName, f.Name()); err != nil {
+	step(out, "Building base image %q — downloads Debian and boots once; the first run takes several minutes…", cfg.BaseName)
+	if err := p.Lima.CreateStreaming(ctx, cfg.BaseName, f.Name(), out); err != nil {
 		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
 	}
 	if err := p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out); err != nil {
@@ -88,7 +97,8 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	}
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
 	// needs a quiescent source disk.
-	if err := p.Lima.Stop(cfg.BaseName); err != nil {
+	step(out, "Stopping base image %q (quiescing it for cloning)…", cfg.BaseName)
+	if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 	}
 	return nil
@@ -118,7 +128,8 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 		return err
 	}
 
-	if err := p.Lima.Clone(cfg.BaseName, cfg.Name); err != nil {
+	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
+	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
 	// Size the clone before its first start: the base is built at a small disk
@@ -126,7 +137,8 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
 		return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
 	}
-	if err := p.Lima.Start(cfg.Name); err != nil {
+	step(out, "Starting %q…", cfg.Name)
+	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 		return fmt.Errorf("start %q: %w", cfg.Name, err)
 	}
 	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, out); err != nil {
@@ -136,10 +148,11 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	// Bounce the VM so the first interactive shell starts cleanly: the finalize
 	// apt upgrade may have pulled a new kernel/libraries, and the hostname change
 	// takes full effect on a fresh boot.
-	if err := p.Lima.Stop(cfg.Name); err != nil {
+	step(out, "Restarting %q for a clean first boot…", cfg.Name)
+	if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
 		return fmt.Errorf("stop %q: %w", cfg.Name, err)
 	}
-	if err := p.Lima.Start(cfg.Name); err != nil {
+	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 		return fmt.Errorf("restart %q: %w", cfg.Name, err)
 	}
 	return nil
@@ -156,7 +169,8 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 			return err
 		}
 	case status != "Stopped":
-		if err := p.Lima.Stop(cfg.BaseName); err != nil {
+		step(out, "Stopping base image %q (quiescing it for cloning)…", cfg.BaseName)
+		if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 		}
 	}
@@ -195,7 +209,8 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if opts.PreserveClaude || opts.PreserveProject {
 		// Ensure the source VM is running so tar can read from it.
 		if status, _ := p.Lima.Status(cfg.Name); status != "Running" {
-			if err := p.Lima.Start(cfg.Name); err != nil {
+			step(out, "Starting %q to stage its data…", cfg.Name)
+			if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 				return fmt.Errorf("start %q for staging: %w", cfg.Name, err)
 			}
 		}
@@ -243,13 +258,15 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
 		return wrap(err)
 	}
-	if err := p.Lima.Clone(cfg.BaseName, cfg.Name); err != nil {
+	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
+	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
 		return wrap(fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err))
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
 		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
 	}
-	if err := p.Lima.Start(cfg.Name); err != nil {
+	step(out, "Starting %q…", cfg.Name)
+	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 		return wrap(fmt.Errorf("start %q: %w", cfg.Name, err))
 	}
 
@@ -282,10 +299,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	}
 
 	// 7. Bounce so the first interactive shell starts cleanly (mirror createVM).
-	if err := p.Lima.Stop(cfg.Name); err != nil {
+	step(out, "Restarting %q for a clean first boot…", cfg.Name)
+	if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
 		return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
 	}
-	if err := p.Lima.Start(cfg.Name); err != nil {
+	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 		return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
 	}
 

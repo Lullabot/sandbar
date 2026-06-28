@@ -29,6 +29,7 @@ func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateCon
 	pr, pw := io.Pipe()
 	m.reader = &readPipe{r: pr}
 	m.running = true
+	m.canceled = false
 	m.doneErr = nil
 	m.output = ""
 	m.progressTitle = title
@@ -38,10 +39,15 @@ func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateCon
 	// reproduced faithfully on a future recreate).
 	m.provCfg = cfg
 
+	// A cancellable context lets ctrl+c (in Update) abort the run mid-flight,
+	// killing the limactl subprocess the provisioner is currently blocked on.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
 	go func() {
 		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the
 		// reader; a non-nil err surfaces as that error on the final Read.
-		pw.CloseWithError(run(context.Background(), cfg, pw))
+		pw.CloseWithError(run(ctx, cfg, pw))
 	}()
 
 	return tea.Batch(readNextCmd(m.reader), m.spinner.Tick)
@@ -70,14 +76,15 @@ func readNextCmd(rp *readPipe) tea.Cmd {
 	}
 }
 
-// updateProgress handles keys on the progress view. While running, keys only
-// scroll the viewport (and ctrl+c quits); once done, back/enter return to the
-// refreshed list.
+// updateProgress handles keys on the progress view. While a build runs, ctrl+c
+// (handled in Update) cancels it and all other keys only scroll the output — q
+// and esc must not quit or navigate away and abandon the running provisioner.
+// Once it's done, q quits and back/enter return to the refreshed list.
 func (m model) updateProgress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Quit) {
-		return m, tea.Quit
-	}
 	if !m.running {
+		if key.Matches(msg, m.keys.Quit) {
+			return m, tea.Quit
+		}
 		if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
 			m.view = viewList
 			return m, nil
@@ -103,9 +110,12 @@ func (m model) progressView() string {
 	b.WriteString("\n")
 
 	if !m.running {
-		if m.doneErr != nil {
+		switch {
+		case m.canceled:
+			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the list."))
+		case m.doneErr != nil:
 			b.WriteString("\n" + errStyle.Render("Failed: "+m.doneErr.Error()))
-		} else {
+		default:
 			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the list."))
 		}
 	}

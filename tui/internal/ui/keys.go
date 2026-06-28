@@ -5,24 +5,25 @@ import "github.com/charmbracelet/bubbles/key"
 // keyMap holds every keybinding the TUI reacts to. Bindings are reused across
 // views (e.g. the same Enter/Quit) and surfaced in the help bar via viewHelp.
 type keyMap struct {
-	Enter    key.Binding
-	New      key.Binding
-	Start    key.Binding
-	Stop     key.Binding
-	Restart  key.Binding
-	Delete   key.Binding
-	Filter   key.Binding
-	Shell    key.Binding
-	Back     key.Binding
-	Quit     key.Binding
-	Tab      key.Binding
-	ShiftTab key.Binding
-	Up       key.Binding
-	Down     key.Binding
-	Submit   key.Binding
-	Confirm  key.Binding
-	Recreate key.Binding
-	Cancel   key.Binding
+	Enter     key.Binding
+	New       key.Binding
+	Start     key.Binding
+	Stop      key.Binding
+	Restart   key.Binding
+	Delete    key.Binding
+	Filter    key.Binding
+	Shell     key.Binding
+	Back      key.Binding
+	Quit      key.Binding
+	Tab       key.Binding
+	ShiftTab  key.Binding
+	Up        key.Binding
+	Down      key.Binding
+	Submit    key.Binding
+	Confirm   key.Binding
+	Recreate  key.Binding
+	Cancel    key.Binding
+	Interrupt key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -45,6 +46,9 @@ func defaultKeys() keyMap {
 		Confirm:  key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "delete")),
 		Recreate: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "recreate")),
 		Cancel:   key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n", "cancel")),
+		// ctrl+c is intercepted in Update (not matched here); this binding is for
+		// the progress-view help bar while a build is running.
+		Interrupt: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
 	}
 }
 
@@ -58,6 +62,10 @@ func (m model) viewHelp() []key.Binding {
 	case viewDetail:
 		return []key.Binding{m.keys.Back, m.keys.Quit}
 	case viewProgress:
+		// While a build runs, ctrl+c cancels it; q/esc are inert until it finishes.
+		if m.running {
+			return []key.Binding{m.keys.Interrupt}
+		}
 		return []key.Binding{m.keys.Back, m.keys.Quit}
 	default: // viewList
 		if m.confirming {

@@ -137,6 +137,12 @@ func TestMethodArgv(t *testing.T) {
 			[]string{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "vm1"}},
 		{"create", func(c *Client) { _ = c.Create("vm1", "/tmp/overlay.yaml") }, []string{"start", "--name", "vm1", "--tty=false", "/tmp/overlay.yaml"}},
 		{"shell", func(c *Client) { _ = c.Shell(context.Background(), "vm1", nil, io.Discard, "ls", "-la") }, []string{"shell", "vm1", "ls", "-la"}},
+		// The streaming variants build the same argv as their buffered counterparts;
+		// they differ only in routing output to the writer (and honouring ctx).
+		{"start-streaming", func(c *Client) { _ = c.StartStreaming(context.Background(), "vm1", io.Discard) }, []string{"start", "vm1"}},
+		{"stop-streaming", func(c *Client) { _ = c.StopStreaming(context.Background(), "vm1", io.Discard) }, []string{"stop", "vm1"}},
+		{"clone-streaming", func(c *Client) { _ = c.CloneStreaming(context.Background(), "base", "vm1", io.Discard) }, []string{"clone", "base", "vm1"}},
+		{"create-streaming", func(c *Client) { _ = c.CreateStreaming(context.Background(), "vm1", "/tmp/overlay.yaml", io.Discard) }, []string{"start", "--name", "vm1", "--tty=false", "/tmp/overlay.yaml"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

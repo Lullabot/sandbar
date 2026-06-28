@@ -35,8 +35,10 @@ go build -o claude-vm ./cmd/claude-vm
 ## Keybindings
 
 The bindings below come from `tui/internal/ui/keys.go` and the per-view handlers
-(`list.go`, `detail.go`, `form.go`, `progress.go`). `ctrl+c` quits from anywhere.
-The active view's keys are also shown in the help bar at the bottom of the screen.
+(`list.go`, `detail.go`, `form.go`, `progress.go`). `ctrl+c` quits from anywhere,
+except while a build is running on the progress view, where it cancels the build
+instead. The active view's keys are also shown in the help bar at the bottom of
+the screen.
 
 ### List view
 
@@ -105,8 +107,14 @@ a private repo into the VM.
 | Key | Action |
 |-----|--------|
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
-| `q` | Quit |
+| `ctrl+c` (while running) | Cancel the build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
+| `q` | Quit (only after the run finishes; inert while a build is running) |
 | `esc` / `backspace`, `enter` | Return to the list (after the run finishes) |
+
+The slow lifecycle steps — building the base image, cloning, and booting — stream
+their `limactl` output live (with `==>` phase banners), so a first-ever creation
+(which builds the base image before your VM is cloned) shows continuous progress
+instead of a silent spinner.
 
 ## Reset a VM
 

@@ -120,6 +120,33 @@ func (c *Client) Create(name, overlayPath string) error {
 	return c.run("start", "--name", name, "--tty=false", overlayPath)
 }
 
+// The streaming variants below mirror Create/Clone/Start/Stop but pipe limactl's
+// live output to out and honour ctx, so the provisioner can show base-build and
+// boot progress in its pane and a cancelled ctx kills the running limactl. The
+// buffered forms above stay for fire-and-forget list actions, which fold stderr
+// into the returned error instead of streaming it.
+
+// CreateStreaming builds and boots a new instance from an overlay/template,
+// streaming the (slow) image download + first boot to out.
+func (c *Client) CreateStreaming(ctx context.Context, name, overlayPath string, out io.Writer) error {
+	return c.runStream(ctx, out, "start", "--name", name, "--tty=false", overlayPath)
+}
+
+// CloneStreaming copies a base image into a new instance, streaming progress.
+func (c *Client) CloneStreaming(ctx context.Context, base, name string, out io.Writer) error {
+	return c.runStream(ctx, out, "clone", base, name)
+}
+
+// StartStreaming boots a stopped instance, streaming its boot output to out.
+func (c *Client) StartStreaming(ctx context.Context, name string, out io.Writer) error {
+	return c.runStream(ctx, out, "start", name)
+}
+
+// StopStreaming shuts a running instance down, streaming progress to out.
+func (c *Client) StopStreaming(ctx context.Context, name string, out io.Writer) error {
+	return c.runStream(ctx, out, "stop", name)
+}
+
 // Shell runs a command (or an interactive shell when argv is empty) inside an
 // instance, streaming I/O so the caller sees live output.
 func (c *Client) Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
@@ -147,6 +174,15 @@ func (c *Client) Preflight() error {
 // into the error for diagnostics.
 func (c *Client) run(args ...string) error {
 	if _, err := c.r.Output(context.Background(), args...); err != nil {
+		return fmt.Errorf("limactl %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// runStream executes a limactl command with no stdin, streaming its combined
+// output to out and honouring ctx. Backs the *Streaming lifecycle methods.
+func (c *Client) runStream(ctx context.Context, out io.Writer, args ...string) error {
+	if err := c.r.Stream(ctx, nil, out, args...); err != nil {
 		return fmt.Errorf("limactl %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
