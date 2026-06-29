@@ -11,6 +11,7 @@ import (
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // fakeRunner is a no-op lima.Runner so the model can be constructed and driven
@@ -630,6 +631,38 @@ func isQuitCmd(cmd tea.Cmd) bool {
 	}
 	_, ok := cmd().(tea.QuitMsg)
 	return ok
+}
+
+// Streamed output longer than the viewport width must wrap, not be truncated:
+// the bubbles viewport hard-truncates over-wide lines, which silently hid the
+// tail of long Ansible error lines (e.g. clone destination paths). After the
+// fix, a single long line reflows so its tail stays visible and no rendered
+// line exceeds the viewport width.
+func TestLongOutputLineWraps(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewProgress
+	m.running = true
+
+	// Width 28 -> viewport width max(20, 28-8) = 20; height leaves room for the
+	// wrapped lines so GotoBottom keeps the tail on screen.
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 28, Height: 24})
+	m = sized.(model)
+
+	// A 69-char unbroken token: the first 20 chars fill one wrapped line, so a
+	// truncating viewport would drop the trailing marker entirely.
+	line := strings.Repeat("A", 60) + "ENDMARKER"
+	out, _ := m.Update(provisionOutputMsg(line))
+	m = out.(model)
+
+	view := m.viewport.View()
+	if !strings.Contains(view, "ENDMARKER") {
+		t.Fatalf("wrapped output should keep the line's tail visible; got:\n%s", view)
+	}
+	for _, l := range strings.Split(view, "\n") {
+		if w := ansi.StringWidth(l); w > m.viewport.Width {
+			t.Fatalf("rendered line width %d exceeds viewport width %d: %q", w, m.viewport.Width, l)
+		}
+	}
 }
 
 // Idle (on the list), ctrl+c quits the whole TUI as usual.

@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // view is the active screen the model renders and routes keys to.
@@ -133,6 +134,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Height = max(5, msg.Height-12)
 		m.table.SetWidth(max(40, msg.Width-6))
 		m.table.SetHeight(max(3, msg.Height-12))
+		// Reflow any streamed output to the new width so it stays wrapped.
+		if m.output != "" {
+			m.setOutput()
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -183,8 +188,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case provisionOutputMsg:
 		if msg != "" {
 			m.output += string(msg)
-			m.viewport.SetContent(m.output)
-			m.viewport.GotoBottom()
+			m.setOutput()
 		}
 		return m, readNextCmd(m.reader)
 
@@ -219,8 +223,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.canceled = true
 				m.output += "\n^C — canceling, cleaning up…\n"
-				m.viewport.SetContent(m.output)
-				m.viewport.GotoBottom()
+				m.setOutput()
 				return m, nil
 			}
 			return m, tea.Quit
@@ -238,6 +241,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.forward(msg)
+}
+
+// setOutput wraps the accumulated provisioner output to the viewport width and
+// pins the view to the bottom. The bubbles viewport truncates lines wider than
+// its width; wrapping first keeps long lines — notably Ansible error paths —
+// fully readable as the user scrolls. ansi.Wrap breaks over-long unbreakable
+// tokens (e.g. file paths) and preserves the output's ANSI colour codes.
+func (m *model) setOutput() {
+	w := m.viewport.Width
+	if w < 1 {
+		w = 80
+	}
+	m.viewport.SetContent(ansi.Wrap(m.output, w, ""))
+	m.viewport.GotoBottom()
 }
 
 // forward delegates non-key, non-handled messages (blinks, internal ticks) to
