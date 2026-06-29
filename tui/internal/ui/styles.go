@@ -15,6 +15,7 @@ var (
 
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 
 	labelStyle        = lipgloss.NewStyle().Width(18).Foreground(lipgloss.Color("245"))

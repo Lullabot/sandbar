@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -58,7 +59,7 @@ var fieldInfo = []string{
 	"Required. git user.name written into the VM's git config.",
 	"Required. git user.email written into the VM's git config.",
 	"vCPUs for the VM. Blank → half your host's cores (minimum 2).",
-	"RAM for the VM, e.g. 8GiB. Blank → 8GiB.",
+	"RAM for the VM, e.g. 8GiB. Blank → 8GiB, or half your host's RAM if that's less.",
 	"Disk size for the VM, e.g. 100GiB. Blank → 100GiB.",
 	"Optional. Docker registry pull-through proxy host. Blank to skip.",
 	"Optional. HTTPS repo to clone into the VM now (GitHub-oriented). Blank to skip.",
@@ -105,6 +106,70 @@ func defaultCPUs() int {
 	return 2
 }
 
+// memCapBytes is the RAM ceiling a VM defaults to: 8GiB, unless that would take
+// more than half the host's RAM.
+const memCapBytes = 8 << 30
+
+// defaultMemory is the blank-field RAM default: 8GiB capped at half the host's
+// RAM so a small host isn't over-committed (a 16GiB+ host still gets 8GiB). It
+// falls back to the full cap when host RAM can't be probed.
+func defaultMemory() string {
+	return cappedMemoryGiB(hostMemBytes(), memCapBytes)
+}
+
+// cappedMemoryGiB returns min(capBytes, half of total) rounded to the nearest
+// whole GiB as a Lima size string. total <= 0 (unknown) yields the cap; the
+// result is floored at 1GiB so a tiny host still gets a usable value.
+func cappedMemoryGiB(total, capBytes int64) string {
+	limit := capBytes
+	if total > 0 {
+		if half := total / 2; half < limit {
+			limit = half
+		}
+	}
+	const gib = 1 << 30
+	g := (limit + gib/2) / gib // round to the nearest GiB
+	if g < 1 {
+		g = 1
+	}
+	return strconv.FormatInt(g, 10) + "GiB"
+}
+
+// limaHomeDir is where Lima keeps its instance images: $LIMA_HOME if set, else
+// ~/.lima. Empty when the home directory can't be resolved.
+func limaHomeDir() string {
+	if h := strings.TrimSpace(os.Getenv("LIMA_HOME")); h != "" {
+		return h
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".lima")
+}
+
+// freeDiskBytes reports the free space on the volume backing Lima's instance
+// store, best-effort (0 = unknown, so callers don't warn). ~/.lima may not exist
+// yet on a fresh host, so it climbs to the nearest existing ancestor — the same
+// filesystem the new VM's disk will land on.
+func freeDiskBytes() int64 {
+	dir := limaHomeDir()
+	if dir == "" {
+		return 0
+	}
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // reached the root without an existing dir
+			return 0
+		}
+		dir = parent
+	}
+	return hostDiskFreeBytes(dir)
+}
+
 // orDefault returns v when it has content, else def — the Go analogue of the
 // script's `: "${VAR:=default}"`.
 func orDefault(v, def string) string {
@@ -125,7 +190,7 @@ func newInputs() []textinput.Model {
 		hostGit("user.name"),        // fGitName
 		hostGit("user.email"),       // fGitEmail
 		strconv.Itoa(defaultCPUs()), // fCPUs      (half the host cores, floor 2)
-		def.Memory,                  // fMemory
+		defaultMemory(),             // fMemory    (8GiB, capped at half host RAM)
 		def.Disk,                    // fDisk
 		"",                          // fDockerProxyHost
 		"",                          // fCloneURL
@@ -152,6 +217,7 @@ func (m *model) openForm() tea.Cmd {
 	m.inputs = newInputs()
 	m.focusIdx = 0
 	m.formErr = nil
+	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
 	m.view = viewForm
 	return m.inputs[0].Focus()
@@ -174,6 +240,7 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.inputs[fDockerProxyHost].SetValue(cfg.DockerProxyHost)
 	m.inputs[fCloneURL].SetValue(cfg.CloneURL)
 
+	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
@@ -280,7 +347,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.CPUs = cpus
 	}
 
-	cfg.Memory = orDefault(m.field(fMemory), cfg.Memory)
+	cfg.Memory = orDefault(m.field(fMemory), defaultMemory())
 	cfg.Disk = orDefault(m.field(fDisk), cfg.Disk)
 	if lang := strings.TrimSpace(os.Getenv("LANG")); lang != "" {
 		cfg.Locale = lang // matches the script's LOCALE="${LANG:-en_US.UTF-8}"
@@ -327,6 +394,23 @@ func parseLimaSize(s string) (int64, bool) {
 		return 0, false
 	}
 	return int64(num * mult), true
+}
+
+// diskOverflowWarning returns a warning string when the disk the user asked for
+// is larger than the free space sampled on the Lima volume, else "". qcow2 disks
+// are sparse so this is advisory (the build still proceeds) — it flags that the
+// disk can't actually grow to its requested size. Empty when free space is
+// unknown (unprobed host) so we don't cry wolf.
+func (m model) diskOverflowWarning() string {
+	if m.hostDiskFree <= 0 {
+		return ""
+	}
+	want, ok := parseLimaSize(m.field(fDisk))
+	if !ok || want <= m.hostDiskFree {
+		return ""
+	}
+	free := humanizeBytes(strconv.FormatInt(m.hostDiskFree, 10))
+	return fmt.Sprintf("Warning: disk %s exceeds the %s free on the Lima volume; the VM may fail to grow to its full size.", m.field(fDisk), free)
 }
 
 // submitForm validates the form; on failure it keeps the form and surfaces the
@@ -515,6 +599,10 @@ func (m model) formView() string {
 
 	if m.formErr != nil {
 		b.WriteString("\n" + errStyle.Render("Error: "+m.formErr.Error()))
+	}
+
+	if w := m.diskOverflowWarning(); w != "" {
+		b.WriteString("\n" + warnStyle.Render(w) + "\n")
 	}
 
 	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))

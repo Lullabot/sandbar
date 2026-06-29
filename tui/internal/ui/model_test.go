@@ -261,6 +261,61 @@ func TestParseLimaSize(t *testing.T) {
 	}
 }
 
+// cappedMemoryGiB caps the 8GiB default at half the host's RAM, rounds to a
+// whole GiB, and floors at 1GiB — falling back to the full cap on an unknown host.
+func TestCappedMemoryGiB(t *testing.T) {
+	const gib = int64(1) << 30
+	cases := []struct {
+		name  string
+		total int64
+		want  string
+	}{
+		{"unknown host falls back to the cap", 0, "8GiB"},
+		{"32GiB host keeps the 8GiB cap", 32 * gib, "8GiB"},
+		{"16GiB host: half equals the cap", 16 * gib, "8GiB"},
+		{"~15.6GiB host (reserved RAM) rounds back to 8", 15*gib + gib*6/10, "8GiB"},
+		{"8GiB host gets half", 8 * gib, "4GiB"},
+		{"4GiB host gets half", 4 * gib, "2GiB"},
+		{"tiny host floors at 1GiB", 512 * (1 << 20), "1GiB"},
+	}
+	for _, c := range cases {
+		if got := cappedMemoryGiB(c.total, memCapBytes); got != c.want {
+			t.Errorf("%s: cappedMemoryGiB(%d) = %q, want %q", c.name, c.total, got, c.want)
+		}
+	}
+}
+
+// A requested disk larger than the free space on the Lima volume surfaces a
+// (non-blocking) warning; a disk that fits, or an unknown free space, does not.
+func TestDiskOverflowWarning(t *testing.T) {
+	m := newTestModel(t)
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+
+	m.hostDiskFree = 50 << 30 // pretend the Lima volume has 50GiB free
+
+	m.inputs[fDisk].SetValue("20GiB")
+	if w := m.diskOverflowWarning(); w != "" {
+		t.Errorf("20GiB under 50GiB free should not warn, got %q", w)
+	}
+	if strings.Contains(m.formView(), "exceeds") {
+		t.Errorf("the form should not warn when the disk fits in free space")
+	}
+
+	m.inputs[fDisk].SetValue("100GiB")
+	if m.diskOverflowWarning() == "" {
+		t.Errorf("100GiB over 50GiB free should warn")
+	}
+	if !strings.Contains(m.formView(), "exceeds") {
+		t.Errorf("the form should surface the disk-exceeds-free-space warning")
+	}
+
+	m.hostDiskFree = 0 // unprobed host: never warn
+	if w := m.diskOverflowWarning(); w != "" {
+		t.Errorf("unknown free space must not warn, got %q", w)
+	}
+}
+
 // Tab navigation in the reset form skips the locked Name, walks every editable
 // field then both toggles, and wraps back to Hostname — never focusing Name.
 func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
@@ -512,8 +567,8 @@ func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	if cfg.User == "" {
 		t.Errorf("User should default to the host user, got empty")
 	}
-	if cfg.Memory != "8GiB" {
-		t.Errorf("Memory = %q, want %q", cfg.Memory, "8GiB")
+	if cfg.Memory != defaultMemory() {
+		t.Errorf("Memory = %q, want the host-capped default %q", cfg.Memory, defaultMemory())
 	}
 	if cfg.Disk != "100GiB" {
 		t.Errorf("Disk = %q, want %q", cfg.Disk, "100GiB")

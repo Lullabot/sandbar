@@ -97,10 +97,15 @@ default, whether it is required, and (for the token) where to create a GitHub
 fine-grained token with the recommended scopes — is shown beneath the form.
 
 Most fields default like `new-vm.sh` when left blank (hostname → the instance
-name, user → your host username, CPUs → half the host's cores, memory/disk →
-`8GiB`/`100GiB`). **`Name` is required** and starts empty — it does not silently
-default. `GitHub repo URL` and `GitHub token` are optional and used only to clone
-a private repo into the VM.
+name, user → your host username, CPUs → half the host's cores, memory → `8GiB`
+**or half your host's RAM, whichever is less**, disk → `100GiB`). **`Name` is
+required** and starts empty — it does not silently default. `GitHub repo URL` and
+`GitHub token` are optional and used only to clone a private repo into the VM.
+
+If the requested **disk** is larger than the free space on the volume backing
+Lima's instance store (`$LIMA_HOME`, else `~/.lima`), the form shows a
+non-blocking warning: qcow2 disks are sparse, so the VM still builds, but it may
+fail to grow to its full size once the volume fills.
 
 ### Progress / streaming view
 

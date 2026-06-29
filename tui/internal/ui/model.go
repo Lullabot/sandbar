@@ -58,9 +58,10 @@ type model struct {
 	confirmBase string // recreate base for a managed VM; "" disables recreate
 
 	// Create form.
-	inputs   []textinput.Model
-	focusIdx int
-	formErr  error
+	inputs       []textinput.Model
+	focusIdx     int
+	formErr      error
+	hostDiskFree int64 // free bytes on the Lima volume, sampled when the form opens (0 = unknown)
 
 	// Reset mode reuses the create form to reset a managed VM: the Name is locked
 	// to the target and two preserve toggles follow the inputs.
