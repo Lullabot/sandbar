@@ -12,11 +12,15 @@
         user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
 
     # Turn https://github.com/org/repo(.git) into host=github.com,
-    # relpath=org/repo, so the checkout mirrors the URL under ~/<host>/.
+    # relpath=org/repo, so the checkout mirrors the URL under ~/<host>/. Strip any
+    # trailing slash(es) before .git: a URL like .../org/repo/ would otherwise
+    # leave relpath="org/repo/", whose dirname is "org/repo" — collapsing the org
+    # directory onto the clone destination so "Create the org directory" creates
+    # the exact path git clone then refuses ("destination path already exists").
     - name: Parse the clone URL
       ansible.builtin.set_fact:
         _clone_host: "{{ project_clone_url | regex_replace('^[a-zA-Z]+://', '') | regex_replace('/.*$', '') }}"
-        _clone_relpath: "{{ project_clone_url | regex_replace('^[a-zA-Z]+://[^/]+/', '') | regex_replace('\\.git$', '') }}"
+        _clone_relpath: "{{ project_clone_url | regex_replace('^[a-zA-Z]+://[^/]+/', '') | regex_replace('/+$', '') | regex_replace('\\.git$', '') }}"
 
     - name: Derive the org directory and clone destination
       ansible.builtin.set_fact:

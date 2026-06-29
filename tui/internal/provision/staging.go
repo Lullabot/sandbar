@@ -19,10 +19,11 @@ var schemeRe = regexp.MustCompile(`^[a-zA-Z]+://`)
 
 // cloneOrgRelDir turns a clone URL into the per-org directory relative to the
 // guest home, mirroring roles/project/tasks/main.yml: host = first path segment
-// after the scheme, relpath = the rest minus a trailing ".git", and the result
-// is host/dirname(relpath) (e.g. https://github.com/org/repo -> github.com/org).
-// Returns ("", false) when the URL is empty or has no org component (a bare
-// repo with no directory part, so dirname is ".").
+// after the scheme, relpath = the rest minus any trailing slash(es) and a
+// trailing ".git", and the result is host/dirname(relpath) (e.g.
+// https://github.com/org/repo -> github.com/org). Returns ("", false) when the
+// URL is empty or has no org component (a bare repo with no directory part, so
+// dirname is ".").
 func cloneOrgRelDir(cloneURL string) (string, bool) {
 	if cloneURL == "" {
 		return "", false
@@ -34,6 +35,9 @@ func cloneOrgRelDir(cloneURL string) (string, bool) {
 	if !ok {
 		return "", false // host only, no path => no org
 	}
+	// Trim trailing slashes before ".git" so a URL like .../org/repo/ resolves to
+	// org "org", not "org/repo" — matching the role's regex_replace('/+$', '').
+	relpath = strings.TrimRight(relpath, "/")
 	relpath = strings.TrimSuffix(relpath, ".git")
 	org := path.Dir(relpath)
 	if org == "." {

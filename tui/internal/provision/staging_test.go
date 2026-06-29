@@ -54,6 +54,8 @@ func TestCloneOrgRelDir(t *testing.T) {
 	}{
 		{"https github org repo", "https://github.com/deviantintegral/claude-code-ansible", "github.com/deviantintegral", true},
 		{"trailing .git", "https://github.com/org/repo.git", "github.com/org", true},
+		{"trailing slash", "https://github.com/org/repo/", "github.com/org", true},
+		{"trailing .git and slash", "https://github.com/org/repo.git/", "github.com/org", true},
 		{"nested group", "https://gitlab.com/group/sub/repo", "gitlab.com/group/sub", true},
 		{"no org segment", "https://github.com/justrepo", "", false},
 		{"empty", "", "", false},
