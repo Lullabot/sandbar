@@ -10,6 +10,7 @@ import (
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -230,6 +231,45 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m = accepted.(model)
 	if m.view != viewProgress || !m.running {
 		t.Fatalf("a valid reset should provision (view=%v running=%v)", m.view, m.running)
+	}
+}
+
+// A list lifecycle action shows a live spinner: starting a VM marks an action in
+// flight (so the spinner animates and renders beside the status), a spinner tick
+// keeps animating while it runs, and the matching actionDoneMsg clears it.
+func TestListActionShowsSpinnerUntilDone(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Stopped", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	started, cmd := m.Update(runeKey('s'))
+	m = started.(model)
+	if !m.acting {
+		t.Fatal("starting a VM should mark an action in flight")
+	}
+	if cmd == nil {
+		t.Fatal("starting a VM should dispatch a command (action + spinner tick)")
+	}
+	if !strings.Contains(m.listView(), "starting") {
+		t.Fatalf("the list should show the in-flight status, got:\n%s", m.listView())
+	}
+
+	// While acting, a spinner tick keeps the animation going (returns a next tick).
+	_, tick := m.Update(spinner.TickMsg{})
+	if tick == nil {
+		t.Fatal("the spinner should keep ticking while an action is in flight")
+	}
+
+	// The action's completion clears the in-flight flag and stops the spinner.
+	done, _ := m.Update(actionDoneMsg{action: "start", name: "claude"})
+	m = done.(model)
+	if m.acting {
+		t.Fatal("actionDoneMsg should clear the in-flight flag")
+	}
+	if _, tick := m.Update(spinner.TickMsg{}); tick != nil {
+		t.Fatal("the spinner must stop ticking once the action is done")
 	}
 }
 

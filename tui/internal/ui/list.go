@@ -94,6 +94,19 @@ func (m model) vmByName(name string) vm.VM {
 	return vm.VM{Name: name}
 }
 
+// beginAction marks a quick list lifecycle action (start/stop/restart/delete) as
+// in flight and batches its command with the spinner tick, so the list shows a
+// live spinner beside the status line until the matching actionDoneMsg clears it.
+// The tick is only kicked when no action is already running, so a second key
+// press can't stack tick loops and spin the animation at double speed.
+func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
+	if m.acting {
+		return cmd
+	}
+	m.acting = true
+	return tea.Batch(cmd, m.spinner.Tick)
+}
+
 // updateList handles keys while the list (or its confirm overlay) is active.
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirming {
@@ -130,21 +143,21 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Start):
 		if n := m.selectedName(); n != "" {
 			m.status = "starting " + n + "…"
-			return m, startCmd(m.cli, n)
+			return m, m.beginAction(startCmd(m.cli, n))
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Stop):
 		if n := m.selectedName(); n != "" {
 			m.status = "stopping " + n + "…"
-			return m, stopCmd(m.cli, n)
+			return m, m.beginAction(stopCmd(m.cli, n))
 		}
 		return m, nil
 
 	case key.Matches(msg, m.keys.Restart):
 		if n := m.selectedName(); n != "" {
 			m.status = "restarting " + n + "…"
-			return m, restartCmd(m.cli, n)
+			return m, m.beginAction(restartCmd(m.cli, n))
 		}
 		return m, nil
 
@@ -191,7 +204,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		name := m.confirmName
 		m.confirming = false
 		m.status = "deleting " + name + "…"
-		return m, deleteCmd(m.cli, name)
+		return m, m.beginAction(deleteCmd(m.cli, name))
 
 	case "r":
 		// Recreate is gated to claude-vm-managed VMs (confirmBase is set only for
@@ -245,7 +258,12 @@ func (m model) listView() string {
 		prompt += "   [n] cancel"
 		b.WriteString("\n" + errStyle.Render(prompt))
 	case m.status != "":
-		b.WriteString("\n" + statusStyle.Render(m.status))
+		status := m.status
+		// While a lifecycle action runs, lead the status with the live spinner.
+		if m.acting {
+			status = m.spinner.View() + " " + status
+		}
+		b.WriteString("\n" + statusStyle.Render(status))
 	}
 
 	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))

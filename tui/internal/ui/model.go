@@ -53,6 +53,12 @@ type model struct {
 	detail      vm.VM
 	managedOnly bool // when true, the list shows only claude-vm-managed VMs
 
+	// acting is true while a quick list lifecycle action (start/stop/restart/
+	// delete) is in flight. It drives the spinner beside the list status line so
+	// these blocking limactl calls show live feedback, and is cleared by the
+	// matching actionDoneMsg.
+	acting bool
+
 	// Delete/recreate confirmation overlay on the list.
 	confirming  bool
 	confirmName string
@@ -141,7 +147,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.running {
+		// The spinner animates both for a long provisioner run and for a quick
+		// list lifecycle action; when neither is in flight, stop ticking.
+		if !m.running && !m.acting {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -167,6 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionDoneMsg:
+		m.acting = false // the action finished; stop the list spinner
 		label := msg.action + " " + msg.name
 		switch {
 		case msg.err != nil:
