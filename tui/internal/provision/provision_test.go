@@ -199,6 +199,140 @@ func TestCreateVM_RefusesExistingTarget(t *testing.T) {
 	}
 }
 
+// stubBaseVersion replaces the git/filesystem indirections used by the base
+// staleness check for the duration of a test, returning a captured record of the
+// version written to each base and a restore func.
+func stubBaseVersion(t *testing.T, current string, currentErr error, stamped map[string]string) map[string]string {
+	t.Helper()
+	written := map[string]string{}
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string) (string, error) { return current, currentErr }
+	readBaseVersionFn = func(base string) string { return stamped[base] }
+	writeBaseVersionFn = func(base, v string) error { written[base] = v; return nil }
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+	return written
+}
+
+// firstSecond reduces a call sequence to its leading two argv tokens, matching
+// the comparison style of TestCreateVM_BuildsBaseWhenAbsent (temp-file paths in
+// `start --name <tmp>` make full-argv comparison brittle).
+func firstSecond(calls [][]string) []struct{ first, second string } {
+	var got []struct{ first, second string }
+	for _, c := range calls {
+		cl := struct{ first, second string }{first: c[0]}
+		if len(c) > 1 {
+			cl.second = c[1]
+		}
+		got = append(got, cl)
+	}
+	return got
+}
+
+// TestCreateVM_StaleBaseRebuilds: an existing base whose recorded playbook
+// version differs from the current one is force-deleted and rebuilt before the
+// clone, and the rebuilt base is stamped with the new version.
+func TestCreateVM_StaleBaseRebuilds(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "newsha", nil, map[string]string{"claude-base": "oldsha"})
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	type call = struct{ first, second string }
+	want := []call{
+		{"list", "claude"},        // exists-guard: target absent
+		{"list", "claude-base"},   // Status(base) -> Stopped
+		{"delete", "claude-base"}, // stale base force-deleted
+		{"start", "--name"},       // BuildBase: Create(base)
+		{"shell", "claude-base"},  // BuildBase: base provision
+		{"stop", "claude-base"},   // BuildBase: stop base
+		{"clone", "claude-base"},  // Clone
+		{"edit", "--set"},         // Configure clone sizes
+		{"start", "claude"},       // Start clone
+		{"shell", "claude"},       // finalize provision
+		{"stop", "claude"},        // bounce: stop
+		{"start", "claude"},       // bounce: start
+	}
+	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stale-base rebuild sequence mismatch:\n got %v\nwant %v", got, want)
+	}
+	// The force flag must be set when deleting the stale base.
+	for _, c := range f.calls {
+		if c[0] == "delete" && (len(c) < 3 || c[2] != "-f") {
+			t.Errorf("stale base delete missing -f: %v", c)
+		}
+	}
+	if written["claude-base"] != "newsha" {
+		t.Errorf("rebuilt base stamped %q, want newsha", written["claude-base"])
+	}
+}
+
+// TestCreateVM_FreshBaseReused: when the base's stamp matches the current
+// playbook version, the base is reused as-is — no delete, no rebuild.
+func TestCreateVM_FreshBaseReused(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"})
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("up-to-date base must not be deleted: %v", f.calls)
+		}
+		if c[0] == "start" && len(c) > 1 && c[1] == "--name" {
+			t.Fatalf("up-to-date base must not be rebuilt: %v", f.calls)
+		}
+	}
+}
+
+// TestCreateVM_UnstampedBaseRebuilds: a base with no recorded version (built
+// before stamping, or by an unknown path) is treated as stale and rebuilt.
+func TestCreateVM_UnstampedBaseRebuilds(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "anysha", nil, map[string]string{}) // no stamp
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	var deleted, rebuilt bool
+	for _, c := range f.calls {
+		if c[0] == "delete" && len(c) > 1 && c[1] == "claude-base" {
+			deleted = true
+		}
+		if c[0] == "start" && len(c) > 1 && c[1] == "--name" {
+			rebuilt = true
+		}
+	}
+	if !deleted || !rebuilt {
+		t.Fatalf("unstamped base should be deleted+rebuilt (deleted=%v rebuilt=%v): %v", deleted, rebuilt, f.calls)
+	}
+}
+
+// TestCreateVM_VersionErrorReusesBase: when the playbook version can't be
+// determined (e.g. not a git checkout), the existing base is reused rather than
+// rebuilt on every create.
+func TestCreateVM_VersionErrorReusesBase(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "", errors.New("not a git checkout"), map[string]string{"claude-base": "oldsha"})
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("base must be reused when version is unknown: %v", f.calls)
+		}
+	}
+}
+
 // TestRecreate deletes (force) then runs the full CreateVM sequence.
 func TestRecreate(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}

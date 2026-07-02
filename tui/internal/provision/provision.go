@@ -101,6 +101,16 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 	}
+
+	// Stamp the base with the playbook version it was built from so a later create
+	// can detect drift and rebuild instead of silently cloning stale content. A
+	// missing stamp (version unknown, or write failed) just forces a rebuild next
+	// time, so neither branch here is fatal to the build.
+	if v, err := playbookVersionFn(p.PlaybookDir); err != nil {
+		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
+	} else if err := writeBaseVersionFn(cfg.BaseName, v); err != nil {
+		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
+	}
 	return nil
 }
 
@@ -163,8 +173,21 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // absent, so the heavy base build runs; an existing but running base is stopped.
 func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	status, err := p.Lima.Status(cfg.BaseName)
+	exists := err == nil && status != ""
+
+	// A base built from an older playbook would clone stale content into every new
+	// VM, so rebuild it when the current playbook differs from what it was stamped
+	// with. The check is host-side (git + a stamp file), adding no limactl calls to
+	// the common up-to-date path.
+	if exists && p.baseStale(cfg.BaseName, out) {
+		if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
+			return fmt.Errorf("delete stale base image %q: %w", cfg.BaseName, err)
+		}
+		exists = false
+	}
+
 	switch {
-	case err != nil || status == "":
+	case !exists:
 		if err := p.BuildBase(ctx, cfg, out); err != nil {
 			return err
 		}
@@ -175,6 +198,30 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 		}
 	}
 	return nil
+}
+
+// baseStale reports whether an existing base image was built from a different
+// playbook version than the one that would be mounted now, and streams the
+// reason when it returns true. A missing/unreadable stamp counts as stale, so a
+// base built before version stamping is rebuilt once. A version-lookup error
+// (e.g. the playbook dir is not a git checkout) is treated as NOT stale — better
+// to reuse the base than to rebuild it on every create.
+func (p *Provisioner) baseStale(baseName string, out io.Writer) bool {
+	want, err := playbookVersionFn(p.PlaybookDir)
+	if err != nil {
+		step(out, "Note: could not determine the current playbook version (%v); reusing the existing base image %q.", err, baseName)
+		return false
+	}
+	have := readBaseVersionFn(baseName)
+	if have == want {
+		return false
+	}
+	if have == "" {
+		step(out, "Base image %q has no recorded playbook version; rebuilding it from the current playbook (%s)…", baseName, shortVersion(want))
+	} else {
+		step(out, "Base image %q was built from playbook %s but the current playbook is %s; rebuilding it…", baseName, shortVersion(have), shortVersion(want))
+	}
+	return true
 }
 
 // ResetOptions selects which of a VM's local state survives a reset. When both
