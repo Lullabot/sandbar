@@ -21,11 +21,17 @@ type readPipe struct {
 // provisionFunc matches Provisioner.CreateVM / Recreate.
 type provisionFunc func(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
 
-// beginProvision launches a provisioner call in a goroutine that writes to an
-// io.Pipe, and returns the commands that (a) stream the pipe into the viewport
-// and (b) animate the spinner. This is the non-blocking pattern: Update never
-// calls the provisioner directly — it only reacts to the messages this produces.
-func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
+// streamFunc is a generic streaming operation writing to out and honouring ctx.
+// It backs both provisioning and file transfers.
+type streamFunc func(ctx context.Context, out io.Writer) error
+
+// beginStream sets up the io.Pipe → viewport → spinner plumbing shared by
+// provisioning and file transfers, spawns run in a goroutine feeding the pipe,
+// and returns the commands that stream the pipe and animate the spinner. This is
+// the non-blocking pattern: Update never runs the operation directly — it only
+// reacts to the messages this produces. m.provCfg is cleared here so a run is NOT
+// recorded as managed unless the caller sets it afterwards (beginProvision does).
+func (m *model) beginStream(title string, run streamFunc) tea.Cmd {
 	pr, pw := io.Pipe()
 	m.reader = &readPipe{r: pr}
 	m.running = true
@@ -35,22 +41,31 @@ func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateCon
 	m.progressTitle = title
 	m.view = viewProgress
 	m.viewport.SetContent("")
-	// Remember the config so a successful run can be recorded as managed (and
-	// reproduced faithfully on a future recreate).
-	m.provCfg = cfg
+	m.provCfg = vm.CreateConfig{}
 
 	// A cancellable context lets ctrl+c (in Update) abort the run mid-flight,
-	// killing the limactl subprocess the provisioner is currently blocked on.
+	// killing the limactl subprocess the operation is currently blocked on.
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 
 	go func() {
 		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the
 		// reader; a non-nil err surfaces as that error on the final Read.
-		pw.CloseWithError(run(ctx, cfg, pw))
+		pw.CloseWithError(run(ctx, pw))
 	}()
 
 	return tea.Batch(readNextCmd(m.reader), m.spinner.Tick)
+}
+
+// beginProvision launches a provisioner call through beginStream and records its
+// config so a successful run can be marked managed (and reproduced faithfully on
+// a future recreate).
+func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
+	cmd := m.beginStream(title, func(ctx context.Context, out io.Writer) error {
+		return run(ctx, cfg, out)
+	})
+	m.provCfg = cfg
+	return cmd
 }
 
 // readNextCmd reads one chunk from the provisioner pipe. It emits a

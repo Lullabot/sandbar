@@ -262,9 +262,9 @@ There are no circular dependencies; the graph is acyclic.
 - ✔️ Task 3: Reusable `bubbles/list` file browser (depends on: 2)
 - ✔️ Task 6: Gated `limae2e` round-trip copy test (depends on: 1)
 
-### Phase 3: Integration
+### Phase 3: Integration ✅
 **Parallel Tasks:**
-- Task 5: Wire Upload/Download actions and the sequential transfer flow (depends on: 1, 3, 4)
+- ✔️ Task 5: Wire Upload/Download actions and the sequential transfer flow (depends on: 1, 3, 4)
 
 ### Phase 4: Documentation
 **Parallel Tasks:**

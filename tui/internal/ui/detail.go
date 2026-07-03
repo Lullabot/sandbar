@@ -8,9 +8,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// updateDetail handles keys on the read-only detail view.
+// updateDetail handles keys on the detail view: Back/Enter return to the list,
+// and Upload/Download start a file transfer for a running VM.
 func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case key.Matches(msg, m.keys.Upload):
+		return m.startTransfer(true) // host → guest
+	case key.Matches(msg, m.keys.Download):
+		return m.startTransfer(false) // guest → host
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
@@ -47,6 +52,12 @@ func (m model) detailView() string {
 	}
 	for _, f := range fields {
 		b.WriteString(labelStyle.Render(f[0]+":") + " " + f[1] + "\n")
+	}
+
+	// A transient status line surfaces the running-VM guard when Upload/Download
+	// can't proceed.
+	if m.status != "" {
+		b.WriteString("\n" + statusStyle.Render(m.status) + "\n")
 	}
 
 	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))

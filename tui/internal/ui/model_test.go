@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deviantintegral/claude-code-ansible/tui/internal/browse"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
@@ -270,6 +271,114 @@ func TestListActionShowsSpinnerUntilDone(t *testing.T) {
 	}
 	if _, tick := m.Update(spinner.TickMsg{}); tick != nil {
 		t.Fatal("the spinner must stop ticking once the action is done")
+	}
+}
+
+// Upload from a Running VM opens the source browser with a host lister and
+// records the transfer direction/VM.
+func TestUploadOpensBrowserForRunningVM(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Running"}
+
+	after, cmd := m.Update(runeKey('u'))
+	m = after.(model)
+
+	if m.view != viewBrowse {
+		t.Fatalf("upload on a running VM should open the browser, view=%v", m.view)
+	}
+	if cmd == nil {
+		t.Fatal("upload should issue the browser's Open command")
+	}
+	if !m.transferUpload {
+		t.Fatal("upload should set transferUpload=true")
+	}
+	if m.transferVM != "claude" {
+		t.Fatalf("transferVM = %q, want claude", m.transferVM)
+	}
+}
+
+// Download from a Running VM opens the browser as a guest-side (download)
+// transfer.
+func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Running"}
+
+	after, _ := m.Update(runeKey('d'))
+	m = after.(model)
+
+	if m.view != viewBrowse {
+		t.Fatalf("download on a running VM should open the browser, view=%v", m.view)
+	}
+	if m.transferUpload {
+		t.Fatal("download should set transferUpload=false")
+	}
+}
+
+// Upload/Download are guarded to running VMs: pressing 'u' on a Stopped VM stays
+// on the detail view and explains why, issuing no command.
+func TestTransferRequiresRunningVM(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
+
+	after, cmd := m.Update(runeKey('u'))
+	m = after.(model)
+
+	if m.view != viewDetail {
+		t.Fatalf("upload on a stopped VM must stay on the detail view, view=%v", m.view)
+	}
+	if cmd != nil {
+		t.Fatal("upload on a stopped VM should not issue a command")
+	}
+	if !strings.Contains(m.status, "must be running") {
+		t.Fatalf("status should explain the running requirement, got %q", m.status)
+	}
+}
+
+// Confirming the destination (ctrl+s) switches to the reused progress view and
+// starts the streamed transfer (state transition only — the fake lima client
+// makes the underlying copy a no-op).
+func TestDestConfirmTransitionsToProgress(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDest
+	m.transferVM = "claude"
+	m.transferSrc = "/home/u/file.txt"
+	m.transferUpload = false // download: guest source → host destination
+	m.dest = browse.NewDestInput("Destination dir: ", "/tmp/host-dst")
+
+	accepted, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = accepted.(model)
+
+	if m.view != viewProgress {
+		t.Fatalf("confirming the destination should switch to progress, view=%v", m.view)
+	}
+	if !m.running {
+		t.Fatal("confirming should start the transfer (running=true)")
+	}
+	if cmd == nil {
+		t.Fatal("confirming should return the streaming commands")
+	}
+	// A transfer must not be recorded as a managed VM.
+	if m.provCfg.Name != "" {
+		t.Fatalf("a transfer must clear provCfg so it is not recorded managed, got %q", m.provCfg.Name)
+	}
+}
+
+// A completed transfer (empty provCfg) must not be added to the managed registry
+// by the shared provisionDoneMsg handler.
+func TestTransferNotRecordedManaged(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewProgress
+	m.running = true
+	m.provCfg = vm.CreateConfig{} // a transfer leaves this empty
+
+	done, _ := m.Update(provisionDoneMsg{})
+	m = done.(model)
+
+	if m.reg.IsManaged("claude") {
+		t.Fatal("a transfer must never be recorded as a managed VM")
 	}
 }
 

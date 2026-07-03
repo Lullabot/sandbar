@@ -192,6 +192,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.detail = m.vmByName(name)
+		m.status = "" // start the detail view clean (its status is transfer guards)
 		m.view = viewDetail
 		return m, nil
 

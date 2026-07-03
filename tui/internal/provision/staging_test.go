@@ -70,6 +70,32 @@ func TestCloneOrgRelDir(t *testing.T) {
 	}
 }
 
+// CheckoutRelDir extends cloneOrgRelDir with the repo directory name, giving the
+// full guest-home-relative checkout path the TUI opens the guest browser at.
+func TestCheckoutRelDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		wantDir string
+		wantOK  bool
+	}{
+		{"https github org repo", "https://github.com/deviantintegral/claude-code-ansible", "github.com/deviantintegral/claude-code-ansible", true},
+		{"trailing .git", "https://github.com/org/repo.git", "github.com/org/repo", true},
+		{"trailing slash", "https://github.com/org/repo/", "github.com/org/repo", true},
+		{"nested group", "https://gitlab.com/group/sub/repo", "gitlab.com/group/sub/repo", true},
+		{"no org segment", "https://github.com/justrepo", "", false},
+		{"empty", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDir, gotOK := CheckoutRelDir(tc.url)
+			if gotDir != tc.wantDir || gotOK != tc.wantOK {
+				t.Fatalf("CheckoutRelDir(%q) = (%q, %v), want (%q, %v)", tc.url, gotDir, gotOK, tc.wantDir, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestGuestHome(t *testing.T) {
 	f := &stagingFakeRunner{streamOut: map[string][]byte{
 		"getent": []byte("andrew:x:1000:1000:Andrew Berry:/home/andrew:/bin/bash\n"),

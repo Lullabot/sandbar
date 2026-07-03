@@ -8,6 +8,7 @@ package ui
 import (
 	"context"
 
+	"github.com/deviantintegral/claude-code-ansible/tui/internal/browse"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/registry"
@@ -30,6 +31,8 @@ const (
 	viewDetail
 	viewForm
 	viewProgress
+	viewBrowse
+	viewDest
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
@@ -97,6 +100,17 @@ type model struct {
 	provCfg       vm.CreateConfig    // config of the instance being provisioned (for the managed registry)
 	cancel        context.CancelFunc // cancels the in-flight provisioner (ctrl+c on the progress view)
 	canceled      bool               // the current/last run was canceled by the user
+
+	// File transfer (Upload/Download). The browser and dest prompt are copy-safe
+	// (only a list.Model / textinput.Model plus small scalars), matching the
+	// value-passed model. destination is always a directory; the source is placed
+	// inside it, so the result is identical across the rsync/scp copy backends.
+	browser           browse.Browser
+	dest              browse.DestInput
+	transferVM        string // VM the transfer targets
+	transferUpload    bool   // true = upload (host→guest); false = download (guest→host)
+	transferSrc       string // chosen source (absolute; a host path, or a guest path without the "vm:" prefix)
+	transferRecursive bool   // the source is a directory (copied with -r)
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -146,6 +160,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Height = max(5, msg.Height-12)
 		m.table.SetWidth(max(40, msg.Width-6))
 		m.table.SetHeight(max(3, msg.Height-12))
+		// Resize an active file browser too (its inner list is only initialized
+		// while a transfer is in flight, so guard on the view to avoid touching a
+		// zero-value browser).
+		if m.view == viewBrowse {
+			m.browser.SetSize(max(20, msg.Width-6), max(5, msg.Height-8))
+		}
 		// Reflow any streamed output to the new width so it stays wrapped.
 		if m.output != "" {
 			m.setOutput()
@@ -252,6 +272,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		case viewProgress:
 			return m.updateProgress(msg)
+		case viewBrowse:
+			return m.updateBrowse(msg)
+		case viewDest:
+			return m.updateDest(msg)
 		}
 	}
 
@@ -286,6 +310,14 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewProgress:
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
+	case viewBrowse:
+		// Deliver the browser's own async dirLoadedMsg (an internal browse type)
+		// and any list ticks by forwarding every non-key message to it.
+		m.browser, cmd = m.browser.Update(msg)
+		return m, cmd
+	case viewDest:
+		m.dest, cmd = m.dest.Update(msg)
+		return m, cmd
 	default:
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
@@ -301,6 +333,10 @@ func (m model) View() string {
 		return m.formView()
 	case viewProgress:
 		return m.progressView()
+	case viewBrowse:
+		return m.browser.View()
+	case viewDest:
+		return m.destView()
 	default:
 		return m.listView()
 	}

@@ -14,6 +14,8 @@ type keyMap struct {
 	Filter    key.Binding
 	Search    key.Binding
 	Shell     key.Binding
+	Upload    key.Binding
+	Download  key.Binding
 	Back      key.Binding
 	Quit      key.Binding
 	Tab       key.Binding
@@ -29,15 +31,19 @@ type keyMap struct {
 
 func defaultKeys() keyMap {
 	return keyMap{
-		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
-		New:      key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-		Start:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
-		Stop:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
-		Restart:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
-		Delete:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		Filter:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter managed")),
-		Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		Shell:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
+		Enter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
+		New:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		Start:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
+		Stop:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
+		Restart: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
+		Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter managed")),
+		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		Shell:   key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
+		// Upload/Download live only on the detail view. 'd' is free there (delete
+		// lives on the list's confirm overlay, not the detail view).
+		Upload:   key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "upload")),
+		Download: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
@@ -62,7 +68,12 @@ func (m model) viewHelp() []key.Binding {
 		// (only ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
 		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewDetail:
-		return []key.Binding{m.keys.Back, m.keys.Quit}
+		return []key.Binding{m.keys.Upload, m.keys.Download, m.keys.Back, m.keys.Quit}
+	case viewBrowse:
+		// The browser draws its own enter/select/filter hint line; esc backs out.
+		return []key.Binding{m.keys.Back}
+	case viewDest:
+		return []key.Binding{m.keys.Submit, m.keys.Back}
 	case viewProgress:
 		// While a build runs, ctrl+c cancels it; q/esc are inert until it finishes.
 		if m.running {

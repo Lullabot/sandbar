@@ -46,6 +46,22 @@ func cloneOrgRelDir(cloneURL string) (string, bool) {
 	return host + "/" + org, true
 }
 
+// CheckoutRelDir returns the guest-home-relative directory the project role
+// clones a repo into (<host>/<org>/<repo>), or ("", false) when cloneURL is
+// empty or has no org segment. It extends cloneOrgRelDir (which yields the parent
+// <host>/<org>) by appending the repo directory name, so the TUI can open the
+// guest file browser at a VM's project checkout.
+func CheckoutRelDir(cloneURL string) (string, bool) {
+	orgRel, ok := cloneOrgRelDir(cloneURL)
+	if !ok {
+		return "", false
+	}
+	rest := schemeRe.ReplaceAllString(cloneURL, "")
+	rest = strings.TrimRight(rest, "/")
+	rest = strings.TrimSuffix(rest, ".git")
+	return orgRel + "/" + path.Base(rest), true
+}
+
 // guestHome resolves the guest user's home directory by reading the passwd entry
 // over `limactl shell` (`getent passwd <user>` => user:x:uid:gid:gecos:home:shell).
 // The home is field index 5; fewer than 7 fields means an unexpected line.
