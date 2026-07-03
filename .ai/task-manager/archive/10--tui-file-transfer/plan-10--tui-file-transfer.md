@@ -281,3 +281,76 @@ part of the default `go test ./...`.
 - Total Tasks: 7
 - Maximum Parallelism: 3 tasks (Phase 1)
 - Critical Path Length: 4 phases (Task 2 → 3 → 5 → 7)
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-03
+
+### Results
+
+All 7 tasks completed across 4 phases; the built-in Upload/Download file-transfer
+UI ships as designed. Delivered:
+
+- **Transport (Task 1)** — `lima.Client.Copy(ctx, out, recursive, src, dst)`
+  streams `limactl copy -v --backend=auto [-r] <src> <dst>` through the existing
+  `Runner.Stream` seam, plus a `GuestPath("<vm>:<path>")` helper. Argv is
+  unit-tested against the fake `Runner`.
+- **DirLister seam (Task 2)** — new `tui/internal/browse` package: a `DirEntry`
+  type, `DirLister` interface, a `localLister` over `os.ReadDir`, and a
+  `guestLister` running one `find … -printf` over `lima.Client.Shell`. Tested
+  with a temp dir and a fake `Runner`.
+- **File browser (Task 3)** — one source-agnostic `bubbles/list` `Browser` reused
+  for both sides, with async `DirLister` loading, a distinct navigate (`enter`) vs.
+  select (`ctrl+s`) affordance, POSIX path join/parent, and the built-in fuzzy
+  filter. Driven by a fake in-memory lister in tests.
+- **Destination prompt (Task 4)** — `NormalizePath` (backslash-unescape,
+  quote-strip, `file://` prefix) and a `DestInput` textinput wrapper that
+  normalizes bracketed-paste/drag-drop. `NormalizePath` is table-tested.
+- **Transfer flow (Task 5)** — `viewBrowse`/`viewDest` states wired into the
+  existing state machine; Upload (`u`) / Download (`d`) detail-view actions guarded
+  on a Running VM; per-direction start dirs (host cwd; guest checkout via new
+  exported `provision.CheckoutRelDir`); destination-is-a-directory contract;
+  transfer streamed through the reused `beginStream` pipe→viewport→spinner plumbing
+  (extracted from `beginProvision`) and never recorded in the managed registry.
+  Model transition tests cover the guard and both directions.
+- **Gated e2e (Task 6)** — `tui/internal/lima/copy_e2e_test.go`
+  (`//go:build limae2e` + `LIMA_E2E` guard) round-trips a file through real Lima
+  and asserts recursive destination-is-a-directory placement. Excluded from the
+  default `go test ./...`; compiles under `-tags limae2e`.
+- **Docs (Task 7)** — `README.md`, `tui/README.md` (keys + "Moving files in and
+  out"), and the `overlay.go` header comment now describe the in-TUI workflow
+  instead of manual `limactl copy`.
+
+Final verification (from `tui/`): `gofmt -l .` clean · `go build ./...` ok ·
+`go vet ./...` ok · `go test ./...` ok · `go test -race ./...` ok ·
+`go build -tags limae2e ./...` ok · `go vet -tags limae2e ./internal/lima/` ok.
+
+### Noteworthy Events
+
+- **Coordination deviation (deliberate).** The blueprint models Phase 1 (tasks
+  1/2/4) and Phase 2 (tasks 3/6) as parallel sub-agent work. Because tasks 2, 3,
+  and 4 all populate the *same* new `tui/internal/browse` package and task 5
+  consumes the exact API surface of tasks 1/3/4, the coordinator implemented the
+  tasks directly in strict dependency order (committing per phase) rather than
+  spawning parallel agents that would race on shared package files. Every phase
+  still passed its validation gate before the next began. Outcome is identical to
+  the intended plan; only the executor differs.
+- **go.sum update.** Importing `bubbles/list` for the first time pulled in its
+  transitive `github.com/sahilm/fuzzy` dependency, which was not yet in `go.sum`;
+  `go mod tidy` added it (`bubbles`/`bubbletea` versions unchanged).
+- **`d` key reuse.** Download binds `d` on the detail view; the list view's
+  delete already uses `d`, but the two never collide because each view dispatches
+  only its own bindings. Documented in `keys.go`.
+- **`provision.CheckoutRelDir`** was added (exported) so the UI can derive the
+  guest project checkout (`<host>/<org>/<repo>`) from a recorded `CloneURL`,
+  building on the existing unexported `cloneOrgRelDir`; it is unit-tested.
+- No blockers; module path kept as `github.com/deviantintegral/claude-code-ansible/tui`
+  (plans 06/07 not landed).
+
+### Recommendations
+
+- Run the gated e2e once on the Lima host to confirm the real round-trip:
+  `cd tui && LIMA_E2E=1 go test -tags limae2e -timeout 30m -run TestE2E ./internal/lima/`.
+- Natural follow-ups remain deferred by design (YAGNI): dual-pane layout,
+  multi-select per transfer, and overwrite/conflict prompts.
