@@ -212,9 +212,9 @@ The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/
 **Parallel Tasks:**
 - ✔️ Task 004: Point `registry.defaultPath` + shell `CACHE_DIR` at `sandbar`; migrate the managed index (copy→verify→remove) and race-safely clean up the old dir. (depends on: 003)
 
-### Phase 5: Completeness verification gate
+### ✅ Phase 5: Completeness verification gate
 **Parallel Tasks:**
-- Task 005: `go build`/`vet`/`fmt`/`test`, `shellcheck`, and the repo-wide zero-hit grep; confirm coupled pairs. (depends on: 004)
+- ✔️ Task 005: `go build`/`vet`/`fmt`/`test`, `shellcheck`, and the repo-wide zero-hit grep; confirm coupled pairs. (depends on: 004)
 
 ### Post-phase Actions
 After each phase: lint passes and a conventional commit is created (POST_PHASE). After all phases: POST_EXECUTION validation, execution summary, and archival.
@@ -224,3 +224,35 @@ After each phase: lint passes and a conventional commit is created (POST_PHASE).
 - Total Tasks: 5
 - Maximum Parallelism: 1 task (each phase)
 - Critical Path Length: 5 phases
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-03
+
+### Results
+
+The project was renamed in-repo from `deviantintegral/claude-code-ansible` (app `claude-vm`) to `lullabot/sandbar` (binary `sand`) across all 5 phases, each landed as its own conventional commit on `feature/06--rename-to-sandbar`:
+
+1. **Go module + binary** — `go.mod` module path → `github.com/lullabot/sandbar/tui`; all 46 import sites across 24 files rewritten; `tui/cmd/claude-vm` → `tui/cmd/sand` (built binary is `sand`); TUI title/status text and app-name comments updated.
+2. **Internal-artifact sweep** — every `claude-vm-*` artifact → `sand-*`, with both coupled pairs moved on both endpoints: `/dev/shm/sand-vars.yml` (new-vm.sh ↔ provision.go) and `/var/log/sand-{provision,finalize}.log` (new-vm.sh ↔ CI). Temp prefixes (`sand.XXXXXX`, `sand-base-*`, `sand-reset-*`) and the persistent `~/.lima/_sand/` dir renamed.
+3. **External-reference sweep** — repo/raw GitHub URLs, app name, and data-dir prose in `install.sh`, `scripts/new-vm.sh`, `README.md`, `tui/README.md` repointed to `lullabot/sandbar` / `sand`; Go repo-URL test fixtures (`provision_test.go`, `staging_test.go`, `overlay_test.go`) updated input+expected together.
+4. **Data-dir rename + migrate-then-cleanup** — `registry.defaultPath` and shell `CACHE_DIR` → `~/.local/share/sandbar`; `registry.Load()` now migrates a pre-rename index (copy → verify → remove old → rmdir-if-empty), covered by `TestMigrateLegacyIndex`; `install.sh`/`new-vm.sh` delete the old clone cache only when it holds no `managed-vms.json`.
+5. **Completeness verification** — `go build` (→ `sand`), `go vet`, `gofmt -l`, `go test ./...`, and `shellcheck install.sh scripts/new-vm.sh` all green; repo-wide grep: **0** `deviantintegral`, **0** `claude-vm`; coupled pairs confirmed identical on both sides.
+
+All Primary Success Criteria are met for the in-repo scope. Criterion #1 (the GitHub org transfer/redirects) remains the human-performed prerequisite noted in the plan and is outside this execution.
+
+### Noteworthy Events
+
+- **`claude-code-ansible` is intentionally NOT zero** (7 references remain), reconciling Success Criteria #3 and #4. Criterion #4 requires the code to migrate a pre-existing `~/.local/share/claude-code-ansible` index, which is impossible without naming the old path. The 7 remaining references are exactly and only that migration/cleanup machinery: `registry.go` `migrateLegacyIndex` (+comment, 3 hits), `registry_test.go` migration test (2 hits), and the `OLD_CACHE_DIR` cleanup guards in `install.sh`/`new-vm.sh` (2 hits). Zero **stale/unported** identity references remain — these deliberate ones are the mechanism that satisfies #4, and Task 5's acceptance criteria were refined to encode this. Plan 07 removes the shell scripts; the registry migration is the durable part and could be retired in a later cleanup once users have migrated.
+- **One-time base-image rebuild** on first run after the rename: `~/.lima/_claude-vm/` → `~/.lima/_sand/` means pre-existing base-image playbook-version stamps aren't found under the new name, so each pre-existing base image is treated as stale and rebuilt once. This self-heals with no data loss and is expected — not a regression.
+- **Tasks and blueprint were auto-generated** at execution time: plan 06 had no `tasks/` or Execution Blueprint, so both were generated (5 sequential tasks) before execution, per the execute-blueprint auto-generation path.
+- **Sequential (not parallel) phases**: the rename is inherently sequential because `new-vm.sh`, `install.sh`, `registry.go`, and `provision_test.go` are each touched by multiple stages; parallel phases would have broken task isolation. Max parallelism is therefore 1.
+- **`shellcheck` was installed** during execution (not present initially) so the shell-lint gate could run locally rather than deferring solely to CI.
+
+### Recommendations
+
+- **Complete the human prerequisite**: a lullabot org admin performs the GitHub transfer/rename to `lullabot/sandbar` so the updated raw/module URLs resolve; open the PR from `feature/06--rename-to-sandbar`.
+- **Run CI on the PR**, especially the `lima-e2e` job — it is the only end-to-end exercise of the coupled `/dev/shm` and `/var/log` provisioning paths that a local `go test` cannot cover.
+- **Proceed to Plan 07** (Homebrew tap + headless binary) once this lands; it consumes the `sandbar` name, `sand` binary, `lullabot` org, and `lullabot/homebrew-sandbar` tap established here.
+- **Future cleanup**: once the `claude-code-ansible` → `sandbar` data-dir migration has propagated to all users, the `migrateLegacyIndex` helper and its test can be removed, at which point the repo reaches a literal zero `claude-code-ansible`.
