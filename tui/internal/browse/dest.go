@@ -216,8 +216,15 @@ func (d DestInput) Update(msg tea.Msg) (DestInput, tea.Cmd) {
 			return d, d.accept()
 		}
 	}
+	// Only re-list/refilter when the value actually changed. Cursor-blink ticks
+	// and other periodic messages also reach here; refiltering on those would reset
+	// the highlighted suggestion on every blink.
+	before := d.ti.Value()
 	var cmd tea.Cmd
 	d.ti, cmd = d.ti.Update(msg)
+	if d.ti.Value() == before {
+		return d, cmd
+	}
 	return d, tea.Batch(cmd, d.maybeRelist())
 }
 

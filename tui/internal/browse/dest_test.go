@@ -97,3 +97,22 @@ func TestDestAutocomplete(t *testing.T) {
 		t.Fatalf("enter should fill the highlighted dir, value=%q want /root/alp2/", d.Value())
 	}
 }
+
+// A message that does not change the input value (a cursor-blink tick, arrow-left,
+// …) must NOT reset the highlighted suggestion. Regression: refiltering on every
+// blink stole the selection.
+func TestDestSelectionSurvivesNonEdits(t *testing.T) {
+	f := fakeLister{"/root": {{Name: "alpha", IsDir: true}, {Name: "beta", IsDir: true}}}
+	d, cmd := NewDestInput("dest: ", "/root/", f)
+	d, _ = d.Update(runCmd(cmd))
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown}) // highlight match 0
+	if d.cursor != 0 {
+		t.Fatalf("precondition: down should highlight match 0, cursor=%d", d.cursor)
+	}
+	// KeyLeft moves the textinput cursor without changing the value — the same
+	// fall-through path a blink tick takes; the selection must survive.
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if d.cursor != 0 {
+		t.Fatalf("a value-preserving message reset the selection, cursor=%d want 0", d.cursor)
+	}
+}
