@@ -239,3 +239,71 @@ After each phase, run `cd tui && go build ./... && go vet ./...` (and `go test .
 - Total Tasks: 5
 - Maximum Parallelism: 2 tasks (Phase 1, and again Phase 3)
 - Critical Path Length: 3 phases (002 → 003 → 004/005)
+
+---
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-03
+
+### Results
+
+All 5 tasks across 3 phases completed and committed on branch
+`feat/plan-05-tui-search`.
+
+- **Task 001 — Incremental name search (`/`)**: a new `Search` binding and a
+  `searching`/`searchQuery` model state. While searching, `updateList`
+  intercepts keys ahead of every action binding and the table's navigation, so
+  action letters (`s x d r S f n q`) and `j`/`k` edit the query; `esc` clears and
+  exits, `enter` keeps the filter, `ctrl+c` still quits. `refreshRows` applies a
+  case-insensitive name substring filter that composes with `managedOnly`, and
+  the live query renders near the status line. The binding shows contextually in
+  the list help bar.
+- **Task 002 — Disk-usage helper**: build-tagged `diskUsedBytes(dir) int64`
+  (`diskusage_unix.go` `linux || darwin` + `diskusage_other.go` fallback)
+  returns `st_blocks × 512` of `<dir>/disk`, or `-1` when unmeasurable — no new
+  dependency, mirroring the existing `hostres` split.
+- **Task 003 — Disk labels + real usage**: list header `Disk`→`Max Disk`, detail
+  `Disk`→`Maximum Disk Size` (value unchanged); a new `vm.VM.DiskUsed` field is
+  populated once per load on `vmsLoadedMsg` from each VM's `Dir`, rendered in a
+  new `Disk Used` list column and `Disk Used (allocated)` detail field. An
+  unmeasurable disk renders blank (not `0 B`) via `humanizeBytes("")`.
+- **Task 004 — Unit tests**: `search_test.go` (action-key capture, esc/enter
+  semantics, case-insensitive filter composing with managed-only) and
+  `diskusage_test.go` (present/missing/empty-dir → positive/`-1`). The
+  blank-vs-`0` humanize case was already covered by `format_test.go`.
+- **Task 005 — Token-lifecycle docs**: `README.md`'s "GitHub Authentication"
+  reworked into one 8-step create→supply→`.env` `GH_TOKEN`→direnv→precedence→
+  multi-org→rotate/revoke→reset walkthrough (PAT scope table preserved verbatim)
+  plus a one-line "Disk Used = allocated blocks" caveat; `tui/README.md` gains
+  the `/` keybinding row and `Max Disk`/`Disk Used` column descriptions and
+  cross-references the README instead of restating the token rules.
+
+**Verification (in `tui/`, the real gate since CI does not run the Go tests):**
+`go build ./...` PASS, `go test ./...` (and `-race`) PASS, `gofmt -l .` clean,
+`go vet ./...` PASS.
+
+### Noteworthy Events
+
+- Phases 1 and 3 each ran their two tasks in parallel; the tasks touched disjoint
+  files (Task 001 UI key routing vs Task 002 new helper files; Task 004 test
+  files vs Task 005 READMEs), so there were no merge conflicts.
+- Task 003 required no changes to existing tests — the column-layout change did
+  not break any hard-coded expectation.
+- Task 004 registered `claude` as a managed VM in the compose test so the
+  managed-only ∩ search intersection is a genuine narrowing rather than trivially
+  empty; classification is consistent with the base-name detection in the code.
+- Execution stayed on the pre-existing `feat/plan-05-tui-search` branch: the
+  feature-branch script is a no-op when already on a non-main branch. No `AGENTS.md`
+  exists in the repo, so the "documentation still correct" gate reduced to the two
+  README files, both updated by Task 005.
+- Committed as three phase commits: `3c9c1a4` (phase 1), `6a2b792` (phase 2),
+  `98a41a3` (phase 3).
+
+### Recommendations
+
+- Wire the TUI's Go tests into CI (deferred to the item-7 testing plan) so this
+  new logic is guarded remotely, not just locally.
+- Eyeball `Disk Used` against `du -B1 --apparent-size=no <dir>/disk` on a real
+  cloned Lima VM as a one-time sanity check of the allocated-block figure.
