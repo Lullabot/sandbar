@@ -1,4 +1,4 @@
-// Package registry tracks which Lima instances were created by claude-vm so the
+// Package registry tracks which Lima instances were created by sand so the
 // TUI can mark them and gate destructive operations. This matters because
 // recreate clones from a Claude base image and would replace ANY instance it is
 // pointed at; Lima does not record a clone's source, so we keep our own small
@@ -14,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // entry is the per-VM record. Config is the (secret-free) create configuration
@@ -31,7 +31,7 @@ type fileSchema struct {
 	VMs map[string]entry `json:"vms"`
 }
 
-// Registry is an in-memory index of claude-vm-managed instances, optionally
+// Registry is an in-memory index of sand-managed instances, optionally
 // backed by a JSON file. An empty path disables persistence (used in tests).
 type Registry struct {
 	path string
@@ -90,7 +90,7 @@ func LoadFrom(path string) (*Registry, error) {
 	return r, nil
 }
 
-// IsManaged reports whether name was created by claude-vm.
+// IsManaged reports whether name was created by sand.
 func (r *Registry) IsManaged(name string) bool {
 	_, ok := r.vms[name]
 	return ok

@@ -3,7 +3,7 @@ package provision
 import (
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 	"gopkg.in/yaml.v3"
 )
 

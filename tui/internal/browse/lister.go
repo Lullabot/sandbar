@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/lima"
 )
 
 // DirEntry is one directory member, normalized so the host and guest listers

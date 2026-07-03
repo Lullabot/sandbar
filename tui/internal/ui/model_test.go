@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/browse"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/browse"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/provision"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,7 +66,7 @@ func TestDeleteKeyEntersConfirm(t *testing.T) {
 	}
 }
 
-// Recreate must be gated to claude-vm-managed VMs: pressing 'r' in the confirm
+// Recreate must be gated to sand-managed VMs: pressing 'r' in the confirm
 // overlay on an UNMANAGED VM is a no-op (it must never replace an unrelated VM
 // with a Claude sandbox).
 func TestRecreateGatedForUnmanagedVM(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/provision"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"

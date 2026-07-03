@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/lima"
 )
 
 // stagingFakeRunner records argv (and streamed stdin) and, unlike the package's

@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/lima"
 )
 
 // schemeRe matches a leading URL scheme (e.g. "https://"), mirroring the strip

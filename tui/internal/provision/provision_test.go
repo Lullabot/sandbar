@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // fakeRunner records the argv of every limactl call (and the stdin of every
