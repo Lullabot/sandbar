@@ -266,9 +266,9 @@ There are no circular dependencies; the graph is acyclic.
 **Parallel Tasks:**
 - ✔️ Task 5: Wire Upload/Download actions and the sequential transfer flow (depends on: 1, 3, 4)
 
-### Phase 4: Documentation
+### Phase 4: Documentation ✅
 **Parallel Tasks:**
-- Task 7: Document the in-TUI Upload/Download workflow (depends on: 5)
+- ✔️ Task 7: Document the in-TUI Upload/Download workflow (depends on: 5)
 
 ### Post-phase Actions
 After each phase that touched Go code, run the validation gate above, then create

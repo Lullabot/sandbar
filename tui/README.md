@@ -79,9 +79,42 @@ Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appea
 
 | Key | Action |
 |-----|--------|
+| `u` | **Upload** a host file/directory into the VM (must be running) — see [Moving files in and out](#moving-files-in-and-out) |
+| `d` | **Download** a guest file/directory to the host (must be running) |
 | `esc` / `backspace` | Back to the list |
 | `enter` | Back to the list |
 | `q` | Quit |
+
+### File browser (upload/download source)
+
+One `bubbles/list` browser is used for **both** the host and guest sides. It
+opens when you press `u`/`d` on the detail view.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` (also `k` / `j`) | Move the selection |
+| `enter` | Enter the highlighted directory (or, on a file, select it) |
+| `ctrl+s` | **Select** the highlighted entry — a directory is copied recursively |
+| `/` | Fuzzy-filter the current directory |
+| `esc` | Back to the detail view |
+
+`..` navigates to the parent directory. Enter (navigate into) and `ctrl+s`
+(select for copy) are deliberately distinct, so choosing a directory as a
+recursive-copy source never collides with entering it.
+
+### Destination prompt
+
+| Key | Action |
+|-----|--------|
+| typing / paste | Edit the destination **directory** (the selection is placed inside it) |
+| `ctrl+s` | Confirm and start the transfer (switches to the progress view) |
+| `esc` | Back to the browser |
+
+The prompt is pre-filled with a sensible default (the guest project checkout for
+uploads, the host working directory for downloads) and accepts typed, pasted, or
+**drag-and-dropped** paths — a dropped path is un-escaped automatically
+(backslash-escaped spaces, surrounding quotes, and an optional `file://` prefix
+are stripped).
 
 ### Create form
 
@@ -121,6 +154,35 @@ The slow lifecycle steps — building the base image, cloning, and booting — s
 their `limactl` output live (with `==>` phase banners), so a first-ever creation
 (which builds the base image before your VM is cloned) shows continuous progress
 instead of a silent spinner.
+
+## Moving files in and out
+
+Open a VM with `enter`, then press `u` (**Upload**, host → guest) or `d`
+(**Download**, guest → host) on the detail view. Both require the VM to be
+**Running** (the copy rides Lima's SSH transport); on a stopped VM the action
+explains why and does nothing.
+
+Each transfer is a short, sequential wizard:
+
+1. **Pick a source** in the file browser — one `bubbles/list` widget used for
+   both host and guest, with a built-in fuzzy filter (`/`). `enter` navigates
+   into directories; `ctrl+s` selects the highlighted file **or** directory (a
+   directory is copied recursively).
+2. **Confirm a destination directory** in a prompt pre-filled with a sensible
+   default. The destination is always a **directory** and the selected item is
+   placed inside it, so the result is identical whether Lima's `rsync` or `scp`
+   backend runs. Typed, pasted, and drag-dropped paths are accepted.
+3. **Watch progress stream** in the same progress pane as provisioning;
+   `ctrl+c` cancels.
+
+This is the in-posture replacement for the old manual `limactl copy`: every
+transfer is a discrete, user-initiated copy, so **nothing leaves the VM** by
+default — there is no writable host mount, no standing share, no new network or
+credential, and `limactl delete` still removes everything.
+
+For v1 a transfer moves **one file or one directory at a time** in a single
+direction; a dual-pane layout, multi-select, and overwrite prompts are
+deliberately deferred.
 
 ## Reset a VM
 
@@ -224,7 +286,9 @@ security posture:
   driven by the `provision_phase` variable (`base` / `finalize` / `full`).
 - **Ephemeral VMs**: the only mount is the playbook, **read-only** — there is no
   writable host mount, so `limactl delete <name>` provably removes everything a VM
-  produced. Move files in or out with `limactl copy`.
+  produced. Move files in or out with the TUI's **Upload**/**Download** actions
+  (see [Moving files in and out](#moving-files-in-and-out)) — discrete,
+  user-initiated copies, so no writable share or standing network is introduced.
 - **Secrets in tmpfs**: per-phase Ansible vars (which may carry a clone token) are
   streamed into the guest's tmpfs and removed on exit; they never land in argv or
   on the persistent disk.

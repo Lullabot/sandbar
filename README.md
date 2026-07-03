@@ -100,7 +100,10 @@ How it spins up the VM:
   mount), so the VM cannot modify anything on your machine and
   `limactl delete <name>` provably removes everything it produced — important
   when the whole point is to throw away potentially compromised code. Move
-  files in or out with `limactl copy`.
+  files in or out with the TUI's **Upload**/**Download** actions on a VM's
+  detail view: each transfer is a discrete, user-initiated `limactl copy` under
+  the hood, so there is still **no writable host mount or standing share** and
+  `limactl delete` provably removes everything.
 - Your answers are passed to Ansible as `--extra-vars`, so there is no
   `group_vars/all.yml` to maintain per VM; each instance is independent.
 
