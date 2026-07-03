@@ -10,7 +10,7 @@ import (
 
 func TestRenderBaseOverlay(t *testing.T) {
 	cfg := vm.CreateConfig{CPUs: 4, Memory: "8GiB", Disk: "100GiB"}
-	const playbookDir = "/home/andrew/src/claude-code-ansible"
+	const playbookDir = "/home/andrew/src/sandbar"
 
 	data, err := RenderBaseOverlay(cfg, playbookDir)
 	if err != nil {

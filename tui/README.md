@@ -1,6 +1,6 @@
-# claude-vm — interactive TUI
+# sand — interactive TUI
 
-`claude-vm` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) terminal
+`sand` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) terminal
 UI for managing this project's disposable Claude Code [Lima](https://lima-vm.io/)
 VMs, with full CRUD: list and inspect instances, create new ones, run lifecycle
 actions (start / stop / restart), and delete or recreate them.
@@ -28,8 +28,8 @@ scrollable progress pane.
 
 ```bash
 cd tui
-go build -o claude-vm ./cmd/claude-vm
-./claude-vm
+go build -o sand ./cmd/sand
+./sand
 ```
 
 ## Keybindings
@@ -52,14 +52,14 @@ the screen.
 | `x` | Stop the selected VM |
 | `r` | Restart the selected VM |
 | `d` | Delete the selected VM (opens a confirmation) |
-| `f` | Toggle the filter: show all VMs ↔ only claude-vm instances (managed + base) |
+| `f` | Toggle the filter: show all VMs ↔ only sand instances (managed + base) |
 | `/` | Incremental name search — type to filter the list by name; `esc` clears and exits, `enter` keeps the filter |
 | `q` | Quit |
 
 Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
 the TUI resumes when you exit the shell.
 
-The **Managed** column marks which VMs `claude-vm` created: `yes` for a managed
+The **Managed** column marks which VMs `sand` created: `yes` for a managed
 clone, `base` for a base image other VMs are cloned from (e.g. `claude-base`), and
 `no` otherwise. See [Managed VMs and safety](#managed-vms-and-safety) below.
 
@@ -230,11 +230,11 @@ confirmation) delete any of them; those are ordinary `limactl` operations.
 
 **Recreate is different**: it deletes the instance and re-clones it from a Claude
 base image, so pointing it at an unrelated VM would replace that VM with a sandbox.
-To prevent this, `claude-vm` records the instances **it** creates and:
+To prevent this, `sand` records the instances **it** creates and:
 
 - marks them in the **Managed** column (and the detail view), and
 - offers **recreate only for managed VMs** (`f` filters the list down to
-  claude-vm's own instances — managed clones and base images).
+  sand's own instances — managed clones and base images).
 
 Base images (the heavy, identity-free images each VM is cloned from, such as
 `claude-base`) are shown as `base` in the **Managed** column and labelled "base
@@ -242,7 +242,7 @@ image (clone source)" in the detail view, so they stand out from the disposable
 VMs cloned from them.
 
 The index of managed VMs is a small JSON file at
-`${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible/managed-vms.json` (the
+`${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json` (the
 same data dir `new-vm.sh` uses). It is updated when you create, recreate, or delete
 a VM from the TUI, and reconciled against `limactl list` on each refresh so an
 instance deleted outside the TUI stops being flagged managed. VMs created outside

@@ -204,9 +204,9 @@ The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/
 **Parallel Tasks:**
 - ✔️ Task 002: Rename every internal `claude-vm-*` artifact to `sand-*` — the two coupled pairs (`/dev/shm/sand-vars.yml`; `/var/log/sand-{provision,finalize}.log`) on both endpoints, temp prefixes, and `~/.lima/_sand/`. (depends on: 001)
 
-### Phase 3: External-reference sweep
+### ✅ Phase 3: External-reference sweep
 **Parallel Tasks:**
-- Task 003: Repoint repo/raw URLs, org, app name, and data-dir prose to `lullabot/sandbar` / `sand` across `install.sh`, `new-vm.sh`, `README.md`, `tui/README.md`, and the Go repo-URL test fixtures. (depends on: 002)
+- ✔️ Task 003: Repoint repo/raw URLs, org, app name, and data-dir prose to `lullabot/sandbar` / `sand` across `install.sh`, `new-vm.sh`, `README.md`, `tui/README.md`, and the Go repo-URL test fixtures. (depends on: 002)
 
 ### Phase 4: Data dir rename + migrate-then-cleanup
 **Parallel Tasks:**
