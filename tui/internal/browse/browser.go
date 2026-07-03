@@ -137,6 +137,7 @@ func (b Browser) Update(msg tea.Msg) (Browser, tea.Cmd) {
 			items = append(items, item{e: e})
 		}
 		cmd := b.list.SetItems(items)
+		b.list.ResetFilter() // show the new directory in full, not narrowed by the old filter
 		b.list.ResetSelected()
 		return b, cmd
 
@@ -186,6 +187,9 @@ func (b *Browser) applySelect(it item) {
 		b.selDir = it.e.IsDir
 	}
 	b.selected = true
+	// Clear the filter so returning to the browser (e.g. esc from the dest prompt)
+	// shows the full listing again rather than the previously narrowed one.
+	b.list.ResetFilter()
 }
 
 // View renders the list and any load error.

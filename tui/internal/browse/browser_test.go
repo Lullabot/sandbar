@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -149,5 +150,37 @@ func TestBrowserClearSelection(t *testing.T) {
 	b.ClearSelection()
 	if _, _, ok := b.Selected(); ok {
 		t.Fatal("ClearSelection should discard the pending selection")
+	}
+}
+
+// The fuzzy filter must clear when navigating into a directory and when selecting
+// an entry, so the next listing (or a return to the browser) shows everything
+// instead of the previously narrowed view.
+func TestBrowserClearsFilterOnNavigateAndSelect(t *testing.T) {
+	f := fakeLister{
+		"/root":       {{Name: "alpha", IsDir: true}, {Name: "beta", IsDir: true}},
+		"/root/alpha": {{Name: "child", IsDir: true}},
+	}
+
+	// Navigating into a directory clears an applied filter.
+	b := NewBrowser(f, "t")
+	b.SetSize(80, 24)
+	b, _ = b.Update(runCmd(b.Open("/root")))
+	b.list.SetFilterText("alpha")
+	b.list.SetFilterState(list.FilterApplied)
+	b, _ = b.Update(dirLoadedMsg{path: "/root/alpha", entries: f["/root/alpha"]})
+	if b.list.FilterState() != list.Unfiltered {
+		t.Fatalf("navigation should clear the filter, state=%v", b.list.FilterState())
+	}
+
+	// Selecting an entry clears the filter too (so returning shows everything).
+	b2 := NewBrowser(f, "t2")
+	b2.SetSize(80, 24)
+	b2, _ = b2.Update(runCmd(b2.Open("/root")))
+	b2.list.SetFilterText("beta")
+	b2.list.SetFilterState(list.FilterApplied)
+	b2.applySelect(item{e: DirEntry{Name: "beta", IsDir: true}})
+	if b2.list.FilterState() != list.Unfiltered {
+		t.Fatalf("select should clear the filter, state=%v", b2.list.FilterState())
 	}
 }
