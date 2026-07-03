@@ -217,10 +217,10 @@ graph TD
 
 No circular dependencies: the graph is acyclic.
 
-### Phase 1: Independent foundations
+### ✅ Phase 1: Independent foundations
 **Parallel Tasks:**
-- Task 001: Incremental name-search mode bound to `/` (search state, key routing, `refreshRows` filter, help)
-- Task 002: Build-tagged disk-usage helper (`diskUsedBytes` — allocated blocks of `<dir>/disk`)
+- ✔️ Task 001: Incremental name-search mode bound to `/` (search state, key routing, `refreshRows` filter, help)
+- ✔️ Task 002: Build-tagged disk-usage helper (`diskUsedBytes` — allocated blocks of `<dir>/disk`)
 
 ### Phase 2: Disk labels and usage rendering
 **Parallel Tasks:**

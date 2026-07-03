@@ -12,6 +12,7 @@ type keyMap struct {
 	Restart   key.Binding
 	Delete    key.Binding
 	Filter    key.Binding
+	Search    key.Binding
 	Shell     key.Binding
 	Back      key.Binding
 	Quit      key.Binding
@@ -35,6 +36,7 @@ func defaultKeys() keyMap {
 		Restart:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 		Delete:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		Filter:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter managed")),
+		Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		Shell:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
@@ -75,9 +77,13 @@ func (m model) viewHelp() []key.Binding {
 			}
 			return []key.Binding{m.keys.Confirm, m.keys.Cancel}
 		}
+		if m.searching {
+			// esc clears/exits, enter commits the filter.
+			return []key.Binding{m.keys.Back, m.keys.Enter}
+		}
 		return []key.Binding{
 			m.keys.Enter, m.keys.Shell, m.keys.New, m.keys.Start, m.keys.Stop,
-			m.keys.Restart, m.keys.Delete, m.keys.Filter, m.keys.Quit,
+			m.keys.Restart, m.keys.Delete, m.keys.Filter, m.keys.Search, m.keys.Quit,
 		}
 	}
 }

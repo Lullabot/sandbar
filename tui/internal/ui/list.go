@@ -54,6 +54,11 @@ func (m *model) refreshRows() {
 		if m.managedOnly && !managed && !base {
 			continue
 		}
+		// The name search composes with the managed-only filter: both must pass.
+		if m.searchQuery != "" &&
+			!strings.Contains(strings.ToLower(v.Name), strings.ToLower(m.searchQuery)) {
+			continue
+		}
 		owner := "no"
 		switch {
 		case base:
@@ -113,6 +118,36 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateConfirm(msg)
 	}
 
+	// While searching, typed keys build searchQuery and filter the table live,
+	// taking priority over every action binding and the table's own navigation.
+	// ctrl+c never reaches here — Update intercepts it before updateList — so it
+	// still quits.
+	if m.searching {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.searching = false
+			m.searchQuery = ""
+			m.refreshRows()
+			return m, nil
+		case tea.KeyEnter:
+			m.searching = false // keep the query; return to normal table navigation
+			return m, nil
+		case tea.KeyBackspace:
+			if m.searchQuery != "" {
+				r := []rune(m.searchQuery)
+				m.searchQuery = string(r[:len(r)-1])
+				m.refreshRows()
+			}
+			return m, nil
+		case tea.KeyRunes, tea.KeySpace:
+			m.searchQuery += string(msg.Runes)
+			m.refreshRows()
+			return m, nil
+		}
+		// Swallow any other key (arrows, tab, …) so it neither navigates nor acts.
+		return m, nil
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -125,6 +160,10 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "showing all VMs"
 		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Search):
+		m.searching = true
 		return m, nil
 
 	case key.Matches(msg, m.keys.New):
@@ -264,6 +303,11 @@ func (m model) listView() string {
 			status = m.spinner.View() + " " + status
 		}
 		b.WriteString("\n" + statusStyle.Render(status))
+	}
+
+	// Show the live search prompt (e.g. "/claude") while searching.
+	if m.searching {
+		b.WriteString("\n" + statusStyle.Render("/"+m.searchQuery))
 	}
 
 	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))

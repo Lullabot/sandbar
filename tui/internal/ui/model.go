@@ -53,6 +53,12 @@ type model struct {
 	detail      vm.VM
 	managedOnly bool // when true, the list shows only claude-vm-managed VMs
 
+	// Incremental name search. When searching is true, typed keys edit
+	// searchQuery instead of firing actions; searchQuery is a case-insensitive
+	// name substring filter applied in refreshRows (composes with managedOnly).
+	searching   bool
+	searchQuery string
+
 	// acting is true while a quick list lifecycle action (start/stop/restart/
 	// delete) is in flight. It drives the spinner beside the list status line so
 	// these blocking limactl calls show live feedback, and is cleared by the

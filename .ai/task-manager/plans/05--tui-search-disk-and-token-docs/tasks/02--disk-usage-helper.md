@@ -2,7 +2,7 @@
 id: 2
 group: "disk-usage"
 dependencies: []
-status: "pending"
+status: "completed"
 created: "2026-07-03"
 skills:
   - "go"
