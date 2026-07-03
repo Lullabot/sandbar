@@ -29,3 +29,32 @@ func TestGuestUserFromSSHConfig(t *testing.T) {
 		t.Fatalf("guestUser(\"\") = %q, want empty", got)
 	}
 }
+
+// guestHome reads the guest home from Lima's cloud-config.yaml. Lima places the
+// home at /home/<user>.guest (not /home/<user>), so it can't be derived from the
+// username — this is the value the transfer flow must use for the destination
+// default and the download start dir. A bare "default" entry in the users list
+// must be skipped, and a missing cloud-config yields "" so the caller falls back.
+func TestGuestHomeFromCloudConfig(t *testing.T) {
+	dir := t.TempDir()
+	// ssh.config sets the login user, so guestHome prefers that user's entry.
+	ssh := "Host lima-x\n  User andrew\n  Port 60022\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh.config"), []byte(ssh), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cc := "#cloud-config\nusers:\n  - default\n  - name: \"andrew\"\n    uid: \"1000\"\n    homedir: \"/home/andrew.guest\"\n    shell: /bin/bash\n"
+	if err := os.WriteFile(filepath.Join(dir, "cloud-config.yaml"), []byte(cc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := guestHome(dir); got != "/home/andrew.guest" {
+		t.Fatalf("guestHome = %q, want /home/andrew.guest (Lima places the home at /home/<user>.guest)", got)
+	}
+
+	// No cloud-config → "" so the caller falls back to the /home/<user> guess.
+	if got := guestHome(t.TempDir()); got != "" {
+		t.Fatalf("guestHome(no cloud-config) = %q, want empty", got)
+	}
+	if got := guestHome(""); got != "" {
+		t.Fatalf("guestHome(\"\") = %q, want empty", got)
+	}
+}

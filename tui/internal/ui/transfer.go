@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	yaml "gopkg.in/yaml.v3"
 )
 
 // startTransfer opens the file browser for an Upload (host→guest) or Download
@@ -157,31 +158,75 @@ func (m model) hostWorkDir() string {
 // project checkout (<home>/<host>/<org>/<repo>, derived from the recorded
 // CloneURL) when known, otherwise the guest home.
 //
-// The guest home is /home/<guest-user>, where the guest user is the account Lima
-// actually created — read from the instance's ssh.config, the exact user
-// `limactl copy`/`shell` authenticate as. Lima may name that account differently
-// from the host user (e.g. "andrew.guest" vs the host's "andrew"), so the host
-// `id -un` is only a last-resort fallback, never the source of truth.
+// The guest home is read from the instance's cloud-config.yaml, because Lima
+// places it at /home/<user>.guest — NOT /home/<user> — so it cannot be
+// reconstructed from the username. If that can't be read, fall back to the old
+// /home/<user> guess (ssh.config user, then recorded config, then host user).
 func (m model) guestDefaultDir() string {
 	cfg, ok := m.reg.Config(m.transferVM)
-	user := guestUser(m.detail.Dir)
-	if user == "" {
-		// ssh.config unreadable: fall back to the recorded config, then the host
-		// user (the old best-effort guess).
-		switch {
-		case ok && cfg.User != "":
+	home := guestHome(m.detail.Dir)
+	if home == "" {
+		user := guestUser(m.detail.Dir)
+		if user == "" && ok {
 			user = cfg.User
-		default:
+		}
+		if user == "" {
 			user = hostUser()
 		}
+		home = "/home/" + user
 	}
-	home := "/home/" + user
 	if ok && cfg.CloneURL != "" {
 		if rel, relOK := provision.CheckoutRelDir(cfg.CloneURL); relOK {
 			return home + "/" + rel
 		}
 	}
 	return home
+}
+
+// guestHome returns the guest login user's home directory for the Lima instance
+// whose data dir is instanceDir, read from Lima's generated cloud-config.yaml
+// (the cloud-init `homedir`). Lima places the guest home at /home/<user>.guest —
+// not /home/<user> — so the home cannot be reconstructed from the username. The
+// entry matching the ssh.config login user is preferred, otherwise the first
+// user carrying a homedir. Returns "" when it can't be determined so the caller
+// can fall back.
+func guestHome(instanceDir string) string {
+	if instanceDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(instanceDir, "cloud-config.yaml"))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Users []yaml.Node `yaml:"users"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	want := guestUser(instanceDir) // prefer the entry for the ssh login user
+	first := ""
+	for i := range doc.Users {
+		// The users list can hold a bare "default" string alongside mappings; skip
+		// anything that isn't a user mapping.
+		if doc.Users[i].Kind != yaml.MappingNode {
+			continue
+		}
+		var u struct {
+			Name    string `yaml:"name"`
+			Homedir string `yaml:"homedir"`
+		}
+		if err := doc.Users[i].Decode(&u); err != nil || u.Homedir == "" {
+			continue
+		}
+		if want != "" && u.Name == want {
+			return u.Homedir
+		}
+		if first == "" {
+			first = u.Homedir
+		}
+	}
+	return first
 }
 
 // guestUser returns the guest login user for the Lima instance whose data dir is
