@@ -178,3 +178,49 @@ This plan is the foundation for Plan 07: the Homebrew tap (`lullabot/homebrew-sa
 
 - 2026-07-03: Staleness refresh against `main` after Plans 05 (search/disk) and 10 (file transfer) landed. (1) Corrected the Go import-site count from **36 across 19 files** to **40 across 24 files** — new TUI files (`internal/browse/lister.go`, `internal/ui/{transfer,commands,form,progress}.go` and their tests) added import sites — in the frontmatter, Executive Summary, Current/Target table, Background, mermaid label, and sweep stage. (2) Added the **persistent host-side artifact** `~/.lima/_claude-vm/` (`baseVersionPath` in `internal/provision/baseversion.go`, added 2026-07-02) to the internal-artifact sweep, the Current/Target table, Background, and Decision Log, with a migration note that renaming it to `_sand` triggers a one-time base-image rebuild. Re-verified as still accurate (no change needed): the two coupled-pair line references (`new-vm.sh:419`↔`provision.go:27`; `new-vm.sh:447,462`↔`test.yml:118,119`), the temp prefixes, `tui/cmd/claude-vm`, and the external URL / data-dir references.
 - 2026-06-30: Refinement session. (1) Expanded rename scope to a full internal sweep of `claude-vm-*` artifacts and identified the two coupled host↔guest↔CI pairs (`/dev/shm` vars file; `/var/log` provision/finalize logs) that must move on both sides — added a dedicated Internal-artifact sweep stage and a coupled-pair risk. (2) Reframed the GitHub org transfer as a human-performed prerequisite (not an agent task) and removed the org-admin-rights implementation risk in favour of a prerequisite note. (3) Dropped the namespace due-diligence stage and fallback (identity pre-verified) and recorded the confirmed identity in a new Decision Log. (4) Changed the data-dir migration to migrate-then-cleanup, corrected the doc to note the dir is also the git-clone cache, and specified a race-safe cleanup guard (shell deletes the old dir only when no `managed-vms.json` remains). (5) Scoped the completeness grep to exclude `.ai/task-manager/` and `todo.md`. Updated the mermaid diagram, Current/Target table, Success Criteria, and frontmatter summary accordingly.
+
+## Task Dependency Diagram
+
+```mermaid
+graph TD
+    001[Task 001: Go module + binary rename] --> 002[Task 002: Internal-artifact sweep]
+    002 --> 003[Task 003: External-reference sweep]
+    003 --> 004[Task 004: Data dir rename + migrate-then-cleanup]
+    004 --> 005[Task 005: Completeness verification gate]
+```
+
+The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/internal/registry/registry.go`, and `tui/internal/provision/provision_test.go` are each touched by more than one stage, so running stages in parallel would break task isolation. This matches the plan's linear P→A→B→C→D→V flow.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Phase 1: Go module + binary rename
+**Parallel Tasks:**
+- Task 001: Rewrite the Go module path (`go.mod` + 46 imports across 24 files), `git mv tui/cmd/claude-vm → tui/cmd/sand`, and update user-facing `claude-vm` app-name strings/comments in `internal/ui` + `registry.go` comments.
+
+### Phase 2: Internal-artifact sweep
+**Parallel Tasks:**
+- Task 002: Rename every internal `claude-vm-*` artifact to `sand-*` — the two coupled pairs (`/dev/shm/sand-vars.yml`; `/var/log/sand-{provision,finalize}.log`) on both endpoints, temp prefixes, and `~/.lima/_sand/`. (depends on: 001)
+
+### Phase 3: External-reference sweep
+**Parallel Tasks:**
+- Task 003: Repoint repo/raw URLs, org, app name, and data-dir prose to `lullabot/sandbar` / `sand` across `install.sh`, `new-vm.sh`, `README.md`, `tui/README.md`, and the Go repo-URL test fixtures. (depends on: 002)
+
+### Phase 4: Data dir rename + migrate-then-cleanup
+**Parallel Tasks:**
+- Task 004: Point `registry.defaultPath` + shell `CACHE_DIR` at `sandbar`; migrate the managed index (copy→verify→remove) and race-safely clean up the old dir. (depends on: 003)
+
+### Phase 5: Completeness verification gate
+**Parallel Tasks:**
+- Task 005: `go build`/`vet`/`fmt`/`test`, `shellcheck`, and the repo-wide zero-hit grep; confirm coupled pairs. (depends on: 004)
+
+### Post-phase Actions
+After each phase: lint passes and a conventional commit is created (POST_PHASE). After all phases: POST_EXECUTION validation, execution summary, and archival.
+
+### Execution Summary
+- Total Phases: 5
+- Total Tasks: 5
+- Maximum Parallelism: 1 task (each phase)
+- Critical Path Length: 5 phases
