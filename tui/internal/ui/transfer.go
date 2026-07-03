@@ -99,11 +99,29 @@ func (m model) updateDest(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// transferDest computes the final copy destination. A directory source is placed
+// INSIDE destDir as destDir/<name>: `limactl copy -r src dst` copies the source
+// directory's *contents* into dst with the rsync backend (and nests it with scp),
+// so without the appended name a directory transfer spills its contents into
+// destDir instead of creating the directory. Files go straight into destDir. The
+// join and the source basename use POSIX vs host path semantics per side (an
+// upload's dest is a guest path and its source a host path; a download's are
+// reversed).
+func transferDest(destDir, srcPath string, recursive, upload bool) string {
+	if !recursive {
+		return destDir
+	}
+	if upload {
+		return path.Join(destDir, filepath.Base(srcPath)) // guest dest, host source
+	}
+	return filepath.Join(destDir, path.Base(srcPath)) // host dest, guest source
+}
+
 // launchCopy builds the source/destination endpoints per direction and runs the
-// copy through the reused streaming plumbing (viewProgress). The destination is
-// always a directory; a directory source sets recursive=true.
+// copy through the reused streaming plumbing (viewProgress). A directory source
+// is nested under the destination via transferDest.
 func (m model) launchCopy() (tea.Model, tea.Cmd) {
-	destDir := m.dest.Value()
+	destDir := transferDest(m.dest.Value(), m.transferSrc, m.transferRecursive, m.transferUpload)
 	var src, dst string
 	if m.transferUpload {
 		src, dst = m.transferSrc, lima.GuestPath(m.transferVM, destDir)

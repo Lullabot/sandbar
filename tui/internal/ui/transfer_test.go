@@ -58,3 +58,23 @@ func TestGuestHomeFromCloudConfig(t *testing.T) {
 		t.Fatalf("guestHome(\"\") = %q, want empty", got)
 	}
 }
+
+// A directory source must be nested under the destination (destDir/<name>): with
+// the rsync backend `limactl copy -r src dst` copies the source's contents into
+// dst, so without the appended name a directory transfer spills its contents into
+// destDir. Files go straight into destDir. Verified against real limactl (rsync
+// and scp) directory copies.
+func TestTransferDestNestsDirectories(t *testing.T) {
+	// Download a directory: nested under the host dest, not spilled.
+	if got := transferDest("/Users/a/dl", "/home/a.guest/proj/mydir", true, false); got != "/Users/a/dl/mydir" {
+		t.Fatalf("download dir dest = %q, want /Users/a/dl/mydir", got)
+	}
+	// Upload a directory: nested under the guest dest.
+	if got := transferDest("/home/a.guest/proj", "/Users/a/work/mydir", true, true); got != "/home/a.guest/proj/mydir" {
+		t.Fatalf("upload dir dest = %q, want /home/a.guest/proj/mydir", got)
+	}
+	// A file goes straight into the dest directory (no nesting).
+	if got := transferDest("/Users/a/dl", "/home/a.guest/proj/file.txt", false, false); got != "/Users/a/dl" {
+		t.Fatalf("file dest = %q, want /Users/a/dl unchanged", got)
+	}
+}
