@@ -251,11 +251,11 @@ graph TD
 
 There are no circular dependencies; the graph is acyclic.
 
-### Phase 1: Foundations (no dependencies)
+### Phase 1: Foundations (no dependencies) ✅
 **Parallel Tasks:**
-- Task 1: Add a streaming `Copy` method to `lima.Client`
-- Task 2: Build the `DirLister` seam (host + guest listers)
-- Task 4: Destination prompt + path normalization
+- ✔️ Task 1: Add a streaming `Copy` method to `lima.Client`
+- ✔️ Task 2: Build the `DirLister` seam (host + guest listers)
+- ✔️ Task 4: Destination prompt + path normalization
 
 ### Phase 2: Components & real-VM proof
 **Parallel Tasks:**

@@ -143,6 +143,15 @@ func TestMethodArgv(t *testing.T) {
 		{"stop-streaming", func(c *Client) { _ = c.StopStreaming(context.Background(), "vm1", io.Discard) }, []string{"stop", "vm1"}},
 		{"clone-streaming", func(c *Client) { _ = c.CloneStreaming(context.Background(), "base", "vm1", io.Discard) }, []string{"clone", "base", "vm1"}},
 		{"create-streaming", func(c *Client) { _ = c.CreateStreaming(context.Background(), "vm1", "/tmp/overlay.yaml", io.Discard) }, []string{"start", "--name", "vm1", "--tty=false", "/tmp/overlay.yaml"}},
+		// Copy builds `copy -v --backend=auto [-r] <src> <dst>`. A host->guest
+		// upload has no -r; a guest->host recursive download inserts -r before the
+		// endpoints, and GuestPath prefixes the instance with "<vm>:".
+		{"copy-upload", func(c *Client) {
+			_ = c.Copy(context.Background(), io.Discard, false, "/host/file.txt", GuestPath("vm1", "/home/u/dir"))
+		}, []string{"copy", "-v", "--backend=auto", "/host/file.txt", "vm1:/home/u/dir"}},
+		{"copy-download-recursive", func(c *Client) {
+			_ = c.Copy(context.Background(), io.Discard, true, GuestPath("vm1", "/home/u/src"), "/host/dst")
+		}, []string{"copy", "-v", "--backend=auto", "-r", "vm1:/home/u/src", "/host/dst"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

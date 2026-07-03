@@ -154,6 +154,26 @@ func (c *Client) Shell(ctx context.Context, name string, stdin io.Reader, out io
 	return c.r.Stream(ctx, stdin, out, args...)
 }
 
+// Copy wraps `limactl copy`, streaming its verbose output to out. The auto
+// backend prefers rsync (resumable) and falls back to scp; -v streams progress;
+// -r is used for directory sources. Guest endpoints are formed with GuestPath
+// ("<vm>:/path"); host endpoints are plain paths. The caller's contract is that
+// dst is always a DIRECTORY and src is placed inside it, so the result is
+// identical whether rsync or scp runs. It goes through Runner.Stream so a
+// cancelled ctx kills the transfer, exactly like the *Streaming methods.
+func (c *Client) Copy(ctx context.Context, out io.Writer, recursive bool, src, dst string) error {
+	args := []string{"copy", "-v", "--backend=auto"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, src, dst)
+	return c.runStream(ctx, out, args...)
+}
+
+// GuestPath forms a limactl guest endpoint ("<instance>:<path>") for copy/shell.
+// Host endpoints are plain paths and are passed through unchanged by callers.
+func GuestPath(instance, path string) string { return instance + ":" + path }
+
 // Preflight mirrors new-vm.sh's guards: limactl must be installed and new
 // enough to support `limactl clone`.
 func (c *Client) Preflight() error {

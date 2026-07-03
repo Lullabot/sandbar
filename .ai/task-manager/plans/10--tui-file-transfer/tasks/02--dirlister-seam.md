@@ -2,7 +2,7 @@
 id: 2
 group: "listing"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-07-03
 skills:
   - go
