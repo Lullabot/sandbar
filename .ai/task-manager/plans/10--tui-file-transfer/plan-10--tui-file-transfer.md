@@ -221,3 +221,63 @@ The work is additive within `tui/internal/ui` (new browser/transfer views and de
 
 - 2026-07-03: Initial plan created.
 - 2026-07-03: Refinement — confirmed sequential single-pane UX (Q1); adopted the destination-is-a-directory placement contract for cross-backend determinism (Q2); pinned browser start directories, guest at the checkout dir falling back to home (Q3); archived superseded plan 09 (Q4); strengthened risks with cancellation partial-file and backend trailing-slash notes; added this Decision Log and Change Log.
+- 2026-07-03: Task breakdown generated (7 tasks) and execution blueprint appended.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+- Per phase, where Go code changed: `cd tui && gofmt -l . && go build ./... && go vet ./... && go test ./...` must pass (the `limae2e` test is excluded from the default suite by its build tag).
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1["Task 1: lima.Client.Copy (transport)"]
+    T2["Task 2: DirLister seam (host + guest listers)"]
+    T3["Task 3: bubbles/list file browser"]
+    T4["Task 4: Destination prompt + path normalization"]
+    T5["Task 5: Transfer flow + Upload/Download actions"]
+    T6["Task 6: Gated real-VM round-trip copy test"]
+    T7["Task 7: Documentation"]
+
+    T2 --> T3
+    T1 --> T5
+    T3 --> T5
+    T4 --> T5
+    T1 --> T6
+    T5 --> T7
+```
+
+There are no circular dependencies; the graph is acyclic.
+
+### Phase 1: Foundations (no dependencies)
+**Parallel Tasks:**
+- Task 1: Add a streaming `Copy` method to `lima.Client`
+- Task 2: Build the `DirLister` seam (host + guest listers)
+- Task 4: Destination prompt + path normalization
+
+### Phase 2: Components & real-VM proof
+**Parallel Tasks:**
+- Task 3: Reusable `bubbles/list` file browser (depends on: 2)
+- Task 6: Gated `limae2e` round-trip copy test (depends on: 1)
+
+### Phase 3: Integration
+**Parallel Tasks:**
+- Task 5: Wire Upload/Download actions and the sequential transfer flow (depends on: 1, 3, 4)
+
+### Phase 4: Documentation
+**Parallel Tasks:**
+- Task 7: Document the in-TUI Upload/Download workflow (depends on: 5)
+
+### Post-phase Actions
+After each phase that touched Go code, run the validation gate above, then create
+a conventional-commit for the phase. The `limae2e` test (Task 6) is only run
+manually/CI with `-tags limae2e` and `LIMA_E2E=1` on a Lima host; it must never be
+part of the default `go test ./...`.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 7
+- Maximum Parallelism: 3 tasks (Phase 1)
+- Critical Path Length: 4 phases (Task 2 → 3 → 5 → 7)
