@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os/exec"
+	"strconv"
 
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
@@ -30,10 +31,21 @@ type (
 	provisionDoneMsg struct{ err error }
 )
 
-// listCmd loads the VM list off the Update goroutine.
+// listCmd loads the VM list off the Update goroutine, and measures each VM's
+// real disk consumption here in the command — a blocking per-VM stat that must
+// NOT run in Update, so an unresponsive mount (stale NFS, sleeping USB, autofs)
+// can't stall the Bubble Tea event loop. A non-positive result leaves DiskUsed
+// empty so the cell renders blank.
 func listCmd(cli *lima.Client) tea.Cmd {
 	return func() tea.Msg {
 		vms, err := cli.List()
+		if err == nil {
+			for i := range vms {
+				if n := diskUsedBytes(vms[i].Dir); n > 0 {
+					vms[i].DiskUsed = strconv.FormatInt(n, 10)
+				}
+			}
+		}
 		return vmsLoadedMsg{vms: vms, err: err}
 	}
 }

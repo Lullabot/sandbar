@@ -150,6 +150,17 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case key.Matches(msg, m.keys.Back):
+		// esc clears a committed name filter — the only place esc is meaningful in
+		// the list. With no active filter the case falls through to the table below,
+		// where esc/backspace stay inert, so this never eats a useful key.
+		if m.searchQuery != "" {
+			m.searchQuery = ""
+			m.status = ""
+			m.refreshRows()
+			return m, nil
+		}
+
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 
@@ -160,6 +171,10 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "showing claude-vm instances only (managed + base)"
 		} else {
 			m.status = "showing all VMs"
+		}
+		// Don't claim "showing all VMs" while a name filter is still narrowing them.
+		if m.searchQuery != "" {
+			m.status += fmt.Sprintf(" (name filter %q also active)", m.searchQuery)
 		}
 		return m, nil
 
@@ -306,9 +321,14 @@ func (m model) listView() string {
 		b.WriteString("\n" + statusStyle.Render(status))
 	}
 
-	// Show the live search prompt (e.g. "/claude") while searching.
-	if m.searching {
-		b.WriteString("\n" + statusStyle.Render("/"+m.searchQuery))
+	// Surface the name filter so it never hides VMs invisibly: a live prompt while
+	// typing, and a persistent indicator (with the key to clear it) once committed
+	// with enter — otherwise a committed filter silently drops rows on every reload.
+	switch {
+	case m.searching:
+		b.WriteString("\n" + statusStyle.Render("/"+m.searchQuery+"   enter: apply · esc: clear"))
+	case m.searchQuery != "":
+		b.WriteString("\n" + statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery)))
 	}
 
 	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))

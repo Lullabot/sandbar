@@ -156,3 +156,43 @@ func TestSearchFilterComposesWithManaged(t *testing.T) {
 		t.Fatalf("managed-only should intersect the search to the managed VM, got %v", names)
 	}
 }
+
+// After committing a search with enter (query kept, searching=false), the filter
+// stays active — so esc on the list must clear it and restore every row. Without
+// this the committed filter persists invisibly with no way to clear it.
+func TestSearchEscClearsCommittedFilter(t *testing.T) {
+	m := newTestModel(t)
+
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Running", CPUs: 2},
+		{Name: "other", Status: "Running", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	// Search "claude" and commit with enter (filter kept, not searching).
+	mi, _ := m.Update(runeKey('/'))
+	m = mi.(model)
+	for _, r := range []rune{'c', 'l', 'a', 'u', 'd', 'e'} {
+		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = mi.(model)
+	}
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mi.(model)
+	if m.searching || m.searchQuery != "claude" {
+		t.Fatalf("precondition: committed filter (searching=%v query=%q)", m.searching, m.searchQuery)
+	}
+	if names := rowNames(m); len(names) != 1 {
+		t.Fatalf("committed filter should narrow rows, got %v", names)
+	}
+
+	// esc on the list (no longer in search mode) clears the committed filter.
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mi.(model)
+	if m.searchQuery != "" {
+		t.Fatalf("esc should clear the committed filter, query = %q", m.searchQuery)
+	}
+	names := rowNames(m)
+	if len(names) != 2 || !contains(names, "claude") || !contains(names, "other") {
+		t.Fatalf("clearing the filter should restore every row, got %v", names)
+	}
+}

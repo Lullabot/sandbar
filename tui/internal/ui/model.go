@@ -7,7 +7,6 @@ package ui
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
@@ -168,15 +167,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "list failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.vms = msg.vms
-		// Measure each VM's real disk consumption once per load (a single stat per
-		// VM, microseconds, no file contents read). A non-positive result means the
-		// disk couldn't be measured; leave DiskUsed empty so the cell renders blank.
-		for i := range m.vms {
-			if n := diskUsedBytes(m.vms[i].Dir); n > 0 {
-				m.vms[i].DiskUsed = strconv.FormatInt(n, 10)
-			}
-		}
+		m.vms = msg.vms // DiskUsed is already measured in listCmd, off the Update goroutine
 		// Reconcile the managed index against reality so a VM deleted outside the
 		// TUI stops being flagged managed (and recreate-able).
 		present := make(map[string]bool, len(msg.vms))
