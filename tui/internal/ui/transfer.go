@@ -82,6 +82,10 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateDest(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyEsc:
+		// Drop the pending source pick so returning to the browser lets the user
+		// navigate/re-select, instead of the still-set selection bouncing them
+		// straight back here on the next keystroke.
+		m.browser.ClearSelection()
 		m.view = viewBrowse
 		return m, nil
 	case key.Matches(msg, m.keys.Submit):

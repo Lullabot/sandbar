@@ -2,6 +2,7 @@ package browse
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,11 @@ import (
 type fakeLister map[string][]DirEntry
 
 func (f fakeLister) List(_ context.Context, p string) ([]DirEntry, error) { return f[p], nil }
+
+// errLister always fails, to exercise the load-error path.
+type errLister struct{}
+
+func (errLister) List(context.Context, string) ([]DirEntry, error) { return nil, errors.New("boom") }
 
 // runCmd executes a tea.Cmd and returns its message (nil-safe).
 func runCmd(cmd tea.Cmd) tea.Msg {
@@ -93,5 +99,55 @@ func TestBrowserRootHasNoParent(t *testing.T) {
 	}
 	if p := parent("/a/b"); p != "/a" {
 		t.Fatalf("parent(/a/b) = %q, want /a", p)
+	}
+}
+
+// TestBrowserInitialLoadErrorIsNavigable: when the very first Open fails (e.g. a
+// download seeded at a guest checkout that doesn't exist), the browser must still
+// seed a ".." entry so the user can navigate up out of the missing directory
+// instead of being trapped in an empty list.
+func TestBrowserInitialLoadErrorIsNavigable(t *testing.T) {
+	b := NewBrowser(errLister{}, "err")
+	b.SetSize(80, 24)
+
+	b, _ = b.Update(runCmd(b.Open("/root/missing")))
+	if b.err == nil {
+		t.Fatal("expected the load error to be surfaced")
+	}
+	if got := len(b.list.Items()); got != 1 {
+		t.Fatalf("a failed initial load should seed a '..' entry, got %d items", got)
+	}
+	if it, ok := b.list.SelectedItem().(item); !ok || !it.up {
+		t.Fatalf("the seeded entry should be '..', got %+v", b.list.SelectedItem())
+	}
+	// Enter on ".." schedules a load of the parent, which may exist.
+	_, cmd := b.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	dl, ok := runCmd(cmd).(dirLoadedMsg)
+	if !ok {
+		t.Fatal("Enter on '..' should schedule a directory load")
+	}
+	if dl.path != "/root" {
+		t.Fatalf("'..' should navigate to the parent /root, got %q", dl.path)
+	}
+}
+
+// TestBrowserClearSelection: a pending selection can be discarded so the caller
+// (backing out of the destination prompt) can re-enter the browser and re-select
+// instead of being bounced straight back.
+func TestBrowserClearSelection(t *testing.T) {
+	f := fakeLister{"/root": {{Name: "a.txt", Size: 3}}}
+	b := NewBrowser(f, "clear")
+	b.SetSize(80, 24)
+	b, _ = b.Update(runCmd(b.Open("/root")))
+
+	// Move off ".." onto the file and select it with Enter.
+	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyDown})
+	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if _, _, ok := b.Selected(); !ok {
+		t.Fatal("precondition: selecting a file should leave a pending selection")
+	}
+	b.ClearSelection()
+	if _, _, ok := b.Selected(); ok {
+		t.Fatal("ClearSelection should discard the pending selection")
 	}
 }

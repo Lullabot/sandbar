@@ -103,6 +103,12 @@ func (b Browser) NotFiltering() bool { return b.list.FilterState() != list.Filte
 // a new directory clears a pending selection.
 func (b Browser) Selected() (string, bool, bool) { return b.selPath, b.selDir, b.selected }
 
+// ClearSelection discards a pending selection so the caller can re-enter the
+// browser (e.g. after backing out of the destination prompt) and navigate or pick
+// a different source, instead of being bounced straight back to the prompt on the
+// next keystroke.
+func (b *Browser) ClearSelection() { b.selected = false }
+
 // Update handles async load results and key input. Enter navigates into a
 // directory (or selects a file); the select key chooses the highlighted entry of
 // any type. While the fuzzy filter is being typed, keys are delegated to the list
@@ -111,7 +117,15 @@ func (b Browser) Update(msg tea.Msg) (Browser, tea.Cmd) {
 	switch msg := msg.(type) {
 	case dirLoadedMsg:
 		if msg.err != nil {
-			b.err = msg.err // keep the old items visible; surface the error
+			b.err = msg.err // surface the error; keep any already-loaded items visible
+			// On the INITIAL load there are no prior items and ".." is only added on
+			// success, so a missing/inaccessible start directory would trap the user in
+			// an empty list. Seed a ".." entry (unless at root) so they can still
+			// navigate up out of it.
+			if len(b.list.Items()) == 0 && msg.path != "/" {
+				b.path = msg.path
+				return b, b.list.SetItems([]list.Item{item{up: true}})
+			}
 			return b, nil
 		}
 		b.err = nil
