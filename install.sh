@@ -13,7 +13,14 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/lullabot/sandbar.git"
-CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
+CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/sandbar"
+
+# Remove the pre-rename clone-cache dir, but only when it holds no un-migrated
+# managed-VM index (the TUI owns that index and migrates it separately).
+OLD_CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
+if [ -d "$OLD_CACHE_DIR" ] && [ ! -f "$OLD_CACHE_DIR/managed-vms.json" ]; then
+  rm -rf "$OLD_CACHE_DIR"
+fi
 
 command -v git >/dev/null 2>&1 || { echo "error: git is required" >&2; exit 1; }
 command -v limactl >/dev/null 2>&1 || {

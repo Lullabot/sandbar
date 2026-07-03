@@ -44,7 +44,7 @@ func NewEmpty() *Registry {
 }
 
 // defaultPath mirrors new-vm.sh's data dir:
-// ${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible/managed-vms.json.
+// ${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json.
 func defaultPath() string {
 	base := os.Getenv("XDG_DATA_HOME")
 	if base == "" {
@@ -54,12 +54,41 @@ func defaultPath() string {
 		}
 		base = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(base, "claude-code-ansible", "managed-vms.json")
+	return filepath.Join(base, "sandbar", "managed-vms.json")
+}
+
+// migrateLegacyIndex copies a pre-rename managed index from the old
+// claude-code-ansible data dir into the new sandbar dir exactly once,
+// copy-before-remove so a crash cannot lose it.
+func migrateLegacyIndex(newPath string) {
+	if _, err := os.Stat(newPath); err == nil {
+		return // new index already present; nothing to do
+	}
+	base := filepath.Dir(filepath.Dir(newPath)) // .../.local/share
+	oldPath := filepath.Join(base, "claude-code-ansible", "managed-vms.json")
+	data, err := os.ReadFile(oldPath)
+	if err != nil {
+		return // no legacy index
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return
+	}
+	if err := os.WriteFile(newPath, data, 0o600); err != nil {
+		return
+	}
+	// verify the new file reads back before removing the old one
+	if back, err := os.ReadFile(newPath); err != nil || len(back) != len(data) {
+		return
+	}
+	_ = os.Remove(oldPath)
+	_ = os.Remove(filepath.Join(base, "claude-code-ansible")) // rmdir if empty
 }
 
 // Load reads the registry from the default path.
 func Load() (*Registry, error) {
-	return LoadFrom(defaultPath())
+	p := defaultPath()
+	migrateLegacyIndex(p)
+	return LoadFrom(p)
 }
 
 // LoadFrom reads the registry from an explicit path. A missing or empty file
