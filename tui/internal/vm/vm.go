@@ -16,13 +16,14 @@ const BaseDiskFloor = "20GiB"
 
 // VM is one Lima instance as reported by `limactl list`.
 type VM struct {
-	Name   string
-	Status string // Running | Stopped | ...
-	CPUs   int
-	Memory string
-	Disk   string
-	Dir    string
-	Arch   string
+	Name     string
+	Status   string // Running | Stopped | ...
+	CPUs     int
+	Memory   string
+	Disk     string // virtual/maximum size Lima reports (qcow2 max)
+	DiskUsed string // allocated on-disk bytes (raw string); "" = unknown/unmeasurable
+	Dir      string
+	Arch     string
 }
 
 // CreateConfig mirrors the answers new-vm.sh gathers.

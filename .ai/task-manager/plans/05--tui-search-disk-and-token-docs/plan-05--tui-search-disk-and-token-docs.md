@@ -222,9 +222,9 @@ No circular dependencies: the graph is acyclic.
 - ✔️ Task 001: Incremental name-search mode bound to `/` (search state, key routing, `refreshRows` filter, help)
 - ✔️ Task 002: Build-tagged disk-usage helper (`diskUsedBytes` — allocated blocks of `<dir>/disk`)
 
-### Phase 2: Disk labels and usage rendering
+### ✅ Phase 2: Disk labels and usage rendering
 **Parallel Tasks:**
-- Task 003: Relabel `Disk`→`Max Disk`/`Maximum Disk Size` and add the `Disk Used` column/field, populated on load (depends on: 002)
+- ✔️ Task 003: Relabel `Disk`→`Max Disk`/`Maximum Disk Size` and add the `Disk Used` column/field, populated on load (depends on: 002)
 
 ### Phase 3: Verification and documentation
 **Parallel Tasks:**

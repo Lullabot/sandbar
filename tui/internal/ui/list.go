@@ -21,8 +21,9 @@ func newTable() table.Model {
 		{Title: "Name", Width: 20},
 		{Title: "Status", Width: 10},
 		{Title: "CPUs", Width: 6},
-		{Title: "Memory", Width: 14},
-		{Title: "Disk", Width: 14},
+		{Title: "Memory", Width: 12},
+		{Title: "Max Disk", Width: 10},
+		{Title: "Disk Used", Width: 10},
 		{Title: "Managed", Width: 8},
 	}
 	t := table.New(
@@ -68,7 +69,7 @@ func (m *model) refreshRows() {
 		}
 		rows = append(rows, table.Row{
 			v.Name, v.Status, strconv.Itoa(v.CPUs),
-			humanizeBytes(v.Memory), humanizeBytes(v.Disk), owner,
+			humanizeBytes(v.Memory), humanizeBytes(v.Disk), humanizeBytes(v.DiskUsed), owner,
 		})
 	}
 	m.table.SetRows(rows)
