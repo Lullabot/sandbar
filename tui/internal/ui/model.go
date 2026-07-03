@@ -93,6 +93,7 @@ type model struct {
 	viewport      viewport.Model
 	spinner       spinner.Model
 	progressTitle string
+	progressBack  view // screen to return to when the finished progress view is dismissed
 	output        string
 	running       bool
 	doneErr       error

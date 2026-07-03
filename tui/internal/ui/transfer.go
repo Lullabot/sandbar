@@ -141,7 +141,7 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	}
 	// beginStream clears provCfg, so provisionDoneMsg will NOT record the transfer
 	// in the managed registry — a copy is not a managed VM.
-	return m, m.beginStream(title, run)
+	return m, m.beginStream(title, viewDetail, run)
 }
 
 // destView renders the destination-directory prompt.

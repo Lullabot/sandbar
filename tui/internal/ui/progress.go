@@ -31,7 +31,7 @@ type streamFunc func(ctx context.Context, out io.Writer) error
 // the non-blocking pattern: Update never runs the operation directly — it only
 // reacts to the messages this produces. m.provCfg is cleared here so a run is NOT
 // recorded as managed unless the caller sets it afterwards (beginProvision does).
-func (m *model) beginStream(title string, run streamFunc) tea.Cmd {
+func (m *model) beginStream(title string, back view, run streamFunc) tea.Cmd {
 	pr, pw := io.Pipe()
 	m.reader = &readPipe{r: pr}
 	m.running = true
@@ -39,6 +39,7 @@ func (m *model) beginStream(title string, run streamFunc) tea.Cmd {
 	m.doneErr = nil
 	m.output = ""
 	m.progressTitle = title
+	m.progressBack = back // where esc returns once the run finishes
 	m.view = viewProgress
 	m.viewport.SetContent("")
 	m.provCfg = vm.CreateConfig{}
@@ -61,7 +62,7 @@ func (m *model) beginStream(title string, run streamFunc) tea.Cmd {
 // config so a successful run can be marked managed (and reproduced faithfully on
 // a future recreate).
 func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
-	cmd := m.beginStream(title, func(ctx context.Context, out io.Writer) error {
+	cmd := m.beginStream(title, viewList, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
 	m.provCfg = cfg
@@ -101,7 +102,7 @@ func (m model) updateProgress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
-			m.view = viewList
+			m.view = m.progressBack // detail for a transfer, list for a provision
 			return m, nil
 		}
 	}
@@ -125,13 +126,17 @@ func (m model) progressView() string {
 	b.WriteString("\n")
 
 	if !m.running {
+		back := "list"
+		if m.progressBack == viewDetail {
+			back = "VM"
+		}
 		switch {
 		case m.canceled:
-			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the list."))
+			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the "+back+"."))
 		case m.doneErr != nil:
 			b.WriteString("\n" + errStyle.Render("Failed: "+m.doneErr.Error()))
 		default:
-			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the list."))
+			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the "+back+"."))
 		}
 	}
 

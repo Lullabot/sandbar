@@ -2,9 +2,7 @@ package browse
 
 import (
 	"context"
-	"fmt"
 	"path"
-	"strconv"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -33,15 +31,9 @@ func (i item) Title() string {
 	return i.e.Name
 }
 
-func (i item) Description() string {
-	if i.up {
-		return "parent directory"
-	}
-	if i.e.IsDir {
-		return "<dir>"
-	}
-	return humanizeSize(i.e.Size)
-}
+// Description satisfies list.DefaultItem but is unused: the browser hides
+// descriptions (a directory is obvious from its trailing "/").
+func (i item) Description() string { return "" }
 
 func (i item) FilterValue() string {
 	if i.up {
@@ -75,7 +67,13 @@ type Browser struct {
 // NewBrowser builds a Browser over lister with the given list title. Call Open to
 // populate it and SetSize to fit the terminal.
 func NewBrowser(lister DirLister, title string) Browser {
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	// A compact, single-line delegate: no per-item description (a directory is
+	// obvious from its trailing "/") and no blank line between entries.
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(nil, d, 0, 0)
 	l.Title = title
 	return Browser{lister: lister, list: l}
 }
@@ -205,18 +203,3 @@ func (b Browser) View() string {
 func join(dir, name string) string { return path.Join(dir, name) }
 
 func parent(dir string) string { return path.Dir(path.Clean(dir)) }
-
-// humanizeSize renders a byte count compactly (e.g. "1.5 KiB"), used as the file
-// description in the list.
-func humanizeSize(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-	div, exp := int64(unit), 0
-	for x := n / unit; x >= unit; x /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
-}
