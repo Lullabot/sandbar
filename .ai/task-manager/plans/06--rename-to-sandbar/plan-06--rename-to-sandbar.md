@@ -196,9 +196,9 @@ The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/
 **Validation Gates:**
 - Reference: `/config/hooks/POST_PHASE.md`
 
-### Phase 1: Go module + binary rename
+### ✅ Phase 1: Go module + binary rename
 **Parallel Tasks:**
-- Task 001: Rewrite the Go module path (`go.mod` + 46 imports across 24 files), `git mv tui/cmd/claude-vm → tui/cmd/sand`, and update user-facing `claude-vm` app-name strings/comments in `internal/ui` + `registry.go` comments.
+- ✔️ Task 001: Rewrite the Go module path (`go.mod` + 46 imports across 24 files), `git mv tui/cmd/claude-vm → tui/cmd/sand`, and update user-facing `claude-vm` app-name strings/comments in `internal/ui` + `registry.go` comments.
 
 ### Phase 2: Internal-artifact sweep
 **Parallel Tasks:**

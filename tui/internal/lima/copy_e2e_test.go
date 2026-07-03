@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // copyE2EOverlay is a minimal base overlay: the shipped Debian 13 image sized to

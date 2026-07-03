@@ -1,4 +1,4 @@
-// Command claude-vm is the interactive TUI for managing Claude Code development
+// Command sand is the interactive TUI for managing Claude Code development
 // VMs: list/inspect instances, create new ones (streaming the provisioner), and
 // run lifecycle actions (start/stop/restart/delete/recreate).
 package main
@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/ui"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/provision"
+	"github.com/lullabot/sandbar/tui/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

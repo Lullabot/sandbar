@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // inGuestScript is the bash body run inside the guest to provision one phase. It

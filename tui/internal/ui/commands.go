@@ -4,8 +4,8 @@ import (
 	"os/exec"
 	"strconv"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

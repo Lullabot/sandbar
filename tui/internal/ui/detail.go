@@ -37,7 +37,7 @@ func (m model) detailView() string {
 	case m.isBaseImage(v.Name):
 		managed = "base image (clone source)"
 	case m.reg.IsManaged(v.Name):
-		managed = "yes (claude-vm)"
+		managed = "yes (sand)"
 	}
 	fields := [][2]string{
 		{"Name", v.Name},

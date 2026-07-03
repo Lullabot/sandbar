@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"

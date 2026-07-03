@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // TestRoundTrip exercises the custom persistence: add -> reload -> remove must

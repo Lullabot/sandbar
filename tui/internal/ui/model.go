@@ -1,4 +1,4 @@
-// Package ui holds the Bubble Tea model, views, and commands for the claude-vm
+// Package ui holds the Bubble Tea model, views, and commands for the sand
 // TUI. It is a thin interactive surface over the lima.Client (VM lifecycle) and
 // provision.Provisioner (create/recreate) packages: all blocking I/O happens in
 // tea.Cmds so Update never stalls, and the long-running provisioner streams its
@@ -8,11 +8,11 @@ package ui
 import (
 	"context"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/browse"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/provision"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/registry"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/browse"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/provision"
+	"github.com/lullabot/sandbar/tui/internal/registry"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -54,7 +54,7 @@ type model struct {
 	table       table.Model
 	vms         []vm.VM
 	detail      vm.VM
-	managedOnly bool // when true, the list shows only claude-vm-managed VMs
+	managedOnly bool // when true, the list shows only sand-managed VMs
 
 	// Incremental name search. When searching is true, typed keys edit
 	// searchQuery instead of firing actions; searchQuery is a case-insensitive
@@ -237,7 +237,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, listCmd(m.cli)
 		}
 		m.doneErr = msg.err
-		// A successful create/recreate yields a claude-vm-managed VM; record it
+		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it.
 		if msg.err == nil && m.provCfg.Name != "" {

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/table"
@@ -14,7 +14,7 @@ import (
 
 // newTable builds the VM list table with its column layout. Name stays the
 // first column so SelectedRow()[0] is always the instance name. The trailing
-// "Managed" column flags VMs claude-vm created, which is what makes recreate
+// "Managed" column flags VMs sand created, which is what makes recreate
 // safe to gate.
 func newTable() table.Model {
 	cols := []table.Column{
@@ -34,7 +34,7 @@ func newTable() table.Model {
 	return t
 }
 
-// isBaseImage reports whether name is a claude-vm base image: a clone source for
+// isBaseImage reports whether name is a sand base image: a clone source for
 // a managed VM, or the default base name even before any clone exists. Base
 // images are the heavy, identity-free images each VM is cloned from, so the list
 // marks them distinctly from ordinary VMs.
@@ -50,7 +50,7 @@ func (m *model) refreshRows() {
 	for _, v := range m.vms {
 		managed := m.reg.IsManaged(v.Name)
 		base := m.isBaseImage(v.Name)
-		// The managed-only view shows claude-vm's own instances: managed clones
+		// The managed-only view shows sand's own instances: managed clones
 		// and the base image(s) they are cloned from.
 		if m.managedOnly && !managed && !base {
 			continue
@@ -168,7 +168,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.managedOnly = !m.managedOnly
 		m.refreshRows()
 		if m.managedOnly {
-			m.status = "showing claude-vm instances only (managed + base)"
+			m.status = "showing sand instances only (managed + base)"
 		} else {
 			m.status = "showing all VMs"
 		}
@@ -263,11 +263,11 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.beginAction(deleteCmd(m.cli, name))
 
 	case "r":
-		// Recreate is gated to claude-vm-managed VMs (confirmBase is set only for
+		// Recreate is gated to sand-managed VMs (confirmBase is set only for
 		// them); ignore it otherwise so a stray 'r' can't replace an unrelated VM.
 		if m.confirmBase == "" {
 			m.confirming = false
-			m.status = "recreate is only available for claude-vm-managed VMs"
+			m.status = "recreate is only available for sand-managed VMs"
 			return m, nil
 		}
 		name := m.confirmName
@@ -300,7 +300,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // listView renders the table, status line, optional confirm prompt, and help.
 func (m model) listView() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("claude-vm"))
+	b.WriteString(titleStyle.Render("sand"))
 	b.WriteString("\n\n")
 	b.WriteString(m.table.View())
 	b.WriteString("\n")

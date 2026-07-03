@@ -1,4 +1,4 @@
-module github.com/deviantintegral/claude-code-ansible/tui
+module github.com/lullabot/sandbar/tui
 
 go 1.24.2
 

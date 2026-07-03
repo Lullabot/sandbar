@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/lima"
 )
 
 // TestLocalListerMapsEntries checks the os.ReadDir -> DirEntry mapping against a

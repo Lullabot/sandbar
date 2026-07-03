@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/lima"
-	"github.com/deviantintegral/claude-code-ansible/tui/internal/vm"
+	"github.com/lullabot/sandbar/tui/internal/lima"
+	"github.com/lullabot/sandbar/tui/internal/vm"
 )
 
 // e2eOverlay is a minimal base overlay: the shipped Debian 13 image sized to the
