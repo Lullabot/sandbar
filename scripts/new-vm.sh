@@ -20,9 +20,9 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/deviantintegral/claude-code-ansible.git"
+REPO_URL="https://github.com/lullabot/sandbar.git"
 CACHE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-ansible"
-INSTALL_URL="https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh"
+INSTALL_URL="https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh"
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -170,7 +170,7 @@ Required (prompted if absent): --git-name, --git-email
 Passing flags over curl: a pipe sends stdin to bash, so flags must go after
 `bash -s --`, not after the pipe. For example, to rebuild an existing VM:
 
-  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash -s -- --recreate
+  curl -fsSL https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh | bash -s -- --recreate
 EOF
 }
 

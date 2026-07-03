@@ -388,7 +388,7 @@ func TestReset_NoPreserve(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+	cfg.CloneURL = "https://github.com/lullabot/sandbar"
 
 	if err := p.Reset(context.Background(), cfg, ResetOptions{}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)
@@ -428,7 +428,7 @@ func TestReset_BothPreserve(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.User = "andrew"
-	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+	cfg.CloneURL = "https://github.com/lullabot/sandbar"
 	opts := ResetOptions{PreserveClaude: true, PreserveProject: true}
 
 	if err := p.Reset(context.Background(), cfg, opts, io.Discard); err != nil {
@@ -437,13 +437,13 @@ func TestReset_BothPreserve(t *testing.T) {
 	calls := f.calls
 
 	// Stage-out: getent resolves home, then two `tar -czf -` archives (claude,
-	// then project under github.com/deviantintegral).
+	// then project under github.com/lullabot).
 	getent := findCall(t, calls, 0, "getent", func(c []string) bool { return hasTok(c, "getent") })
 	outClaude := findCall(t, calls, getent+1, "stage-out claude (-czf .claude)", func(c []string) bool {
 		return hasTok(c, "-czf") && hasTok(c, ".claude")
 	})
-	outProject := findCall(t, calls, outClaude+1, "stage-out project (-czf github.com/deviantintegral)", func(c []string) bool {
-		return hasTok(c, "-czf") && hasTok(c, "github.com/deviantintegral")
+	outProject := findCall(t, calls, outClaude+1, "stage-out project (-czf github.com/lullabot)", func(c []string) bool {
+		return hasTok(c, "-czf") && hasTok(c, "github.com/lullabot")
 	})
 
 	// Recreate sized: delete -> ensure base -> clone -> configure -> start.
@@ -472,7 +472,7 @@ func TestReset_BothPreserve(t *testing.T) {
 		return hasTok(c, "-xzf")
 	})
 	chownProject := findCall(t, calls, inProject+1, "chown project", func(c []string) bool {
-		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/deviantintegral")
+		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/lullabot")
 	})
 	direnv := findCall(t, calls, chownProject+1, "direnv allow", func(c []string) bool {
 		return hasTok(c, "direnv") && hasTok(c, "allow")
@@ -545,7 +545,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+	cfg.CloneURL = "https://github.com/lullabot/sandbar"
 
 	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)
@@ -560,7 +560,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 		t.Fatalf("claude-only reset should stage in exactly once, got %d", n)
 	}
 	for _, c := range f.calls {
-		if hasTok(c, "-czf") && hasTok(c, "github.com/deviantintegral") {
+		if hasTok(c, "-czf") && hasTok(c, "github.com/lullabot") {
 			t.Fatalf("claude-only reset must not stage out the project tree: %v", c)
 		}
 		if hasTok(c, "direnv") {
@@ -594,7 +594,7 @@ func TestReset_ProjectOnly(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	cfg.CloneURL = "https://github.com/deviantintegral/claude-code-ansible"
+	cfg.CloneURL = "https://github.com/lullabot/sandbar"
 
 	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveProject: true}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)

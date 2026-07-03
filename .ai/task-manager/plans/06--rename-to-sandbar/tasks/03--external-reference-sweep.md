@@ -2,7 +2,7 @@
 id: 3
 group: "external-sweep"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: "2026-07-03"
 skills:
   - bash

@@ -15,10 +15,10 @@ It works two ways from the same script:
 - **Just want a VM** — run it without checking the repo out:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh | bash
   ```
 
-  This clones the playbook into `~/.local/share/claude-code-ansible` (pinned
+  This clones the playbook into `~/.local/share/sandbar` (pinned
   to the latest release tag when one exists) and launches the VM from there.
 
   To pass flags on this path, put them **after `bash -s --`** — a pipe sends
@@ -26,7 +26,7 @@ It works two ways from the same script:
   an existing VM:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/deviantintegral/claude-code-ansible/main/install.sh | bash -s -- --recreate
+  curl -fsSL https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh | bash -s -- --recreate
   ```
 
 - **Hacking on the playbook** — from a checkout, run the script directly:
@@ -67,7 +67,7 @@ After cloning, the script restarts the VM once so your first shell lands with
 the right group membership (e.g. `docker`), the new hostname, and any kernel or
 library updates the finalize `apt upgrade` installed.
 
-**Per-VM disk sizing (TUI).** The `tui/` `claude-vm` sizes each VM individually
+**Per-VM disk sizing (TUI).** The `tui/` `sand` sizes each VM individually
 rather than inheriting the base's size. It builds the base at a small virtual-disk
 floor (`20GiB`) and grows every clone to its requested size (`cpus` and `memory`
 are likewise applied per clone), so disk size is chosen per VM. A clone can grow
@@ -112,7 +112,7 @@ Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`), and
 
 ### Interactive TUI (`tui/`)
 
-For an interactive alternative, the `tui/` directory ships `claude-vm`, a Bubble
+For an interactive alternative, the `tui/` directory ships `sand`, a Bubble
 Tea terminal UI that manages these VMs (list, create, start/stop/restart, and
 delete/recreate) using the same base-image / clone / finalize flow. See
 [`tui/README.md`](tui/README.md) for build and usage. `scripts/new-vm.sh` is

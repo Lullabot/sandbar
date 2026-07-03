@@ -52,7 +52,7 @@ func TestCloneOrgRelDir(t *testing.T) {
 		wantDir string
 		wantOK  bool
 	}{
-		{"https github org repo", "https://github.com/deviantintegral/claude-code-ansible", "github.com/deviantintegral", true},
+		{"https github org repo", "https://github.com/lullabot/sandbar", "github.com/lullabot", true},
 		{"trailing .git", "https://github.com/org/repo.git", "github.com/org", true},
 		{"trailing slash", "https://github.com/org/repo/", "github.com/org", true},
 		{"trailing .git and slash", "https://github.com/org/repo.git/", "github.com/org", true},
@@ -79,7 +79,7 @@ func TestCheckoutRelDir(t *testing.T) {
 		wantDir string
 		wantOK  bool
 	}{
-		{"https github org repo", "https://github.com/deviantintegral/claude-code-ansible", "github.com/deviantintegral/claude-code-ansible", true},
+		{"https github org repo", "https://github.com/lullabot/sandbar", "github.com/lullabot/sandbar", true},
 		{"trailing .git", "https://github.com/org/repo.git", "github.com/org/repo", true},
 		{"trailing slash", "https://github.com/org/repo/", "github.com/org/repo", true},
 		{"nested group", "https://gitlab.com/group/sub/repo", "gitlab.com/group/sub/repo", true},
