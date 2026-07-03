@@ -148,6 +148,53 @@ func TestCorruptFileMovedAside(t *testing.T) {
 	}
 }
 
+// TestMigrateLegacyIndex: a pre-rename claude-code-ansible index is migrated to
+// the new sandbar location on Load() — the managed VM survives, and the old
+// index file is removed once the copy is verified.
+func TestMigrateLegacyIndex(t *testing.T) {
+	base := t.TempDir()
+	// Load() resolves the data dir from XDG_DATA_HOME via defaultPath().
+	t.Setenv("XDG_DATA_HOME", base)
+
+	// Seed a legacy index using the real writer so the on-disk JSON shape
+	// matches production exactly.
+	oldPath := filepath.Join(base, "claude-code-ansible", "managed-vms.json")
+	seed, err := LoadFrom(oldPath)
+	if err != nil {
+		t.Fatalf("seed load: %v", err)
+	}
+	if err := seed.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}); err != nil {
+		t.Fatalf("seed add: %v", err)
+	}
+
+	// Load() migrates the legacy index before the first read.
+	r, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !r.IsManaged("claude") {
+		t.Fatal("migrated registry should report claude as managed")
+	}
+
+	// (a) the new index exists and parses with the VM present.
+	newPath := filepath.Join(base, "sandbar", "managed-vms.json")
+	if _, statErr := os.Stat(newPath); statErr != nil {
+		t.Fatalf("new index should exist at %s: %v", newPath, statErr)
+	}
+	moved, err := LoadFrom(newPath)
+	if err != nil {
+		t.Fatalf("load migrated index: %v", err)
+	}
+	if !moved.IsManaged("claude") || moved.Base("claude") != "claude-base" {
+		t.Fatalf("migrated index missing the VM: managed=%v base=%q", moved.IsManaged("claude"), moved.Base("claude"))
+	}
+
+	// (b) the old index file no longer exists.
+	if _, statErr := os.Stat(oldPath); !os.IsNotExist(statErr) {
+		t.Fatalf("old index should be removed, stat err = %v", statErr)
+	}
+}
+
 func containsStr(haystack, needle string) bool {
 	for i := 0; i+len(needle) <= len(haystack); i++ {
 		if haystack[i:i+len(needle)] == needle {

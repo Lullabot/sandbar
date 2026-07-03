@@ -208,9 +208,9 @@ The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/
 **Parallel Tasks:**
 - ✔️ Task 003: Repoint repo/raw URLs, org, app name, and data-dir prose to `lullabot/sandbar` / `sand` across `install.sh`, `new-vm.sh`, `README.md`, `tui/README.md`, and the Go repo-URL test fixtures. (depends on: 002)
 
-### Phase 4: Data dir rename + migrate-then-cleanup
+### ✅ Phase 4: Data dir rename + migrate-then-cleanup
 **Parallel Tasks:**
-- Task 004: Point `registry.defaultPath` + shell `CACHE_DIR` at `sandbar`; migrate the managed index (copy→verify→remove) and race-safely clean up the old dir. (depends on: 003)
+- ✔️ Task 004: Point `registry.defaultPath` + shell `CACHE_DIR` at `sandbar`; migrate the managed index (copy→verify→remove) and race-safely clean up the old dir. (depends on: 003)
 
 ### Phase 5: Completeness verification gate
 **Parallel Tasks:**
