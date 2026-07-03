@@ -115,5 +115,5 @@ jobs:
       - name: Dump provisioning logs on failure
         if: failure()
         run: |
-          limactl shell claude-ci sudo tail -n 100 /var/log/claude-vm-provision.log || true
-          limactl shell claude-ci sudo tail -n 100 /var/log/claude-vm-finalize.log || true
+          limactl shell claude-ci sudo tail -n 100 /var/log/sand-provision.log || true
+          limactl shell claude-ci sudo tail -n 100 /var/log/sand-finalize.log || true

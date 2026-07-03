@@ -81,7 +81,7 @@ func guestHome(ctx context.Context, cli *lima.Client, name, user string) (string
 // cross a destroy/recreate. The temp name carries a recognisable prefix so a
 // leaked dir is easy to spot.
 func newStageDir() (string, error) {
-	dir, err := os.MkdirTemp("", "claude-vm-reset-*")
+	dir, err := os.MkdirTemp("", "sand-reset-*")
 	if err != nil {
 		return "", fmt.Errorf("create stage dir: %w", err)
 	}

@@ -524,12 +524,12 @@ func finalizeStream(t *testing.T, streams []string) string {
 	return ""
 }
 
-// stageDirs lists the leaked host staging directories (claude-vm-reset-*) so a
+// stageDirs lists the leaked host staging directories (sand-reset-*) so a
 // test can assert the reset cleans up after itself on success or leaves the dir
 // (for recovery) on a post-staging failure.
 func stageDirs(t *testing.T) []string {
 	t.Helper()
-	g, err := filepath.Glob(filepath.Join(os.TempDir(), "claude-vm-reset-*"))
+	g, err := filepath.Glob(filepath.Join(os.TempDir(), "sand-reset-*"))
 	if err != nil {
 		t.Fatalf("glob stage dirs: %v", err)
 	}

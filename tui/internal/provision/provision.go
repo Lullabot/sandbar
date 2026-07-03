@@ -24,7 +24,7 @@ import (
 // playbook creates — notably the apt keyrings — root-only, which breaks apt
 // signature verification by the _apt sandbox user.
 const inGuestScript = `set -eu -o pipefail
-vars=/dev/shm/claude-vm-vars.yml
+vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
 install -m 600 /dev/null "$vars"
 cat > "$vars"
@@ -71,7 +71,7 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 		return fmt.Errorf("render base overlay: %w", err)
 	}
 
-	f, err := os.CreateTemp("", "claude-vm-base-*.yaml")
+	f, err := os.CreateTemp("", "sand-base-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create overlay temp file: %w", err)
 	}

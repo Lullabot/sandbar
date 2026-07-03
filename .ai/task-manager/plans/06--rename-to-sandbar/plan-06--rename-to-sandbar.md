@@ -200,9 +200,9 @@ The rename is intentionally sequential: `scripts/new-vm.sh`, `install.sh`, `tui/
 **Parallel Tasks:**
 - ✔️ Task 001: Rewrite the Go module path (`go.mod` + 46 imports across 24 files), `git mv tui/cmd/claude-vm → tui/cmd/sand`, and update user-facing `claude-vm` app-name strings/comments in `internal/ui` + `registry.go` comments.
 
-### Phase 2: Internal-artifact sweep
+### ✅ Phase 2: Internal-artifact sweep
 **Parallel Tasks:**
-- Task 002: Rename every internal `claude-vm-*` artifact to `sand-*` — the two coupled pairs (`/dev/shm/sand-vars.yml`; `/var/log/sand-{provision,finalize}.log`) on both endpoints, temp prefixes, and `~/.lima/_sand/`. (depends on: 001)
+- ✔️ Task 002: Rename every internal `claude-vm-*` artifact to `sand-*` — the two coupled pairs (`/dev/shm/sand-vars.yml`; `/var/log/sand-{provision,finalize}.log`) on both endpoints, temp prefixes, and `~/.lima/_sand/`. (depends on: 001)
 
 ### Phase 3: External-reference sweep
 **Parallel Tasks:**
