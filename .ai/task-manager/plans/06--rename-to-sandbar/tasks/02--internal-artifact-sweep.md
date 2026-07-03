@@ -2,7 +2,7 @@
 id: 2
 group: "internal-sweep"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: "2026-07-03"
 skills:
   - go

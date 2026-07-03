@@ -65,7 +65,7 @@ func baseVersionPath(baseName string) string {
 			home = filepath.Join(h, ".lima")
 		}
 	}
-	return filepath.Join(home, "_claude-vm", baseName+".playbook-version")
+	return filepath.Join(home, "_sand", baseName+".playbook-version")
 }
 
 // readBaseVersion returns the stamped playbook version for a base image, or ""

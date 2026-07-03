@@ -334,7 +334,7 @@ build_allyml() {
   fi
 }
 
-WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/claude-vm.XXXXXX")"
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/sand.XXXXXX")"
 chmod 700 "$WORKDIR"
 
 # ---------------------------------------------------------------------------
@@ -416,7 +416,7 @@ run_provision() {
   if ! build_allyml "$phase" "$hostname" | limactl shell "$name" sudo bash -c '
         set -eu -o pipefail
         log="$1"
-        vars=/dev/shm/claude-vm-vars.yml
+        vars=/dev/shm/sand-vars.yml
         trap "rm -f \"$vars\"" EXIT
         # Keep the vars file private (it may carry a token) with an explicit
         # mode rather than a global umask: a restrictive umask would also make
@@ -444,7 +444,7 @@ build_base() {
   # Ansible); the heavy base-phase playbook is run by run_provision over
   # `limactl shell` so its output streams to the terminal, just like finalize.
   limactl start --name "$BASE_NAME" --tty=false "$overlay"
-  if ! run_provision "$BASE_NAME" base "$BASE_NAME" /var/log/claude-vm-provision.log; then
+  if ! run_provision "$BASE_NAME" base "$BASE_NAME" /var/log/sand-provision.log; then
     die "Base build failed (see the log above). Fix the cause, then retry: $(rerun_cmd --rebuild)"
   fi
 
@@ -459,7 +459,7 @@ build_base() {
 finalize_clone() {
   local name="$1"
   info "Finalizing '$name' (hostname, git identity, apt upgrade${CLONE_URL:+, repo clone})…"
-  if ! run_provision "$name" finalize "$HOSTNAME_" /var/log/claude-vm-finalize.log; then
+  if ! run_provision "$name" finalize "$HOSTNAME_" /var/log/sand-finalize.log; then
     die "Finalize failed (see the log above). Fix the cause, then re-clone: $(rerun_cmd --recreate --name "$name")"
   fi
 }
