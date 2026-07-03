@@ -226,10 +226,10 @@ No circular dependencies: the graph is acyclic.
 **Parallel Tasks:**
 - ✔️ Task 003: Relabel `Disk`→`Max Disk`/`Maximum Disk Size` and add the `Disk Used` column/field, populated on load (depends on: 002)
 
-### Phase 3: Verification and documentation
+### ✅ Phase 3: Verification and documentation
 **Parallel Tasks:**
-- Task 004: Unit tests for search key-routing and disk-usage measurement/formatting (depends on: 001, 002, 003)
-- Task 005: Consolidated GitHub-token lifecycle docs + TUI README search/disk updates (depends on: 001, 003)
+- ✔️ Task 004: Unit tests for search key-routing and disk-usage measurement/formatting (depends on: 001, 002, 003)
+- ✔️ Task 005: Consolidated GitHub-token lifecycle docs + TUI README search/disk updates (depends on: 001, 003)
 
 ### Post-phase Actions
 After each phase, run `cd tui && go build ./... && go vet ./...` (and `go test ./...` from Phase 3 onward) to confirm the module stays green before the next phase begins.

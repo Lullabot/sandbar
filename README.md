@@ -78,6 +78,10 @@ below it until the base is rebuilt — delete `claude-base` so the next TUI
 create/reset rebuilds it at the floor. This per-clone sizing (and the reset flow)
 is TUI-only; `new-vm.sh` keeps the inherited-from-base behavior described above.
 
+> `Disk Used` reports allocated blocks (`st_blocks × 512`), so it can sit far
+> below the maximum (qcow2 is sparse); on APFS it reflects shared-block
+> accounting and may differ for blocks shared with a clone source.
+
 Non-interactive use (CI, scripting) is supported via flags — see
 `./scripts/new-vm.sh --help`. For example:
 
@@ -201,44 +205,67 @@ If you are running the playbook on the same machine you want to provision (i.e. 
 
 The playbook installs the [GitHub CLI (`gh`)](https://cli.github.com/) and
 configures it as the git credential helper, so `git push` / `git pull` over
-HTTPS authenticate against whatever token is in the environment.
+HTTPS authenticate against whatever token is in the environment. The walkthrough
+below threads a single fine-grained token through its whole life — from creating
+it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
 
-Supply tokens per directory with `.env` files. direnv is installed and
-configured with `load_dotenv = true`, so a `GH_TOKEN=...` line in a `.env`
-file is loaded when you `cd` into that directory and unloaded when you leave.
-`GH_TOKEN` takes precedence over any token stored by `gh auth login`.
+1. **Create a fine-grained Personal Access Token.** Fine-grained PATs are
+   recommended over classic PATs. They offer several advantages:
 
-For multiple organizations or clients, use a **separate VM per org/context**
-rather than juggling several tokens on one machine. The VMs are disposable,
-and this keeps each context's credentials and code fully isolated.
+   - **Scoped to specific repositories** — a token can only access the repos you choose
+   - **Granular permissions** — grant only the access each project needs
+   - **Mandatory expiration dates** — tokens cannot be created without an expiry
 
-### Recommended: Fine-grained Personal Access Tokens
+   Create them at **Settings > Developer settings > Personal access tokens >
+   Fine-grained tokens** with the recommended permissions (this is the set
+   `new-vm.sh` shows when prompting for a token):
 
-Fine-grained PATs are recommended over classic PATs. They offer several advantages:
+   | Permission | Access | Purpose |
+   |------------|--------|---------|
+   | Contents | Read and write | Push and pull code |
+   | Pull requests | **Read** | Read PRs without letting the agent self-merge to `main` without human review |
+   | Issues | **Read** | Read issues without write access |
+   | Actions | Read and write | Inspect and trigger CI |
+   | Workflows | Read and write | Update workflow files |
+   | Metadata | Read-only | Always required (automatically included) |
 
-- **Scoped to specific repositories** — a token can only access the repos you choose
-- **Granular permissions** — grant only the access each project needs
-- **Mandatory expiration dates** — tokens cannot be created without an expiry
+   Pull requests and Issues are deliberately **read-only** so an autonomous
+   agent cannot merge its own PRs or close issues without a human in the loop.
+   Bump them to write only if your workflow needs the agent to open/manage them
+   directly.
 
-Create them at: **Settings > Developer settings > Personal access tokens > Fine-grained tokens**.
+2. **Supply it at VM-create time.** Provide the token through the TUI
+   create-form `GitHub token` field, `new-vm.sh --clone-token`, or the
+   `project_clone_token` playbook variable. It is used only to clone a private
+   repo into the VM.
 
-Recommended permissions (this is the set `new-vm.sh` shows when prompting for a
-token):
+3. **Where it lands.** For `github.com` clone URLs the token is written into the
+   per-org `.env` as `GH_TOKEN` (treat that file as a secret).
 
-| Permission | Access | Purpose |
-|------------|--------|---------|
-| Contents | Read and write | Push and pull code |
-| Pull requests | **Read** | Read PRs without letting the agent self-merge to `main` without human review |
-| Issues | **Read** | Read issues without write access |
-| Actions | Read and write | Inspect and trigger CI |
-| Workflows | Read and write | Update workflow files |
-| Metadata | Read-only | Always required (automatically included) |
+4. **How it loads.** direnv is installed and configured with `load_dotenv =
+   true`, so the `GH_TOKEN=...` line is loaded when you `cd` into that directory
+   and unloaded when you leave.
 
-Pull requests and Issues are deliberately **read-only** so an autonomous agent
-cannot merge its own PRs or close issues without a human in the loop. Bump them
-to write only if your workflow needs the agent to open/manage them directly.
+5. **Precedence.** `GH_TOKEN` takes precedence over any token stored by `gh auth
+   login`, and because `gh` is the git credential helper, `git push` / `git
+   pull` over HTTPS use whatever token is in the environment.
 
-For the best security posture, create a separate fine-grained token per organization or client.
+6. **Multiple organizations.** For multiple organizations or clients, use a
+   **separate VM per org/context** rather than juggling several tokens on one
+   machine. The VMs are disposable, and this keeps each context's credentials
+   and code fully isolated — create a separate fine-grained token per
+   organization or client for the best security posture.
+
+7. **Rotate, expire, revoke.** Fine-grained PATs must have an expiry. When a
+   token expires or you rotate it, update the `.env` `GH_TOKEN` line (or
+   re-supply the new token on the next create), then revoke the old token in
+   GitHub settings.
+
+8. **Reset does not carry the token.** A reset/recreate does **not** carry the
+   token — it is never stored in the managed-VM index — so a private-repo VM
+   must have the token re-supplied on reset **unless** *Preserve project .env +
+   checkout* is enabled, which keeps the existing `.env` (and its `GH_TOKEN`),
+   so no re-supply is needed.
 
 ## Security Model
 

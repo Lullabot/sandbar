@@ -53,6 +53,7 @@ the screen.
 | `r` | Restart the selected VM |
 | `d` | Delete the selected VM (opens a confirmation) |
 | `f` | Toggle the filter: show all VMs ↔ only claude-vm instances (managed + base) |
+| `/` | Incremental name search — type to filter the list by name; `esc` clears and exits, `enter` keeps the filter |
 | `q` | Quit |
 
 Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
@@ -139,18 +140,24 @@ both default off):
 - **Preserve project .env + checkout** — keeps the per-org directory (the cloned
   repo and its `.env`). It is disabled when the VM cloned no repo. When enabled it
   **skips the re-clone**, so you do **not** need to re-supply a token to reset a
-  VM that had cloned a private repo (the clone token is never stored).
+  VM that had cloned a private repo. Otherwise the clone token must be re-supplied
+  on reset — see [GitHub Authentication](../README.md#github-authentication) for
+  the full token lifecycle.
 
 Enabling either toggle copies that data out of the VM to a private temp dir on
 your host and restores it after the recreate. The form warns that this moves your
 Claude login and `.env` token off the VM: **do not preserve if you suspect the VM
 is compromised.** See the main [Security Model](../README.md#security-model).
 
-**Disk sizing.** A VM's disk can **grow** from the base floor (`20GiB`) but
-cannot **shrink** below the current base's virtual size — qcow2 cannot shrink a
-live disk — so the form enforces a minimum of the floor. A base built before
-per-VM sizing keeps its old (larger) size and clones can't go under it; delete
-`claude-base` to rebuild the base at the floor on the next create/reset.
+**Disk sizing.** The list shows two disk columns — `Max Disk` (the VM's maximum
+virtual size) and `Disk Used` (its real allocated blocks); the detail view names
+them `Maximum Disk Size` and `Disk Used (allocated)`. `Disk Used` sits well below
+`Max Disk` because qcow2 disks are sparse — only written blocks are allocated. A
+VM's `Max Disk` can **grow** from the base floor (`20GiB`) but cannot **shrink**
+below the current base's virtual size — qcow2 cannot shrink a live disk — so the
+form enforces a minimum of the floor. A base built before per-VM sizing keeps its
+old (larger) size and clones can't go under it; delete `claude-base` to rebuild
+the base at the floor on the next create/reset.
 
 ## Managed VMs and safety
 
@@ -183,9 +190,10 @@ delete still works, recreate does not.
 The index also stores each managed VM's create configuration (CPUs, memory, disk,
 hostname, git identity, …) so **recreate pre-fills the reset form faithfully**
 instead of resetting it to defaults (see [Reset a VM](#reset-a-vm)). The **clone
-token is never stored** — recreating a VM that had cloned a private repo will need
-the token re-supplied, unless you enable *Preserve project .env + checkout*, which
-keeps the existing checkout and skips the re-clone.
+token is deliberately never written to the index** (secrets never touch disk); how
+that plays out on reset — re-supply the token unless *Preserve project .env +
+checkout* is enabled — is covered in
+[GitHub Authentication](../README.md#github-authentication).
 
 Creating a VM whose name already exists is refused with a clear message rather than
 colliding — delete it, or recreate it to reset it.
