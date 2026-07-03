@@ -191,3 +191,51 @@ All code changes are confined to the TUI module: the `ui` package (keys, model, 
 ### Change Log
 
 - 2026-06-30 (refinement): Corrected the disk-image filename from the non-existent `diffdisk`/`basedisk` to Lima 2.x's single `disk` (verified on Lima 2.1.3 against three live instances). Reframed the virtual-vs-actual rationale to lead with qcow2 sparse allocation and demote reflink/CoW to a platform-specific bonus, citing the repo's own CI note that ext4 clones are full copies; reworded Success Criterion 3 away from "almost nothing". Pinned scope to the qcow2 `disk` only (no `cidata.iso`/logs, no legacy-Lima fallback). Specified that `DiskUsed` is a raw-bytes string populated in the `ui` layer on `vmsLoadedMsg` (not in `lima.Client` or `refreshRows`) and rendered via the existing `humanizeBytes`. Completed the search-mode key set (added `S`/`r`/`enter`) and added file:line anchors throughout. Added Plan Clarifications rows and this Decision Log.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001["Task 001: Incremental name-search mode (/)"]
+    002["Task 002: Build-tagged disk-usage helper"]
+    003["Task 003: Relabel Disk + add Disk Used column/field"]
+    004["Task 004: Unit tests — search routing + disk usage"]
+    005["Task 005: Token-lifecycle docs + TUI README"]
+
+    002 --> 003
+    001 --> 004
+    002 --> 004
+    003 --> 004
+    001 --> 005
+    003 --> 005
+```
+
+No circular dependencies: the graph is acyclic.
+
+### Phase 1: Independent foundations
+**Parallel Tasks:**
+- Task 001: Incremental name-search mode bound to `/` (search state, key routing, `refreshRows` filter, help)
+- Task 002: Build-tagged disk-usage helper (`diskUsedBytes` — allocated blocks of `<dir>/disk`)
+
+### Phase 2: Disk labels and usage rendering
+**Parallel Tasks:**
+- Task 003: Relabel `Disk`→`Max Disk`/`Maximum Disk Size` and add the `Disk Used` column/field, populated on load (depends on: 002)
+
+### Phase 3: Verification and documentation
+**Parallel Tasks:**
+- Task 004: Unit tests for search key-routing and disk-usage measurement/formatting (depends on: 001, 002, 003)
+- Task 005: Consolidated GitHub-token lifecycle docs + TUI README search/disk updates (depends on: 001, 003)
+
+### Post-phase Actions
+After each phase, run `cd tui && go build ./... && go vet ./...` (and `go test ./...` from Phase 3 onward) to confirm the module stays green before the next phase begins.
+
+### Execution Summary
+- Total Phases: 3
+- Total Tasks: 5
+- Maximum Parallelism: 2 tasks (Phase 1, and again Phase 3)
+- Critical Path Length: 3 phases (002 → 003 → 004/005)
