@@ -346,7 +346,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	m.transferVM = "claude"
 	m.transferSrc = "/home/u/file.txt"
 	m.transferUpload = false // download: guest source → host destination
-	m.dest = browse.NewDestInput("Destination dir: ", "/tmp/host-dst")
+	m.dest, _ = browse.NewDestInput("Destination dir: ", "/tmp/host-dst", nil)
 
 	accepted, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = accepted.(model)

@@ -68,13 +68,18 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.transferSrc = p
 		m.transferRecursive = isDir
 		// The destination is always a DIRECTORY; the source is placed inside it.
+		// The dest field autocompletes directories on the destination side — the
+		// host for a download, the guest for an upload.
 		def := m.hostWorkDir()
+		var destLister browse.DirLister = browse.NewLocalLister()
 		if m.transferUpload {
 			def = m.guestDefaultDir() // an upload lands in the guest
+			destLister = browse.NewGuestLister(m.cli, m.transferVM)
 		}
-		m.dest = browse.NewDestInput("Destination dir: ", def)
+		var initCmd tea.Cmd
+		m.dest, initCmd = browse.NewDestInput("Destination dir: ", def, destLister)
 		m.view = viewDest
-		return m, textinput.Blink
+		return m, tea.Batch(textinput.Blink, initCmd)
 	}
 	return m, cmd
 }
@@ -156,6 +161,7 @@ func (m model) destView() string {
 	b.WriteString(m.dest.View())
 	b.WriteString("\n\n")
 	b.WriteString(statusStyle.Render("The selected item is placed INSIDE this directory."))
+	b.WriteString("\n" + statusStyle.Render("Type to autocomplete · ↑/↓ choose · enter fills · ctrl+s copy · esc back"))
 	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))
 	return appStyle.Render(b.String())
 }
