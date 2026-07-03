@@ -257,10 +257,10 @@ There are no circular dependencies; the graph is acyclic.
 - ✔️ Task 2: Build the `DirLister` seam (host + guest listers)
 - ✔️ Task 4: Destination prompt + path normalization
 
-### Phase 2: Components & real-VM proof
+### Phase 2: Components & real-VM proof ✅
 **Parallel Tasks:**
-- Task 3: Reusable `bubbles/list` file browser (depends on: 2)
-- Task 6: Gated `limae2e` round-trip copy test (depends on: 1)
+- ✔️ Task 3: Reusable `bubbles/list` file browser (depends on: 2)
+- ✔️ Task 6: Gated `limae2e` round-trip copy test (depends on: 1)
 
 ### Phase 3: Integration
 **Parallel Tasks:**

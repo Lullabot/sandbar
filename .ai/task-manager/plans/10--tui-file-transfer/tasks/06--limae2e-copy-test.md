@@ -2,7 +2,7 @@
 id: 6
 group: "e2e-test"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-03
 skills:
   - go
