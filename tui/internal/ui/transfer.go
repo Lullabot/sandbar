@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/deviantintegral/claude-code-ansible/tui/internal/browse"
@@ -153,16 +155,25 @@ func (m model) hostWorkDir() string {
 
 // guestDefaultDir is the guest browser's / upload destination's default: the VM's
 // project checkout (<home>/<host>/<org>/<repo>, derived from the recorded
-// CloneURL) when known, otherwise the guest home. The guest user comes from the
-// VM's recorded config, defaulting to the host user (Debian/Ubuntu convention).
+// CloneURL) when known, otherwise the guest home.
+//
+// The guest home is /home/<guest-user>, where the guest user is the account Lima
+// actually created — read from the instance's ssh.config, the exact user
+// `limactl copy`/`shell` authenticate as. Lima may name that account differently
+// from the host user (e.g. "andrew.guest" vs the host's "andrew"), so the host
+// `id -un` is only a last-resort fallback, never the source of truth.
 func (m model) guestDefaultDir() string {
 	cfg, ok := m.reg.Config(m.transferVM)
-	user := ""
-	if ok {
-		user = cfg.User
-	}
+	user := guestUser(m.detail.Dir)
 	if user == "" {
-		user = hostUser()
+		// ssh.config unreadable: fall back to the recorded config, then the host
+		// user (the old best-effort guess).
+		switch {
+		case ok && cfg.User != "":
+			user = cfg.User
+		default:
+			user = hostUser()
+		}
 	}
 	home := "/home/" + user
 	if ok && cfg.CloneURL != "" {
@@ -171,4 +182,28 @@ func (m model) guestDefaultDir() string {
 		}
 	}
 	return home
+}
+
+// guestUser returns the guest login user for the Lima instance whose data dir is
+// instanceDir, parsed from Lima's generated ssh.config ("User <name>"). That is
+// the account limactl authenticates as for shell/copy, which Lima may name
+// differently from the host user. Returns "" when it can't be determined, so the
+// caller can fall back.
+func guestUser(instanceDir string) string {
+	if instanceDir == "" {
+		return ""
+	}
+	f, err := os.Open(filepath.Join(instanceDir, "ssh.config"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		// ssh.config indents directives, e.g. "  User debian".
+		if fields := strings.Fields(sc.Text()); len(fields) == 2 && fields[0] == "User" {
+			return fields[1]
+		}
+	}
+	return ""
 }
