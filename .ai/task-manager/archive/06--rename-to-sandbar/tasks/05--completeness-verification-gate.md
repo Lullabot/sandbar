@@ -2,7 +2,7 @@
 id: 5
 group: "verification"
 dependencies: [4]
-status: "pending"
+status: "completed"
 created: "2026-07-03"
 skills:
   - go
@@ -22,7 +22,8 @@ Prove the rename is complete and consistent: the module builds a `sand` binary, 
 - [ ] `cd tui && go vet ./...` is clean and `gofmt -l .` prints nothing.
 - [ ] `cd tui && go test ./...` passes.
 - [ ] `shellcheck install.sh scripts/new-vm.sh` passes.
-- [ ] Repo-wide grep (excluding `.ai/`, `.git/`, `todo.md`) for `deviantintegral`, `claude-code-ansible`, `claude-vm` returns **0** hits.
+- [ ] Repo-wide grep (excluding `.ai/`, `.git/`, `todo.md`) for `deviantintegral` and `claude-vm` returns **0** hits.
+- [ ] Repo-wide grep for `claude-code-ansible` returns **only** the intentional legacy-path references in the index-migration/cleanup machinery — `registry.go` (`migrateLegacyIndex` + comment), `registry_test.go` (the migration test), and the `OLD_CACHE_DIR` cleanup guards in `install.sh`/`new-vm.sh` — and **zero** stale identity references. (These deliberate references are the mechanism that satisfies Success Criterion #4 — migrate a pre-existing `claude-code-ansible` index — so they reconcile with, rather than violate, Criterion #3's "zero references" intent. Plan 07 removes the shell scripts; the registry migration is the durable part.)
 - [ ] The two coupled pairs read identically on both endpoints: `/dev/shm/sand-vars.yml` (`new-vm.sh` ↔ `provision.go`) and `/var/log/sand-{provision,finalize}.log` (`new-vm.sh` ↔ `.github/workflows/test.yml`).
 
 ## Technical Requirements
