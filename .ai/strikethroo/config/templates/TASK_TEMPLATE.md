@@ -4,6 +4,8 @@ group: "user-authentication"
 dependencies: []  # List of task IDs, e.g., [2, 3]
 status: "[STATUS]"  # pending | in-progress | completed | needs-clarification
 created: [YYYY-MM-DD]
+model: "[MODEL]"    # haiku | sonnet | opus — capability tier for this task's subagent (see config/shared/model-effort-rubric.md)
+effort: "[EFFORT]"  # low | medium | high | xhigh — reasoning tier; selects the st-worker-<effort> subagent
 skills: # Technical skills required for this task
   - [SKILL-1]
   - [SKILL-2]
