@@ -1,0 +1,181 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
+)
+
+// limaBaseDeleter is the narrow lima.Client surface the --rebuild path needs:
+// checking whether the base image exists and force-deleting it. An interface
+// so doHeadlessCreate can be unit-tested with a stub instead of a real
+// lima.Client (which would need a real limactl).
+type limaBaseDeleter interface {
+	Status(name string) (string, error)
+	Delete(name string, force bool) error
+}
+
+// headlessProvisioner is the narrow provision.Provisioner surface runCreate
+// drives (mirroring the TUI's provisionFunc in internal/ui/progress.go). An
+// interface so doHeadlessCreate's bookkeeping can be unit-tested with a stub
+// that "succeeds" without a real limactl/ansible run.
+type headlessProvisioner interface {
+	CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
+	Recreate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
+}
+
+// runCreate implements the headless `sand create` subcommand: it parses the
+// new-vm.sh flag surface (minus --ref — the playbook is embedded in the sand
+// binary, so there is no ref left to pin), builds and validates a
+// vm.CreateConfig, and drives the provisioner + managed-registry bookkeeping
+// shared with the TUI. It never prompts; missing required fields are a
+// validation error.
+func runCreate(args []string) error {
+	cfg := vm.DefaultCreateConfig()
+
+	fs := flag.NewFlagSet("create", flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
+
+Headlessly provision a Claude Code development VM: no TUI, no prompts. Flags
+mirror new-vm.sh's, minus --ref (the playbook is embedded in this binary, so
+there is no ref to pin).
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+
+	cpusFlag := fs.String("cpus", fmt.Sprint(cfg.CPUs), "vCPUs")
+	fs.StringVar(&cfg.Name, "name", cfg.Name, "Lima instance name")
+	fs.StringVar(&cfg.BaseName, "base-name", cfg.BaseName, "Base image instance name")
+	fs.StringVar(&cfg.Hostname, "hostname", cfg.Hostname, "VM hostname (default: same as --name)")
+	fs.StringVar(&cfg.User, "user", cfg.User, "Primary VM user")
+	fs.StringVar(&cfg.GitName, "git-name", cfg.GitName, "git user.name (required)")
+	fs.StringVar(&cfg.GitEmail, "git-email", cfg.GitEmail, "git user.email (required)")
+	fs.StringVar(&cfg.Memory, "memory", cfg.Memory, "RAM, e.g. 8GiB")
+	fs.StringVar(&cfg.Disk, "disk", cfg.Disk, "Disk size, e.g. 100GiB")
+	fs.StringVar(&cfg.Locale, "locale", cfg.Locale, "System locale")
+	fs.StringVar(&cfg.Domain, "domain", cfg.Domain, "Domain suffix")
+	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
+	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
+	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
+	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
+	rebuild := fs.Bool("rebuild", false, "Delete and rebuild the base image first, then create")
+	// -y/--yes are accepted for flag-surface parity with new-vm.sh, but headless
+	// mode never prompts regardless, so they carry no behavior of their own.
+	_ = fs.Bool("y", false, "Accept all defaults, never prompt (headless mode always behaves this way)")
+	_ = fs.Bool("yes", false, "same as -y")
+	// NOTE: --ref is deliberately NOT a flag here. new-vm.sh's --ref pins the git
+	// ref of a checked-out playbook in standalone mode; sand's playbook is
+	// embedded in the binary at build time (see playbook_embed.go), so there is
+	// no ref left to pin at create time. This is not a gap — see task 3 notes.
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil // usage was already printed; -h/--help is not a failure
+		}
+		return err // flag package already printed usage
+	}
+
+	n, err := vm.ParseCPUs(*cpusFlag)
+	if err != nil {
+		return err
+	}
+	cfg.CPUs = n
+
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("sand create: %w", err)
+	}
+
+	cli := lima.New(lima.NewExecRunner())
+	if err := cli.Preflight(); err != nil {
+		return err
+	}
+
+	dir, err := provision.LocatePlaybook()
+	if err != nil {
+		return err
+	}
+	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
+
+	reg, loadErr := registry.Load()
+	if reg == nil {
+		reg = registry.NewEmpty()
+	}
+	if loadErr != nil {
+		fmt.Fprintln(os.Stderr, "warning:", loadErr)
+	}
+
+	// Reconcile against the live instance list before acting, exactly like the
+	// TUI does on every list load — so a VM deleted outside sand isn't wrongly
+	// treated as managed (and gated recreate-able).
+	live, err := cli.List()
+	if err != nil {
+		return fmt.Errorf("list existing instances: %w", err)
+	}
+	if _, err := manage.Reconcile(reg, live); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not update managed index:", err)
+	}
+
+	// A cancellable context lets ctrl+c abort the run mid-flight, killing the
+	// limactl subprocess it is currently blocked on — matching the TUI's cancel.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return doHeadlessCreate(ctx, reg, cli, prov, cfg, *recreate, *rebuild, os.Stdout)
+}
+
+// doHeadlessCreate drives the create/recreate/rebuild flow and then performs
+// the SAME managed-registry bookkeeping the TUI performs on a successful
+// provision (recording cfg as managed — see internal/manage and
+// internal/ui/model.go's provisionDoneMsg handling), so a headless-created VM
+// is flagged managed and stays recreate-able exactly like one made through
+// the TUI.
+//
+// --rebuild force-rebuilds the base image regardless of staleness detection,
+// independent of --recreate (which targets the clone, not the base); both may
+// be combined. --recreate is gated on the target already being a sand-managed
+// VM — recreate clones from a Claude base image and would replace ANY
+// instance it is pointed at, so it must never be offered for a VM sand did
+// not create.
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, ld limaBaseDeleter, prov headlessProvisioner, cfg vm.CreateConfig, recreate, rebuild bool, out io.Writer) error {
+	if rebuild {
+		if status, err := ld.Status(cfg.BaseName); err == nil && status != "" {
+			if err := ld.Delete(cfg.BaseName, true); err != nil {
+				return fmt.Errorf("delete base image %q for rebuild: %w", cfg.BaseName, err)
+			}
+		}
+	}
+
+	if recreate {
+		base, ok := manage.RecreateBase(reg, cfg.Name)
+		if !ok {
+			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
+		}
+		cfg.BaseName = base
+		if err := prov.Recreate(ctx, cfg, out); err != nil {
+			return err
+		}
+	} else {
+		if err := prov.CreateVM(ctx, cfg, out); err != nil {
+			return err
+		}
+	}
+
+	if err := manage.RecordSuccess(reg, cfg); err != nil {
+		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
+	}
+	return nil
+}

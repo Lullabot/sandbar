@@ -238,9 +238,9 @@ graph TD
 No circular dependencies: the graph is a DAG flowing 001 → {002, 003} →
 {004, 005} → 006.
 
-### Phase 1: Module Foundation
+### Phase 1: Module Foundation ✅
 **Parallel Tasks:**
-- Task 001: Relocate the Go module from `tui/` to the repo root (no dependencies)
+- ✔️ Task 001: Relocate the Go module from `tui/` to the repo root (no dependencies) — `completed`
 
 ### Phase 2: Binary Capabilities
 **Parallel Tasks:**
