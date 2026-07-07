@@ -1,0 +1,39 @@
+# Release workflow: on a `v*` tag push, GoReleaser cross-compiles `sand` for
+# darwin/linux x amd64/arm64, publishes the archives to GitHub Releases, and
+# updates the Homebrew formula in the `lullabot/homebrew-sandbar` tap.
+#
+# Human prerequisites (one-time, performed by a release maintainer, NOT by
+# this workflow):
+#   1. Create the empty `lullabot/homebrew-sandbar` GitHub repository (this is
+#      the Homebrew tap GoReleaser's `brews:` publisher pushes formula updates
+#      to).
+#   2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret on this repo: a
+#      token scoped to push access on `lullabot/homebrew-sandbar` only.
+#   3. Validate the publisher end-to-end by pushing a pre-release tag (e.g.
+#      `v0.0.0-rc1`) before the first real release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

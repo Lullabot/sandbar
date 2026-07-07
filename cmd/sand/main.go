@@ -14,12 +14,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// version is the sand release version. It defaults to "dev" for local/source
+// builds; GoReleaser stamps the real value at build time via
+// `-ldflags "-X main.version={{.Version}}"`.
+var version = "dev"
+
 func main() {
 	// Subcommand dispatch: bare `sand` (no args) launches the TUI, unchanged;
 	// `sand create ...` runs the headless, non-interactive provisioning path
 	// (see create.go); any other first argument is an unknown subcommand.
+	// `--version`/`version` is handled first so it works without limactl.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "version":
+			fmt.Println(version)
+			return
 		case "create":
 			if err := runCreate(os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, err)

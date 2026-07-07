@@ -1,0 +1,40 @@
+version: 2
+
+builds:
+  - id: sand
+    main: ./cmd/sand
+    binary: sand
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: sand
+    formats: [tar.gz]
+
+# NOTE: `brews` (a Homebrew *formula*) is used deliberately, not the newer
+# `homebrew_casks`. GoReleaser v2.17 deprecates `brews`, but Homebrew *casks*
+# are macOS-only, and this project requires `brew install` on macOS AND Linux
+# (plan 07, Success Criterion 3). A formula is the only cross-platform option,
+# so `brews` is retained despite the deprecation warning. `goreleaser check`
+# reports the config as valid but flags this property; `goreleaser release`
+# under `~> v2` still generates the formula. Follow-up: revisit if a future
+# GoReleaser removes `brews` (Linux Homebrew distribution would then need a
+# different mechanism).
+brews:
+  - name: sand
+    repository:
+      owner: lullabot
+      name: homebrew-sandbar
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    dependencies:
+      - name: lima
+    description: "Headless + TUI manager for Claude Code development VMs (Lima)"
+    homepage: "https://github.com/lullabot/sandbar"

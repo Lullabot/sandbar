@@ -1,15 +1,16 @@
 name: test
 
 # Two jobs:
-#   * lint     — fast, no VM: shellcheck the bash + ansible syntax check. Runs
-#                on every push so most mistakes fail in ~30s.
-#   * lima-e2e — the real thing: run scripts/new-vm.sh end to end on a Lima VM.
-#                GitHub's hosted ubuntu runners expose /dev/kvm (nested virt for
-#                Linux guests), so Lima runs under QEMU+KVM here — this is the
-#                only place the Lima orchestration (base build, `limactl clone`,
-#                finalize) can be exercised. macOS runners lack nested virt, so
-#                the Mac `vz` driver is intentionally not covered; the driver is
-#                Lima's concern, not this repo's.
+#   * lint     — fast, no VM: ansible syntax check. Runs on every push so most
+#                mistakes fail in ~30s.
+#   * lima-e2e — the real thing: build `sand` from the checkout and run it
+#                end to end on a Lima VM. GitHub's hosted ubuntu runners expose
+#                /dev/kvm (nested virt for Linux guests), so Lima runs under
+#                QEMU+KVM here — this is the only place the Lima orchestration
+#                (base build, `limactl clone`, finalize) can be exercised.
+#                macOS runners lack nested virt, so the Mac `vz` driver is
+#                intentionally not covered; the driver is Lima's concern, not
+#                this repo's.
 
 # push only on main (post-merge); feature branches run once via pull_request,
 # not twice from a matching push event.
@@ -31,9 +32,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Shellcheck the install/provision scripts
-        run: shellcheck install.sh scripts/new-vm.sh
 
       - name: Ansible syntax check
         run: |
@@ -68,13 +66,20 @@ jobs:
           path: ~/.cache/lima
           key: lima-${{ steps.lima.outputs.version }}
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build sand from the checkout
+        run: go build -o sand ./cmd/sand
+
       # Run the actual entrypoint, non-interactively. This builds the base
       # image, clones it to `claude-ci`, finalizes, and restarts — the full
       # path that can't run inside the nested-virt-less dev VM. Modest resources
       # to fit the hosted runner (4 vCPU / 16 GB).
-      - name: Provision a VM with new-vm.sh
+      - name: Provision a VM with sand (built from the checkout)
         run: |
-          ./scripts/new-vm.sh --yes \
+          ./sand create --yes \
             --name claude-ci \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB
