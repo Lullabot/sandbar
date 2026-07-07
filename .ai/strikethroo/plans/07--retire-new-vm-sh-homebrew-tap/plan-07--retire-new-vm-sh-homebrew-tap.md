@@ -213,3 +213,59 @@ Builds on the **now-completed Plan 06** (archived) for the name, binary, and org
 
 - 2026-07-06: Second refinement session (Plan 06 has since merged/archived at `…/sandbar/tui`). (1) Rewrote all stale Plan 06 coordination language (Executive Summary, Current/Target table, Background, Architectural Approach, Integration Strategy, Implementation Risks): the relocation is no longer foldable into 06's rename pass — it is an **independent import rewrite this plan owns**; **confirmed (interactive) to keep relocate-to-root + embed** over the build-time-copy alternative. (2) Reconciled **Plan 08 sequencing**: 08 now lands *after* this plan, so this plan edits only the `lima-e2e` and `lint` steps and does **not** add the go-test/coverage job. (3) Added the missing **Self Validation** section (required by the template + POST_PLAN hook): clean build/tests, embedded-FS assertion, working-tree and no-checkout provisioning, managed-registry parity, release/tap, and clean-removal checks. (4) Surfaced a technical gap — **managed-registry bookkeeping (`registry.Add`/reconcile/recreate-gate) lives in `internal/ui/model.go`, not the `Provisioner`** — as an interface constraint on the headless `sand create`, with a new Technical Risk, a Decision-Log entry, and a Clarifications row. (5) Extended the removal scope to scrub two stale in-repo `new-vm.sh` comment references (`site.yml`, `roles/project/defaults/main.yml`) — they ship inside the **embedded** playbook — while explicitly leaving the unrelated third-party `install.sh` installer URLs; refined the Self Validation grep to match. Updated Clarifications and the Decision Log accordingly.
 - 2026-06-30: Refinement session. (1) Resolved the `go:embed`-vs-clone crux: chose **embed via relocating the Go module from `tui/` to the repo root** (`go:embed` can't reach the parent-dir playbook), and added a dedicated module-relocation stage. (2) Set playbook resolution to **working-tree-first with an embedded fallback**, reworking `LocatePlaybook` into three tiers. (3) Fixed the **CI** migration to **build `sand` from the checkout** (exercises PR playbook edits) and to **drop the lint job's shellcheck** of the deleted scripts. (4) **Deleted `install.sh` outright** (brew-only) and removed `--ref` from the headless surface; settled `sand create` as the subcommand. (5) Added **human prerequisites** (tap repo + scoped release token), **version stamping**, **`depends_on "lima"`**, and **GoReleaser root-module config**. (6) Flagged cross-plan interactions: this plan **supersedes Plan 06's module-path target** (`…/sandbar` not `…/sandbar/tui`) — coordinate to avoid a double import rewrite — and **changes Plan 08's go-test working dir** to the repo root. Updated the frontmatter summary, Clarifications, Current/Target table, mermaid diagram, component sections, Risks, and Success Criteria accordingly.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+Six tasks decompose this plan. The critical path is linear at the ends
+(relocation gates everything; removal is gated on everything) and fans out in
+the middle (embed + headless in parallel; release + CI migration in parallel).
+
+```mermaid
+graph TD
+    001["Task 001: Relocate Go module tui/ → repo root"] --> 002["Task 002: Embed playbook + working-tree-first resolution"]
+    001 --> 003["Task 003: Headless sand create + registry bookkeeping"]
+    002 --> 004["Task 004: GoReleaser release + Homebrew tap"]
+    003 --> 004
+    002 --> 005["Task 005: Migrate CI lima-e2e to the sand binary"]
+    003 --> 005
+    004 --> 006["Task 006: Delete new-vm.sh + install.sh; docs → brew"]
+    005 --> 006
+```
+
+No circular dependencies: the graph is a DAG flowing 001 → {002, 003} →
+{004, 005} → 006.
+
+### Phase 1: Module Foundation
+**Parallel Tasks:**
+- Task 001: Relocate the Go module from `tui/` to the repo root (no dependencies)
+
+### Phase 2: Binary Capabilities
+**Parallel Tasks:**
+- Task 002: Embed the playbook and make resolution working-tree-first (depends on: 001)
+- Task 003: Add the headless `sand create` subcommand + managed-registry bookkeeping (depends on: 001)
+
+### Phase 3: Distribution & CI Proof
+**Parallel Tasks:**
+- Task 004: Release automation via GoReleaser + a Homebrew tap (depends on: 002, 003)
+- Task 005: Migrate CI `lima-e2e` to build `sand` from the checkout (depends on: 002, 003)
+
+### Phase 4: Retirement
+**Parallel Tasks:**
+- Task 006: Delete `new-vm.sh` + `install.sh` and switch docs to `brew` (depends on: 004, 005)
+
+### Post-phase Actions
+Run the plan's **Self Validation** checks as the phase gates dictate: after
+Phase 2, the clean build/tests and embedded-FS assertion (Self Validation 1–2);
+after Phase 3, the working-tree provisioning path and managed-registry parity in
+CI, and the release/tap validation on a pre-release tag (Self Validation 3–6);
+after Phase 4, the clean-removal greps (Self Validation 7). The human
+prerequisites (create `lullabot/homebrew-sandbar`; provision
+`HOMEBREW_TAP_GITHUB_TOKEN`) must be satisfied before Phase 3's release task can
+publish.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 6
