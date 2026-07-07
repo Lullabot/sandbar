@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -236,13 +237,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmName = n
 			// Recreate clones from a Claude base, so it is only offered for VMs we
 			// created — otherwise it would replace an unrelated VM with a sandbox.
+			// Shared with the headless `sand create` path (internal/manage) so the
+			// two entrypoints cannot drift on the gate.
 			m.confirmBase = ""
-			if m.reg.IsManaged(n) {
-				if base := m.reg.Base(n); base != "" {
-					m.confirmBase = base
-				} else {
-					m.confirmBase = vm.DefaultCreateConfig().BaseName
-				}
+			if base, ok := manage.RecreateBase(m.reg, n); ok {
+				m.confirmBase = base
 			}
 		}
 		return m, nil

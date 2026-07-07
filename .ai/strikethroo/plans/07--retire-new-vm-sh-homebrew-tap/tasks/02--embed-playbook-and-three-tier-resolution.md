@@ -2,7 +2,7 @@
 id: 2
 group: "sand-binary"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-06
 model: "sonnet"
 effort: "high"

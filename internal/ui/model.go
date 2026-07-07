@@ -10,6 +10,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -190,12 +191,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.vms = msg.vms // DiskUsed is already measured in listCmd, off the Update goroutine
 		// Reconcile the managed index against reality so a VM deleted outside the
-		// TUI stops being flagged managed (and recreate-able).
-		present := make(map[string]bool, len(msg.vms))
-		for _, v := range msg.vms {
-			present[v.Name] = true
-		}
-		if _, err := m.reg.Reconcile(present); err != nil {
+		// TUI stops being flagged managed (and recreate-able). Shared with the
+		// headless `sand create` path (internal/manage) so the two entrypoints
+		// cannot drift.
+		if _, err := manage.Reconcile(m.reg, msg.vms); err != nil {
 			m.status = "warning: could not update managed index: " + err.Error()
 		}
 		m.refreshRows()
@@ -239,9 +238,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.doneErr = msg.err
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
-		// and recreate stays available for it.
+		// and recreate stays available for it. Shared with the headless
+		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
 		if msg.err == nil && m.provCfg.Name != "" {
-			if err := m.reg.Add(m.provCfg); err != nil {
+			if err := manage.RecordSuccess(m.reg, m.provCfg); err != nil {
 				m.status = "VM ready, but recording it as managed failed: " + err.Error()
 			}
 		}
