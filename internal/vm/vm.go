@@ -5,7 +5,10 @@ package vm
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // BaseDiskFloor is the virtual disk size the base image is built at. Clones are
@@ -85,6 +88,23 @@ func (c CreateConfig) EffectiveHostname() string {
 		return c.Hostname
 	}
 	return c.Name
+}
+
+// HostUser returns the primary VM user to default to when one is not given.
+// Lima creates a guest user matching the host username, so mirror the original
+// bash provisioner (`id -un`, falling back to $USER and then "claude"). It is
+// deliberately never empty: an empty user_name passed to Ansible would override
+// the user role's default and break in-guest user creation.
+func HostUser() string {
+	if out, err := exec.Command("id", "-un").Output(); err == nil {
+		if u := strings.TrimSpace(string(out)); u != "" {
+			return u
+		}
+	}
+	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
+		return u
+	}
+	return "claude"
 }
 
 // ParseCPUs validates the script's "cpus must be a positive integer" rule from a string field.
