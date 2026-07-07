@@ -2,7 +2,7 @@
 id: 6
 group: "ci-migration-and-removal"
 dependencies: [4, 5]
-status: "pending"
+status: "completed"
 created: 2026-07-06
 model: "sonnet"
 effort: "medium"

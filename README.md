@@ -4,39 +4,38 @@ Ansible playbook to provision a Debian 13 (trixie) VM as a Claude Code developme
 
 ## Quick start with Lima (recommended)
 
-The fastest and recommended way to get a VM is `scripts/new-vm.sh`. It prompts
-for the required settings (with sensible autodetected defaults), then starts a
-[Lima](https://lima-vm.io/docs/installation/) instance that installs Ansible and
-runs this playbook against itself with `--connection=local` — no manual cloning,
-inventory editing, or `ansible` install required.
+The fastest and recommended way to get a VM is `sand`, a small Go CLI/TUI with
+the playbook embedded in it. Install it via Homebrew:
 
-It works two ways from the same script:
+```bash
+brew install lullabot/sandbar/sand
+```
 
-- **Just want a VM** — run it without checking the repo out:
+Then either drive it headlessly:
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh | bash
-  ```
+```bash
+sand create --git-name "Your Name" --git-email you@example.com
+```
 
-  This clones the playbook into `~/.local/share/sandbar` (pinned
-  to the latest release tag when one exists) and launches the VM from there.
+or launch the interactive TUI:
 
-  To pass flags on this path, put them **after `bash -s --`** — a pipe sends
-  everything after `| bash` to bash, not to the script. For example, to rebuild
-  an existing VM:
+```bash
+sand
+```
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/lullabot/sandbar/main/install.sh | bash -s -- --recreate
-  ```
+Either way, `sand` starts a [Lima](https://lima-vm.io/docs/installation/)
+instance that installs Ansible and runs the embedded playbook against itself
+with `--connection=local` — no manual cloning, inventory editing, or `ansible`
+install required.
 
-- **Hacking on the playbook** — from a checkout, run the script directly:
-
-  ```bash
-  ./scripts/new-vm.sh
-  ```
-
-  In this mode the script mounts your **working tree**, so uncommitted edits
-  provision the VM.
+- **Just want a VM** — the Homebrew-installed binary works from anywhere; it
+  materializes its embedded playbook to a private temp dir and mounts that.
+- **Hacking on the playbook** — run `sand` from a checkout of this repository
+  (e.g. via `go build ./cmd/sand`). It detects the working tree (by walking up
+  to a directory containing `site.yml`) and mounts that instead of its embedded
+  copy, so uncommitted edits provision the VM. See
+  [README-sand.md](README-sand.md#playbook-resolution-working-tree-first-embedded-fallback)
+  for the resolution order.
 
 ### Base image and clones
 
@@ -58,35 +57,34 @@ skipped on `finalize`, the `project` role is skipped on `base`.
   the base, then makes the VM.
 - `--recreate` deletes and re-clones the **named** VM from the existing base (a
   fast reset of one VM, without rebuilding the base).
-- With `new-vm.sh`, `cpus` / `memory` / `disk` are set when the base is built and
-  inherited by clones; pass them with `--rebuild` to change. (`disk` is baked into
-  the base image, so growing it on a clone built by the script needs
-  `limactl disk resize`.)
+- With `sand create` (headless mode), `cpus` / `memory` / `disk` are set when
+  the base is built and inherited by clones; pass them with `--rebuild` to
+  change. (`disk` is baked into the base image, so growing it on a clone built
+  this way needs `limactl disk resize`.)
 
-After cloning, the script restarts the VM once so your first shell lands with
+After cloning, `sand` restarts the VM once so your first shell lands with
 the right group membership (e.g. `docker`), the new hostname, and any kernel or
 library updates the finalize `apt upgrade` installed.
 
-**Per-VM disk sizing (TUI).** The `tui/` `sand` sizes each VM individually
-rather than inheriting the base's size. It builds the base at a small virtual-disk
-floor (`20GiB`) and grows every clone to its requested size (`cpus` and `memory`
-are likewise applied per clone), so disk size is chosen per VM. A clone can grow
+**Per-VM disk sizing.** `sand` sizes each VM individually rather than
+inheriting the base's size. It builds the base at a small virtual-disk floor
+(`20GiB`) and grows every clone to its requested size (`cpus` and `memory` are
+likewise applied per clone), so disk size is chosen per VM. A clone can grow
 from the floor but never below it, so an effective "shrink" is simply a fresh
 clone grown to a smaller number than the old VM. **One-time migration:** a base
 built before this change keeps its old (larger) virtual size, and clones can't go
 below it until the base is rebuilt — delete `claude-base` so the next TUI
-create/reset rebuilds it at the floor. This per-clone sizing (and the reset flow)
-is TUI-only; `new-vm.sh` keeps the inherited-from-base behavior described above.
+create/reset rebuilds it at the floor.
 
 > `Disk Used` reports allocated blocks (`st_blocks × 512`), so it can sit far
 > below the maximum (qcow2 is sparse); on APFS it reflects shared-block
 > accounting and may differ for blocks shared with a clone source.
 
-Non-interactive use (CI, scripting) is supported via flags — see
-`./scripts/new-vm.sh --help`. For example:
+Non-interactive use (CI, scripting) is supported via `sand create`'s flags —
+see `sand create --help`. For example:
 
 ```bash
-./scripts/new-vm.sh --yes --name claude \
+sand create --yes --name claude \
   --git-name "Your Name" --git-email you@example.com
 ```
 
@@ -107,17 +105,15 @@ How it spins up the VM:
 - Your answers are passed to Ansible as `--extra-vars`, so there is no
   `group_vars/all.yml` to maintain per VM; each instance is independent.
 
-Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`), and
-`git` for the `curl | bash` path.
+Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`).
 
-### Interactive TUI (`tui/`)
+### Interactive TUI
 
-For an interactive alternative, the `tui/` directory ships `sand`, a Bubble
-Tea terminal UI that manages these VMs (list, create, start/stop/restart, and
-delete/recreate) using the same base-image / clone / finalize flow. See
-[`tui/README.md`](tui/README.md) for build and usage. `scripts/new-vm.sh` is
-unchanged and remains the scripted entry point — the `curl | bash` and CI paths
-still go through it.
+`sand` run with no arguments (instead of `sand create`) opens a Bubble Tea
+terminal UI that manages these VMs (list, create, start/stop/restart, and
+delete/recreate) using the same base-image / clone / finalize flow as headless
+`sand create`. See [README-sand.md](README-sand.md) for build, usage, and
+keybindings.
 
 **Reset a VM.** On a managed VM, the recreate action opens the create form
 **pre-filled** with the VM's last-used settings, with `Name` locked. Edit any
@@ -221,7 +217,7 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
 
    Create them at **Settings > Developer settings > Personal access tokens >
    Fine-grained tokens** with the recommended permissions (this is the set
-   `new-vm.sh` shows when prompting for a token):
+   the TUI shows when prompting for a token):
 
    | Permission | Access | Purpose |
    |------------|--------|---------|
@@ -238,7 +234,7 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
    directly.
 
 2. **Supply it at VM-create time.** Provide the token through the TUI
-   create-form `GitHub token` field, `new-vm.sh --clone-token`, or the
+   create-form `GitHub token` field, `sand create --clone-token`, or the
    `project_clone_token` playbook variable. It is used only to clone a private
    repo into the VM.
 
@@ -325,3 +321,24 @@ finishes — no webhook configuration required.
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
 - **claude-code** — Claude Code CLI installation and configuration
 - **project** — Optional initial repo clone + per-org `.env`/direnv setup (only runs when `project_clone_url` is set)
+
+## Releases and the Homebrew tap
+
+`sand` ships as a prebuilt binary via Homebrew (`brew install
+lullabot/sandbar/sand`), with this repository's playbook embedded at build
+time — see [README-sand.md](README-sand.md#playbook-resolution-working-tree-first-embedded-fallback)
+for how the embedded copy is resolved at runtime.
+
+- **Cutting a release.** Pushing a `v*` tag (e.g. `v0.1.0`) triggers the
+  `release` GitHub Actions workflow, which runs
+  [GoReleaser](https://goreleaser.com/) to build and publish the `sand`
+  binaries and push an updated formula to the tap.
+- **The tap.** Formulas live in a separate repository,
+  `lullabot/homebrew-sandbar`, which must exist before the first release (it is
+  not created by CI). GoReleaser's `brews:` config pushes the updated formula
+  there on every tagged release.
+- **Human prerequisites** (one-time, before the first tag):
+  1. Create the `lullabot/homebrew-sandbar` repository.
+  2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` secret (a token with write access
+     to that repository) in this repo's Actions secrets, so GoReleaser can push
+     the formula update.

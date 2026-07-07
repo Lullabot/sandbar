@@ -26,7 +26,7 @@ type VM struct {
 	Arch     string
 }
 
-// CreateConfig mirrors the answers new-vm.sh gathers.
+// CreateConfig mirrors the answers the original bash provisioner gathers.
 type CreateConfig struct {
 	Name            string
 	BaseName        string
@@ -57,9 +57,9 @@ func DefaultCreateConfig() CreateConfig {
 	}
 }
 
-// Validate enforces the same required-field and consistency rules as new-vm.sh:
-// a git identity is required, the instance name must differ from the base image
-// name, and CPUs must be a positive integer.
+// Validate enforces the same required-field and consistency rules as the
+// original bash provisioner: a git identity is required, the instance name
+// must differ from the base image name, and CPUs must be a positive integer.
 func (c CreateConfig) Validate() error {
 	if c.Name == "" {
 		return fmt.Errorf("instance name is required")

@@ -35,12 +35,12 @@ type headlessProvisioner interface {
 	Recreate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
 }
 
-// runCreate implements the headless `sand create` subcommand: it parses the
-// new-vm.sh flag surface (minus --ref — the playbook is embedded in the sand
-// binary, so there is no ref left to pin), builds and validates a
-// vm.CreateConfig, and drives the provisioner + managed-registry bookkeeping
-// shared with the TUI. It never prompts; missing required fields are a
-// validation error.
+// runCreate implements the headless `sand create` subcommand: it parses a
+// flag surface mirroring the original bash provisioner's (minus --ref — the
+// playbook is embedded in the sand binary, so there is no ref left to pin),
+// builds and validates a vm.CreateConfig, and drives the provisioner +
+// managed-registry bookkeeping shared with the TUI. It never prompts; missing
+// required fields are a validation error.
 func runCreate(args []string) error {
 	cfg := vm.DefaultCreateConfig()
 
@@ -49,8 +49,8 @@ func runCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
 
 Headlessly provision a Claude Code development VM: no TUI, no prompts. Flags
-mirror new-vm.sh's, minus --ref (the playbook is embedded in this binary, so
-there is no ref to pin).
+mirror the original bash provisioner's, minus --ref (the playbook is embedded
+in this binary, so there is no ref to pin).
 
 Flags:
 `)
@@ -73,12 +73,14 @@ Flags:
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Delete and rebuild the base image first, then create")
-	// -y/--yes are accepted for flag-surface parity with new-vm.sh, but headless
-	// mode never prompts regardless, so they carry no behavior of their own.
+	// -y/--yes are accepted for flag-surface parity with the original bash
+	// provisioner, but headless mode never prompts regardless, so they carry no
+	// behavior of their own.
 	_ = fs.Bool("y", false, "Accept all defaults, never prompt (headless mode always behaves this way)")
 	_ = fs.Bool("yes", false, "same as -y")
-	// NOTE: --ref is deliberately NOT a flag here. new-vm.sh's --ref pins the git
-	// ref of a checked-out playbook in standalone mode; sand's playbook is
+	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
+	// --ref pinned the git ref of a checked-out playbook in standalone mode;
+	// sand's playbook is
 	// embedded in the binary at build time (see playbook_embed.go), so there is
 	// no ref left to pin at create time. This is not a gap — see task 3 notes.
 

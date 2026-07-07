@@ -5,31 +5,83 @@ UI for managing this project's disposable Claude Code [Lima](https://lima-vm.io/
 VMs, with full CRUD: list and inspect instances, create new ones, run lifecycle
 actions (start / stop / restart), and delete or recreate them.
 
-It reimplements the orchestration in [`scripts/new-vm.sh`](scripts/new-vm.sh)
-in Go: the heavy, identity-free install is provisioned once into a stopped **base
-image**, each VM is a fast `limactl clone` of that base, and a light **finalize**
-pass applies the per-VM bits (hostname, git identity, `apt upgrade`, optional repo
-clone). Creating and recreating a VM streams the provisioner's output into a
-scrollable progress pane.
+It provisions the heavy, identity-free install once into a stopped **base
+image**, then makes each VM a fast `limactl clone` of that base, and runs a
+light **finalize** pass on the clone (hostname, git identity, `apt upgrade`,
+optional repo clone). Creating and recreating a VM streams the provisioner's
+output into a scrollable progress pane.
+
+`sand` ships in two modes from the same binary:
+
+- **`sand`** (no subcommand) opens the interactive Bubble Tea TUI documented
+  below.
+- **`sand create`** drives the same provisioner headlessly — no TUI, no
+  prompts — for scripting and CI. See
+  [Headless mode (`sand create`)](#headless-mode-sand-create).
 
 ## Prerequisites
 
-- **Lima** (`limactl`) on your `PATH`, new enough to support `limactl clone`. The
-  TUI runs a preflight check on startup and exits with an install link if either
-  is missing. (See [Lima installation](https://lima-vm.io/docs/installation/).)
-- **Run it from within a checkout** of this playbook repository. On startup the
-  TUI locates the playbook by walking up from the current git checkout to a
-  toplevel that contains `site.yml`; it exits with an error if it cannot find one.
-- You do **not** need Ansible on your host. The base image's Lima config installs
-  `ansible` (and `rsync`) inside the guest, and the playbook is then run in the VM
-  with `--connection=local` — the same model `new-vm.sh` uses.
+- **Lima** (`limactl`) on your `PATH`, new enough to support `limactl clone`.
+  Both the TUI and `sand create` run a preflight check on startup and exit with
+  an install link if it's missing or too old. (See
+  [Lima installation](https://lima-vm.io/docs/installation/).)
+- You do **not** need Ansible on your host, and you do **not** need a checkout
+  of this repository. The base image's Lima config installs `ansible` (and
+  `rsync`) inside the guest, and the playbook is then run in the VM with
+  `--connection=local`. See
+  [Playbook resolution](#playbook-resolution-working-tree-first-embedded-fallback)
+  for where the playbook itself comes from.
 
 ## Build & run
 
+Installed via Homebrew (`brew install lullabot/sandbar/sand`), just run `sand`
+or `sand create`. To build from a checkout of this repository instead:
+
 ```bash
-go build -o sand ./cmd/sand
+go build ./cmd/sand
 ./sand
 ```
+
+## Playbook resolution: working-tree-first, embedded-fallback
+
+The Ansible playbook (`site.yml`, `roles/`, `group_vars/`) is embedded into the
+`sand` binary at build time (see `playbook_embed.go`), so a Homebrew-installed
+`sand` needs no separate checkout to provision a VM. At startup `sand` resolves
+which copy of the playbook to mount into the VM in two tiers:
+
+1. **Working tree first.** If `sand` is run from inside a git checkout of this
+   repository (detected by walking up from the current directory to a toplevel
+   containing `site.yml`), it mounts that working tree. This is the mode for
+   hacking on the playbook: uncommitted edits take effect on the next
+   provision, with no rebuild required.
+2. **Embedded fallback.** Otherwise (e.g. a Homebrew-installed binary run
+   outside any checkout), `sand` materializes the playbook fileset embedded in
+   the binary to a fresh private temp dir and mounts that instead.
+
+## Headless mode (`sand create`)
+
+`sand create` drives the exact same base-image / clone / finalize provisioner
+as the TUI, with no prompts — useful for scripting and CI. Flags mirror what
+the TUI's create form asks for:
+
+```bash
+sand create --name claude --git-name "Your Name" --git-email you@example.com
+```
+
+Common flags (run `sand create --help` for the full list and defaults):
+
+| Flag | Purpose |
+|------|---------|
+| `--name` | Lima instance name (default `claude`) |
+| `--git-name` / `--git-email` | git identity written into the VM (required) |
+| `--cpus` / `--memory` / `--disk` | VM sizing (defaults mirror the TUI form) |
+| `--clone-url` / `--clone-token` | Optional private repo to clone into the VM |
+| `--recreate` | If the named instance exists and is sand-managed, delete and re-clone it |
+| `--rebuild` | Delete and rebuild the base image first, then create |
+
+`--ref` (pinning a playbook git ref) is deliberately not a flag: with the
+playbook embedded in the binary, there is no separate ref left to pin — see
+[Playbook resolution](#playbook-resolution-working-tree-first-embedded-fallback).
 
 ## Keybindings
 
@@ -129,7 +181,8 @@ literal character here, so only `ctrl+c` quits. Help for the focused field — i
 default, whether it is required, and (for the token) where to create a GitHub
 fine-grained token with the recommended scopes — is shown beneath the form.
 
-Most fields default like `new-vm.sh` when left blank (hostname → the instance
+Most fields default the same way `sand create`'s flags do when left blank
+(hostname → the instance
 name, user → your host username, CPUs → half the host's cores, memory → `8GiB`
 **or half your host's RAM, whichever is less**, disk → `100GiB`). **`Name` is
 required** and starts empty — it does not silently default. `GitHub repo URL` and
@@ -241,12 +294,12 @@ image (clone source)" in the detail view, so they stand out from the disposable
 VMs cloned from them.
 
 The index of managed VMs is a small JSON file at
-`${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json` (the
-same data dir `new-vm.sh` uses). It is updated when you create, recreate, or delete
-a VM from the TUI, and reconciled against `limactl list` on each refresh so an
-instance deleted outside the TUI stops being flagged managed. VMs created outside
-the TUI (e.g. directly via `new-vm.sh` or `limactl`) are treated as unmanaged;
-delete still works, recreate does not.
+`${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json`. It is updated
+when you create, recreate, or delete a VM from the TUI or `sand create`, and
+reconciled against `limactl list` on each refresh so an instance deleted
+outside `sand` stops being flagged managed. VMs created outside `sand` (e.g.
+directly via `limactl`) are treated as unmanaged; delete still works, recreate
+does not.
 
 The index also stores each managed VM's create configuration (CPUs, memory, disk,
 hostname, git identity, …) so **recreate pre-fills the reset form faithfully**
@@ -275,9 +328,10 @@ streams separately: only stdout is parsed, and stderr is surfaced as diagnostics
 on failure. The list parser also skips any line that is not a JSON object, so a
 stray notice on stdout degrades to "ignored" rather than failing the listing.
 
-## Relationship to `new-vm.sh`
+## Relationship to the original bash provisioner
 
-The TUI and [`scripts/new-vm.sh`](scripts/new-vm.sh) share the same model and
+`sand` (both the TUI and `sand create`) is a from-scratch Go port that replaced
+this project's original bash provisioner script. It keeps the same model and
 security posture:
 
 - **Base / clone / finalize**: provision the heavy work once into a stopped base
@@ -292,7 +346,9 @@ security posture:
   streamed into the guest's tmpfs and removed on exit; they never land in argv or
   on the persistent disk.
 
-The bash script is **unchanged**, and remains the scripted entry point: the
-`curl … | bash` (Homebrew / standalone) install and the CI path both go through
-`new-vm.sh`. The TUI is an interactive alternative for managing VMs from a
-checkout, not a replacement for it.
+The bash script has been retired: `brew install lullabot/sandbar/sand` (or
+`go build ./cmd/sand` from a checkout) is now the sole install path, and both
+`sand create` (scripting/CI) and the interactive TUI go through the same Go
+provisioner described above — see
+[Playbook resolution](#playbook-resolution-working-tree-first-embedded-fallback)
+and [Headless mode](#headless-mode-sand-create).
