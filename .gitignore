@@ -1,5 +1,5 @@
 group_vars/all.yml
-# Personal Lima config (image digests, paths) — generate VMs with scripts/new-vm.sh
+# Personal Lima config (image digests, paths) — generate VMs with `sand create`
 /lima.yaml
 
 # GoReleaser build output

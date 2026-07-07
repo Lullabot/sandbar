@@ -14,8 +14,8 @@ type varItem struct {
 }
 
 // BuildExtraVars renders the Ansible extra-vars (all.yml) for one provisioning
-// phase, mirroring new-vm.sh's build_allyml. The phase (base/finalize/full)
-// drives which tasks site.yml runs.
+// phase, mirroring the original bash provisioner's build_allyml. The phase
+// (base/finalize/full) drives which tasks site.yml runs.
 //
 // The base image is identity-free, so the git identity and the project-clone
 // vars (which may include a token) are emitted only for non-base phases — they

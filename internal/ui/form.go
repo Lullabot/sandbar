@@ -50,8 +50,9 @@ var fieldLabels = []string{
 }
 
 // fieldInfo is the per-field help shown for the focused field. The GitHub token
-// entry mirrors new-vm.sh's github_token_help: where to create a fine-grained
-// token and the recommended (deliberately limited) permissions.
+// entry mirrors the original bash provisioner's github_token_help: where to
+// create a fine-grained token and the recommended (deliberately limited)
+// permissions.
 var fieldInfo = []string{
 	"Required. Lima instance name — also the VM you'll `limactl shell` into. Must differ from the base image.",
 	"VM hostname inside the guest. Blank → same as the instance name.",
@@ -82,9 +83,9 @@ func hostGit(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// hostUser mirrors new-vm.sh's default primary user: Lima creates a guest user
-// matching the host username, so default to it (best-effort), falling back to
-// $USER and then "claude".
+// hostUser mirrors the original bash provisioner's default primary user: Lima
+// creates a guest user matching the host username, so default to it
+// (best-effort), falling back to $USER and then "claude".
 func hostUser() string {
 	if out, err := exec.Command("id", "-un").Output(); err == nil {
 		if u := strings.TrimSpace(string(out)); u != "" {
@@ -97,8 +98,8 @@ func hostUser() string {
 	return "claude"
 }
 
-// defaultCPUs mirrors new-vm.sh's default_cpus(): half the host's logical CPUs,
-// with a floor of 2.
+// defaultCPUs mirrors the original bash provisioner's default_cpus(): half the
+// host's logical CPUs, with a floor of 2.
 func defaultCPUs() int {
 	if n := runtime.NumCPU() / 2; n >= 2 {
 		return n
@@ -325,10 +326,11 @@ func (m *model) resetFocusPrev() tea.Cmd {
 // as blank for defaulting.
 func (m model) field(i int) string { return strings.TrimSpace(m.inputs[i].Value()) }
 
-// buildConfig assembles a CreateConfig from the form fields. Like new-vm.sh, a
-// blank field falls back to its default rather than producing an empty-named VM,
-// an empty primary user, or an empty memory/disk that Lima would reject. Only
-// the git identity has no default and is required (enforced by Validate).
+// buildConfig assembles a CreateConfig from the form fields. Like the original
+// bash provisioner, a blank field falls back to its default rather than
+// producing an empty-named VM, an empty primary user, or an empty memory/disk
+// that Lima would reject. Only the git identity has no default and is required
+// (enforced by Validate).
 func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg := vm.DefaultCreateConfig()
 	cfg.Name = m.field(fName)                              // required; Validate rejects empty

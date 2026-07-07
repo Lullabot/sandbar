@@ -174,8 +174,8 @@ func (c *Client) Copy(ctx context.Context, out io.Writer, recursive bool, src, d
 // Host endpoints are plain paths and are passed through unchanged by callers.
 func GuestPath(instance, path string) string { return instance + ":" + path }
 
-// Preflight mirrors new-vm.sh's guards: limactl must be installed and new
-// enough to support `limactl clone`.
+// Preflight mirrors the original bash provisioner's guards: limactl must be
+// installed and new enough to support `limactl clone`.
 func (c *Client) Preflight() error {
 	ctx := context.Background()
 	if _, err := c.r.Output(ctx, "--version"); err != nil {

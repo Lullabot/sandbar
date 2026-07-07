@@ -688,9 +688,10 @@ func TestNewInputsSeedsDefaults(t *testing.T) {
 	}
 }
 
-// A blank optional field must fall back to its default (mirroring new-vm.sh):
-// clearing hostname/user/memory/disk on a named VM yields a valid, fully
-// populated config. Name has no default and is covered separately.
+// A blank optional field must fall back to its default (mirroring the
+// original bash provisioner): clearing hostname/user/memory/disk on a named VM
+// yields a valid, fully populated config. Name has no default and is covered
+// separately.
 func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	m := newTestModel(t)
 	opened, _ := m.Update(runeKey('n'))

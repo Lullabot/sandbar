@@ -247,10 +247,10 @@ No circular dependencies: the graph is a DAG flowing 001 → {002, 003} →
 - ✔️ Task 002: Embed the playbook and make resolution working-tree-first (depends on: 001) — `completed`
 - ✔️ Task 003: Add the headless `sand create` subcommand + managed-registry bookkeeping (depends on: 001) — `completed`
 
-### Phase 3: Distribution & CI Proof
+### Phase 3: Distribution & CI Proof ✅
 **Parallel Tasks:**
-- Task 004: Release automation via GoReleaser + a Homebrew tap (depends on: 002, 003)
-- Task 005: Migrate CI `lima-e2e` to build `sand` from the checkout (depends on: 002, 003)
+- ✔️ Task 004: Release automation via GoReleaser + a Homebrew tap (depends on: 002, 003) — `completed`
+- ✔️ Task 005: Migrate CI `lima-e2e` to build `sand` from the checkout (depends on: 002, 003) — `completed`
 
 ### Phase 4: Retirement
 **Parallel Tasks:**

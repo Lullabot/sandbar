@@ -13,7 +13,8 @@ import (
 )
 
 // inGuestScript is the bash body run inside the guest to provision one phase. It
-// reproduces new-vm.sh's run_provision: the phase vars are streamed in over
+// reproduces the original bash provisioner's run_provision: the phase vars are
+// streamed in over
 // stdin into tmpfs (never argv, so a finalize token never appears in a process
 // listing or on the persistent disk) and removed via an EXIT trap; the playbook
 // is re-synced from the still-mounted host copy first so a run always reflects
@@ -48,7 +49,7 @@ func step(out io.Writer, format string, args ...any) {
 }
 
 // runProvision streams one phase's extra-vars into the guest over stdin and runs
-// the playbook there. Mirrors new-vm.sh's run_provision.
+// the playbook there. Mirrors the original bash provisioner's run_provision.
 func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, out io.Writer) error {
 	vars, err := BuildExtraVars(cfg, phase, hostname)
 	if err != nil {
@@ -64,7 +65,7 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 
 // BuildBase renders the base overlay, creates the base instance, runs the heavy
 // base-phase playbook over a shell, and stops the instance (kept as the clone
-// source). Mirrors new-vm.sh's build_base.
+// source). Mirrors the original bash provisioner's build_base.
 func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	overlay, err := RenderBaseOverlay(cfg, p.PlaybookDir)
 	if err != nil {
@@ -116,13 +117,14 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 
 // CreateVM ensures a stopped base image exists, clones it into the target VM,
 // starts it, runs the light finalize pass (hostname, git identity, optional repo
-// clone), then bounces the VM so the first shell starts cleanly. Mirrors
-// new-vm.sh's launch sequence.
+// clone), then bounces the VM so the first shell starts cleanly. Mirrors the
+// original bash provisioner's launch sequence.
 func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
-	// Refuse an existing target rather than colliding on clone — new-vm.sh has the
-	// same guard. A definite status (no error, non-empty) means the instance is
-	// already there. Recreate calls createVM directly (it just deleted the
-	// target), so it bypasses this check instead of racing a just-removed VM.
+	// Refuse an existing target rather than colliding on clone — the original
+	// bash provisioner has the same guard. A definite status (no error,
+	// non-empty) means the instance is already there. Recreate calls createVM
+	// directly (it just deleted the target), so it bypasses this check instead
+	// of racing a just-removed VM.
 	if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
 		return fmt.Errorf("instance %q already exists — delete it first, or choose a different name", cfg.Name)
 	}
@@ -362,7 +364,8 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 }
 
 // Recreate deletes the named instance (force) and re-clones it from the base
-// image — a fast way to reset one VM. Mirrors new-vm.sh's --recreate path.
+// image — a fast way to reset one VM. Mirrors the original bash provisioner's
+// --recreate path.
 func (p *Provisioner) Recreate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	if err := p.Lima.Delete(cfg.Name, true); err != nil {
 		return fmt.Errorf("delete %q: %w", cfg.Name, err)

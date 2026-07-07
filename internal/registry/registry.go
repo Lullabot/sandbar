@@ -2,8 +2,8 @@
 // TUI can mark them and gate destructive operations. This matters because
 // recreate clones from a Claude base image and would replace ANY instance it is
 // pointed at; Lima does not record a clone's source, so we keep our own small
-// JSON index under the XDG data dir (the same location new-vm.sh uses for its
-// cache).
+// JSON index under the XDG data dir (the same location the original bash
+// provisioner used for its cache).
 package registry
 
 import (
@@ -43,7 +43,7 @@ func NewEmpty() *Registry {
 	return &Registry{vms: map[string]entry{}}
 }
 
-// defaultPath mirrors new-vm.sh's data dir:
+// defaultPath mirrors the original bash provisioner's data dir:
 // ${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json.
 func defaultPath() string {
 	base := os.Getenv("XDG_DATA_HOME")

@@ -15,8 +15,8 @@ import (
 // resolves in two tiers:
 //
 //  1. If run inside a git checkout containing site.yml, return the working
-//     tree — matching new-vm.sh's "repo mode" so uncommitted edits to the
-//     playbook take effect.
+//     tree — matching the original bash provisioner's "repo mode" so
+//     uncommitted edits to the playbook take effect.
 //  2. Otherwise (no checkout, e.g. a Homebrew-installed binary run outside
 //     any repository), materialise the playbook fileset embedded in the
 //     sandbar package to a fresh private temp dir and return that path.

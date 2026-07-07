@@ -3,7 +3,7 @@
   hosts: all
   become: true
   # provision_phase splits the run so a generic "base" VM can be built once and
-  # cloned cheaply (see scripts/new-vm.sh):
+  # cloned cheaply:
   #   full     - everything in one pass (default; the non-clone / curl|bash flow)
   #   base     - heavy, identity-free setup baked into the clone source
   #   finalize - light per-clone work (hostname, git identity, apt upgrade, repo)
