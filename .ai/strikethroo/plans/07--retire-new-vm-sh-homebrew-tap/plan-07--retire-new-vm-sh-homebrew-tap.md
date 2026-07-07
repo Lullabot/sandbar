@@ -242,10 +242,10 @@ No circular dependencies: the graph is a DAG flowing 001 → {002, 003} →
 **Parallel Tasks:**
 - ✔️ Task 001: Relocate the Go module from `tui/` to the repo root (no dependencies) — `completed`
 
-### Phase 2: Binary Capabilities
+### Phase 2: Binary Capabilities ✅
 **Parallel Tasks:**
-- Task 002: Embed the playbook and make resolution working-tree-first (depends on: 001)
-- Task 003: Add the headless `sand create` subcommand + managed-registry bookkeeping (depends on: 001)
+- ✔️ Task 002: Embed the playbook and make resolution working-tree-first (depends on: 001) — `completed`
+- ✔️ Task 003: Add the headless `sand create` subcommand + managed-registry bookkeeping (depends on: 001) — `completed`
 
 ### Phase 3: Distribution & CI Proof
 **Parallel Tasks:**
