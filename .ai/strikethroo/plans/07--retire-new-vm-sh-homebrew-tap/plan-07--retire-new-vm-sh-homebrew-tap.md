@@ -252,9 +252,9 @@ No circular dependencies: the graph is a DAG flowing 001 → {002, 003} →
 - ✔️ Task 004: Release automation via GoReleaser + a Homebrew tap (depends on: 002, 003) — `completed`
 - ✔️ Task 005: Migrate CI `lima-e2e` to build `sand` from the checkout (depends on: 002, 003) — `completed`
 
-### Phase 4: Retirement
+### Phase 4: Retirement ✅
 **Parallel Tasks:**
-- Task 006: Delete `new-vm.sh` + `install.sh` and switch docs to `brew` (depends on: 004, 005)
+- ✔️ Task 006: Delete `new-vm.sh` + `install.sh` and switch docs to `brew` (depends on: 004, 005) — `completed`
 
 ### Post-phase Actions
 Run the plan's **Self Validation** checks as the phase gates dictate: after
@@ -269,3 +269,116 @@ publish.
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-06
+
+### Results
+
+All 6 tasks across 4 phases were implemented and verified (each phase committed
+separately; every committed HEAD was re-verified to build and test green in an
+isolated worktree):
+
+- **Task 01 — Module relocation.** The Go module moved from `tui/` to the repo
+  root; module path is now `github.com/lullabot/sandbar` (no `/tui`), 41 import
+  sites rewritten across 25 files. `go build ./cmd/sand` + `go test ./...` green;
+  no `lullabot/sandbar/tui` imports remain.
+- **Task 02 — Embedded playbook.** New root `package sandbar` embeds
+  `site.yml ansible.cfg inventory all:roles all:group_vars`; `LocatePlaybook`
+  is two-tier (git working tree wins, else materialise the embedded fileset to a
+  temp dir). Embed-completeness unit test passes (`go test ./internal/provision
+  -run Embed`).
+- **Task 03 — Headless `sand create`.** New subcommand mirrors `new-vm.sh`'s
+  flags (minus `--ref`); bare `sand` still opens the TUI. Managed-registry
+  bookkeeping (record + reconcile + recreate-gate) extracted into a shared
+  `internal/manage` package used by **both** the TUI and headless paths. Parity
+  unit test asserts a headless create is recorded as managed with its
+  `CreateConfig`. Secret-over-stdin hygiene preserved.
+- **Task 04 — Release + tap.** Root `.goreleaser.yaml` (darwin/linux ×
+  amd64/arm64, `CGO_ENABLED=0`, `-X main.version` ldflags) + a tag-triggered
+  `release.yml`; `brews:` publishes to `lullabot/homebrew-sandbar` with
+  `depends_on "lima"`. A local `goreleaser release --snapshot` built all four
+  archives and a valid formula, and confirmed the embedded playbook survives the
+  cross-compile. `sand --version` reports the stamped value.
+- **Task 05 — CI migration.** `lima-e2e` now builds `sand` from the checkout and
+  provisions with `sand create --yes …` (all apt-keyring / toolchain assertions
+  and the failure log-tail preserved); the `lint` job no longer shellchecks the
+  deleted scripts (ansible `--syntax-check` kept).
+- **Task 06 — Removal.** `scripts/new-vm.sh` and `install.sh` deleted;
+  `grep -rn new-vm.sh` (excl. `.git`/`.ai`) is empty; `install.sh` grep shows
+  only the two third-party installer URLs. README/`README-sand.md` rewritten
+  around `brew install lullabot/sandbar/sand` + `sand create`.
+
+**Self-Validation status:** SV1 (clean build/tests, no `tui/` imports), SV2
+(embedded-FS assertion), and SV7 (clean-removal greps) **pass** locally. SV3/SV4/SV5
+(live-VM working-tree + no-checkout provisioning, managed-registry parity) are
+covered at unit/integration level (parity test, embed test) and are exercised
+live by the migrated `lima-e2e` CI job **by plan design**; SV6 (release publish +
+`brew install`) is blocked on the documented human prerequisites, though the
+release *build* is proven by the successful goreleaser snapshot.
+
+### Noteworthy Events
+
+- **Phase-1 commit staging anomaly (caught and fixed).** The first phase commit
+  captured the *pre-rewrite* content of the renamed files (`git mv` staged the
+  original content; a path-scoped `git add` did not override it), so the module
+  path/imports were momentarily un-rewritten in that commit even though the
+  working tree was correct. Detected by building the committed HEAD in an
+  **isolated worktree** (not just the working tree). Fixed by amending the
+  phase-1 commit. Adopted isolated-HEAD build+test verification after **every**
+  subsequent phase — all passed.
+- **Within-phase tasks were serialized, not parallelized.** All six tasks mutate
+  one shared Go module; running same-phase agents concurrently in one working
+  tree would race on shared files (and a multi-worktree merge of overlapping Go
+  edits was higher-risk than the marginal wall-clock gain). Tasks were dispatched
+  one at a time in dependency order, each verified before the next — trading
+  parallelism (Critical Rule 3) for correctness/safety (Critical Rule 4).
+- **GoReleaser `brews` deprecation — deliberate retention.** GoReleaser v2.17
+  flags `brews:` (Homebrew *formula*) as deprecated in favour of
+  `homebrew_casks`. But Homebrew casks are **macOS-only**, and the plan requires
+  `brew install` on **macOS *and* Linux** (Success Criterion 3). `brews`
+  (formula) is the only cross-platform option, so it was retained deliberately
+  and annotated in `.goreleaser.yaml`. `goreleaser check` reports
+  *"configuration is valid, but uses deprecated properties"*; `goreleaser release`
+  under `~> v2` still generates the formula, verified by a snapshot build.
+- **Task-04 agent stalled** waiting on a background goreleaser process; the
+  orchestrator took over and verified the release artifacts directly (config,
+  ldflags version stamping, YAML validity, and a full snapshot build).
+- **Bonus real-Lima regression run.** The gated `limae2e` suite was run against
+  real Lima VMs after the relocation (supplementary to plan 07's own gate, the
+  migrated CI job). Result: `internal/provision`'s
+  `TestE2E_ConfigureGrowsDiskAndStageRoundTrip` **PASSED** (180s) — the package
+  most changed by this plan (embed) provisions and stage-round-trips correctly
+  on a real VM. `internal/lima`'s `TestE2ECopyRoundTrip` **FAILED** on the
+  recursive-directory-copy assertion (the single-file round-trip in the same
+  test passed). This is **not a plan-07 regression**: this plan made no
+  functional change to `lima.Client.Copy` (the `internal/lima/client.go` diff vs
+  the pre-plan-07 baseline `acb62b2` is only the import-path rewrite and one
+  comment reword), so the recursive-copy behaviour is byte-identical to before.
+  **Confirmed dynamically:** the `acb62b2` baseline fails the same test with the
+  byte-identical error (`cat: …/srcdir/nested.txt: No such file or directory`),
+  so this is a pre-existing/environmental issue with `limactl` recursive copy
+  under this runner. Flagged as a follow-up below.
+
+### Necessary follow-ups
+
+1. **Human release prerequisites (blocking first release):** create the empty
+   `lullabot/homebrew-sandbar` tap repo and provision a scoped
+   `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret with push to it; then validate
+   end-to-end on a pre-release tag (`v0.0.0-rc1`) and confirm
+   `brew install lullabot/sandbar/sand` on macOS + Linux (Self-Validation 6).
+2. **Merge to run `lima-e2e` in CI** to obtain the live green signal for the
+   working-tree provisioning path (Self-Validation 3) on the real runner.
+3. **Revisit `brews` if a future GoReleaser removes it** — Linux Homebrew
+   distribution would then need an alternative mechanism (casks are macOS-only).
+4. **Untracked `todo.md`** (a pre-existing personal scratch file, not tracked and
+   outside this plan's scope) still references old `tui/internal/ui/…` paths;
+   update if/when it is acted on.
+5. **Pre-existing `TestE2ECopyRoundTrip` failure** (recursive `limactl copy`) —
+   unrelated to this plan: the `lima.Copy` code is byte-identical to the
+   pre-plan-07 baseline `acb62b2` (only imports + a comment changed), and that
+   baseline was run and **fails the same test identically**, so the failure
+   predates this work. Worth a separate investigation into `limactl`
+   recursive-copy semantics on this runner; it is not gated by this work order.
