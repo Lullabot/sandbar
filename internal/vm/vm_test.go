@@ -59,6 +59,18 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// TestHostUserNeverEmpty locks the load-bearing invariant behind the headless
+// `sand create` user default: HostUser must never return "". An empty user_name
+// passed as an Ansible extra-var overrides the user role's default and breaks
+// the base phase's in-guest user creation (the bug that broke the lima-e2e CI
+// job when create sent an empty user). The fallback chain (id -un → $USER →
+// "claude") guarantees a non-empty result in every environment.
+func TestHostUserNeverEmpty(t *testing.T) {
+	if u := HostUser(); u == "" {
+		t.Fatal("HostUser() = \"\", want a non-empty default (id -un → $USER → \"claude\")")
+	}
+}
+
 func TestDefaultCreateConfig(t *testing.T) {
 	c := DefaultCreateConfig()
 	if c.Name != "claude" {

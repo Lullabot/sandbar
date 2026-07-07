@@ -97,6 +97,14 @@ Flags:
 	}
 	cfg.CPUs = n
 
+	// Lima creates a guest user matching the host username; default cfg.User to
+	// it when --user is omitted, exactly as the TUI form and the original bash
+	// provisioner do. Passing an empty user_name would otherwise override the
+	// user role's default and break the base phase's in-guest user creation.
+	if cfg.User == "" {
+		cfg.User = vm.HostUser()
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("sand create: %w", err)
 	}

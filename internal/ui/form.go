@@ -83,20 +83,10 @@ func hostGit(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// hostUser mirrors the original bash provisioner's default primary user: Lima
-// creates a guest user matching the host username, so default to it
-// (best-effort), falling back to $USER and then "claude".
-func hostUser() string {
-	if out, err := exec.Command("id", "-un").Output(); err == nil {
-		if u := strings.TrimSpace(string(out)); u != "" {
-			return u
-		}
-	}
-	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
-		return u
-	}
-	return "claude"
-}
+// hostUser defaults the primary VM user to the host username (Lima creates a
+// matching guest user). The headless `sand create` path defaults the same way,
+// so both share vm.HostUser as the single source of truth.
+func hostUser() string { return vm.HostUser() }
 
 // defaultCPUs mirrors the original bash provisioner's default_cpus(): half the
 // host's logical CPUs, with a floor of 2.
