@@ -350,9 +350,12 @@ for how the embedded copy is resolved at runtime.
   there on every release.
 - **Human prerequisites** (one-time, before the first release):
   1. Create the `lullabot/homebrew-sandbar` repository.
-  2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` secret (a token with write access
-     to that repository) in this repo's Actions secrets, so GoReleaser can push
-     the formula update.
+  2. Create a dedicated org GitHub App (Contents: write) installed only on
+     `lullabot/homebrew-sandbar`, and set its App ID as the `HOMEBREW_TAP_APP_ID`
+     variable and its private key as the `HOMEBREW_TAP_APP_PRIVATE_KEY` secret in
+     this repo's Actions settings. The `release` workflow mints a short-lived,
+     tap-scoped token from them so GoReleaser can push the formula update
+     (no long-lived PAT).
   3. Install the org release-please App on this repo (contents + pull-requests
      write) and set the `RELEASE_PLEASE_APP_ID` variable and
      `RELEASE_PLEASE_PRIVATE_KEY` secret used by `release-please.yml`.
