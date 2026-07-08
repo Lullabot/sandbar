@@ -4,7 +4,8 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "release-type": "go"
+      "release-type": "go",
+      "release-as": "0.1.0"
     }
   }
 }
