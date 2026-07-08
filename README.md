@@ -81,11 +81,14 @@ create/reset rebuilds it at the floor.
 > accounting and may differ for blocks shared with a clone source.
 
 Non-interactive use (CI, scripting) is supported via `sand create`'s flags —
-see `sand create --help`. For example:
+see `sand create --help`. Every flag has a default, and `--git-name` /
+`--git-email` fall back to your host's `git config`, so on a configured machine
+`sand create` needs no flags. Pass them explicitly where the host has no git
+identity (e.g. a bare CI runner) — otherwise `sand create` errors rather than
+fabricate a commit author:
 
 ```bash
-sand create --name claude \
-  --git-name "Your Name" --git-email you@example.com
+sand create --git-name "Your Name" --git-email you@example.com
 ```
 
 How it spins up the VM:
