@@ -84,7 +84,7 @@ Non-interactive use (CI, scripting) is supported via `sand create`'s flags —
 see `sand create --help`. For example:
 
 ```bash
-sand create --yes --name claude \
+sand create --name claude \
   --git-name "Your Name" --git-email you@example.com
 ```
 
