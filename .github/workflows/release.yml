@@ -13,8 +13,11 @@
 #   1. Create the empty `lullabot/homebrew-sandbar` GitHub repository (this is
 #      the Homebrew tap GoReleaser's `brews:` publisher pushes formula updates
 #      to).
-#   2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret on this repo: a
-#      token scoped to push access on `lullabot/homebrew-sandbar` only.
+#   2. Create a dedicated GitHub App (org-owned) with Contents:write, installed
+#      only on `lullabot/homebrew-sandbar`. Store its App ID as the
+#      `HOMEBREW_TAP_APP_ID` Actions variable and its private key as the
+#      `HOMEBREW_TAP_APP_PRIVATE_KEY` secret on this repo; the job mints a
+#      short-lived, tap-scoped token from them at runtime.
 name: release
 
 on:
@@ -34,10 +37,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Mint a short-lived (~1h) token scoped to the tap repo so GoReleaser's
+      # `brews:` publisher can push the formula there. Replaces a long-lived PAT:
+      # the dedicated App is installed only on homebrew-sandbar with
+      # contents:write, so this workflow's cross-repo reach is exactly that.
+      - uses: actions/create-github-app-token@v3
+        id: tap-token
+        with:
+          app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-sandbar
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
           args: release --clean
         env:
+          # The GitHub Release in THIS repo uses the default token; only the
+          # cross-repo formula push uses the App token.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
