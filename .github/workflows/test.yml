@@ -79,7 +79,7 @@ jobs:
       # to fit the hosted runner (4 vCPU / 16 GB).
       - name: Provision a VM with sand (built from the checkout)
         run: |
-          ./sand create --yes \
+          ./sand create \
             --name claude-ci \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB
