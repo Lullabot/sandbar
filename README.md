@@ -332,16 +332,27 @@ lullabot/sandbar/sand`), with this repository's playbook embedded at build
 time — see [README-sand.md](README-sand.md#playbook-resolution-working-tree-first-embedded-fallback)
 for how the embedded copy is resolved at runtime.
 
-- **Cutting a release.** Pushing a `v*` tag (e.g. `v0.1.0`) triggers the
-  `release` GitHub Actions workflow, which runs
-  [GoReleaser](https://goreleaser.com/) to build and publish the `sand`
-  binaries and push an updated formula to the tap.
+- **Cutting a release.** Releases are driven by
+  [release-please](https://github.com/googleapis/release-please): it keeps a
+  release PR open that accrues the changelog from Conventional Commit messages
+  on `main`. Merging that PR creates the `vX.Y.Z` tag and GitHub Release, which
+  in turn triggers the `release` workflow — [GoReleaser](https://goreleaser.com/)
+  builds and uploads the `sand` binaries and pushes an updated formula to the
+  tap. You never push a tag by hand; version bumps follow the commit types
+  (`feat` → minor, `fix` → patch, with `bump-minor-pre-major` while pre-1.0).
+- **Why a GitHub App token.** release-please authenticates with an org GitHub
+  App (not the default `GITHUB_TOKEN`) precisely so the tag it creates triggers
+  the `release` workflow — tags created with `GITHUB_TOKEN` do not trigger other
+  workflows.
 - **The tap.** Formulas live in a separate repository,
   `lullabot/homebrew-sandbar`, which must exist before the first release (it is
   not created by CI). GoReleaser's `brews:` config pushes the updated formula
-  there on every tagged release.
-- **Human prerequisites** (one-time, before the first tag):
+  there on every release.
+- **Human prerequisites** (one-time, before the first release):
   1. Create the `lullabot/homebrew-sandbar` repository.
   2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` secret (a token with write access
      to that repository) in this repo's Actions secrets, so GoReleaser can push
      the formula update.
+  3. Install the org release-please App on this repo (contents + pull-requests
+     write) and set the `RELEASE_PLEASE_APP_ID` variable and
+     `RELEASE_PLEASE_PRIVATE_KEY` secret used by `release-please.yml`.

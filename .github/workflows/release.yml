@@ -1,6 +1,12 @@
 # Release workflow: on a `v*` tag push, GoReleaser cross-compiles `sand` for
-# darwin/linux x amd64/arm64, publishes the archives to GitHub Releases, and
+# darwin/linux x amd64/arm64, uploads the archives to the GitHub Release, and
 # updates the Homebrew formula in the `lullabot/homebrew-sandbar` tap.
+#
+# Tags are created by release-please (see release-please.yml), not by hand:
+# merging its release PR creates the `vX.Y.Z` tag + GitHub Release, and — because
+# release-please tags with a GitHub App token — that tag push triggers this
+# workflow. GoReleaser runs in `release.mode: keep-existing`, so it uploads the
+# binaries to release-please's existing release without touching its notes.
 #
 # Human prerequisites (one-time, performed by a release maintainer, NOT by
 # this workflow):
@@ -9,8 +15,6 @@
 #      to).
 #   2. Provision a `HOMEBREW_TAP_GITHUB_TOKEN` Actions secret on this repo: a
 #      token scoped to push access on `lullabot/homebrew-sandbar` only.
-#   3. Validate the publisher end-to-end by pushing a pre-release tag (e.g.
-#      `v0.0.0-rc1`) before the first real release.
 name: release
 
 on:

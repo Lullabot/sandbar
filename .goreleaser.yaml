@@ -19,6 +19,13 @@ archives:
   - id: sand
     formats: [tar.gz]
 
+# release-please owns the tag and the GitHub Release (with the generated
+# changelog as its notes). This workflow is triggered by release-please's tag
+# push and only builds/uploads the binaries + Homebrew formula, so keep the
+# existing release rather than recreating it or clobbering its notes.
+release:
+  mode: keep-existing
+
 # NOTE: `brews` (a Homebrew *formula*) is used deliberately, not the newer
 # `homebrew_casks`. GoReleaser v2.17 deprecates `brews`, but Homebrew *casks*
 # are macOS-only, and this project requires `brew install` on macOS AND Linux
