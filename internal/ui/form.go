@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -73,15 +72,10 @@ var fieldInfo = []string{
 		"  Issues: Read    Pull requests: Read    Workflows: Read and write",
 }
 
-// hostGit reads a single value from the host git config, best-effort: any error
-// (git missing, key unset) yields an empty seed.
-func hostGit(key string) string {
-	out, err := exec.Command("git", "config", "--get", key).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
+// hostGit seeds a git-identity field from the host git config. The headless
+// `sand create` path seeds the same way, so both share vm.HostGitConfig as the
+// single source of truth (mirroring hostUser/vm.HostUser below).
+func hostGit(key string) string { return vm.HostGitConfig(key) }
 
 // hostUser defaults the primary VM user to the host username (Lima creates a
 // matching guest user). The headless `sand create` path defaults the same way,

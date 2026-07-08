@@ -68,10 +68,10 @@ func (c CreateConfig) Validate() error {
 		return fmt.Errorf("instance name is required")
 	}
 	if c.GitName == "" {
-		return fmt.Errorf("git user.name is required")
+		return fmt.Errorf("git user.name is required: pass --git-name or set it with `git config --global user.name \"...\"`")
 	}
 	if c.GitEmail == "" {
-		return fmt.Errorf("git user.email is required")
+		return fmt.Errorf("git user.email is required: pass --git-email or set it with `git config --global user.email \"...\"`")
 	}
 	if c.Name == c.BaseName {
 		return fmt.Errorf("instance name %q must differ from base image name %q", c.Name, c.BaseName)
@@ -105,6 +105,19 @@ func HostUser() string {
 		return u
 	}
 	return "claude"
+}
+
+// HostGitConfig reads a single value from the host git config, best-effort: any
+// error (git missing, key unset) yields an empty string. Both the headless
+// `sand create` path and the TUI form seed the git identity from here so
+// --git-name/--git-email may be omitted when the host already has an identity;
+// it is the single source of truth for that default (mirroring HostUser).
+func HostGitConfig(key string) string {
+	out, err := exec.Command("git", "config", "--get", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ParseCPUs validates the script's "cpus must be a positive integer" rule from a string field.

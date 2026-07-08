@@ -48,12 +48,16 @@ func runCreate(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
 
-Headlessly provision a Claude Code development VM: no TUI, no prompts. Only
---git-name and --git-email are required; every other flag has a default (shown
-below). Flags mirror the original bash provisioner's, minus --ref (the playbook
-is embedded in this binary, so there is no ref to pin).
+Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
+flag has a default: --git-name/--git-email fall back to the host's git config
+(user.name/user.email), so on a machine with git configured `+"`sand create`"+`
+needs no flags. If neither the flags nor the host git config supply an
+identity, sand errors rather than fabricate a commit author. Flags mirror the
+original bash provisioner's, minus --ref (the playbook is embedded in this
+binary, so there is no ref to pin).
 
-Example:
+Examples:
+  sand create                                                   # host git identity
   sand create --git-name "Your Name" --git-email you@example.com
 
 Flags:
@@ -66,8 +70,8 @@ Flags:
 	fs.StringVar(&cfg.BaseName, "base-name", cfg.BaseName, "Base image instance name")
 	fs.StringVar(&cfg.Hostname, "hostname", cfg.Hostname, "VM hostname (default: same as --name)")
 	fs.StringVar(&cfg.User, "user", cfg.User, "Primary VM user")
-	fs.StringVar(&cfg.GitName, "git-name", cfg.GitName, "git user.name (required)")
-	fs.StringVar(&cfg.GitEmail, "git-email", cfg.GitEmail, "git user.email (required)")
+	fs.StringVar(&cfg.GitName, "git-name", cfg.GitName, "git user.name (default: host `git config user.name`)")
+	fs.StringVar(&cfg.GitEmail, "git-email", cfg.GitEmail, "git user.email (default: host `git config user.email`)")
 	fs.StringVar(&cfg.Memory, "memory", cfg.Memory, "RAM, e.g. 8GiB")
 	fs.StringVar(&cfg.Disk, "disk", cfg.Disk, "Disk size, e.g. 100GiB")
 	fs.StringVar(&cfg.Locale, "locale", cfg.Locale, "System locale")
@@ -102,6 +106,16 @@ Flags:
 	// user role's default and break the base phase's in-guest user creation.
 	if cfg.User == "" {
 		cfg.User = vm.HostUser()
+	}
+
+	// Git identity falls back to the host's git config when the flags are
+	// omitted, mirroring how the TUI form seeds those fields. If the host has no
+	// identity either, Validate below errors — sand never fabricates an author.
+	if cfg.GitName == "" {
+		cfg.GitName = vm.HostGitConfig("user.name")
+	}
+	if cfg.GitEmail == "" {
+		cfg.GitEmail = vm.HostGitConfig("user.email")
 	}
 
 	if err := cfg.Validate(); err != nil {
