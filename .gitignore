@@ -4,3 +4,6 @@ group_vars/all.yml
 
 # GoReleaser build output
 dist/
+
+# `go build ./cmd/sand` drops the binary at the repo root
+/sand
