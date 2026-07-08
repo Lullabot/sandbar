@@ -48,9 +48,13 @@ func runCreate(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
 
-Headlessly provision a Claude Code development VM: no TUI, no prompts. Flags
-mirror the original bash provisioner's, minus --ref (the playbook is embedded
-in this binary, so there is no ref to pin).
+Headlessly provision a Claude Code development VM: no TUI, no prompts. Only
+--git-name and --git-email are required; every other flag has a default (shown
+below). Flags mirror the original bash provisioner's, minus --ref (the playbook
+is embedded in this binary, so there is no ref to pin).
+
+Example:
+  sand create --git-name "Your Name" --git-email you@example.com
 
 Flags:
 `)
@@ -73,11 +77,6 @@ Flags:
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Delete and rebuild the base image first, then create")
-	// -y/--yes are accepted for flag-surface parity with the original bash
-	// provisioner, but headless mode never prompts regardless, so they carry no
-	// behavior of their own.
-	_ = fs.Bool("y", false, "Accept all defaults, never prompt (headless mode always behaves this way)")
-	_ = fs.Bool("yes", false, "same as -y")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
 	// sand's playbook is
