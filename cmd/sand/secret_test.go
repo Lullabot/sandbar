@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // withXDGDataHome points XDG_DATA_HOME at a fresh temp dir for the duration
@@ -253,5 +256,168 @@ func TestPrintSecretList_EmptyStoreSaysNoSecrets(t *testing.T) {
 	printSecretList(&out, store, false)
 	if out.Len() == 0 {
 		t.Fatal("printSecretList on empty store produced no output")
+	}
+}
+
+// TestEffectSummaryLines_GitHubOnly is the honesty-critical AC for `sand
+// secret sync`: with only a GitHub secret stored, the summary must claim the
+// GitHub/git effect is immediate and must NOT print the env-var line (there
+// is no env-var secret to have changed).
+func TestEffectSummaryLines_GitHubOnly(t *testing.T) {
+	store := &secrets.Store{}
+	store.SetSecret(secrets.CategoryGitHub, "", "", "ghp_x")
+
+	lines := effectSummaryLines(store)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "effective immediately") {
+		t.Fatalf("expected an immediate-effect line, got: %v", lines)
+	}
+	if strings.Contains(joined, "new shell") {
+		t.Fatalf("must not print the env-var line when no env-var secret is stored: %v", lines)
+	}
+}
+
+// TestEffectSummaryLines_EnvVarOnly covers the inverse: only a global or
+// dir-scoped env var stored must print the "new shell" line and must NOT
+// claim an immediate GitHub/git effect. It also asserts the critical honesty
+// property from the task spec: the text must not claim a running process
+// (e.g. a running claude) picks up the new value, and must not instruct the
+// user (or sand itself) to force a restart — describing the fact that an
+// already-running process keeps its old values "until restarted" is fine
+// (and is the spec's own suggested wording); telling the user to actually go
+// do it is not.
+func TestEffectSummaryLines_EnvVarOnly(t *testing.T) {
+	store := &secrets.Store{}
+	store.SetSecret(secrets.CategoryGlobal, "", "MY_VAR", "v")
+
+	lines := effectSummaryLines(store)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "new shell") {
+		t.Fatalf("expected the new-shell line for an env-var secret, got: %v", lines)
+	}
+	if strings.Contains(joined, "effective immediately") {
+		t.Fatalf("must not claim an immediate git/GitHub effect when no GitHub secret is stored: %v", lines)
+	}
+	if strings.Contains(joined, "pick up") || strings.Contains(joined, "picks up") {
+		t.Fatalf("must not claim a running process picks up the new value: %v", lines)
+	}
+	lower := strings.ToLower(joined)
+	if strings.Contains(lower, "please restart") || strings.Contains(lower, "must restart") || strings.Contains(lower, "restart the vm") || strings.Contains(lower, "restart your shell") {
+		t.Fatalf("must not instruct a forced restart: %v", lines)
+	}
+}
+
+// TestEffectSummaryLines_Both covers a store with both kinds of secrets:
+// both lines must print.
+func TestEffectSummaryLines_Both(t *testing.T) {
+	store := &secrets.Store{}
+	store.SetSecret(secrets.CategoryGitHub, "", "", "ghp_x")
+	store.SetSecret(secrets.CategoryDirEnv, "some/dir", "MY_VAR", "v")
+
+	lines := effectSummaryLines(store)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "effective immediately") {
+		t.Fatalf("expected the GitHub line, got: %v", lines)
+	}
+	if !strings.Contains(joined, "new shell") {
+		t.Fatalf("expected the env-var line, got: %v", lines)
+	}
+}
+
+// TestEffectSummaryLines_Empty covers an empty store: sync still succeeds
+// (the secrets role is a safe no-op), so the summary must say something
+// rather than print nothing.
+func TestEffectSummaryLines_Empty(t *testing.T) {
+	lines := effectSummaryLines(&secrets.Store{})
+	if len(lines) == 0 {
+		t.Fatal("effectSummaryLines(empty store) produced no output")
+	}
+}
+
+// TestCheckVMRunning_Running: a "Running" status with no error passes.
+func TestCheckVMRunning_Running(t *testing.T) {
+	if err := checkVMRunning("dev", "Running", nil); err != nil {
+		t.Fatalf("checkVMRunning(Running): unexpected error: %v", err)
+	}
+}
+
+// TestCheckVMRunning_StoppedSurfacesStatus: a non-running status must error,
+// and the error must surface the observed status so the user knows why sync
+// refused (task 5: "error clearly if the VM isn't running (surface limactl
+// status)").
+func TestCheckVMRunning_StoppedSurfacesStatus(t *testing.T) {
+	err := checkVMRunning("dev", "Stopped", nil)
+	if err == nil {
+		t.Fatal("checkVMRunning(Stopped): expected an error")
+	}
+	if !strings.Contains(err.Error(), "Stopped") {
+		t.Fatalf("error must surface the observed status: %v", err)
+	}
+	if !strings.Contains(err.Error(), "dev") {
+		t.Fatalf("error must name the VM: %v", err)
+	}
+}
+
+// TestCheckVMRunning_AbsentSurfacesNotFound: an empty status (VM does not
+// exist) must error without a blank/confusing status string.
+func TestCheckVMRunning_AbsentSurfacesNotFound(t *testing.T) {
+	err := checkVMRunning("dev", "", nil)
+	if err == nil {
+		t.Fatal("checkVMRunning(absent): expected an error")
+	}
+	if strings.Contains(err.Error(), "status: )") || strings.Contains(err.Error(), "status: \n") {
+		t.Fatalf("error should not print a blank status: %v", err)
+	}
+}
+
+// TestCheckVMRunning_StatusErrorSurfaced: an error from limactl itself
+// (e.g. limactl not usable) must be surfaced, not swallowed.
+func TestCheckVMRunning_StatusErrorSurfaced(t *testing.T) {
+	statusErr := errors.New("limactl: boom")
+	err := checkVMRunning("dev", "", statusErr)
+	if err == nil {
+		t.Fatal("checkVMRunning(status error): expected an error")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("underlying limactl error must be surfaced: %v", err)
+	}
+}
+
+// TestSyncConfig_FallsBackWhenUnmanaged: an unmanaged/unregistered VM name
+// still resolves to a usable CreateConfig (host user, sand's defaults) —
+// RenderSecrets requires cfg.User for the secrets role's getent lookup, and
+// sync must not fail just because the VM predates/bypasses the registry.
+func TestSyncConfig_FallsBackWhenUnmanaged(t *testing.T) {
+	withXDGDataHome(t)
+
+	cfg := syncConfig("never-registered")
+	if cfg.Name != "never-registered" {
+		t.Fatalf("cfg.Name = %q, want %q", cfg.Name, "never-registered")
+	}
+	if cfg.User == "" {
+		t.Fatal("syncConfig must never return an empty User (required by the secrets role)")
+	}
+}
+
+// TestSyncConfig_UsesRegisteredConfig: a managed VM's recorded CreateConfig
+// (notably its User) must be reused, not sand's generic default, so sync
+// renders against the identity the VM actually has.
+func TestSyncConfig_UsesRegisteredConfig(t *testing.T) {
+	withXDGDataHome(t)
+
+	reg, err := registry.Load()
+	if err != nil {
+		t.Fatalf("registry.Load: %v", err)
+	}
+	if err := reg.Add(vm.CreateConfig{Name: "dev", BaseName: "claude-base", User: "someoneelse", CPUs: 2}); err != nil {
+		t.Fatalf("registry.Add: %v", err)
+	}
+
+	cfg := syncConfig("dev")
+	if cfg.Name != "dev" {
+		t.Fatalf("cfg.Name = %q, want %q", cfg.Name, "dev")
+	}
+	if cfg.User != "someoneelse" {
+		t.Fatalf("cfg.User = %q, want the registered user %q", cfg.User, "someoneelse")
 	}
 }

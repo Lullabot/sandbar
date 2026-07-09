@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -34,6 +35,20 @@ cd /root/playbook
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 
+// scopedInGuestScript returns inGuestScript unchanged when tags is empty
+// (the normal full-role-set path used by every phase today), or the same
+// script with an Ansible `--tags <tags>` appended to the ansible-playbook
+// invocation when tags is non-empty — e.g. RenderSecrets passes "secrets" so
+// a sync applies only the secrets role's tasks. tags is always an internal,
+// hardcoded constant (never derived from user input), so appending it to the
+// script text carries no injection risk.
+func scopedInGuestScript(tags string) string {
+	if tags == "" {
+		return inGuestScript
+	}
+	return strings.TrimSuffix(inGuestScript, "\n") + " --tags " + tags + "\n"
+}
+
 // Provisioner drives the base-build / clone / finalize sequence through a
 // lima.Client, streaming playbook output to the caller-supplied writer.
 type Provisioner struct {
@@ -49,16 +64,60 @@ func step(out io.Writer, format string, args ...any) {
 }
 
 // runProvision streams one phase's extra-vars into the guest over stdin and runs
-// the playbook there. Mirrors the original bash provisioner's run_provision.
+// the FULL playbook there (every role site.yml gates in for that phase).
+// Mirrors the original bash provisioner's run_provision.
 func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, out io.Writer) error {
+	return p.runProvisionTagged(ctx, name, phase, hostname, cfg, "", out)
+}
+
+// runProvisionTagged is runProvision's general form: when tags is non-empty
+// it restricts the guest's ansible-playbook run to that Ansible `--tags`
+// value (see scopedInGuestScript), so a caller like RenderSecrets can apply
+// a single role's tasks against an already-running VM without running a full
+// phase. The stdin/tmpfs vars-passing and rsync-then-run machinery are
+// identical either way — this is the ONE place that shells into the guest,
+// so create/finalize/Reset and RenderSecrets never duplicate it.
+func (p *Provisioner) runProvisionTagged(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, tags string, out io.Writer) error {
 	vars, err := BuildExtraVars(cfg, phase, hostname)
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
 	step(out, "Provisioning %q (%s phase, Ansible)…", name, phase)
 	// Vars go over STDIN, never argv (secret hygiene).
-	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", inGuestScript); err != nil {
+	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", scopedInGuestScript(tags)); err != nil {
 		return fmt.Errorf("provisioning (%s) failed for %q: %w", phase, name, err)
+	}
+	return nil
+}
+
+// secretsRoleTag is the Ansible tag applied to the secrets role in site.yml
+// (see the `tags: ["secrets"]` entry on that role), used by RenderSecrets to
+// scope its run to just that role's tasks.
+const secretsRoleTag = "secrets"
+
+// RenderSecrets re-renders the host secrets store's CURRENT contents into an
+// ALREADY-RUNNING VM by applying only the secrets role (`ansible-playbook
+// --tags secrets`) — never a full finalize pass, so a sync is fast and has
+// no side effects on any other role. It does NOT start, stop, or restart the
+// VM or instruct a shell restart; that decision belongs to the caller (and
+// per task 5, sync deliberately never forces one).
+//
+// This is the single "load store -> map to secrets_* vars -> run the
+// secrets role over stdin" entry point: `sand secret sync` (cmd/sand,
+// task 5) and the TUI's refresh action (task 6) both call it rather than
+// duplicating the render logic. Callers only need name (the running Lima
+// instance to target) and enough of cfg to satisfy BuildExtraVars' non-base
+// fields — notably cfg.User, which the secrets role's getent lookup
+// requires; the other identity/clone fields BuildExtraVars also embeds are
+// harmless no-ops here since --tags secrets skips every task outside the
+// secrets role. cfg.Name is always overridden to name, so the secrets store
+// loaded is guaranteed to be the one for the VM actually being targeted,
+// even if the caller's cfg came from a different source (e.g. a stale
+// registry entry).
+func (p *Provisioner) RenderSecrets(ctx context.Context, name string, cfg vm.CreateConfig, out io.Writer) error {
+	cfg.Name = name
+	if err := p.runProvisionTagged(ctx, name, "finalize", cfg.EffectiveHostname(), cfg, secretsRoleTag, out); err != nil {
+		return fmt.Errorf("render secrets into %q: %w", name, err)
 	}
 	return nil
 }

@@ -2,14 +2,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
+	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // maskedDisplay is what `sand secret list` prints in place of a cleartext
@@ -36,6 +43,8 @@ func runSecret(args []string) error {
 		return runSecretList(args[1:])
 	case "rm":
 		return runSecretRm(args[1:])
+	case "sync":
+		return runSecretSync(args[1:])
 	default:
 		secretUsage(os.Stderr)
 		return fmt.Errorf("sand secret: unknown subcommand %q", args[0])
@@ -79,6 +88,11 @@ Subcommands:
   rm <NAME> --vm <name> [--dir <relpath>] [--github]
       Remove a secret. Uses the same category routing as 'set'.
 
+  sync --vm <name>
+      Re-render the host store's current secrets into an ALREADY-RUNNING VM
+      (applies only the secrets role — fast, no other role runs, no VM or
+      shell restart). Requires the VM to already be running.
+
 Examples:
   printf 'ghp_xxx\n' | sand secret set TOKEN --vm dev --github
   printf 'ghp_yyy\n' | sand secret set TOKEN --vm dev --github --dir github.com/acme
@@ -86,6 +100,7 @@ Examples:
   sand secret list --vm dev
   sand secret list --vm dev --reveal
   sand secret rm VAR --vm dev --dir some/dir
+  sand secret sync --vm dev
 `)
 }
 
@@ -376,4 +391,146 @@ Flags:
 		return fmt.Errorf("save secrets for %q: %w", *vmName, err)
 	}
 	return nil
+}
+
+// runSecretSync implements `sand secret sync --vm <name>`: it re-renders the
+// host store's CURRENT secrets into an already-running VM by applying only
+// the secrets role (via provision.Provisioner.RenderSecrets — task 4/5's
+// shared render entry point), never a full finalize pass, and never starting,
+// stopping, or restarting the VM or a shell. Real limactl/ansible execution
+// is exercised end to end by task 7's real-VM e2e test; this function's own
+// pure-logic pieces (checkVMRunning, syncConfig, effectSummaryLines) are unit
+// tested directly.
+func runSecretSync(args []string) error {
+	fs := flag.NewFlagSet("secret sync", flag.ContinueOnError)
+	vmName := fs.String("vm", "", "target VM name (required)")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), `Usage: sand secret sync --vm <name>
+
+Re-render the host secrets store's current contents into an ALREADY-RUNNING
+VM by applying only the secrets role (not a full finalize) — fast, and with
+no side effects on any other role. The VM must already be running (create it
+with 'sand create' or start it first); sync never starts, stops, or restarts
+a VM, and never asks you to restart a shell.
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if err := requireVM("sync", *vmName); err != nil {
+		return err
+	}
+
+	cli := lima.New(lima.NewExecRunner())
+	if err := cli.Preflight(); err != nil {
+		return err
+	}
+
+	status, statusErr := cli.Status(*vmName)
+	if err := checkVMRunning(*vmName, status, statusErr); err != nil {
+		return err
+	}
+
+	store, err := secrets.Load(*vmName)
+	if err != nil {
+		return fmt.Errorf("load secrets for %q: %w", *vmName, err)
+	}
+
+	dir, err := provision.LocatePlaybook()
+	if err != nil {
+		return err
+	}
+	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
+
+	// A cancellable context lets ctrl+c abort mid-flight, matching the
+	// headless create/TUI provisioning paths.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := prov.RenderSecrets(ctx, *vmName, syncConfig(*vmName), os.Stdout); err != nil {
+		return err
+	}
+
+	for _, line := range effectSummaryLines(store) {
+		fmt.Fprintln(os.Stdout, line)
+	}
+	return nil
+}
+
+// checkVMRunning enforces sync's require-running precondition: RenderSecrets
+// targets an already-running VM (it never starts one), so a non-running
+// target is a clear, immediate error rather than a confusing failure deep
+// inside the shell call. It surfaces the observed limactl status (or the
+// underlying limactl error) so the user knows exactly why sync refused, per
+// the task's "error clearly if the VM isn't running (surface limactl
+// status)" requirement. Extracted as a pure function so the message is
+// unit-testable without a real limactl.
+func checkVMRunning(vmName, status string, statusErr error) error {
+	if statusErr != nil {
+		return fmt.Errorf("sand secret sync: could not determine status of %q: %w", vmName, statusErr)
+	}
+	if status != "Running" {
+		disp := status
+		if disp == "" {
+			disp = "not found"
+		}
+		return fmt.Errorf("sand secret sync: %q is not running (status: %s) — start it first, then retry", vmName, disp)
+	}
+	return nil
+}
+
+// syncConfig resolves the vm.CreateConfig RenderSecrets needs: the VM's
+// recorded managed-registry config when one exists, so cfg.User (required by
+// the secrets role's getent lookup) matches the identity the VM actually has,
+// falling back to sand's own defaults (host username) for a VM that predates
+// or bypasses the registry. Registry load errors are treated the same way
+// doHeadlessCreate treats them (best-effort; a corrupt/missing index falls
+// back to the same defaults rather than blocking sync).
+func syncConfig(vmName string) vm.CreateConfig {
+	cfg := vm.DefaultCreateConfig()
+	cfg.Name = vmName
+	cfg.User = vm.HostUser()
+
+	if reg, _ := registry.Load(); reg != nil {
+		if stored, ok := reg.Config(vmName); ok {
+			cfg = stored
+		}
+	}
+	cfg.Name = vmName
+	return cfg
+}
+
+// effectSummaryLines picks the honest effect-summary lines to print after a
+// successful RenderSecrets, based on which secret categories are actually
+// present in the host store (the categories RenderSecrets just rendered):
+//   - a GitHub secret present -> the git/GitHub line (effective immediately,
+//     since the file-backed credential store + includeIf takes effect on the
+//     next git/gh invocation).
+//   - a global or directory-scoped env-var secret present -> the env-var
+//     line (requires a NEW shell; already-running processes, e.g. a running
+//     claude, keep their old environment until restarted).
+//
+// It deliberately never claims a running process picks up a new env var and
+// never suggests forcing a VM or shell restart — both are stated non-goals
+// in the task spec. An empty store (nothing to render) still returns a
+// non-empty summary so sync's output is never silent.
+func effectSummaryLines(store *secrets.Store) []string {
+	var lines []string
+	if store != nil && len(store.GitHub) > 0 {
+		lines = append(lines, "GitHub/git secrets updated — effective immediately (next git/gh call).")
+	}
+	if store != nil && (len(store.Global) > 0 || len(store.DirEnv) > 0) {
+		lines = append(lines, "Global/directory environment variable secrets updated — open a new shell for them to take effect. Already-running processes (e.g. a running claude) keep the old values until restarted.")
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "No secrets are currently stored for this VM — nothing to render.")
+	}
+	return lines
 }
