@@ -370,6 +370,44 @@ func TestE2ESecrets(t *testing.T) {
 		}
 	})
 
+	// ---- Removal reconciliation: deleting a secret purges it from the VM ---
+	// Deletes the global var and orgB's token, re-renders, and asserts the
+	// role reconciled the removals: the global var is gone from a fresh login
+	// shell (secrets.env rewritten to empty), orgB's credential file is pruned,
+	// and orgA's is NOT over-pruned.
+	t.Run("RemovalPurgesFromVM", func(t *testing.T) {
+		store, err := secrets.Load(cfg.Name)
+		if err != nil {
+			t.Fatalf("secrets.Load (removal): %v", err)
+		}
+		if !store.RemoveSecret(secrets.CategoryGlobal, "", globalVarName) {
+			t.Fatalf("expected to remove global %s", globalVarName)
+		}
+		if !store.RemoveSecret(secrets.CategoryGitHub, orgBScope, "") {
+			t.Fatalf("expected to remove github scope %s", orgBScope)
+		}
+		if err := store.Save(cfg.Name); err != nil {
+			t.Fatalf("store.Save (removal): %v", err)
+		}
+
+		var out bytes.Buffer
+		if err := prov.RenderSecrets(ctx, cfg.Name, cfg, &out); err != nil {
+			t.Fatalf("RenderSecrets (removal): %v\n%s", err, out.String())
+		}
+
+		if got := guestOut(t, cli, cfg.Name, "bash", "-lc", `printf '%s' "$`+globalVarName+`"`); got != "" {
+			t.Errorf("global var should be gone from a fresh shell after removal, got %q", got)
+		}
+		orgBFile := home + "/.config/sandbar/git-credentials/" + githubSlug(orgBScope)
+		if got := guestOut(t, cli, cfg.Name, "sh", "-c", "test -e "+orgBFile+" && echo EXISTS || echo GONE"); got != "GONE" {
+			t.Errorf("orgB credential file %s should be pruned, got %q", orgBFile, got)
+		}
+		orgAFile := home + "/.config/sandbar/git-credentials/" + githubSlug(orgAScope)
+		if got := guestOut(t, cli, cfg.Name, "sh", "-c", "test -e "+orgAFile+" && echo EXISTS || echo GONE"); got != "EXISTS" {
+			t.Errorf("orgA credential file %s must remain (not over-pruned), got %q", orgAFile, got)
+		}
+	})
+
 	// ---- AC4 (legacy create parity, optional real-clone half) -----------
 	t.Run("LegacyCreateParity_RealPrivateClone", func(t *testing.T) {
 		repoURL := os.Getenv("SAND_E2E_PRIVATE_REPO_URL")

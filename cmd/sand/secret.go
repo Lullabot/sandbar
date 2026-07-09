@@ -455,7 +455,35 @@ Flags:
 	if err := store.Save(*vmName); err != nil {
 		return fmt.Errorf("save secrets for %q: %w", *vmName, err)
 	}
+
+	// Re-render the (now-smaller) store into the VM so the removed secret
+	// actually disappears from it — the secrets role reconciles removals
+	// (rewrites/clears secrets.env, prunes stale GitHub credential files).
+	// Mirrors `set`: apply when running, otherwise it purges on the next
+	// create/start/sync.
+	applied, err := applyToVMIfRunning(*vmName)
+	if err != nil {
+		return fmt.Errorf("secret removed from the host store, but re-rendering %q failed: %w", *vmName, err)
+	}
+	printRmReminder(os.Stdout, cat, *vmName, applied)
 	return nil
+}
+
+// printRmReminder explains what `rm` did. The load-bearing honesty point is
+// the same as set's: re-rendering removes the secret from the VM's files, but
+// an env var already exported into a running shell/process stays until that
+// session is reconnected; a removed GitHub token stops being used on the next
+// git/gh call.
+func printRmReminder(w io.Writer, cat secrets.Category, vmName string, applied bool) {
+	if !applied {
+		fmt.Fprintf(w, "Removed from the host store for %q. It will be removed from the VM on the next create/start (or run: sand secret sync --vm %s).\n", vmName, vmName)
+		return
+	}
+	if cat == secrets.CategoryGitHub {
+		fmt.Fprintf(w, "Removed from %q and applied — git/gh stops using it on the next call.\n", vmName)
+		return
+	}
+	fmt.Fprintf(w, "Removed from %q and applied. Already-open shells keep the variable until reconnected — open a new shell (and restart tools like claude) to drop it.\n", vmName)
 }
 
 // runSecretSync implements `sand secret sync --vm <name>`: it re-renders the

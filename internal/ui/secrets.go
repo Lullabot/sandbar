@@ -188,6 +188,17 @@ func (m *model) loadSecretsList() {
 
 // updateSecrets handles keys on the secrets panel.
 func (m model) updateSecrets(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// An armed delete is resolved first: the delete/confirm key commits it,
+	// anything else disarms it (and then falls through to normal handling), so
+	// an accidental keystroke never destroys a secret.
+	if m.secretDeletePending {
+		if key.Matches(msg, m.keys.Delete) || key.Matches(msg, m.keys.Confirm) {
+			return m.deleteSelectedSecret()
+		}
+		m.secretDeletePending = false
+		m.secretsStatus = ""
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -196,6 +207,15 @@ func (m model) updateSecrets(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.AddSecret):
 		return m, m.openSecretForm(false)
+	case key.Matches(msg, m.keys.EditSecret):
+		return m, m.openEditSecretForm()
+	case key.Matches(msg, m.keys.Delete):
+		if len(m.secretsEntries) == 0 {
+			return m, nil
+		}
+		m.secretDeletePending = true
+		m.secretsStatus = "delete " + secretLine(m.secretsEntries[m.secretsCursor]) + "?  press d again to confirm, any other key cancels"
+		return m, nil
 	case key.Matches(msg, m.keys.RefreshToken):
 		return m, m.openSecretForm(true)
 	case key.Matches(msg, m.keys.Up):
@@ -209,6 +229,89 @@ func (m model) updateSecrets(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	return m, nil
+}
+
+// openEditSecretForm opens the add/edit form pre-filled from the highlighted
+// secret (its current value included, masked on screen) so the value — or the
+// scope/name — can be changed. The original key is recorded so that changing
+// the key on submit is treated as a rename (the old entry is removed) rather
+// than leaving an orphan behind.
+func (m *model) openEditSecretForm() tea.Cmd {
+	if len(m.secretsEntries) == 0 {
+		m.secretsStatus = "no secret to edit"
+		return nil
+	}
+	e := m.secretsEntries[m.secretsCursor]
+
+	value := ""
+	if store, err := secrets.Load(m.secretsVM); err == nil {
+		if v, ok := store.Value(e.Category, e.Scope, e.Name); ok {
+			value = v
+		}
+	}
+
+	m.openSecretForm(false)
+	m.secretEditing = true
+	m.secretEditOrigCat = e.Category
+	m.secretEditOrigScope = e.Scope
+	m.secretEditOrigName = e.Name
+	m.secretCategory = e.Category
+	m.secretScopeInput.SetValue(e.Scope)
+	m.secretNameInput.SetValue(e.Name)
+	m.secretValueInput.SetValue(value)
+
+	// Start focus on the value field — the common edit — if the category has
+	// one in its field set.
+	fields := secretFormFields(m.secretCategory, false)
+	for i, f := range fields {
+		if f == sfValue {
+			m.secretFieldFocus = i
+			return m.secretFocusField(sfValue)
+		}
+	}
+	m.secretFieldFocus = 0
+	return m.secretFocusField(fields[0])
+}
+
+// deleteSelectedSecret removes the highlighted secret from the host store and,
+// when the VM is running, re-renders so it disappears from the VM too (the
+// secrets role prunes the corresponding file/credential); otherwise it drops
+// on the next create/start/sync. The list is reloaded before any render so the
+// panel reflects the removal immediately on return.
+func (m model) deleteSelectedSecret() (tea.Model, tea.Cmd) {
+	m.secretDeletePending = false
+	if len(m.secretsEntries) == 0 {
+		return m, nil
+	}
+	e := m.secretsEntries[m.secretsCursor]
+
+	store, err := secrets.Load(m.secretsVM)
+	if err != nil {
+		m.secretsErr = err
+		return m, nil
+	}
+	if !store.RemoveSecret(e.Category, e.Scope, e.Name) {
+		m.secretsStatus = "secret not found"
+		return m, nil
+	}
+	if err := store.Save(m.secretsVM); err != nil {
+		m.secretsErr = err
+		return m, nil
+	}
+	m.loadSecretsList()
+
+	if m.detail.Status == "Running" {
+		vmName := m.secretsVM
+		cfg := secretsSyncConfig(m.reg, vmName)
+		prov := m.prov
+		run := func(ctx context.Context, out io.Writer) error {
+			return prov.RenderSecrets(ctx, vmName, cfg, out)
+		}
+		return m, m.beginStream("Removing secret from "+vmName, viewSecrets, run)
+	}
+
+	m.secretsStatus = "deleted from host store — drops from the VM on next start, or run 'sand secret sync'"
 	return m, nil
 }
 
@@ -247,6 +350,7 @@ func (m model) secretsView() string {
 // and starts focus on the scope field (no category cycling, no name field).
 func (m *model) openSecretForm(refresh bool) tea.Cmd {
 	m.secretRefreshMode = refresh
+	m.secretEditing = false
 	m.secretFormErr = nil
 	m.secretCategory = secrets.CategoryGlobal
 	if refresh {
@@ -401,12 +505,19 @@ func (m model) submitSecretForm() (tea.Model, tea.Cmd) {
 		m.secretFormErr = err
 		return m, nil
 	}
+	// Editing with a changed key is a rename: drop the original entry so the
+	// old one doesn't linger alongside the renamed one.
+	if m.secretEditing && (m.secretEditOrigCat != cat || m.secretEditOrigScope != scope || m.secretEditOrigName != name) {
+		store.RemoveSecret(m.secretEditOrigCat, m.secretEditOrigScope, m.secretEditOrigName)
+	}
 	store.SetSecret(cat, scope, name, value)
 	if err := store.Save(m.secretsVM); err != nil {
 		m.secretFormErr = err
 		return m, nil
 	}
 	m.secretFormErr = nil
+	m.secretEditing = false
+	m.loadSecretsList()
 
 	// Apply live when the VM is running so the secret is usable without a
 	// separate `sand secret sync`, mirroring the CLI's `set`. When it isn't
@@ -431,7 +542,6 @@ func (m model) submitSecretForm() (tea.Model, tea.Cmd) {
 	}
 
 	m.secretsStatus = "saved to host store — applies on next start, or run 'sand secret sync' when running"
-	m.loadSecretsList()
 	m.view = viewSecrets
 	return m, nil
 }

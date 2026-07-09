@@ -28,9 +28,10 @@ type keyMap struct {
 	Cancel    key.Binding
 	Interrupt key.Binding
 
-	// Secrets panel (opened from the detail view) and its add/refresh form.
+	// Secrets panel (opened from the detail view) and its add/edit/refresh form.
 	Secrets      key.Binding
 	AddSecret    key.Binding
+	EditSecret   key.Binding
 	RefreshToken key.Binding
 }
 
@@ -65,8 +66,10 @@ func defaultKeys() keyMap {
 		// Secrets lives only on the detail view. 's' is free there (Start lives
 		// on the list, same reuse pattern as Delete/Download both on 'd').
 		Secrets: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "secrets")),
-		// AddSecret/RefreshToken live only on the secrets panel.
+		// AddSecret/EditSecret/RefreshToken live only on the secrets panel;
+		// Delete ('d') is reused there to delete the highlighted secret.
 		AddSecret:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add secret")),
+		EditSecret:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		RefreshToken: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh gh token")),
 	}
 }
@@ -86,7 +89,7 @@ func (m model) viewHelp() []key.Binding {
 	case viewDest:
 		return []key.Binding{m.keys.Submit, m.keys.Back}
 	case viewSecrets:
-		return []key.Binding{m.keys.AddSecret, m.keys.RefreshToken, m.keys.Up, m.keys.Down, m.keys.Back, m.keys.Quit}
+		return []key.Binding{m.keys.AddSecret, m.keys.EditSecret, m.keys.Delete, m.keys.RefreshToken, m.keys.Up, m.keys.Down, m.keys.Back, m.keys.Quit}
 	case viewSecretForm:
 		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewProgress:
