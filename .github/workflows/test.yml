@@ -61,7 +61,7 @@ jobs:
       # Cache the downloaded Debian cloud image across runs so repeat builds
       # don't re-download it. Keyed on the Lima version from the setup step.
       - name: Cache Lima image downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/lima
           key: lima-${{ steps.lima.outputs.version }}
