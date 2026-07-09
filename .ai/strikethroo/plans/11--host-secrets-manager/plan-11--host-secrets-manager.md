@@ -234,10 +234,12 @@ No circular dependencies.
 - ✔️ Task 1: Host secrets store package `internal/secrets` — `completed`
 - ✔️ Task 2: Ansible `secrets` render role (global env, file-backed git credentials + `includeIf`, managed direnv) — `completed`
 
-### Phase 2: Store consumers
+### Phase 2: Store consumers ✅
 **Parallel Tasks:**
-- Task 3: `sand secret` CLI — set/list/rm (depends on: 1)
-- Task 4: Provisioning integration — render on create/reset + reshape `--clone-token` (depends on: 1, 2)
+- ✔️ Task 3: `sand secret` CLI — set/list/rm (depends on: 1) — `completed`
+- ✔️ Task 4: Provisioning integration — render on create/reset + reshape `--clone-token` (depends on: 1, 2) — `completed`
+
+> **Carry-forward for Task 6:** the TUI create-form (`internal/ui/form.go`) still sets `cfg.CloneToken` and calls `CreateVM` directly, bypassing `provision.RecordCloneTokenSecret`; Task 6 must wire the TUI create path through `RecordCloneTokenSecret` so a TUI-created VM with a clone token authenticates.
 
 ### Phase 3: Live application
 **Parallel Tasks:**

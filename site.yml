@@ -23,9 +23,13 @@
       when: provision_phase | default('full') != 'finalize'
     - role: claude-code
       when: provision_phase | default('full') != 'finalize'
-    - role: project
-      when: provision_phase | default('full') != 'base'
     # Secrets (env vars, GitHub credentials, per-dir .env) are per-clone
     # identity material, same as project — never baked into the base image.
+    # Ordering is load-bearing: secrets MUST render before project so the
+    # file-backed git credential store (and its includeIf ~/.gitconfig
+    # stanza) already exists when project's `git clone` of a private repo
+    # authenticates through it.
     - role: secrets
+      when: provision_phase | default('full') != 'base'
+    - role: project
       when: provision_phase | default('full') != 'base'
