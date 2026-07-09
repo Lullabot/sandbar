@@ -260,3 +260,39 @@ Apply the verification gate (`/config/shared/verification-gate.md`) after each p
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 8
+
+---
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-09
+
+### Results
+
+Delivered the host-backed secrets manager across 8 tasks / 5 phases, all committed on `feature/11--host-secrets-manager`:
+
+- **`internal/secrets`** — per-VM host store (source of truth) at `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets/<vm>.json`, atomic `0600` writes, `global`/`github`/`dir_env` categories, value redaction.
+- **`roles/secrets`** — renders into the VM: VM-global env file sourced by `~/.profile`; file-backed git credential store with per-org `includeIf "gitdir:"` overrides (live rotation, multi-token-per-VM); managed direnv per-dir `.env`. Runs before `project` in `site.yml`, gated out of the base image.
+- **`sand secret set|list|rm|sync`** — values read from stdin (never argv); `sync` re-renders into a running VM (git/GitHub immediate, env vars need a new shell) via `provision.RenderSecrets`.
+- **Provisioning** — host secrets rendered on create and reset over stdin; `--clone-token` reshaped to record a github-scoped secret (`RecordCloneTokenSecret`); the old per-org `.env`/`GH_TOKEN`/direnv clone path in `roles/project` retired.
+- **TUI secrets panel** (`s`/`a`/`r`) — masked list, add/edit, refresh-GitHub-token applied live — resolves issue #3. Create- and reset-form clone-token paths wired through `RecordCloneTokenSecret`.
+- **Docs** — `README.md` GitHub-auth section and `README-sand.md` rewritten for the new model; stale `project_clone_token` playbook-variable references removed.
+
+Success criteria met and verified on a real Lima VM (`TestE2ESecrets`, gated `limae2e`/`LIMA_E2E=1`): recreation persistence, two GitHub tokens in one VM selected by directory, live token rotation in an already-open shell, and `--clone-token` credential render — all PASS; the optional real-private-clone subtest SKIPs cleanly without a repo/token.
+
+### Noteworthy Events
+
+- **direnv decision:** kept but fully managed by `sand` (invisible `direnv allow`), per the user's clarification — it now covers only directory-scoped *generic* env vars, while GitHub uses the file-backed credential store.
+- **Live-update reality:** GitHub/git rotations are live (file-backed helper re-read per call); plain env vars require a new shell — surfaced honestly by `sand secret sync` and the docs.
+- **Two bugs caught by the real-VM Self Validation** (fixed in commit `f4c40f9`):
+  1. VM-global env vars were sourced from `~/.bashrc`, whose Debian non-interactive guard returns before the source line — invisible to `bash -lc`/scripts/tools. Moved the source to `~/.profile`.
+  2. Guest output was captured with stdout+stderr merged; `limactl`'s `cd <host-cwd>` stderr warning corrupted `getent` parsing in `guestHome` (garbage home dir). Added `lima.Client.ShellOut` (stdout-only) and routed `guestHome` (production, hardening real `reset`) and the e2e helper through it.
+- **Regressions found and fixed during execution:** the TUI create-form (and, in cleanup, the reset-form) clone-token path bypassed `RecordCloneTokenSecret`; both wired up. Stale `project_clone_token` docs removed after the variable was retired.
+- First e2e run also failed only on the harness `getent` bug and the `.bashrc` guard — no defect was ever found in the store, CLI, credential rendering, or sync logic itself.
+
+### Necessary follow-ups
+
+- **Optional real private-clone e2e:** `TestE2ESecrets/LegacyCreateParity_RealPrivateClone` skips unless `SAND_E2E_PRIVATE_REPO_URL` + `SAND_E2E_PRIVATE_REPO_TOKEN` are set — run it once against a real private repo to close the last assertion.
+- **`internal/browse/lister.go`** parses `cli.Shell` (merged) output and shares the same latent stderr-merge risk; out of scope here, but a candidate to migrate to `ShellOut`.
+- No `gh auth` file-store refresh was exercised end-to-end (best-effort, `failed_when: false`); revisit if `gh` CLI (as opposed to `git`) auth becomes a first-class requirement.
