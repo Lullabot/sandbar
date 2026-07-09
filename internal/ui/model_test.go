@@ -9,6 +9,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -908,5 +909,51 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	}
 	if m.formErr == nil {
 		t.Fatalf("invalid submit should surface a validation error")
+	}
+}
+
+// A create-form submission with a GitHub clone URL + token must record the
+// clone token as a github-scoped secret in the host store BEFORE CreateVM
+// runs (provision.RecordCloneTokenSecret — the same call cmd/sand/create.go's
+// doHeadlessCreate makes), so a TUI-created VM's private clone can
+// authenticate. Regression: the TUI create path previously called
+// prov.CreateVM directly, bypassing that call entirely. RecordCloneTokenSecret
+// runs synchronously inside submitForm, before beginProvision spawns the
+// provisioning goroutine, so the recorded secret is observable immediately
+// after the ctrl+s keystroke (the goroutine itself needs no time to run).
+func TestSubmitFormRecordsCloneTokenSecretBeforeCreate(t *testing.T) {
+	m := newTestModel(t) // newTestModel sets XDG_DATA_HOME to an isolated temp dir
+
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+
+	m.inputs[fName].SetValue("myvm")
+	m.inputs[fGitName].SetValue("Ada Lovelace")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
+	m.inputs[fCloneURL].SetValue("https://github.com/acme/repo")
+	m.inputs[fCloneToken].SetValue("ghp_supersecrettoken")
+
+	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = submitted.(model)
+
+	if m.view != viewProgress || !m.running {
+		t.Fatalf("a valid create should start provisioning, view=%v running=%v", m.view, m.running)
+	}
+	if m.formErr != nil {
+		t.Fatalf("a valid create must not surface a form error, got %v", m.formErr)
+	}
+
+	store, err := secrets.Load("myvm")
+	if err != nil {
+		t.Fatalf("secrets.Load: %v", err)
+	}
+	if len(store.GitHub) != 1 {
+		t.Fatalf("expected the clone token recorded as one github secret before CreateVM ran, got %d", len(store.GitHub))
+	}
+	if got := store.GitHub[0].Scope; got != "github.com/acme" {
+		t.Fatalf("recorded scope = %q, want %q", got, "github.com/acme")
+	}
+	if got := store.GitHub[0].Token; got != "ghp_supersecrettoken" {
+		t.Fatalf("recorded token = %q, want the entered clone token", got)
 	}
 }

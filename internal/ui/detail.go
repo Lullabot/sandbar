@@ -16,6 +16,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startTransfer(true) // host → guest
 	case key.Matches(msg, m.keys.Download):
 		return m.startTransfer(false) // guest → host
+	case key.Matches(msg, m.keys.Secrets):
+		return m, m.openSecretsPanel()
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):

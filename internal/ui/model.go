@@ -13,6 +13,7 @@ import (
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -34,6 +35,8 @@ const (
 	viewProgress
 	viewBrowse
 	viewDest
+	viewSecrets
+	viewSecretForm
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
@@ -113,6 +116,28 @@ type model struct {
 	transferUpload    bool   // true = upload (host→guest); false = download (guest→host)
 	transferSrc       string // chosen source (absolute; a host path, or a guest path without the "vm:" prefix)
 	transferRecursive bool   // the source is a directory (copied with -r)
+
+	// Secrets panel (viewSecrets) for the VM opened via detail. secretsEntries
+	// holds ONLY redacted (masked) entries — the panel never touches a Store's
+	// cleartext fields directly, so it structurally cannot render a value back
+	// in the clear.
+	secretsVM      string
+	secretsEntries []secrets.RedactedEntry
+	secretsCursor  int
+	secretsStatus  string
+	secretsErr     error
+
+	// Add/edit/refresh secret form (viewSecretForm). secretRefreshMode locks
+	// the category to github and narrows the form to scope+value for the
+	// dedicated "refresh GitHub token" action; otherwise the category cycles
+	// among global/dir_env/github and the applicable fields follow.
+	secretCategory    secrets.Category
+	secretRefreshMode bool
+	secretScopeInput  textinput.Model
+	secretNameInput   textinput.Model
+	secretValueInput  textinput.Model
+	secretFieldFocus  int
+	secretFormErr     error
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -277,6 +302,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBrowse(msg)
 		case viewDest:
 			return m.updateDest(msg)
+		case viewSecrets:
+			return m.updateSecrets(msg)
+		case viewSecretForm:
+			return m.updateSecretForm(msg)
 		}
 	}
 
@@ -319,6 +348,12 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewDest:
 		m.dest, cmd = m.dest.Update(msg)
 		return m, cmd
+	case viewSecretForm:
+		cmds := make([]tea.Cmd, 3)
+		m.secretScopeInput, cmds[0] = m.secretScopeInput.Update(msg)
+		m.secretNameInput, cmds[1] = m.secretNameInput.Update(msg)
+		m.secretValueInput, cmds[2] = m.secretValueInput.Update(msg)
+		return m, tea.Batch(cmds...)
 	default:
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
@@ -338,6 +373,10 @@ func (m model) View() string {
 		return m.browser.View()
 	case viewDest:
 		return m.destView()
+	case viewSecrets:
+		return m.secretsView()
+	case viewSecretForm:
+		return m.secretFormView()
 	default:
 		return m.listView()
 	}

@@ -245,10 +245,10 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 5: `sand secret sync` — live re-render into a running VM (depends on: 1, 4) — `completed`. Reusable entry point: `provision.(*Provisioner).RenderSecrets(ctx, name, cfg, out)` runs only the `secrets`-tagged role over stdin; Task 6's TUI refresh reuses it.
 
-### Phase 4: Surfaces & verification
+### Phase 4: Surfaces & verification ✅
 **Parallel Tasks:**
-- Task 6: TUI secrets panel, resolves issue #3 (depends on: 1, 5)
-- Task 7: End-to-end tests — multi-token, live rotation, recreation persistence (depends on: 3, 4, 5)
+- ✔️ Task 6: TUI secrets panel, resolves issue #3 (depends on: 1, 5) — `completed`. Also fixed the create-form clone-token regression; cleanup pass additionally wired the reset-form clone token through `RecordCloneTokenSecret`.
+- ✔️ Task 7: End-to-end tests — multi-token, live rotation, recreation persistence (depends on: 3, 4, 5) — `completed`. Gated `//go:build limae2e` + `LIMA_E2E=1`; real-VM boot executed in the plan's Self Validation. Run: `LIMA_E2E=1 go test -tags limae2e -timeout 60m -run TestE2ESecrets ./internal/provision/`.
 
 ### Phase 5: Documentation
 **Parallel Tasks:**
