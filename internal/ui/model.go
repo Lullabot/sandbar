@@ -126,6 +126,10 @@ type model struct {
 	secretsCursor  int
 	secretsStatus  string
 	secretsErr     error
+	// secretDeletePending arms a two-step confirm for deleting the highlighted
+	// secret (press delete once to arm, again to confirm), mirroring the list's
+	// delete-confirm convention so a fat-finger doesn't destroy a secret.
+	secretDeletePending bool
 
 	// Add/edit/refresh secret form (viewSecretForm). secretRefreshMode locks
 	// the category to github and narrows the form to scope+value for the
@@ -138,6 +142,14 @@ type model struct {
 	secretValueInput  textinput.Model
 	secretFieldFocus  int
 	secretFormErr     error
+	// Edit mode (viewSecretForm opened with 'e' on an existing secret). The
+	// form is pre-filled from the highlighted entry; secretEditOrig* records
+	// its original key so a change to category/scope/name on submit is treated
+	// as a rename (remove the old entry) rather than leaving an orphan.
+	secretEditing       bool
+	secretEditOrigCat   secrets.Category
+	secretEditOrigScope string
+	secretEditOrigName  string
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.

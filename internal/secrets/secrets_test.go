@@ -168,6 +168,26 @@ func TestRemoveSecret(t *testing.T) {
 	}
 }
 
+func TestValue_ReturnsCleartextByKey(t *testing.T) {
+	s := &Store{Version: 1}
+	s.SetSecret(CategoryGlobal, "", "MY_VAR", "gv")
+	s.SetSecret(CategoryGitHub, "github.com/acme", "", "tok")
+	s.SetSecret(CategoryDirEnv, "some/dir", "DV", "dv")
+
+	if v, ok := s.Value(CategoryGlobal, "", "MY_VAR"); !ok || v != "gv" {
+		t.Fatalf("Value(global) = %q,%v want gv,true", v, ok)
+	}
+	if v, ok := s.Value(CategoryGitHub, "github.com/acme", ""); !ok || v != "tok" {
+		t.Fatalf("Value(github) = %q,%v want tok,true", v, ok)
+	}
+	if v, ok := s.Value(CategoryDirEnv, "some/dir", "DV"); !ok || v != "dv" {
+		t.Fatalf("Value(dir_env) = %q,%v want dv,true", v, ok)
+	}
+	if _, ok := s.Value(CategoryGlobal, "", "MISSING"); ok {
+		t.Fatal("Value on a missing key should report false")
+	}
+}
+
 func TestSetSecret_UpdatesExistingInPlace(t *testing.T) {
 	s := &Store{Version: 1}
 	s.SetSecret(CategoryGlobal, "", "MY_VAR", "first")

@@ -215,3 +215,133 @@ func TestRefreshTokenAppliesLiveWhenRunning(t *testing.T) {
 		t.Fatalf("github token not persisted as expected, got %+v", store.GitHub)
 	}
 }
+
+// Deleting a secret is a two-step confirm: the first delete key arms it (does
+// NOT remove anything), the second commits. On a stopped VM the removal is a
+// host-store-only write (no live render).
+func TestDeleteSecretTwoStepConfirm(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
+
+	store, err := secrets.Load("claude")
+	if err != nil {
+		t.Fatalf("secrets.Load: %v", err)
+	}
+	store.SetSecret(secrets.CategoryGlobal, "", "GONE", "v")
+	if err := store.Save("claude"); err != nil {
+		t.Fatalf("secrets.Save: %v", err)
+	}
+
+	opened, _ := m.Update(runeKey('s'))
+	m = opened.(model)
+	if len(m.secretsEntries) != 1 {
+		t.Fatalf("want 1 loaded entry, got %d", len(m.secretsEntries))
+	}
+
+	// First 'd' arms the confirm; nothing is deleted yet.
+	armed, _ := m.Update(runeKey('d'))
+	m = armed.(model)
+	if !m.secretDeletePending {
+		t.Fatal("first 'd' should arm the delete confirm")
+	}
+	if st, _ := secrets.Load("claude"); len(st.Global) != 1 {
+		t.Fatalf("secret must NOT be deleted on the first 'd', got %+v", st.Global)
+	}
+
+	// Second 'd' commits.
+	committed, _ := m.Update(runeKey('d'))
+	m = committed.(model)
+	if m.secretDeletePending {
+		t.Fatal("pending should clear after the confirming key")
+	}
+	if st, _ := secrets.Load("claude"); len(st.Global) != 0 {
+		t.Fatalf("secret should be deleted after confirm, got %+v", st.Global)
+	}
+	if m.view != viewSecrets {
+		t.Fatalf("after a stopped-VM delete the panel stays on viewSecrets, got %v", m.view)
+	}
+}
+
+// An armed delete is cancelled by any non-confirming key.
+func TestDeleteSecretCancelledByOtherKey(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
+
+	store, _ := secrets.Load("claude")
+	store.SetSecret(secrets.CategoryGlobal, "", "KEEP", "v")
+	if err := store.Save("claude"); err != nil {
+		t.Fatalf("secrets.Save: %v", err)
+	}
+
+	opened, _ := m.Update(runeKey('s'))
+	m = opened.(model)
+	armed, _ := m.Update(runeKey('d'))
+	m = armed.(model)
+	if !m.secretDeletePending {
+		t.Fatal("'d' should arm the confirm")
+	}
+
+	// A non-confirm key (down arrow) cancels the pending delete.
+	cancelled, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = cancelled.(model)
+	if m.secretDeletePending {
+		t.Fatal("a non-confirming key should cancel the pending delete")
+	}
+	if st, _ := secrets.Load("claude"); len(st.Global) != 1 {
+		t.Fatalf("secret must NOT be deleted when the confirm is cancelled, got %+v", st.Global)
+	}
+}
+
+// Editing pre-fills the form from the highlighted secret (name + current value)
+// and, when the key changes, treats it as a rename: the old entry is removed so
+// no orphan is left behind.
+func TestEditSecretPrefillsAndRenames(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
+
+	store, _ := secrets.Load("claude")
+	store.SetSecret(secrets.CategoryGlobal, "", "OLD", "oldval")
+	if err := store.Save("claude"); err != nil {
+		t.Fatalf("secrets.Save: %v", err)
+	}
+
+	opened, _ := m.Update(runeKey('s'))
+	m = opened.(model)
+
+	edited, _ := m.Update(runeKey('e'))
+	m = edited.(model)
+	if m.view != viewSecretForm {
+		t.Fatalf("'e' should open the secret form, view=%v", m.view)
+	}
+	if !m.secretEditing {
+		t.Fatal("edit mode flag should be set")
+	}
+	if m.secretNameInput.Value() != "OLD" {
+		t.Fatalf("name should be pre-filled, got %q", m.secretNameInput.Value())
+	}
+	if m.secretValueInput.Value() != "oldval" {
+		t.Fatalf("value should be pre-filled with the current cleartext, got %q", m.secretValueInput.Value())
+	}
+
+	// Rename OLD -> NEW and submit.
+	m.secretNameInput.SetValue("NEW")
+	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = submitted.(model)
+
+	st, err := secrets.Load("claude")
+	if err != nil {
+		t.Fatalf("secrets.Load: %v", err)
+	}
+	if len(st.Global) != 1 {
+		t.Fatalf("rename should not leave an orphan, got %+v", st.Global)
+	}
+	if v, ok := st.Value(secrets.CategoryGlobal, "", "NEW"); !ok || v != "oldval" {
+		t.Fatalf("NEW should carry the old value, got %q ok=%v", v, ok)
+	}
+	if _, ok := st.Value(secrets.CategoryGlobal, "", "OLD"); ok {
+		t.Fatal("OLD should be gone after the rename")
+	}
+}

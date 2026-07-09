@@ -376,6 +376,43 @@ func TestPrintSetReminder_AppliedGitHub(t *testing.T) {
 	}
 }
 
+// TestPrintRmReminder_NotApplied: a removal on a non-running VM only touched
+// the host store, so the reminder must point at how it gets purged from the VM
+// (create/start/sync) and must not claim it was already removed from the VM.
+func TestPrintRmReminder_NotApplied(t *testing.T) {
+	var b strings.Builder
+	printRmReminder(&b, secrets.CategoryGlobal, "dev", false)
+	out := b.String()
+	if !strings.Contains(out, "sand secret sync --vm dev") {
+		t.Fatalf("not-applied rm reminder should mention sync, got: %q", out)
+	}
+	if !strings.Contains(out, "host store") {
+		t.Fatalf("not-applied rm reminder should say it was removed from the host store, got: %q", out)
+	}
+}
+
+// TestPrintRmReminder_AppliedEnvVar: a removed env var still lingers in
+// already-open shells, so the reminder must say to open a new shell.
+func TestPrintRmReminder_AppliedEnvVar(t *testing.T) {
+	var b strings.Builder
+	printRmReminder(&b, secrets.CategoryGlobal, "dev", true)
+	out := b.String()
+	if !strings.Contains(out, "new shell") {
+		t.Fatalf("applied env-var rm reminder must mention opening a new shell, got: %q", out)
+	}
+}
+
+// TestPrintRmReminder_AppliedGitHub: a removed GitHub token stops being used on
+// the next git/gh call.
+func TestPrintRmReminder_AppliedGitHub(t *testing.T) {
+	var b strings.Builder
+	printRmReminder(&b, secrets.CategoryGitHub, "dev", true)
+	out := b.String()
+	if !strings.Contains(out, "next call") {
+		t.Fatalf("applied github rm reminder should say git stops using it on the next call, got: %q", out)
+	}
+}
+
 // TestCheckVMRunning_Running: a "Running" status with no error passes.
 func TestCheckVMRunning_Running(t *testing.T) {
 	if err := checkVMRunning("dev", "Running", nil); err != nil {

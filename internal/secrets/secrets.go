@@ -225,6 +225,35 @@ func (s *Store) RemoveSecret(category Category, scope, name string) bool {
 	return false
 }
 
+// Value returns the cleartext value of a stored secret keyed by
+// (category, scope, name), and whether it exists. It is the inverse of the
+// (category, scope, name) key SetSecret/RemoveSecret use; callers that only
+// need to display the store must use Redacted() instead — Value hands back
+// cleartext and is intended for an editor that pre-fills the current value.
+func (s *Store) Value(category Category, scope, name string) (string, bool) {
+	switch category {
+	case CategoryGlobal:
+		for i := range s.Global {
+			if s.Global[i].Name == name {
+				return s.Global[i].Value, true
+			}
+		}
+	case CategoryGitHub:
+		for i := range s.GitHub {
+			if s.GitHub[i].Scope == scope {
+				return s.GitHub[i].Token, true
+			}
+		}
+	case CategoryDirEnv:
+		for i := range s.DirEnv {
+			if s.DirEnv[i].Scope == scope && s.DirEnv[i].Name == name {
+				return s.DirEnv[i].Value, true
+			}
+		}
+	}
+	return "", false
+}
+
 // maskedValue is returned for every secret in Redacted(); it deliberately
 // carries no information about the underlying value (not even its length)
 // so it is safe to log or print.
