@@ -1,7 +1,6 @@
 package provision
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -66,13 +65,17 @@ func CheckoutRelDir(cloneURL string) (string, bool) {
 // over `limactl shell` (`getent passwd <user>` => user:x:uid:gid:gecos:home:shell).
 // The home is field index 5; fewer than 7 fields means an unexpected line.
 func guestHome(ctx context.Context, cli *lima.Client, name, user string) (string, error) {
-	var buf bytes.Buffer
-	if err := cli.Shell(ctx, name, nil, &buf, "getent", "passwd", user); err != nil {
+	// ShellOut (stdout only), not Shell (merged stdout+stderr): getent output is
+	// parsed by splitting on ':', and limactl's cd-to-host-cwd warning on stderr
+	// is full of colons — merging it in would corrupt the parse and yield a
+	// garbage home directory.
+	out, err := cli.ShellOut(ctx, name, "getent", "passwd", user)
+	if err != nil {
 		return "", fmt.Errorf("getent passwd %s: %w", user, err)
 	}
-	fields := strings.Split(strings.TrimSpace(buf.String()), ":")
+	fields := strings.Split(strings.TrimSpace(string(out)), ":")
 	if len(fields) < 7 {
-		return "", fmt.Errorf("unexpected getent passwd output for %s: %q", user, buf.String())
+		return "", fmt.Errorf("unexpected getent passwd output for %s: %q", user, string(out))
 	}
 	return fields[5], nil
 }

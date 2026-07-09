@@ -25,6 +25,12 @@ type stagingFakeRunner struct {
 
 func (f *stagingFakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, args)
+	joined := strings.Join(args, " ")
+	for key, val := range f.streamOut {
+		if strings.Contains(joined, key) {
+			return val, f.err
+		}
+	}
 	return nil, f.err
 }
 

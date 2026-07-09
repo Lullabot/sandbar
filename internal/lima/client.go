@@ -154,6 +154,19 @@ func (c *Client) Shell(ctx context.Context, name string, stdin io.Reader, out io
 	return c.r.Stream(ctx, stdin, out, args...)
 }
 
+// ShellOut runs a command inside an instance and returns its stdout ONLY, with
+// the guest's stderr kept separate (folded into the error on failure). Unlike
+// Shell — which streams stdout and stderr merged into one writer for live
+// display — this is the right call whenever the caller PARSES the output:
+// `limactl shell` injects a `cd <host-cwd>` into the guest login shell and, when
+// that directory does not exist in the guest, the resulting `bash: cd: … No such
+// file or directory` warning would otherwise be merged into (and corrupt) the
+// parsed stdout.
+func (c *Client) ShellOut(ctx context.Context, name string, argv ...string) ([]byte, error) {
+	args := append([]string{"shell", name}, argv...)
+	return c.r.Output(ctx, args...)
+}
+
 // Copy wraps `limactl copy`, streaming its verbose output to out. The auto
 // backend prefers rsync (resumable) and falls back to scp; -v streams progress;
 // -r is used for directory sources. Guest endpoints are formed with GuestPath
