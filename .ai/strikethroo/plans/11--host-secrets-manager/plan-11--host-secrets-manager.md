@@ -229,10 +229,10 @@ graph TD
 
 No circular dependencies.
 
-### Phase 1: Foundations (no dependencies)
+### Phase 1: Foundations (no dependencies) ✅
 **Parallel Tasks:**
-- Task 1: Host secrets store package `internal/secrets`
-- Task 2: Ansible `secrets` render role (global env, file-backed git credentials + `includeIf`, managed direnv)
+- ✔️ Task 1: Host secrets store package `internal/secrets` — `completed`
+- ✔️ Task 2: Ansible `secrets` render role (global env, file-backed git credentials + `includeIf`, managed direnv) — `completed`
 
 ### Phase 2: Store consumers
 **Parallel Tasks:**

@@ -25,3 +25,7 @@
       when: provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'
+    # Secrets (env vars, GitHub credentials, per-dir .env) are per-clone
+    # identity material, same as project — never baked into the base image.
+    - role: secrets
+      when: provision_phase | default('full') != 'base'
