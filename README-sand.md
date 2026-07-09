@@ -132,9 +132,22 @@ Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appea
 |-----|--------|
 | `u` | **Upload** a host file/directory into the VM (must be running) — see [Moving files in and out](#moving-files-in-and-out) |
 | `d` | **Download** a guest file/directory to the host (must be running) |
+| `s` | Open the **secrets panel** (masked list) — see [Secrets](#secrets) |
 | `esc` / `backspace` | Back to the list |
 | `enter` | Back to the list |
 | `q` | Quit |
+
+### Secrets panel
+
+Opened with `s` from the detail view.
+
+| Key | Action |
+|-----|--------|
+| `a` | Add/edit a secret (VM-global, directory-scoped, or GitHub token) |
+| `r` | Refresh a GitHub token — persists the new value to the host store and applies it live to the VM |
+| `esc` / `backspace` | Back to the detail view |
+
+See [Secrets](#secrets) for the full model.
 
 ### File browser (upload/download source)
 
@@ -251,17 +264,20 @@ both default off):
 
 - **Preserve Claude Code settings** — keeps `~/.claude` and `~/.claude.json`
   (your Claude login and history) across the recreate.
-- **Preserve project .env + checkout** — keeps the per-org directory (the cloned
-  repo and its `.env`). It is disabled when the VM cloned no repo. When enabled it
-  **skips the re-clone**, so you do **not** need to re-supply a token to reset a
-  VM that had cloned a private repo. Otherwise the clone token must be re-supplied
-  on reset — see [GitHub Authentication](README.md#github-authentication) for
-  the full token lifecycle.
+- **Preserve project .env + checkout** — keeps the cloned repo directory
+  (and any legacy per-project `.env`) across the recreate, skipping the
+  re-clone. It is disabled when the VM cloned no repo. Secrets, including
+  GitHub tokens, are **not** affected by this toggle — they live in the host
+  secrets store, independent of the VM, and are re-rendered into the VM on
+  every create *and* reset regardless of whether this toggle is on. See
+  [Secrets](#secrets) and [GitHub
+  Authentication](README.md#github-authentication).
 
-Enabling either toggle copies that data out of the VM to a private temp dir on
-your host and restores it after the recreate. The form warns that this moves your
-Claude login and `.env` token off the VM: **do not preserve if you suspect the VM
-is compromised.** See the main [Security Model](README.md#security-model).
+Enabling the "Preserve Claude Code settings" toggle copies that data out of
+the VM to a private temp dir on your host and restores it after the
+recreate. The form warns that this moves your Claude login off the VM: **do
+not preserve if you suspect the VM is compromised.** See the main [Security
+Model](README.md#security-model).
 
 **Disk sizing.** The list shows two disk columns — `Max Disk` (the VM's maximum
 virtual size) and `Disk Used` (its real allocated blocks); the detail view names
@@ -272,6 +288,86 @@ below the current base's virtual size — qcow2 cannot shrink a live disk — so
 form enforces a minimum of the floor. A base built before per-VM sizing keeps its
 old (larger) size and clones can't go under it; delete `claude-base` to rebuild
 the base at the floor on the next create/reset.
+
+## Secrets
+
+`sand` manages per-VM secrets on the **host**, then renders them into the VM.
+The host store is the single source of truth: it is re-rendered into the VM
+on every `sand create` **and** every reset, so recreating a VM never requires
+you to regenerate secrets by hand. This resolves GitHub issue #3 (rotating a
+GitHub token without a VM rebuild).
+
+**Store location.** `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets/<vm>.json`,
+one file per VM, mode `0600`.
+
+**Two scopes:**
+
+- **VM-global** environment variables — available everywhere in the VM.
+- **Directory-scoped** secrets — environment variables (or GitHub tokens)
+  that only apply under a given repo/subtree, e.g. per-org checkouts.
+
+**GitHub auth is file-backed, not an env var.** A GitHub token is rendered as
+a dedicated git credential store, selected per-directory via git's
+`includeIf "gitdir:~/<scope>/"`. This means:
+
+- **Multiple GitHub tokens can coexist in one VM** — `git`/`gh` auto-select
+  the right token based on the repo directory you're in. This is the
+  intended way to work across orgs/clients in a single VM (including
+  porting code between repos that need different tokens), rather than
+  spinning up a separate VM per context.
+- **Rotating a token takes effect on the next `git`/`gh` call** — no new
+  shell, no VM restart.
+
+**Generic environment-variable secrets** (global or directory-scoped) behave
+like normal shell env vars: **a new shell is required** to pick up a changed
+value — already-running processes and shells keep the old value.
+
+**direnv** is still used for directory-scoped generic env vars, but it is
+fully **managed by `sand`** — `sand` runs `direnv allow` for you when it
+renders a directory's secrets. You never need to run `direnv allow`
+yourself.
+
+### CLI
+
+All subcommands require `--vm <name>`. Secret **values are never passed as a
+CLI argument** — `set` always reads the value from stdin (or prompts on
+stderr if stdin is a terminal), so values never appear in `ps` output or
+shell history.
+
+```
+printf 'ghp_xxx\n' | sand secret set TOKEN --vm dev --github
+printf 'ghp_yyy\n' | sand secret set TOKEN --vm dev --github --dir github.com/acme
+printf 'v\n'       | sand secret set VAR   --vm dev --dir some/dir
+sand secret list --vm dev
+sand secret list --vm dev --reveal
+sand secret rm VAR --vm dev --dir some/dir
+sand secret sync --vm dev
+```
+
+- `sand secret set <NAME> --vm <name> [--dir <relpath>] [--github]` — routing:
+  no `--dir` → VM-global env var; `--dir` without `--github` →
+  directory-scoped env var; `--github` → GitHub token (scope = `--dir`;
+  an empty `--dir` sets the VM's default token).
+- `sand secret list --vm <name> [--reveal]` — masked by default; `--reveal`
+  prints cleartext values.
+- `sand secret rm <NAME> --vm <name> [--dir <relpath>] [--github]` — same
+  category routing as `set`.
+- `sand secret sync --vm <name>` — re-renders the host store's current
+  secrets into an **already-running** VM (git/GitHub credentials apply
+  immediately; env vars still need a new shell). Does not restart the VM.
+
+### TUI
+
+From the VM detail view, press `s` to open the **secrets panel** (a masked
+list of the VM's stored secrets). From the panel, press `a` to add or edit a
+secret, or `r` to refresh a GitHub token — the refresh both persists the new
+value to the host store and applies it live to the running VM. See
+[Secrets panel](#secrets-panel) in Keybindings.
+
+`sand create --clone-url <url> --clone-token <T>` still works exactly as
+before from the caller's perspective: the token is now recorded as a
+github-scoped secret in the host store instead of being written to a
+per-org `.env` loaded by direnv.
 
 ## Managed VMs and safety
 

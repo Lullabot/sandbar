@@ -250,9 +250,9 @@ No circular dependencies.
 - ✔️ Task 6: TUI secrets panel, resolves issue #3 (depends on: 1, 5) — `completed`. Also fixed the create-form clone-token regression; cleanup pass additionally wired the reset-form clone token through `RecordCloneTokenSecret`.
 - ✔️ Task 7: End-to-end tests — multi-token, live rotation, recreation persistence (depends on: 3, 4, 5) — `completed`. Gated `//go:build limae2e` + `LIMA_E2E=1`; real-VM boot executed in the plan's Self Validation. Run: `LIMA_E2E=1 go test -tags limae2e -timeout 60m -run TestE2ESecrets ./internal/provision/`.
 
-### Phase 5: Documentation
+### Phase 5: Documentation ✅
 **Parallel Tasks:**
-- Task 8: Rewrite token/secrets docs, reference issue #3 (depends on: 3, 5, 6)
+- ✔️ Task 8: Rewrite token/secrets docs, reference issue #3 (depends on: 3, 5, 6) — `completed`. Cleanup also removed stale `project_clone_token`-as-playbook-variable references (that var was retired in Task 4).
 
 ### Post-phase Actions
 Apply the verification gate (`/config/shared/verification-gate.md`) after each phase; do not mark a phase complete on an unverified subagent claim.
