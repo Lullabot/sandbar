@@ -241,9 +241,9 @@ No circular dependencies.
 
 > **Carry-forward for Task 6:** the TUI create-form (`internal/ui/form.go`) still sets `cfg.CloneToken` and calls `CreateVM` directly, bypassing `provision.RecordCloneTokenSecret`; Task 6 must wire the TUI create path through `RecordCloneTokenSecret` so a TUI-created VM with a clone token authenticates.
 
-### Phase 3: Live application
+### Phase 3: Live application ✅
 **Parallel Tasks:**
-- Task 5: `sand secret sync` — live re-render into a running VM (depends on: 1, 4)
+- ✔️ Task 5: `sand secret sync` — live re-render into a running VM (depends on: 1, 4) — `completed`. Reusable entry point: `provision.(*Provisioner).RenderSecrets(ctx, name, cfg, out)` runs only the `secrets`-tagged role over stdin; Task 6's TUI refresh reuses it.
 
 ### Phase 4: Surfaces & verification
 **Parallel Tasks:**

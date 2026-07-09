@@ -30,6 +30,7 @@
     # stanza) already exists when project's `git clone` of a private repo
     # authenticates through it.
     - role: secrets
+      tags: ["secrets"]
       when: provision_phase | default('full') != 'base'
     - role: project
       when: provision_phase | default('full') != 'base'
