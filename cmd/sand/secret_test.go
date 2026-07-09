@@ -334,6 +334,48 @@ func TestEffectSummaryLines_Empty(t *testing.T) {
 	}
 }
 
+// TestPrintSetReminder_NotApplied: when the VM isn't running, `set` only wrote
+// the host store, so the reminder must point the user at how it gets applied
+// (create/start/sync) and must NOT claim it was applied.
+func TestPrintSetReminder_NotApplied(t *testing.T) {
+	var b strings.Builder
+	printSetReminder(&b, secrets.CategoryGlobal, "dev", false)
+	out := b.String()
+	if !strings.Contains(out, "sand secret sync --vm dev") {
+		t.Fatalf("not-applied reminder should mention sync, got: %q", out)
+	}
+	if strings.Contains(out, "Saved and applied") {
+		t.Fatalf("must not claim it was applied when the VM wasn't running: %q", out)
+	}
+}
+
+// TestPrintSetReminder_AppliedEnvVar: an applied env-var secret must tell the
+// user to reconnect active sessions (new shell) — the load-bearing honesty
+// point, since rendering does not change a running process's environment.
+func TestPrintSetReminder_AppliedEnvVar(t *testing.T) {
+	var b strings.Builder
+	printSetReminder(&b, secrets.CategoryGlobal, "dev", true)
+	out := b.String()
+	if !strings.Contains(out, "reconnect") || !strings.Contains(out, "NEW shells") {
+		t.Fatalf("applied env-var reminder must tell the user to reconnect for a new shell, got: %q", out)
+	}
+}
+
+// TestPrintSetReminder_AppliedGitHub: an applied GitHub token is live on the
+// next git/gh call, so the reminder must say no reconnect is needed and must
+// NOT tell the user to reconnect sessions.
+func TestPrintSetReminder_AppliedGitHub(t *testing.T) {
+	var b strings.Builder
+	printSetReminder(&b, secrets.CategoryGitHub, "dev", true)
+	out := b.String()
+	if !strings.Contains(out, "git/gh call") {
+		t.Fatalf("applied github reminder should mention the next git/gh call, got: %q", out)
+	}
+	if strings.Contains(out, "reconnect any active sessions") {
+		t.Fatalf("github token is live; must not tell the user to reconnect sessions: %q", out)
+	}
+}
+
 // TestCheckVMRunning_Running: a "Running" status with no error passes.
 func TestCheckVMRunning_Running(t *testing.T) {
 	if err := checkVMRunning("dev", "Running", nil); err != nil {

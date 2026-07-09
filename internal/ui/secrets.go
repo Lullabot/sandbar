@@ -49,6 +49,12 @@ var secretCategoryOrder = []secrets.Category{
 // surfaces the exact same honest claim the CLI does.
 const githubEffectNote = "GitHub/git secrets updated — effective immediately (next git/gh call)."
 
+// envEffectNote is the honest counterpart for an environment-variable secret:
+// rendering it into the VM does not change any already-running process's
+// environment, so the user must reconnect active sessions (a new shell) to see
+// it. Mirrors cmd/sand/secret.go's effectSummaryLines env-var line.
+const envEffectNote = "Environment-variable secret applied — take effect in NEW shells only; reconnect active sessions (reopen 'limactl shell', restart tools like claude) to pick it up."
+
 // secretLine renders one row of the secrets panel list from a redacted
 // entry — the panel's ONLY path to displaying a secret, mirroring
 // cmd/sand/secret.go's formatSecretLine. Because e carries only a masked
@@ -400,9 +406,31 @@ func (m model) submitSecretForm() (tea.Model, tea.Cmd) {
 		m.secretFormErr = err
 		return m, nil
 	}
-
 	m.secretFormErr = nil
-	m.secretsStatus = "secret saved"
+
+	// Apply live when the VM is running so the secret is usable without a
+	// separate `sand secret sync`, mirroring the CLI's `set`. When it isn't
+	// running, the value stays on the host and renders on the next
+	// create/start; just confirm the save.
+	if m.detail.Status == "Running" {
+		vmName := m.secretsVM
+		cfg := secretsSyncConfig(m.reg, vmName)
+		prov := m.prov
+		note := envEffectNote
+		if cat == secrets.CategoryGitHub {
+			note = githubEffectNote
+		}
+		run := func(ctx context.Context, out io.Writer) error {
+			if err := prov.RenderSecrets(ctx, vmName, cfg, out); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, note)
+			return nil
+		}
+		return m, m.beginStream("Applying secret to "+vmName, viewSecrets, run)
+	}
+
+	m.secretsStatus = "saved to host store — applies on next start, or run 'sand secret sync' when running"
 	m.loadSecretsList()
 	m.view = viewSecrets
 	return m, nil
