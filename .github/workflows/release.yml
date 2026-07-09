@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       # Mint a short-lived (~1h) token scoped to the tap repo so GoReleaser's
