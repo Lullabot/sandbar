@@ -206,10 +206,14 @@ If you are running the playbook on the same machine you want to provision (i.e. 
 ## GitHub Authentication
 
 The playbook installs the [GitHub CLI (`gh`)](https://cli.github.com/) and
-configures it as the git credential helper, so `git push` / `git pull` over
-HTTPS authenticate against whatever token is in the environment. The walkthrough
-below threads a single fine-grained token through its whole life — from creating
-it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
+configures it as the git credential helper. With the host secrets manager
+(`sand secret`, see [README-sand.md](README-sand.md#secrets)), GitHub auth is
+**file-backed** rather than an environment variable: `sand` renders a git
+credential store per token and wires it up via git's `includeIf
+"gitdir:~/<scope>/"`, so `git`/`gh` automatically pick the right token based
+on which directory you're in. The walkthrough below threads a token through
+its whole life — from creating it in GitHub, to supplying it at VM-create
+time, to rotating and revoking it.
 
 1. **Create a fine-grained Personal Access Token.** Fine-grained PATs are
    recommended over classic PATs. They offer several advantages:
@@ -236,38 +240,46 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
    Bump them to write only if your workflow needs the agent to open/manage them
    directly.
 
-2. **Supply it at VM-create time.** Provide the token through the TUI
-   create-form `GitHub token` field, `sand create --clone-token`, or the
-   `project_clone_token` playbook variable. It is used only to clone a private
-   repo into the VM.
+2. **Supply it at VM-create time (or add it later).** Provide the token
+   through the TUI create-form `GitHub token` field or `sand create
+   --clone-url ... --clone-token <T>` to clone a private repo into the VM.
+   You can also add or rotate a token at any time with `sand secret set
+   <NAME> --vm <name> --github [--dir <relpath>]` (see
+   [README-sand.md](README-sand.md#secrets)) or the TUI's secrets panel — no
+   VM recreate required.
 
-3. **Where it lands.** For `github.com` clone URLs the token is written into the
-   per-org `.env` as `GH_TOKEN` (treat that file as a secret).
+3. **Where it lands.** The token is recorded as a github-scoped secret in the
+   host-side secrets store
+   (`${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets/<vm>.json`, mode
+   `0600`), then rendered into the VM as a git credential store selected by
+   directory. The host store is the single source of truth: it is
+   re-rendered into the VM on every create **and** every reset, so recreating
+   a VM does not require you to regenerate or re-supply the token yourself
+   (unless you're rotating it — see below).
 
-4. **How it loads.** direnv is installed and configured with `load_dotenv =
-   true`, so the `GH_TOKEN=...` line is loaded when you `cd` into that directory
-   and unloaded when you leave.
+4. **Multiple organizations, one VM.** Because tokens are scoped per
+   directory (via `--dir`), **multiple GitHub tokens can coexist in a single
+   VM** — `git`/`gh` auto-select the right one based on the repo you're in.
+   This is the intended way to work across orgs/clients, including porting
+   code between repos that need different tokens, without juggling separate
+   VMs per context. Give each org/client its own fine-grained token and its
+   own `--dir` scope for the best security posture.
 
-5. **Precedence.** `GH_TOKEN` takes precedence over any token stored by `gh auth
-   login`, and because `gh` is the git credential helper, `git push` / `git
-   pull` over HTTPS use whatever token is in the environment.
+5. **Rotate, expire, revoke.** Fine-grained PATs must have an expiry. To
+   rotate, run `sand secret set <NAME> --vm <name> --github [--dir
+   <relpath>]` with the new value (or use the TUI secrets panel's refresh
+   action), then revoke the old token in GitHub settings. **The rotation
+   takes effect on the next `git`/`gh` call** — no new shell and no VM
+   restart needed.
 
-6. **Multiple organizations.** For multiple organizations or clients, use a
-   **separate VM per org/context** rather than juggling several tokens on one
-   machine. The VMs are disposable, and this keeps each context's credentials
-   and code fully isolated — create a separate fine-grained token per
-   organization or client for the best security posture.
-
-7. **Rotate, expire, revoke.** Fine-grained PATs must have an expiry. When a
-   token expires or you rotate it, update the `.env` `GH_TOKEN` line (or
-   re-supply the new token on the next create), then revoke the old token in
-   GitHub settings.
-
-8. **Reset does not carry the token.** A reset/recreate does **not** carry the
-   token — it is never stored in the managed-VM index — so a private-repo VM
-   must have the token re-supplied on reset **unless** *Preserve project .env +
-   checkout* is enabled, which keeps the existing `.env` (and its `GH_TOKEN`),
-   so no re-supply is needed.
+6. **Live-update boundary.** Git/GitHub credential rotations apply
+   immediately, as above. Plain environment-variable secrets (VM-global or
+   directory-scoped, set with `sand secret set <NAME> --vm <name> [--dir
+   <relpath>]`) do **not** apply to already-running shells or processes —
+   open a **new shell** to pick up a changed value. `sand secret sync --vm
+   <name>` re-renders the host store into a running VM without restarting it,
+   but existing shells still need to be reopened for env-var changes to be
+   visible.
 
 ## Security Model
 
@@ -276,7 +288,8 @@ This playbook creates a **disposable, single-purpose development VM** intended t
 - **Passwordless sudo** is enabled for the configured user (default: `claude`). The VM is not intended to host multiple users or untrusted workloads.
 - **Claude Code runs with `--dangerously-skip-permissions`**, allowing it to operate without interactive approval prompts. This is appropriate because the VM is ephemeral and isolated — it can be torn down and reprovisioned at any time.
 - **A random password** is generated for SSH and Samba access and is not stored persistently. With the Lima base-image flow it is generated once when the base is built, so clones of that base share it; this is immaterial in practice because Lima access is over `limactl shell` with an injected key, not the password. Direct (non-Lima) `full` provisioning still gets a fresh password per run.
-- **The TUI reset preserve options are a deliberate, opt-in exception** to "nothing leaves the VM". When you enable them, the selected data — the Claude login under `~/.claude` plus `~/.claude.json`, and/or the per-org `.env` (which holds `GH_TOKEN`) together with the checkout — is copied to a private host temp dir, restored into the recreated VM, then deleted. They default off; **do not** use preserve if you suspect the VM is compromised.
+- **The host secrets store** (`${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets/<vm>.json`, mode `0600`) is the single source of truth for GitHub tokens and env-var secrets; it is re-rendered into the VM on every create and reset, so it is a deliberate, host-side exception to "nothing leaves the VM" for that one file — treat it as sensitive. See [README-sand.md](README-sand.md#secrets).
+- **The TUI reset preserve options** remain a separate, opt-in exception for the rest of a VM's local state. When you enable them, the selected data — the Claude login under `~/.claude` plus `~/.claude.json`, and/or the project checkout — is copied to a private host temp dir, restored into the recreated VM, then deleted. They default off; **do not** use preserve if you suspect the VM is compromised.
 
 **Do not use this playbook to provision machines that hold sensitive data or are exposed to the public internet.** It is designed for an isolated LAN or virtual network where the VM is treated as disposable.
 
@@ -298,7 +311,12 @@ Copy `group_vars/all.yml.example` to `group_vars/all.yml` and edit, or override 
 | `devtools_docker_registry_proxy_host` | `docker-registry-proxy.example` | Docker registry proxy hostname |
 | `devtools_docker_registry_proxy_port` | `3128` | Docker registry proxy port |
 | `project_clone_url` | _(empty)_ | Optional HTTPS repo to clone on first provision, into `~/<host>/<org>/<repo>` |
-| `project_clone_token` | _(empty)_ | Optional token for the clone. For `github.com` URLs it is written to the per-org `.env` as `GH_TOKEN` (loaded by direnv); treat as a secret |
+
+> **Note:** there is no longer a `project_clone_token` playbook variable. A
+> clone token is supplied via `sand create --clone-token` (or the TUI) and
+> recorded as a github-scoped secret in the host secrets store, from which the
+> `secrets` role renders a file-backed git credential — see
+> [GitHub Authentication](#github-authentication).
 
 ### Authenticating Claude Code
 
@@ -323,7 +341,7 @@ finishes — no webhook configuration required.
 - **samba** — Samba file sharing for the user's home directory (skipped by the Lima flow; `samba_enabled: false`)
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
 - **claude-code** — Claude Code CLI installation and configuration
-- **project** — Optional initial repo clone + per-org `.env`/direnv setup (only runs when `project_clone_url` is set)
+- **project** — Optional initial repo clone + host-managed secrets/direnv setup (only runs when `project_clone_url` is set)
 
 ## Releases and the Homebrew tap
 
