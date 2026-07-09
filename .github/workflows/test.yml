@@ -31,7 +31,7 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Ansible syntax check
         run: |
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # `limactl clone` copies the provisioned qcow2 (the runner's ext4 isn't
       # copy-on-write), so base + clone roughly double the disk footprint.
