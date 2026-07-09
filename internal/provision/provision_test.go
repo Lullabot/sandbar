@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -377,6 +378,55 @@ func findCall(t *testing.T, calls [][]string, from int, what string, match func(
 	}
 	t.Fatalf("could not find call %q at/after index %d in %v", what, from, calls)
 	return -1
+}
+
+// TestCreateVM_SecretsRenderedFromHostStoreNeverOnArgv proves the stdin/argv
+// secret-hygiene contract end to end for the host secrets store: with a
+// secret pre-recorded in the VM's store, CreateVM's finalize provision must
+// stream it over stdin (inside the YAML vars blob BuildExtraVars produces via
+// SecretVars), and it must never appear in any argv the provisioner builds
+// for limactl/ansible — mirroring/extending the existing "vars go over
+// stdin, never argv" contract already enforced by inGuestScript's fixed argv.
+func TestCreateVM_SecretsRenderedFromHostStoreNeverOnArgv(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	cfg := testConfig()
+	const secretValue = "ghp_supersecrettoken_should_never_be_on_argv"
+	store, err := secrets.Load(cfg.Name)
+	if err != nil {
+		t.Fatalf("secrets.Load: %v", err)
+	}
+	store.SetSecret(secrets.CategoryGlobal, "", "MY_SECRET", secretValue)
+	if err := store.Save(cfg.Name); err != nil {
+		t.Fatalf("secrets.Save: %v", err)
+	}
+
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.CreateVM(context.Background(), cfg, io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	// The secret must appear in the streamed stdin (the finalize vars blob)...
+	found := false
+	for _, s := range f.streams {
+		if strings.Contains(s, secretValue) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("secret value never appeared in any streamed stdin; streams=%v", f.streams)
+	}
+
+	// ...but never in any argv the provisioner built for limactl.
+	for _, c := range f.calls {
+		for _, tok := range c {
+			if strings.Contains(tok, secretValue) {
+				t.Fatalf("secret value leaked into argv: %v", c)
+			}
+		}
+	}
 }
 
 // TestReset_NoPreserve: a reset with no preservation is a clean recreate. With a

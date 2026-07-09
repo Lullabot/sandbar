@@ -1,0 +1,379 @@
+package main
+
+import (
+	"bufio"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/lullabot/sandbar/internal/secrets"
+)
+
+// maskedDisplay is what `sand secret list` prints in place of a cleartext
+// value when --reveal is not given. It mirrors internal/secrets' own mask
+// so masked output is consistent whichever path (Redacted() or a direct
+// Store read) produced it.
+const maskedDisplay = "****"
+
+// runSecret is the `sand secret` command-group dispatcher: it routes to the
+// set/list/rm leaves, mirroring the top-level dispatch in main.go.
+func runSecret(args []string) error {
+	if len(args) == 0 {
+		secretUsage(os.Stderr)
+		return errors.New("sand secret: missing subcommand (set|list|rm)")
+	}
+
+	switch args[0] {
+	case "-h", "--help", "help":
+		secretUsage(os.Stdout)
+		return nil
+	case "set":
+		return runSecretSet(args[1:])
+	case "list":
+		return runSecretList(args[1:])
+	case "rm":
+		return runSecretRm(args[1:])
+	default:
+		secretUsage(os.Stderr)
+		return fmt.Errorf("sand secret: unknown subcommand %q", args[0])
+	}
+}
+
+// secretUsage documents the subcommand tree and, critically, the stdin
+// value convention: the whole reason this command group reads from stdin
+// instead of a flag/positional argument is so secret values never appear on
+// argv (visible to any other user via `ps`, and liable to end up in shell
+// history).
+func secretUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage: sand secret <subcommand> [flags]
+
+Manage per-VM host-side secrets (global environment variables, GitHub
+tokens, and directory-scoped environment variables) that sand can inject
+into a VM. This only mutates the host-side store; applying secrets to a
+running VM is a separate 'sand secret sync' step.
+
+IMPORTANT: secret values are never accepted as a CLI argument. 'set' always
+reads the value from stdin, e.g.:
+
+    printf 'the-value\n' | sand secret set MY_VAR --vm test
+
+When stdin is a terminal (no pipe/redirect), you are prompted for the value
+on stderr instead (the input is not hidden/no-echo).
+
+Subcommands:
+  set <NAME> --vm <name> [--dir <relpath>] [--github]
+      Store a secret read from stdin (see above).
+      Category routing:
+        (no flags)          -> VM-global environment variable
+        --dir <relpath>     -> directory-scoped environment variable
+        --github            -> default GitHub token
+        --dir <relpath> --github -> GitHub token scoped to <relpath>
+
+  list --vm <name> [--reveal]
+      List stored secrets. Values are masked by default; --reveal prints
+      cleartext values.
+
+  rm <NAME> --vm <name> [--dir <relpath>] [--github]
+      Remove a secret. Uses the same category routing as 'set'.
+
+Examples:
+  printf 'ghp_xxx\n' | sand secret set TOKEN --vm dev --github
+  printf 'ghp_yyy\n' | sand secret set TOKEN --vm dev --github --dir github.com/acme
+  printf 'v\n'       | sand secret set VAR   --vm dev --dir some/dir
+  sand secret list --vm dev
+  sand secret list --vm dev --reveal
+  sand secret rm VAR --vm dev --dir some/dir
+`)
+}
+
+// secretCategory maps the --dir/--github flags to the secrets.Category to
+// store/remove under, following the task's routing table:
+//   - --github (--dir given or not) -> CategoryGitHub, scope = dir (empty
+//     scope is the VM-wide default token).
+//   - --dir without --github        -> CategoryDirEnv, scope = dir.
+//   - neither                       -> CategoryGlobal.
+func secretCategory(dir string, github bool) secrets.Category {
+	switch {
+	case github:
+		return secrets.CategoryGitHub
+	case dir != "":
+		return secrets.CategoryDirEnv
+	default:
+		return secrets.CategoryGlobal
+	}
+}
+
+// reorderFlags splits args into (positional, flagArgs) so Go's flag package
+// — which stops parsing at the first non-flag token and dumps everything
+// after it into fs.Args(), unparsed — can still parse flags that come AFTER
+// a positional argument. That ordering is this CLI's documented shape (e.g.
+// `sand secret set NAME --vm test`, NAME first), so without this
+// reordering step, flags placed after NAME would never be recognized.
+// valueFlags names (without leading dashes) the flags that consume a
+// following argument (e.g. "vm", "dir"); any other "-x"/"--x" token is
+// treated as boolean (no following value consumed), unless it is
+// self-contained via "=" (e.g. "--dir=some/dir").
+func reorderFlags(args []string, valueFlags map[string]bool) (positional, flagArgs []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if len(a) > 1 && a[0] == '-' {
+			flagArgs = append(flagArgs, a)
+			name := strings.TrimLeft(a, "-")
+			if strings.Contains(name, "=") {
+				continue // self-contained (--flag=value); no value to consume
+			}
+			if valueFlags[name] && i+1 < len(args) {
+				i++
+				flagArgs = append(flagArgs, args[i])
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	return positional, flagArgs
+}
+
+// requireVM validates that --vm was supplied. The codebase has no notion of
+// a "current/selected" VM for headless commands (sand create requires an
+// explicit --name the same way), so --vm is always required here.
+func requireVM(subcommand, vmName string) error {
+	if vmName == "" {
+		return fmt.Errorf("sand secret %s: --vm is required", subcommand)
+	}
+	return nil
+}
+
+// isTerminal reports whether f is connected to a terminal (as opposed to a
+// pipe, redirect, or /dev/null). Used to decide whether readSecretValue
+// should print an interactive prompt. Implemented directly against
+// os.ModeCharDevice rather than pulling in a TTY-detection dependency (e.g.
+// golang.org/x/term) — a plain, echoed line read is an acceptable trade-off
+// here since this only gates whether a prompt is printed, not how the line
+// is read.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// readSecretValue reads a secret value for name from in, one line, with the
+// trailing newline (if any) stripped. This is the ONLY way a secret value
+// enters this command group: it is never accepted as a positional or flag
+// argument, so it never appears on argv (e.g. in `ps` output) or shell
+// history. When isTTY is true (interactive stdin), a prompt naming the
+// secret is written to prompt (stderr) first; a no-echo/hidden read was
+// judged not worth an extra dependency for a host-local secrets file, so
+// the input is read (and possibly locally echoed by the terminal) plainly.
+func readSecretValue(in io.Reader, prompt io.Writer, isTTY bool, name string) (string, error) {
+	if isTTY {
+		fmt.Fprintf(prompt, "Enter value for %s: ", name)
+	}
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("read secret value: %w", err)
+		}
+		if line == "" {
+			return "", fmt.Errorf("no value provided for %s (stdin was empty)", name)
+		}
+		// EOF with no trailing newline: the value we got is still valid.
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// doSecretSet performs the actual Load/SetSecret/Save round trip shared by
+// runSecretSet, factored out so the category-routing + persistence logic is
+// unit-testable without going through flag parsing or stdin.
+func doSecretSet(vmName, dir string, github bool, name, value string) error {
+	store, err := secrets.Load(vmName)
+	if err != nil {
+		return fmt.Errorf("load secrets for %q: %w", vmName, err)
+	}
+	cat := secretCategory(dir, github)
+	store.SetSecret(cat, dir, name, value)
+	if err := store.Save(vmName); err != nil {
+		return fmt.Errorf("save secrets for %q: %w", vmName, err)
+	}
+	return nil
+}
+
+// runSecretSet implements `sand secret set <NAME> [--vm] [--dir] [--github]`.
+func runSecretSet(args []string) error {
+	fs := flag.NewFlagSet("secret set", flag.ContinueOnError)
+	vmName := fs.String("vm", "", "target VM name (required)")
+	dir := fs.String("dir", "", "home-relative directory scope (absent = VM-global)")
+	github := fs.Bool("github", false, "store as a GitHub token (category github)")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), `Usage: sand secret set <NAME> --vm <name> [--dir <relpath>] [--github]
+
+Reads the secret VALUE from stdin (never as a CLI argument) — see
+'sand secret --help' for the full convention and category-routing rules.
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	positional, flagArgs := reorderFlags(args, map[string]bool{"vm": true, "dir": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if len(positional) != 1 {
+		return fmt.Errorf("sand secret set: expected exactly one NAME argument, got %d", len(positional))
+	}
+	name := positional[0]
+
+	if err := requireVM("set", *vmName); err != nil {
+		return err
+	}
+
+	value, err := readSecretValue(os.Stdin, os.Stderr, isTerminal(os.Stdin), name)
+	if err != nil {
+		return err
+	}
+
+	return doSecretSet(*vmName, *dir, *github, name, value)
+}
+
+// runSecretList implements `sand secret list [--vm] [--reveal]`.
+func runSecretList(args []string) error {
+	fs := flag.NewFlagSet("secret list", flag.ContinueOnError)
+	vmName := fs.String("vm", "", "target VM name (required)")
+	reveal := fs.Bool("reveal", false, "show cleartext values instead of masked")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), `Usage: sand secret list --vm <name> [--reveal]
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if err := requireVM("list", *vmName); err != nil {
+		return err
+	}
+
+	store, err := secrets.Load(*vmName)
+	if err != nil {
+		return fmt.Errorf("load secrets for %q: %w", *vmName, err)
+	}
+
+	printSecretList(os.Stdout, store, *reveal)
+	return nil
+}
+
+// printSecretList writes one line per stored secret to w. By default it
+// goes through internal/secrets' Redacted() helper — the only supported way
+// to display a Store's contents without leaking cleartext — so masking
+// behavior stays centralized in the secrets package. --reveal (reveal=true)
+// prints the store's raw values instead.
+func printSecretList(w io.Writer, store *secrets.Store, reveal bool) {
+	if !reveal {
+		entries := store.Redacted()
+		if len(entries) == 0 {
+			fmt.Fprintln(w, "no secrets stored")
+			return
+		}
+		for _, e := range entries {
+			fmt.Fprintln(w, formatSecretLine(e.Category, e.Scope, e.Name, e.Masked))
+		}
+		return
+	}
+
+	var lines int
+	for _, g := range store.Global {
+		fmt.Fprintln(w, formatSecretLine(secrets.CategoryGlobal, "", g.Name, g.Value))
+		lines++
+	}
+	for _, g := range store.GitHub {
+		fmt.Fprintln(w, formatSecretLine(secrets.CategoryGitHub, g.Scope, "", g.Token))
+		lines++
+	}
+	for _, d := range store.DirEnv {
+		fmt.Fprintln(w, formatSecretLine(secrets.CategoryDirEnv, d.Scope, d.Name, d.Value))
+		lines++
+	}
+	if lines == 0 {
+		fmt.Fprintln(w, "no secrets stored")
+	}
+}
+
+// formatSecretLine renders one secrets list row. value is already either
+// masked or cleartext by the time it reaches here — this function only
+// handles layout.
+func formatSecretLine(cat secrets.Category, scope, name, value string) string {
+	switch cat {
+	case secrets.CategoryGlobal:
+		return fmt.Sprintf("[global]  %s = %s", name, value)
+	case secrets.CategoryGitHub:
+		scopeDisp := scope
+		if scopeDisp == "" {
+			scopeDisp = "(default)"
+		}
+		return fmt.Sprintf("[github]  %s = %s", scopeDisp, value)
+	case secrets.CategoryDirEnv:
+		return fmt.Sprintf("[dir_env] %s:%s = %s", scope, name, value)
+	default:
+		return fmt.Sprintf("[%s] %s:%s = %s", cat, scope, name, value)
+	}
+}
+
+// runSecretRm implements `sand secret rm <NAME> [--vm] [--dir] [--github]`.
+func runSecretRm(args []string) error {
+	fs := flag.NewFlagSet("secret rm", flag.ContinueOnError)
+	vmName := fs.String("vm", "", "target VM name (required)")
+	dir := fs.String("dir", "", "home-relative directory scope (must match the value used at 'set' time)")
+	github := fs.Bool("github", false, "remove a GitHub token (category github)")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), `Usage: sand secret rm <NAME> --vm <name> [--dir <relpath>] [--github]
+
+Flags:
+`)
+		fs.PrintDefaults()
+	}
+	positional, flagArgs := reorderFlags(args, map[string]bool{"vm": true, "dir": true})
+	if err := fs.Parse(flagArgs); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if len(positional) != 1 {
+		return fmt.Errorf("sand secret rm: expected exactly one NAME argument, got %d", len(positional))
+	}
+	name := positional[0]
+
+	if err := requireVM("rm", *vmName); err != nil {
+		return err
+	}
+
+	store, err := secrets.Load(*vmName)
+	if err != nil {
+		return fmt.Errorf("load secrets for %q: %w", *vmName, err)
+	}
+
+	cat := secretCategory(*dir, *github)
+	if !store.RemoveSecret(cat, *dir, name) {
+		return fmt.Errorf("sand secret rm: no such secret %q (category %s, dir %q)", name, cat, *dir)
+	}
+
+	if err := store.Save(*vmName); err != nil {
+		return fmt.Errorf("save secrets for %q: %w", *vmName, err)
+	}
+	return nil
+}
