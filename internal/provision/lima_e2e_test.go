@@ -19,7 +19,6 @@
 package provision
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -46,11 +45,13 @@ disk: "` + vm.BaseDiskFloor + `"
 // test on error.
 func guestOut(t *testing.T, cli *lima.Client, name string, argv ...string) string {
 	t.Helper()
-	var buf bytes.Buffer
-	if err := cli.Shell(context.Background(), name, nil, &buf, argv...); err != nil {
-		t.Fatalf("shell %s %v: %v\n%s", name, argv, err, buf.String())
+	// ShellOut, not Shell: capture stdout only so limactl's cd-to-host-cwd
+	// warning on stderr never bleeds into an asserted value.
+	out, err := cli.ShellOut(context.Background(), name, argv...)
+	if err != nil {
+		t.Fatalf("shell %s %v: %v\n%s", name, argv, err, string(out))
 	}
-	return strings.TrimSpace(buf.String())
+	return strings.TrimSpace(string(out))
 }
 
 func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {

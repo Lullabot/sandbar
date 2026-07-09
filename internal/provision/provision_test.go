@@ -53,6 +53,15 @@ func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	if len(args) >= 2 && args[0] == "list" && args[1] != "--format" {
 		return f.status[args[1]], f.err
 	}
+	// guestHome reads the home dir from stdout of `shell <name> getent passwd
+	// <user>` (fields user:x:uid:gid:gecos:home:shell) via ShellOut/Output; emit
+	// a canned passwd line so the staging path resolves to /home/andrew in the
+	// reset tests.
+	for _, a := range args {
+		if a == "getent" {
+			return []byte("andrew:x:1000:1000::/home/andrew:/bin/bash\n"), f.err
+		}
+	}
 	return f.outputs[args[0]], f.err
 }
 
@@ -61,17 +70,6 @@ func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, a
 	if stdin != nil {
 		data, _ := io.ReadAll(stdin)
 		f.streams = append(f.streams, string(data))
-	}
-	// guestHome reads the home dir from stdout of `shell <name> getent passwd <user>`
-	// (fields user:x:uid:gid:gecos:home:shell); emit a canned passwd line so the
-	// staging path resolves to /home/andrew in the reset tests.
-	if out != nil {
-		for _, a := range args {
-			if a == "getent" {
-				_, _ = io.WriteString(out, "andrew:x:1000:1000::/home/andrew:/bin/bash\n")
-				break
-			}
-		}
 	}
 	return f.callErr(args)
 }
