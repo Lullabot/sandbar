@@ -27,6 +27,11 @@ type keyMap struct {
 	Recreate  key.Binding
 	Cancel    key.Binding
 	Interrupt key.Binding
+
+	// Secrets panel (opened from the detail view) and its add/refresh form.
+	Secrets      key.Binding
+	AddSecret    key.Binding
+	RefreshToken key.Binding
 }
 
 func defaultKeys() keyMap {
@@ -57,6 +62,12 @@ func defaultKeys() keyMap {
 		// ctrl+c is intercepted in Update (not matched here); this binding is for
 		// the progress-view help bar while a build is running.
 		Interrupt: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
+		// Secrets lives only on the detail view. 's' is free there (Start lives
+		// on the list, same reuse pattern as Delete/Download both on 'd').
+		Secrets: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "secrets")),
+		// AddSecret/RefreshToken live only on the secrets panel.
+		AddSecret:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add secret")),
+		RefreshToken: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh gh token")),
 	}
 }
 
@@ -68,12 +79,16 @@ func (m model) viewHelp() []key.Binding {
 		// (only ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
 		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewDetail:
-		return []key.Binding{m.keys.Upload, m.keys.Download, m.keys.Back, m.keys.Quit}
+		return []key.Binding{m.keys.Upload, m.keys.Download, m.keys.Secrets, m.keys.Back, m.keys.Quit}
 	case viewBrowse:
 		// The browser draws its own enter/select/filter hint line; esc backs out.
 		return []key.Binding{m.keys.Back}
 	case viewDest:
 		return []key.Binding{m.keys.Submit, m.keys.Back}
+	case viewSecrets:
+		return []key.Binding{m.keys.AddSecret, m.keys.RefreshToken, m.keys.Up, m.keys.Down, m.keys.Back, m.keys.Quit}
+	case viewSecretForm:
+		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewProgress:
 		// While a build runs, ctrl+c cancels it; q/esc are inert until it finishes.
 		if m.running {

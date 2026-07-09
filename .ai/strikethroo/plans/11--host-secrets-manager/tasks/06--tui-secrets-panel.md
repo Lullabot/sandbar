@@ -2,7 +2,7 @@
 id: 6
 group: "tui"
 dependencies: [1, 5]
-status: "pending"
+status: "completed"
 created: 2026-07-09
 model: "sonnet"
 effort: "high"

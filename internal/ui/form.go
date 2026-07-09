@@ -415,6 +415,15 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = err
 		return m, nil
 	}
+	// Record a GitHub clone token into the host secrets store BEFORE
+	// CreateVM runs, mirroring cmd/sand/create.go's doHeadlessCreate (which
+	// calls this immediately ahead of its own CreateVM/Recreate dispatch) —
+	// without it, the secrets role has nothing to render on the first
+	// finalize pass and a private clone silently fails to authenticate.
+	if err := provision.RecordCloneTokenSecret(cfg); err != nil {
+		m.formErr = fmt.Errorf("record clone token secret: %w", err)
+		return m, nil
+	}
 	m.formErr = nil
 	cmd := m.beginProvision("Creating "+cfg.Name, m.prov.CreateVM, cfg)
 	return m, cmd
@@ -437,6 +446,14 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.formErr = nil
+	// Record any clone token from the reset form as a github-scoped secret in the
+	// host store before Reset re-renders secrets from it — mirrors submitForm and
+	// cmd/sand/create.go so a token typed here actually authenticates the clone
+	// instead of being silently dropped.
+	if err := provision.RecordCloneTokenSecret(cfg); err != nil {
+		m.formErr = err
+		return m, nil
+	}
 	opts := provision.ResetOptions{PreserveClaude: m.preserveClaude, PreserveProject: m.preserveProject && m.projectToggleEnabled}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		return m.prov.Reset(ctx, c, opts, out)
