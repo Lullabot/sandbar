@@ -256,7 +256,72 @@ Flags:
 		return err
 	}
 
-	return doSecretSet(*vmName, *dir, *github, name, value)
+	if err := doSecretSet(*vmName, *dir, *github, name, value); err != nil {
+		return err
+	}
+
+	// A `set` only writes the host store. Apply it to the VM immediately when
+	// it is running so "set then use it" just works (the natural expectation);
+	// when the VM is not running the value stays safely on the host and renders
+	// on the next create/start/sync. Either way, print an honest reminder — an
+	// env-var secret needs a NEW shell, so any active session must be
+	// reconnected to see it.
+	applied, err := applyToVMIfRunning(*vmName)
+	if err != nil {
+		return fmt.Errorf("secret saved to the host store, but applying it to %q failed: %w", *vmName, err)
+	}
+	printSetReminder(os.Stdout, secretCategory(*dir, *github), *vmName, applied)
+	return nil
+}
+
+// printSetReminder tells the user what `set` did and what remains. The
+// load-bearing part is the env-var case: rendering the secret into the VM does
+// NOT change any already-running process's environment, so the user must open
+// a new shell / reconnect active sessions (and restart tools like claude) to
+// see it. A GitHub token needs no reconnect — the file-backed credential store
+// is re-read on the next git/gh call.
+func printSetReminder(w io.Writer, cat secrets.Category, vmName string, applied bool) {
+	if !applied {
+		fmt.Fprintf(w, "Saved to the host store for %q. It will be applied when the VM is created or next running (or run: sand secret sync --vm %s).\n", vmName, vmName)
+		return
+	}
+	if cat == secrets.CategoryGitHub {
+		fmt.Fprintf(w, "Saved and applied to %q — effective on the next git/gh call (no need to reconnect sessions).\n", vmName)
+		return
+	}
+	fmt.Fprintf(w, "Saved and applied to %q. Environment-variable secrets take effect in NEW shells only — reconnect any active sessions (reopen 'limactl shell', restart tools like claude) to pick it up.\n", vmName)
+}
+
+// applyToVMIfRunning renders the host store into vmName when it is running,
+// reporting whether it applied. Unlike `sync` — which errors on a non-running
+// VM — `set` treats "not running" (or a VM that doesn't exist yet) as fine: the
+// value is safely on the host and renders on the next create/start/sync. This
+// is what makes `sand secret set` apply immediately to a live VM. It reuses the
+// same secrets-only RenderSecrets path as `sync`.
+func applyToVMIfRunning(vmName string) (bool, error) {
+	cli := lima.New(lima.NewExecRunner())
+	if err := cli.Preflight(); err != nil {
+		return false, err
+	}
+	status, statusErr := cli.Status(vmName)
+	if statusErr != nil || status != "Running" {
+		// Unreadable status (e.g. the VM doesn't exist yet) or a stopped VM is
+		// not an error for set — nothing to apply now.
+		return false, nil
+	}
+
+	dir, err := provision.LocatePlaybook()
+	if err != nil {
+		return false, err
+	}
+	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := prov.RenderSecrets(ctx, vmName, syncConfig(vmName), os.Stdout); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // runSecretList implements `sand secret list [--vm] [--reveal]`.
