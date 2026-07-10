@@ -511,7 +511,7 @@ func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 }
 
 // When the project toggle is disabled (no CloneURL), tab navigation reaches the
-// Claude toggle but never the inert project toggle, and the Claude toggle still
+// Claude toggle but never the disabled project toggle, and the Claude toggle still
 // flips.
 func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
 	cfg := resetConfig()
