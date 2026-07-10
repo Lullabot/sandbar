@@ -13,6 +13,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// secretsChrome is the number of terminal rows secretsView spends on
+// everything BUT the textarea: the title, the cleartext warning, the scoping
+// tip, the (possible) error line, the help bar, and appStyle's padding. The
+// editor height is the terminal height minus this, so the whole view fits
+// without overflowing and scrolling the title off the top of the screen.
+const secretsChrome = 16
+
 // openSecrets opens the secrets editor for the named VM, seeding the textarea
 // with its current KEY=VALUE pairs (one per line, keys sorted ascending).
 // Deliberately callable regardless of the VM's running status — secrets live
@@ -22,7 +29,7 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	ta := textarea.New()
 	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name)))
 	ta.SetWidth(max(20, m.width-8))
-	ta.SetHeight(max(5, m.height-14))
+	ta.SetHeight(max(5, m.height-secretsChrome))
 	m.secretsArea = ta
 	m.secretsVM = name
 	m.secretsErr = nil
@@ -160,6 +167,7 @@ func (m model) updateSecrets(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // secretsView renders the secrets editor: a title naming the VM, the textarea,
 // any pending error, and a cleartext-storage warning.
 func (m model) secretsView() string {
+	cw := m.contentWidth()
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Secrets: " + m.secretsVM))
 	b.WriteString("\n\n")
@@ -167,15 +175,18 @@ func (m model) secretsView() string {
 	b.WriteString("\n")
 
 	if m.secretsErr != nil {
-		b.WriteString("\n" + errStyle.Render("Error: "+m.secretsErr.Error()) + "\n")
+		b.WriteString("\n" + errStyle.Width(cw).Render("Error: "+m.secretsErr.Error()) + "\n")
 	}
 
-	b.WriteString("\n" + warnStyle.Render(
-		"Values are shown in cleartext and stored unencrypted on this host (0600).\n"+
+	// Both blurbs are Width-wrapped to the terminal: without it the tip (styled
+	// with the fixed-width labelStyle) collapsed into an ~18-column ribbon and
+	// the warning ran off the right edge.
+	b.WriteString("\n" + warnStyle.Width(cw).Render(
+		"Values are shown in cleartext and stored unencrypted on this host (0600). "+
 			"They are written into the VM on its next start.") + "\n")
 
-	b.WriteString("\n" + labelStyle.Render(
-		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section\n"+
+	b.WriteString("\n" + hintStyle.Width(cw).Render(
+		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section "+
 			"(e.g. [github.com/acme]) to scope git auth to that subtree.") + "\n")
 
 	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))

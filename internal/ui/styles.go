@@ -21,6 +21,11 @@ var (
 	labelStyle        = lipgloss.NewStyle().Width(18).Foreground(lipgloss.Color("245"))
 	focusedLabelStyle = lipgloss.NewStyle().Width(18).Bold(true).Foreground(lipgloss.Color("63"))
 
+	// hintStyle is dim guidance text that must reflow to the full content width.
+	// Unlike labelStyle it carries no fixed Width, so callers set one (via
+	// .Width) to wrap it to the terminal rather than a form label's column.
+	hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("63")).

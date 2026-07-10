@@ -5,7 +5,39 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
+
+// The editor must fit the terminal and its guidance must reflow to the content
+// width, not collapse into a narrow ribbon. Before the fix the scoping tip was
+// styled with the fixed 18-column labelStyle, so it wrapped into ~9 short lines
+// that pushed the whole view past the terminal height and scrolled the title
+// off the top (the PR feedback: "The secrets manager rendering is broken").
+func TestSecretsViewFitsAndTipReflows(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m.openSecrets("claude")
+
+	view := m.secretsView()
+	lines := strings.Split(view, "\n")
+	if len(lines) > m.height {
+		t.Fatalf("secretsView rendered %d lines, exceeding the %d-row terminal — it will scroll the title off the top", len(lines), m.height)
+	}
+
+	// The tip must wrap to roughly the content width, not the old 18-column label
+	// column: find its widest line and require it to be well past 18 columns.
+	widest := 0
+	for _, ln := range lines {
+		if strings.Contains(ln, "scope git auth") || strings.Contains(ln, "Tip:") {
+			if w := lipgloss.Width(ln); w > widest {
+				widest = w
+			}
+		}
+	}
+	if widest <= 18 {
+		t.Fatalf("the scoping tip wrapped to %d columns, want it reflowed to the content width (not the 18-col label column)", widest)
+	}
+}
 
 // parseSecrets is pure custom validation logic: table-driven coverage of the
 // blank/comment skip, first-'='-only split, key validation, and duplicate
