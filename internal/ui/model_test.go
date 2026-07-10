@@ -1086,6 +1086,27 @@ func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
 	}
 }
 
+// The reset form flags an already-saved GH_TOKEN with a placeholder so a blank
+// field is not misread as "no token" (the PR feedback: "The blank github token
+// is confusing"). A VM with no saved token leaves the placeholder empty.
+func TestResetFormPlaceholdersSavedToken(t *testing.T) {
+	m := newTestModel(t)
+	if err := m.sec.Set("has-token", map[string]string{"GH_TOKEN": "ghp_secret"}); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+
+	m.openResetForm("has-token", vm.CreateConfig{Name: "has-token", BaseName: "claude-base"})
+	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "***") {
+		t.Fatalf("token placeholder for a VM with a saved token = %q, want it to signal a saved token", ph)
+	}
+
+	m2 := newTestModel(t)
+	m2.openResetForm("no-token", vm.CreateConfig{Name: "no-token", BaseName: "claude-base"})
+	if ph := m2.inputs[fCloneToken].Placeholder; ph != "" {
+		t.Fatalf("token placeholder for a VM with no saved token = %q, want empty", ph)
+	}
+}
+
 // With no managed-running VMs, pressing X raises no confirm overlay and just
 // sets an explanatory status.
 func TestStopAllNoTargetsSetsStatusNoOverlay(t *testing.T) {
