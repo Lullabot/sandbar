@@ -325,3 +325,188 @@ func TestLoad_CorruptFileWarnsButReturnsUsableStore(t *testing.T) {
 		t.Fatalf("corrupt file should be preserved at %s.corrupt: %v", path, statErr)
 	}
 }
+
+// TestValidScope is the accept/reject table from the acceptance criteria:
+// "" (global) and a normal dir path are accepted; anything that could escape
+// $HOME or inject into a shell/gitconfig pattern is rejected.
+func TestValidScope(t *testing.T) {
+	accept := []string{"", "github.com/acme", "a", "a-b_c.d", "a/b/c"}
+	reject := []string{
+		"/etc", "../x", "a/../b", "a//b", "a/", "/a", "$(id)", "a b", "a;rm",
+		".", "a/.", "a/..", "..", "a/./b",
+	}
+	for _, sc := range accept {
+		if !ValidScope(sc) {
+			t.Errorf("ValidScope(%q) = false, want true", sc)
+		}
+	}
+	for _, sc := range reject {
+		if ValidScope(sc) {
+			t.Errorf("ValidScope(%q) = true, want false", sc)
+		}
+	}
+}
+
+// TestLoadFrom_V1Migration: an unversioned/v1 flat file loads such that the
+// VM's pairs live under the global scope "", and the next save stamps
+// version:2 on disk.
+func TestLoadFrom_V1Migration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	v1 := `{"version":1,"vms":{"x":{"A":"1"}}}`
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatalf("seed v1 file: %v", err)
+	}
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v1: %v", err)
+	}
+	if got := s.Get("x"); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+		t.Fatalf("migrated global scope = %v, want {A:1}", got)
+	}
+	all := s.GetAll("x")
+	if got := all[""]; !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+		t.Fatalf("GetAll()[\"\"] = %v, want {A:1}", got)
+	}
+
+	// Force a save and confirm the on-disk shape is stamped version 2.
+	if err := s.Set("x", s.Get("x")); err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(raw), `"version": 2`) {
+		t.Fatalf("expected version 2 after re-save, got: %s", raw)
+	}
+}
+
+// TestLoadFrom_UnversionedMigration: a file with no "version" field at all
+// (Version == 0) is treated the same as v1.
+func TestLoadFrom_UnversionedMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	unversioned := `{"vms":{"x":{"A":"1"}}}`
+	if err := os.WriteFile(path, []byte(unversioned), 0o600); err != nil {
+		t.Fatalf("seed unversioned file: %v", err)
+	}
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load unversioned: %v", err)
+	}
+	if got := s.Get("x"); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+		t.Fatalf("migrated global scope = %v, want {A:1}", got)
+	}
+}
+
+// TestGetAllSetAll_RoundTrip: SetAll persists a scope->pairs map that
+// survives a reload via GetAll, including a non-global scope.
+func TestGetAllSetAll_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	scopes := map[string]map[string]string{
+		"":                {"EDITOR": "vim"},
+		"github.com/acme": {"GH_TOKEN": "ghp_x"},
+	}
+	if err := s.SetAll("claude", scopes); err != nil {
+		t.Fatalf("SetAll: %v", err)
+	}
+
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got := s2.GetAll("claude")
+	if !reflect.DeepEqual(got, scopes) {
+		t.Fatalf("GetAll after reload = %v, want %v", got, scopes)
+	}
+
+	// GetAll returns a deep copy: mutating it must not affect the store.
+	got[""]["EDITOR"] = "mutated"
+	got["NEW"] = map[string]string{"X": "1"}
+	again := s2.GetAll("claude")
+	if again[""]["EDITOR"] != "vim" {
+		t.Fatalf("GetAll must return a defensive deep copy; store was mutated: %v", again)
+	}
+	if _, ok := again["NEW"]; ok {
+		t.Fatalf("GetAll must return a defensive deep copy; top-level map was mutated: %v", again)
+	}
+
+	// Raw on-disk shape check: version 2, nested scope maps.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	if !strings.Contains(string(raw), `"version": 2`) {
+		t.Fatalf("expected version 2, got: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"github.com/acme"`) {
+		t.Fatalf("expected scoped key in raw JSON, got: %s", raw)
+	}
+}
+
+// TestSetAll_EmptyOrAllEmptyDropsEntry: an empty scopes map, or a map whose
+// scopes are all empty, drops the VM's entry rather than persisting an empty
+// object tree.
+func TestSetAll_EmptyOrAllEmptyDropsEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	s, _ := LoadFrom(path)
+	if err := s.SetAll("claude", map[string]map[string]string{"": {"A": "1"}}); err != nil {
+		t.Fatalf("seed SetAll: %v", err)
+	}
+	if err := s.SetAll("claude", map[string]map[string]string{}); err != nil {
+		t.Fatalf("SetAll empty: %v", err)
+	}
+	if got := s.GetAll("claude"); len(got) != 0 {
+		t.Fatalf("empty SetAll should clear the entry, got %v", got)
+	}
+
+	if err := s.SetAll("claude", map[string]map[string]string{"": {"A": "1"}}); err != nil {
+		t.Fatalf("re-seed SetAll: %v", err)
+	}
+	if err := s.SetAll("claude", map[string]map[string]string{"": {}, "scope": {}}); err != nil {
+		t.Fatalf("SetAll all-empty scopes: %v", err)
+	}
+	if got := s.GetAll("claude"); len(got) != 0 {
+		t.Fatalf("all-empty-scope SetAll should clear the entry, got %v", got)
+	}
+}
+
+// TestSetAll_RejectsHostileScope: SetAll must reject a hostile scope string
+// before it can be persisted, since a scope reaches the guest as a
+// filesystem path and a gitdir: pattern.
+func TestSetAll_RejectsHostileScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	s, _ := LoadFrom(path)
+	if err := s.SetAll("claude", map[string]map[string]string{"../etc": {"A": "1"}}); err == nil {
+		t.Fatal("SetAll must reject a hostile scope")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected SetAll must not write the store (stat err = %v)", statErr)
+	}
+	if got := s.GetAll("claude"); len(got) != 0 {
+		t.Fatalf("rejected SetAll must not mutate the in-memory store, got %v", got)
+	}
+}
+
+// TestSetAll_AllOrNothingOnInvalidKey: a valid scope paired with an invalid
+// key anywhere in the call rejects the whole SetAll, mirroring Set's
+// all-or-nothing behavior.
+func TestSetAll_AllOrNothingOnInvalidKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	s, _ := LoadFrom(path)
+	scopes := map[string]map[string]string{
+		"github.com/acme": {"OK": "1", "BAD KEY": "x"},
+	}
+	if err := s.SetAll("claude", scopes); err == nil {
+		t.Fatal("SetAll must reject a map containing an invalid key")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("rejected SetAll must not write the store (stat err = %v)", statErr)
+	}
+	if got := s.GetAll("claude"); len(got) != 0 {
+		t.Fatalf("rejected SetAll must not mutate the in-memory store, got %v", got)
+	}
+}
