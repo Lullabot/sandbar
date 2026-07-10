@@ -38,8 +38,9 @@ import (
 // the other confirms. A nil *confirmState on the model means no confirmation
 // is pending.
 type confirmState struct {
-	prompt string  // e.g. `Delete "web"?`
-	run    tea.Cmd // dispatched (via beginAction) when the user presses Confirm
+	prompt  string  // e.g. `Delete "web"?`
+	run     tea.Cmd // dispatched (via beginAction) when the user presses Confirm
+	working string  // status shown (with the live spinner) while run is in flight; "" leaves the status line untouched
 }
 
 // view is the active screen the model renders and routes keys to.
@@ -469,6 +470,12 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Confirm): // y
 		run := m.confirm.run
+		// Seed the in-flight status so the spinner (raised by beginAction) has a
+		// label to sit beside — otherwise a confirmed stop-all/delete would spin
+		// against an empty or stale status line.
+		if m.confirm.working != "" {
+			m.status = m.confirm.working
+		}
 		m.confirm = nil
 		return m, m.beginAction(run)
 	case key.Matches(msg, m.keys.Cancel): // n / esc

@@ -258,8 +258,9 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.confirm = &confirmState{
-			prompt: fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
-			run:    stopAllCmd(m.cli, targets),
+			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
+			run:     stopAllCmd(m.cli, targets),
+			working: fmt.Sprintf("stopping %d sand VMs…", len(targets)),
 		}
 		return m, nil
 
@@ -290,13 +291,17 @@ func (m model) listView() string {
 	switch {
 	case m.confirm != nil:
 		b.WriteString("\n" + m.confirmView())
-	case m.status != "":
+	case m.acting:
+		// While a lifecycle action (including a confirmed stop-all) runs, lead the
+		// status with the live spinner — even if no status text was set, so the
+		// action never looks frozen.
 		status := m.status
-		// While a lifecycle action runs, lead the status with the live spinner.
-		if m.acting {
-			status = m.spinner.View() + " " + status
+		if status == "" {
+			status = "working…"
 		}
-		b.WriteString("\n" + statusStyle.Render(status))
+		b.WriteString("\n" + statusStyle.Render(m.spinner.View()+" "+status))
+	case m.status != "":
+		b.WriteString("\n" + statusStyle.Render(m.status))
 	}
 
 	// Surface the name filter so it never hides VMs invisibly: a live prompt while

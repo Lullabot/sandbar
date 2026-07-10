@@ -1086,6 +1086,43 @@ func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
 	}
 }
 
+// Confirming a stop-all marks an action in flight and shows the live spinner
+// beside a stop-all status — the run must not spin against a blank status line
+// (the PR feedback: "There's no progress spinner when running stop all").
+func TestStopAllConfirmShowsSpinner(t *testing.T) {
+	m := newTestModel(t)
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "claude-base"}); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "managed-running", Status: "Running"},
+	}})
+	m = loaded.(model)
+	m.width, m.height = 100, 30 // a reported size so the view renders realistically
+
+	// X raises the confirm overlay; y confirms it.
+	raised, _ := m.Update(runeKey('X'))
+	m = raised.(model)
+	if m.confirm == nil {
+		t.Fatal("X with a running managed VM should raise the confirm overlay")
+	}
+	confirmed, cmd := m.Update(runeKey('y'))
+	m = confirmed.(model)
+
+	if !m.acting {
+		t.Fatal("confirming stop-all should mark an action in flight")
+	}
+	if cmd == nil {
+		t.Fatal("confirming stop-all should dispatch a command (action + spinner tick)")
+	}
+	if !strings.Contains(m.status, "stopping") {
+		t.Fatalf("confirming stop-all should seed a status, got %q", m.status)
+	}
+	if !strings.Contains(m.listView(), m.spinner.View()) {
+		t.Fatalf("the list view should render the spinner while stopping, got:\n%s", m.listView())
+	}
+}
+
 // The reset form flags an already-saved GH_TOKEN with a placeholder so a blank
 // field is not misread as "no token" (the PR feedback: "The blank github token
 // is confusing"). A VM with no saved token leaves the placeholder empty.
