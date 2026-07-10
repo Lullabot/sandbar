@@ -212,7 +212,7 @@ fail to grow to its full size once the volume fills.
 |-----|--------|
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
 | `ctrl+c` (while running) | Cancel the build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
-| `q` | Quit (only after the run finishes; inert while a build is running) |
+| `q` | Quit (only after the run finishes; does nothing while a build is running) |
 | `esc` / `backspace`, `enter` | Return to the list (after the run finishes) |
 
 The slow lifecycle steps — building the base image, cloning, and booting — stream
