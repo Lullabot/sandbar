@@ -23,10 +23,15 @@ func TestApplySecrets_SecretNeverOnArgv(t *testing.T) {
 		t.Fatalf("ApplySecrets: %v", err)
 	}
 
-	// Global-only apply: the write call plus the profile/bashrc ensure call.
-	if len(f.calls) != 2 {
-		t.Fatalf("want exactly 2 limactl calls (write + ensure-profile), got %d: %v", len(f.calls), f.calls)
+	// Global-only apply: the write call, the profile/bashrc ensure call, and
+	// the git-credential reconcile pass (task 04, runs unconditionally even
+	// with zero recognized forge tokens — see gitcred.go).
+	if len(f.calls) != 3 {
+		t.Fatalf("want exactly 3 limactl calls (write + ensure-profile + git-cred reconcile), got %d: %v", len(f.calls), f.calls)
 	}
+	// The reconcile pass's block body is empty (no scoped tokens), so it
+	// streams no stdin (nil, not an empty reader) — only the global write's
+	// stdin is streamed.
 	if len(f.streams) != 1 {
 		t.Fatalf("want exactly 1 streamed stdin, got %d", len(f.streams))
 	}
@@ -153,8 +158,8 @@ func TestApplySecrets_EmptyRemovesGuestFile(t *testing.T) {
 		t.Fatalf("ApplySecrets: %v", err)
 	}
 
-	if len(f.calls) != 2 {
-		t.Fatalf("want exactly 2 limactl calls (clear + ensure-profile), got %d: %v", len(f.calls), f.calls)
+	if len(f.calls) != 3 {
+		t.Fatalf("want exactly 3 limactl calls (clear + ensure-profile + git-cred reconcile), got %d: %v", len(f.calls), f.calls)
 	}
 	argv := f.calls[0]
 	joined := strings.Join(argv, " ")
@@ -181,8 +186,8 @@ func TestApplySecrets_NilScopesRemovesGuestFile(t *testing.T) {
 	if err := ApplySecrets(context.Background(), cli, "claude", "andrew", nil, io.Discard); err != nil {
 		t.Fatalf("ApplySecrets(nil): %v", err)
 	}
-	if len(f.calls) != 2 {
-		t.Fatalf("want 2 calls, got %d: %v", len(f.calls), f.calls)
+	if len(f.calls) != 3 {
+		t.Fatalf("want 3 calls (clear + ensure-profile + git-cred reconcile), got %d: %v", len(f.calls), f.calls)
 	}
 	if !strings.Contains(strings.Join(f.calls[0], " "), "rm -f") {
 		t.Fatalf("nil scopes must run the clear script; argv=%v", f.calls[0])
@@ -208,9 +213,13 @@ func TestApplySecrets_ScopedWritesEnvAndDirenvAllow(t *testing.T) {
 	}
 
 	// global clear, ensure-profile, guest-home lookup (getent), scoped write,
-	// direnv allow.
-	if len(f.calls) != 5 {
-		t.Fatalf("want 5 calls (clear, ensure-profile, getent, scoped write, direnv allow), got %d: %v", len(f.calls), f.calls)
+	// direnv allow, plus GH_TOKEN's git-credential write and the git-cred
+	// reconcile pass (task 04 — see gitcred_test.go's dedicated
+	// TestApplySecrets_ScopedGHTokenWritesGitCredentials for the detailed
+	// git-credential assertions; this test stays focused on the plain
+	// scoped-env-var + direnv path).
+	if len(f.calls) != 7 {
+		t.Fatalf("want 7 calls (clear, ensure-profile, getent, scoped write, direnv allow, git-cred write, git-cred reconcile), got %d: %v", len(f.calls), f.calls)
 	}
 
 	var wroteScope, ranDirenv bool
@@ -274,10 +283,11 @@ func TestApplySecrets_EmptyScopesMapAppliesNoScopedFiles(t *testing.T) {
 	if err := ApplySecrets(context.Background(), cli, "claude", "andrew", scopes, io.Discard); err != nil {
 		t.Fatalf("ApplySecrets: %v", err)
 	}
-	// Only the global clear + ensure-profile calls; no scoped write, no direnv,
-	// no guest-home lookup.
-	if len(f.calls) != 2 {
-		t.Fatalf("want 2 calls, got %d: %v", len(f.calls), f.calls)
+	// Only the global clear + ensure-profile calls, plus the unconditional
+	// git-cred reconcile pass; no scoped write, no direnv, no guest-home
+	// lookup.
+	if len(f.calls) != 3 {
+		t.Fatalf("want 3 calls, got %d: %v", len(f.calls), f.calls)
 	}
 	for _, argv := range f.calls {
 		if hasTok(argv, "direnv") || hasTok(argv, "getent") {
