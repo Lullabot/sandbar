@@ -58,7 +58,7 @@ func TestSearchCapturesActionKeys(t *testing.T) {
 		t.Fatalf("query = %q, want the typed action letters %q", m.searchQuery, "sxdrSfnq")
 	}
 	// No action may have fired while searching.
-	if m.confirming {
+	if m.confirm != nil {
 		t.Fatal("an action fired while searching (delete confirm opened)")
 	}
 	if m.acting {

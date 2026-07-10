@@ -35,12 +35,6 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "secret":
-			if err := runSecret(os.Args[2:]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			return
 		default:
 			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n", os.Args[1])
 			os.Exit(2)

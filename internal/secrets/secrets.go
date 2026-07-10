@@ -1,78 +1,72 @@
-// Package secrets is the host-side, per-VM secrets store: the single source
-// of truth for every secret sand injects into a Lima VM (global environment
-// variables, GitHub tokens, and directory-scoped environment variables). It
-// is persisted as a sibling of the managed-VM registry
-// (internal/registry), under its own secrets/ subdirectory — one JSON file
-// per VM — so the registry itself stays secret-free.
+// Package secrets is a per-VM host store of arbitrary KEY=VALUE pairs that sand
+// applies into a guest's shell environment. The pairs are persisted host-side in
+// a 0600 JSON file and rendered into a file the guest SOURCEs, so the rendering
+// is a security boundary: a value containing a single quote, a `$(…)`, or a
+// backtick must reach the guest shell as literal text and never execute. Render
+// wraps every value in POSIX single quotes (the one escaping that expands
+// nothing) for exactly that reason.
 //
-// Values are stored in plaintext on disk, protected only by filesystem
-// permissions (0700 directory, 0600 file). This package never logs or
-// prints a cleartext secret value; callers that need to display secrets must
-// go through Redacted(), which only ever returns masked values.
+// The on-disk shape mirrors the registry package:
+// {"version":1,"vms":{"<name>":{"KEY":"VALUE"}}}. Load is tolerant of a missing
+// or corrupt file and refuses a file from a newer sand, always returning a
+// usable, non-nil store.
 package secrets
 
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 )
 
-// Category identifies which of the three secret kinds a mutation targets.
-type Category string
+// schemaVersion is the on-disk format this build writes and understands. A file
+// stamped with a higher version is refused rather than misparsed (a newer sand
+// may have added fields this build would silently drop on the next save).
+const schemaVersion = 1
 
-const (
-	// CategoryGlobal is a VM-wide environment variable, keyed by name.
-	CategoryGlobal Category = "global"
-	// CategoryGitHub is a GitHub token bound to a home-relative directory
-	// scope, keyed by scope. An empty scope (or ".") means the VM-wide
-	// default token; a non-empty scope (e.g. "github.com/acme") is an
-	// org/subtree override.
-	CategoryGitHub Category = "github"
-	// CategoryDirEnv is a generic environment variable scoped to a
-	// home-relative directory, keyed by (scope, name).
-	CategoryDirEnv Category = "dir_env"
-)
-
-// GlobalSecret is a VM-wide environment variable.
-type GlobalSecret struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+// fileSchema is the on-disk JSON shape:
+// {"version":1,"vms":{"<name>":{"KEY":"VALUE"}}}.
+type fileSchema struct {
+	Version int                          `json:"version"`
+	VMs     map[string]map[string]string `json:"vms"`
 }
 
-// GitHubSecret is a GitHub token bound to a home-relative directory scope.
-type GitHubSecret struct {
-	Scope string `json:"scope"`
-	Token string `json:"token"`
+// keyRE is the exact grammar for a shell-safe environment variable name. Keys are
+// emitted UNQUOTED by Render, so this is a security gate, not mere validation.
+var keyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ValidKey reports whether k is a legal environment variable name:
+// [A-Za-z_][A-Za-z0-9_]*. Everything else — the empty string, a leading digit, a
+// name with a dash, space, `=`, `$`, or any other metacharacter — is rejected,
+// because such a name cannot be emitted as an unquoted `export` token without
+// becoming a shell injection.
+func ValidKey(k string) bool {
+	return keyRE.MatchString(k)
 }
 
-// DirEnvSecret is a generic environment variable scoped to a home-relative
-// directory.
-type DirEnvSecret struct {
-	Scope string `json:"scope"`
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// Store is the on-disk JSON shape for one VM's secrets file. Field order and
-// tags are a cross-task contract: keep them exactly as documented in
-// .ai/strikethroo/plans/11--host-secrets-manager/tasks/01--host-secrets-store-package.md.
+// Store is an in-memory, per-VM secret store optionally backed by a JSON file.
+// An empty path disables persistence (used in tests). It holds no mutex, so it
+// is copy-safe to embed by value in the TUI model — callers hold a *Store and the
+// TUI passes that pointer through its by-value Update.
 type Store struct {
-	Version int            `json:"version"`
-	Global  []GlobalSecret `json:"global"`
-	GitHub  []GitHubSecret `json:"github"`
-	DirEnv  []DirEnvSecret `json:"dir_env"`
+	path string
+	vms  map[string]map[string]string
 }
 
-// currentVersion is written to new/loaded stores that don't already carry a
-// version (e.g. a freshly created Store or a pre-existing file from a
-// future minor revision that omitted the field).
-const currentVersion = 1
+// NewEmpty returns an in-memory store with no backing file. save() is a no-op for
+// it, so it never touches disk.
+func NewEmpty() *Store {
+	return &Store{vms: map[string]map[string]string{}}
+}
 
-// dataDir mirrors registry.defaultPath's XDG resolution:
-// ${XDG_DATA_HOME:-$HOME/.local/share}/sandbar.
-func dataDir() string {
+// defaultPath mirrors the registry's XDG derivation but for the secrets file:
+// ${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/secrets.json.
+func defaultPath() string {
 	base := os.Getenv("XDG_DATA_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -81,22 +75,22 @@ func dataDir() string {
 		}
 		base = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(base, "sandbar")
+	return filepath.Join(base, "sandbar", "secrets.json")
 }
 
-// Path returns the on-disk location of vm's secrets file:
-// ${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/secrets/<vm-name>.json.
-func Path(vm string) string {
-	return filepath.Join(dataDir(), "secrets", vm+".json")
+// Load reads the store from the default path.
+func Load() (*Store, error) {
+	return LoadFrom(defaultPath())
 }
 
-// Load reads vm's secrets store. A missing file yields an empty, usable
-// store — not an error — mirroring registry.LoadFrom's behavior so callers
-// don't need special-case handling for a VM that has never had a secret
-// set.
-func Load(vm string) (*Store, error) {
-	path := Path(vm)
-	s := &Store{Version: currentVersion}
+// LoadFrom reads the store from an explicit path. A missing or empty file yields
+// an empty store (not an error). A corrupt file is moved aside to
+// "<path>.corrupt" — so a later save cannot silently clobber recoverable data —
+// and the error is returned for the caller to surface. A file stamped with a
+// version newer than this build understands is refused with an "upgrade sand"
+// error. In every case the returned store is non-nil and usable.
+func LoadFrom(path string) (*Store, error) {
+	s := &Store{path: path, vms: map[string]map[string]string{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -107,181 +101,144 @@ func Load(vm string) (*Store, error) {
 	if len(data) == 0 {
 		return s, nil
 	}
-	if err := json.Unmarshal(data, s); err != nil {
-		return &Store{Version: currentVersion}, err
+	var parsed fileSchema
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		_ = os.Rename(path, path+".corrupt")
+		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
-	if s.Version == 0 {
-		s.Version = currentVersion
+	if parsed.Version > schemaVersion {
+		return s, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, parsed.Version, schemaVersion)
+	}
+	if parsed.VMs != nil {
+		s.vms = parsed.VMs
 	}
 	return s, nil
 }
 
-// Save atomically persists s as vm's secrets file: write to a unique temp
-// file in the same directory, set its mode to exactly 0600, then rename
-// over the destination. The parent directory is created with 0700 if
-// missing. The temp-then-rename sequence ensures a crash mid-write can
-// never leave a partially written or torn secrets file in place.
-func (s *Store) Save(vm string) error {
-	if s.Version == 0 {
-		s.Version = currentVersion
+// Get returns a defensive copy of the KEY=VALUE pairs stored for vm, or an empty
+// (non-nil) map if none. The copy prevents a caller from mutating the store's
+// backing map behind its back.
+func (s *Store) Get(vm string) map[string]string {
+	out := make(map[string]string, len(s.vms[vm]))
+	for k, v := range s.vms[vm] {
+		out[k] = v
 	}
-	path := Path(vm)
-	dir := filepath.Dir(path)
+	return out
+}
+
+// Set replaces vm's pairs with a copy of pairs and persists the change. Every key
+// is validated first (ValidKey); a single invalid key rejects the whole call
+// without mutating the store or touching disk, so an injectable key can never be
+// persisted. An empty pairs map drops vm's entry rather than persisting an empty
+// object.
+func (s *Store) Set(vm string, pairs map[string]string) error {
+	for k := range pairs {
+		if !ValidKey(k) {
+			return fmt.Errorf("invalid secret key %q: keys must match [A-Za-z_][A-Za-z0-9_]*", k)
+		}
+	}
+	if len(pairs) == 0 {
+		if _, ok := s.vms[vm]; !ok {
+			return s.save()
+		}
+		delete(s.vms, vm)
+		return s.save()
+	}
+	cp := make(map[string]string, len(pairs))
+	for k, v := range pairs {
+		cp[k] = v
+	}
+	s.vms[vm] = cp
+	return s.save()
+}
+
+// Remove drops vm's entry and persists the change.
+func (s *Store) Remove(vm string) error {
+	delete(s.vms, vm)
+	return s.save()
+}
+
+// shellSingleQuote wraps s in single quotes for safe inclusion in a POSIX shell
+// file. Inside single quotes no expansion occurs, so the only character needing
+// special handling is the quote itself. Each single quote is replaced by the
+// four-byte sequence quote, backslash, quote, quote -- which closes the quoted
+// span, emits one escaped literal quote, then reopens the span. That keeps
+// command substitutions, backticks, dollar-variables, and backslashes all
+// literal. See the ReplaceAll call below for the exact sequence.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Render emits the guest env file: one `export KEY='VALUE'` line per pair, keys
+// sorted ascending so the output is byte-stable for equal input, each value
+// single-quote-escaped, with a trailing newline. Keys that are not ValidKey are
+// skipped — they are emitted unquoted and so cannot be represented safely; Set
+// already rejects them, and this is the second line of defense.
+func Render(pairs map[string]string) string {
+	keys := make([]string, 0, len(pairs))
+	for k := range pairs {
+		if !ValidKey(k) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString("export " + k + "=" + shellSingleQuote(pairs[k]) + "\n")
+	}
+	return b.String()
+}
+
+// save writes the store atomically: a unique temp file in the same directory as
+// the target, created at 0600 BEFORE any secret bytes are written, is renamed
+// over the target. The parent directory is forced to 0700. There is therefore no
+// instant at which a world-readable file holds a secret. An empty path is a
+// no-op, so an in-memory store never touches disk. The unique temp name keeps two
+// TUI processes sharing a data dir from racing on a fixed name.
+func (s *Store) save() error {
+	if s.path == "" {
+		return nil
+	}
+	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// Force 0700 even if the directory pre-existed (e.g. the registry created the
+	// shared sandbar dir at 0755): the secrets dir must not be world-listable.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
 
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.MarshalIndent(fileSchema{Version: schemaVersion, VMs: s.vms}, "", "  ")
 	if err != nil {
 		return err
 	}
 
+	// os.CreateTemp opens the file at mode 0600, so the file is never
+	// world-readable, not even for the instant before we write secret bytes.
 	tmp, err := os.CreateTemp(dir, ".secrets-*.json.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	// Best-effort cleanup if anything below fails before the rename.
-	defer func() { _ = os.Remove(tmpName) }()
-
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
+	if err := os.Rename(tmpName, s.path); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, path)
-}
-
-// SetSecret adds or updates a secret in category, keyed by (scope, name):
-//   - CategoryGlobal: keyed by name; scope is ignored, value is the
-//     variable's value.
-//   - CategoryGitHub: keyed by scope; name is ignored, value is the token.
-//   - CategoryDirEnv: keyed by (scope, name); value is the variable's
-//     value.
-//
-// An existing entry with the same key is updated in place; otherwise a new
-// entry is appended.
-func (s *Store) SetSecret(category Category, scope, name, value string) {
-	switch category {
-	case CategoryGlobal:
-		for i := range s.Global {
-			if s.Global[i].Name == name {
-				s.Global[i].Value = value
-				return
-			}
-		}
-		s.Global = append(s.Global, GlobalSecret{Name: name, Value: value})
-	case CategoryGitHub:
-		for i := range s.GitHub {
-			if s.GitHub[i].Scope == scope {
-				s.GitHub[i].Token = value
-				return
-			}
-		}
-		s.GitHub = append(s.GitHub, GitHubSecret{Scope: scope, Token: value})
-	case CategoryDirEnv:
-		for i := range s.DirEnv {
-			if s.DirEnv[i].Scope == scope && s.DirEnv[i].Name == name {
-				s.DirEnv[i].Value = value
-				return
-			}
-		}
-		s.DirEnv = append(s.DirEnv, DirEnvSecret{Scope: scope, Name: name, Value: value})
-	}
-}
-
-// RemoveSecret removes the secret in category keyed by (scope, name),
-// following the same key semantics as SetSecret. It reports whether an
-// entry was found and removed.
-func (s *Store) RemoveSecret(category Category, scope, name string) bool {
-	switch category {
-	case CategoryGlobal:
-		for i := range s.Global {
-			if s.Global[i].Name == name {
-				s.Global = append(s.Global[:i], s.Global[i+1:]...)
-				return true
-			}
-		}
-	case CategoryGitHub:
-		for i := range s.GitHub {
-			if s.GitHub[i].Scope == scope {
-				s.GitHub = append(s.GitHub[:i], s.GitHub[i+1:]...)
-				return true
-			}
-		}
-	case CategoryDirEnv:
-		for i := range s.DirEnv {
-			if s.DirEnv[i].Scope == scope && s.DirEnv[i].Name == name {
-				s.DirEnv = append(s.DirEnv[:i], s.DirEnv[i+1:]...)
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// Value returns the cleartext value of a stored secret keyed by
-// (category, scope, name), and whether it exists. It is the inverse of the
-// (category, scope, name) key SetSecret/RemoveSecret use; callers that only
-// need to display the store must use Redacted() instead — Value hands back
-// cleartext and is intended for an editor that pre-fills the current value.
-func (s *Store) Value(category Category, scope, name string) (string, bool) {
-	switch category {
-	case CategoryGlobal:
-		for i := range s.Global {
-			if s.Global[i].Name == name {
-				return s.Global[i].Value, true
-			}
-		}
-	case CategoryGitHub:
-		for i := range s.GitHub {
-			if s.GitHub[i].Scope == scope {
-				return s.GitHub[i].Token, true
-			}
-		}
-	case CategoryDirEnv:
-		for i := range s.DirEnv {
-			if s.DirEnv[i].Scope == scope && s.DirEnv[i].Name == name {
-				return s.DirEnv[i].Value, true
-			}
-		}
-	}
-	return "", false
-}
-
-// maskedValue is returned for every secret in Redacted(); it deliberately
-// carries no information about the underlying value (not even its length)
-// so it is safe to log or print.
-const maskedValue = "****"
-
-// RedactedEntry is a display-safe view of one stored secret. It never
-// carries the cleartext value.
-type RedactedEntry struct {
-	Category Category
-	Scope    string
-	Name     string
-	Masked   string
-}
-
-// Redacted returns a display list covering every secret in s with values
-// replaced by a fixed mask. This is the only supported way for a caller to
-// list/display store contents; callers must never print or log the raw
-// Store fields.
-func (s *Store) Redacted() []RedactedEntry {
-	out := make([]RedactedEntry, 0, len(s.Global)+len(s.GitHub)+len(s.DirEnv))
-	for _, g := range s.Global {
-		out = append(out, RedactedEntry{Category: CategoryGlobal, Name: g.Name, Masked: maskedValue})
-	}
-	for _, g := range s.GitHub {
-		out = append(out, RedactedEntry{Category: CategoryGitHub, Scope: g.Scope, Masked: maskedValue})
-	}
-	for _, d := range s.DirEnv {
-		out = append(out, RedactedEntry{Category: CategoryDirEnv, Scope: d.Scope, Name: d.Name, Masked: maskedValue})
-	}
-	return out
+	return nil
 }

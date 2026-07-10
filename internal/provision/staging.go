@@ -16,14 +16,14 @@ import (
 // the project role applies via regex_replace with the pattern ^[a-zA-Z]+://.
 var schemeRe = regexp.MustCompile(`^[a-zA-Z]+://`)
 
-// cloneOrgRelDir turns a clone URL into the per-org directory relative to the
+// OrgRelDir turns a clone URL into the per-org directory relative to the
 // guest home, mirroring roles/project/tasks/main.yml: host = first path segment
 // after the scheme, relpath = the rest minus any trailing slash(es) and a
 // trailing ".git", and the result is host/dirname(relpath) (e.g.
 // https://github.com/org/repo -> github.com/org). Returns ("", false) when the
 // URL is empty or has no org component (a bare repo with no directory part, so
 // dirname is ".").
-func cloneOrgRelDir(cloneURL string) (string, bool) {
+func OrgRelDir(cloneURL string) (string, bool) {
 	if cloneURL == "" {
 		return "", false
 	}
@@ -47,11 +47,11 @@ func cloneOrgRelDir(cloneURL string) (string, bool) {
 
 // CheckoutRelDir returns the guest-home-relative directory the project role
 // clones a repo into (<host>/<org>/<repo>), or ("", false) when cloneURL is
-// empty or has no org segment. It extends cloneOrgRelDir (which yields the parent
+// empty or has no org segment. It extends OrgRelDir (which yields the parent
 // <host>/<org>) by appending the repo directory name, so the TUI can open the
 // guest file browser at a VM's project checkout.
 func CheckoutRelDir(cloneURL string) (string, bool) {
-	orgRel, ok := cloneOrgRelDir(cloneURL)
+	orgRel, ok := OrgRelDir(cloneURL)
 	if !ok {
 		return "", false
 	}

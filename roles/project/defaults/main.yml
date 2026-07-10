@@ -1,7 +1,7 @@
 ---
 # Optional initial project clone. Empty by default — set via
-# `sand create --clone-url` or group_vars. GitHub authentication for the
-# clone comes from the secrets role's file-backed git credential store (see
-# roles/secrets), populated from a github-scoped secret in the host secrets
-# store — not from a var here.
+# `sand create --clone-url` or group_vars. project_clone_token is used for
+# GitHub URLs (written to a per-org .env as GH_TOKEN and approved with
+# direnv); other hosts clone without it.
 project_clone_url: ""
+project_clone_token: ""

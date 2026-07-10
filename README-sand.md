@@ -3,7 +3,7 @@
 `sand` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) terminal
 UI for managing this project's disposable Claude Code [Lima](https://lima-vm.io/)
 VMs, with full CRUD: list and inspect instances, create new ones, run lifecycle
-actions (start / stop / restart), and delete or recreate them.
+actions (start / stop / restart), edit their secrets, and delete or reset them.
 
 It provisions the heavy, identity-free install once into a stopped **base
 image**, then makes each VM a fast `limactl clone` of that base, and runs a
@@ -91,63 +91,78 @@ except while a build is running on the progress view, where it cancels the build
 instead. The active view's keys are also shown in the help bar at the bottom of
 the screen.
 
+Actions divide by screen: the **list** selects a VM and owns the global actions;
+the **VM screen** owns every action that targets one VM.
+
 ### List view
 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` (also `k` / `j`) | Move the selection |
-| `enter` | Open the selected VM's detail view |
-| `S` | Open an interactive shell in the selected VM (must be running) |
+| `enter` | Open the selected VM's screen |
 | `n` | Open the create-VM form |
-| `s` | Start the selected VM |
-| `x` | Stop the selected VM |
-| `r` | Restart the selected VM |
-| `d` | Delete the selected VM (opens a confirmation) |
 | `f` | Toggle the filter: show all VMs ↔ only sand instances (managed + base) |
 | `/` | Incremental name search — type to filter the list by name; `esc` clears and exits, `enter` keeps the filter |
+| `X` | Stop every running sand-managed VM (see below) |
 | `q` | Quit |
-
-Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
-the TUI resumes when you exit the shell.
 
 The **Managed** column marks which VMs `sand` created: `yes` for a managed
 clone, `base` for a base image other VMs are cloned from (e.g. `claude-base`), and
 `no` otherwise. See [Managed VMs and safety](#managed-vms-and-safety) below.
 
-### Delete / recreate confirmation (on the list)
+### Stop all (on the list)
 
-Pressing `d` on the list opens an inline prompt. The `[r] recreate` option appears
-**only for managed VMs**, and names the base it would clone from, e.g.
-`Delete "claude"?  [y] yes   [r] recreate from claude-base   [n] cancel`.
+`X` stops every VM that is sand-managed **and** currently running, after a
+confirmation naming them. Unmanaged Lima instances and base images are never
+touched, so an instance you run for unrelated work is safe. VMs hidden by an
+active `f` or `/` filter are still stopped — `X` means "stop all", not "stop what
+I can see". Stopping is sequential; if one VM refuses to stop, the others still
+stop and the failure is reported by name.
 
-| Key | Action |
-|-----|--------|
-| `y` (also `d`) | Confirm: delete the VM |
-| `r` | Recreate: open the pre-filled reset form to re-clone the VM from its base image (managed VMs only) — see [Reset a VM](#reset-a-vm) |
-| `n` (also `esc`) | Cancel |
-
-### Detail view
+### VM view
 
 | Key | Action |
 |-----|--------|
+| `s` | Start the VM |
+| `x` | Stop the VM |
+| `r` | Restart the VM |
+| `R` | **Reset**: open the pre-filled form to re-clone the VM from its base image (managed VMs only) — see [Reset a VM](#reset-a-vm) |
+| `S` | Open an interactive shell in the VM (must be running) |
+| `d` | **Delete** the VM (opens a confirmation) |
 | `u` | **Upload** a host file/directory into the VM (must be running) — see [Moving files in and out](#moving-files-in-and-out) |
-| `d` | **Download** a guest file/directory to the host (must be running) |
-| `s` | Open the **secrets panel** (masked list) — see [Secrets](#secrets) |
+| `g` | **Download** a guest file/directory to the host (must be running) |
+| `e` | Edit the VM's **secrets** — works whether the VM is running or stopped |
 | `esc` / `backspace` | Back to the list |
-| `enter` | Back to the list |
 | `q` | Quit |
 
-### Secrets panel
+Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
+the TUI resumes when you exit the shell.
 
-Opened with `s` from the detail view.
+`d` is bound to delete on every screen: it is the most destructive key, so its
+meaning never changes under your fingers. Download took the rename to `g` (get).
 
-| Key | Action |
-|-----|--------|
-| `a` | Add/edit a secret (VM-global, directory-scoped, or GitHub token) |
-| `r` | Refresh a GitHub token — persists the new value to the host store and applies it live to the VM |
-| `esc` / `backspace` | Back to the detail view |
+### Delete confirmation
 
-See [Secrets](#secrets) for the full model.
+Pressing `d` opens an inline prompt: `Delete "claude"?  [y] yes   [n] cancel`.
+Only `y` confirms — a second press of `d` does nothing, so an accidental
+double-tap cannot destroy a VM. Reset is a separate action (`R`), not a branch of
+the delete prompt.
+
+### Secrets editor
+
+Pressing `e` opens a `KEY=VALUE` editor for the VM's secrets, seeded from the
+host store. It does **not** require the VM to be running — that is the point:
+secrets live on the host and are written into the guest on the VM's next start.
+
+- One `KEY=VALUE` per line. Blank lines and `#` comments are ignored.
+- A line splits on its **first** `=`, so a value may contain `=`.
+- Keys must be valid environment variable names (`[A-Za-z_][A-Za-z0-9_]*`). A bad
+  key, or a duplicate key, aborts the save naming the offending line — nothing is
+  written until the whole buffer is valid.
+- `ctrl+s` saves; `esc` discards.
+
+Values are shown in cleartext. See [Where secrets live](README.md#where-secrets-live)
+for the storage and trust model — they are stored **unencrypted** on the host.
 
 ### File browser (upload/download source)
 
@@ -251,33 +266,32 @@ deliberately deferred.
 
 ## Reset a VM
 
-Pressing `r` on the delete/recreate confirmation (managed VMs only) opens the
-create form **pre-filled** with the VM's recorded settings, titled *Reset VM*.
-The `Name` is locked to the VM being reset; every other field is editable, so a
-reset doubles as the way to change a VM's CPUs, memory, disk, hostname, git
-identity, or clone URL. Submit with `ctrl+s` to delete the VM and re-clone it
-from the base with the edited settings (the new settings are then recorded, so
-the next reset defaults to them).
+Pressing `R` on the VM screen (managed VMs only) opens the create form
+**pre-filled** with the VM's recorded settings, titled *Reset VM*. The `Name` is
+locked to the VM being reset; every other field is editable, so a reset doubles
+as the way to change a VM's CPUs, memory, disk, hostname, git identity, or clone
+URL. Submit with `ctrl+s` to delete the VM and re-clone it from the base with the
+edited settings (the new settings are then recorded, so the next reset defaults
+to them).
 
-Two **preserve toggles** follow the fields (space/enter flips the focused one;
-both default off):
+Up to two **preserve toggles** follow the fields (space/enter flips the focused
+one; both default off):
 
 - **Preserve Claude Code settings** — keeps `~/.claude` and `~/.claude.json`
-  (your Claude login and history) across the recreate.
-- **Preserve project .env + checkout** — keeps the cloned repo directory
-  (and any legacy per-project `.env`) across the recreate, skipping the
-  re-clone. It is disabled when the VM cloned no repo. Secrets, including
-  GitHub tokens, are **not** affected by this toggle — they live in the host
-  secrets store, independent of the VM, and are re-rendered into the VM on
-  every create *and* reset regardless of whether this toggle is on. See
-  [Secrets](#secrets) and [GitHub
-  Authentication](README.md#github-authentication).
+  (your Claude login and history) across the reset.
+- **Preserve ~/&lt;host&gt;/&lt;org&gt;** — named for the exact directory it
+  protects, e.g. `Preserve ~/github.com/lullabot`. It keeps the per-org directory
+  (the cloned repo and its `.env`). When enabled it **skips the re-clone**, so you
+  do **not** need to re-supply a token to reset a VM that had cloned a private
+  repo. Otherwise the clone token must be re-supplied on reset — see
+  [GitHub Authentication](README.md#github-authentication) for the full token
+  lifecycle. **This toggle is hidden entirely** when the VM cloned no repo, since
+  there would be nothing to preserve.
 
-Enabling the "Preserve Claude Code settings" toggle copies that data out of
-the VM to a private temp dir on your host and restores it after the
-recreate. The form warns that this moves your Claude login off the VM: **do
-not preserve if you suspect the VM is compromised.** See the main [Security
-Model](README.md#security-model).
+Enabling either toggle copies that data out of the VM to a private temp dir on
+your host and restores it after the reset. The form warns that this moves your
+Claude login and `.env` token off the VM: **do not preserve if you suspect the VM
+is compromised.** See the main [Security Model](README.md#security-model).
 
 **Disk sizing.** The list shows two disk columns — `Max Disk` (the VM's maximum
 virtual size) and `Disk Used` (its real allocated blocks); the detail view names
@@ -289,86 +303,6 @@ form enforces a minimum of the floor. A base built before per-VM sizing keeps it
 old (larger) size and clones can't go under it; delete `claude-base` to rebuild
 the base at the floor on the next create/reset.
 
-## Secrets
-
-`sand` manages per-VM secrets on the **host**, then renders them into the VM.
-The host store is the single source of truth: it is re-rendered into the VM
-on every `sand create` **and** every reset, so recreating a VM never requires
-you to regenerate secrets by hand. This resolves GitHub issue #3 (rotating a
-GitHub token without a VM rebuild).
-
-**Store location.** `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets/<vm>.json`,
-one file per VM, mode `0600`.
-
-**Two scopes:**
-
-- **VM-global** environment variables — available everywhere in the VM.
-- **Directory-scoped** secrets — environment variables (or GitHub tokens)
-  that only apply under a given repo/subtree, e.g. per-org checkouts.
-
-**GitHub auth is file-backed, not an env var.** A GitHub token is rendered as
-a dedicated git credential store, selected per-directory via git's
-`includeIf "gitdir:~/<scope>/"`. This means:
-
-- **Multiple GitHub tokens can coexist in one VM** — `git`/`gh` auto-select
-  the right token based on the repo directory you're in. This is the
-  intended way to work across orgs/clients in a single VM (including
-  porting code between repos that need different tokens), rather than
-  spinning up a separate VM per context.
-- **Rotating a token takes effect on the next `git`/`gh` call** — no new
-  shell, no VM restart.
-
-**Generic environment-variable secrets** (global or directory-scoped) behave
-like normal shell env vars: **a new shell is required** to pick up a changed
-value — already-running processes and shells keep the old value.
-
-**direnv** is still used for directory-scoped generic env vars, but it is
-fully **managed by `sand`** — `sand` runs `direnv allow` for you when it
-renders a directory's secrets. You never need to run `direnv allow`
-yourself.
-
-### CLI
-
-All subcommands require `--vm <name>`. Secret **values are never passed as a
-CLI argument** — `set` always reads the value from stdin (or prompts on
-stderr if stdin is a terminal), so values never appear in `ps` output or
-shell history.
-
-```
-printf 'ghp_xxx\n' | sand secret set TOKEN --vm dev --github
-printf 'ghp_yyy\n' | sand secret set TOKEN --vm dev --github --dir github.com/acme
-printf 'v\n'       | sand secret set VAR   --vm dev --dir some/dir
-sand secret list --vm dev
-sand secret list --vm dev --reveal
-sand secret rm VAR --vm dev --dir some/dir
-sand secret sync --vm dev
-```
-
-- `sand secret set <NAME> --vm <name> [--dir <relpath>] [--github]` — routing:
-  no `--dir` → VM-global env var; `--dir` without `--github` →
-  directory-scoped env var; `--github` → GitHub token (scope = `--dir`;
-  an empty `--dir` sets the VM's default token).
-- `sand secret list --vm <name> [--reveal]` — masked by default; `--reveal`
-  prints cleartext values.
-- `sand secret rm <NAME> --vm <name> [--dir <relpath>] [--github]` — same
-  category routing as `set`.
-- `sand secret sync --vm <name>` — re-renders the host store's current
-  secrets into an **already-running** VM (git/GitHub credentials apply
-  immediately; env vars still need a new shell). Does not restart the VM.
-
-### TUI
-
-From the VM detail view, press `s` to open the **secrets panel** (a masked
-list of the VM's stored secrets). From the panel, press `a` to add or edit a
-secret, or `r` to refresh a GitHub token — the refresh both persists the new
-value to the host store and applies it live to the running VM. See
-[Secrets panel](#secrets-panel) in Keybindings.
-
-`sand create --clone-url <url> --clone-token <T>` still works exactly as
-before from the caller's perspective: the token is now recorded as a
-github-scoped secret in the host store instead of being written to a
-per-org `.env` loaded by direnv.
-
 ## Managed VMs and safety
 
 `limactl` lists **every** Lima instance on your machine, not just the ones this
@@ -376,13 +310,15 @@ tool created — your `default` template VM, a Colima docker VM, and so on all s
 up in the list. You can safely list, inspect, start, stop, restart, and (with a
 confirmation) delete any of them; those are ordinary `limactl` operations.
 
-**Recreate is different**: it deletes the instance and re-clones it from a Claude
+**Reset is different**: it deletes the instance and re-clones it from a Claude
 base image, so pointing it at an unrelated VM would replace that VM with a sandbox.
 To prevent this, `sand` records the instances **it** creates and:
 
-- marks them in the **Managed** column (and the detail view), and
-- offers **recreate only for managed VMs** (`f` filters the list down to
-  sand's own instances — managed clones and base images).
+- marks them in the **Managed** column (and the VM screen),
+- offers **reset (`R`) only for managed VMs** (`f` filters the list down to
+  sand's own instances — managed clones and base images), and
+- restricts **stop all (`X`)** to running managed VMs, so it never stops an
+  unrelated Lima instance.
 
 Base images (the heavy, identity-free images each VM is cloned from, such as
 `claude-base`) are shown as `base` in the **Managed** column and labelled "base
@@ -391,22 +327,32 @@ VMs cloned from them.
 
 The index of managed VMs is a small JSON file at
 `${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json`. It is updated
-when you create, recreate, or delete a VM from the TUI or `sand create`, and
+when you create, reset, or delete a VM from the TUI or `sand create`, and
 reconciled against `limactl list` on each refresh so an instance deleted
 outside `sand` stops being flagged managed. VMs created outside `sand` (e.g.
-directly via `limactl`) are treated as unmanaged; delete still works, recreate
-does not.
+directly via `limactl`) are treated as unmanaged; delete still works, but reset
+and stop-all skip them.
 
 The index also stores each managed VM's create configuration (CPUs, memory, disk,
-hostname, git identity, …) so **recreate pre-fills the reset form faithfully**
-instead of resetting it to defaults (see [Reset a VM](#reset-a-vm)). The **clone
-token is deliberately never written to the index** (secrets never touch disk); how
-that plays out on reset — re-supply the token unless *Preserve project .env +
-checkout* is enabled — is covered in
-[GitHub Authentication](README.md#github-authentication).
+hostname, git identity, …) so **reset pre-fills its form faithfully** instead of
+resetting it to defaults (see [Reset a VM](#reset-a-vm)). The index carries a
+schema `version`; an older unversioned file is migrated on load.
+
+The **clone token is never written to this index** — `managed-vms.json` stays
+secret-free. Secrets live in a *separate* file, `secrets.json`, stored
+**unencrypted** at mode `0600`; see
+[Where secrets live](README.md#where-secrets-live). A token supplied on the
+create form is recorded there as `GH_TOKEN`, so it survives in the VM's
+environment across restarts and can be edited at any time with `e`.
+
+Note the one thing the store does **not** do: a reset re-clones the repo during
+its finalize pass, which runs *before* the stored secrets are written into the
+guest. So resetting a VM that cloned a **private** repo still requires
+re-supplying the clone token on the reset form — unless you enable the
+*Preserve ~/&lt;host&gt;/&lt;org&gt;* toggle, which skips the re-clone entirely.
 
 Creating a VM whose name already exists is refused with a clear message rather than
-colliding — delete it, or recreate it to reset it.
+colliding — delete it, or reset it.
 
 ## Why the `limactl` CLI (not a Go API)
 

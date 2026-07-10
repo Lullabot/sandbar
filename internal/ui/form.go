@@ -231,7 +231,12 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.resetBaseName = cfg.BaseName
 	m.preserveClaude = false
 	m.preserveProject = false
-	m.projectToggleEnabled = cfg.CloneURL != "" // no clone => nothing to preserve
+	orgRel, ok := provision.OrgRelDir(cfg.CloneURL)
+	m.projectToggleEnabled = ok // no clone, or no org segment => nothing to preserve
+	m.projectToggleLabel = ""
+	if ok {
+		m.projectToggleLabel = "Preserve ~/" + orgRel
+	}
 	m.toggleFocus = -1
 	m.formErr = nil
 	m.view = viewForm
@@ -295,7 +300,8 @@ func (m *model) resetFocusPrev() tea.Cmd {
 			m.focusIdx--
 			return m.inputs[m.focusIdx].Focus()
 		}
-		// At the first editable input → wrap up to the last toggle.
+		// At the first editable input → wrap up to the last toggle (the project
+		// toggle when shown, else the Claude toggle).
 		m.inputs[m.focusIdx].Blur()
 		if m.projectToggleEnabled {
 			m.toggleFocus = 1
@@ -415,15 +421,6 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = err
 		return m, nil
 	}
-	// Record a GitHub clone token into the host secrets store BEFORE
-	// CreateVM runs, mirroring cmd/sand/create.go's doHeadlessCreate (which
-	// calls this immediately ahead of its own CreateVM/Recreate dispatch) —
-	// without it, the secrets role has nothing to render on the first
-	// finalize pass and a private clone silently fails to authenticate.
-	if err := provision.RecordCloneTokenSecret(cfg); err != nil {
-		m.formErr = fmt.Errorf("record clone token secret: %w", err)
-		return m, nil
-	}
 	m.formErr = nil
 	cmd := m.beginProvision("Creating "+cfg.Name, m.prov.CreateVM, cfg)
 	return m, cmd
@@ -446,14 +443,6 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.formErr = nil
-	// Record any clone token from the reset form as a github-scoped secret in the
-	// host store before Reset re-renders secrets from it — mirrors submitForm and
-	// cmd/sand/create.go so a token typed here actually authenticates the clone
-	// instead of being silently dropped.
-	if err := provision.RecordCloneTokenSecret(cfg); err != nil {
-		m.formErr = err
-		return m, nil
-	}
 	opts := provision.ResetOptions{PreserveClaude: m.preserveClaude, PreserveProject: m.preserveProject && m.projectToggleEnabled}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		return m.prov.Reset(ctx, c, opts, out)
@@ -529,25 +518,21 @@ func (m model) updateResetForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleRow renders one reset-mode preserve toggle: a checkbox glyph, the label
-// highlighted when focused, and a grayed "(no project cloned)" note when the
-// toggle is disabled (the VM cloned no repo, so there is nothing to preserve).
-// It uses inline styles rather than labelStyle/focusedLabelStyle, whose fixed
-// width would wrap these longer lines.
-func toggleRow(label string, on, focused, enabled bool) string {
+// toggleRow renders one reset-mode preserve toggle: a checkbox glyph and the
+// label, highlighted when focused. It uses inline styles rather than
+// labelStyle/focusedLabelStyle, whose fixed width would wrap these longer
+// lines. Callers only render a toggle that is actually usable — a disabled,
+// unreachable toggle never reaches the screen.
+func toggleRow(label string, on, focused bool) string {
 	box := "[ ]"
 	if on {
 		box = "[x]"
 	}
 	line := box + " " + label
-	switch {
-	case !enabled:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(line + "  (no project cloned)")
-	case focused:
+	if focused {
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render(line)
-	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
 	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
 }
 
 // formView renders the labelled inputs, validation error, and help. In reset mode
@@ -582,8 +567,10 @@ func (m model) formView() string {
 	// The two preserve toggles and their compromise warning (reset mode only).
 	if m.resetMode {
 		b.WriteString("\n")
-		b.WriteString(toggleRow("Preserve Claude Code settings", m.preserveClaude, m.toggleFocus == 0, true) + "\n")
-		b.WriteString(toggleRow("Preserve project .env + checkout", m.preserveProject, m.toggleFocus == 1, m.projectToggleEnabled) + "\n")
+		b.WriteString(toggleRow("Preserve Claude Code settings", m.preserveClaude, m.toggleFocus == 0) + "\n")
+		if m.projectToggleEnabled {
+			b.WriteString(toggleRow(m.projectToggleLabel, m.preserveProject, m.toggleFocus == 1) + "\n")
+		}
 		if m.preserveClaude || m.preserveProject {
 			b.WriteString("\n" + errStyle.Render("Preserving copies your Claude login and the .env token out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
 		}

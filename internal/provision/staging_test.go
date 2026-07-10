@@ -51,7 +51,7 @@ func (f *stagingFakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Wr
 	return f.err
 }
 
-func TestCloneOrgRelDir(t *testing.T) {
+func TestOrgRelDir(t *testing.T) {
 	cases := []struct {
 		name    string
 		url     string
@@ -68,15 +68,15 @@ func TestCloneOrgRelDir(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotDir, gotOK := cloneOrgRelDir(tc.url)
+			gotDir, gotOK := OrgRelDir(tc.url)
 			if gotDir != tc.wantDir || gotOK != tc.wantOK {
-				t.Fatalf("cloneOrgRelDir(%q) = (%q, %v), want (%q, %v)", tc.url, gotDir, gotOK, tc.wantDir, tc.wantOK)
+				t.Fatalf("OrgRelDir(%q) = (%q, %v), want (%q, %v)", tc.url, gotDir, gotOK, tc.wantDir, tc.wantOK)
 			}
 		})
 	}
 }
 
-// CheckoutRelDir extends cloneOrgRelDir with the repo directory name, giving the
+// CheckoutRelDir extends OrgRelDir with the repo directory name, giving the
 // full guest-home-relative checkout path the TUI opens the guest browser at.
 func TestCheckoutRelDir(t *testing.T) {
 	cases := []struct {

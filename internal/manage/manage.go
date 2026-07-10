@@ -12,9 +12,11 @@ import (
 
 // Reconcile drops managed entries whose VM is no longer present in live (the
 // current `limactl list` result), so a VM deleted outside sand stops being
-// flagged managed (and recreate-able). It returns whether anything was
-// pruned. Mirrors the TUI's vmsLoadedMsg handling in internal/ui/model.go.
-func Reconcile(reg *registry.Registry, live []vm.VM) (bool, error) {
+// flagged managed (and recreate-able). It returns the names it dropped, so a
+// caller can prune those from its own per-VM state too (the TUI does this for
+// its secrets store). Mirrors the TUI's vmsLoadedMsg handling in
+// internal/ui/model.go.
+func Reconcile(reg *registry.Registry, live []vm.VM) ([]string, error) {
 	present := make(map[string]bool, len(live))
 	for _, v := range live {
 		present[v.Name] = true
@@ -27,7 +29,7 @@ func Reconcile(reg *registry.Registry, live []vm.VM) (bool, error) {
 // only ever offered for VMs sand itself created — and, when it may, the base
 // image to clone from: the VM's recorded base, or the default base name if
 // none was recorded (e.g. a pre-snapshot index entry). Mirrors the TUI's
-// confirmBase gate in internal/ui/list.go.
+// Reset gate in internal/ui/detail.go.
 func RecreateBase(reg *registry.Registry, name string) (base string, ok bool) {
 	if !reg.IsManaged(name) {
 		return "", false

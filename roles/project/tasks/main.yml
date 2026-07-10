@@ -35,13 +35,32 @@
         group: "{{ user_name }}"
         mode: "0755"
 
-    # Authentication for a private GitHub clone comes from the secrets role's
-    # file-backed git credential store (roles/secrets), not from a var passed
-    # here: `sand create --clone-token` records the token as a github-scoped
-    # secret in the host store (see internal/provision.RecordCloneTokenSecret),
-    # and site.yml runs the secrets role BEFORE this one so the credential
-    # (and its includeIf ~/.gitconfig stanza) already exists when the clone
-    # below runs.
+    # GitHub convention: GH_TOKEN in a per-org .env, loaded by direnv. The
+    # gitconfig credential helper (gh) reads GH_TOKEN so HTTPS auth just works.
+    - name: Write the per-org .env with GH_TOKEN (GitHub only)
+      ansible.builtin.copy:
+        dest: "{{ _clone_org_dir }}/.env"
+        content: "GH_TOKEN={{ project_clone_token }}\n"
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0600"
+      no_log: true
+      when:
+        - project_clone_token | length > 0
+        - _clone_host == "github.com"
+
+    - name: Approve the .env with direnv
+      ansible.builtin.command:
+        cmd: direnv allow {{ _clone_org_dir }}
+      become: true
+      become_user: "{{ user_name }}"
+      environment:
+        HOME: "{{ user_home }}"
+      changed_when: true
+      when:
+        - project_clone_token | length > 0
+        - _clone_host == "github.com"
+
     - name: Clone the project
       ansible.builtin.git:
         repo: "{{ project_clone_url }}"
@@ -51,4 +70,6 @@
       become_user: "{{ user_name }}"
       environment:
         HOME: "{{ user_home }}"
+        GH_TOKEN: "{{ project_clone_token if _clone_host == 'github.com' else '' }}"
         GIT_TERMINAL_PROMPT: "0"
+      no_log: "{{ project_clone_token | length > 0 }}"

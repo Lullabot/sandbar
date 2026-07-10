@@ -81,12 +81,12 @@ func TestReconcilePrunesAbsent(t *testing.T) {
 	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
 	_ = r.Add(vm.CreateConfig{Name: "gone", BaseName: "claude-base"})
 
-	changed, err := r.Reconcile(map[string]bool{"claude": true})
+	dropped, err := r.Reconcile(map[string]bool{"claude": true})
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if !changed {
-		t.Fatal("reconcile should report a change when pruning")
+	if len(dropped) != 1 || dropped[0] != "gone" {
+		t.Fatalf("reconcile should report the dropped name, got %v", dropped)
 	}
 	if r.IsManaged("gone") {
 		t.Fatal("absent VM should be pruned")
@@ -95,7 +95,7 @@ func TestReconcilePrunesAbsent(t *testing.T) {
 		t.Fatal("present VM should be kept")
 	}
 
-	if changed, _ := r.Reconcile(map[string]bool{"claude": true}); changed {
+	if dropped, _ := r.Reconcile(map[string]bool{"claude": true}); len(dropped) != 0 {
 		t.Fatal("second reconcile with no diff should report no change")
 	}
 }
@@ -192,6 +192,98 @@ func TestMigrateLegacyIndex(t *testing.T) {
 	// (b) the old index file no longer exists.
 	if _, statErr := os.Stat(oldPath); !os.IsNotExist(statErr) {
 		t.Fatalf("old index should be removed, stat err = %v", statErr)
+	}
+}
+
+// TestLoad_UnversionedFileMigrates: a legacy index with no "version" key must
+// load with zero data loss, and the next save must stamp the current version
+// while keeping the existing entry intact.
+func TestLoad_UnversionedFileMigrates(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	sandbarDir := filepath.Join(dataHome, "sandbar")
+	if err := os.MkdirAll(sandbarDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(sandbarDir, "managed-vms.json")
+	legacy := `{"vms":{"old-vm":{"base":"claude-base","config":{"Name":"old-vm","BaseName":"claude-base","CPUs":4}}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load unversioned file: %v", err)
+	}
+	if !r.IsManaged("old-vm") {
+		t.Fatal("old-vm should be managed after loading unversioned file")
+	}
+	cfg, ok := r.Config("old-vm")
+	if !ok || cfg.CPUs != 4 {
+		t.Fatalf("old-vm config not preserved: %+v (ok=%v)", cfg, ok)
+	}
+
+	// Trigger a save and confirm the file now carries the version alongside
+	// the preserved entry.
+	if err := r.Add(vm.CreateConfig{Name: "new-vm", BaseName: "claude-base"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !containsStr(string(raw), `"version": 1`) {
+		t.Fatalf("expected version 1 stamped in file:\n%s", raw)
+	}
+	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
+		t.Fatalf("old-vm entry with CPUs 4 not preserved after save:\n%s", raw)
+	}
+}
+
+// TestLoad_FutureVersionRefused: a file whose version this binary does not
+// understand must be refused, not misparsed.
+func TestLoad_FutureVersionRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	future := `{"version":99,"vms":{"x":{"base":"claude-base","config":{"Name":"x","BaseName":"claude-base"}}}}`
+	if err := os.WriteFile(path, []byte(future), 0o600); err != nil {
+		t.Fatalf("seed future file: %v", err)
+	}
+
+	r, err := LoadFrom(path)
+	if err == nil {
+		t.Fatal("expected an error loading a future-versioned file")
+	}
+	if !containsStr(err.Error(), "upgrade sand") {
+		t.Fatalf("error should tell the user to upgrade sand, got: %v", err)
+	}
+	if r == nil {
+		t.Fatal("returned registry should be non-nil")
+	}
+	if r.IsManaged("x") {
+		t.Fatal("nothing should be parsed out of a future-versioned file")
+	}
+}
+
+// TestSave_WritesVersion: any save must stamp the current version, and the
+// clone token must never appear in the persisted bytes.
+func TestSave_WritesVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CloneToken: "SENTINEL_TOKEN_DO_NOT_PERSIST"}); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !containsStr(string(raw), `"version": 1`) {
+		t.Fatalf("expected version 1 in saved file:\n%s", raw)
+	}
+	if containsStr(string(raw), "SENTINEL_TOKEN_DO_NOT_PERSIST") {
+		t.Fatalf("clone token leaked into the index:\n%s", raw)
 	}
 }
 

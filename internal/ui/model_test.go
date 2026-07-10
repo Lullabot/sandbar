@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -9,7 +10,6 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
-	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -42,8 +42,9 @@ func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
-// Pressing 'd' on a populated list opens the confirm-delete overlay for the
-// highlighted VM (Delete must always confirm before destroying).
+// Pressing 'd' on the VM (detail) screen opens the confirm-delete overlay for
+// the displayed VM (Delete must always confirm before destroying). Delete now
+// lives on the detail screen, not the list.
 func TestDeleteKeyEntersConfirm(t *testing.T) {
 	m := newTestModel(t)
 
@@ -52,25 +53,84 @@ func TestDeleteKeyEntersConfirm(t *testing.T) {
 	}})
 	m = loaded.(model)
 
-	if m.confirming {
-		t.Fatalf("model should not start in confirming state")
+	if m.confirm != nil {
+		t.Fatalf("model should not start with a pending confirmation")
 	}
 
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
 	next, _ := m.Update(runeKey('d'))
 	m = next.(model)
 
-	if !m.confirming {
-		t.Fatalf("pressing 'd' should enter confirm state")
+	if m.confirm == nil {
+		t.Fatalf("pressing 'd' should raise the confirm overlay")
 	}
-	if m.confirmName != "claude" {
-		t.Fatalf("confirmName = %q, want %q", m.confirmName, "claude")
+	if !strings.Contains(m.confirm.prompt, "claude") {
+		t.Fatalf("confirm prompt = %q, want it to name %q", m.confirm.prompt, "claude")
 	}
 }
 
-// Recreate must be gated to sand-managed VMs: pressing 'r' in the confirm
-// overlay on an UNMANAGED VM is a no-op (it must never replace an unrelated VM
-// with a Claude sandbox).
-func TestRecreateGatedForUnmanagedVM(t *testing.T) {
+// The rendered delete prompt has shrunk to yes/cancel; recreate is now a
+// separate, R-bound Reset action and must never reappear as an [r] branch
+// here. Cheap insurance against that regression.
+func TestConfirmDeletePromptHasNoRecreateBranch(t *testing.T) {
+	m := newTestModel(t)
+
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Running", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
+	next, _ := m.Update(runeKey('d'))
+	m = next.(model)
+
+	rendered := m.detailView()
+	if !strings.Contains(rendered, `Delete "claude"?  [y] yes   [n] cancel`) {
+		t.Fatalf("rendered prompt missing the expected text, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "[r]") {
+		t.Fatalf("rendered prompt must not offer an [r] branch, got:\n%s", rendered)
+	}
+}
+
+// An accidental double-tap of 'd' on the VM screen must not destroy the VM:
+// only the bound Confirm key ('y') may dispatch the pending delete, and every
+// other key (including a second 'd') is swallowed while confirming.
+func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Running", CPUs: 2},
+	}})
+	m = loaded.(model)
+
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
+
+	first, cmd1 := m.Update(runeKey('d'))
+	m = first.(model)
+	if m.confirm == nil {
+		t.Fatal("first 'd' should raise the confirm overlay")
+	}
+	if cmd1 != nil {
+		t.Fatal("raising the overlay must not itself dispatch a command")
+	}
+
+	second, cmd2 := m.Update(runeKey('d'))
+	m = second.(model)
+	if m.confirm == nil {
+		t.Fatal("a second 'd' while confirming must not clear the overlay")
+	}
+	if cmd2 != nil {
+		t.Fatal("a second 'd' while confirming must not dispatch anything (no double-tap delete)")
+	}
+}
+
+// Reset ('R' on the VM screen) is gated to sand-managed VMs: pressing it on an
+// UNMANAGED VM is a no-op that explains why via the status line (it must never
+// replace an unrelated VM with a Claude sandbox).
+func TestResetGateUnmanagedShowsStatus(t *testing.T) {
 	m := newTestModel(t) // empty (temp) registry => nothing is managed
 
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
@@ -78,19 +138,19 @@ func TestRecreateGatedForUnmanagedVM(t *testing.T) {
 	}})
 	m = loaded.(model)
 
-	confirm, _ := m.Update(runeKey('d'))
-	m = confirm.(model)
-	if !m.confirming {
-		t.Fatal("'d' should enter confirm state")
-	}
-	if m.confirmBase != "" {
-		t.Fatalf("unmanaged VM must have no recreate base, got %q", m.confirmBase)
-	}
-
-	after, _ := m.Update(runeKey('r'))
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("default")
+	after, _ := m.Update(runeKey('R'))
 	m = after.(model)
-	if m.view == viewProgress || m.running {
-		t.Fatal("recreate on an unmanaged VM must not start provisioning")
+
+	if m.view != viewDetail {
+		t.Fatalf("reset on an unmanaged VM must not leave the detail screen, view = %v", m.view)
+	}
+	if m.status == "" {
+		t.Fatal("reset on an unmanaged VM should explain why via the status line")
+	}
+	if strings.Contains(strings.ToLower(m.status), "recreate") {
+		t.Fatalf("status must not say 'recreate', got %q", m.status)
 	}
 }
 
@@ -110,8 +170,10 @@ func resetConfig() vm.CreateConfig {
 	}
 }
 
-// openReset seeds the registry with cfg, loads it as a VM, and drives `d` then
-// `r` so the model lands on the pre-filled reset form.
+// openReset seeds the registry with cfg, loads it as a VM, and presses 'R' on
+// the VM (detail) screen so the model lands on the pre-filled reset form. R
+// opens the form directly — no confirmation step, and no hand-off to the
+// list is needed.
 func openReset(t *testing.T, cfg vm.CreateConfig) model {
 	t.Helper()
 	m := newTestModel(t)
@@ -123,20 +185,16 @@ func openReset(t *testing.T, cfg vm.CreateConfig) model {
 	}})
 	m = loaded.(model)
 
-	confirm, _ := m.Update(runeKey('d'))
-	m = confirm.(model)
-	if m.confirmBase != cfg.BaseName {
-		t.Fatalf("managed VM should carry its recreate base, got %q", m.confirmBase)
-	}
-
-	after, _ := m.Update(runeKey('r'))
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM(cfg.Name)
+	after, _ := m.Update(runeKey('R'))
 	return after.(model)
 }
 
-// For a managed VM, recreate now opens the pre-filled reset form (instead of
+// For a managed VM, Reset opens the pre-filled reset form (instead of
 // provisioning immediately): Name is locked and the editable fields hold the
 // VM's recorded settings.
-func TestRecreateOpensResetForm(t *testing.T) {
+func TestResetGateManagedOpensForm(t *testing.T) {
 	cfg := resetConfig()
 	m := openReset(t, cfg)
 
@@ -197,7 +255,8 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 	}
 }
 
-// The project toggle is disabled when the seeded config cloned no repo.
+// The project toggle is hidden entirely when the seeded config cloned no repo
+// (it can never be selected, so it should never render).
 func TestResetProjectToggleDisabledWithoutCloneURL(t *testing.T) {
 	cfg := resetConfig()
 	cfg.CloneURL = ""
@@ -206,8 +265,11 @@ func TestResetProjectToggleDisabledWithoutCloneURL(t *testing.T) {
 	if m.projectToggleEnabled {
 		t.Fatalf("project toggle should be disabled when CloneURL is empty")
 	}
-	if !strings.Contains(m.formView(), "no project cloned") {
-		t.Fatalf("the disabled project toggle should be annotated")
+	if strings.Contains(m.formView(), staleDisabledToggleLabel) {
+		t.Fatalf("the disabled project toggle should no longer render at all")
+	}
+	if strings.Contains(m.formView(), "Preserve ~/") {
+		t.Fatalf("no project-preserve line should render when the toggle is hidden")
 	}
 }
 
@@ -236,15 +298,18 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	}
 }
 
-// A list lifecycle action shows a live spinner: starting a VM marks an action in
-// flight (so the spinner animates and renders beside the status), a spinner tick
-// keeps animating while it runs, and the matching actionDoneMsg clears it.
+// A detail-screen lifecycle action shows a live spinner: starting a VM marks
+// an action in flight (so the spinner animates and renders beside the
+// status), a spinner tick keeps animating while it runs, and the matching
+// actionDoneMsg clears it.
 func TestListActionShowsSpinnerUntilDone(t *testing.T) {
 	m := newTestModel(t)
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "claude", Status: "Stopped", CPUs: 2},
 	}})
 	m = loaded.(model)
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
 
 	started, cmd := m.Update(runeKey('s'))
 	m = started.(model)
@@ -254,8 +319,8 @@ func TestListActionShowsSpinnerUntilDone(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("starting a VM should dispatch a command (action + spinner tick)")
 	}
-	if !strings.Contains(m.listView(), "starting") {
-		t.Fatalf("the list should show the in-flight status, got:\n%s", m.listView())
+	if !strings.Contains(m.detailView(), "starting") {
+		t.Fatalf("the detail view should show the in-flight status, got:\n%s", m.detailView())
 	}
 
 	// While acting, a spinner tick keeps the animation going (returns a next tick).
@@ -306,7 +371,8 @@ func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
 	m.view = viewDetail
 	m.detail = vm.VM{Name: "claude", Status: "Running"}
 
-	after, _ := m.Update(runeKey('d'))
+	// Download rebound from 'd' to 'g': 'd' is delete everywhere now.
+	after, _ := m.Update(runeKey('g'))
 	m = after.(model)
 
 	if m.view != viewBrowse {
@@ -611,14 +677,17 @@ func TestEscLeavesForm(t *testing.T) {
 	}
 }
 
-// Shell is guarded to running VMs: pressing 'S' on a stopped VM explains why and
-// issues no command, so the user never sees a raw limactl error.
+// Shell is guarded to running VMs: pressing 'S' on the detail screen for a
+// stopped VM explains why and issues no command, so the user never sees a raw
+// limactl error. Shell now lives on the detail screen, not the list.
 func TestShellRequiresRunningVM(t *testing.T) {
 	m := newTestModel(t)
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "claude", Status: "Stopped", CPUs: 2},
 	}})
 	m = loaded.(model)
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
 
 	after, cmd := m.Update(runeKey('S'))
 	m = after.(model)
@@ -633,13 +702,16 @@ func TestShellRequiresRunningVM(t *testing.T) {
 	}
 }
 
-// On a running VM, 'S' issues the (TTY-handover) shell command.
+// On a running VM, 'S' on the detail screen issues the (TTY-handover) shell
+// command.
 func TestShellRunsForRunningVM(t *testing.T) {
 	m := newTestModel(t)
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "claude", Status: "Running", CPUs: 2},
 	}})
 	m = loaded.(model)
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
 
 	if _, cmd := m.Update(runeKey('S')); cmd == nil {
 		t.Fatal("shell on a running VM should issue a command")
@@ -912,48 +984,205 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	}
 }
 
-// A create-form submission with a GitHub clone URL + token must record the
-// clone token as a github-scoped secret in the host store BEFORE CreateVM
-// runs (provision.RecordCloneTokenSecret — the same call cmd/sand/create.go's
-// doHeadlessCreate makes), so a TUI-created VM's private clone can
-// authenticate. Regression: the TUI create path previously called
-// prov.CreateVM directly, bypassing that call entirely. RecordCloneTokenSecret
-// runs synchronously inside submitForm, before beginProvision spawns the
-// provisioning goroutine, so the recorded secret is observable immediately
-// after the ctrl+s keystroke (the goroutine itself needs no time to run).
-func TestSubmitFormRecordsCloneTokenSecretBeforeCreate(t *testing.T) {
-	m := newTestModel(t) // newTestModel sets XDG_DATA_HOME to an isolated temp dir
+// The list only selects a VM now; it no longer acts on one. Former list-only
+// lifecycle keys (start/stop/restart/shell/delete) are not bubbles/table
+// bindings either, so on the list they simply do nothing.
+func TestListKeysNoLongerDispatchLifecycleActions(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Stopped", CPUs: 2},
+	}})
+	m = loaded.(model)
 
-	opened, _ := m.Update(runeKey('n'))
-	m = opened.(model)
+	after, cmd := m.Update(runeKey('s'))
+	m = after.(model)
 
-	m.inputs[fName].SetValue("myvm")
-	m.inputs[fGitName].SetValue("Ada Lovelace")
-	m.inputs[fGitEmail].SetValue("ada@example.com")
-	m.inputs[fCloneURL].SetValue("https://github.com/acme/repo")
-	m.inputs[fCloneToken].SetValue("ghp_supersecrettoken")
+	if cmd != nil {
+		t.Fatal("pressing 's' on the list should dispatch no command")
+	}
+	if m.acting {
+		t.Fatal("pressing 's' on the list should not mark an action in flight")
+	}
+	if m.view != viewList {
+		t.Fatalf("pressing 's' on the list should leave the view on viewList, got %v", m.view)
+	}
+}
 
-	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = submitted.(model)
+// The VM screen now owns per-VM lifecycle actions: pressing 's' there marks an
+// action in flight and dispatches a command against the displayed VM.
+func TestDetailActionsDispatchLifecycleCommands(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Stopped", CPUs: 2},
+	}})
+	m = loaded.(model)
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM("claude")
 
-	if m.view != viewProgress || !m.running {
-		t.Fatalf("a valid create should start provisioning, view=%v running=%v", m.view, m.running)
+	after, cmd := m.Update(runeKey('s'))
+	m = after.(model)
+
+	if !m.acting {
+		t.Fatal("pressing 's' on the detail view should mark an action in flight")
 	}
-	if m.formErr != nil {
-		t.Fatalf("a valid create must not surface a form error, got %v", m.formErr)
+	if cmd == nil {
+		t.Fatal("pressing 's' on the detail view should dispatch a command")
+	}
+}
+
+// The VM screen's snapshot goes stale after a lifecycle action; a reload must
+// re-seed m.detail (by name) from the fresh list so Status reflects reality
+// without kicking the user back to the list — unless the VM is gone, in which
+// case there is nothing left to display and the model falls back to the list.
+func TestDetailRefreshReseedsFromReloadedList(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Stopped", CPUs: 2}
+
+	updated, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "claude", Status: "Running", CPUs: 2},
+	}})
+	m = updated.(model)
+
+	if m.view != viewDetail {
+		t.Fatalf("a reload must not change the view while the VM still exists, got %v", m.view)
+	}
+	if m.detail.Status != "Running" {
+		t.Fatalf("m.detail.Status = %q, want %q", m.detail.Status, "Running")
 	}
 
-	store, err := secrets.Load("myvm")
-	if err != nil {
-		t.Fatalf("secrets.Load: %v", err)
+	gone, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "someone-else", Status: "Running"},
+	}})
+	m = gone.(model)
+	if m.view != viewList {
+		t.Fatalf("a reload where the displayed VM is gone should fall back to the list, got %v", m.view)
 	}
-	if len(store.GitHub) != 1 {
-		t.Fatalf("expected the clone token recorded as one github secret before CreateVM ran, got %d", len(store.GitHub))
+}
+
+// stopAllTargets must include only VMs that are sand-managed AND currently
+// Running AND not a base image — never an unmanaged VM, a stopped managed VM,
+// or a (possibly running, mid-build) base image.
+func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
+	m := newTestModel(t)
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "claude-base"}); err != nil {
+		t.Fatalf("seed registry: %v", err)
 	}
-	if got := store.GitHub[0].Scope; got != "github.com/acme" {
-		t.Fatalf("recorded scope = %q, want %q", got, "github.com/acme")
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-stopped", BaseName: "claude-base"}); err != nil {
+		t.Fatalf("seed registry: %v", err)
 	}
-	if got := store.GitHub[0].Token; got != "ghp_supersecrettoken" {
-		t.Fatalf("recorded token = %q, want the entered clone token", got)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "managed-running", Status: "Running"},
+		{Name: "managed-stopped", Status: "Stopped"},
+		{Name: "unmanaged-running", Status: "Running"},
+		{Name: "claude-base", Status: "Running"}, // the default base image name
+	}})
+	m = loaded.(model)
+
+	got := m.stopAllTargets()
+	if len(got) != 1 || got[0] != "managed-running" {
+		t.Fatalf("stopAllTargets() = %v, want [managed-running]", got)
+	}
+}
+
+// With no managed-running VMs, pressing X raises no confirm overlay and just
+// sets an explanatory status.
+func TestStopAllNoTargetsSetsStatusNoOverlay(t *testing.T) {
+	m := newTestModel(t)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: "stopped-vm", Status: "Stopped"},
+	}})
+	m = loaded.(model)
+
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+	m = after.(model)
+
+	if m.confirm != nil {
+		t.Fatal("with no running managed VMs, X must not raise the confirm overlay")
+	}
+	if cmd != nil {
+		t.Fatal("with no running managed VMs, X must dispatch nothing")
+	}
+	if m.status == "" {
+		t.Fatal("X with no targets should explain via the status line")
+	}
+}
+
+// stopAllFakeRunner lets Stop fail for specific instance names while
+// succeeding for others, so stopAllCmd's partial-failure accumulation can be
+// exercised without a real limactl.
+type stopAllFakeRunner struct{ failNames map[string]bool }
+
+func (f stopAllFakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
+	if len(args) >= 2 && args[0] == "stop" && f.failNames[args[1]] {
+		return nil, errors.New("boom")
+	}
+	return nil, nil
+}
+func (stopAllFakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+
+// stopAllCmd stops every target sequentially, accumulating failures: a fake
+// client that fails for "bad" and succeeds for "good" must report an error
+// naming "bad" but not "good", while still calling Stop for both (the good VM
+// stays stopped even though a later one fails).
+func TestStopAllCmdReportsPartialFailureByName(t *testing.T) {
+	cli := lima.New(stopAllFakeRunner{failNames: map[string]bool{"bad": true}})
+
+	msg := stopAllCmd(cli, []string{"good", "bad"})()
+	done, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("stopAllCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
+	}
+	if done.err == nil {
+		t.Fatal("stopAllCmd should report an error when a target fails to stop")
+	}
+	if !strings.Contains(done.err.Error(), "bad") {
+		t.Fatalf("error %q should name the failed VM %q", done.err.Error(), "bad")
+	}
+	if strings.Contains(done.err.Error(), "good") {
+		t.Fatalf("error %q must not name the VM that stopped successfully", done.err.Error())
+	}
+}
+
+// summarizeNames truncates the display list once the running length would
+// exceed the width budget, but every target is still stopped regardless of
+// display — this test only checks the truncation boundary.
+func TestSummarizeNamesTruncatesForNarrowWidth(t *testing.T) {
+	names := []string{"web", "api", "db", "cache", "worker", "queue"}
+	got := summarizeNames(names, 20) // narrow width forces truncation
+	if !strings.Contains(got, "more") {
+		t.Fatalf("summarizeNames with a narrow width should truncate with '...and N more', got %q", got)
+	}
+	full := summarizeNames(names, 500) // ample width: no truncation needed
+	for _, n := range names {
+		if !strings.Contains(full, n) {
+			t.Fatalf("summarizeNames with ample width should include %q, got %q", n, full)
+		}
+	}
+}
+
+// A successful delete makes the VM screen's record disappear, so the
+// completion message returns the user to the list rather than leaving them
+// stranded on a VM that no longer exists. A failed delete leaves the VM in
+// place, so the user stays on its screen to see the error.
+func TestDeleteReturnsToListFromDetail(t *testing.T) {
+	m := newTestModel(t)
+	m.view = viewDetail
+	m.detail = vm.VM{Name: "claude", Status: "Running"}
+
+	done, _ := m.Update(actionDoneMsg{action: "delete", name: "claude"})
+	m = done.(model)
+	if m.view != viewList {
+		t.Fatalf("a successful delete should return to the list, view = %v", m.view)
+	}
+
+	m2 := newTestModel(t)
+	m2.view = viewDetail
+	m2.detail = vm.VM{Name: "claude", Status: "Running"}
+
+	failed, _ := m2.Update(actionDoneMsg{action: "delete", name: "claude", err: errors.New("boom")})
+	m2 = failed.(model)
+	if m2.view != viewDetail {
+		t.Fatalf("a failed delete must keep the user on the detail view, view = %v", m2.view)
 	}
 }
