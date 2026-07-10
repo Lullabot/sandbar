@@ -246,8 +246,15 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
 
 3. **Where it lands.** For `github.com` clone URLs the token is:
    - Written into the per-org `.env` as `GH_TOKEN` when the repo is cloned (treat that file as a secret)
-   - Recorded in the host's `secrets.json` (unencrypted, see [Where Secrets Live](#where-secrets-live) below) as a `GH_TOKEN` pair
+   - Recorded in the host's `secrets.json` (unencrypted, see [Where Secrets Live](#where-secrets-live) below) as a `GH_TOKEN` pair in the VM's **global** scope
    - Applied to the guest's `~/.config/sandbar/secrets.env` every time the VM starts (so it is always available, even after a reset)
+
+   The create form always seeds the token into the global scope, so it does
+   **not** get the automatic git-credential wiring described in
+   [Secrets Editor](#secrets-editor) — the per-org `.env` (written once, at
+   clone time) is what makes `git`/`gh` authenticate under `~/<host>/<org>/`.
+   If you want the same token to also authenticate other scopes, move it (or
+   add a copy) into a `[github.com/acme]` section in the secrets editor.
 
 4. **How it loads.** direnv is installed and configured with `load_dotenv =
    true`, so the `GH_TOKEN=...` line is loaded when you `cd` into that directory
@@ -281,22 +288,42 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
 
 ## Secrets Editor
 
-You can add or edit arbitrary `KEY=VALUE` environment variables for a VM using the secrets editor. Press `e` on a VM's detail screen in the TUI to open it. The editor:
+`sand` stores an arbitrary set of `KEY=VALUE` pairs per VM, optionally grouped
+into **scopes** — a scope is a safe home-relative directory path (e.g.
+`github.com/acme`); the empty scope is **global**. Press `e` on a VM's detail
+screen in the TUI to open the editor. It:
 
 - Works whether the VM is running or stopped (secrets live on the host and are applied on the VM's next start)
-- Accepts one `KEY=VALUE` pair per line
+- Renders the global scope first, headerless, then each directory scope under its own `[scope]` header, e.g.:
+
+  ```
+  EDITOR=vim
+
+  [github.com/acme]
+  GH_TOKEN=ghp_your_token_here
+  ```
+
+- Accepts one `KEY=VALUE` pair per line within a section; a line splits on its **first** `=`, so a value may contain `=`
 - Ignores blank lines and lines starting with `#` (comments)
 - Requires keys to match the shell variable name pattern `[A-Za-z_][A-Za-z0-9_]*` (letters, digits, underscore; not starting with a digit)
-- Allows values to contain `=` or any other characters
-- Saves changes with `Ctrl+S`; press `Esc` to discard edits without saving
+- Saves changes with `Ctrl+S`; press `Esc` to discard edits without saving. Saving shows "applies on next start" — nothing is pushed to a running VM immediately
 
-When you save, the pairs are persisted and applied to `~/.config/sandbar/secrets.env` on the VM's next start (via `sand start` or `sand reset`). A VM started outside `sand` (e.g., a bare `limactl start`) will not receive freshly-applied secrets — it will use whatever `secrets.env` was last written by a previous `sand`-initiated start, or none if there never was one.
+**Convention, not a storage feature:** name a GitHub token `GH_TOKEN` and put it
+under an org-scoped section like `[github.com/acme]`. `sand` recognizes
+`GH_TOKEN` via a small delivery-layer table and, for any **non-empty** scope,
+additionally wires `git`/`gh` credentials for that subtree (via a git
+`includeIf "gitdir:~/<scope>/"` stanza) so authentication just works under
+`~/<scope>/`. The secrets store itself has no idea what GitHub is — it only
+ever holds `(scope, KEY, VALUE)` triples.
 
 ## Where Secrets Live
 
 **Host side.** `sand` stores each VM's secrets in `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json`, **unencrypted**, at mode `0600` inside a `0700` directory. This is a deliberate trade: it is what lets you edit a VM's token or other secrets without booting the VM. It also means anyone who can read your user account's files (on this machine or via filesystem-level access) can read every sandbox's secrets. The managed-VM index (`managed-vms.json`) remains secret-free.
 
-**Guest side.** When a VM starts, `sand` renders the secrets into `~/.config/sandbar/secrets.env` (mode `0600`, parent dir `0700`), owned by the user. This file is sourced from both `~/.profile` (login shells) and `~/.bashrc` (interactive non-login shells), so its variables are available in all shell types. If no secrets are stored for a VM, the guest file is removed on start, so stale values do not linger.
+**Guest side.** When a VM starts, `sand` renders each scope into the guest:
+
+- The **global** scope (`""`) renders into `~/.config/sandbar/secrets.env` (mode `0600`, parent dir `0700`), sourced from both `~/.profile` (login shells) and `~/.bashrc` (interactive non-login shells), so its variables are available in all shell types. If no global secrets are stored for a VM, the guest file is removed on start, so stale values do not linger.
+- A directory **scope** `foo/bar` renders into `~/foo/bar/.env`, auto-loaded by direnv (`direnv allow` runs once per apply) when you `cd` into that directory, and unloaded when you leave.
 
 ## Security Model
 

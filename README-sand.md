@@ -154,15 +154,38 @@ Pressing `e` opens a `KEY=VALUE` editor for the VM's secrets, seeded from the
 host store. It does **not** require the VM to be running — that is the point:
 secrets live on the host and are written into the guest on the VM's next start.
 
-- One `KEY=VALUE` per line. Blank lines and `#` comments are ignored.
+Secrets are optionally grouped into **scopes** — a scope is a safe
+home-relative directory path (e.g. `github.com/acme`); the empty scope is
+**global**. The buffer renders the global scope first, headerless, then each
+directory scope under its own `[scope]` header:
+
+```
+EDITOR=vim
+
+[github.com/acme]
+GH_TOKEN=ghp_your_token_here
+```
+
+- One `KEY=VALUE` per line within a section. Blank lines and `#` comments are ignored.
 - A line splits on its **first** `=`, so a value may contain `=`.
+- A `[scope]` header line starts a new section; `[]` (or the region before any header) is the global scope.
 - Keys must be valid environment variable names (`[A-Za-z_][A-Za-z0-9_]*`). A bad
-  key, or a duplicate key, aborts the save naming the offending line — nothing is
-  written until the whole buffer is valid.
-- `ctrl+s` saves; `esc` discards.
+  key, a bad scope, or a duplicate key within a scope aborts the save naming the
+  offending line — nothing is written until the whole buffer is valid.
+- `ctrl+s` saves and shows "applies on next start" in the status line; `esc` discards.
 
 Values are shown in cleartext. See [Where secrets live](README.md#where-secrets-live)
 for the storage and trust model — they are stored **unencrypted** on the host.
+
+**Where scopes land in the guest:** the global scope renders into
+`~/.config/sandbar/secrets.env`, sourced by both login and interactive shells;
+a scope `foo/bar` renders into `~/foo/bar/.env`, auto-loaded by direnv. Naming
+a token `GH_TOKEN` and scoping it (e.g. `[github.com/acme]`) is a
+**convention**, not a storage feature: `sand` recognizes a small,
+delivery-layer table of token names and, for a non-empty scope, additionally
+wires `git`/`gh` credentials for that subtree so they authenticate under
+`~/<scope>/`. The secrets store itself knows nothing about GitHub — it only
+ever holds `(scope, KEY, VALUE)` triples.
 
 ### File browser (upload/download source)
 
@@ -342,8 +365,9 @@ The **clone token is never written to this index** — `managed-vms.json` stays
 secret-free. Secrets live in a *separate* file, `secrets.json`, stored
 **unencrypted** at mode `0600`; see
 [Where secrets live](README.md#where-secrets-live). A token supplied on the
-create form is recorded there as `GH_TOKEN`, so it survives in the VM's
-environment across restarts and can be edited at any time with `e`.
+create form is recorded there as `GH_TOKEN` in the VM's global scope, so it
+survives in the VM's environment across restarts and can be edited (or
+rescoped, e.g. under `[github.com/acme]`) at any time with `e`.
 
 Note the one thing the store does **not** do: a reset re-clones the repo during
 its finalize pass, which runs *before* the stored secrets are written into the
