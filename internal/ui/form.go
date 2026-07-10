@@ -538,6 +538,7 @@ func toggleRow(label string, on, focused bool) string {
 // formView renders the labelled inputs, validation error, and help. In reset mode
 // the Name is shown as a locked line and two preserve toggles follow the inputs.
 func (m model) formView() string {
+	cw := m.contentWidth()
 	var b strings.Builder
 	title := "New VM"
 	if m.resetMode {
@@ -572,9 +573,9 @@ func (m model) formView() string {
 			b.WriteString(toggleRow(m.projectToggleLabel, m.preserveProject, m.toggleFocus == 1) + "\n")
 		}
 		if m.preserveClaude || m.preserveProject {
-			b.WriteString("\n" + errStyle.Render("Preserving copies your Claude login and the .env token out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
+			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies your Claude login and the .env token out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
 		}
-		b.WriteString("\n" + fieldInfoStyle.Render("Disk can only grow from the base floor (min "+vm.BaseDiskFloor+").") + "\n")
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render("Disk can only grow from the base floor (min "+vm.BaseDiskFloor+").") + "\n")
 	}
 
 	// Help for the focused field (where to get a GitHub token, what defaults
@@ -584,15 +585,17 @@ func (m model) formView() string {
 		showInfo = false
 	}
 	if showInfo {
-		b.WriteString("\n" + fieldInfoStyle.Render(fieldInfo[m.focusIdx]) + "\n")
+		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
+		// wrapped help still fits inside the content column.
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fieldInfo[m.focusIdx]) + "\n")
 	}
 
 	if m.formErr != nil {
-		b.WriteString("\n" + errStyle.Render("Error: "+m.formErr.Error()))
+		b.WriteString("\n" + errStyle.Width(cw).Render("Error: "+m.formErr.Error()))
 	}
 
 	if w := m.diskOverflowWarning(); w != "" {
-		b.WriteString("\n" + warnStyle.Render(w) + "\n")
+		b.WriteString("\n" + warnStyle.Width(cw).Render(w) + "\n")
 	}
 
 	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))
