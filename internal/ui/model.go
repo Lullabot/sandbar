@@ -350,8 +350,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so the guest would have no secrets.env until the VM's *next* start.
 			// Dispatch the apply now (batched with the list refresh) so a user who
 			// creates a VM and immediately shells in finds GH_TOKEN already set.
-			user, pairs := m.secretsFor(m.provCfg.Name)
-			applyCmd = applySecretsCmd(m.cli, m.provCfg.Name, user, pairs)
+			user, scopes := m.secretsFor(m.provCfg.Name)
+			applyCmd = applySecretsCmd(m.cli, m.provCfg.Name, user, scopes)
 		}
 		if applyCmd != nil {
 			return m, tea.Batch(listCmd(m.cli), applyCmd)

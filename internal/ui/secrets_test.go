@@ -11,10 +11,11 @@ import (
 // blank/comment skip, first-'='-only split, key validation, and duplicate
 // rejection the acceptance criteria call out.
 func TestSecretsParsePairs(t *testing.T) {
-	pairs, err := parseSecrets("A=1\n\n# c\nB=x=y\n")
+	scopes, err := parseSecrets("A=1\n\n# c\nB=x=y\n")
 	if err != nil {
 		t.Fatalf("parseSecrets returned an unexpected error: %v", err)
 	}
+	pairs := scopes[""]
 	want := map[string]string{"A": "1", "B": "x=y"}
 	if len(pairs) != len(want) {
 		t.Fatalf("parseSecrets() = %v, want %v", pairs, want)
@@ -61,6 +62,98 @@ func TestSecretsParseDuplicateKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "A") {
 		t.Fatalf("error %q should name the duplicate key %q", err.Error(), "A")
+	}
+}
+
+// renderPairsForEditor -> parseSecrets round-trips for a multi-scope VM: the
+// global section renders headerless first, then each non-empty scope as a
+// sorted [scope] section with sorted keys, and re-parsing reproduces the
+// original scope map exactly.
+func TestSecretsRoundTripMultiScope(t *testing.T) {
+	scopes := map[string]map[string]string{
+		"":                {"EDITOR": "vim", "A": "1"},
+		"github.com/acme": {"GH_TOKEN": "ghp_xxx", "OTHER": "value"},
+		"gitlab.com/team": {"GITLAB_TOKEN": "glpat_yyy"},
+	}
+
+	text := renderPairsForEditor(scopes)
+	got, err := parseSecrets(text)
+	if err != nil {
+		t.Fatalf("parseSecrets(renderPairsForEditor(scopes)) returned an unexpected error: %v\ntext:\n%s", err, text)
+	}
+
+	if len(got) != len(scopes) {
+		t.Fatalf("round trip scope count = %d, want %d (got %v)", len(got), len(scopes), got)
+	}
+	for scope, pairs := range scopes {
+		gotPairs, ok := got[scope]
+		if !ok {
+			t.Fatalf("round trip missing scope %q", scope)
+		}
+		if len(gotPairs) != len(pairs) {
+			t.Fatalf("scope %q: got %v, want %v", scope, gotPairs, pairs)
+		}
+		for k, v := range pairs {
+			if gotPairs[k] != v {
+				t.Errorf("scope %q key %q = %q, want %q", scope, k, gotPairs[k], v)
+			}
+		}
+	}
+
+	// Byte-stable: rendering again produces identical text.
+	if again := renderPairsForEditor(scopes); again != text {
+		t.Fatalf("renderPairsForEditor is not byte-stable:\nfirst:\n%s\nsecond:\n%s", text, again)
+	}
+}
+
+// The global section is headerless and rendered first, before any [scope]
+// section — the recommended grammar's defining property.
+func TestSecretsRenderGlobalFirstHeaderless(t *testing.T) {
+	scopes := map[string]map[string]string{
+		"":         {"A": "1"},
+		"some/dir": {"B": "2"},
+	}
+	text := renderPairsForEditor(scopes)
+	if !strings.HasPrefix(text, "A=1\n") {
+		t.Fatalf("expected global section headerless and first, got:\n%s", text)
+	}
+	if idx := strings.Index(text, "[some/dir]"); idx <= 0 {
+		t.Fatalf("expected a [some/dir] header after the global section, got:\n%s", text)
+	}
+}
+
+// A [scope] header with an invalid scope aborts the whole parse with a
+// per-line error naming the offending scope.
+func TestSecretsParseInvalidScopeHeader(t *testing.T) {
+	_, err := parseSecrets("[../escape]\nA=1\n")
+	if err == nil {
+		t.Fatal("parseSecrets should reject an invalid scope header")
+	}
+	if !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "../escape") {
+		t.Fatalf("error %q should mention line 1 and the offending scope", err.Error())
+	}
+}
+
+// A duplicate key is only rejected within the SAME scope; the same key name
+// may appear once per scope.
+func TestSecretsParseDuplicateKeyAcrossScopesAllowed(t *testing.T) {
+	got, err := parseSecrets("A=1\n\n[org/dir]\nA=2\n")
+	if err != nil {
+		t.Fatalf("parseSecrets should allow the same key in different scopes, got error: %v", err)
+	}
+	if got[""]["A"] != "1" || got["org/dir"]["A"] != "2" {
+		t.Fatalf("parseSecrets() = %v, want global A=1 and org/dir A=2", got)
+	}
+}
+
+// A duplicate key within the SAME scope is still rejected.
+func TestSecretsParseDuplicateKeySameScope(t *testing.T) {
+	_, err := parseSecrets("[org/dir]\nA=1\nA=2\n")
+	if err == nil {
+		t.Fatal("parseSecrets should reject a duplicate key within the same scope")
+	}
+	if !strings.Contains(err.Error(), "A") {
+		t.Fatalf("error %q should name the duplicate key", err.Error())
 	}
 }
 
