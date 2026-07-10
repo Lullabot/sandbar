@@ -52,7 +52,7 @@ func TestStartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]string{"GH_TOKEN": "ghp_x"})()
+	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -63,8 +63,10 @@ func TestStartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	if done.warn != "" {
 		t.Fatalf("done.warn = %q, want empty on a successful apply", done.warn)
 	}
-	if len(fr.streamCalls) != 1 {
-		t.Fatalf("expected exactly one Shell (ApplySecrets) call, got %d: %v", len(fr.streamCalls), fr.streamCalls)
+	// ApplySecrets makes two guest calls for a global-only apply: the write
+	// itself, then the idempotent ~/.profile + ~/.bashrc source-line ensure.
+	if len(fr.streamCalls) != 2 {
+		t.Fatalf("expected exactly two Shell (ApplySecrets) calls, got %d: %v", len(fr.streamCalls), fr.streamCalls)
 	}
 	call := fr.streamCalls[0]
 	if call[0] != "shell" || call[1] != "claude" {
@@ -85,7 +87,7 @@ func TestStartFailureSkipsApplySecrets(t *testing.T) {
 	fr := &secretsFakeRunner{failOutput: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]string{"A": "1"})()
+	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -104,7 +106,7 @@ func TestRestartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := restartCmd(cli, "claude", "ada", map[string]string{"GH_TOKEN": "ghp_x"})()
+	msg := restartCmd(cli, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("restartCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -112,8 +114,8 @@ func TestRestartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	if done.err != nil {
 		t.Fatalf("done.err = %v, want nil", done.err)
 	}
-	if len(fr.streamCalls) != 1 {
-		t.Fatalf("expected exactly one Shell (ApplySecrets) call after restart, got %d", len(fr.streamCalls))
+	if len(fr.streamCalls) != 2 {
+		t.Fatalf("expected exactly two Shell (ApplySecrets) calls after restart, got %d", len(fr.streamCalls))
 	}
 }
 
@@ -125,7 +127,7 @@ func TestSecretsWarnNotFailOnApplyFailure(t *testing.T) {
 	fr := &secretsFakeRunner{failStream: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]string{"A": "1"})()
+	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)

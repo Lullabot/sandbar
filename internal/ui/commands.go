@@ -67,13 +67,13 @@ func listCmd(cli *lima.Client) tea.Cmd {
 // Note: a VM started outside sand (a bare `limactl start`) does not get
 // freshly applied secrets — it sources whatever secrets.env was last written
 // by a previous sand-initiated start (or none, if there never was one).
-func startCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
+func startCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if err := cli.Start(name); err != nil {
 			return actionDoneMsg{action: "start", name: name, err: err}
 		}
 		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "start", name: name, warn: warn}
@@ -92,7 +92,7 @@ func stopCmd(cli *lima.Client, name string) tea.Cmd {
 // This is not redundant with startCmd: restartCmd drives cli.Stop/cli.Start
 // directly rather than re-dispatching startCmd, so it would otherwise skip
 // the apply step entirely.
-func restartCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
+func restartCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if err := cli.Stop(name); err != nil {
 			return actionDoneMsg{action: "restart", name: name, err: err}
@@ -101,7 +101,7 @@ func restartCmd(cli *lima.Client, name, user string, pairs map[string]string) te
 			return actionDoneMsg{action: "restart", name: name, err: err}
 		}
 		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "restart", name: name, warn: warn}
@@ -114,25 +114,26 @@ func restartCmd(cli *lima.Client, name, user string, pairs map[string]string) te
 // the time provisionDoneMsg fires), and by then a create-form GH_TOKEN has
 // just landed in the store — so this pushes it in rather than waiting for the
 // VM's *next* start. Failure is a warning, matching startCmd/restartCmd.
-func applySecretsCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
+func applySecretsCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "apply secrets", name: name, warn: warn}
 	}
 }
 
-// secretsFor returns the guest user and stored secrets for a VM, defaulting
-// the user to the host username when the VM has no recorded config (mirroring
-// openResetForm's fallback in detail.go).
-func (m model) secretsFor(name string) (user string, pairs map[string]string) {
+// secretsFor returns the guest user and the VM's full scope map (global plus
+// any directory-scoped secrets), defaulting the user to the host username
+// when the VM has no recorded config (mirroring openResetForm's fallback in
+// detail.go).
+func (m model) secretsFor(name string) (user string, scopes map[string]map[string]string) {
 	user = vm.HostUser()
 	if cfg, ok := m.reg.Config(name); ok && cfg.User != "" {
 		user = cfg.User
 	}
-	return user, m.sec.Get(name)
+	return user, m.sec.GetAll(name)
 }
 
 // deleteCmd force-removes a VM.

@@ -23,8 +23,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Start):
 		m.status = "starting " + m.detail.Name + "…"
-		user, pairs := m.secretsFor(m.detail.Name)
-		return m, m.beginAction(startCmd(m.cli, m.detail.Name, user, pairs))
+		user, scopes := m.secretsFor(m.detail.Name)
+		return m, m.beginAction(startCmd(m.cli, m.detail.Name, user, scopes))
 
 	case key.Matches(msg, m.keys.Stop):
 		m.status = "stopping " + m.detail.Name + "…"
@@ -32,8 +32,8 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Restart):
 		m.status = "restarting " + m.detail.Name + "…"
-		user, pairs := m.secretsFor(m.detail.Name)
-		return m, m.beginAction(restartCmd(m.cli, m.detail.Name, user, pairs))
+		user, scopes := m.secretsFor(m.detail.Name)
+		return m, m.beginAction(restartCmd(m.cli, m.detail.Name, user, scopes))
 
 	case key.Matches(msg, m.keys.Shell):
 		// limactl shell needs a running instance; guard so the key gives a clear
