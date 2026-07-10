@@ -156,7 +156,7 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 		return err
 	}
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
-	// needs a quiescent source disk.
+	// needs an idle source disk.
 	step(out, "Stopping base image %q (quiescing it for cloning)…", cfg.BaseName)
 	if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
@@ -230,7 +230,7 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 }
 
 // ensureBaseStopped makes sure the base image exists and is stopped — a clone
-// needs a quiescent source disk. An empty/error status means the instance is
+// needs an idle source disk. An empty/error status means the instance is
 // absent, so the heavy base build runs; an existing but running base is stopped.
 func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	status, err := p.Lima.Status(cfg.BaseName)
