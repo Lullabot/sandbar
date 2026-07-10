@@ -193,6 +193,17 @@ func (m model) Init() tea.Cmd {
 	return listCmd(m.cli)
 }
 
+// contentWidth is the usable text width inside appStyle's horizontal padding (2
+// columns each side). Dynamic help/warning text is wrapped to it (via a style's
+// Width) so a long line reflows down the screen instead of being clipped at the
+// terminal's right edge. It floors so a not-yet-sized model still renders.
+func (m model) contentWidth() int {
+	if w := m.width - 4; w >= 20 {
+		return w
+	}
+	return 20
+}
+
 // Update is the single dispatch point. Key messages route by active view; all
 // other messages (async results, ticks, blinks) are handled or forwarded to the
 // active sub-component.
@@ -210,6 +221,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// zero-value browser).
 		if m.view == viewBrowse {
 			m.browser.SetSize(max(20, msg.Width-6), max(5, msg.Height-8))
+		}
+		// Keep an open secrets editor sized to the terminal (its height budget
+		// must match openSecrets, or the editor plus its footer would overflow and
+		// scroll the title off the top).
+		if m.view == viewSecrets {
+			m.secretsArea.SetWidth(max(20, msg.Width-8))
+			m.secretsArea.SetHeight(max(5, msg.Height-secretsChrome))
 		}
 		// Reflow any streamed output to the new width so it stays wrapped.
 		if m.output != "" {
