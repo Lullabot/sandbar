@@ -48,8 +48,9 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Delete):
 		name := m.detail.Name
 		m.confirm = &confirmState{
-			prompt: fmt.Sprintf("Delete %q?", name),
-			run:    deleteCmd(m.cli, name),
+			prompt:  fmt.Sprintf("Delete %q?", name),
+			run:     deleteCmd(m.cli, name),
+			working: "deleting " + name + "…",
 		}
 		return m, nil
 
@@ -140,6 +141,14 @@ func (m model) detailView() string {
 	switch {
 	case m.confirm != nil:
 		b.WriteString("\n" + m.confirmView() + "\n")
+	case m.acting:
+		// A lifecycle action (start/stop/restart/delete) is in flight — lead the
+		// status with the live spinner, matching the list screen.
+		status := m.status
+		if status == "" {
+			status = "working…"
+		}
+		b.WriteString("\n" + statusStyle.Render(m.spinner.View()+" "+status) + "\n")
 	case m.status != "":
 		b.WriteString("\n" + statusStyle.Render(m.status) + "\n")
 	}
