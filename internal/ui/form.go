@@ -505,7 +505,7 @@ func (m model) updateResetForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.toggleFocus == 0:
 			m.preserveClaude = !m.preserveClaude
-		case m.projectToggleEnabled: // toggle 1 is inert without a cloned project
+		case m.projectToggleEnabled: // toggle 1 is disabled without a cloned project
 			m.preserveProject = !m.preserveProject
 		}
 		return m, nil

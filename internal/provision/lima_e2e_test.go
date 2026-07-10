@@ -75,7 +75,7 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 
-	// Build the base at the floor, then stop it so the clone source is quiescent.
+	// Build the base at the floor, then stop it so the clone source is idle.
 	if err := cli.Create(base, overlay); err != nil {
 		t.Fatalf("create base: %v", err)
 	}

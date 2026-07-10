@@ -93,7 +93,7 @@ func (m model) viewHelp() []key.Binding {
 	case viewSecretForm:
 		return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
 	case viewProgress:
-		// While a build runs, ctrl+c cancels it; q/esc are inert until it finishes.
+		// While a build runs, ctrl+c cancels it; q/esc do nothing until it finishes.
 		if m.running {
 			return []key.Binding{m.keys.Interrupt}
 		}

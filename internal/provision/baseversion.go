@@ -17,7 +17,7 @@ import (
 // The version is the playbook checkout's git HEAD, suffixed "-dirty" when the
 // working tree has uncommitted changes so local edits always force a rebuild.
 // The stamp lives host-side (keyed by base name) so the check is a cheap file
-// read — no need to boot the base to interrogate it.
+// read — no need to boot the base to inspect it.
 
 // playbookVersionFn, readBaseVersionFn and writeBaseVersionFn are indirected
 // through package vars so tests can stub the git/filesystem side effects.

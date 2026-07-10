@@ -154,7 +154,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Back):
 		// esc clears a committed name filter — the only place esc is meaningful in
 		// the list. With no active filter the case falls through to the table below,
-		// where esc/backspace stay inert, so this never eats a useful key.
+		// where esc/backspace do nothing, so this never eats a useful key.
 		if m.searchQuery != "" {
 			m.searchQuery = ""
 			m.status = ""

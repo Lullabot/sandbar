@@ -18,7 +18,7 @@ import (
 //     tree — matching the original bash provisioner's "repo mode" so
 //     uncommitted edits to the playbook take effect.
 //  2. Otherwise (no checkout, e.g. a Homebrew-installed binary run outside
-//     any repository), materialise the playbook fileset embedded in the
+//     any repository), extract the playbook fileset embedded in the
 //     sandbar package to a fresh private temp dir and return that path.
 //
 // The temp dir created in tier 2 is intentionally not removed here: the

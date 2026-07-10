@@ -55,7 +55,7 @@ which copy of the playbook to mount into the VM in two tiers:
    hacking on the playbook: uncommitted edits take effect on the next
    provision, with no rebuild required.
 2. **Embedded fallback.** Otherwise (e.g. a Homebrew-installed binary run
-   outside any checkout), `sand` materializes the playbook fileset embedded in
+   outside any checkout), `sand` extracts the playbook fileset embedded in
    the binary to a fresh private temp dir and mounts that instead.
 
 ## Headless mode (`sand create`)
