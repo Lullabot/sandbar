@@ -174,14 +174,6 @@ Flags:
 // instance it is pointed at, so it must never be offered for a VM sand did
 // not create.
 func doHeadlessCreate(ctx context.Context, reg *registry.Registry, ld limaBaseDeleter, prov headlessProvisioner, cfg vm.CreateConfig, recreate, rebuild bool, out io.Writer) error {
-	// Record a GitHub clone token into the host secrets store BEFORE either
-	// provisioning path runs, so the secrets role has it to render on the
-	// very first finalize pass (see provision.RecordCloneTokenSecret and
-	// BuildExtraVars, which loads the store fresh on every non-base phase).
-	if err := provision.RecordCloneTokenSecret(cfg); err != nil {
-		return fmt.Errorf("record clone token secret: %w", err)
-	}
-
 	if rebuild {
 		if status, err := ld.Status(cfg.BaseName); err == nil && status != "" {
 			if err := ld.Delete(cfg.BaseName, true); err != nil {

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -378,55 +377,6 @@ func findCall(t *testing.T, calls [][]string, from int, what string, match func(
 	return -1
 }
 
-// TestCreateVM_SecretsRenderedFromHostStoreNeverOnArgv proves the stdin/argv
-// secret-hygiene contract end to end for the host secrets store: with a
-// secret pre-recorded in the VM's store, CreateVM's finalize provision must
-// stream it over stdin (inside the YAML vars blob BuildExtraVars produces via
-// SecretVars), and it must never appear in any argv the provisioner builds
-// for limactl/ansible — mirroring/extending the existing "vars go over
-// stdin, never argv" contract already enforced by inGuestScript's fixed argv.
-func TestCreateVM_SecretsRenderedFromHostStoreNeverOnArgv(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-
-	cfg := testConfig()
-	const secretValue = "ghp_supersecrettoken_should_never_be_on_argv"
-	store, err := secrets.Load(cfg.Name)
-	if err != nil {
-		t.Fatalf("secrets.Load: %v", err)
-	}
-	store.SetSecret(secrets.CategoryGlobal, "", "MY_SECRET", secretValue)
-	if err := store.Save(cfg.Name); err != nil {
-		t.Fatalf("secrets.Save: %v", err)
-	}
-
-	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
-	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-
-	if err := p.CreateVM(context.Background(), cfg, io.Discard); err != nil {
-		t.Fatalf("CreateVM: %v", err)
-	}
-
-	// The secret must appear in the streamed stdin (the finalize vars blob)...
-	found := false
-	for _, s := range f.streams {
-		if strings.Contains(s, secretValue) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("secret value never appeared in any streamed stdin; streams=%v", f.streams)
-	}
-
-	// ...but never in any argv the provisioner built for limactl.
-	for _, c := range f.calls {
-		for _, tok := range c {
-			if strings.Contains(tok, secretValue) {
-				t.Fatalf("secret value leaked into argv: %v", c)
-			}
-		}
-	}
-}
-
 // TestReset_NoPreserve: a reset with no preservation is a clean recreate. With a
 // stopped base and CloneURL set, it must delete -> ensure base -> clone ->
 // configure -> start -> finalize -> stop -> start, and the finalize vars keep
@@ -764,98 +714,5 @@ func TestReset_StartsStoppedSourceForStaging(t *testing.T) {
 	del := findCall(t, f.calls, 0, "delete", func(c []string) bool { return c[0] == "delete" })
 	if !(startSrc < stageOut && startSrc < del) {
 		t.Fatalf("source start (idx %d) must precede stage-out (%d) and delete (%d)", startSrc, stageOut, del)
-	}
-}
-
-// TestRenderSecrets_RunsOnlySecretsRoleTagged is the load-bearing contract
-// for task 5's `sand secret sync`: RenderSecrets must shell into the ALREADY
-// RUNNING target exactly once, scoped to the secrets role via
-// `--tags secrets` (never a full finalize — no clone/configure/start/stop
-// calls at all), and it must stream the host store's secrets over stdin,
-// never argv.
-func TestRenderSecrets_RunsOnlySecretsRoleTagged(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-
-	const secretValue = "ghp_sync_secret_never_on_argv"
-	store, err := secrets.Load("claude")
-	if err != nil {
-		t.Fatalf("secrets.Load: %v", err)
-	}
-	store.SetSecret(secrets.CategoryGitHub, "", "", secretValue)
-	if err := store.Save("claude"); err != nil {
-		t.Fatalf("secrets.Save: %v", err)
-	}
-
-	f := &fakeRunner{status: map[string][]byte{"claude": []byte("Running\n")}}
-	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-
-	cfg := testConfig()
-	if err := p.RenderSecrets(context.Background(), "claude", cfg, io.Discard); err != nil {
-		t.Fatalf("RenderSecrets: %v", err)
-	}
-
-	// Exactly one call: the tagged shell. No clone/configure/start/stop —
-	// RenderSecrets must never touch the VM's lifecycle.
-	if len(f.calls) != 1 {
-		t.Fatalf("RenderSecrets call sequence = %v, want exactly one shell call", f.calls)
-	}
-	got := f.calls[0]
-	if got[0] != "shell" || got[1] != "claude" {
-		t.Fatalf("RenderSecrets call = %v, want a shell call targeting claude", got)
-	}
-	script := got[len(got)-1]
-	if !strings.Contains(script, "--tags secrets") {
-		t.Errorf("RenderSecrets script missing --tags secrets:\n%s", script)
-	}
-	// Every other part of the in-guest script (stdin/tmpfs vars, rsync,
-	// ansible-playbook invocation) must be unchanged from the untagged path.
-	if !strings.HasPrefix(script, strings.TrimSuffix(inGuestScript, "\n")) {
-		t.Errorf("RenderSecrets script diverges from the shared provisioning script:\n%s", script)
-	}
-
-	// The secret must be streamed over stdin...
-	if len(f.streams) != 1 {
-		t.Fatalf("got %d streamed stdins, want 1", len(f.streams))
-	}
-	if !strings.Contains(f.streams[0], secretValue) {
-		t.Errorf("RenderSecrets stdin missing the secret value:\n%s", f.streams[0])
-	}
-	// ...and never appear in any argv.
-	for _, c := range f.calls {
-		for _, tok := range c {
-			if strings.Contains(tok, secretValue) {
-				t.Fatalf("secret value leaked into argv: %v", c)
-			}
-		}
-	}
-}
-
-// TestRenderSecrets_UsesTargetNameForStore proves RenderSecrets loads the
-// secrets store for the VM it is actually rendering into (the "name"
-// argument), not whatever cfg.Name happens to be — guarding against a
-// caller passing a stale/mismatched cfg.
-func TestRenderSecrets_UsesTargetNameForStore(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-
-	const secretValue = "dev-only-secret-value"
-	store, err := secrets.Load("dev")
-	if err != nil {
-		t.Fatalf("secrets.Load: %v", err)
-	}
-	store.SetSecret(secrets.CategoryGlobal, "", "MY_VAR", secretValue)
-	if err := store.Save("dev"); err != nil {
-		t.Fatalf("secrets.Save: %v", err)
-	}
-
-	f := &fakeRunner{status: map[string][]byte{"dev": []byte("Running\n")}}
-	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-
-	cfg := testConfig() // cfg.Name == "claude", deliberately mismatched
-	if err := p.RenderSecrets(context.Background(), "dev", cfg, io.Discard); err != nil {
-		t.Fatalf("RenderSecrets: %v", err)
-	}
-
-	if len(f.streams) != 1 || !strings.Contains(f.streams[0], secretValue) {
-		t.Fatalf("RenderSecrets did not render the store for the target VM %q; streams=%v", "dev", f.streams)
 	}
 }

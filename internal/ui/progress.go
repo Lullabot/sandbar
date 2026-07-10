@@ -127,11 +127,8 @@ func (m model) progressView() string {
 
 	if !m.running {
 		back := "list"
-		switch m.progressBack {
-		case viewDetail:
+		if m.progressBack == viewDetail {
 			back = "VM"
-		case viewSecrets:
-			back = "secrets"
 		}
 		switch {
 		case m.canceled:

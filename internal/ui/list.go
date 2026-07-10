@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -82,6 +81,57 @@ func (m *model) refreshRows() {
 	}
 }
 
+// stopAllTargets returns the sand-managed VMs that are currently running.
+// Base images are excluded: they are kept stopped by design and are a clone
+// source, not a workspace — though a base mid-build is running, which is
+// exactly why the exclusion is explicit rather than incidental.
+//
+// This walks m.vms (every loaded VM), NOT the filtered table rows: a managed
+// VM hidden by an active name filter ('/') or the managed-only toggle ('f')
+// must still be stopped. That is a deliberate choice — 'X' means "stop all",
+// not "stop what I can currently see" — because the opposite reading is
+// defensible and a future reader will wonder.
+func (m model) stopAllTargets() []string {
+	var names []string
+	for _, v := range m.vms {
+		if v.Status != "Running" || !m.reg.IsManaged(v.Name) || m.isBaseImage(v.Name) {
+			continue
+		}
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// summarizeNames renders up to a width-appropriate number of names for
+// display in the confirm prompt, summarizing any remainder as "and N more".
+// Display only: every target in names is still stopped regardless of how the
+// list is truncated here. Falls back to a sane budget when the terminal size
+// has not been reported yet (width == 0).
+func summarizeNames(names []string, width int) string {
+	budget := width - 40
+	if budget < 20 {
+		budget = 20
+	}
+	var b strings.Builder
+	shown := 0
+	for i, n := range names {
+		sep := ""
+		if i > 0 {
+			sep = ", "
+		}
+		if b.Len()+len(sep)+len(n) > budget && shown > 0 {
+			break
+		}
+		b.WriteString(sep)
+		b.WriteString(n)
+		shown++
+	}
+	if shown < len(names) {
+		fmt.Fprintf(&b, " and %d more", len(names)-shown)
+	}
+	return b.String()
+}
+
 // selectedName returns the highlighted VM's name, or "" when the list is empty.
 func (m model) selectedName() string {
 	row := m.table.SelectedRow()
@@ -91,14 +141,17 @@ func (m model) selectedName() string {
 	return row[0]
 }
 
-// vmByName looks up a loaded VM record by name.
-func (m model) vmByName(name string) vm.VM {
+// lookupVM looks up a loaded VM record by name, reporting whether it was found.
+// The miss case is distinguishable from a real zero-value record, which the
+// detail view's re-seed needs: "the VM is gone" must route back to the list
+// rather than render a stale or blank record.
+func (m model) lookupVM(name string) (vm.VM, bool) {
 	for _, v := range m.vms {
 		if v.Name == name {
-			return v
+			return v, true
 		}
 	}
-	return vm.VM{Name: name}
+	return vm.VM{Name: name}, false
 }
 
 // beginAction marks a quick list lifecycle action (start/stop/restart/delete) as
@@ -116,7 +169,7 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 
 // updateList handles keys while the list (or its confirm overlay) is active.
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.confirming {
+	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
 
@@ -192,108 +245,38 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if name == "" {
 			return m, nil
 		}
-		m.detail = m.vmByName(name)
+		// The name came from a selected row, so the lookup always hits.
+		m.detail, _ = m.lookupVM(name)
 		m.status = "" // start the detail view clean (its status is transfer guards)
 		m.view = viewDetail
 		return m, nil
 
-	case key.Matches(msg, m.keys.Start):
-		if n := m.selectedName(); n != "" {
-			m.status = "starting " + n + "…"
-			return m, m.beginAction(startCmd(m.cli, n))
+	case key.Matches(msg, m.keys.StopAll):
+		targets := m.stopAllTargets()
+		if len(targets) == 0 {
+			m.status = "no running sand VMs to stop"
+			return m, nil
+		}
+		m.confirm = &confirmState{
+			prompt: fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
+			run:    stopAllCmd(m.cli, targets),
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.Stop):
-		if n := m.selectedName(); n != "" {
-			m.status = "stopping " + n + "…"
-			return m, m.beginAction(stopCmd(m.cli, n))
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.Restart):
-		if n := m.selectedName(); n != "" {
-			m.status = "restarting " + n + "…"
-			return m, m.beginAction(restartCmd(m.cli, n))
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.Shell):
-		if n := m.selectedName(); n != "" {
-			// limactl shell needs a running instance; guard so the key gives a
-			// clear message instead of a raw limactl error.
-			if m.vmByName(n).Status != "Running" {
-				m.status = n + " must be running to open a shell (press s to start it)"
-				return m, nil
-			}
-			m.status = "opening a shell in " + n + " — the TUI resumes when you exit"
-			return m, shellCmd(n)
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.Delete):
-		if n := m.selectedName(); n != "" {
-			m.confirming = true
-			m.confirmName = n
-			// Recreate clones from a Claude base, so it is only offered for VMs we
-			// created — otherwise it would replace an unrelated VM with a sandbox.
-			// Shared with the headless `sand create` path (internal/manage) so the
-			// two entrypoints cannot drift on the gate.
-			m.confirmBase = ""
-			if base, ok := manage.RecreateBase(m.reg, n); ok {
-				m.confirmBase = base
-			}
-		}
-		return m, nil
 	}
 
+	// Start/Stop/Restart/Shell/Delete now live on the detail (VM) screen — the
+	// list only selects a VM, it no longer acts on one. Their keys (s/x/r/S/d)
+	// are not bubbles/table bindings, so falling through here leaves them inert
+	// rather than accidentally navigating the table.
+	//
+	// 'g' is a bubbles/table binding (GotoTop). On the list that is fine — we
+	// want the table's 'g'. Download (also 'g') only matches in updateDetail,
+	// which has no table, so the two never collide: updateList never checks
+	// m.keys.Download, and viewHelp scopes the download hint to viewDetail.
 	var cmd tea.Cmd
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
-}
-
-// updateConfirm handles the destructive delete/recreate confirmation overlay.
-func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "d":
-		name := m.confirmName
-		m.confirming = false
-		m.status = "deleting " + name + "…"
-		return m, m.beginAction(deleteCmd(m.cli, name))
-
-	case "r":
-		// Recreate is gated to sand-managed VMs (confirmBase is set only for
-		// them); ignore it otherwise so a stray 'r' can't replace an unrelated VM.
-		if m.confirmBase == "" {
-			m.confirming = false
-			m.status = "recreate is only available for sand-managed VMs"
-			return m, nil
-		}
-		name := m.confirmName
-		m.confirming = false
-		// Pre-fill the reset form from the VM's recorded config (sizing, hostname,
-		// identity) rather than resetting to defaults. The clone token is not
-		// stored, so a VM that cloned a private repo will need it re-supplied. Fall
-		// back to a minimal config if no snapshot exists (e.g. a pre-snapshot index
-		// entry).
-		cfg, ok := m.reg.Config(name)
-		if !ok || cfg.Name == "" {
-			cfg = vm.DefaultCreateConfig()
-			cfg.Name = name
-			cfg.User = hostUser()
-			cfg.GitName = hostGit("user.name")
-			cfg.GitEmail = hostGit("user.email")
-		}
-		cfg.BaseName = m.confirmBase
-		// Open the editable reset form (with preserve toggles) instead of
-		// provisioning immediately; submit dispatches provision.Reset.
-		return m, m.openResetForm(name, cfg)
-
-	case "n", "esc":
-		m.confirming = false
-		return m, nil
-	}
-	return m, nil
 }
 
 // listView renders the table, status line, optional confirm prompt, and help.
@@ -305,13 +288,8 @@ func (m model) listView() string {
 	b.WriteString("\n")
 
 	switch {
-	case m.confirming:
-		prompt := fmt.Sprintf("Delete %q?  [y] yes", m.confirmName)
-		if m.confirmBase != "" {
-			prompt += fmt.Sprintf("   [r] recreate from %s", m.confirmBase)
-		}
-		prompt += "   [n] cancel"
-		b.WriteString("\n" + errStyle.Render(prompt))
+	case m.confirm != nil:
+		b.WriteString("\n" + m.confirmView())
 	case m.status != "":
 		status := m.status
 		// While a lifecycle action runs, lead the status with the live spinner.

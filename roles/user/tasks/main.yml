@@ -112,6 +112,15 @@
     mode: "0644"
   when: provision_phase | default('full') != 'finalize'
 
+- name: Ensure ~/.config/sandbar directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/sandbar"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0700"
+  when: provision_phase | default('full') != 'finalize'
+
 - name: Deploy bashrc customizations
   ansible.builtin.blockinfile:
     path: "{{ user_home }}/.bashrc"
@@ -123,6 +132,25 @@
       export VISUAL=vim
       export EDITOR=vim
       eval "$(direnv hook bash)"
+      # Secrets are written by `sand` on VM start; the file is absent until then.
+      if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
+        . "$HOME/.config/sandbar/secrets.env"
+      fi
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Source the sandbar secrets file from ~/.profile (login shells)
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.profile"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - sandbar secrets"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+    block: |
+      # Secrets are written by `sand` on VM start; the file is absent until then.
+      if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
+        . "$HOME/.config/sandbar/secrets.env"
+      fi
   when: provision_phase | default('full') != 'finalize'
 
 - name: Display generated password for {{ user_name }}

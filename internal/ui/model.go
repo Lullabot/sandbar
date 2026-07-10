@@ -1,8 +1,13 @@
 // Package ui holds the Bubble Tea model, views, and commands for the sand
-// TUI. It is a thin interactive surface over the lima.Client (VM lifecycle) and
-// provision.Provisioner (create/recreate) packages: all blocking I/O happens in
-// tea.Cmds so Update never stalls, and the long-running provisioner streams its
-// output into a scrollable progress pane.
+// TUI. It is a thin interactive surface over the lima.Client (VM lifecycle),
+// provision.Provisioner (create/reset), registry.Registry (which VMs are ours),
+// and secrets.Store (per-VM host-side secrets) packages.
+//
+// Screens divide by responsibility: the list selects a VM and owns the global
+// actions (new, filter, search, stop all); the VM screen owns every action that
+// targets one VM. All blocking I/O happens in tea.Cmds so Update never stalls,
+// and the long-running provisioner streams its output into a scrollable
+// progress pane.
 package ui
 
 import (
@@ -17,13 +22,25 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
+
+// confirmState is a pending destructive action awaiting the user's `y`. It is
+// screen-agnostic: the VM screen raises it for delete, and a future stop-all
+// (list screen) can raise it the same way — neither screen needs to know what
+// the other confirms. A nil *confirmState on the model means no confirmation
+// is pending.
+type confirmState struct {
+	prompt string  // e.g. `Delete "web"?`
+	run    tea.Cmd // dispatched (via beginAction) when the user presses Confirm
+}
 
 // view is the active screen the model renders and routes keys to.
 type view int
@@ -36,7 +53,6 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
-	viewSecretForm
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
@@ -72,10 +88,10 @@ type model struct {
 	// matching actionDoneMsg.
 	acting bool
 
-	// Delete/recreate confirmation overlay on the list.
-	confirming  bool
-	confirmName string
-	confirmBase string // recreate base for a managed VM; "" disables recreate
+	// Pending destructive-action confirmation (nil = inactive). Raised by
+	// whichever screen dispatches the action; routed and rendered from both
+	// viewList and viewDetail via updateConfirm/confirmView below.
+	confirm *confirmState
 
 	// Create form.
 	inputs       []textinput.Model
@@ -90,8 +106,9 @@ type model struct {
 	resetBaseName        string // base image the reset clones from
 	preserveClaude       bool
 	preserveProject      bool
-	projectToggleEnabled bool // false when the VM has no CloneURL (nothing to preserve)
-	toggleFocus          int  // -1 = focus is in the text inputs; 0/1 = a toggle is focused
+	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
+	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
+	toggleFocus          int    // -1 = focus is in the text inputs; 0 = Claude toggle; 1 = project toggle (only reachable when projectToggleEnabled)
 
 	// Progress / streaming.
 	viewport      viewport.Model
@@ -117,39 +134,13 @@ type model struct {
 	transferSrc       string // chosen source (absolute; a host path, or a guest path without the "vm:" prefix)
 	transferRecursive bool   // the source is a directory (copied with -r)
 
-	// Secrets panel (viewSecrets) for the VM opened via detail. secretsEntries
-	// holds ONLY redacted (masked) entries — the panel never touches a Store's
-	// cleartext fields directly, so it structurally cannot render a value back
-	// in the clear.
-	secretsVM      string
-	secretsEntries []secrets.RedactedEntry
-	secretsCursor  int
-	secretsStatus  string
-	secretsErr     error
-	// secretDeletePending arms a two-step confirm for deleting the highlighted
-	// secret (press delete once to arm, again to confirm), mirroring the list's
-	// delete-confirm convention so a fat-finger doesn't destroy a secret.
-	secretDeletePending bool
-
-	// Add/edit/refresh secret form (viewSecretForm). secretRefreshMode locks
-	// the category to github and narrows the form to scope+value for the
-	// dedicated "refresh GitHub token" action; otherwise the category cycles
-	// among global/dir_env/github and the applicable fields follow.
-	secretCategory    secrets.Category
-	secretRefreshMode bool
-	secretScopeInput  textinput.Model
-	secretNameInput   textinput.Model
-	secretValueInput  textinput.Model
-	secretFieldFocus  int
-	secretFormErr     error
-	// Edit mode (viewSecretForm opened with 'e' on an existing secret). The
-	// form is pre-filled from the highlighted entry; secretEditOrig* records
-	// its original key so a change to category/scope/name on submit is treated
-	// as a rename (remove the old entry) rather than leaving an orphan.
-	secretEditing       bool
-	secretEditOrigCat   secrets.Category
-	secretEditOrigScope string
-	secretEditOrigName  string
+	// Secrets editor. sec is the host-side store (a pointer, so the value-passed
+	// model stays cheap to copy). secretsArea holds the KEY=VALUE buffer and
+	// secretsVM the VM it belongs to.
+	sec         *secrets.Store
+	secretsArea textarea.Model
+	secretsVM   string
+	secretsErr  error
 }
 
 // New wires the dependencies into a ready-to-run tea.Model.
@@ -165,10 +156,19 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		reg = registry.NewEmpty()
 	}
 
+	// The secrets store gets the same tolerant posture as the registry: a
+	// corrupt file surfaces as a warning rather than crashing or silently
+	// discarding the VM's secrets.
+	sec, secErr := secrets.Load()
+	if sec == nil {
+		sec = secrets.NewEmpty()
+	}
+
 	m := model{
 		cli:      cli,
 		prov:     prov,
 		reg:      reg,
+		sec:      sec,
 		keys:     defaultKeys(),
 		help:     help.New(),
 		view:     viewList,
@@ -176,8 +176,14 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		viewport: viewport.New(80, 18),
 		spinner:  sp,
 	}
-	if loadErr != nil {
+	// Neither load failure may silently shadow the other.
+	switch {
+	case loadErr != nil && secErr != nil:
+		m.status = "warning: " + loadErr.Error() + "; " + secErr.Error()
+	case loadErr != nil:
 		m.status = "warning: " + loadErr.Error()
+	case secErr != nil:
+		m.status = "warning: " + secErr.Error()
 	}
 	return m
 }
@@ -231,10 +237,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// TUI stops being flagged managed (and recreate-able). Shared with the
 		// headless `sand create` path (internal/manage) so the two entrypoints
 		// cannot drift.
-		if _, err := manage.Reconcile(m.reg, msg.vms); err != nil {
+		dropped, err := manage.Reconcile(m.reg, msg.vms)
+		if err != nil {
 			m.status = "warning: could not update managed index: " + err.Error()
 		}
+		// A VM that vanished outside the TUI (and so got dropped above) also loses
+		// its host-stored secrets — there is no guest left to apply them to, and
+		// keeping them around risks silently reattaching stale secrets to an
+		// unrelated VM that later reuses the name. Best-effort: a failure here
+		// isn't worth displacing the reconcile status above.
+		for _, name := range dropped {
+			_ = m.sec.Remove(name)
+		}
 		m.refreshRows()
+		// The VM screen acts on the VM it displays, so its snapshot goes stale after
+		// every start/stop/restart. Re-seed it from the reloaded list; if the VM is
+		// gone (deleted, or removed outside the TUI), fall back to the list rather
+		// than rendering a zero-value record.
+		if m.view == viewDetail {
+			if v, ok := m.lookupVM(m.detail.Name); ok {
+				m.detail = v
+			} else {
+				m.view = viewList
+			}
+		}
 		return m, nil
 
 	case actionDoneMsg:
@@ -246,14 +272,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.action == "shell":
 			m.status = "" // returned from the interactive shell; nothing to report
 		case msg.action == "delete":
-			// A deleted VM is no longer managed; drop it from the index.
-			if err := m.reg.Remove(msg.name); err != nil {
-				m.status = label + " ok (warning: managed index not updated: " + err.Error() + ")"
-			} else {
+			// The record the VM screen was displaying no longer exists; only on
+			// this success path (msg.err != nil already returned above) — a failed
+			// delete leaves the VM in place, so the user should stay on its screen
+			// to see the error.
+			m.view = viewList
+			// A deleted VM is no longer managed, and its host-stored secrets no
+			// longer have a guest to apply to; drop it from both indexes. Neither
+			// failure may silently shadow the other.
+			regErr := m.reg.Remove(msg.name)
+			secErr := m.sec.Remove(msg.name)
+			switch {
+			case regErr != nil && secErr != nil:
+				m.status = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
+			case regErr != nil:
+				m.status = label + " ok (warning: managed index not updated: " + regErr.Error() + ")"
+			case secErr != nil:
+				m.status = label + " ok (warning: secrets not pruned: " + secErr.Error() + ")"
+			default:
 				m.status = label + " ok"
 			}
 		default:
 			m.status = label + " ok"
+		}
+		// A non-fatal ApplySecrets failure (start/restart/apply-secrets) is
+		// appended to whatever success status the switch above set; it must never
+		// run on the failure branch, which already carries its own error message.
+		if msg.err == nil && msg.warn != "" {
+			m.status += " (warning: " + msg.warn + ")"
 		}
 		return m, listCmd(m.cli) // refresh after every action
 
@@ -277,10 +323,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it. Shared with the headless
 		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
+		var applyCmd tea.Cmd
 		if msg.err == nil && m.provCfg.Name != "" {
 			if err := manage.RecordSuccess(m.reg, m.provCfg); err != nil {
 				m.status = "VM ready, but recording it as managed failed: " + err.Error()
 			}
+			// The create form's token becomes the VM's GH_TOKEN secret, so it can
+			// be edited later without a rebuild. It never enters the managed
+			// registry, which strips CloneToken by design (registry.Add). Seeding
+			// it here — in the TUI, on provisionDoneMsg — rather than inside
+			// internal/provision keeps the host secrets store a TUI concern and
+			// needs no new provision→secrets import; the headless `sand create`
+			// path has no store to seed from, so doing this in the provisioner
+			// would silently diverge the two entrypoints (Option A, rejected).
+			// m.sec.Get already returns a defensive copy, so mutating pairs here
+			// cannot corrupt the store ahead of Set validating it.
+			if m.provCfg.CloneToken != "" {
+				pairs := m.sec.Get(m.provCfg.Name)
+				pairs["GH_TOKEN"] = m.provCfg.CloneToken
+				if err := m.sec.Set(m.provCfg.Name, pairs); err != nil {
+					m.status = "VM ready, but the token could not be saved as a secret: " + err.Error()
+				}
+			}
+			// createVM/Reset each end with their own StartStreaming, which runs
+			// BEFORE this handler and before GH_TOKEN lands in the store above —
+			// so the guest would have no secrets.env until the VM's *next* start.
+			// Dispatch the apply now (batched with the list refresh) so a user who
+			// creates a VM and immediately shells in finds GH_TOKEN already set.
+			user, pairs := m.secretsFor(m.provCfg.Name)
+			applyCmd = applySecretsCmd(m.cli, m.provCfg.Name, user, pairs)
+		}
+		if applyCmd != nil {
+			return m, tea.Batch(listCmd(m.cli), applyCmd)
 		}
 		return m, listCmd(m.cli) // refresh the list the user returns to
 
@@ -316,8 +390,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDest(msg)
 		case viewSecrets:
 			return m.updateSecrets(msg)
-		case viewSecretForm:
-			return m.updateSecretForm(msg)
 		}
 	}
 
@@ -360,16 +432,38 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewDest:
 		m.dest, cmd = m.dest.Update(msg)
 		return m, cmd
-	case viewSecretForm:
-		cmds := make([]tea.Cmd, 3)
-		m.secretScopeInput, cmds[0] = m.secretScopeInput.Update(msg)
-		m.secretNameInput, cmds[1] = m.secretNameInput.Update(msg)
-		m.secretValueInput, cmds[2] = m.secretValueInput.Update(msg)
-		return m, tea.Batch(cmds...)
+	case viewSecrets:
+		m.secretsArea, cmd = m.secretsArea.Update(msg)
+		return m, cmd
 	default:
 		m.table, cmd = m.table.Update(msg)
 		return m, cmd
 	}
+}
+
+// updateConfirm routes keys while a destructive-action confirmation is
+// pending. Both updateList and updateDetail hand off to it first whenever
+// m.confirm != nil, so neither view carries its own overlay key-handling.
+// Only the bound Confirm key ('y') dispatches the pending run; every other
+// key — including a stray repeat of whatever key raised the overlay — is
+// swallowed, so an accidental double-tap can never fire the action twice.
+func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Confirm): // y
+		run := m.confirm.run
+		m.confirm = nil
+		return m, m.beginAction(run)
+	case key.Matches(msg, m.keys.Cancel): // n / esc
+		m.confirm = nil
+		return m, nil
+	}
+	return m, nil
+}
+
+// confirmView renders the pending confirmation prompt. Shared by listView and
+// detailView so neither screen formats its own overlay text.
+func (m model) confirmView() string {
+	return errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel")
 }
 
 // View renders the active screen.
@@ -387,8 +481,6 @@ func (m model) View() string {
 		return m.destView()
 	case viewSecrets:
 		return m.secretsView()
-	case viewSecretForm:
-		return m.secretFormView()
 	default:
 		return m.listView()
 	}

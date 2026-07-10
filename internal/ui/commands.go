@@ -1,10 +1,15 @@
 package ui
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,10 +25,14 @@ type (
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
+	// warn carries a non-fatal problem (currently: a failed ApplySecrets) that
+	// must NOT be treated as a failure — err staying nil is what tells the
+	// handler in model.go the action itself succeeded.
 	actionDoneMsg struct {
 		action string
 		name   string
 		err    error
+		warn   string
 	}
 	// provisionOutputMsg is one chunk of streamed provisioner output.
 	provisionOutputMsg string
@@ -50,10 +59,24 @@ func listCmd(cli *lima.Client) tea.Cmd {
 	}
 }
 
-// startCmd boots a stopped VM.
-func startCmd(cli *lima.Client, name string) tea.Cmd {
+// startCmd boots a stopped VM and then writes its host-stored secrets into
+// the guest. A secrets failure is reported as a warning, not a failure: a VM
+// that is up without its secrets is more useful than one reported as
+// failed-to-start. If Start itself fails, ApplySecrets is never attempted.
+//
+// Note: a VM started outside sand (a bare `limactl start`) does not get
+// freshly applied secrets — it sources whatever secrets.env was last written
+// by a previous sand-initiated start (or none, if there never was one).
+func startCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "start", name: name, err: cli.Start(name)}
+		if err := cli.Start(name); err != nil {
+			return actionDoneMsg{action: "start", name: name, err: err}
+		}
+		warn := ""
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+			warn = "secrets not applied: " + err.Error()
+		}
+		return actionDoneMsg{action: "start", name: name, warn: warn}
 	}
 }
 
@@ -64,20 +87,84 @@ func stopCmd(cli *lima.Client, name string) tea.Cmd {
 	}
 }
 
-// restartCmd stops then starts a VM, surfacing the first failure.
-func restartCmd(cli *lima.Client, name string) tea.Cmd {
+// restartCmd stops then starts a VM, surfacing the first failure, and applies
+// secrets after a successful start — same warn-not-fail semantics as startCmd.
+// This is not redundant with startCmd: restartCmd drives cli.Stop/cli.Start
+// directly rather than re-dispatching startCmd, so it would otherwise skip
+// the apply step entirely.
+func restartCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if err := cli.Stop(name); err != nil {
 			return actionDoneMsg{action: "restart", name: name, err: err}
 		}
-		return actionDoneMsg{action: "restart", name: name, err: cli.Start(name)}
+		if err := cli.Start(name); err != nil {
+			return actionDoneMsg{action: "restart", name: name, err: err}
+		}
+		warn := ""
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+			warn = "secrets not applied: " + err.Error()
+		}
+		return actionDoneMsg{action: "restart", name: name, warn: warn}
 	}
+}
+
+// applySecretsCmd writes name's stored secrets into the guest without
+// starting or stopping anything. It backs the create/reset seam: createVM and
+// Reset each end with their own StartStreaming (so the VM is already up by
+// the time provisionDoneMsg fires), and by then a create-form GH_TOKEN has
+// just landed in the store — so this pushes it in rather than waiting for the
+// VM's *next* start. Failure is a warning, matching startCmd/restartCmd.
+func applySecretsCmd(cli *lima.Client, name, user string, pairs map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		warn := ""
+		if err := provision.ApplySecrets(context.Background(), cli, name, user, pairs, io.Discard); err != nil {
+			warn = "secrets not applied: " + err.Error()
+		}
+		return actionDoneMsg{action: "apply secrets", name: name, warn: warn}
+	}
+}
+
+// secretsFor returns the guest user and stored secrets for a VM, defaulting
+// the user to the host username when the VM has no recorded config (mirroring
+// openResetForm's fallback in detail.go).
+func (m model) secretsFor(name string) (user string, pairs map[string]string) {
+	user = vm.HostUser()
+	if cfg, ok := m.reg.Config(name); ok && cfg.User != "" {
+		user = cfg.User
+	}
+	return user, m.sec.Get(name)
 }
 
 // deleteCmd force-removes a VM.
 func deleteCmd(cli *lima.Client, name string) tea.Cmd {
 	return func() tea.Msg {
 		return actionDoneMsg{action: "delete", name: name, err: cli.Delete(name, true)}
+	}
+}
+
+// stopAllCmd stops each named VM in turn, accumulating failures. Stopping is
+// sequential rather than concurrent: limactl stop is I/O-heavy, lima.Client
+// gives no concurrency guarantees, and a serial loop yields a deterministic
+// error report. VMs that stop successfully stay stopped even if a later one
+// fails.
+//
+// name carries a count rather than a single VM name (there is no single VM
+// here): model.go's actionDoneMsg handler builds its status label as
+// `action + " " + name`, so passing a descriptive count keeps that label
+// readable ("stop all (3 VMs) ok") instead of leaving a trailing space.
+func stopAllCmd(cli *lima.Client, names []string) tea.Cmd {
+	return func() tea.Msg {
+		var failed []string
+		for _, n := range names {
+			if err := cli.Stop(n); err != nil {
+				failed = append(failed, n)
+			}
+		}
+		var err error
+		if len(failed) > 0 {
+			err = fmt.Errorf("could not stop: %s", strings.Join(failed, ", "))
+		}
+		return actionDoneMsg{action: "stop all", name: fmt.Sprintf("(%d VMs)", len(names)), err: err}
 	}
 }
 

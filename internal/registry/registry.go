@@ -26,9 +26,14 @@ type entry struct {
 	Config vm.CreateConfig `json:"config"`
 }
 
-// fileSchema is the on-disk JSON shape: {"vms": {"<name>": {...}}}.
+// currentVersion is the schema version this binary writes. A file with no
+// version predates versioning and is read as version 1.
+const currentVersion = 1
+
+// fileSchema is the on-disk JSON shape: {"version": N, "vms": {"<name>": {...}}}.
 type fileSchema struct {
-	VMs map[string]entry `json:"vms"`
+	Version int              `json:"version"`
+	VMs     map[string]entry `json:"vms"`
 }
 
 // Registry is an in-memory index of sand-managed instances, optionally
@@ -113,6 +118,14 @@ func LoadFrom(path string) (*Registry, error) {
 		_ = os.Rename(path, path+".corrupt")
 		return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
+	if parsed.Version == 0 {
+		parsed.Version = 1 // unversioned file predates the version field
+	}
+	if parsed.Version > currentVersion {
+		return NewEmpty(), fmt.Errorf(
+			"managed index %s has schema version %d, but this sand only understands %d; upgrade sand",
+			path, parsed.Version, currentVersion)
+	}
 	if parsed.VMs != nil {
 		r.vms = parsed.VMs
 	}
@@ -167,23 +180,27 @@ func (r *Registry) Remove(name string) error {
 }
 
 // Reconcile drops managed entries whose VM no longer exists; present is the set
-// of live instance names. It returns whether anything was pruned. This keeps a
-// stale entry from lingering after a VM is deleted outside the TUI. It cannot
-// detect a name being *reused* by an unrelated VM — provenance is not
-// recoverable from limactl — which is why recreate still requires an explicit
-// confirmation.
-func (r *Registry) Reconcile(present map[string]bool) (bool, error) {
-	changed := false
+// of live instance names. It returns the names that were dropped (nil if none
+// were), so a caller with its own per-VM state keyed by that name (the TUI's
+// secrets store) can prune it in step — this is the single shared place the
+// TUI and headless `sand create` path agree on reconciliation, so it must
+// carry enough information for both to stay in sync, not just the TUI's
+// original bool. This keeps a stale entry from lingering after a VM is
+// deleted outside the TUI. It cannot detect a name being *reused* by an
+// unrelated VM — provenance is not recoverable from limactl — which is why
+// recreate still requires an explicit confirmation.
+func (r *Registry) Reconcile(present map[string]bool) ([]string, error) {
+	var dropped []string
 	for name := range r.vms {
 		if !present[name] {
 			delete(r.vms, name)
-			changed = true
+			dropped = append(dropped, name)
 		}
 	}
-	if !changed {
-		return false, nil
+	if len(dropped) == 0 {
+		return nil, nil
 	}
-	return true, r.save()
+	return dropped, r.save()
 }
 
 // save writes the index atomically (unique temp file + rename). With an empty
@@ -198,7 +215,7 @@ func (r *Registry) save() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(fileSchema{VMs: r.vms}, "", "  ")
+	data, err := json.MarshalIndent(fileSchema{Version: currentVersion, VMs: r.vms}, "", "  ")
 	if err != nil {
 		return err
 	}
