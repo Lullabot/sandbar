@@ -172,26 +172,37 @@ func ApplySecrets(ctx context.Context, cli *lima.Client, name, user string, scop
 		}
 		scopeNames = append(scopeNames, scope)
 	}
-	if len(scopeNames) == 0 {
-		return nil
-	}
-	sort.Strings(scopeNames)
+	if len(scopeNames) > 0 {
+		sort.Strings(scopeNames)
 
-	// direnv allow needs an absolute guest path, so resolve $HOME once,
-	// host-side, rather than per scope.
-	home, err := guestHome(ctx, cli, name, user)
-	if err != nil {
-		return fmt.Errorf("resolve guest home for %q: %w", user, err)
+		// direnv allow needs an absolute guest path, so resolve $HOME once,
+		// host-side, rather than per scope.
+		home, err := guestHome(ctx, cli, name, user)
+		if err != nil {
+			return fmt.Errorf("resolve guest home for %q: %w", user, err)
+		}
+
+		for _, scope := range scopeNames {
+			body := RenderDotenv(scopes[scope])
+			if err := cli.Shell(ctx, name, strings.NewReader(body), out, "sudo", "-H", "-u", user, "bash", "-c", scopeEnvScript(scope)); err != nil {
+				return fmt.Errorf("apply scoped secrets ~/%s/.env: %w", scope, err)
+			}
+			if err := cli.Shell(ctx, name, nil, out, "sudo", "-iu", user, "direnv", "allow", home+"/"+scope); err != nil {
+				return fmt.Errorf("direnv allow ~/%s: %w", scope, err)
+			}
+		}
 	}
 
-	for _, scope := range scopeNames {
-		body := RenderDotenv(scopes[scope])
-		if err := cli.Shell(ctx, name, strings.NewReader(body), out, "sudo", "-H", "-u", user, "bash", "-c", scopeEnvScript(scope)); err != nil {
-			return fmt.Errorf("apply scoped secrets ~/%s/.env: %w", scope, err)
-		}
-		if err := cli.Shell(ctx, name, nil, out, "sudo", "-iu", user, "direnv", "allow", home+"/"+scope); err != nil {
-			return fmt.Errorf("direnv allow ~/%s: %w", scope, err)
-		}
+	// Git-credential wiring (task 04): for each recognized forge token
+	// (see recognizedForgeTokens in gitcred.go — the ONLY place in sand that
+	// knows a forge exists) found in a non-empty scope, additionally render
+	// main's proven per-scope git-credentials + gitconfig.d include +
+	// includeIf "gitdir:~/<scope>/" wiring. This runs unconditionally
+	// (even when there are zero recognized tokens) so a removed token's
+	// stale on-disk files and ~/.gitconfig stanza are reconciled away.
+	entries := collectGitCredEntries(scopes)
+	if err := applyGitCredEntries(ctx, cli, name, user, entries, out); err != nil {
+		return err
 	}
 	return nil
 }

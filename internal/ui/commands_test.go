@@ -63,10 +63,13 @@ func TestStartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	if done.warn != "" {
 		t.Fatalf("done.warn = %q, want empty on a successful apply", done.warn)
 	}
-	// ApplySecrets makes two guest calls for a global-only apply: the write
-	// itself, then the idempotent ~/.profile + ~/.bashrc source-line ensure.
-	if len(fr.streamCalls) != 2 {
-		t.Fatalf("expected exactly two Shell (ApplySecrets) calls, got %d: %v", len(fr.streamCalls), fr.streamCalls)
+	// ApplySecrets makes three guest calls for a global-only apply: the write
+	// itself, the idempotent ~/.profile + ~/.bashrc source-line ensure, and
+	// the unconditional git-credential reconcile pass (task 04 — runs even
+	// though a global-scope GH_TOKEN is not itself git-credential-wired; see
+	// internal/provision/gitcred.go).
+	if len(fr.streamCalls) != 3 {
+		t.Fatalf("expected exactly three Shell (ApplySecrets) calls, got %d: %v", len(fr.streamCalls), fr.streamCalls)
 	}
 	call := fr.streamCalls[0]
 	if call[0] != "shell" || call[1] != "claude" {
@@ -114,8 +117,10 @@ func TestRestartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	if done.err != nil {
 		t.Fatalf("done.err = %v, want nil", done.err)
 	}
-	if len(fr.streamCalls) != 2 {
-		t.Fatalf("expected exactly two Shell (ApplySecrets) calls after restart, got %d", len(fr.streamCalls))
+	// Same three-call shape as TestStartAppliesSecretsAfterSuccessfulStart
+	// (write, ensure-profile, git-credential reconcile — task 04).
+	if len(fr.streamCalls) != 3 {
+		t.Fatalf("expected exactly three Shell (ApplySecrets) calls after restart, got %d", len(fr.streamCalls))
 	}
 }
 
