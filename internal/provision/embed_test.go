@@ -39,19 +39,19 @@ func TestEmbedPlaybookFSComplete(t *testing.T) {
 	}
 }
 
-// TestEmbedMaterializeToTempDir asserts the embedded fileset can be
-// materialised byte-for-byte into a fresh, private temp dir, independent of
+// TestEmbedExtractToTempDir asserts the embedded fileset can be
+// extracted byte-for-byte into a fresh, private temp dir, independent of
 // any git checkout — this is the tier-2 resolver path exercised when
 // LocatePlaybook runs outside a repository (e.g. a Homebrew install).
-func TestEmbedMaterializeToTempDir(t *testing.T) {
-	dir, err := materializeEmbedded(sandbar.PlaybookFS)
+func TestEmbedExtractToTempDir(t *testing.T) {
+	dir, err := extractEmbedded(sandbar.PlaybookFS)
 	if err != nil {
-		t.Fatalf("materializeEmbedded: %v", err)
+		t.Fatalf("extractEmbedded: %v", err)
 	}
 
 	for _, f := range []string{"site.yml", "ansible.cfg", "inventory"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
-			t.Errorf("materialised dir missing %q: %v", f, err)
+			t.Errorf("extracted dir missing %q: %v", f, err)
 		}
 	}
 
@@ -60,7 +60,7 @@ func TestEmbedMaterializeToTempDir(t *testing.T) {
 		t.Fatalf("glob roles/*/tasks/main.yml: %v", err)
 	}
 	if len(matches) == 0 {
-		t.Error("materialised dir has no roles/*/tasks/main.yml")
+		t.Error("extracted dir has no roles/*/tasks/main.yml")
 	}
 
 	gvMatches, err := filepath.Glob(filepath.Join(dir, "group_vars", "*"))
@@ -68,7 +68,7 @@ func TestEmbedMaterializeToTempDir(t *testing.T) {
 		t.Fatalf("glob group_vars/*: %v", err)
 	}
 	if len(gvMatches) == 0 {
-		t.Error("materialised dir has no group_vars/* members")
+		t.Error("extracted dir has no group_vars/* members")
 	}
 
 	// Byte-identical spot check against the source tree's site.yml.
@@ -78,10 +78,10 @@ func TestEmbedMaterializeToTempDir(t *testing.T) {
 	}
 	gotSite, err := os.ReadFile(filepath.Join(dir, "site.yml"))
 	if err != nil {
-		t.Fatalf("read materialised site.yml: %v", err)
+		t.Fatalf("read extracted site.yml: %v", err)
 	}
 	if string(wantSite) != string(gotSite) {
-		t.Error("materialised site.yml is not byte-identical to the source tree")
+		t.Error("extracted site.yml is not byte-identical to the source tree")
 	}
 }
 
