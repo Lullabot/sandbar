@@ -225,6 +225,15 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.inputs[fDockerProxyHost].SetValue(cfg.DockerProxyHost)
 	m.inputs[fCloneURL].SetValue(cfg.CloneURL)
 
+	// The token itself is never stored in the recorded config, so the field seeds
+	// blank. When the VM already has a saved GH_TOKEN secret, an empty box is
+	// confusing ("is there no token?"); a placeholder makes clear that blank keeps
+	// the saved token and typing replaces it (submitReset only overwrites the
+	// secret when the field is non-empty).
+	if m.hasStoredToken(cfg.Name) {
+		m.inputs[fCloneToken].Placeholder = "*** saved — leave blank to keep it"
+	}
+
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = true
 	m.resetName = cfg.Name
@@ -242,6 +251,18 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.view = viewForm
 	m.focusIdx = fHostname
 	return m.inputs[fHostname].Focus()
+}
+
+// hasStoredToken reports whether the VM already has a GH_TOKEN secret in any
+// scope (global or directory-scoped). The reset form uses it to decide whether
+// to hint — via the token field's placeholder — that a saved token exists.
+func (m model) hasStoredToken(name string) bool {
+	for _, pairs := range m.sec.GetAll(name) {
+		if _, ok := pairs["GH_TOKEN"]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // focusNext / focusPrev move the cursor between fields, wrapping around.
