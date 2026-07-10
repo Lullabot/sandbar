@@ -157,7 +157,7 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	}
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
 	// needs an idle source disk.
-	step(out, "Stopping base image %q (quiescing it for cloning)…", cfg.BaseName)
+	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
 	if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 	}
@@ -253,7 +253,7 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 			return err
 		}
 	case status != "Stopped":
-		step(out, "Stopping base image %q (quiescing it for cloning)…", cfg.BaseName)
+		step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
 		if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 		}
