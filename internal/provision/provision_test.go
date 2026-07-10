@@ -73,6 +73,12 @@ func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, a
 	return f.callErr(args)
 }
 
+func (f *fakeRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
+	// StageOut now streams through StreamOut; mirror Stream so the reset tests'
+	// recorded call sequence and staged-stdin capture are unchanged.
+	return f.Stream(ctx, stdin, out, args...)
+}
+
 func testConfig() vm.CreateConfig {
 	cfg := vm.DefaultCreateConfig() // Name=claude, BaseName=claude-base
 	cfg.User = "andrew"

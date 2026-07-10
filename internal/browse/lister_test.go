@@ -49,6 +49,10 @@ func (f fakeRunner) Stream(_ context.Context, _ io.Reader, w io.Writer, _ ...str
 	_, err := w.Write(f.out)
 	return err
 }
+func (f fakeRunner) StreamOut(_ context.Context, _ io.Reader, w io.Writer, _ ...string) error {
+	_, err := w.Write(f.out)
+	return err
+}
 
 // TestGuestListerParsesFindOutput checks the tab-separated find -printf parsing:
 // type letter -> IsDir, size, and name.

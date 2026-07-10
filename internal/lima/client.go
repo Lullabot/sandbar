@@ -154,6 +154,18 @@ func (c *Client) Shell(ctx context.Context, name string, stdin io.Reader, out io
 	return c.r.Stream(ctx, stdin, out, args...)
 }
 
+// ShellStreamOut runs a command inside an instance, streaming its stdout ONLY
+// to out while keeping stderr separate (folded into the error on failure).
+// Unlike Shell — which merges stdout and stderr into out for live display —
+// this is the right call when out receives a binary/parseable payload, e.g. a
+// `tar -czf -` stream piped straight into an archive file: merging limactl's
+// `cd` warning on stderr would corrupt the archive. stdin feeds the command's
+// input (nil for none).
+func (c *Client) ShellStreamOut(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
+	args := append([]string{"shell", name}, argv...)
+	return c.r.StreamOut(ctx, stdin, out, args...)
+}
+
 // ShellOut runs a command inside an instance and returns its stdout ONLY, with
 // the guest's stderr kept separate (folded into the error on failure). Unlike
 // Shell — which streams stdout and stderr merged into one writer for live
