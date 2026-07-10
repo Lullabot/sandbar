@@ -29,7 +29,7 @@ func LocatePlaybook() (string, error) {
 	if top, err := gitCheckoutPlaybookDir(); err == nil {
 		return top, nil
 	}
-	return materializeEmbedded(sandbar.PlaybookFS)
+	return extractEmbedded(sandbar.PlaybookFS)
 }
 
 // gitCheckoutPlaybookDir resolves the current git checkout's toplevel and
@@ -49,11 +49,11 @@ func gitCheckoutPlaybookDir() (string, error) {
 	return top, nil
 }
 
-// materializeEmbedded writes every file in fsys to a fresh, private temp
+// extractEmbedded writes every file in fsys to a fresh, private temp
 // dir, preserving directory structure and file contents byte-for-byte, and
 // returns the temp dir's path. It is the tier-2 fallback for LocatePlaybook
 // when no git checkout is available.
-func materializeEmbedded(fsys fs.FS) (string, error) {
+func extractEmbedded(fsys fs.FS) (string, error) {
 	dir, err := os.MkdirTemp("", "sand-playbook-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir for embedded playbook: %w", err)
@@ -74,7 +74,7 @@ func materializeEmbedded(fsys fs.FS) (string, error) {
 		return os.WriteFile(target, data, 0o644)
 	})
 	if err != nil {
-		return "", fmt.Errorf("materialise embedded playbook to %s: %w", dir, err)
+		return "", fmt.Errorf("extract embedded playbook to %s: %w", dir, err)
 	}
 
 	return dir, nil
