@@ -21,6 +21,14 @@ type Runner interface {
 	// Used for long-running, interactive commands like `shell` and `start`, where
 	// the caller wants to see everything (stdout and stderr) live.
 	Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error
+	// StreamOut runs `limactl args...`, piping stdin in and streaming stdout ONLY
+	// to out, keeping the guest/limactl stderr SEPARATE (folded into the returned
+	// error). Use it — never Stream — when out receives bytes that are consumed
+	// programmatically (a tar stream piped to a file, say): `limactl shell`
+	// injects a `cd <host-cwd>` into the login shell and its "No such file or
+	// directory" warning on stderr would otherwise be interleaved into out and
+	// corrupt the payload.
+	StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error
 }
 
 // execRunner is the real Runner: it shells out to the limactl binary.
@@ -53,4 +61,21 @@ func (r *execRunner) Stream(ctx context.Context, stdin io.Reader, out io.Writer,
 	cmd.Stdout = out
 	cmd.Stderr = out
 	return cmd.Run()
+}
+
+func (r *execRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, r.bin, args...)
+	cmd.Stdin = stdin
+	cmd.Stdout = out
+	// stderr stays OUT of out so it cannot corrupt the streamed stdout payload;
+	// it is captured and folded into the error on failure, exactly like Output.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return err
 }

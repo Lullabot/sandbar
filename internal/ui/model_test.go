@@ -21,8 +21,9 @@ import (
 // in tests without ever spawning a real limactl.
 type fakeRunner struct{}
 
-func (fakeRunner) Output(context.Context, ...string) ([]byte, error)             { return nil, nil }
-func (fakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+func (fakeRunner) Output(context.Context, ...string) ([]byte, error)                { return nil, nil }
+func (fakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error    { return nil }
+func (fakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error { return nil }
 
 func newTestModel(t *testing.T) model {
 	t.Helper()
@@ -1120,6 +1121,9 @@ func (f stopAllFakeRunner) Output(_ context.Context, args ...string) ([]byte, er
 	return nil, nil
 }
 func (stopAllFakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+func (stopAllFakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error {
+	return nil
+}
 
 // stopAllCmd stops every target sequentially, accumulating failures: a fake
 // client that fails for "bad" and succeeds for "good" must report an error

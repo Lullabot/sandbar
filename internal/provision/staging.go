@@ -103,6 +103,12 @@ func removeStageDir(dir string) { _ = os.RemoveAll(dir) }
 // host archive file using `tar` over `limactl shell` as root. --ignore-failed-read
 // keeps a missing optional path (e.g. ~/.claude.json) from aborting the archive;
 // tar preserves the original modes/ownership inside the tarball.
+//
+// It uses ShellStreamOut (stdout only), NOT Shell (merged stdout+stderr): the
+// gzip stream is tar's stdout, and `limactl shell` emits a `cd <host-cwd>` "No
+// such file or directory" warning on stderr whenever that host path is absent
+// in the guest. Merging that warning into the archive corrupts the gzip, and
+// the later StageIn `tar -xzf` then aborts with exit status 2.
 func StageOut(ctx context.Context, cli *lima.Client, name, home string, guestPaths []string, hostArchive string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
@@ -111,7 +117,7 @@ func StageOut(ctx context.Context, cli *lima.Client, name, home string, guestPat
 	defer file.Close()
 
 	argv := append([]string{"sudo", "tar", "-C", home, "--ignore-failed-read", "-czf", "-"}, guestPaths...)
-	if err := cli.Shell(ctx, name, nil, file, argv...); err != nil {
+	if err := cli.ShellStreamOut(ctx, name, nil, file, argv...); err != nil {
 		return fmt.Errorf("stage out: %w", err)
 	}
 	return nil

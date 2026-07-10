@@ -51,6 +51,12 @@ func (f *stagingFakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Wr
 	return f.err
 }
 
+func (f *stagingFakeRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
+	// StageOut streams the tar archive through StreamOut; mirror Stream so the
+	// recorded argv and canned-stdout routing are identical.
+	return f.Stream(ctx, stdin, out, args...)
+}
+
 func TestOrgRelDir(t *testing.T) {
 	cases := []struct {
 		name    string

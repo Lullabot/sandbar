@@ -29,6 +29,11 @@ func (f *fakeRunner) Stream(_ context.Context, _ io.Reader, _ io.Writer, args ..
 	return f.err
 }
 
+func (f *fakeRunner) StreamOut(_ context.Context, _ io.Reader, _ io.Writer, args ...string) error {
+	f.calls = append(f.calls, args)
+	return f.err
+}
+
 func TestListParsesFixture(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "list.json"))
 	if err != nil {

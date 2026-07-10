@@ -45,6 +45,10 @@ func (f *secretsFakeRunner) Stream(_ context.Context, stdin io.Reader, _ io.Writ
 	return nil
 }
 
+func (f *secretsFakeRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
+	return f.Stream(ctx, stdin, out, args...)
+}
+
 // (a) A successful Start is followed by an ApplySecrets call (a lima Shell
 // invocation targeting the VM) carrying the VM's stored pairs on stdin, run
 // as the given guest user.
