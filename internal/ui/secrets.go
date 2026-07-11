@@ -27,6 +27,11 @@ const secretsChrome = 16
 // reason to gate editing on it being up.
 func (m *model) openSecrets(name string) tea.Cmd {
 	ta := textarea.New()
+	// This is a plain KEY=VALUE / [scope] env editor, not a code buffer: drop the
+	// line-number gutter (the stray "1") and the default "┃ " line prompt, which
+	// otherwise paints a full-height vertical bar down every empty row.
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
 	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name)))
 	ta.SetWidth(max(20, m.width-8))
 	ta.SetHeight(max(5, m.height-secretsChrome))
@@ -34,7 +39,11 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	m.secretsVM = name
 	m.secretsErr = nil
 	m.view = viewSecrets
-	return ta.Focus()
+	// Focus the STORED textarea, not the local copy: Focus has a pointer receiver,
+	// so calling it on `ta` after the value-copy above would leave m.secretsArea
+	// blurred — and a blurred textarea silently drops every keystroke, so the user
+	// could not type a single character.
+	return m.secretsArea.Focus()
 }
 
 // scopeHeaderRE matches a section header line: "[" + scope + "]" with no
