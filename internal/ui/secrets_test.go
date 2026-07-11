@@ -199,6 +199,124 @@ func openSecretsViaKey(m model, name, status string) model {
 	return after.(model)
 }
 
+// typeInto feeds s through the model's Update one rune at a time, exactly as a
+// real keyboard would, so it exercises the whole key-routing path (Update ->
+// updateSecrets -> textarea) rather than poking the textarea directly. Newlines
+// are sent as the Enter key, which the textarea turns into a line break.
+func typeInto(m model, s string) model {
+	for _, r := range s {
+		var msg tea.KeyMsg
+		if r == '\n' {
+			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		} else {
+			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+		}
+		after, _ := m.Update(msg)
+		m = after.(model)
+	}
+	return m
+}
+
+// The editor must be focused the moment it opens, or the textarea silently
+// drops every keystroke. This is the direct regression guard for the
+// value-copy-then-Focus bug (Focus mutated a local copy, leaving the stored
+// textarea blurred so the user could not type).
+func TestSecretsEditorIsFocusedOnOpen(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m = openSecretsViaKey(m, "claude", "Stopped")
+
+	if !m.secretsArea.Focused() {
+		t.Fatal("the secrets editor must be focused on open, or keystrokes are dropped")
+	}
+}
+
+// End-to-end: open the editor with 'e', TYPE a KEY=VALUE pair through the real
+// key path, and ctrl+s. The typed text must reach the buffer and persist. Had
+// the editor opened blurred, the buffer would stay empty and nothing would
+// save — which is exactly the "I can't add a secret" report.
+func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m = openSecretsViaKey(m, "claude", "Stopped")
+
+	m = typeInto(m, "FOO=bar")
+	if got := m.secretsArea.Value(); !strings.Contains(got, "FOO=bar") {
+		t.Fatalf("typed text never reached the editor buffer, value = %q", got)
+	}
+
+	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = after.(model)
+
+	if m.view != viewDetail {
+		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	}
+	if got := m.sec.Get("claude"); got["FOO"] != "bar" {
+		t.Fatalf("typed secret was not persisted, Store.Get = %v", got)
+	}
+}
+
+// A user can type a multi-line, scoped buffer (global pair, a [scope] header,
+// and a scoped pair) and have every scope persist. Exercises Enter-as-newline
+// plus the scope grammar through the real key path.
+func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 120, 30
+	m = openSecretsViaKey(m, "claude", "Stopped")
+
+	m = typeInto(m, "EDITOR=vim\n[github.com/acme]\nGH_TOKEN=ghp_x")
+
+	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = after.(model)
+
+	if m.secretsErr != nil {
+		t.Fatalf("a valid multi-scope buffer should save cleanly, got error: %v", m.secretsErr)
+	}
+	scopes := m.sec.GetAll("claude")
+	if scopes[""]["EDITOR"] != "vim" {
+		t.Fatalf("global scope not persisted, got %v", scopes[""])
+	}
+	if scopes["github.com/acme"]["GH_TOKEN"] != "ghp_x" {
+		t.Fatalf("directory scope not persisted, got %v", scopes["github.com/acme"])
+	}
+}
+
+// Backspace edits the buffer (a further check that keys are actually routed
+// into the focused textarea, not swallowed).
+func TestSecretsEditorBackspaceEdits(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m = openSecretsViaKey(m, "claude", "Stopped")
+
+	m = typeInto(m, "AB")
+	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = after.(model)
+
+	if got := m.secretsArea.Value(); got != "A" {
+		t.Fatalf("backspace did not edit the buffer, value = %q, want %q", got, "A")
+	}
+}
+
+// The opened editor must not paint the code-buffer chrome — the line-number
+// gutter ("1") or the default "┃ " line prompt that tiled a full-height bar
+// down every empty row (both flagged as "hanging" artifacts on the PR).
+func TestSecretsEditorHasNoGutterOrPromptBar(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 100, 30
+	m = openSecretsViaKey(m, "claude", "Stopped")
+
+	if m.secretsArea.ShowLineNumbers {
+		t.Fatal("the secrets editor must not show a line-number gutter")
+	}
+	if m.secretsArea.Prompt != "" {
+		t.Fatalf("the secrets editor must not draw a line prompt, got %q", m.secretsArea.Prompt)
+	}
+	// And the rendered editor must not contain the default vertical prompt bar.
+	if strings.Contains(m.secretsArea.View(), "┃") {
+		t.Fatal("the rendered editor still contains the ┃ prompt bar")
+	}
+}
+
 // 'e' opens the secrets editor regardless of VM status — the whole point of
 // the feature is that secrets live on the host and are editable whether or
 // not the VM happens to be running.
