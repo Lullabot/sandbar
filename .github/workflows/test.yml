@@ -39,6 +39,25 @@ jobs:
           sudo apt-get install -y ansible
           ansible-playbook -i localhost, --connection=local site.yml --syntax-check
 
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      # Unit and integration tests, including the teatest golden snapshots of
+      # the TUI. These need no VM (the lima client is faked), so they run here
+      # rather than in the slow lima-e2e job. The `limae2e`-tagged tests that
+      # boot real VMs stay gated and run only in lima-e2e below.
+      - name: Go tests
+        run: go test ./...
+
   lima-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
