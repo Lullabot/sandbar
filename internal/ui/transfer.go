@@ -13,9 +13,9 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -57,7 +57,7 @@ func (m model) startTransfer(upload bool) (tea.Model, tea.Cmd) {
 // the detail view (unless the user is mid-filter, where the browser cancels the
 // filter). When the browser reports a selection, the flow advances to the
 // destination prompt pre-filled with a per-direction default directory.
-func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Back) && m.browser.NotFiltering() {
 		m.view = viewDetail
 		return m, nil
@@ -87,9 +87,9 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateDest routes keys on the destination prompt. Esc goes back to the browser;
 // Submit (ctrl+s) confirms and launches the copy. Backspace must edit the field,
 // so only esc (not the esc/backspace Back binding) backs out.
-func (m model) updateDest(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateDest(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case msg.Type == tea.KeyEsc:
+	case msg.Code == tea.KeyEsc:
 		// Drop the pending source pick so returning to the browser lets the user
 		// navigate/re-select, instead of the still-set selection bouncing them
 		// straight back here on the next keystroke.

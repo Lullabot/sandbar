@@ -8,8 +8,8 @@ import (
 
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // readPipe bundles the read end of the provisioner pipe. It is stored on the
@@ -96,7 +96,7 @@ func readNextCmd(rp *readPipe) tea.Cmd {
 // (handled in Update) cancels it and all other keys only scroll the output — q
 // and esc must not quit or navigate away and abandon the running provisioner.
 // Once it's done, q quits and back/enter return to the refreshed list.
-func (m model) updateProgress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.running {
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit

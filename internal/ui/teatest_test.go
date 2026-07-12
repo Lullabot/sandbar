@@ -10,9 +10,9 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 )
 
 // These are integration tests that drive the whole Bubble Tea program the way a
@@ -67,6 +67,22 @@ func waitForText(t *testing.T, tm *teatest.TestModel, want string) {
 	}, teatest.WithDuration(5*time.Second), teatest.WithCheckInterval(20*time.Millisecond))
 }
 
+// waitForTypedText is waitForText's counterpart for freshly-typed input. v2's
+// cell-diffing renderer redraws only the cell under the blinking virtual
+// cursor (bubbles/v2 textinput resets and restarts the blink on every
+// keystroke) — so the raw output stream can catch a bare cursor-blink space
+// wedged between two characters that were, from the model's perspective,
+// typed back to back (e.g. "my vm" instead of "myvm"). Collapsing spaces
+// before matching absorbs that renderer artifact while still failing if a
+// character is actually dropped, garbled, or reordered.
+func waitForTypedText(t *testing.T, tm *teatest.TestModel, want string) {
+	t.Helper()
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		got := strings.ReplaceAll(ansi.Strip(string(b)), " ", "")
+		return strings.Contains(got, want)
+	}, teatest.WithDuration(5*time.Second), teatest.WithCheckInterval(20*time.Millisecond))
+}
+
 // finalScreen quits the program and returns the final model's rendered view
 // with ANSI stripped — the deterministic snapshot payload.
 func finalScreen(t *testing.T, tm *teatest.TestModel) []byte {
@@ -75,7 +91,7 @@ func finalScreen(t *testing.T, tm *teatest.TestModel) []byte {
 		t.Fatalf("quit: %v", err)
 	}
 	fm := tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
-	return []byte(ansi.Strip(fm.View()) + "\n")
+	return []byte(ansi.Strip(fm.View().Content) + "\n")
 }
 
 // The VM list renders with the canned instances, their sizes humanized and the
@@ -90,7 +106,7 @@ func TestTUIListView(t *testing.T) {
 func TestTUIDetailView(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	waitForText(t, tm, "VM: claude")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
@@ -99,9 +115,9 @@ func TestTUIDetailView(t *testing.T) {
 func TestTUIDeleteConfirm(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	waitForText(t, tm, "VM: claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	tm.Send(runeKey('d'))
 	waitForText(t, tm, `Delete "claude"?`)
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
@@ -110,9 +126,9 @@ func TestTUIDeleteConfirm(t *testing.T) {
 func TestTUISecretsPanelEmpty(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	waitForText(t, tm, "VM: claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	tm.Send(runeKey('e'))
 	waitForText(t, tm, "Secrets: claude")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
@@ -124,10 +140,10 @@ func TestTUISecretsPanelEmpty(t *testing.T) {
 func TestTUINewFormAcceptsTyping(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	tm.Send(runeKey('n'))
 	waitForText(t, tm, "New VM")
 	tm.Type("myvm")
-	waitForText(t, tm, "myvm") // the field echoes the typed characters
+	waitForTypedText(t, tm, "myvm") // the field echoes the typed characters
 
 	fm := finalModel(t, tm)
 	if got := fm.inputs[fName].Value(); got != "myvm" {

@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // NormalizePath cleans a pasted or drag-dropped path so it is immediately
@@ -195,13 +195,12 @@ func (d DestInput) Update(msg tea.Msg) (DestInput, tea.Cmd) {
 		d.entries = msg.entries
 		d.refilter()
 		return d, nil
-	case tea.KeyMsg:
-		if msg.Paste {
-			d.ti.SetValue(NormalizePath(string(msg.Runes)))
-			d.ti.CursorEnd()
-			return d, d.maybeRelist()
-		}
-		switch msg.Type {
+	case tea.PasteMsg:
+		d.ti.SetValue(NormalizePath(msg.Content))
+		d.ti.CursorEnd()
+		return d, d.maybeRelist()
+	case tea.KeyPressMsg:
+		switch msg.Code {
 		case tea.KeyDown:
 			if d.cursor < len(d.matches)-1 {
 				d.cursor++

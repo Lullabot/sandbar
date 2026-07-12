@@ -11,7 +11,7 @@ import (
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/ui"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // version is the sand release version. It defaults to "dev" for local/source
@@ -61,7 +61,7 @@ func runTUI() {
 
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
 
-	if _, err := tea.NewProgram(ui.New(cli, prov), tea.WithAltScreen()).Run(); err != nil {
+	if _, err := tea.NewProgram(ui.New(cli, prov)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

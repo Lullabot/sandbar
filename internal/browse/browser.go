@@ -4,9 +4,9 @@ import (
 	"context"
 	"path"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 )
 
 // selectKey chooses the highlighted entry regardless of type — distinct from
@@ -141,7 +141,7 @@ func (b Browser) Update(msg tea.Msg) (Browser, tea.Cmd) {
 		b.list.ResetSelected()
 		return b, cmd
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// While the user is typing a filter, let the list consume every key so it
 		// does not steal navigate/select.
 		if b.list.FilterState() == list.Filtering {
@@ -155,7 +155,7 @@ func (b Browser) Update(msg tea.Msg) (Browser, tea.Cmd) {
 				b.applySelect(it)
 			}
 			return b, nil
-		case msg.Type == tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			it, ok := b.list.SelectedItem().(item)
 			if !ok {
 				return b, nil

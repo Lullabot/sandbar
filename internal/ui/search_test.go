@@ -5,7 +5,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/vm"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // rowNames extracts the Name column (row[0]) from every row currently in the
@@ -50,7 +50,7 @@ func TestSearchCapturesActionKeys(t *testing.T) {
 	}
 
 	for _, r := range []rune{'s', 'x', 'd', 'r', 'S', 'f', 'n', 'q'} {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(runeKey(r))
 		m = mi.(model)
 	}
 
@@ -69,7 +69,7 @@ func TestSearchCapturesActionKeys(t *testing.T) {
 	}
 
 	// esc clears the query and exits search.
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = mi.(model)
 	if m.searching || m.searchQuery != "" {
 		t.Fatalf("esc should clear the query and exit search (searching=%v query=%q)", m.searching, m.searchQuery)
@@ -92,12 +92,12 @@ func TestSearchEnterKeepsFilter(t *testing.T) {
 	mi, _ := m.Update(runeKey('/'))
 	m = mi.(model)
 	for _, r := range []rune{'t', 'w', 'o'} {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(runeKey(r))
 		m = mi.(model)
 	}
 
 	// Commit with enter: leave search but keep the query and the filtered rows.
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mi.(model)
 	if m.searching {
 		t.Fatal("enter should exit search mode")
@@ -135,7 +135,7 @@ func TestSearchFilterComposesWithManaged(t *testing.T) {
 	mi, _ := m.Update(runeKey('/'))
 	m = mi.(model)
 	for _, r := range []rune{'C', 'L', 'A', 'U', 'D', 'E'} {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(runeKey(r))
 		m = mi.(model)
 	}
 
@@ -173,10 +173,10 @@ func TestSearchEscClearsCommittedFilter(t *testing.T) {
 	mi, _ := m.Update(runeKey('/'))
 	m = mi.(model)
 	for _, r := range []rune{'c', 'l', 'a', 'u', 'd', 'e'} {
-		mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		mi, _ = m.Update(runeKey(r))
 		m = mi.(model)
 	}
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = mi.(model)
 	if m.searching || m.searchQuery != "claude" {
 		t.Fatalf("precondition: committed filter (searching=%v query=%q)", m.searching, m.searchQuery)
@@ -186,7 +186,7 @@ func TestSearchEscClearsCommittedFilter(t *testing.T) {
 	}
 
 	// esc on the list (no longer in search mode) clears the committed filter.
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = mi.(model)
 	if m.searchQuery != "" {
 		t.Fatalf("esc should clear the committed filter, query = %q", m.searchQuery)
