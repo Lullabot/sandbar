@@ -12,5 +12,10 @@ import "embed"
 // directories includes dot- and underscore-prefixed files that go:embed
 // would otherwise silently drop.
 //
+// This list defines what "the playbook" is, so the in-guest rsync in
+// internal/provision mirrors it as a filter (a repo-mode mount is the whole
+// checkout, and the guest must get the same tree either way). Change one, change
+// the other; TestGuestSyncCopiesOnlyThePlaybook fails if they drift.
+//
 //go:embed site.yml ansible.cfg inventory all:roles all:group_vars
 var PlaybookFS embed.FS

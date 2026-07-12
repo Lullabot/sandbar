@@ -25,12 +25,25 @@ import (
 // restrictive global umask: a global umask would also make mode-less files the
 // playbook creates — notably the apt keyrings — root-only, which breaks apt
 // signature verification by the _apt sandbox user.
+//
+// The rsync copies only the playbook fileset, never the whole mount. In repo
+// mode /mnt/playbook is the git checkout, so an unfiltered sync would drag the
+// entire repository (.git, Go sources, agent tooling) into every VM — and
+// readlink() on a symlink under the read-only host mount fails with EPERM, so a
+// checkout containing symlinks (.claude/skills/) failed the sync outright. The
+// filter list is the rsync spelling of the go:embed directives in
+// playbook_embed.go: keep the two in step, and the guest gets the same tree
+// whether it came from a checkout or the embedded copy. --delete-excluded makes
+// /root/playbook match that set exactly, clearing junk a pre-filter base baked in.
 const inGuestScript = `set -eu -o pipefail
 vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
 install -m 600 /dev/null "$vars"
 cat > "$vars"
-rsync -a --delete /mnt/playbook/ /root/playbook/
+rsync -a --delete --delete-excluded \
+  --include=/site.yml --include=/ansible.cfg --include=/inventory \
+  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
+  /mnt/playbook/ /root/playbook/
 cd /root/playbook
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
