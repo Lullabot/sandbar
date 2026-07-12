@@ -1,3 +1,37 @@
+# Release pipeline. On a push to `main`, release-please maintains a release PR
+# that collects the changelog from Conventional Commit messages; merging that PR
+# makes this workflow cut the release: release-please creates the `vX.Y.Z` tag
+# and a *draft* GitHub Release, then GoReleaser cross-compiles `sand` for
+# darwin/linux x amd64/arm64, uploads the archives into that draft, publishes
+# it, and pushes an updated formula to the `lullabot/homebrew-sandbar` tap.
+#
+# Both steps live in one workflow, chained with `needs`, because the release
+# must still be a draft when GoReleaser reaches it. This repository has GitHub's
+# immutable releases turned on: a release is frozen the moment it is published
+# and can never gain another asset (the `422 Cannot upload assets to an
+# immutable release` that broke the v0.1.0 run). release-please therefore leaves
+# the release unpublished and GoReleaser publishes it once every archive is
+# attached — and `needs` guarantees GoReleaser only ever sees a draft that
+# already exists. A separate tag-triggered workflow would race the draft's
+# creation, and a GoReleaser run that finds no draft to adopt creates and
+# publishes a release of its own, burning that version number for good.
+#
+# If GoReleaser fails, re-run the failed job from the run page: release-please's
+# outputs are preserved, so the retry uploads into the same draft.
+#
+# Human prerequisites (one-time, performed by a release maintainer, NOT by
+# this workflow):
+#   1. Create the empty `lullabot/homebrew-sandbar` GitHub repository (this is
+#      the Homebrew tap GoReleaser's `brews:` publisher pushes formula updates
+#      to).
+#   2. Create a dedicated GitHub App (org-owned) with Contents:write, installed
+#      only on `lullabot/homebrew-sandbar`. Store its App ID as the
+#      `HOMEBREW_TAP_APP_ID` Actions variable and its private key as the
+#      `HOMEBREW_TAP_APP_PRIVATE_KEY` secret on this repo; the job mints a
+#      short-lived, tap-scoped token from them at runtime.
+#   3. Install the org's release-please App on this repo (contents:write +
+#      pull-requests:write) and set the `RELEASE_PLEASE_APP_ID` variable and
+#      `RELEASE_PLEASE_PRIVATE_KEY` secret.
 name: release-please
 
 on:
@@ -15,22 +49,59 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-24.04
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       # A GitHub App token (not the default GITHUB_TOKEN) is required here on
-      # purpose: release-please creates the release commit and the `v*` tag, and
-      # that tag is what triggers the `release` workflow (GoReleaser). Events
-      # made with GITHUB_TOKEN deliberately do NOT trigger other workflows, so a
-      # GITHUB_TOKEN-created tag would leave the binaries + Homebrew formula
-      # unbuilt. The token is minted per-run and expires in ~1h. Reuses the
-      # org's release-please App (install it on this repo with contents:write +
-      # pull-requests:write).
+      # purpose: release-please opens the release PR, and events made with
+      # GITHUB_TOKEN deliberately do NOT trigger other workflows, so a
+      # GITHUB_TOKEN-opened PR would never run the test workflow. The token is
+      # minted per-run and expires in ~1h. Reuses the org's release-please App.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  goreleaser:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      # The release commit is already on `main` at this point, but check out the
+      # tag explicitly: GoReleaser derives the version from the git state, and
+      # `main` may have moved on since release-please tagged it.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Mint a short-lived (~1h) token scoped to the tap repo so GoReleaser's
+      # `brews:` publisher can push the formula there. Replaces a long-lived PAT:
+      # the dedicated App is installed only on homebrew-sandbar with
+      # contents:write, so this workflow's cross-repo reach is exactly that.
+      - uses: actions/create-github-app-token@v3
+        id: tap-token
+        with:
+          app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-sandbar
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          # The GitHub Release in THIS repo uses the default token; only the
+          # cross-repo formula push uses the App token.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.tap-token.outputs.token }}
