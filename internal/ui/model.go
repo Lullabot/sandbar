@@ -11,7 +11,8 @@
 package ui
 
 import (
-	"context"
+	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
@@ -57,8 +58,11 @@ const (
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
-// all fields must be safe to copy (note: no strings.Builder — output is a plain
-// string for that reason).
+// every field must be safe to copy — no strings.Builder, and nothing mutable that
+// has to outlive one Update call. State that does (a running job's log, its
+// cancel func, its parsed progress) lives behind the jobs POINTER below, in the
+// one registry every model copy shares. That is the whole reason the registry is
+// a pointer: a copied model must not fork the work it is watching.
 type model struct {
 	cli  *lima.Client
 	prov *provision.Provisioner
@@ -69,6 +73,7 @@ type model struct {
 	view   view
 	width  int
 	height int
+	layout layoutMode // budgets derived from width/height by classify (see layout.go); set by applySize
 	status string
 
 	// List + detail.
@@ -76,6 +81,29 @@ type model struct {
 	vms         []vm.VM
 	detail      vm.VM
 	managedOnly bool // when true, the list shows only sand-managed VMs
+
+	// jobs is the VM-keyed job registry (jobs.go): every provision and transfer in
+	// flight, plus the last run each VM retained. It is a POINTER because the model
+	// is passed by value — a registry embedded here would fork on the first copy —
+	// and it satisfies the jobLookup seam in commandreg.go, which gates Delete
+	// while a VM builds and the reopen-log verb on a VM having a run to show. A nil
+	// registry is safe to call and reports "no jobs", so a model built by hand
+	// behaves exactly as it did before this existed.
+	jobs *jobRegistry
+
+	// heartbeats is the VM-keyed guest heartbeat registry (heartbeat.go): one live
+	// `limactl shell` per RUNNING VM, streaming real cpu and memory out of the guest.
+	// A POINTER for the same reason jobs is, and nil-safe for the same reason.
+	heartbeats *heartbeatRegistry
+
+	// focused tracks whether the terminal has focus, and lastInput when the user
+	// last touched a key. Together with the active view they are the idle gate
+	// (shouldTick, heartbeat.go) that decides whether sand may hold SSH connections
+	// open into the guests. focused starts TRUE: a terminal that does not support
+	// focus reporting never sends a FocusMsg, and a gate that waited for one would
+	// leave the board permanently blank.
+	focused   bool
+	lastInput time.Time
 
 	// Incremental name search. When searching is true, typed keys edit
 	// searchQuery instead of firing actions; searchQuery is a case-insensitive
@@ -111,18 +139,21 @@ type model struct {
 	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
 	toggleFocus          int    // -1 = focus is in the text inputs; 0 = Claude toggle; 1 = project toggle (only reachable when projectToggleEnabled)
 
-	// Progress / streaming.
-	viewport      viewport.Model
-	spinner       spinner.Model
-	progressTitle string
-	progressBack  view // screen to return to when the finished progress view is dismissed
-	output        string
-	running       bool
-	doneErr       error
-	reader        *readPipe
-	provCfg       vm.CreateConfig    // config of the instance being provisioned (for the managed registry)
-	cancel        context.CancelFunc // cancels the in-flight provisioner (ctrl+c on the progress view)
-	canceled      bool               // the current/last run was canceled by the user
+	// Progress / streaming. Everything that used to be a single job's state on the
+	// model — its title, back view, output buffer, running flag, error, reader,
+	// config and cancel func — now lives on that job in the registry above. What is
+	// left here is which job the progress SCREEN is showing, which is a property of
+	// the screen, not of the work: the job goes on whether or not anyone is looking.
+	viewport   viewport.Model
+	spinner    spinner.Model
+	progressVM string // the VM whose run the progress screen displays ("" = none)
+
+	// spinning is true while exactly one spinner.Tick loop is in flight. Jobs and
+	// quick actions can now overlap (they could not while the old model-wide
+	// running flag froze the keyboard), and each one kicking its own tick would
+	// stack loops and spin the animation at double speed. tickSpinner owns this
+	// flag.
+	spinning bool
 
 	// File transfer (Upload/Download). The browser and dest prompt are copy-safe
 	// (only a list.Model / textinput.Model plus small scalars), matching the
@@ -166,17 +197,26 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 	}
 
 	m := model{
-		cli:      cli,
-		prov:     prov,
-		reg:      reg,
-		sec:      sec,
-		keys:     defaultKeys(),
-		help:     help.New(),
-		view:     viewList,
-		table:    newTable(),
-		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(18)),
-		spinner:  sp,
+		cli:        cli,
+		prov:       prov,
+		reg:        reg,
+		sec:        sec,
+		jobs:       newJobRegistry(),
+		heartbeats: newHeartbeats(cli),
+		keys:       newKeyMap(),
+		help:       help.New(),
+		view:       viewList,
+		table:      newTable(),
+		viewport:   viewport.New(),
+		spinner:    sp,
+		// The session starts focused and freshly used; anything else and the idle
+		// gate would be shut before the first frame.
+		focused:   true,
+		lastInput: time.Now(),
 	}
+	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
+	// the model renders sensibly before the first real WindowSizeMsg arrives.
+	m.applySize(80, 24)
 	// Neither load failure may silently shadow the other.
 	switch {
 	case loadErr != nil && secErr != nil:
@@ -194,52 +234,129 @@ func (m model) Init() tea.Cmd {
 	return listCmd(m.cli)
 }
 
-// contentWidth is the usable text width inside appStyle's horizontal padding (2
-// columns each side). Dynamic help/warning text is wrapped to it (via a style's
-// Width) so a long line reflows down the screen instead of being clipped at the
-// terminal's right edge. It floors so a not-yet-sized model still renders.
-func (m model) contentWidth() int {
-	if w := m.width - 4; w >= 20 {
-		return w
+// applySize recomputes the layout mode for a new terminal size and pushes its
+// budgets onto every sub-component the active (or potentially active) view
+// owns. This is the single place classify is invoked — nothing else may call
+// it, so every pane's size traces back to one decision. Called both from New
+// (to seed a pre-resize default) and the WindowSizeMsg handler.
+func (m *model) applySize(w, h int) {
+	m.width, m.height = w, h
+	m.layout = classify(w, h)
+
+	m.help.SetWidth(w)
+	m.viewport.SetWidth(m.layout.ContentWidth)
+	m.viewport.SetHeight(m.layout.GridHeight)
+	m.table.SetWidth(m.layout.ContentWidth)
+	m.table.SetHeight(m.layout.GridHeight)
+
+	// Resize an active file browser too (its inner list is only initialized
+	// while a transfer is in flight, so guard on the view to avoid touching a
+	// zero-value browser).
+	if m.view == viewBrowse {
+		m.browser.SetSize(m.layout.ContentWidth, m.layout.GridHeight)
 	}
-	return 20
+	// Keep an open secrets editor sized to the terminal (its height budget
+	// must match openSecrets, or the editor plus its footer would overflow and
+	// scroll the title off the top).
+	if m.view == viewSecrets {
+		w, h := secretsEditorSize(m.layout)
+		m.secretsArea.SetWidth(w)
+		m.secretsArea.SetHeight(h)
+	}
+	// Reflow the shown job's streamed output to the new width so it stays wrapped.
+	if m.progressVM != "" {
+		m.setOutput()
+	}
 }
 
-// Update is the single dispatch point. Key messages route by active view; all
-// other messages (async results, ticks, blinks) are handled or forwarded to the
-// active sub-component.
+// tickSpinner starts the spinner's tick loop, and returns nil if one is already
+// in flight. Exactly one loop may exist: jobs and quick lifecycle actions can now
+// overlap — two builds, or a build plus a start — and a tick loop per caller
+// would animate the spinner at two, three, N times its speed. The loop ends
+// itself (clearing m.spinning) when the last of them finishes; see the
+// spinner.TickMsg handler in Update.
+func (m *model) tickSpinner() tea.Cmd {
+	if m.spinning {
+		return nil
+	}
+	m.spinning = true
+	return m.spinner.Tick
+}
+
+// present indexes a freshly loaded VM list by name, for jobRegistry.reconcile.
+func present(vms []vm.VM) map[string]bool {
+	set := make(map[string]bool, len(vms))
+	for _, v := range vms {
+		set[v.Name] = true
+	}
+	return set
+}
+
+// Update dispatches the message, then reconciles the guest heartbeats against
+// whatever state that left behind.
+//
+// The reconcile runs after EVERY message rather than at the few places that
+// obviously matter, and that is deliberate: the heartbeat's gate (shouldTick) turns
+// on the active view, the terminal's focus, and how long ago the user last typed —
+// three things that change under a dozen different messages, in five different
+// files. A gate re-checked at "the places that change it" is a gate that is one
+// forgotten `m.view = …` away from holding an SSH connection open into every guest
+// on the machine, forever, with nobody watching. Checking it centrally costs a mutex
+// and a map walk over at most a handful of VMs, and it cannot be forgotten.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.dispatch(msg)
+	nm, ok := next.(model)
+	if !ok {
+		return next, cmd
+	}
+	return nm, tea.Batch(cmd, nm.syncHeartbeats())
+}
+
+// dispatch is the single message-handling point. Key messages route by active view;
+// all other messages (async results, ticks, blinks) are handled or forwarded to the
+// active sub-component.
+func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		m.help.SetWidth(msg.Width)
-		m.viewport.SetWidth(max(20, msg.Width-8))
-		m.viewport.SetHeight(max(5, msg.Height-12))
-		m.table.SetWidth(max(40, msg.Width-6))
-		m.table.SetHeight(max(3, msg.Height-12))
-		// Resize an active file browser too (its inner list is only initialized
-		// while a transfer is in flight, so guard on the view to avoid touching a
-		// zero-value browser).
-		if m.view == viewBrowse {
-			m.browser.SetSize(max(20, msg.Width-6), max(5, msg.Height-8))
-		}
-		// Keep an open secrets editor sized to the terminal (its height budget
-		// must match openSecrets, or the editor plus its footer would overflow and
-		// scroll the title off the top).
-		if m.view == viewSecrets {
-			m.secretsArea.SetWidth(max(20, msg.Width-8))
-			m.secretsArea.SetHeight(max(5, msg.Height-secretsChrome))
-		}
-		// Reflow any streamed output to the new width so it stays wrapped.
-		if m.output != "" {
-			m.setOutput()
-		}
+		m.applySize(msg.Width, msg.Height)
 		return m, nil
 
+	case tea.FocusMsg:
+		// The terminal came back to the foreground. That is the user returning, so it
+		// reopens the idle gate on both counts — and syncHeartbeats, above, reopens
+		// the connections.
+		m.focused = true
+		m.lastInput = time.Now()
+		return m, nil
+
+	case tea.BlurMsg:
+		// Backgrounded. Every heartbeat is an SSH connection into a guest, and nobody
+		// is looking at the gauges they feed.
+		m.focused = false
+		return m, nil
+
+	case heartbeatSampleMsg:
+		// The channel closed: this VM's stream ended. Against a real VM that is what a
+		// `limactl stop` looks like from here (the shell dies within ~300ms with `exit
+		// status 255`), so it is the ordinary path for a VM going down, not an
+		// exceptional one. ended() drops the reading, so the gauge goes with the VM
+		// instead of freezing at whatever it last said.
+		if !msg.ok {
+			m.heartbeats.ended(msg.vm, msg.epoch)
+			return m, nil
+		}
+		// fold returns nil for a sample from a connection that has since been replaced,
+		// which ends that stale read loop rather than letting it double up on the live
+		// one.
+		return m, heartbeatReadCmd(msg.vm, msg.epoch, m.heartbeats.fold(msg.vm, msg.epoch, msg.sample))
+
 	case spinner.TickMsg:
-		// The spinner animates both for a long provisioner run and for a quick
-		// list lifecycle action; when neither is in flight, stop ticking.
-		if !m.running && !m.acting {
+		// The spinner animates for any job in flight (on any VM, whether or not its
+		// screen is showing) and for a quick lifecycle action; when neither is
+		// happening, the loop ends and spinning goes false so the next action can
+		// start a fresh one.
+		if !m.acting && !m.jobs.anyRunning() {
+			m.spinning = false
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -267,6 +384,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// isn't worth displacing the reconcile status above.
 		for _, name := range dropped {
 			_ = m.sec.Remove(name)
+		}
+		// Fold the fresh list into the job registry: a job whose VM has disappeared
+		// (deleted here or outside sand) is cancelled and reaped rather than left
+		// running against a VM that no longer exists. reconcile knows not to reap a
+		// build whose VM does not exist YET, nor a reset that deleted its own VM.
+		if reaped := m.jobs.reconcile(present(msg.vms)); len(reaped) > 0 {
+			m.status = "canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared"
+			// Nothing left to show for the run the user was watching.
+			if m.view == viewProgress && !m.jobs.exists(m.progressVM) {
+				m.view = viewList
+			}
 		}
 		m.refreshRows()
 		// The VM screen acts on the VM it displays, so its snapshot goes stale after
@@ -296,6 +424,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// delete leaves the VM in place, so the user should stay on its screen
 			// to see the error.
 			m.view = viewList
+			// The user acted on this VM in the most final way there is, so its
+			// retained run goes with it: a failed build's sticky Failed status exists
+			// to be acted on, and deleting the VM is acting on it. (A run still in
+			// flight is cancelled by remove — Delete is gated on !vmBuilding, so that
+			// only happens if the VM was deleted from outside sand.)
+			m.jobs.remove(msg.name)
 			// A deleted VM is no longer managed, and its host-stored secrets no
 			// longer have a guest to apply to; drop it from both indexes. Neither
 			// failure may silently shadow the other.
@@ -323,28 +457,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listCmd(m.cli) // refresh after every action
 
 	case provisionOutputMsg:
-		if msg != "" {
-			m.output += string(msg)
+		// The chunk is keyed by VM, so N jobs can stream at once without their
+		// output crossing streams. addOutput reports false for a job that was
+		// reaped mid-flight: its late chunks are dropped and its reader is not
+		// re-issued, which is what ends that job's read loop.
+		if !m.jobs.addOutput(msg.vm, msg.chunk) {
+			return m, nil
+		}
+		if m.view == viewProgress && m.progressVM == msg.vm {
 			m.setOutput()
 		}
-		return m, readNextCmd(m.reader)
+		return m, readNextCmd(msg.vm, m.jobs.reader(msg.vm))
 
 	case provisionDoneMsg:
-		m.running = false
+		// finish retains the job — with its log — whether it succeeded or failed:
+		// that is what makes the tile's Failed status sticky and its log
+		// reopenable. It reports false only for a job already reaped, whose done
+		// message is stale.
+		job, ok := m.jobs.finish(msg.vm, msg.err)
+		if !ok {
+			return m, nil
+		}
+		if m.view == viewProgress && m.progressVM == msg.vm {
+			m.setOutput()
+		}
 		// A user-canceled run leaves partial state behind; don't record it as
 		// managed and don't surface its (kill-induced) error as a failure.
-		if m.canceled {
-			m.doneErr = nil
+		if job.Canceled {
 			return m, listCmd(m.cli)
 		}
-		m.doneErr = msg.err
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it. Shared with the headless
 		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
+		// A transfer's job carries no config, so it is never recorded — the
+		// distinction m.provCfg used to draw, now drawn per-job.
+		cfg, isProvision := m.jobs.config(msg.vm)
 		var applyCmd tea.Cmd
-		if msg.err == nil && m.provCfg.Name != "" {
-			if err := manage.RecordSuccess(m.reg, m.provCfg); err != nil {
+		if msg.err == nil && isProvision && cfg.Name != "" {
+			if err := manage.RecordSuccess(m.reg, cfg); err != nil {
 				m.status = "VM ready, but recording it as managed failed: " + err.Error()
 			}
 			// The create form's token becomes the VM's GH_TOKEN secret, so it can
@@ -357,10 +508,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// would silently diverge the two entrypoints (Option A, rejected).
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
 			// cannot corrupt the store ahead of Set validating it.
-			if m.provCfg.CloneToken != "" {
-				pairs := m.sec.Get(m.provCfg.Name)
-				pairs["GH_TOKEN"] = m.provCfg.CloneToken
-				if err := m.sec.Set(m.provCfg.Name, pairs); err != nil {
+			if cfg.CloneToken != "" {
+				pairs := m.sec.Get(cfg.Name)
+				pairs["GH_TOKEN"] = cfg.CloneToken
+				if err := m.sec.Set(cfg.Name, pairs); err != nil {
 					m.status = "VM ready, but the token could not be saved as a secret: " + err.Error()
 				}
 			}
@@ -369,8 +520,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so the guest would have no secrets.env until the VM's *next* start.
 			// Dispatch the apply now (batched with the list refresh) so a user who
 			// creates a VM and immediately shells in finds GH_TOKEN already set.
-			user, scopes := m.secretsFor(m.provCfg.Name)
-			applyCmd = applySecretsCmd(m.cli, m.provCfg.Name, user, scopes)
+			user, scopes := m.secretsFor(cfg.Name)
+			applyCmd = applySecretsCmd(m.cli, cfg.Name, user, scopes)
 		}
 		if applyCmd != nil {
 			return m, tea.Batch(listCmd(m.cli), applyCmd)
@@ -378,17 +529,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listCmd(m.cli) // refresh the list the user returns to
 
 	case tea.KeyPressMsg:
+		// Any key is proof someone is still there, which is half of the idle gate (see
+		// shouldTick). It is also what WAKES a session that went idle: no timer runs
+		// while sand is idle — that is the point of being idle — so the keypress that
+		// says "I'm back" is the message that reopens the heartbeats.
+		m.lastInput = time.Now()
+
 		if msg.String() == "ctrl+c" {
-			// While a build is in flight, ctrl+c cancels it (killing the underlying
-			// limactl via the provisioner's context) and shows the result, rather
-			// than quitting the whole TUI and orphaning a half-built VM. Everywhere
-			// else — including the finished progress screen — ctrl+c quits.
-			if m.view == viewProgress && m.running {
-				if m.cancel != nil {
-					m.cancel()
-				}
-				m.canceled = true
-				m.output += "\n^C — canceling, cleaning up…\n"
+			// On the progress screen, ctrl+c cancels the job being SHOWN — and only
+			// that one, killing the limactl subprocess it is blocked on — rather than
+			// quitting the whole TUI and orphaning a half-built VM. Cancellation is
+			// per-job now: with several builds in flight, the one on screen is the one
+			// the user is aiming at. Everywhere else — including a finished progress
+			// screen — ctrl+c quits.
+			if m.view == viewProgress && m.jobs.cancelJob(m.progressVM) {
 				m.setOutput()
 				return m, nil
 			}
@@ -415,17 +569,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.forward(msg)
 }
 
-// setOutput wraps the accumulated provisioner output to the viewport width and
-// pins the view to the bottom. The bubbles viewport truncates lines wider than
-// its width; wrapping first keeps long lines — notably Ansible error paths —
-// fully readable as the user scrolls. ansi.Wrap breaks over-long unbreakable
-// tokens (e.g. file paths) and preserves the output's ANSI colour codes.
+// setOutput wraps the SHOWN job's accumulated output to the viewport width and
+// pins the view to the bottom. The buffer comes from the job registry, not from
+// the model, which is what lets the user leave a build and come back to a log
+// that kept filling while they were away. The bubbles viewport truncates lines
+// wider than its width; wrapping first keeps long lines — notably Ansible error
+// paths — fully readable as the user scrolls. ansi.Wrap breaks over-long
+// unbreakable tokens (e.g. file paths) and preserves the output's ANSI colour
+// codes.
 func (m *model) setOutput() {
 	w := m.viewport.Width()
 	if w < 1 {
 		w = 80
 	}
-	m.viewport.SetContent(ansi.Wrap(m.output, w, ""))
+	out := ""
+	if job, ok := m.shownJob(); ok {
+		out = job.Output
+	}
+	m.viewport.SetContent(ansi.Wrap(out, w, ""))
 	m.viewport.GotoBottom()
 }
 
@@ -514,5 +675,11 @@ func (m model) View() tea.View {
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
+	// Ask the terminal to report focus, which is what delivers the FocusMsg/BlurMsg
+	// that half the heartbeat's idle gate rests on (see shouldTick). A terminal that
+	// does not support it simply never sends one, and the gate falls back to "the
+	// user is here" — the only safe default, since the alternative is a board that
+	// never fills in.
+	v.ReportFocus = true
 	return v
 }

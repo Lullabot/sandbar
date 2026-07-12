@@ -20,14 +20,12 @@ import (
 )
 
 // startTransfer opens the file browser for an Upload (host→guest) or Download
-// (guest→host). Both directions require a running VM and guard with a clear
-// message otherwise, mirroring the list's shell-action guard. The browser is
-// seeded with the appropriate DirLister and start directory per direction.
+// (guest→host). Both directions require a running VM; that guard lives in the
+// Upload/Download commands' enabledFor (commandreg.go) — same as Shell — so a
+// stopped VM never dispatches here at all rather than dispatching and
+// explaining itself. The browser is seeded with the appropriate DirLister and
+// start directory per direction.
 func (m model) startTransfer(upload bool) (tea.Model, tea.Cmd) {
-	if m.detail.Status != "Running" {
-		m.status = m.detail.Name + " must be running to transfer files (press s to start it)"
-		return m, nil
-	}
 	m.status = ""
 	m.transferVM = m.detail.Name
 	m.transferUpload = upload
@@ -46,9 +44,7 @@ func (m model) startTransfer(upload bool) (tea.Model, tea.Cmd) {
 		title = "Download — pick a guest file or directory"
 	}
 	m.browser = browse.NewBrowser(lister, title)
-	if m.width > 0 && m.height > 0 {
-		m.browser.SetSize(max(20, m.width-6), max(5, m.height-8))
-	}
+	m.browser.SetSize(m.layout.ContentWidth, m.layout.GridHeight)
 	m.view = viewBrowse
 	return m, m.browser.Open(startDir)
 }
@@ -144,9 +140,16 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	run := func(ctx context.Context, out io.Writer) error {
 		return m.cli.Copy(ctx, out, recursive, src, dst)
 	}
-	// beginStream clears provCfg, so provisionDoneMsg will NOT record the transfer
-	// in the managed registry — a copy is not a managed VM.
-	return m, m.beginStream(title, viewDetail, run)
+	// beginStream registers the job WITHOUT a provision config (only
+	// beginProvision/beginReset attach one), so provisionDoneMsg will NOT record
+	// the transfer in the managed registry — a copy is not a managed VM — and the
+	// VM's tile will not read as Building while it runs.
+	return m, m.beginStream(m.transferVM, title, viewDetail, run)
+}
+
+// destHelp returns the bindings shown in the destination-prompt's help bar.
+func (m model) destHelp() []key.Binding {
+	return []key.Binding{m.keys.Submit, m.keys.Back}
 }
 
 // destView renders the destination-directory prompt.
@@ -162,7 +165,7 @@ func (m model) destView() string {
 	b.WriteString("\n\n")
 	b.WriteString(statusStyle.Render("The selected item is placed INSIDE this directory."))
 	b.WriteString("\n" + statusStyle.Render("Type to autocomplete · ↑/↓ choose · enter fills · ctrl+s copy · esc back"))
-	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n\n" + m.help.ShortHelpView(m.destHelp()))
 	return appStyle.Render(b.String())
 }
 

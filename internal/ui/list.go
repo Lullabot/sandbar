@@ -157,14 +157,12 @@ func (m model) lookupVM(name string) (vm.VM, bool) {
 // beginAction marks a quick list lifecycle action (start/stop/restart/delete) as
 // in flight and batches its command with the spinner tick, so the list shows a
 // live spinner beside the status line until the matching actionDoneMsg clears it.
-// The tick is only kicked when no action is already running, so a second key
-// press can't stack tick loops and spin the animation at double speed.
+// tickSpinner is what keeps a second key press — or a build already running on
+// another VM — from stacking tick loops and spinning the animation at double
+// speed.
 func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
-	if m.acting {
-		return cmd
-	}
 	m.acting = true
-	return tea.Batch(cmd, m.spinner.Tick)
+	return tea.Batch(cmd, m.tickSpinner())
 }
 
 // updateList handles keys while the list (or its confirm overlay) is active.
@@ -274,10 +272,28 @@ func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// 'g' is a bubbles/table binding (GotoTop). On the list that is fine — we
 	// want the table's 'g'. Download (also 'g') only matches in updateDetail,
 	// which has no table, so the two never collide: updateList never checks
-	// m.keys.Download, and viewHelp scopes the download hint to viewDetail.
+	// for a Download binding, and the detail screen's own help/dispatch (see
+	// commandreg.go) scopes the download hint to the VM screen.
 	var cmd tea.Cmd
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
+}
+
+// listHelp returns the bindings shown in the list screen's help bar: the
+// pending-confirm overlay and the live search prompt each replace the normal
+// set of global/chrome keys with their own narrower one.
+func (m model) listHelp() []key.Binding {
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
+	if m.searching {
+		// esc clears/exits, enter commits the filter.
+		return []key.Binding{m.keys.Back, m.keys.Enter}
+	}
+	return []key.Binding{
+		m.keys.Enter, m.keys.New, m.keys.Filter, m.keys.Search,
+		m.keys.StopAll, m.keys.Quit,
+	}
 }
 
 // listView renders the table, status line, optional confirm prompt, and help.
@@ -314,6 +330,6 @@ func (m model) listView() string {
 		b.WriteString("\n" + statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery)))
 	}
 
-	b.WriteString("\n\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n\n" + m.help.ShortHelpView(m.listHelp()))
 	return appStyle.Render(b.String())
 }

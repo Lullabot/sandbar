@@ -1,0 +1,192 @@
+cpu  1681 0 2734 155860 277 0 98 42 0 0
+cpu0 974 0 1482 77767 156 0 33 8 0 0
+cpu1 706 0 1251 78093 120 0 65 33 0 0
+intr 163544 46 9 0 0 1394 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 0 0 0 0 0 1 0 4395 3551 0 0 0 1399 808 0 699 600 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 205051
+btime 1783896466
+processes 1820
+procs_running 2
+procs_blocked 0
+softirq 93590 0 18524 10 1196 0 0 56 48023 0 25781
+MemTotal:        2015488 kB
+MemFree:         1133248 kB
+MemAvailable:    1656984 kB
+Buffers:           13116 kB
+Cached:           635336 kB
+SwapCached:            0 kB
+Active:           416496 kB
+Inactive:         347104 kB
+Active(anon):     115696 kB
+Inactive(anon):        0 kB
+Active(file):     300800 kB
+Inactive(file):   347104 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:        115084 kB
+Mapped:           169188 kB
+Shmem:               620 kB
+KReclaimable:      14864 kB
+Slab:              43556 kB
+SReclaimable:      14864 kB
+SUnreclaim:        28692 kB
+KernelStack:        2544 kB
+PageTables:         2768 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1007744 kB
+Committed_AS:     555620 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:       13964 kB
+VmallocChunk:          0 kB
+Percpu:              928 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:     73728 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Unaccepted:            0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       84076 kB
+DirectMap2M:     2007040 kB
+DirectMap1G:           0 kB
+---sand-heartbeat---
+cpu  1809 0 2806 156059 277 0 98 42 0 0
+cpu0 1102 0 1554 77767 156 0 33 8 0 0
+cpu1 706 0 1251 78292 120 0 65 33 0 0
+intr 164230 46 9 0 0 1394 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 0 0 0 0 0 1 0 4395 3552 0 0 0 1400 808 0 701 603 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 205253
+btime 1783896466
+processes 1822
+procs_running 3
+procs_blocked 0
+softirq 93806 0 18556 10 1199 0 0 57 48157 0 25827
+MemTotal:        2015488 kB
+MemFree:         1133248 kB
+MemAvailable:    1657028 kB
+Buffers:           13116 kB
+Cached:           635380 kB
+SwapCached:            0 kB
+Active:           416592 kB
+Inactive:         347120 kB
+Active(anon):     115764 kB
+Inactive(anon):        0 kB
+Active(file):     300828 kB
+Inactive(file):   347120 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:        115192 kB
+Mapped:           169312 kB
+Shmem:               620 kB
+KReclaimable:      14864 kB
+Slab:              43556 kB
+SReclaimable:      14864 kB
+SUnreclaim:        28692 kB
+KernelStack:        2544 kB
+PageTables:         2832 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1007744 kB
+Committed_AS:     555604 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:       13964 kB
+VmallocChunk:          0 kB
+Percpu:              928 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:     73728 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Unaccepted:            0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       84076 kB
+DirectMap2M:     2007040 kB
+DirectMap1G:           0 kB
+---sand-heartbeat---
+cpu  1939 0 2879 156257 277 0 98 42 0 0
+cpu0 1231 0 1626 77767 156 0 33 8 0 0
+cpu1 708 0 1252 78490 120 0 65 33 0 0
+intr 164934 46 9 0 0 1394 0 0 0 0 0 0 0 3 0 0 0 0 0 0 0 0 0 0 0 0 1 0 4395 3552 0 0 0 1401 808 0 704 605 0 0 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 205541
+btime 1783896466
+processes 1824
+procs_running 3
+procs_blocked 0
+softirq 94000 0 18595 10 1203 0 0 57 48293 0 25842
+MemTotal:        2015488 kB
+MemFree:         1133248 kB
+MemAvailable:    1657028 kB
+Buffers:           13116 kB
+Cached:           635380 kB
+SwapCached:            0 kB
+Active:           416588 kB
+Inactive:         347120 kB
+Active(anon):     115760 kB
+Inactive(anon):        0 kB
+Active(file):     300828 kB
+Inactive(file):   347120 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:        115188 kB
+Mapped:           169304 kB
+Shmem:               620 kB
+KReclaimable:      14864 kB
+Slab:              43556 kB
+SReclaimable:      14864 kB
+SUnreclaim:        28692 kB
+KernelStack:        2544 kB
+PageTables:         2832 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1007744 kB
+Committed_AS:     555604 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:       13964 kB
+VmallocChunk:          0 kB
+Percpu:              928 kB
+HardwareCorrupted:     0 kB
+AnonHugePages:     73728 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Unaccepted:            0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       84076 kB
+DirectMap2M:     2007040 kB
+DirectMap1G:           0 kB
+---sand-heartbeat---

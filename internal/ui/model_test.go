@@ -27,16 +27,34 @@ func (fakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) er
 
 func newTestModel(t *testing.T) model {
 	t.Helper()
+	return newTestModelWithCli(t, lima.New(fakeRunner{}))
+}
+
+// newTestModelWithCli is newTestModel's parametrized form, for tests that need
+// to observe or control the lima.Client's underlying calls (e.g. a
+// secretsFakeRunner asserting exactly what ApplySecrets sent toward the
+// guest) rather than the no-op fakeRunner.
+func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
+	t.Helper()
 	// Isolate the managed-VM registry to a temp dir so tests never read or write
 	// the developer's real index.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	cli := lima.New(fakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
 	m, ok := New(cli, prov).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}
 	return m
+}
+
+// resized drives a real tea.WindowSizeMsg through Update, exactly as a
+// terminal resize would, rather than poking m.width/m.height directly — the
+// layout budgets every screen sizes itself from (m.layout) are only
+// recomputed by that single WindowSizeMsg path (see applySize in model.go),
+// so a test that wants a specific size must go through it too.
+func resized(m model, w, h int) model {
+	next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return next.(model)
 }
 
 // runeKey builds a tea.KeyPressMsg for a single printable character, mirroring
@@ -137,10 +155,15 @@ func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
 	}
 }
 
-// Reset ('R' on the VM screen) is gated to sand-managed VMs: pressing it on an
-// UNMANAGED VM is a no-op that explains why via the status line (it must never
-// replace an unrelated VM with a Claude sandbox).
-func TestResetGateUnmanagedShowsStatus(t *testing.T) {
+// Reset ('R' on the VM screen) is gated to sand-managed VMs: it must never
+// replace an unrelated VM with a Claude sandbox. Pressing it on an UNMANAGED
+// VM used to be a no-op that explained why via the status line — but an
+// advertised verb that fires and only prints an explanation is the same
+// lying-footer bug Shell was fixed for (see TestShellOfferedOnlyWhenRunning),
+// so the gate now lives in enabledFor: the help bar omits Reset entirely
+// (the reason is already visible in the VM record's Managed field) and
+// pressing 'R' is a silent no-op — no command, no status change.
+func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 	m := newTestModel(t) // empty (temp) registry => nothing is managed
 
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
@@ -150,17 +173,22 @@ func TestResetGateUnmanagedShowsStatus(t *testing.T) {
 
 	m.view = viewDetail
 	m.detail, _ = m.lookupVM("default")
-	after, _ := m.Update(runeKey('R'))
+
+	if strings.Contains(plainHelp(m.detailView()), "R reset") {
+		t.Fatalf("an unmanaged VM's help bar must not offer reset, got:\n%s", m.detailView())
+	}
+
+	after, cmd := m.Update(runeKey('R'))
 	m = after.(model)
 
 	if m.view != viewDetail {
 		t.Fatalf("reset on an unmanaged VM must not leave the detail screen, view = %v", m.view)
 	}
-	if m.status == "" {
-		t.Fatal("reset on an unmanaged VM should explain why via the status line")
+	if cmd != nil {
+		t.Fatal("reset on an unmanaged VM should dispatch no command")
 	}
-	if strings.Contains(strings.ToLower(m.status), "recreate") {
-		t.Fatalf("status must not say 'recreate', got %q", m.status)
+	if m.status != "" {
+		t.Fatalf("reset on an unmanaged VM should be a silent no-op (help bar already omits it), got status %q", m.status)
 	}
 }
 
@@ -201,6 +229,26 @@ func openReset(t *testing.T, cfg vm.CreateConfig) model {
 	return after.(model)
 }
 
+// The mirror of TestResetGateUnmanagedIsSilentNoOp: a sand-managed VM's help
+// bar DOES offer Reset.
+func TestResetGateManagedOffersReset(t *testing.T) {
+	cfg := resetConfig()
+	m := newTestModel(t)
+	if err := m.reg.Add(cfg); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
+		{Name: cfg.Name, Status: "Stopped", CPUs: cfg.CPUs},
+	}})
+	m = loaded.(model)
+	m.view = viewDetail
+	m.detail, _ = m.lookupVM(cfg.Name)
+
+	if !strings.Contains(plainHelp(m.detailView()), "R reset") {
+		t.Fatalf("a sand-managed VM's help bar should offer reset, got:\n%s", m.detailView())
+	}
+}
+
 // For a managed VM, Reset opens the pre-filled reset form (instead of
 // provisioning immediately): Name is locked and the editable fields hold the
 // VM's recorded settings.
@@ -214,7 +262,7 @@ func TestResetGateManagedOpensForm(t *testing.T) {
 	if !m.resetMode {
 		t.Fatalf("the form should be in reset mode")
 	}
-	if m.running || m.view == viewProgress {
+	if m.jobs.anyRunning() || m.view == viewProgress {
 		t.Fatalf("recreate must no longer provision immediately")
 	}
 	if m.resetName != cfg.Name {
@@ -292,8 +340,8 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m.inputs[fDisk].SetValue("10GiB")
 	rejected, _ := m.Update(ctrlKey('s'))
 	m = rejected.(model)
-	if m.view == viewProgress || m.running {
-		t.Fatalf("a sub-floor disk must not provision (view=%v running=%v)", m.view, m.running)
+	if m.view == viewProgress || m.jobs.anyRunning() {
+		t.Fatalf("a sub-floor disk must not provision (view=%v)", m.view)
 	}
 	if m.formErr == nil {
 		t.Fatalf("a sub-floor disk should surface a validation error")
@@ -303,8 +351,16 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m.inputs[fDisk].SetValue("100GiB")
 	accepted, _ := m.Update(ctrlKey('s'))
 	m = accepted.(model)
-	if m.view != viewProgress || !m.running {
-		t.Fatalf("a valid reset should provision (view=%v running=%v)", m.view, m.running)
+	if m.view != viewProgress || !m.jobs.isRunning("claude") {
+		t.Fatalf("a valid reset should provision (view=%v)", m.view)
+	}
+	// A reset deletes and re-clones its own VM, so it must be exempt from the
+	// disappeared-VM reaper — see TestResetJobSurvivesItsOwnDelete.
+	m.jobs.mu.Lock()
+	recreates := m.jobs.jobs["claude"].recreates
+	m.jobs.mu.Unlock()
+	if !recreates {
+		t.Fatal("a reset's job must be flagged as one that recreates its own VM")
 	}
 }
 
@@ -357,6 +413,10 @@ func TestUploadOpensBrowserForRunningVM(t *testing.T) {
 	m.view = viewDetail
 	m.detail = vm.VM{Name: "claude", Status: "Running"}
 
+	if !strings.Contains(plainHelp(m.detailView()), "u upload") {
+		t.Fatalf("a running VM's help bar should offer upload, got:\n%s", m.detailView())
+	}
+
 	after, cmd := m.Update(runeKey('u'))
 	m = after.(model)
 
@@ -381,6 +441,10 @@ func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
 	m.view = viewDetail
 	m.detail = vm.VM{Name: "claude", Status: "Running"}
 
+	if !strings.Contains(plainHelp(m.detailView()), "g download") {
+		t.Fatalf("a running VM's help bar should offer download, got:\n%s", m.detailView())
+	}
+
 	// Download rebound from 'd' to 'g': 'd' is delete everywhere now.
 	after, _ := m.Update(runeKey('g'))
 	m = after.(model)
@@ -393,24 +457,41 @@ func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
 	}
 }
 
-// Upload/Download are guarded to running VMs: pressing 'u' on a Stopped VM stays
-// on the detail view and explains why, issuing no command.
+// Upload/Download are guarded to running VMs via the command registry's
+// enabledFor (commandreg.go), the same way Shell is: a stopped VM's help bar
+// omits both, and pressing 'u' or 'g' is a silent no-op — no command, no
+// status change. This used to surface a "must be running" status message
+// instead; that is the exact lying-footer pattern (advertise the verb, fire
+// it, print an explanation instead of doing the thing) the registry exists
+// to eliminate — see TestShellRequiresRunningVM for the precedent this
+// mirrors. The running-VM mirror (help bar offers both, and pressing the key
+// fires it) is covered by TestUploadOpensBrowserForRunningVM and
+// TestDownloadOpensBrowserForRunningVM below.
 func TestTransferRequiresRunningVM(t *testing.T) {
 	m := newTestModel(t)
 	m.view = viewDetail
 	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
 
-	after, cmd := m.Update(runeKey('u'))
-	m = after.(model)
+	rendered := plainHelp(m.detailView())
+	if strings.Contains(rendered, "u upload") {
+		t.Fatalf("a stopped VM's help bar must not offer upload, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "g download") {
+		t.Fatalf("a stopped VM's help bar must not offer download, got:\n%s", rendered)
+	}
 
-	if m.view != viewDetail {
-		t.Fatalf("upload on a stopped VM must stay on the detail view, view=%v", m.view)
-	}
-	if cmd != nil {
-		t.Fatal("upload on a stopped VM should not issue a command")
-	}
-	if !strings.Contains(m.status, "must be running") {
-		t.Fatalf("status should explain the running requirement, got %q", m.status)
+	for _, k := range []rune{'u', 'g'} {
+		after, cmd := m.Update(runeKey(k))
+		m2 := after.(model)
+		if m2.view != viewDetail {
+			t.Fatalf("%q on a stopped VM must stay on the detail view, view=%v", k, m2.view)
+		}
+		if cmd != nil {
+			t.Fatalf("%q on a stopped VM should not issue a command", k)
+		}
+		if m2.status != "" {
+			t.Fatalf("%q on a stopped VM should be a silent no-op (help bar already omits it), got status %q", k, m2.status)
+		}
 	}
 }
 
@@ -431,15 +512,20 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	if m.view != viewProgress {
 		t.Fatalf("confirming the destination should switch to progress, view=%v", m.view)
 	}
-	if !m.running {
-		t.Fatal("confirming should start the transfer (running=true)")
+	if !m.jobs.isRunning("claude") {
+		t.Fatal("confirming should start the transfer as a job on its VM")
 	}
 	if cmd == nil {
 		t.Fatal("confirming should return the streaming commands")
 	}
-	// A transfer must not be recorded as a managed VM.
-	if m.provCfg.Name != "" {
-		t.Fatalf("a transfer must clear provCfg so it is not recorded managed, got %q", m.provCfg.Name)
+	// A transfer's job carries no provision config, so it is neither recorded as a
+	// managed VM nor rendered as a Building tile.
+	s, _ := m.jobs.snapshot("claude")
+	if s.Provision {
+		t.Fatal("a transfer must not be marked a provision")
+	}
+	if got := m.statusOf(vm.VM{Name: "claude", Status: "Running"}); got != statusRunning {
+		t.Fatalf("a running transfer must not make its VM read as Building, got %v", got)
 	}
 }
 
@@ -447,11 +533,9 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 // by the shared provisionDoneMsg handler.
 func TestTransferNotRecordedManaged(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewProgress
-	m.running = true
-	m.provCfg = vm.CreateConfig{} // a transfer leaves this empty
+	seedJob(t, &m, "claude", vm.CreateConfig{}) // a transfer's job carries no config
 
-	done, _ := m.Update(provisionDoneMsg{})
+	done, _ := m.Update(provisionDoneMsg{vm: "claude"})
 	m = done.(model)
 
 	if m.reg.IsManaged("claude") {
@@ -688,8 +772,13 @@ func TestEscLeavesForm(t *testing.T) {
 }
 
 // Shell is guarded to running VMs: pressing 'S' on the detail screen for a
-// stopped VM explains why and issues no command, so the user never sees a raw
-// limactl error. Shell now lives on the detail screen, not the list.
+// stopped VM is a silent no-op — no command, no state change. The guard used
+// to live inline in updateDetail (surfacing a "must be running" status
+// message); it now lives in the command registry's enabledFor (commandreg.go),
+// so the key doesn't fire at all rather than firing and explaining itself,
+// mirroring Start/Stop's fixed behaviour (see TestShellOfferedOnlyWhenRunning
+// in commandreg_test.go for the matching help-bar assertion). Shell now lives
+// on the detail screen, not the list.
 func TestShellRequiresRunningVM(t *testing.T) {
 	m := newTestModel(t)
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
@@ -704,11 +793,11 @@ func TestShellRequiresRunningVM(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("shell on a stopped VM should not issue a command")
 	}
-	if m.view == viewProgress || m.running {
+	if m.view == viewProgress || m.jobs.anyRunning() {
 		t.Fatal("shell on a stopped VM must not start anything")
 	}
-	if m.status == "" {
-		t.Fatal("shell on a stopped VM should explain why it can't open")
+	if m.status != "" {
+		t.Fatalf("shell on a stopped VM should be a silent no-op (help bar already omits it), got status %q", m.status)
 	}
 }
 
@@ -851,8 +940,8 @@ func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
 	if m.focusIdx != 1 {
 		t.Fatalf("enter should advance to the next field, got focus %d", m.focusIdx)
 	}
-	if m.view != viewForm || m.running {
-		t.Fatalf("enter must not start provisioning (view=%v running=%v)", m.view, m.running)
+	if m.view != viewForm || m.jobs.anyRunning() {
+		t.Fatalf("enter must not start provisioning (view=%v)", m.view)
 	}
 }
 
@@ -873,18 +962,18 @@ func isQuitCmd(cmd tea.Cmd) bool {
 // line exceeds the viewport width.
 func TestLongOutputLineWraps(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewProgress
-	m.running = true
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
 
-	// Width 28 -> viewport width max(20, 28-8) = 20; height leaves room for the
-	// wrapped lines so GotoBottom keeps the tail on screen.
+	// The viewport's width/height come from classify's layout budget (see
+	// layout.go); height leaves room for the wrapped lines so GotoBottom keeps
+	// the tail on screen.
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 28, Height: 24})
 	m = sized.(model)
 
 	// A 69-char unbroken token: the first 20 chars fill one wrapped line, so a
 	// truncating viewport would drop the trailing marker entirely.
 	line := strings.Repeat("A", 60) + "ENDMARKER"
-	out, _ := m.Update(provisionOutputMsg(line))
+	out, _ := m.Update(provisionOutputMsg{vm: "claude", chunk: line})
 	m = out.(model)
 
 	view := m.viewport.View()
@@ -908,21 +997,25 @@ func TestCtrlCQuitsWhenIdle(t *testing.T) {
 
 // While a build is in flight, ctrl+c cancels the provisioner (cancels its
 // context) and stays on the progress view to show the result — it must NOT quit
-// the whole TUI and orphan a half-built VM.
+// the whole TUI and orphan a half-built VM. Cancellation targets the job the
+// screen is SHOWING; the per-job isolation is covered by TestTwoJobsInFlight.
 func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	m := newTestModel(t)
-	called := false
-	m.view = viewProgress
-	m.running = true
-	m.cancel = func() { called = true }
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	called := make(chan struct{})
+	m.jobs.mu.Lock()
+	m.jobs.jobs["claude"].cancel = func() { close(called) }
+	m.jobs.mu.Unlock()
 
 	after, cmd := m.Update(ctrlKey('c'))
 	m = after.(model)
 
-	if !called {
+	select {
+	case <-called:
+	default:
 		t.Fatal("ctrl+c during a build should cancel the provisioner context")
 	}
-	if !m.canceled {
+	if s, _ := m.jobs.snapshot("claude"); !s.Canceled {
 		t.Fatal("ctrl+c during a build should mark the run canceled")
 	}
 	if m.view != viewProgress {
@@ -933,15 +1026,15 @@ func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	}
 }
 
-// q must not quit (nor navigate away) while a build runs — only ctrl+c cancels.
-// This guards the footgun where q (the global quit) abandoned a running build.
+// q must not quit while the build you are watching is still running — the reflex
+// that ends a session must not orphan a half-built VM. esc is how you leave (and
+// it leaves the build running); ctrl+c is how you cancel.
 func TestQDoesNotQuitDuringProvision(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewProgress
-	m.running = true
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
 
 	if _, cmd := m.Update(runeKey('q')); isQuitCmd(cmd) {
-		t.Fatal("q during a build must not quit; only ctrl+c cancels")
+		t.Fatal("q during a build must not quit; esc backgrounds it and ctrl+c cancels")
 	}
 }
 
@@ -949,19 +1042,23 @@ func TestQDoesNotQuitDuringProvision(t *testing.T) {
 // the VM as managed nor surface the (kill-induced) error as a failure.
 func TestCanceledRunIsNotRecordedManaged(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewProgress
-	m.running = true
-	m.canceled = true
-	m.provCfg = vm.CreateConfig{Name: "myvm", BaseName: "claude-base"}
+	seedJob(t, &m, "myvm", vm.CreateConfig{Name: "myvm", BaseName: "claude-base"})
+	if !m.jobs.cancelJob("myvm") {
+		t.Fatal("precondition: the running job should be cancellable")
+	}
 
-	done, _ := m.Update(provisionDoneMsg{err: context.Canceled})
+	done, _ := m.Update(provisionDoneMsg{vm: "myvm", err: context.Canceled})
 	m = done.(model)
 
-	if m.running {
-		t.Fatal("a done message should clear running")
+	s, ok := m.jobs.snapshot("myvm")
+	if !ok || s.Running() {
+		t.Fatal("a done message should end the run")
 	}
-	if m.doneErr != nil {
-		t.Fatalf("a canceled run should not surface a failure, got %v", m.doneErr)
+	if s.Err != nil {
+		t.Fatalf("a canceled run should not surface a failure, got %v", s.Err)
+	}
+	if s.Failed() {
+		t.Fatal("a canceled run is not a failure — its VM must not render as Failed")
 	}
 	if m.reg.IsManaged("myvm") {
 		t.Fatal("a canceled run must not be recorded as managed")
@@ -1107,7 +1204,7 @@ func TestStopAllConfirmShowsSpinner(t *testing.T) {
 		{Name: "managed-running", Status: "Running"},
 	}})
 	m = loaded.(model)
-	m.width, m.height = 100, 30 // a reported size so the view renders realistically
+	m = resized(m, 100, 30) // a reported size so the view renders realistically
 
 	// X raises the confirm overlay; y confirms it.
 	raised, _ := m.Update(runeKey('X'))

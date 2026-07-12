@@ -1,25 +1,29 @@
-                                                                                                  
-   sand                                                                                           
-                                                                                                  
-   Name                  Status      CPUs    Memory        Max Disk    Disk Used   Managed        
-   claude                Running     4       8 GiB         100 GiB                 no             
-   web                   Stopped     2       4 GiB         50 GiB                  no             
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-                                                                                                  
-  enter detail • n new • f filter managed • / search • X stop all • q quit                        
-                                                                                                  
+                                                                                                    
+   sand                                                                                             
+                                                                                                    
+   Name                  Status      CPUs    Memory        Max Disk    Disk Used   Managed          
+   claude                Running     4       8 GiB         100 GiB                 no               
+   web                   Stopped     2       4 GiB         50 GiB                  no               
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+  enter detail • n new • f filter managed • / search • X stop all • q quit                          
+                                                                                                    

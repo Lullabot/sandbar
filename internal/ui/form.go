@@ -468,7 +468,11 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		return m.prov.Reset(ctx, c, opts, out)
 	}
-	return m, m.beginProvision("Resetting "+cfg.Name, run, cfg)
+	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
+	// its VM legitimately vanishes from `limactl list` mid-run. The registry has to
+	// know, or its disappeared-VM reaper would cancel the reset the moment it did
+	// the deletion it exists to do.
+	return m, m.beginReset("Resetting "+cfg.Name, run, cfg)
 }
 
 // updateForm handles keys while the create form is active.
@@ -556,10 +560,17 @@ func toggleRow(label string, on, focused bool) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
 }
 
+// formHelp returns the bindings shown in the create/reset form's help bar.
+// 'q' is a text character in the form, so Quit is intentionally omitted (only
+// ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
+func (m model) formHelp() []key.Binding {
+	return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
+}
+
 // formView renders the labelled inputs, validation error, and help. In reset mode
 // the Name is shown as a locked line and two preserve toggles follow the inputs.
 func (m model) formView() string {
-	cw := m.contentWidth()
+	cw := m.layout.ContentWidth
 	var b strings.Builder
 	title := "New VM"
 	if m.resetMode {
@@ -619,6 +630,6 @@ func (m model) formView() string {
 		b.WriteString("\n" + warnStyle.Width(cw).Render(w) + "\n")
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n" + m.help.ShortHelpView(m.formHelp()))
 	return appStyle.Render(b.String())
 }
