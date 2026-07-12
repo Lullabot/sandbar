@@ -421,26 +421,34 @@ for how the embedded copy is resolved at runtime.
 - **Cutting a release.** Releases are driven by
   [release-please](https://github.com/googleapis/release-please): it keeps a
   release PR open that collects the changelog from Conventional Commit messages
-  on `main`. Merging that PR creates the `vX.Y.Z` tag and a *draft* GitHub
-  Release, and the tag triggers the `release` workflow —
-  [GoReleaser](https://goreleaser.com/) builds the `sand` binaries, uploads them
-  into that draft, publishes it, and pushes an updated formula to the tap. You
-  never push a tag by hand; version bumps follow the commit types (`feat` →
-  minor, `fix` → patch, with `bump-minor-pre-major` while pre-1.0).
+  on `main`. Merging that PR runs the `release-please` workflow, whose two jobs
+  are the whole pipeline: release-please creates the `vX.Y.Z` tag and a *draft*
+  GitHub Release, then [GoReleaser](https://goreleaser.com/) builds the `sand`
+  binaries, uploads them into that draft, publishes it, and pushes an updated
+  formula to the tap. You never push a tag by hand; version bumps follow the
+  commit types (`feat` → minor, `fix` → patch, with `bump-minor-pre-major` while
+  pre-1.0). If GoReleaser fails, re-run the failed job from the run page — the
+  retry uploads into the same draft.
 - **Why the release starts as a draft.** This repository has GitHub's
   [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
   turned on, so a release is frozen the moment it is published and no asset can
   be added to it afterwards. Assets therefore have to go in while it is still a
   draft: release-please is configured with `draft` (leave it unpublished) plus
-  `force-tag-creation` (push the tag anyway — GitHub does not create the tag for
-  a draft release on its own, and without the tag the `release` workflow would
-  never fire), and GoReleaser is configured with `use_existing_draft` to adopt
-  that draft instead of creating a release of its own. Publishing is GoReleaser's
-  final step, once every archive is attached. A version whose release is
-  published without binaries cannot be repaired — skip it and cut the next patch.
+  `force-tag-creation` (create the tag anyway — GitHub does not create the tag
+  for a draft release on its own, and GoReleaser builds from the tag), and
+  GoReleaser is configured with `use_existing_draft` to adopt that draft instead
+  of creating a release of its own. Publishing is GoReleaser's final step, once
+  every archive is attached. A version whose release is published without
+  binaries cannot be repaired — skip it and cut the next patch.
+- **Why one workflow, not two.** GoReleaser is a `needs:` job in the same
+  workflow rather than a separate tag-triggered one, so it cannot start before
+  the draft release exists. A tag-triggered workflow would race release-please
+  (the tag is created just before the release), and a GoReleaser run that finds
+  no draft to adopt creates and publishes a release of its own — which under
+  immutable releases burns the version number permanently.
 - **Why a GitHub App token.** release-please authenticates with an org GitHub
-  App (not the default `GITHUB_TOKEN`) precisely so the tag it creates triggers
-  the `release` workflow — tags created with `GITHUB_TOKEN` do not trigger other
+  App (not the default `GITHUB_TOKEN`) so that the release PR it opens runs the
+  test workflow — events made with `GITHUB_TOKEN` do not trigger other
   workflows.
 - **The tap.** Formulas live in a separate repository,
   `lullabot/homebrew-sandbar`, which must exist before the first release (it is
@@ -451,7 +459,7 @@ for how the embedded copy is resolved at runtime.
   2. Create a dedicated org GitHub App (Contents: write) installed only on
      `lullabot/homebrew-sandbar`, and set its App ID as the `HOMEBREW_TAP_APP_ID`
      variable and its private key as the `HOMEBREW_TAP_APP_PRIVATE_KEY` secret in
-     this repo's Actions settings. The `release` workflow mints a short-lived,
+     this repo's Actions settings. The GoReleaser job mints a short-lived,
      tap-scoped token from them so GoReleaser can push the formula update
      (no long-lived PAT).
   3. Install the org release-please App on this repo (contents + pull-requests
