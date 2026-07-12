@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/Lullabot/sandbar/compare/v0.1.0...v0.2.0) (2026-07-12)
+
+
+### Features
+
+* **secrets:** git-credential wiring for recognized forge tokens ([ad8f47f](https://github.com/Lullabot/sandbar/commit/ad8f47f380d96c38fe03d1ac9f791493bb191949))
+* **secrets:** scope-aware delivery and TUI editor ([194bf1b](https://github.com/Lullabot/sandbar/commit/194bf1bc030bc235d1cc5237062ab16abfaf1889))
+* **secrets:** scope-aware store schema v2 with v1 migration ([1517ee6](https://github.com/Lullabot/sandbar/commit/1517ee68ebdca1ca7219516371867eac4dd61bbf))
+
+
+### Bug Fixes
+
+* **create:** wrap long form help and warnings to the terminal width ([02f18a8](https://github.com/Lullabot/sandbar/commit/02f18a809b94218a3cb9363f5760d4923f679a2a))
+* **reset:** keep stderr out of the staged tar archive ([ccd07d6](https://github.com/Lullabot/sandbar/commit/ccd07d666c0d1da5be6f7e5f36712d2f99ffe39b))
+* **reset:** signal a saved GitHub token with a masked placeholder ([765b2ab](https://github.com/Lullabot/sandbar/commit/765b2abb461f39b58a3903f968e72a45d00e591d))
+* **secrets:** focus the editor on open so keystrokes register ([b10a42c](https://github.com/Lullabot/sandbar/commit/b10a42c6f334637520b8ee19aa10b3812a981ae3))
+* **secrets:** reflow editor guidance so the view fits the terminal ([b53e97b](https://github.com/Lullabot/sandbar/commit/b53e97b67d188a56c6c944b6b938d81e67a27acc))
+* **tui:** show a live spinner during stop-all and detail actions ([2062b77](https://github.com/Lullabot/sandbar/commit/2062b77ec1f3a92d80232750f50c1667a24439ac))
+
 ## 0.1.0 (2026-07-12)
 
 
