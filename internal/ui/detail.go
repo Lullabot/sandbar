@@ -1,12 +1,8 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/lullabot/sandbar/internal/manage"
-	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -14,96 +10,51 @@ import (
 
 // updateDetail handles keys on the detail (VM) screen. The list only selects a
 // VM; every per-VM lifecycle action — start/stop/restart/reset/shell/delete —
-// plus the existing upload/download live here.
+// plus the existing upload/download derive from the command registry in
+// commandreg.go: a key fires iff its command's enabledFor returns true for
+// the focused VM, which is what keeps this dispatcher and detailHelp's footer
+// from disagreeing (the bug the registry replaced: the old per-view help
+// switch used to offer every verb unconditionally).
 func (m model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
 
-	switch {
-	case key.Matches(msg, m.keys.Start):
-		m.status = "starting " + m.detail.Name + "…"
-		user, scopes := m.secretsFor(m.detail.Name)
-		return m, m.beginAction(startCmd(m.cli, m.detail.Name, user, scopes))
-
-	case key.Matches(msg, m.keys.Stop):
-		m.status = "stopping " + m.detail.Name + "…"
-		return m, m.beginAction(stopCmd(m.cli, m.detail.Name))
-
-	case key.Matches(msg, m.keys.Restart):
-		m.status = "restarting " + m.detail.Name + "…"
-		user, scopes := m.secretsFor(m.detail.Name)
-		return m, m.beginAction(restartCmd(m.cli, m.detail.Name, user, scopes))
-
-	case key.Matches(msg, m.keys.Shell):
-		// limactl shell needs a running instance; guard so the key gives a clear
-		// message instead of a raw limactl error.
-		if m.detail.Status != "Running" {
-			m.status = m.detail.Name + " must be running to open a shell (press s to start it)"
-			return m, nil
+	for _, c := range detailCommands {
+		if key.Matches(msg, c.binding) && c.enabledFor(m, m.detail) {
+			cmd := c.action(&m, m.detail)
+			return m, cmd
 		}
-		m.status = "opening a shell in " + m.detail.Name + " — the TUI resumes when you exit"
-		return m, shellCmd(m.detail.Name)
-
-	case key.Matches(msg, m.keys.Delete):
-		name := m.detail.Name
-		m.confirm = &confirmState{
-			prompt:  fmt.Sprintf("Delete %q?", name),
-			run:     deleteCmd(m.cli, name),
-			working: "deleting " + name + "…",
+	}
+	for _, c := range detailChrome {
+		if key.Matches(msg, c.binding) && c.enabledFor(m) {
+			cmd := c.action(&m)
+			return m, cmd
 		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.Reset):
-		name := m.detail.Name
-		// Reset clones from a Claude base, so it is only offered for VMs we
-		// created — otherwise it would replace an unrelated VM with a sandbox.
-		// Shared with the headless `sand create` path (internal/manage) so the
-		// two entrypoints cannot drift on the gate.
-		base, ok := manage.RecreateBase(m.reg, name)
-		if !ok {
-			m.status = "reset is only available for sand-managed VMs"
-			return m, nil
-		}
-		// Pre-fill the reset form from the VM's recorded config (sizing,
-		// hostname, identity) rather than resetting to defaults. The clone
-		// token is not stored, so a VM that cloned a private repo will need it
-		// re-supplied. Fall back to a minimal config if no snapshot exists
-		// (e.g. a pre-snapshot index entry).
-		cfg, found := m.reg.Config(name)
-		if !found || cfg.Name == "" {
-			cfg = vm.DefaultCreateConfig()
-			cfg.Name = name
-			cfg.User = hostUser()
-			cfg.GitName = hostGit("user.name")
-			cfg.GitEmail = hostGit("user.email")
-		}
-		cfg.BaseName = base
-		// Open the editable reset form (with preserve toggles) instead of
-		// provisioning immediately; submit dispatches provision.Reset.
-		return m, m.openResetForm(name, cfg)
-
-	case key.Matches(msg, m.keys.Secrets):
-		// Deliberately no running-VM guard: secrets live on the host, so they are
-		// editable whether or not the VM is up. They reach the guest on next start.
-		return m, m.openSecrets(m.detail.Name)
-
-	case key.Matches(msg, m.keys.Upload):
-		return m.startTransfer(true) // host → guest
-
-	case key.Matches(msg, m.keys.Download):
-		return m.startTransfer(false) // guest → host
-
-	case key.Matches(msg, m.keys.Quit):
-		return m, tea.Quit
-
-	// Back/Enter return to the list. Matched after every action case above so
-	// neither Enter nor Back is ever swallowed by a newly added binding.
-	case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
-		m.view = viewList
-		return m, nil
 	}
 	return m, nil
+}
+
+// detailHelp returns the bindings shown in the VM screen's help bar, derived
+// from the exact same registry (and the exact same enabledFor calls) that
+// updateDetail dispatches from above — so it shows a verb iff pressing that
+// verb's key would do something.
+func (m model) detailHelp() []key.Binding {
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
+	bindings := make([]key.Binding, 0, len(detailCommands)+len(detailChrome))
+	for _, c := range detailCommands {
+		if c.enabledFor(m, m.detail) {
+			bindings = append(bindings, c.binding)
+		}
+	}
+	for _, c := range detailChrome {
+		if c.enabledFor(m) {
+			bindings = append(bindings, c.binding)
+		}
+	}
+	return bindings
 }
 
 // detailView renders the highlighted VM's full record.
@@ -153,6 +104,6 @@ func (m model) detailView() string {
 		b.WriteString("\n" + statusStyle.Render(m.status) + "\n")
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n" + m.help.ShortHelpView(m.detailHelp()))
 	return appStyle.Render(b.String())
 }

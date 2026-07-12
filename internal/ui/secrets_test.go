@@ -15,7 +15,7 @@ import (
 // off the top (the PR feedback: "The secrets manager rendering is broken").
 func TestSecretsViewFitsAndTipReflows(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 100, 30
+	m = resized(m, 100, 30)
 	m.openSecrets("claude")
 
 	view := m.secretsView()
@@ -189,6 +189,34 @@ func TestSecretsParseDuplicateKeySameScope(t *testing.T) {
 	}
 }
 
+// A buffer pasted with CRLF line endings must not leak a trailing "\r" into
+// any parsed VALUE (or KEY). Before the fix, parseSecrets split on the raw
+// (untrimmed) line, so every line's "\r" — left behind by
+// strings.Split(text, "\n") — landed inside the value, and Render would
+// single-quote it straight into the guest's secrets.env.
+func TestSecretsParseCRLFDoesNotCorruptValues(t *testing.T) {
+	scopes, err := parseSecrets("A=1\r\n[org/dir]\r\nGH_TOKEN=ghp_x\r\n")
+	if err != nil {
+		t.Fatalf("parseSecrets returned an unexpected error on a CRLF buffer: %v", err)
+	}
+	for scope, pairs := range scopes {
+		for k, v := range pairs {
+			if strings.ContainsRune(k, '\r') {
+				t.Fatalf("scope %q key %q carries a trailing \\r", scope, k)
+			}
+			if strings.ContainsRune(v, '\r') {
+				t.Fatalf("scope %q key %q value %q carries a trailing \\r", scope, k, v)
+			}
+		}
+	}
+	if scopes[""]["A"] != "1" {
+		t.Fatalf(`scopes[""]["A"] = %q, want "1"`, scopes[""]["A"])
+	}
+	if scopes["org/dir"]["GH_TOKEN"] != "ghp_x" {
+		t.Fatalf(`scopes["org/dir"]["GH_TOKEN"] = %q, want "ghp_x"`, scopes["org/dir"]["GH_TOKEN"])
+	}
+}
+
 // openSecretsViaKey drives the real 'e' key on the detail screen, mirroring a
 // real session rather than calling openSecrets directly.
 func openSecretsViaKey(m model, name, status string) model {
@@ -223,7 +251,7 @@ func typeInto(m model, s string) model {
 // textarea blurred so the user could not type).
 func TestSecretsEditorIsFocusedOnOpen(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 100, 30
+	m = resized(m, 100, 30)
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	if !m.secretsArea.Focused() {
@@ -237,7 +265,7 @@ func TestSecretsEditorIsFocusedOnOpen(t *testing.T) {
 // save — which is exactly the "I can't add a secret" report.
 func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 100, 30
+	m = resized(m, 100, 30)
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	m = typeInto(m, "FOO=bar")
@@ -261,7 +289,7 @@ func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 // plus the scope grammar through the real key path.
 func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 120, 30
+	m = resized(m, 120, 30)
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	m = typeInto(m, "EDITOR=vim\n[github.com/acme]\nGH_TOKEN=ghp_x")
@@ -285,7 +313,7 @@ func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 // into the focused textarea, not swallowed).
 func TestSecretsEditorBackspaceEdits(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 100, 30
+	m = resized(m, 100, 30)
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	m = typeInto(m, "AB")
@@ -302,7 +330,7 @@ func TestSecretsEditorBackspaceEdits(t *testing.T) {
 // down every empty row (both flagged as "hanging" artifacts on the PR).
 func TestSecretsEditorHasNoGutterOrPromptBar(t *testing.T) {
 	m := newTestModel(t)
-	m.width, m.height = 100, 30
+	m = resized(m, 100, 30)
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	if m.secretsArea.ShowLineNumbers {

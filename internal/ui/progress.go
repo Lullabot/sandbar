@@ -12,11 +12,27 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// readPipe bundles the read end of the provisioner pipe. It is stored on the
-// model (by pointer) so successive readNextCmds keep reading the same stream.
+// readPipe bundles the read end of one job's pipe. It is held by pointer (on the
+// job, inside the registry) so successive readNextCmds keep reading the same
+// stream.
 type readPipe struct {
 	r *io.PipeReader
 }
+
+// close tears the read end down. Every subsequent write to the paired writer
+// fails immediately, which is what unblocks a run function that is mid-write —
+// or one that ignores its context entirely — so a reaped job cannot leak its
+// goroutine. See stop() in jobs.go.
+func (rp *readPipe) close() {
+	if rp != nil && rp.r != nil {
+		rp.r.CloseWithError(errJobReaped)
+	}
+}
+
+// errJobReaped is what a reaped job's pipe reports. It never reaches the user:
+// the job is already out of the registry by the time it surfaces, so its
+// provisionDoneMsg is dropped.
+var errJobReaped = errors.New("job reaped: its VM disappeared")
 
 // provisionFunc matches Provisioner.CreateVM / Recreate.
 type provisionFunc func(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
@@ -25,29 +41,51 @@ type provisionFunc func(ctx context.Context, cfg vm.CreateConfig, out io.Writer)
 // It backs both provisioning and file transfers.
 type streamFunc func(ctx context.Context, out io.Writer) error
 
-// beginStream sets up the io.Pipe → viewport → spinner plumbing shared by
-// provisioning and file transfers, spawns run in a goroutine feeding the pipe,
-// and returns the commands that stream the pipe and animate the spinner. This is
-// the non-blocking pattern: Update never runs the operation directly — it only
-// reacts to the messages this produces. m.provCfg is cleared here so a run is NOT
-// recorded as managed unless the caller sets it afterwards (beginProvision does).
-func (m *model) beginStream(title string, back view, run streamFunc) tea.Cmd {
-	pr, pw := io.Pipe()
-	m.reader = &readPipe{r: pr}
-	m.running = true
-	m.canceled = false
-	m.doneErr = nil
-	m.output = ""
-	m.progressTitle = title
-	m.progressBack = back // where esc returns once the run finishes
-	m.view = viewProgress
-	m.viewport.SetContent("")
-	m.provCfg = vm.CreateConfig{}
+// beginStream registers a job for the VM named name and sets up the io.Pipe →
+// registry → viewport → spinner plumbing shared by provisioning and file
+// transfers. It spawns run in a goroutine feeding the pipe and returns the
+// commands that stream it. This is the non-blocking pattern: Update never runs
+// the operation — it only reacts to the VM-keyed messages this produces.
+//
+// The job is registered WITHOUT a provision config, so a run is not recorded as
+// managed unless the caller sets one afterwards (beginProvision does). That
+// distinction — a transfer is not a managed VM — used to live in a single
+// m.provCfg field; it is now per-job, and it is also what keeps a transfer from
+// painting its VM's tile as Building.
+//
+// If a job is already in flight for this VM, no second one is started: the
+// registry is keyed by VM name, so a second job would orphan the first one's
+// cancel func and leak its goroutine. The user is shown the running job instead.
+func (m *model) beginStream(name, title string, back view, run streamFunc) tea.Cmd {
+	if m.jobs.isRunning(name) {
+		m.status = name + " already has a run in flight — showing it"
+		return m.showJobLog(name)
+	}
 
-	// A cancellable context lets ctrl+c (in Update) abort the run mid-flight,
-	// killing the limactl subprocess the operation is currently blocked on.
+	pr, pw := io.Pipe()
+	// A cancellable context lets ctrl+c (in Update) abort this job — and only this
+	// job — mid-flight, killing the limactl subprocess it is blocked on.
 	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
+
+	j := &job{
+		name:   name,
+		title:  title,
+		back:   back, // where esc returns from this job's progress view
+		state:  jobRunning,
+		cancel: cancel,
+		reader: &readPipe{r: pr},
+	}
+	if !m.jobs.begin(j) {
+		// Unreachable: isRunning above already refused a live job, and only the
+		// Update goroutine begins jobs. Guarded anyway — the alternative is a leaked
+		// goroutine with no cancel func.
+		cancel()
+		return nil
+	}
+
+	m.progressVM = name
+	m.view = viewProgress
+	m.setOutput()
 
 	go func() {
 		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the
@@ -55,69 +93,136 @@ func (m *model) beginStream(title string, back view, run streamFunc) tea.Cmd {
 		pw.CloseWithError(run(ctx, pw))
 	}()
 
-	return tea.Batch(readNextCmd(m.reader), m.spinner.Tick)
+	return tea.Batch(readNextCmd(name, j.reader), m.tickSpinner())
 }
 
 // beginProvision launches a provisioner call through beginStream and records its
-// config so a successful run can be marked managed (and reproduced faithfully on
-// a future recreate).
+// config on the job, so a successful run can be marked managed (and reproduced
+// faithfully on a future recreate). The config is attached AFTER beginStream, so
+// only provisions carry one — a transfer's job has none and is never recorded.
 func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
-	cmd := m.beginStream(title, viewList, func(ctx context.Context, out io.Writer) error {
+	return m.beginJob(title, run, cfg, false)
+}
+
+// beginReset is beginProvision for a Reset/Recreate: the same provisioning job,
+// flagged as one that deletes and re-creates its own VM. That flag is what stops
+// the disappeared-VM reaper from killing a reset the moment it deletes the VM it
+// is about to clone back (see jobRegistry.reconcile).
+func (m *model) beginReset(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
+	return m.beginJob(title, run, cfg, true)
+}
+
+// beginJob is the shared body of beginProvision/beginReset.
+func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, recreates bool) tea.Cmd {
+	cmd := m.beginStream(cfg.Name, title, viewList, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
-	m.provCfg = cfg
+	m.jobs.markProvision(cfg.Name, cfg, recreates)
 	return cmd
 }
 
-// readNextCmd reads one chunk from the provisioner pipe. It emits a
+// showJobLog puts a VM's run — live or retained — back on the progress screen.
+// It backs the reopen-log verb (commandreg.go): the registry holds the buffer
+// anyway, so a failed provision can be interrogated instead of merely announced.
+func (m *model) showJobLog(name string) tea.Cmd {
+	if !m.jobs.exists(name) {
+		return nil
+	}
+	m.progressVM = name
+	m.view = viewProgress
+	m.setOutput()
+	// A live job is still animating (the user may have walked away from it and
+	// come back); a retained one has nothing left to spin for.
+	if m.jobs.isRunning(name) {
+		return m.tickSpinner()
+	}
+	return nil
+}
+
+// readNextCmd reads one chunk from a job's pipe. It emits a VM-keyed
 // provisionOutputMsg per chunk (Update re-issues it to read the next one) and a
-// provisionDoneMsg at EOF or on error. Reading happens off the Update goroutine.
-func readNextCmd(rp *readPipe) tea.Cmd {
+// provisionDoneMsg at EOF or on error. Reading happens off the Update goroutine,
+// and the VM name is what lets N of these run at once without their output
+// crossing streams — the message used to be a bare string, which is precisely why
+// only one job could ever exist.
+func readNextCmd(name string, rp *readPipe) tea.Cmd {
 	return func() tea.Msg {
 		if rp == nil {
-			return provisionDoneMsg{}
+			return provisionDoneMsg{vm: name}
 		}
 		buf := make([]byte, 4096)
 		n, err := rp.r.Read(buf)
 		if n > 0 {
-			return provisionOutputMsg(buf[:n])
+			return provisionOutputMsg{vm: name, chunk: string(buf[:n])}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return provisionDoneMsg{}
+				return provisionDoneMsg{vm: name}
 			}
-			return provisionDoneMsg{err: err}
+			return provisionDoneMsg{vm: name, err: err}
 		}
-		return provisionOutputMsg("")
+		return provisionOutputMsg{vm: name}
 	}
 }
 
-// updateProgress handles keys on the progress view. While a build runs, ctrl+c
-// (handled in Update) cancels it and all other keys only scroll the output — q
-// and esc must not quit or navigate away and abandon the running provisioner.
-// Once it's done, q quits and back/enter return to the refreshed list.
+// shownJob is the job the progress screen is displaying, if any.
+func (m model) shownJob() (jobSnapshot, bool) {
+	return m.jobs.snapshot(m.progressVM)
+}
+
+// updateProgress handles keys on the progress view. The screen no longer traps
+// the user: esc/enter ALWAYS return to the job's back view and the job keeps
+// running behind them — that is the un-freezing this task exists for, and it is
+// what lets a user start a second VM while the first one builds. ctrl+c (handled
+// in Update) cancels the job being shown, and only that one. q still refuses to
+// quit while the shown job runs, so the reflex that ends a session does not
+// orphan a half-built VM.
 func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if !m.running {
-		if key.Matches(msg, m.keys.Quit) {
-			return m, tea.Quit
+	job, ok := m.shownJob()
+
+	if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
+		m.view = viewList // a vanished job (its VM was deleted) has no back view left
+		if ok {
+			m.view = job.Back // detail for a transfer, list for a provision
 		}
-		if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
-			m.view = m.progressBack // detail for a transfer, list for a provision
-			return m, nil
-		}
+		return m, nil
 	}
+	if (!ok || !job.Running()) && key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
 }
 
+// progressHelp returns the bindings shown in the progress screen's help bar.
+// While the shown job runs, ctrl+c cancels it and esc leaves it running; once it
+// has finished, esc returns and q quits.
+func (m model) progressHelp() []key.Binding {
+	if job, ok := m.shownJob(); ok && job.Running() {
+		return []key.Binding{m.keys.Interrupt, m.keys.Background}
+	}
+	return []key.Binding{m.keys.Back, m.keys.Quit}
+}
+
 // progressView renders the spinner/title, the scrollable output box, the final
-// status, and the help bar.
+// status, and the help bar — all for the job the screen is showing.
 func (m model) progressView() string {
 	var b strings.Builder
 
-	head := m.progressTitle
-	if m.running {
+	job, ok := m.shownJob()
+	if !ok {
+		// The job was reaped: its VM disappeared while the user watched it.
+		b.WriteString(titleStyle.Render("Run unavailable"))
+		b.WriteString("\n\n")
+		b.WriteString(statusStyle.Render("This VM is gone, and its run went with it. Press esc to return to the list."))
+		b.WriteString("\n\n" + m.help.ShortHelpView(m.progressHelp()))
+		return appStyle.Render(b.String())
+	}
+
+	head := job.Title
+	if job.Running() {
 		head = m.spinner.View() + " " + head
 	}
 	b.WriteString(titleStyle.Render(head))
@@ -125,21 +230,21 @@ func (m model) progressView() string {
 	b.WriteString(boxStyle.Render(m.viewport.View()))
 	b.WriteString("\n")
 
-	if !m.running {
+	if !job.Running() {
 		back := "list"
-		if m.progressBack == viewDetail {
+		if job.Back == viewDetail {
 			back = "VM"
 		}
 		switch {
-		case m.canceled:
+		case job.Canceled:
 			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the "+back+"."))
-		case m.doneErr != nil:
-			b.WriteString("\n" + errStyle.Render("Failed: "+m.doneErr.Error()))
+		case job.Err != nil:
+			b.WriteString("\n" + errStyle.Render("Failed: "+job.Err.Error()))
 		default:
 			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the "+back+"."))
 		}
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n" + m.help.ShortHelpView(m.progressHelp()))
 	return appStyle.Render(b.String())
 }

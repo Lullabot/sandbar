@@ -9,6 +9,8 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // secretsFakeRunner is a lima.Runner whose Output (backs cli.Start/cli.Stop)
@@ -164,15 +166,13 @@ func TestSecretsWarnNotFailOnApplyFailure(t *testing.T) {
 // CloneToken empty — the token reaches secrets.json, never managed-vms.json.
 func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewProgress
-	m.running = true
-	m.provCfg = vm.CreateConfig{
+	seedJob(t, &m, "claude", vm.CreateConfig{
 		Name:       "claude",
 		BaseName:   "claude-base",
 		CloneToken: "ghp_x",
-	}
+	})
 
-	next, cmd := m.Update(provisionDoneMsg{})
+	next, cmd := m.Update(provisionDoneMsg{vm: "claude"})
 	m = next.(model)
 
 	if got := m.sec.Get("claude")["GH_TOKEN"]; got != "ghp_x" {
@@ -197,11 +197,9 @@ func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 	if err := m.sec.Set("claude", map[string]string{"OTHER": "kept"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
-	m.view = viewProgress
-	m.running = true
-	m.provCfg = vm.CreateConfig{Name: "claude", BaseName: "claude-base"}
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
 
-	next, _ := m.Update(provisionDoneMsg{})
+	next, _ := m.Update(provisionDoneMsg{vm: "claude"})
 	m = next.(model)
 
 	got := m.sec.Get("claude")
@@ -228,6 +226,92 @@ func TestDeleteSecretsPruned(t *testing.T) {
 
 	if got := m.sec.Get("claude"); len(got) != 0 {
 		t.Fatalf("a successful delete should prune secrets, sec.Get returned %v", got)
+	}
+}
+
+// (f) Saving the secrets editor (ctrl+s) on a RUNNING VM must not stop at the
+// host store: it must also push the new value into the guest, the same way
+// startCmd/restartCmd do after a boot. This is the in-process half of the
+// "ctrl+s never reaches the guest" fix — necessary but not sufficient; the
+// far-side proof (a real guest actually receiving the new value, without a
+// restart) lives in the limae2e test.
+func TestSecretsSaveOnRunningVMPushesToGuest(t *testing.T) {
+	fr := &secretsFakeRunner{}
+	cli := lima.New(fr)
+	m := newTestModelWithCli(t, cli)
+	m = resized(m, 100, 30)
+	m.vms = []vm.VM{{Name: "claude", Status: "Running"}}
+	m = openSecretsViaKey(m, "claude", "Running")
+	m = typeInto(m, "GH_TOKEN=ghp_new")
+
+	after, cmd := m.Update(ctrlKey('s'))
+	m = after.(model)
+
+	if m.view != viewDetail {
+		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	}
+	if got := m.sec.Get("claude"); got["GH_TOKEN"] != "ghp_new" {
+		t.Fatalf("the host store should still persist immediately, got %v", got)
+	}
+	if cmd == nil {
+		t.Fatal("saving on a RUNNING VM must dispatch a command that pushes the change to the guest, got nil")
+	}
+
+	// Drive whatever cmd() returns to a concrete actionDoneMsg — beginAction
+	// batches the apply with the spinner tick, so unwrap a possible BatchMsg.
+	var done actionDoneMsg
+	found := false
+	msg := cmd()
+	cmds := []tea.Cmd{func() tea.Msg { return msg }}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		cmds = batch
+	}
+	for _, c := range cmds {
+		if c == nil {
+			continue
+		}
+		if d, ok := c().(actionDoneMsg); ok {
+			done = d
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an actionDoneMsg from the save-on-running-VM command, got %v", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("the guest apply should have succeeded, got err = %v", done.err)
+	}
+	if len(fr.streamCalls) == 0 {
+		t.Fatal("saving on a running VM should have shelled into the guest to apply the secret")
+	}
+	if !strings.Contains(fr.streamStdin[0], "GH_TOKEN") {
+		t.Fatalf("guest apply stdin %q should carry the new GH_TOKEN pair", fr.streamStdin[0])
+	}
+}
+
+// (g) The same save on a STOPPED VM must NOT reach the guest — there is
+// nothing running to apply to — and the status must say so honestly (not
+// claim the value already applied).
+func TestSecretsSaveOnStoppedVMDoesNotTouchGuest(t *testing.T) {
+	fr := &secretsFakeRunner{}
+	cli := lima.New(fr)
+	m := newTestModelWithCli(t, cli)
+	m = resized(m, 100, 30)
+	m.vms = []vm.VM{{Name: "claude", Status: "Stopped"}}
+	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = typeInto(m, "GH_TOKEN=ghp_new")
+
+	after, cmd := m.Update(ctrlKey('s'))
+	m = after.(model)
+
+	if cmd != nil {
+		t.Fatal("saving on a STOPPED VM must not dispatch a guest-apply command")
+	}
+	if len(fr.streamCalls) != 0 {
+		t.Fatalf("saving on a stopped VM must not shell into the guest, got %d calls", len(fr.streamCalls))
+	}
+	if !strings.Contains(m.status, "claude") || !strings.Contains(m.status, "next start") {
+		t.Fatalf("status %q should name the VM and honestly say it applies on next start", m.status)
 	}
 }
 

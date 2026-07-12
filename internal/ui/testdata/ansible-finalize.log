@@ -1,0 +1,276 @@
+
+==> Cloning "p04cap2" from base image "p04cap-base"…
+
+==> Starting "p04cap2"…
+time="2026-07-12T18:17:48-04:00" level=info msg="Using the existing instance `p04cap2`"
+time="2026-07-12T18:17:48-04:00" level=info msg="Starting the instance \"p04cap2\" with internal VM driver \"qemu\""
+time="2026-07-12T18:17:51-04:00" level=info msg="[hostagent] hostagent socket created at /home/debian/.lima/p04cap2/ha.sock"
+time="2026-07-12T18:17:52-04:00" level=info msg="[hostagent] Using system firmware (`/usr/share/OVMF/OVMF_CODE_4M.fd`)"
+time="2026-07-12T18:17:52-04:00" level=info msg="[hostagent] Starting QEMU (hint: to watch the boot progress, see `/home/debian/.lima/p04cap2/serial*.log`)"
+time="2026-07-12T18:17:52-04:00" level=info msg="SSH Local Port: 40165"
+time="2026-07-12T18:17:52-04:00" level=info msg="[hostagent] Waiting for the essential requirement 1 of 4: \"ssh\""
+time="2026-07-12T18:18:31-04:00" level=info msg="[hostagent] The essential requirement 1 of 4 is satisfied"
+time="2026-07-12T18:18:31-04:00" level=info msg="[hostagent] Waiting for the essential requirement 2 of 4: \"user session is ready for ssh\""
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] The essential requirement 2 of 4 is satisfied"
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] Waiting for the essential requirement 3 of 4: \"sshfs binary to be installed\""
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] The essential requirement 3 of 4 is satisfied"
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] Waiting for the essential requirement 4 of 4: \"fuse to \\\"allow_other\\\" as user\""
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] The essential requirement 4 of 4 is satisfied"
+time="2026-07-12T18:18:38-04:00" level=info msg="[hostagent] Mounting \"/home/debian/sandbar/.claude/worktrees/tui-tile-board\" on \"/mnt/playbook\""
+time="2026-07-12T18:18:39-04:00" level=info msg="[hostagent] Waiting for the optional requirement 1 of 2: \"systemd must be available\""
+time="2026-07-12T18:18:39-04:00" level=info msg="[hostagent] Stopping forwarding \"/run/lima-guestagent.sock\" (guest) to \"/home/debian/.lima/p04cap2/ga.sock\" (host)"
+time="2026-07-12T18:18:39-04:00" level=info msg="[hostagent] Forwarding \"/run/lima-guestagent.sock\" (guest) to \"/home/debian/.lima/p04cap2/ga.sock\" (host)"
+time="2026-07-12T18:18:39-04:00" level=info msg="[hostagent] The optional requirement 1 of 2 is satisfied"
+time="2026-07-12T18:18:39-04:00" level=info msg="[hostagent] Waiting for the optional requirement 2 of 2: \"containerd binaries to be installed\""
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] The optional requirement 2 of 2 is satisfied"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Waiting for the guest agent to be running"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Guest agent is running"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Waiting for the final requirement 1 of 1: \"boot scripts must have finished\""
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Time sync: guest agent is alive, starting time synchronization"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding TCP 127.0.0.53:53"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding TCP 0.0.0.0:22"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding TCP from 127.0.0.1:39553 to 127.0.0.1:39553"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding TCP from 0.0.0.0:5355 to 127.0.0.1:5355"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding TCP 127.0.0.54:53"
+time="2026-07-12T18:18:40-04:00" level=warning msg="[hostagent] failed to listen tcp: 127.0.0.1:5355" error="listen tcp 127.0.0.1:5355: bind: address already in use"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding TCP [::]:22"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding TCP from [::]:5355 to 127.0.0.1:5355"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding UDP 127.0.0.54:53"
+time="2026-07-12T18:18:40-04:00" level=warning msg="[hostagent] failed to listen tcp: 127.0.0.1:5355" error="listen tcp 127.0.0.1:5355: bind: address already in use"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding UDP 127.0.0.53:53"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Not forwarding UDP 192.168.5.15:68"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding UDP from 0.0.0.0:5353 to 127.0.0.1:5353"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding UDP from 0.0.0.0:5355 to 127.0.0.1:5355"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding UDP from [::]:5353 to 127.0.0.1:5353"
+time="2026-07-12T18:18:40-04:00" level=info msg="[hostagent] Forwarding UDP from [::]:5355 to 127.0.0.1:5355"
+time="2026-07-12T18:18:49-04:00" level=info msg="[hostagent] The final requirement 1 of 1 is satisfied"
+time="2026-07-12T18:18:49-04:00" level=info msg="READY. Run `limactl shell p04cap2` to open the shell."
+
+==> Provisioning "p04cap2" (finalize phase, Ansible)…
+bash: line 1: cd: /home/debian/sandbar/.claude/worktrees/tui-tile-board: No such file or directory
+bash: line 1: cd: /home/debian: No such file or directory
+SAND_ANSIBLE_TASK_TOTAL=72
+
+PLAY [Provision Claude Code development VM] ************************************
+
+TASK [Gathering Facts] *********************************************************
+[WARNING]: Host 'localhost' is using the discovered Python interpreter at '/usr/bin/python3.13', but future installation of another Python interpreter could cause a different interpreter to be discovered. See https://docs.ansible.com/ansible-core/2.19/reference_appendices/interpreter_discovery.html for more information.
+ok: [localhost]
+
+TASK [base : Set hostname] *****************************************************
+changed: [localhost]
+
+TASK [base : Deploy /etc/hosts] ************************************************
+changed: [localhost]
+
+TASK [base : Upgrade all apt packages] *****************************************
+changed: [localhost]
+
+TASK [base : Generate locale] **************************************************
+skipping: [localhost]
+
+TASK [base : Set default locale] ***********************************************
+skipping: [localhost]
+
+TASK [base : Install base packages] ********************************************
+skipping: [localhost]
+
+TASK [base : Accept COLORTERM over SSH for truecolor terminals] ****************
+skipping: [localhost]
+
+TASK [base : Ensure /etc/apt/keyrings directory exists] ************************
+skipping: [localhost]
+
+TASK [base : Download NodeSource GPG key] **************************************
+skipping: [localhost]
+
+TASK [base : Dearmor NodeSource GPG key] ***************************************
+skipping: [localhost]
+
+TASK [base : Remove temporary NodeSource GPG key file] *************************
+skipping: [localhost]
+
+TASK [base : Deploy NodeSource APT repository] *********************************
+skipping: [localhost]
+
+TASK [base : Install Node.js] **************************************************
+skipping: [localhost]
+
+TASK [user : Generate a secure random password] ********************************
+skipping: [localhost]
+
+TASK [user : Create user debian] ***********************************************
+skipping: [localhost]
+
+TASK [user : Get home directory for debian] ************************************
+ok: [localhost]
+
+TASK [user : Set user home directory fact] *************************************
+ok: [localhost]
+
+TASK [user : Deploy sudoers file for passwordless sudo] ************************
+skipping: [localhost]
+
+TASK [user : Ensure ~/.ssh directory exists] ***********************************
+skipping: [localhost]
+
+TASK [user : Fetch SSH authorized_keys from a URL] *****************************
+skipping: [localhost]
+
+TASK [user : Deploy ~/.ssh/rc] *************************************************
+skipping: [localhost]
+
+TASK [user : Deploy ~/.tmux.conf] **********************************************
+skipping: [localhost]
+
+TASK [user : Deploy ~/.gitconfig] **********************************************
+changed: [localhost]
+
+TASK [user : Ensure ~/.local/bin directory exists] *****************************
+skipping: [localhost]
+
+TASK [user : Ensure ~/.config/direnv directory exists] *************************
+skipping: [localhost]
+
+TASK [user : Deploy ~/.config/direnv/direnv.toml] ******************************
+skipping: [localhost]
+
+TASK [user : Ensure ~/.config/sandbar directory exists] ************************
+skipping: [localhost]
+
+TASK [user : Deploy bashrc customizations] *************************************
+skipping: [localhost]
+
+TASK [user : Source the sandbar secrets file from ~/.profile (login shells)] ***
+skipping: [localhost]
+
+TASK [user : Display generated password for debian] ****************************
+skipping: [localhost]
+
+TASK [samba : Install Samba packages] ******************************************
+skipping: [localhost]
+
+TASK [samba : Deploy smb.conf] *************************************************
+skipping: [localhost]
+
+TASK [samba : Set Samba password for debian] ***********************************
+skipping: [localhost]
+
+TASK [samba : Enable and start smbd] *******************************************
+skipping: [localhost]
+
+TASK [dev-tools : Get home directory for debian] *******************************
+skipping: [localhost]
+
+TASK [dev-tools : Set devtools user home directory fact] ***********************
+skipping: [localhost]
+
+TASK [dev-tools : Ensure /etc/apt/keyrings directory exists] *******************
+skipping: [localhost]
+
+TASK [dev-tools : Download Docker GPG key] *************************************
+skipping: [localhost]
+
+TASK [dev-tools : Deploy Docker APT repository] ********************************
+skipping: [localhost]
+
+TASK [dev-tools : Install Docker packages] *************************************
+skipping: [localhost]
+
+TASK [dev-tools : Enable and start Docker service] *****************************
+skipping: [localhost]
+
+TASK [dev-tools : Add claude user to docker group] *****************************
+skipping: [localhost]
+
+TASK [dev-tools : Download ddev GPG key] ***************************************
+skipping: [localhost]
+
+TASK [dev-tools : Dearmor ddev GPG key] ****************************************
+skipping: [localhost]
+
+TASK [dev-tools : Deploy ddev APT repository] **********************************
+skipping: [localhost]
+
+TASK [dev-tools : Install ddev] ************************************************
+skipping: [localhost]
+
+TASK [dev-tools : Download Cloudflare GPG key] *********************************
+skipping: [localhost]
+
+TASK [dev-tools : Deploy Cloudflare APT repository] ****************************
+skipping: [localhost]
+
+TASK [dev-tools : Install cloudflared] *****************************************
+skipping: [localhost]
+
+TASK [dev-tools : Download GitHub CLI GPG key] *********************************
+skipping: [localhost]
+
+TASK [dev-tools : Deploy GitHub CLI APT repository] ****************************
+skipping: [localhost]
+
+TASK [dev-tools : Install GitHub CLI] ******************************************
+skipping: [localhost]
+
+TASK [dev-tools : Install uv] **************************************************
+skipping: [localhost]
+
+TASK [dev-tools : Install mkcert CA] *******************************************
+skipping: [localhost]
+
+TASK [dev-tools : Download Docker registry proxy CA certificate] ***************
+skipping: [localhost]
+
+TASK [dev-tools : Ensure Docker systemd override directory exists] *************
+skipping: [localhost]
+
+TASK [dev-tools : Deploy Docker proxy configuration] ***************************
+skipping: [localhost]
+
+TASK [claude-code : Get home directory for debian] *****************************
+skipping: [localhost]
+
+TASK [claude-code : Set user home directory fact] ******************************
+skipping: [localhost]
+
+TASK [claude-code : Create ~/.claude directory] ********************************
+skipping: [localhost]
+
+TASK [claude-code : Deploy ~/.claude/settings.json from template] **************
+skipping: [localhost]
+
+TASK [claude-code : Install Claude Code using the official installer] **********
+skipping: [localhost]
+
+TASK [claude-code : Add ~/.local/bin to PATH in ~/.bashrc] *********************
+skipping: [localhost]
+
+TASK [project : Get home directory for debian] *********************************
+skipping: [localhost]
+
+TASK [project : Set home directory fact] ***************************************
+skipping: [localhost]
+
+TASK [project : Parse the clone URL] *******************************************
+skipping: [localhost]
+
+TASK [project : Derive the org directory and clone destination] ****************
+skipping: [localhost]
+
+TASK [project : Create the org directory] **************************************
+skipping: [localhost]
+
+TASK [project : Write the per-org .env with GH_TOKEN (GitHub only)] ************
+skipping: [localhost]
+
+TASK [project : Approve the .env with direnv] **********************************
+skipping: [localhost]
+
+TASK [project : Clone the project] *********************************************
+skipping: [localhost]
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=7    changed=4    unreachable=0    failed=0    skipped=65   rescued=0    ignored=0   
+
+

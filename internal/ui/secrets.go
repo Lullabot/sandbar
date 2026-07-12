@@ -13,12 +13,25 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// secretsChrome is the number of terminal rows secretsView spends on
+// secretsEditorChrome is the number of terminal rows secretsView spends on
 // everything BUT the textarea: the title, the cleartext warning, the scoping
-// tip, the (possible) error line, the help bar, and appStyle's padding. The
-// editor height is the terminal height minus this, so the whole view fits
-// without overflowing and scrolling the title off the top of the screen.
-const secretsChrome = 16
+// tip, the help bar, and the blank line separating each (appStyle's own
+// padding is already folded into layoutMode.ContentHeight). secretsEditorSize
+// is the single place this is applied — called from both openSecrets and
+// applySize — so the editor's width/height can never drift out of sync the
+// way the old fixed row-count constant (previously duplicated between this
+// file and model.go's WindowSizeMsg handler) could.
+const secretsEditorChrome = 12
+
+// secretsEditorSize derives the textarea's width/height from the layout
+// mode, in place of a hardcoded terminal-size offset.
+func secretsEditorSize(lm layoutMode) (width, height int) {
+	h := lm.ContentHeight - secretsEditorChrome
+	if h < minBudget {
+		h = minBudget
+	}
+	return lm.ContentWidth, h
+}
 
 // openSecrets opens the secrets editor for the named VM, seeding the textarea
 // with its current KEY=VALUE pairs (one per line, keys sorted ascending).
@@ -33,8 +46,9 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name)))
-	ta.SetWidth(max(20, m.width-8))
-	ta.SetHeight(max(5, m.height-secretsChrome))
+	w, h := secretsEditorSize(m.layout)
+	ta.SetWidth(w)
+	ta.SetHeight(h)
 	m.secretsArea = ta
 	m.secretsVM = name
 	m.secretsErr = nil
@@ -95,9 +109,14 @@ func renderPairsForEditor(scopes map[string]map[string]string) string {
 // a new section: "[]" or the region before any header is the global scope
 // (""); anything else is a directory scope, validated with
 // secrets.ValidScope. Within a section, a line splits on its FIRST '=', so a
-// value may contain '='. The key is trimmed; the value is not, since a
-// trailing space can be significant. Any bad line aborts the whole parse — a
-// partial save would silently drop a secret the user typed. A duplicate KEY
+// value may contain '='. The split runs on the TRIMMED line, not the raw
+// one — a leading/interior space in the value survives ("A= 1" -> " 1" is
+// still significant), but a trailing carriage return does not: a buffer
+// pasted with CRLF line endings (Split(text, "\n") leaves a "\r" on the end
+// of every line) would otherwise land that "\r" inside every VALUE, and
+// Render single-quotes it straight into the guest's secrets.env. The key is
+// additionally trimmed on top of that. Any bad line aborts the whole parse —
+// a partial save would silently drop a secret the user typed. A duplicate KEY
 // is rejected only within the SAME scope; the same key may appear once per
 // scope. Kept free of model state so it is trivially testable on its own.
 func parseSecrets(text string) (map[string]map[string]string, error) {
@@ -125,7 +144,7 @@ func parseSecrets(text string) (map[string]map[string]string, error) {
 			cur = existing
 			continue
 		}
-		k, v, ok := strings.Cut(line, "=")
+		k, v, ok := strings.Cut(trimmed, "=")
 		if !ok {
 			return nil, fmt.Errorf("line %d: expected KEY=VALUE, got %q", i+1, line)
 		}
@@ -146,6 +165,18 @@ func parseSecrets(text string) (map[string]map[string]string, error) {
 // returns to the detail view; esc discards the buffer and returns to the
 // detail view without writing anything. Both must be handled BEFORE any key
 // reaches the textarea, which otherwise consumes ctrl+s/esc as ordinary text.
+//
+// The host store is always the thing that gets written first — it is the
+// source of truth "on next start" regardless of the VM's current status. But
+// a RUNNING VM already has a guest to push the change into right now, so the
+// save additionally batches applySecretsCmd (gated on m.lookupVM's Status, the
+// same live snapshot the rest of the detail screen's actions key off of). A
+// STOPPED VM has no guest to reach — its value legitimately waits for the
+// VM's next start, which is the only case the status line may say so. Unlike
+// the fire-and-forget shape this replaced, the apply's result is not
+// swallowed: it is routed through the ordinary actionDoneMsg -> status-line
+// path (see the actionDoneMsg case in model.go), so a guest that could not be
+// reached surfaces as "apply secrets <name> failed: ...", never as success.
 func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEsc:
@@ -164,8 +195,14 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.secretsErr = nil
-		m.status = "secrets saved for " + m.secretsVM + " — they apply on next start"
+		name := m.secretsVM
 		m.view = viewDetail
+		if v, ok := m.lookupVM(name); ok && v.Status == "Running" {
+			m.status = "secrets saved for " + name + " — applying to the running VM…"
+			user, liveScopes := m.secretsFor(name)
+			return m, m.beginAction(applySecretsCmd(m.cli, name, user, liveScopes))
+		}
+		m.status = "secrets saved for " + name + " — they apply on next start"
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -173,10 +210,15 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// secretsHelp returns the bindings shown in the secrets editor's help bar.
+func (m model) secretsHelp() []key.Binding {
+	return []key.Binding{m.keys.Save, m.keys.Back}
+}
+
 // secretsView renders the secrets editor: a title naming the VM, the textarea,
 // any pending error, and a cleartext-storage warning.
 func (m model) secretsView() string {
-	cw := m.contentWidth()
+	cw := m.layout.ContentWidth
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Secrets: " + m.secretsVM))
 	b.WriteString("\n\n")
@@ -198,6 +240,6 @@ func (m model) secretsView() string {
 		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section "+
 			"(e.g. [github.com/acme]) to scope git auth to that subtree.") + "\n")
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.viewHelp()))
+	b.WriteString("\n" + m.help.ShortHelpView(m.secretsHelp()))
 	return appStyle.Render(b.String())
 }

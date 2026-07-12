@@ -34,6 +34,22 @@ import (
 // playbook_embed.go: keep the two in step, and the guest gets the same tree
 // whether it came from a checkout or the embedded copy. --delete-excluded makes
 // /root/playbook match that set exactly, clearing junk a pre-filter base baked in.
+//
+// The SAND_ANSIBLE_TASK_TOTAL line exists because Ansible's default stdout
+// callback prints no task count ANYWHERE in its output, so the TUI — which
+// renders a progress bar on a building VM's tile — has no denominator to fill it
+// with. --list-tasks supplies one, and it is exact rather than an estimate:
+// Ansible announces a TASK banner even for a task it goes on to skip (a
+// `when:`-gated role still announces every one of its tasks, then prints
+// "skipping:"), so the static list and the live banner count agree. The +1 is
+// "Gathering Facts", which every play runs and --list-tasks omits. Verified
+// against a real base-phase run: 71 listed + 1 = the 72 banners it printed.
+// Parsed host-side by internal/ui/ansible.go.
+//
+// It is best-effort by construction: if the listing fails or returns nothing
+// countable, the total is 0, the tile falls back to an indeterminate bar, and
+// the provision itself is untouched. A progress bar must never be able to break
+// a build.
 const inGuestScript = `set -eu -o pipefail
 vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
@@ -44,6 +60,12 @@ rsync -a --delete --delete-excluded \
   --include='/roles/***' --include='/group_vars/***' --exclude='*' \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
+listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
+case "${listed:-}" in
+  ''|*[!0-9]*) total=0 ;;
+  *) total=$((listed + 1)) ;;
+esac
+echo "SAND_ANSIBLE_TASK_TOTAL=$total"
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 

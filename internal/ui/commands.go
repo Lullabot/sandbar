@@ -34,10 +34,21 @@ type (
 		err    error
 		warn   string
 	}
-	// provisionOutputMsg is one chunk of streamed provisioner output.
-	provisionOutputMsg string
-	// provisionDoneMsg signals the provisioner goroutine finished.
-	provisionDoneMsg struct{ err error }
+	// provisionOutputMsg is one chunk of streamed output from ONE VM's job. It
+	// used to be a bare string — which is precisely why only one job could ever
+	// exist: a chunk that does not say which VM it came from can only be appended
+	// to a single global buffer. vm is what lets N jobs stream at once, each into
+	// its own log.
+	provisionOutputMsg struct {
+		vm    string
+		chunk string
+	}
+	// provisionDoneMsg signals that ONE VM's job goroutine finished. VM-keyed for
+	// the same reason.
+	provisionDoneMsg struct {
+		vm  string
+		err error
+	}
 )
 
 // listCmd loads the VM list off the Update goroutine, and measures each VM's
@@ -109,18 +120,23 @@ func restartCmd(cli *lima.Client, name, user string, scopes map[string]map[strin
 }
 
 // applySecretsCmd writes name's stored secrets into the guest without
-// starting or stopping anything. It backs the create/reset seam: createVM and
-// Reset each end with their own StartStreaming (so the VM is already up by
-// the time provisionDoneMsg fires), and by then a create-form GH_TOKEN has
-// just landed in the store — so this pushes it in rather than waiting for the
-// VM's *next* start. Failure is a warning, matching startCmd/restartCmd.
+// starting or stopping anything. It backs two seams:
+//
+//   - The create/reset follow-up: createVM and Reset each end with their own
+//     StartStreaming (so the VM is already up by the time provisionDoneMsg
+//     fires), and by then a create-form GH_TOKEN has just landed in the store —
+//     so this pushes it in rather than waiting for the VM's *next* start.
+//   - The secrets editor's save path (updateSecrets, secrets.go), gated on the
+//     VM being Running.
+//
+// Unlike startCmd/restartCmd — where a failed apply is a non-fatal warning
+// because the VM itself already started/stopped successfully — this command's
+// entire job IS the apply, so its failure is reported as a real error
+// (actionDoneMsg.err), not swallowed into a warning next to a false "ok".
 func applySecretsCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
-			warn = "secrets not applied: " + err.Error()
-		}
-		return actionDoneMsg{action: "apply secrets", name: name, warn: warn}
+		err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard)
+		return actionDoneMsg{action: "apply secrets", name: name, err: err}
 	}
 }
 
