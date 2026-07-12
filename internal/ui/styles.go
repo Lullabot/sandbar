@@ -40,4 +40,28 @@ var (
 			BorderLeft(true).
 			BorderForeground(lipgloss.Color("63")).
 			PaddingLeft(1)
+
+	// Tile status colours (task 07, tile.go): the SAME ANSI-256 indices used
+	// above, not a second palette — 42 (okStyle's green) for running, 241
+	// (statusStyle's dim grey) for stopped, 214 (warnStyle's amber) for
+	// building, 203 (errStyle's red) for failed. Colour is never the only
+	// carrier of meaning: every tile also prints a glyph and the status word,
+	// which is what a status test can still tell apart after ansi.Strip.
+	tileTitleStyle    = lipgloss.NewStyle().Bold(true)
+	tileRunningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	tileStoppedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tileBuildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	tileFailedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+
+	// tileChromeStyle is the dim (never absent) treatment for a tile's
+	// secondary rows: gauges, badges, the closing up/last-used line. Same 245
+	// index as labelStyle/hintStyle/fieldInfoStyle above.
+	tileChromeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	// tileFocusedBorderColor/tileUnfocusedBorderColor colour a tile's border;
+	// the focused tile additionally switches to lipgloss.ThickBorder() (see
+	// tile.go) so focus survives NO_COLOR and a monochrome terminal too — the
+	// border glyphs themselves change, not just their colour.
+	tileFocusedBorderColor   = lipgloss.Color("63")
+	tileUnfocusedBorderColor = lipgloss.Color("245")
 )
