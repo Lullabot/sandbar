@@ -29,7 +29,7 @@ with `--connection=local` — no manual cloning, inventory editing, or `ansible`
 install required.
 
 - **Just want a VM** — the Homebrew-installed binary works from anywhere; it
-  materializes its embedded playbook to a private temp dir and mounts that.
+  extracts its embedded playbook to a private temp dir and mounts that.
 - **Hacking on the playbook** — run `sand` from a checkout of this repository
   (e.g. via `go build ./cmd/sand`). It detects the working tree (by walking up
   to a directory containing `site.yml`) and mounts that instead of its embedded
@@ -331,8 +331,9 @@ This playbook creates a **disposable, single-purpose development VM** intended t
 
 - **Passwordless sudo** is enabled for the configured user (default: `claude`). The VM is not intended to host multiple users or untrusted workloads.
 - **Claude Code runs with `--dangerously-skip-permissions`**, allowing it to operate without interactive approval prompts. This is appropriate because the VM is ephemeral and isolated — it can be torn down and reprovisioned at any time.
-- **A random password** is generated for SSH and Samba access and is not stored persistently. With the Lima base-image flow it is generated once when the base is built, so clones of that base share it; this is immaterial in practice because Lima access is over `limactl shell` with an injected key, not the password. Direct (non-Lima) `full` provisioning still gets a fresh password per run.
-- **The TUI reset preserve options are a deliberate, opt-in exception** to "nothing leaves the VM". When you enable them, the selected data — the Claude login under `~/.claude` plus `~/.claude.json`, and/or the per-org `.env` (which holds `GH_TOKEN`) together with the checkout — is copied to a private host temp dir, restored into the reset VM, then deleted. They default off; **do not** use preserve if you suspect the VM is compromised.
+- **A random password** is generated for SSH and Samba access and is not stored persistently. With the Lima base-image flow it is generated once when the base is built, so clones of that base share it; this doesn't matter in practice because Lima access is over `limactl shell` with an injected key, not the password. Direct (non-Lima) `full` provisioning still gets a fresh password per run.
+- **The host secrets store** (`${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json`, mode `0600`) is the single source of truth for every secret you give a VM, including GitHub tokens; it is rendered into the VM on each start, so it is a deliberate, host-side exception to "nothing leaves the VM" for that one file — treat it as sensitive. See [Secrets Editor](#secrets-editor).
+- **The TUI reset preserve options are a separate, opt-in exception** to "nothing leaves the VM". When you enable them, the selected data — the Claude login under `~/.claude` plus `~/.claude.json`, and/or the per-org `.env` (which holds `GH_TOKEN`) together with the checkout — is copied to a private host temp dir, restored into the reset VM, then deleted. They default off; **do not** use preserve if you suspect the VM is compromised.
 
 **Do not use this playbook to provision machines that hold sensitive data or are exposed to the public internet.** It is designed for an isolated LAN or virtual network where the VM is treated as disposable.
 
@@ -419,7 +420,7 @@ for how the embedded copy is resolved at runtime.
 
 - **Cutting a release.** Releases are driven by
   [release-please](https://github.com/googleapis/release-please): it keeps a
-  release PR open that accrues the changelog from Conventional Commit messages
+  release PR open that collects the changelog from Conventional Commit messages
   on `main`. Merging that PR creates the `vX.Y.Z` tag and GitHub Release, which
   in turn triggers the `release` workflow — [GoReleaser](https://goreleaser.com/)
   builds and uploads the `sand` binaries and pushes an updated formula to the
