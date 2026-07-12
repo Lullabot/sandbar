@@ -23,8 +23,18 @@ archives:
 # changelog as its notes). This workflow is triggered by release-please's tag
 # push and only builds/uploads the binaries + Homebrew formula, so keep the
 # existing release rather than recreating it or clobbering its notes.
+#
+# The repository has GitHub's immutable releases turned on: a release is frozen
+# the moment it is *published*, and assets can no longer be added to it. So
+# release-please leaves its release as a draft (`draft` + `force-tag-creation`
+# in release-please-config.json — the tag still gets pushed, which is what
+# triggers this workflow), GoReleaser adopts that draft via `use_existing_draft`
+# to upload the archives into it, and publishes it as its last step. GoReleaser
+# matches the draft by release *name*, which for a non-monorepo release-please
+# release is the tag — the same as GoReleaser's default `name_template`.
 release:
   mode: keep-existing
+  use_existing_draft: true
 
 # NOTE: `brews` (a Homebrew *formula*) is used deliberately, not the newer
 # `homebrew_casks`. GoReleaser v2.17 deprecates `brews`, but Homebrew *casks*
