@@ -12,8 +12,8 @@ import (
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -39,8 +39,17 @@ func newTestModel(t *testing.T) model {
 	return m
 }
 
-func runeKey(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+// runeKey builds a tea.KeyPressMsg for a single printable character, mirroring
+// how a real keypress is delivered in v2 (Code and Text both carry the rune).
+func runeKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// ctrlKey builds a tea.KeyPressMsg for ctrl+<r> (e.g. ctrlKey('s') is
+// ctrl+s) — v2 dropped the named tea.KeyCtrlS/tea.KeyCtrlC constants in
+// favor of Code+Mod.
+func ctrlKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
 }
 
 // Pressing 'd' on the VM (detail) screen opens the confirm-delete overlay for
@@ -233,7 +242,7 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 
 	// Tab through the inputs until focus lands on the first toggle.
 	for i := 0; i < 20 && m.toggleFocus != 0; i++ {
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
 	if m.toggleFocus != 0 {
@@ -246,7 +255,7 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 		t.Fatalf("the warning must not show before any toggle is on")
 	}
 
-	sp, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
 	if !m.preserveClaude {
 		t.Fatalf("space on the first toggle should enable preserveClaude")
@@ -281,7 +290,7 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 
 	// Below the floor: keep the form and surface an error, do not provision.
 	m.inputs[fDisk].SetValue("10GiB")
-	rejected, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	rejected, _ := m.Update(ctrlKey('s'))
 	m = rejected.(model)
 	if m.view == viewProgress || m.running {
 		t.Fatalf("a sub-floor disk must not provision (view=%v running=%v)", m.view, m.running)
@@ -292,7 +301,7 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 
 	// At/above the floor: dispatch the reset and switch to the progress view.
 	m.inputs[fDisk].SetValue("100GiB")
-	accepted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	accepted, _ := m.Update(ctrlKey('s'))
 	m = accepted.(model)
 	if m.view != viewProgress || !m.running {
 		t.Fatalf("a valid reset should provision (view=%v running=%v)", m.view, m.running)
@@ -416,7 +425,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	m.transferUpload = false // download: guest source → host destination
 	m.dest, _ = browse.NewDestInput("Destination dir: ", "/tmp/host-dst", nil)
 
-	accepted, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	accepted, cmd := m.Update(ctrlKey('s'))
 	m = accepted.(model)
 
 	if m.view != viewProgress {
@@ -555,7 +564,7 @@ func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 			wrapped = true
 			break
 		}
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
 	if !sawToggle0 || !sawToggle1 {
@@ -567,10 +576,10 @@ func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 
 	// Shift+tab from the first editable field wraps up to the last toggle.
 	for m.focusIdx != fHostname || m.toggleFocus != -1 {
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	prev, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	prev, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = prev.(model)
 	if m.toggleFocus != 1 {
 		t.Fatalf("shift+tab from Hostname should wrap to the last toggle, got toggleFocus=%d", m.toggleFocus)
@@ -594,14 +603,14 @@ func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
 			sawClaude = true
 			break
 		}
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
 	if !sawClaude {
 		t.Fatalf("navigation never reached the Claude toggle")
 	}
 	// Space still flips the Claude toggle even with the project toggle disabled.
-	sp, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
 	if !m.preserveClaude {
 		t.Fatalf("space on the Claude toggle should enable preserveClaude")
@@ -616,7 +625,7 @@ func TestResetEscClearsResetMode(t *testing.T) {
 		t.Fatalf("precondition: form should be in reset mode")
 	}
 
-	back, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	back, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = back.(model)
 	if m.view != viewList {
 		t.Fatalf("esc should return to the list, got view %v", m.view)
@@ -650,7 +659,7 @@ func TestBackspaceEditsFieldInForm(t *testing.T) {
 	// Put a known value in the focused field (cursor lands at the end).
 	m.inputs[m.focusIdx].SetValue("claude")
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = after.(model)
 
 	if m.view != viewForm {
@@ -671,7 +680,7 @@ func TestEscLeavesForm(t *testing.T) {
 		t.Fatalf("'n' should open the form, view = %v", m.view)
 	}
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = after.(model)
 	if m.view != viewList {
 		t.Fatalf("esc should return to the list, got view %v", m.view)
@@ -817,7 +826,7 @@ func TestEmptyNameFailsValidation(t *testing.T) {
 	m.inputs[fGitName].SetValue("Ada")
 	m.inputs[fGitEmail].SetValue("ada@example.com")
 
-	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	submitted, _ := m.Update(ctrlKey('s'))
 	m = submitted.(model)
 
 	if m.view != viewForm {
@@ -837,7 +846,7 @@ func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
 		t.Fatalf("form should open focused on the first field, got %d", m.focusIdx)
 	}
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if m.focusIdx != 1 {
 		t.Fatalf("enter should advance to the next field, got focus %d", m.focusIdx)
@@ -883,8 +892,8 @@ func TestLongOutputLineWraps(t *testing.T) {
 		t.Fatalf("wrapped output should keep the line's tail visible; got:\n%s", view)
 	}
 	for _, l := range strings.Split(view, "\n") {
-		if w := ansi.StringWidth(l); w > m.viewport.Width {
-			t.Fatalf("rendered line width %d exceeds viewport width %d: %q", w, m.viewport.Width, l)
+		if w := ansi.StringWidth(l); w > m.viewport.Width() {
+			t.Fatalf("rendered line width %d exceeds viewport width %d: %q", w, m.viewport.Width(), l)
 		}
 	}
 }
@@ -892,7 +901,7 @@ func TestLongOutputLineWraps(t *testing.T) {
 // Idle (on the list), ctrl+c quits the whole TUI as usual.
 func TestCtrlCQuitsWhenIdle(t *testing.T) {
 	m := newTestModel(t)
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); !isQuitCmd(cmd) {
+	if _, cmd := m.Update(ctrlKey('c')); !isQuitCmd(cmd) {
 		t.Fatal("ctrl+c on the list should quit the TUI")
 	}
 }
@@ -907,7 +916,7 @@ func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	m.running = true
 	m.cancel = func() { called = true }
 
-	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	after, cmd := m.Update(ctrlKey('c'))
 	m = after.(model)
 
 	if !called {
@@ -974,7 +983,7 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	m.inputs[fName].SetValue("myvm")
 	m.inputs[fGitName].SetValue("")
 
-	submitted, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	submitted, _ := m.Update(ctrlKey('s'))
 	m = submitted.(model)
 
 	if m.view != viewForm {
@@ -1153,7 +1162,7 @@ func TestStopAllNoTargetsSetsStatusNoOverlay(t *testing.T) {
 	}})
 	m = loaded.(model)
 
-	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+	after, cmd := m.Update(runeKey('X'))
 	m = after.(model)
 
 	if m.confirm != nil {

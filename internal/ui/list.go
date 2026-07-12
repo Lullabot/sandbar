@@ -7,9 +7,9 @@ import (
 
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 )
 
 // newTable builds the VM list table with its column layout. Name stays the
@@ -168,7 +168,7 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 }
 
 // updateList handles keys while the list (or its confirm overlay) is active.
-func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
@@ -178,24 +178,24 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// ctrl+c never reaches here — Update intercepts it before updateList — so it
 	// still quits.
 	if m.searching {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch {
+		case msg.Code == tea.KeyEsc:
 			m.searching = false
 			m.searchQuery = ""
 			m.refreshRows()
 			return m, nil
-		case tea.KeyEnter:
+		case msg.Code == tea.KeyEnter:
 			m.searching = false // keep the query; return to normal table navigation
 			return m, nil
-		case tea.KeyBackspace:
+		case msg.Code == tea.KeyBackspace:
 			if m.searchQuery != "" {
 				r := []rune(m.searchQuery)
 				m.searchQuery = string(r[:len(r)-1])
 				m.refreshRows()
 			}
 			return m, nil
-		case tea.KeyRunes, tea.KeySpace:
-			m.searchQuery += string(msg.Runes)
+		case msg.Text != "":
+			m.searchQuery += msg.Text
 			m.refreshRows()
 			return m, nil
 		}

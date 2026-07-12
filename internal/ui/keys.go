@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // keyMap holds every keybinding the TUI reacts to. Bindings are reused across
 // views (e.g. the same Enter/Quit) and surfaced in the help bar via viewHelp.

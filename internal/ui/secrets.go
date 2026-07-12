@@ -8,9 +8,9 @@ import (
 
 	"github.com/lullabot/sandbar/internal/secrets"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // secretsChrome is the number of terminal rows secretsView spends on
@@ -146,9 +146,9 @@ func parseSecrets(text string) (map[string]map[string]string, error) {
 // returns to the detail view; esc discards the buffer and returns to the
 // detail view without writing anything. Both must be handled BEFORE any key
 // reaches the textarea, which otherwise consumes ctrl+s/esc as ordinary text.
-func (m model) updateSecrets(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case msg.Type == tea.KeyEsc:
+	case msg.Code == tea.KeyEsc:
 		m.view = viewDetail
 		m.secretsErr = nil
 		return m, nil

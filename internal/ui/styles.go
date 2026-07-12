@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Shared lipgloss styles for the TUI. Colours are ANSI 256 indices so the UI
 // degrades gracefully on limited terminals.

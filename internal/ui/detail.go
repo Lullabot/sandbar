@@ -8,14 +8,14 @@ import (
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // updateDetail handles keys on the detail (VM) screen. The list only selects a
 // VM; every per-VM lifecycle action — start/stop/restart/reset/shell/delete —
 // plus the existing upload/download live here.
-func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateDetail(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}

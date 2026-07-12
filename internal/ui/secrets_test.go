@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The editor must fit the terminal and its guidance must reflow to the content
@@ -207,9 +207,9 @@ func typeInto(m model, s string) model {
 	for _, r := range s {
 		var msg tea.KeyMsg
 		if r == '\n' {
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		} else {
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+			msg = runeKey(r)
 		}
 		after, _ := m.Update(msg)
 		m = after.(model)
@@ -245,7 +245,7 @@ func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 		t.Fatalf("typed text never reached the editor buffer, value = %q", got)
 	}
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
 	if m.view != viewDetail {
@@ -266,7 +266,7 @@ func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 
 	m = typeInto(m, "EDITOR=vim\n[github.com/acme]\nGH_TOKEN=ghp_x")
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
 	if m.secretsErr != nil {
@@ -289,7 +289,7 @@ func TestSecretsEditorBackspaceEdits(t *testing.T) {
 	m = openSecretsViaKey(m, "claude", "Stopped")
 
 	m = typeInto(m, "AB")
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = after.(model)
 
 	if got := m.secretsArea.Value(); got != "A" {
@@ -339,7 +339,7 @@ func TestSecretsEditorEscDiscards(t *testing.T) {
 	m = openSecretsViaKey(m, "claude", "Running")
 	m.secretsArea.SetValue("A=1\n")
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = after.(model)
 
 	if m.view != viewDetail {
@@ -358,7 +358,7 @@ func TestSecretsEditorSaveValidPersists(t *testing.T) {
 	m = openSecretsViaKey(m, "claude", "Stopped")
 	m.secretsArea.SetValue("A=1\nB=2\n")
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
 	if m.view != viewDetail {
@@ -380,7 +380,7 @@ func TestSecretsEditorSaveInvalidStaysAndDoesNotPersist(t *testing.T) {
 	m = openSecretsViaKey(m, "claude", "Stopped")
 	m.secretsArea.SetValue("2BAD=x\n")
 
-	after, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
 	if m.view != viewSecrets {

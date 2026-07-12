@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // After a finished run, esc/back returns to progressBack: the VM detail view for
@@ -18,7 +18,7 @@ func TestProgressReturnsToBackView(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := model{view: viewProgress, running: false, progressBack: tc.back, keys: defaultKeys()}
-			got, _ := m.updateProgress(tea.KeyMsg{Type: tea.KeyEsc})
+			got, _ := m.updateProgress(tea.KeyPressMsg{Code: tea.KeyEsc})
 			if v := got.(model).view; v != tc.back {
 				t.Fatalf("esc after done: view = %v, want %v", v, tc.back)
 			}

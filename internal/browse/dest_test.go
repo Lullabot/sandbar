@@ -3,7 +3,7 @@ package browse
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestNormalizePath table-tests the custom un-escaping/quote/scheme logic.
@@ -33,11 +33,11 @@ func TestNormalizePath(t *testing.T) {
 	}
 }
 
-// TestDestInputNormalizesPaste asserts a Paste KeyMsg with an escaped path yields
+// TestDestInputNormalizesPaste asserts a PasteMsg with an escaped path yields
 // a clean Value (the drag-drop convenience path).
 func TestDestInputNormalizesPaste(t *testing.T) {
 	d, _ := NewDestInput("Destination dir: ", "/home/u", nil)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Paste: true, Runes: []rune(`/Users/me/My\ Files`)})
+	d, _ = d.Update(tea.PasteMsg{Content: `/Users/me/My\ Files`})
 	if got := d.Value(); got != "/Users/me/My Files" {
 		t.Fatalf("pasted value = %q, want %q", got, "/Users/me/My Files")
 	}
@@ -81,18 +81,18 @@ func TestDestAutocomplete(t *testing.T) {
 
 	// Type "al": prefix filter → alp2, alpha.
 	for _, r := range "al" {
-		d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		d, _ = d.Update(runeKey(r))
 	}
 	if len(d.matches) != 2 || d.matches[0] != "alp2" {
 		t.Fatalf("prefix 'al' should match alp2, alpha; got %v", d.matches)
 	}
 
 	// ↓ highlights the first match; enter fills it in (drilling one level deeper).
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if d.cursor != 0 {
 		t.Fatalf("down should highlight the first match, cursor=%d", d.cursor)
 	}
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.Value() != "/root/alp2/" {
 		t.Fatalf("enter should fill the highlighted dir, value=%q want /root/alp2/", d.Value())
 	}
@@ -105,13 +105,13 @@ func TestDestSelectionSurvivesNonEdits(t *testing.T) {
 	f := fakeLister{"/root": {{Name: "alpha", IsDir: true}, {Name: "beta", IsDir: true}}}
 	d, cmd := NewDestInput("dest: ", "/root/", f)
 	d, _ = d.Update(runCmd(cmd))
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown}) // highlight match 0
+	d, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // highlight match 0
 	if d.cursor != 0 {
 		t.Fatalf("precondition: down should highlight match 0, cursor=%d", d.cursor)
 	}
 	// KeyLeft moves the textinput cursor without changing the value — the same
 	// fall-through path a blink tick takes; the selection must survive.
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	d, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if d.cursor != 0 {
 		t.Fatalf("a value-preserving message reset the selection, cursor=%d want 0", d.cursor)
 	}

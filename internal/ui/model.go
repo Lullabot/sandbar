@@ -21,14 +21,14 @@ import (
 	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -174,7 +174,7 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		help:     help.New(),
 		view:     viewList,
 		table:    newTable(),
-		viewport: viewport.New(80, 18),
+		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(18)),
 		spinner:  sp,
 	}
 	// Neither load failure may silently shadow the other.
@@ -212,9 +212,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.help.Width = msg.Width
-		m.viewport.Width = max(20, msg.Width-8)
-		m.viewport.Height = max(5, msg.Height-12)
+		m.help.SetWidth(msg.Width)
+		m.viewport.SetWidth(max(20, msg.Width-8))
+		m.viewport.SetHeight(max(5, msg.Height-12))
 		m.table.SetWidth(max(40, msg.Width-6))
 		m.table.SetHeight(max(3, msg.Height-12))
 		// Resize an active file browser too (its inner list is only initialized
@@ -377,8 +377,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, listCmd(m.cli) // refresh the list the user returns to
 
-	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
+	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+c" {
 			// While a build is in flight, ctrl+c cancels it (killing the underlying
 			// limactl via the provisioner's context) and shows the result, rather
 			// than quitting the whole TUI and orphaning a half-built VM. Everywhere
@@ -421,7 +421,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // fully readable as the user scrolls. ansi.Wrap breaks over-long unbreakable
 // tokens (e.g. file paths) and preserves the output's ANSI colour codes.
 func (m *model) setOutput() {
-	w := m.viewport.Width
+	w := m.viewport.Width()
 	if w < 1 {
 		w = 80
 	}
@@ -466,7 +466,7 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Only the bound Confirm key ('y') dispatches the pending run; every other
 // key — including a stray repeat of whatever key raised the overlay — is
 // swallowed, so an accidental double-tap can never fire the action twice.
-func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Confirm): // y
 		run := m.confirm.run
@@ -491,22 +491,28 @@ func (m model) confirmView() string {
 	return errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel")
 }
 
-// View renders the active screen.
-func (m model) View() string {
+// View renders the active screen. v2 moved the alt-screen toggle from a
+// program option (tea.WithAltScreen(), the v1 entrypoint) into this View
+// field, so it is set here instead of in cmd/sand/main.go.
+func (m model) View() tea.View {
+	var content string
 	switch m.view {
 	case viewDetail:
-		return m.detailView()
+		content = m.detailView()
 	case viewForm:
-		return m.formView()
+		content = m.formView()
 	case viewProgress:
-		return m.progressView()
+		content = m.progressView()
 	case viewBrowse:
-		return m.browser.View()
+		content = m.browser.View()
 	case viewDest:
-		return m.destView()
+		content = m.destView()
 	case viewSecrets:
-		return m.secretsView()
+		content = m.secretsView()
 	default:
-		return m.listView()
+		content = m.listView()
 	}
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 )
 
 // fakeLister is an in-memory DirLister keyed by absolute path, so the Browser can
@@ -26,6 +26,19 @@ func runCmd(cmd tea.Cmd) tea.Msg {
 		return nil
 	}
 	return cmd()
+}
+
+// runeKey builds a tea.KeyPressMsg for a single printable character, mirroring
+// how a real keypress is delivered in v2 (Code and Text both carry the rune).
+func runeKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// ctrlKey builds a tea.KeyPressMsg for ctrl+<r> (e.g. ctrlKey('s') is
+// ctrl+s) — v2 dropped the named tea.KeyCtrlS/tea.KeyCtrlC constants in
+// favor of Code+Mod.
+func ctrlKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
 }
 
 // TestBrowserNavigateAndSelect covers YOUR logic: Open populates items, moving to
@@ -54,13 +67,13 @@ func TestBrowserNavigateAndSelect(t *testing.T) {
 	}
 
 	// Cursor starts on ".." (index 0); one Down lands on sub (index 1).
-	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyDown})
+	b, _ = b.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if it, ok := b.list.SelectedItem().(item); !ok || it.up || it.e.Name != "sub" {
 		t.Fatalf("after Down, selected item = %+v, want the 'sub' directory", b.list.SelectedItem())
 	}
 
 	// Enter on the directory schedules a reload of the child path.
-	entered, cmd := b.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	entered, cmd := b.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msg := runCmd(cmd)
 	dl, ok := msg.(dirLoadedMsg)
 	if !ok {
@@ -75,7 +88,7 @@ func TestBrowserNavigateAndSelect(t *testing.T) {
 	}
 
 	// Back on /root, the select key on 'sub' reports it as a recursive-source dir.
-	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	b, _ = b.Update(ctrlKey('s'))
 	p, isDir, ok := b.Selected()
 	if !ok {
 		t.Fatalf("select key should register a selection")
@@ -122,7 +135,7 @@ func TestBrowserInitialLoadErrorIsNavigable(t *testing.T) {
 		t.Fatalf("the seeded entry should be '..', got %+v", b.list.SelectedItem())
 	}
 	// Enter on ".." schedules a load of the parent, which may exist.
-	_, cmd := b.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := b.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	dl, ok := runCmd(cmd).(dirLoadedMsg)
 	if !ok {
 		t.Fatal("Enter on '..' should schedule a directory load")
@@ -142,8 +155,8 @@ func TestBrowserClearSelection(t *testing.T) {
 	b, _ = b.Update(runCmd(b.Open("/root")))
 
 	// Move off ".." onto the file and select it with Enter.
-	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyDown})
-	b, _ = b.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	b, _ = b.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	b, _ = b.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if _, _, ok := b.Selected(); !ok {
 		t.Fatal("precondition: selecting a file should leave a pending selection")
 	}

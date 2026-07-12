@@ -13,10 +13,10 @@ import (
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Form field indices. The slice order also drives tab/shift+tab focus movement.
@@ -186,7 +186,7 @@ func newInputs() []textinput.Model {
 	for i := range inputs {
 		ti := textinput.New()
 		ti.CharLimit = 256
-		ti.Width = 44
+		ti.SetWidth(44)
 		ti.SetValue(seeds[i])
 		if i == fCloneToken {
 			ti.EchoMode = textinput.EchoPassword
@@ -472,12 +472,12 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 }
 
 // updateForm handles keys while the create form is active.
-func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Note: 'q' is a text character here, so only ctrl+c (handled globally) quits.
 	// Only esc (not the shared Back binding) leaves the form: Back also matches
 	// backspace, which here must edit the focused field, not navigate away.
 	switch {
-	case msg.Type == tea.KeyEsc:
+	case msg.Code == tea.KeyEsc:
 		m.view = viewList
 		m.resetMode = false // a later create form must not inherit reset state
 		return m, nil
@@ -509,9 +509,9 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateResetForm handles keys for the reset-mode form: navigation skips the
 // locked Name and extends into the two preserve toggles, and space/enter on a
 // focused toggle flips it instead of moving focus.
-func (m model) updateResetForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// On a focused toggle, space/enter flips its bool rather than navigating.
-	if m.toggleFocus >= 0 && (msg.Type == tea.KeySpace || msg.Type == tea.KeyEnter) {
+	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
 		switch {
 		case m.toggleFocus == 0:
 			m.preserveClaude = !m.preserveClaude
