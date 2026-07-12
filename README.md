@@ -2,19 +2,56 @@
 
 Ansible playbook to provision a Debian 13 (trixie) VM as a Claude Code development environment.
 
-## Quick start with Lima (recommended)
+## Installing `sand`
 
-The fastest and recommended way to get a VM is `sand`, a small Go CLI/TUI with
-the playbook embedded in it. Install it via Homebrew:
+`sand` is a small Go CLI/TUI with this playbook embedded in it. It ships as a
+prebuilt binary from the [`lullabot/homebrew-sandbar`](https://github.com/Lullabot/homebrew-sandbar)
+tap:
 
 ```bash
 brew install lullabot/sandbar/sand
 ```
 
-Then either drive it headlessly:
+That taps the repository and installs the formula in one step; `brew tap
+lullabot/sandbar && brew install sand` is the explicit equivalent. Homebrew
+pulls in [Lima](https://lima-vm.io) as a dependency, so there is nothing else to
+install — no Ansible, no Go toolchain, no clone of this repository.
+
+Formulas (not casks) are published deliberately, so `brew install` works on
+**macOS and Linux**, on both `amd64` and `arm64`. On Linux, Homebrew installs
+Lima but not a hypervisor — Lima needs a working QEMU/KVM host, see the [Lima
+installation docs](https://lima-vm.io/docs/installation/).
+
+To upgrade or remove:
 
 ```bash
-sand create --git-name "Your Name" --git-email you@example.com
+brew upgrade sand
+brew uninstall sand   # does not delete your VMs; use `limactl delete <name>`
+```
+
+### From source
+
+If you're hacking on the playbook or the Go code, build from a checkout instead
+— a `sand` run from a working tree mounts *that* tree rather than its embedded
+copy of the playbook, so uncommitted edits provision the VM:
+
+```bash
+go build ./cmd/sand && ./sand
+```
+
+You still need Lima on the host. See
+[README-sand.md](README-sand.md#playbook-resolution-working-tree-first-embedded-fallback)
+for the playbook resolution order.
+
+## Quick start with Lima (recommended)
+
+Once `sand` is installed, drive it headlessly. Every flag has a default, and
+`--git-name`/`--git-email` fall back to the host's `git config`, so on a machine
+with git configured this needs no flags at all:
+
+```bash
+sand create
+sand create --git-name "Your Name" --git-email you@example.com   # or be explicit
 ```
 
 or launch the interactive TUI:
@@ -26,16 +63,10 @@ sand
 Either way, `sand` starts a [Lima](https://lima-vm.io/docs/installation/)
 instance that installs Ansible and runs the embedded playbook against itself
 with `--connection=local` — no manual cloning, inventory editing, or `ansible`
-install required.
-
-- **Just want a VM** — the Homebrew-installed binary works from anywhere; it
-  extracts its embedded playbook to a private temp dir and mounts that.
-- **Hacking on the playbook** — run `sand` from a checkout of this repository
-  (e.g. via `go build ./cmd/sand`). It detects the working tree (by walking up
-  to a directory containing `site.yml`) and mounts that instead of its embedded
-  copy, so uncommitted edits provision the VM. See
-  [README-sand.md](README-sand.md#playbook-resolution-working-tree-first-embedded-fallback)
-  for the resolution order.
+install required. The Homebrew-installed binary works from anywhere: it extracts
+its embedded playbook to a private temp dir and mounts that. Run it from a
+checkout of this repository instead and it mounts your working tree, so
+uncommitted playbook edits provision the VM.
 
 ### Base image and clones
 
