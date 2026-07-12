@@ -44,7 +44,8 @@ func (listFakeRunner) Output(_ context.Context, args ...string) ([]byte, error) 
 	}
 	return nil, nil
 }
-func (listFakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+func (listFakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error    { return nil }
+func (listFakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error { return nil }
 
 // newTeaProgram builds the real tea.Model over the canned lima client, with the
 // managed-index/secrets store isolated to a temp dir, and boots it in an
@@ -94,22 +95,24 @@ func TestTUIDetailView(t *testing.T) {
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
-// 'd' on the list raises the delete-confirmation overlay for the highlighted VM.
+// 'd' on the VM screen raises the delete-confirmation overlay for that VM.
 func TestTUIDeleteConfirm(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForText(t, tm, "VM: claude")
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	waitForText(t, tm, `Delete "claude"?`)
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
-// Detail -> 's' opens the (empty) secrets panel for the VM.
+// VM screen -> 'e' opens the (empty) secrets editor for the VM.
 func TestTUISecretsPanelEmpty(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	waitForText(t, tm, "VM: claude")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	waitForText(t, tm, "Secrets: claude")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
