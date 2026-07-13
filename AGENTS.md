@@ -23,9 +23,12 @@ two halves that share one repo:
 - `secrets`, `registry`, `manage`, `browse`, `vm` — host-side secrets store,
   managed-VM index, shared registry bookkeeping, file browser, domain types.
 
-Entrypoint: `cmd/sand/main.go`. There is a headless `sand create` path
-(`internal/manage`) and the TUI path; keep them from drifting — both go through
-the same `provision`/`registry` seams by design.
+Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
+(`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
+keep them from drifting — the create/TUI paths go through the same
+`provision`/`registry` seams by design, and both shell entrypoints (the TUI's `S`
+verb and `sand shell`) construct their guest-attach command exclusively via
+`lima.AttachArgv`, the one place in sand that knows tmux exists.
 
 ## Build, run, format
 
