@@ -52,6 +52,16 @@ Conventions:
   `fakeRunner`/`listFakeRunner` types in the `*_test.go` files) that returns
   canned output. `New`/model construction takes a `*lima.Client` built over the
   fake.
+- **And no test may write to the developer's host state.** A fake `Runner` stops
+  a test from *running* `limactl`; it does nothing about the files the code
+  around it writes. Isolate the environment too — `isolateHostState(t)` in
+  `internal/ui` sets **both** `XDG_DATA_HOME` (managed-VM index, secrets store)
+  and `LIMA_HOME` (the base image's playbook-version stamp). `LIMA_HOME` is not
+  hypothetical: the TUI tests build a real `provision.Provisioner` over a fake
+  runner, so driving a create walked `ensureBaseStopped` → `writeBaseVersion` and
+  stamped the developer's real `claude-base` as freshly built from a playbook it
+  had never seen — which makes `baseStale` skip the rebuild the user needs and
+  clone from a stale image, silently.
 - **TUI integration tests** use `charmbracelet/x/exp/teatest`
   (`internal/ui/teatest_test.go`): they boot the whole program in a simulated
   terminal, drive it with real key events, and snapshot

@@ -69,7 +69,7 @@ func newTeaProgram(t *testing.T) *teatest.TestModel {
 // than the default 100x30.
 func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	isolateHostState(t)
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
@@ -230,7 +230,7 @@ func (r *buildingRunner) Stream(ctx context.Context, _ io.Reader, out io.Writer,
 // old model froze every key here for the entire provision, so this test is the
 // difference between the feature working and the feature being claimed.
 func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	isolateHostState(t)
 	// The create form seeds its git identity from the host's git config, so pin one:
 	// an unconfigured host would fail validation and never reach the provisioner.
 	gitconfig := filepath.Join(t.TempDir(), "gitconfig")
