@@ -236,6 +236,8 @@ If you are running the playbook on the same machine you want to provision (i.e. 
   `claude` login (see below)
 - Optionally configures a Docker registry proxy for caching pulls
 - Deploys tmux, git, and bashrc configurations
+- Enables systemd linger for the user, so a detached tmux session (and the
+  Claude Code session inside it) keeps running after you disconnect
 
 ## GitHub Authentication
 
