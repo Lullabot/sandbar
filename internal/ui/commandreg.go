@@ -96,7 +96,7 @@ var detailCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
 		help:       "start",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status != "Running" },
+		enabledFor: func(_ model, v vm.VM) bool { return v.Status != limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
@@ -106,7 +106,7 @@ var detailCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
 		help:       "stop",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
+		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
 			return m.beginAction(stopCmd(m.cli, v.Name))
@@ -169,7 +169,7 @@ var detailCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
 		help:       "shell",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
+		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
 			return shellCmd(v.Name)
@@ -202,7 +202,7 @@ var detailCommands = []vmCommand{
 		// This used to be an in-action check that surfaced a "must be running"
 		// status message and did nothing else — exactly the lying-footer pattern
 		// Shell was already fixed for. Gated the same way here.
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
+		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, true) // host → guest
 			*m = next.(model)
@@ -216,7 +216,7 @@ var detailCommands = []vmCommand{
 		// harmless here since the detail screen has no table.
 		binding:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "download")),
 		help:       "download",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
+		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, false) // guest → host
 			*m = next.(model)

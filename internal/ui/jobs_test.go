@@ -112,17 +112,23 @@ func (f *fakeJob) run(ctx context.Context, _ vm.CreateConfig, out io.Writer) err
 	}
 }
 
+// stream is run in streamFunc shape — what beginStream (a file transfer) takes,
+// as opposed to the provisionFunc beginProvision takes.
+func (f *fakeJob) stream(ctx context.Context, out io.Writer) error {
+	return f.run(ctx, vm.CreateConfig{}, out)
+}
+
 // write feeds one chunk into the job's stream and waits until the model has
-// folded it into that VM's log — so a test can assert on ordering.
-func (f *fakeJob) write(l *teaLoop, name, chunk string) {
+// folded it into THAT RUN's log — so a test can assert on ordering.
+func (f *fakeJob) write(l *teaLoop, key jobKey, chunk string) {
 	l.t.Helper()
 	select {
 	case f.out <- chunk:
 	case <-time.After(5 * time.Second):
-		l.t.Fatalf("%s: nobody read the chunk %q", name, chunk)
+		l.t.Fatalf("%s: nobody read the chunk %q", key.vm, chunk)
 	}
-	l.pump("output of "+name, func(m model) bool {
-		s, ok := m.jobs.snapshot(name)
+	l.pump("output of "+key.vm, func(m model) bool {
+		s, ok := m.jobs.snapshot(key)
 		return ok && strings.Contains(s.Output, chunk)
 	})
 }
@@ -137,23 +143,27 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	if m.jobs == nil {
 		m.jobs = newJobRegistry()
 	}
+	key := provisionKey(name)
+	if cfg.Name == "" {
+		key = transferKey(name)
+	}
 	if !m.jobs.begin(&job{
-		name:   name,
+		key:    key,
 		title:  "Creating " + name,
 		back:   viewBoard,
 		state:  jobRunning,
 		cancel: func() {},
 	}) {
-		t.Fatalf("seedJob: %s already has a job in flight", name)
+		t.Fatalf("seedJob: %s already has a run of this kind in flight", name)
 	}
 	m.jobs.markProvision(name, cfg, false)
-	m.progressVM = name
+	m.progressJob = key
 	m.view = viewProgress
 }
 
-// jobOutput is the job registry's accumulated log for name.
-func jobOutput(m model, name string) string {
-	s, ok := m.jobs.snapshot(name)
+// jobOutput is the job registry's accumulated log for a run.
+func jobOutput(m model, key jobKey) string {
+	s, ok := m.jobs.snapshot(key)
 	if !ok {
 		return ""
 	}
@@ -205,7 +215,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 				return
 			default:
 				for _, n := range []string{"alpha", "beta"} {
-					s, ok := reg.snapshot(n)
+					s, ok := reg.snapshot(provisionKey(n))
 					_ = deriveStatus(vm.VM{Name: n, Status: "Running"}, s, ok)
 				}
 			}
@@ -217,12 +227,12 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}()
 
 	// Interleave the two streams. Each chunk must land in its own VM's buffer.
-	alpha.write(l, "alpha", "TASK [base : alpha-one]\n")
-	beta.write(l, "beta", "TASK [base : beta-one]\n")
-	alpha.write(l, "alpha", "TASK [base : alpha-two]\n")
-	beta.write(l, "beta", "TASK [base : beta-two]\n")
+	alpha.write(l, provisionKey("alpha"), "TASK [base : alpha-one]\n")
+	beta.write(l, provisionKey("beta"), "TASK [base : beta-one]\n")
+	alpha.write(l, provisionKey("alpha"), "TASK [base : alpha-two]\n")
+	beta.write(l, provisionKey("beta"), "TASK [base : beta-two]\n")
 
-	outA, outB := jobOutput(l.m, "alpha"), jobOutput(l.m, "beta")
+	outA, outB := jobOutput(l.m, provisionKey("alpha")), jobOutput(l.m, provisionKey("beta"))
 	if strings.Contains(outA, "beta-") {
 		t.Fatalf("beta's output leaked into alpha's buffer:\n%s", outA)
 	}
@@ -237,11 +247,11 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}
 
 	// Each job parses its OWN Ansible progress — the counters must not be shared.
-	sa, _ := l.m.jobs.snapshot("alpha")
+	sa, _ := l.m.jobs.snapshot(provisionKey("alpha"))
 	if sa.Progress.Task != "alpha-two" || sa.Progress.Index != 2 {
 		t.Fatalf("alpha's parsed progress = %+v, want task alpha-two at index 2", sa.Progress)
 	}
-	sb, _ := l.m.jobs.snapshot("beta")
+	sb, _ := l.m.jobs.snapshot(provisionKey("beta"))
 	if sb.Progress.Task != "beta-two" || sb.Progress.Index != 2 {
 		t.Fatalf("beta's parsed progress = %+v, want task beta-two at index 2", sb.Progress)
 	}
@@ -251,8 +261,8 @@ func TestTwoJobsInFlight(t *testing.T) {
 	l.m.view = viewDetail
 	l.m.detail = vm.VM{Name: "alpha", Status: "Running"}
 	l.send(runeKey('l'))
-	if l.m.view != viewProgress || l.m.progressVM != "alpha" {
-		t.Fatalf("reopening alpha's log should show it in the progress view (view=%v vm=%q)", l.m.view, l.m.progressVM)
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey("alpha") {
+		t.Fatalf("reopening alpha's log should show it in the progress view (view=%v job=%+v)", l.m.view, l.m.progressJob)
 	}
 	l.send(ctrlKey('c'))
 
@@ -261,7 +271,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 	if !l.m.jobs.isRunning("beta") {
 		t.Fatal("cancelling alpha must not touch beta")
 	}
-	if s, _ := l.m.jobs.snapshot("alpha"); !s.Canceled {
+	if s, _ := l.m.jobs.snapshot(provisionKey("alpha")); !s.Canceled {
 		t.Fatalf("alpha should be marked cancelled, got %+v", s)
 	}
 	// A cancelled run leaves partial state: it is not recorded as managed, and it
@@ -274,9 +284,9 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}
 
 	// beta is untouched and still streaming — its buffer never saw alpha's cancel.
-	beta.write(l, "beta", "TASK [base : beta-three]\n")
-	if strings.Contains(jobOutput(l.m, "beta"), "^C") {
-		t.Fatalf("alpha's cancel notice leaked into beta's buffer:\n%s", jobOutput(l.m, "beta"))
+	beta.write(l, provisionKey("beta"), "TASK [base : beta-three]\n")
+	if strings.Contains(jobOutput(l.m, provisionKey("beta")), "^C") {
+		t.Fatalf("alpha's cancel notice leaked into beta's buffer:\n%s", jobOutput(l.m, provisionKey("beta")))
 	}
 
 	// beta finishes cleanly: it (and only it) is recorded as managed.
@@ -285,7 +295,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 	if !l.m.reg.IsManaged("beta") {
 		t.Fatal("a successful provision should be recorded as managed")
 	}
-	if s, _ := l.m.jobs.snapshot("beta"); s.State != jobSucceeded {
+	if s, _ := l.m.jobs.snapshot(provisionKey("beta")); s.State != jobSucceeded {
 		t.Fatalf("beta should have succeeded, got %+v", s)
 	}
 }
@@ -299,7 +309,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 
 	fail := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", fail.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
-	fail.write(l, "web", "TASK [dev-tools : Install Docker]\nfatal: [localhost]: FAILED!\n")
+	fail.write(l, provisionKey("web"), "TASK [dev-tools : Install Docker]\nfatal: [localhost]: FAILED!\n")
 
 	fail.done <- errors.New("provisioning (base) failed for \"web\"")
 	l.pump("web to fail", func(m model) bool { return !m.jobs.isRunning("web") })
@@ -312,7 +322,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 	// The refresh tick that would have dropped it.
 	l.send(vmsLoadedMsg{vms: []vm.VM{v}})
 
-	s, ok := l.m.jobs.snapshot("web")
+	s, ok := l.m.jobs.snapshot(provisionKey("web"))
 	if !ok {
 		t.Fatal("a failed job must survive a list refresh — dropping it turns the tile green")
 	}
@@ -332,7 +342,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 
 	// Deleting the VM is the user acting on it: the retained run goes with it.
 	l.send(actionDoneMsg{action: "delete", name: "web"})
-	if _, ok := l.m.jobs.snapshot("web"); ok {
+	if _, ok := l.m.jobs.snapshot(provisionKey("web")); ok {
 		t.Fatal("deleting a VM should drop its retained run")
 	}
 }
@@ -357,7 +367,8 @@ func TestJobReapedWhenVMDisappears(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	l.exec(l.m.beginStream("web", "Uploading to web", viewDetail, run))
+	cmd, _ := l.m.beginStream(transferKey("web"), "Uploading to web", viewDetail, run)
+	l.exec(cmd)
 	<-blocked
 
 	// The VM is present at first — that is what makes a later absence evidence of
@@ -370,7 +381,7 @@ func TestJobReapedWhenVMDisappears(t *testing.T) {
 	// It vanishes.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "other", Status: "Running"}}})
 
-	if _, ok := l.m.jobs.snapshot("web"); ok {
+	if _, ok := l.m.jobs.snapshot(transferKey("web")); ok {
 		t.Fatal("a job whose VM disappeared must be reaped from the registry")
 	}
 	select {
@@ -389,7 +400,7 @@ func TestCreateJobNotReapedBeforeItsVMAppears(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
-	job.write(l, "web", "==> Building base image\n")
+	job.write(l, provisionKey("web"), "==> Building base image\n")
 
 	// Several refreshes in which the VM being built does not exist yet.
 	for i := 0; i < 3; i++ {
@@ -412,7 +423,7 @@ func TestResetJobSurvivesItsOwnDelete(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
-	job.write(l, "web", "==> Deleting web\n")
+	job.write(l, provisionKey("web"), "==> Deleting web\n")
 
 	// Present, then gone (the reset just deleted it), then back (the re-clone).
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
@@ -476,7 +487,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
-	job.write(l, "web", "TASK [base : Install]\n")
+	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
 
 	// esc backs out of the progress screen WITHOUT cancelling the build.
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -495,7 +506,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 	// The still-running job keeps streaming into its own buffer while the user is
 	// elsewhere, and reopening its log shows it.
-	job.write(l, "web", "TASK [base : Node]\n")
+	job.write(l, provisionKey("web"), "TASK [base : Node]\n")
 	l.m.view = viewDetail
 	l.m.detail = vm.VM{Name: "web", Status: "Running"}
 	l.send(runeKey('l'))
@@ -524,5 +535,303 @@ func TestReopenLogGatedOnARetainedRun(t *testing.T) {
 	m = after.(model)
 	if m.view != viewDetail || cmd != nil {
 		t.Fatalf("'l' with no retained run should be a silent no-op (view=%v cmd=%v)", m.view, cmd)
+	}
+}
+
+// A FILE TRANSFER MUST NEVER DESTROY A RETAINED FAILED BUILD.
+//
+// The registry retains a failed provision precisely so the tile can keep saying
+// Failed and the log can still explain why — Lima has no idea Ansible ever ran and
+// goes on calling the half-built VM "Running", which is the whole reason
+// deriveStatus consults the registry FIRST. Upload is offered on that tile (its
+// enabledFor asks Lima, and Lima says Running), so the user can absolutely press
+// `u` on it — and a registry with one slot per VM let that copy EVICT the failed
+// build: the tile fell back to Lima and went green, and the Ansible log went with
+// it. Unrecoverable for the session, and the exact lie the status derivation
+// exists to prevent.
+func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 100, 30)
+	l := newTeaLoop(t, m)
+
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED! => the play exploded\n")
+	build.done <- errAnsibleBoom
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+
+	// Lima reports the half-built VM as Running; it always does.
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+	web, _ := l.m.lookupVM("web")
+	if got := l.m.statusOf(web); got != statusFailed {
+		t.Fatalf("precondition: a failed build's tile must read Failed, got %v", got)
+	}
+
+	// The user uploads a file to it.
+	upload := newFakeJob()
+	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	l.exec(uploadCmd)
+
+	// The transfer gets its own progress surface…
+	if l.m.view != viewProgress {
+		t.Fatalf("a transfer should open its own progress screen, got view %v", l.m.view)
+	}
+	if s, ok := l.m.shownJob(); !ok || s.Title != "Uploading notes.txt" || !s.Running() {
+		t.Fatalf("the progress screen should show the running transfer, got %+v (ok=%v)", s, ok)
+	}
+	// … and the failed build is untouched underneath it.
+	if got := l.m.statusOf(web); got != statusFailed {
+		t.Fatalf("a file copy must not flip a failed build's tile back to green: statusOf(web) = %v, want Failed", got)
+	}
+	// The reopen-log verb still reaches the Ansible failure — the only record of WHY.
+	l.m.showJobLog("web")
+	s, ok := l.m.shownJob()
+	if !ok || !strings.Contains(s.Output, "the play exploded") {
+		t.Fatalf("`l` must still reopen the failed build's log, got (ok=%v):\n%s", ok, s.Output)
+	}
+
+	upload.done <- nil
+	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+
+	// And the tile STILL says Failed once the copy is done: only the user acting on
+	// the VM (a reset, a delete) clears that.
+	if got := l.m.statusOf(web); got != statusFailed {
+		t.Fatalf("after the copy finished, statusOf(web) = %v, want Failed", got)
+	}
+}
+
+// mustNotRun is a provisionFunc that fails the test if it is ever called: the
+// refused create must not merely be un-recorded, it must not RUN.
+func mustNotRun(t *testing.T) provisionFunc {
+	return func(context.Context, vm.CreateConfig, io.Writer) error {
+		t.Error("a create refused because the VM already has a run in flight must never run")
+		return nil
+	}
+}
+
+// BEGINSTREAM REFUSES A SECOND RUN FOR A VM THAT ALREADY HAS ONE — and beginJob
+// used to mark the job it did not start as a provision ANYWAY, mutating the run
+// that WAS in flight. Consequence (a): a file upload in flight gets PROMOTED to a
+// build. Its tile renders Building with an Ansible progress bar for a `limactl
+// copy`, Delete is disabled on a perfectly healthy VM, a failed copy paints the
+// tile red — the exact lie deriveStatus promises never to tell — and on success
+// the copy is recorded in the managed index under a config the VM was never built
+// from, seeding its GH_TOKEN from a form the user filled in for a different VM.
+func TestARefusedCreateDoesNotPromoteAnInFlightTransfer(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	upload := newFakeJob()
+	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	l.exec(uploadCmd)
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+
+	// The user presses n and types the name of the VM being copied to. Nothing
+	// rejects that — vm.CreateConfig.Validate is a pure value check and cannot see
+	// the job registry — so the form submits and beginProvision is called.
+	wrong := vm.CreateConfig{Name: "web", BaseName: "other-base", CPUs: 8, CloneToken: "ghp_secret"}
+	l.exec(l.m.beginProvision("Creating web", mustNotRun(t), wrong))
+
+	web, _ := l.m.lookupVM("web")
+	if got := l.m.statusOf(web); got != statusRunning {
+		t.Fatalf("a file copy must never render as a build: statusOf(web) = %v, want Running", got)
+	}
+	if l.m.vmBuilding("web") {
+		t.Fatal("a copy in flight must not gate Delete the way a build does")
+	}
+	if cfg, _ := l.m.jobs.config("web"); cfg.Name != "" {
+		t.Fatalf("the refused create's config must not be attached to the copy in flight, got %+v", cfg)
+	}
+
+	upload.done <- nil
+	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+}
+
+// Consequence (b) of the same bug: a create for a VM that is ALREADY BUILDING
+// swapped the running build's config for the second form's. On success
+// RecordSuccess then recorded the WRONG cpus/memory/clone-URL/token for the VM
+// that was actually built, and a later Reset would rebuild it from that config.
+func TestASecondCreateDoesNotSwapTheRunningBuildsConfig(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	build := newFakeJob()
+	real := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, Memory: "4GiB", CloneURL: "https://github.com/acme/real"}
+	l.exec(l.m.beginProvision("Creating web", build.run, real))
+	build.write(l, provisionKey("web"), "==> Cloning web from base image\n")
+
+	wrong := vm.CreateConfig{Name: "web", BaseName: "other-base", CPUs: 8, Memory: "32GiB", CloneURL: "https://github.com/acme/wrong", CloneToken: "ghp_secret"}
+	l.exec(l.m.beginProvision("Creating web", mustNotRun(t), wrong))
+
+	if got := l.m.jobs.names(); len(got) != 1 {
+		t.Fatalf("the refused create must not register a second run for web, got %v", got)
+	}
+	got, ok := l.m.jobs.config("web")
+	if !ok {
+		t.Fatal("the build in flight should still carry its own config")
+	}
+	if got.CPUs != real.CPUs || got.Memory != real.Memory || got.BaseName != real.BaseName ||
+		got.CloneURL != real.CloneURL || got.CloneToken != "" {
+		t.Fatalf("the running build's config was swapped for the refused form's: %+v", got)
+	}
+	if !strings.Contains(l.m.lastMessage(), "in flight") {
+		t.Fatalf("the user must be told the create was refused, got %q", l.m.lastMessage())
+	}
+
+	build.done <- nil
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+}
+
+// THE FORM REFUSES A NAME THAT IS ALREADY BUSY, and says so with the name still on
+// screen to edit. vm.CreateConfig.Validate is a pure value check and cannot see the
+// job registry, so nothing used to stop a create for a VM that was already building
+// — it submitted, beginStream refused the second run, and the second form's config
+// was stamped onto the FIRST one's build. This is where that is caught, because it
+// is the only place the user can still fix it.
+func TestCreateFormRefusesANameWithARunInFlight(t *testing.T) {
+	m := newTestModel(t)
+	building := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, Memory: "4GiB"}
+	seedJob(t, &m, "web", building)
+	m.view = viewBoard
+
+	opened, _ := m.Update(runeKey('n'))
+	m = opened.(model)
+	if m.view != viewForm {
+		t.Fatalf("precondition: 'n' should open the create form, got view %v", m.view)
+	}
+	// Name it after the VM that is already building; fill in what Validate needs.
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Ada Lovelace")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
+	m.inputs[fCPUs].SetValue("8")
+
+	submitted, cmd := m.Update(ctrlKey('s'))
+	m = submitted.(model)
+
+	if m.view != viewForm {
+		t.Fatalf("a refused create must keep the form open so the name can be edited, got view %v", m.view)
+	}
+	if m.formErr == nil || !strings.Contains(m.formErr.Error(), "in flight") {
+		t.Fatalf("formErr = %v, want an honest refusal saying web already has a run in flight", m.formErr)
+	}
+	if cmd != nil {
+		t.Fatal("a refused create must dispatch nothing")
+	}
+	// And the build it collided with is untouched — same config, still the only run.
+	if got := m.jobs.names(); len(got) != 1 {
+		t.Fatalf("the refused create must not register a run, got %v", got)
+	}
+	if got, _ := m.jobs.config("web"); got != building {
+		t.Fatalf("the running build's config = %+v, want it untouched (%+v)", got, building)
+	}
+}
+
+// A COPY THAT FINISHES MUST NOT BE MISTAKEN FOR THE BUILD THAT BUILT THE VM.
+//
+// A VM can now hold both runs at once, so the provisionDoneMsg handler can be
+// handed a COPY's done message for a VM whose BUILD is sitting right there in the
+// registry, config and all. Keying "was this a provision?" off the presence of a
+// config would then re-record the VM as managed and re-seed its GH_TOKEN every time
+// a file finished copying — a write to the host secrets store, triggered by a
+// `limactl copy`. The KIND is what answers that question.
+func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 100, 30)
+	l := newTeaLoop(t, m)
+
+	// web was built by sand, with a clone token, and the build has finished.
+	build := newFakeJob()
+	cfg := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, CloneToken: "ghp_secret"}
+	l.exec(l.m.beginProvision("Creating web", build.run, cfg))
+	build.done <- nil
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+	if !l.m.reg.IsManaged("web") {
+		t.Fatal("precondition: a successful build records the VM as managed")
+	}
+
+	// Its GH_TOKEN is dropped from the store (the user cleared it, say). A file copy
+	// finishing must not put it back — the copy did not build anything.
+	if err := l.m.sec.Set("web", map[string]string{}); err != nil {
+		t.Fatalf("clear secrets: %v", err)
+	}
+
+	upload := newFakeJob()
+	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	if !started {
+		t.Fatal("a copy must start on a VM whose build has finished")
+	}
+	l.exec(uploadCmd)
+	upload.done <- nil
+	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+
+	if got := l.m.sec.Get("web"); got["GH_TOKEN"] != "" {
+		t.Fatalf("a finished copy re-seeded the build's clone token into the secrets store: %v", got)
+	}
+}
+
+// WHICH LOG `l` REOPENS when a VM holds two of them. A FAILED build wins outright
+// (TestATransferNeverEvictsARetainedFailedBuild pins that half — it is the run the
+// red tile is talking about). Otherwise the most recent run wins: a build that
+// SUCCEEDED is settled history, and the copy the user just ran is what "show me
+// this VM's log" means.
+func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 100, 30)
+	l := newTeaLoop(t, m)
+
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\n")
+	build.done <- nil
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+
+	upload := newFakeJob()
+	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	l.exec(uploadCmd)
+	upload.write(l, transferKey("web"), "copied notes.txt\n")
+	upload.done <- nil
+	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+
+	l.m.view = viewBoard
+	l.m.showJobLog("web")
+	s, ok := l.m.shownJob()
+	if !ok || !strings.Contains(s.Output, "copied notes.txt") {
+		t.Fatalf("`l` should reopen the most recent run once the build has succeeded, got (ok=%v):\n%s", ok, s.Output)
+	}
+	// Both runs are still retained — the copy did not evict the build.
+	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+		t.Fatal("the succeeded build must still be retained alongside the copy")
+	}
+}
+
+// A failed provision leaves a VM that Lima still calls "Running", and the tile
+// says Failed. The VM screen must not then say "Running" — that is the same lie
+// the tile derivation exists to prevent, told on the very screen an alarmed user
+// opens BECAUSE the tile went red.
+func TestDetailScreenDoesNotCallAFailedBuildRunning(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 100, 30)
+	l := newTeaLoop(t, m)
+
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED!\n")
+	build.done <- errAnsibleBoom
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+
+	web, _ := l.m.lookupVM("web")
+	if got := l.m.statusOf(web); got != statusFailed {
+		t.Fatalf("precondition: the tile must read Failed, got %v", got)
+	}
+
+	got := l.m.detailStatus(web)
+	if !strings.Contains(got, "Failed") {
+		t.Errorf("the VM screen reported a failed build as %q — the tile says Failed", got)
+	}
+	if !strings.Contains(got, "Running") {
+		t.Errorf("the VM screen should still surface that Lima has the VM up, got %q", got)
 	}
 }

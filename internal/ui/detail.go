@@ -6,6 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // updateDetail handles keys on the detail (VM) screen. The list only selects a
@@ -73,7 +75,7 @@ func (m model) detailView() string {
 	}
 	fields := [][2]string{
 		{"Name", v.Name},
-		{"Status", v.Status},
+		{"Status", m.detailStatus(v)},
 		{"CPUs", strconv.Itoa(v.CPUs)},
 		{"Memory", humanizeBytes(v.Memory)},
 		{"Maximum Disk Size", humanizeBytes(v.Disk)},
@@ -96,4 +98,22 @@ func (m model) detailView() string {
 
 	b.WriteString("\n" + m.footerView(m.detailHelp()))
 	return appStyle.Render(b.String())
+}
+
+// detailStatus is the VM screen's answer to the same question the tile answers,
+// and it must not disagree with it: pressing enter on a red Failed tile and
+// reading "Status: Running" is the same lie the tile derivation exists to stop,
+// told one screen over. It is worse here, because this is the screen a user
+// opens precisely BECAUSE the tile alarmed them.
+//
+// When the derived status and Lima's differ, BOTH are shown. They are both true
+// and the user needs both: a failed provision leaves a VM whose process really
+// is up, and "Failed (Lima reports Running)" is the whole story, where either
+// half alone is a half-truth.
+func (m model) detailStatus(v vm.VM) string {
+	derived := m.statusOf(v).String()
+	if derived == v.Status {
+		return derived
+	}
+	return derived + " (Lima reports " + v.Status + ")"
 }

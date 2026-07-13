@@ -22,8 +22,8 @@ func TestProgressReturnsToBackView(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := newJobRegistry()
-			reg.begin(&job{name: "claude", back: tc.back, state: jobSucceeded})
-			m := model{view: viewProgress, progressVM: "claude", jobs: reg, keys: newKeyMap()}
+			reg.begin(&job{key: provisionKey("claude"), back: tc.back, state: jobSucceeded})
+			m := model{view: viewProgress, progressJob: provisionKey("claude"), jobs: reg, keys: newKeyMap()}
 			got, _ := m.updateProgress(tea.KeyPressMsg{Code: tea.KeyEsc})
 			if v := got.(model).view; v != tc.back {
 				t.Fatalf("esc after done: view = %v, want %v", v, tc.back)
@@ -37,7 +37,7 @@ func TestProgressReturnsToBackView(t *testing.T) {
 // still work — the alternative is a user stranded on a screen about a VM that no
 // longer exists.
 func TestProgressSurvivesAReapedJob(t *testing.T) {
-	m := model{view: viewProgress, progressVM: "gone", jobs: newJobRegistry(), keys: newKeyMap(), help: help.New()}
+	m := model{view: viewProgress, progressJob: provisionKey("gone"), jobs: newJobRegistry(), keys: newKeyMap(), help: help.New()}
 	if out := m.progressView(); !strings.Contains(out, "esc") {
 		t.Fatalf("a vanished run should still offer a way out, got:\n%s", out)
 	}

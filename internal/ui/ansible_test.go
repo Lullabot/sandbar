@@ -91,9 +91,9 @@ func TestAnsibleParserRealOutput(t *testing.T) {
 			if got.Total != got.Index {
 				t.Errorf("the guest reported %d tasks but the run printed %d banners — the bar would never reach its end", got.Total, got.Index)
 			}
-			if got.Play != "Provision Claude Code development VM" {
-				t.Errorf("Play = %q", got.Play)
-			}
+			// The PLAY banner is deliberately not parsed: nothing renders a play name
+			// (a building tile shows role/task/step — see tileRoleLine), and a parsed
+			// field with no consumer is dead weight that reads like a promise.
 			if got.Role != f.lastRole || got.Task != f.lastTask {
 				t.Errorf("Role/Task = %q/%q, want %q/%q (the run's last banner)", got.Role, got.Task, f.lastRole, f.lastTask)
 			}

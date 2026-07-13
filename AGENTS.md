@@ -151,15 +151,20 @@ every bullet, not the constraint itself.
   door: a refresh reorders the roster mid-keypress and a key meant for
   `prod-box` lands on `dev-box`. `focusedVM()`/`syncBoard()` in `board.go`
   are the only correct way to ask "what VM is the ring on".
-- **The job registry retains the last run per VM, in memory, including its
-  log — failed jobs are kept, not discarded.** Dropping a failed job on
-  completion would make a failed provision render as healthy the moment its
-  progress view closes. The log is reopenable from the tile (`l`, gated on
-  `HasRetainedRun`) specifically because a build that failed while the user
-  wasn't looking needs to stay explainable. Run history is **not** persisted
-  across restarts and there is no multi-run history — both are deliberately
-  out of scope; do not build a storage format for this without a scope
-  change.
+- **The job registry retains the last run per VM *per kind* — a provision and
+  a file transfer are two runs — in memory, including its log; failed jobs
+  are kept, not discarded.** Dropping a failed job on completion would make a
+  failed provision render as healthy the moment its progress view closes. So
+  would keying the registry by VM name alone, which is why it is keyed by
+  `jobKey` (VM + `jobKind`): a failed build's tile stays red and Lima still
+  calls that half-built VM `Running`, so `u` is offered on it — and a copy
+  sharing the build's slot would evict it, flip the tile green, and destroy
+  the Ansible log that was the only record of the failure. **Only a
+  provision moves a VM's status** (`deriveStatus`); a copy that fails is a
+  failed copy, not a broken VM. Run history is **not** persisted across
+  restarts and there is no multi-run history beyond those two slots — both
+  are deliberately out of scope; do not build a storage format for this
+  without a scope change.
 - **Keys, help text, and verb eligibility all derive from one command
   registry** (`internal/ui/commandreg.go`). Do not reintroduce a
   hand-maintained help list beside it — that duplication is what this

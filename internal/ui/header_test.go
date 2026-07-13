@@ -36,7 +36,7 @@ func TestHiddenCountAgainstAMixedFleet(t *testing.T) {
 	}
 
 	// The header's own honesty clause, in the plan's own wording.
-	counts := m.headerCounts()
+	counts := m.headerCounts(m.layout.ContentWidth)
 	if !strings.Contains(counts, "1 base") || !strings.Contains(counts, "1 external") || !strings.Contains(counts, "hidden") {
 		t.Fatalf("headerCounts() = %q, want it to name 1 hidden base image and 1 hidden external VM", counts)
 	}
@@ -61,8 +61,8 @@ func TestHiddenCountIsSilentWhenNothingIsHidden(t *testing.T) {
 	if base, external := m.hiddenCounts(); base != 0 || external != 0 {
 		t.Fatalf("hiddenCounts() = (%d, %d), want (0, 0) with nothing hidden", base, external)
 	}
-	if strings.Contains(m.headerCounts(), "hidden") {
-		t.Fatalf("headerCounts() = %q, must not claim anything is hidden when nothing is", m.headerCounts())
+	if counts := m.headerCounts(m.layout.ContentWidth); strings.Contains(counts, "hidden") {
+		t.Fatalf("headerCounts() = %q, must not claim anything is hidden when nothing is", counts)
 	}
 }
 

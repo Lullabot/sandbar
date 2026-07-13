@@ -8,8 +8,6 @@ package ui
 // terminal-size subtractions (one per pane, duplicated in places) drift out
 // of sync with each other in the first place.
 type layoutMode struct {
-	Width, Height int // the raw size classify was given, for reference
-
 	// ContentWidth/ContentHeight are the usable area inside appStyle's
 	// Padding(1, 2): every screen's text and panes live inside this box, not
 	// the raw terminal size.
@@ -40,7 +38,12 @@ type layoutMode struct {
 	// goes to zero: the grid and the footer are the last things to shrink.
 	GridHeight int
 
-	// FooterHeight is the help bar's row budget.
+	// FooterHeight is the CLOSING BAND's row budget, not the help bar's alone:
+	// the status/activity line, the name-filter indicator and the help bar
+	// together (footerBandView, board.go), padded with blanks to exactly this
+	// many rows. Budgeting only the help bar is what broke 80x24 — the board
+	// spent rows on chrome nobody had counted, and the terminal clipped the
+	// help bar right off the bottom.
 	FooterHeight int
 }
 
@@ -66,12 +69,20 @@ const (
 // Fixed row budgets for the header/messages/footer bands. headerHeightFull is
 // the title plus a VM-count line; headerHeightCompact folds the counts into
 // the title line. messagesStripHeight is the messages pane shown between the
-// header and the grid. footerRowHeight is the help bar.
+// header and the grid. footerBandHeight is the closing band below it.
 const (
 	headerHeightFull    = 2
 	headerHeightCompact = 1
 	messagesStripHeight = 3
-	footerRowHeight     = 1
+
+	// footerBandHeight is the closing band: the activity line (which carries a
+	// pending confirmation, so it may never be shed), the name-filter
+	// indicator, and the help bar. Three rows, ALWAYS — blanks take up the
+	// slack when the optional two are absent, so the band's height is a
+	// constant the grid's budget can be derived against and the help bar
+	// cannot be pushed off the bottom of the terminal by a status line
+	// appearing. See footerBandView.
+	footerBandHeight = 3
 
 	// minBudget is the floor every derived budget is clamped to, so classify
 	// always returns a renderable mode — there is no terminal size at which
@@ -82,8 +93,15 @@ const (
 	// thresholds below which the header compacts and the messages strip
 	// hides, respectively. They encode the shedding order: messages strip
 	// first, then a compact header; the grid and footer never go.
+	//
+	// messagesMinHeight is 27 because THE STRIP MAY NOT COST A TILE ROW. At 26
+	// rows and below, its three lines are exactly what would drop the 80x24
+	// board from two tiles to one — and the tiles are the board's reason to
+	// exist, while the strip's newest line is already on the activity line
+	// below the grid. 27 is the shortest terminal that affords both (2 header +
+	// 3 strip + 16 tiles + 3 footer band + 2 padding = 26 <= 27).
 	fullHeaderMinHeight = 20
-	messagesMinHeight   = 24
+	messagesMinHeight   = 27
 )
 
 // classify maps a terminal size to the budgets every screen sizes itself
@@ -111,7 +129,7 @@ func classify(w, h int) layoutMode {
 	if showMessages {
 		messagesHeight = messagesStripHeight
 	}
-	footerHeight := footerRowHeight
+	footerHeight := footerBandHeight
 
 	grid := contentHeight - headerHeight - messagesHeight - footerHeight
 	// Shed the least-essential pane first as the budget goes negative: the
@@ -131,9 +149,6 @@ func classify(w, h int) layoutMode {
 	grid = clamp(grid, minBudget)
 
 	return layoutMode{
-		Width:  w,
-		Height: h,
-
 		ContentWidth:  contentWidth,
 		ContentHeight: contentHeight,
 

@@ -1,13 +1,27 @@
 package ui
 
-// jobs.go is the VM-keyed job registry: sand's only concurrent subsystem, and
-// the source of the board's Building and Failed statuses.
+// jobs.go is the job registry: sand's only concurrent subsystem, and the source
+// of the board's Building and Failed statuses.
 //
 // Before it, one reader/output/cancel triple on the model served exactly one job
 // and a single model-wide running flag froze every key for the minutes a
-// provision took. The registry generalizes that into N jobs keyed by VM name, so
-// several provisions (and transfers) can be in flight while the board stays live
-// — and so a building VM can render a progress bar on its own tile.
+// provision took. The registry generalizes that into N jobs, so several
+// provisions (and transfers) can be in flight while the board stays live — and so
+// a building VM can render a progress bar on its own tile.
+//
+// # What a run is keyed by
+//
+// A jobKey: THE VM, AND WHICH OF ITS TWO RUNS THIS IS — a provision (create or
+// reset) or a file transfer. Keying by VM name alone is not a simplification, it
+// is a bug, and a severe one: a create that fails is RETAINED as a failed
+// provision precisely so its tile stays red and its Ansible log stays readable,
+// while Lima — which has no idea Ansible ever ran — goes on calling the
+// half-built VM "Running". Upload is offered on that tile (its enabledFor asks
+// Lima), so pressing `u` on it registered a transfer under the same key, EVICTED
+// the failed build, and the tile fell back to Lima and went a reassuring green
+// with the log destroyed along with it. A VM can legitimately hold both runs at
+// once, so it gets a slot for each, and only the PROVISION slot may move its
+// status (see deriveStatus).
 //
 // # The concurrency contract
 //
@@ -22,19 +36,19 @@ package ui
 //     takes the lock.
 //   - The tea.Cmd goroutines — the run function feeding the pipe, and
 //     readNextCmd draining it — touch ONLY the io.Pipe, never the registry. A
-//     chunk read off the pipe travels back to Update as a VM-keyed
+//     chunk read off the pipe travels back to Update as a KEYED
 //     provisionOutputMsg, and it is Update, under the lock, that appends and
 //     parses it. That is why the parser can be a mutable struct on the job.
 //
-// Nothing outside this file ever holds a *job. Readers (the progress view today,
-// the tile renderer tomorrow) get a jobSnapshot: a value copy taken under the
-// lock, safe to render from any goroutine.
+// Nothing outside this file ever holds a *job. Readers (the progress view, the
+// tile renderer) get a jobSnapshot: a value copy taken under the lock, safe to
+// render from any goroutine.
 //
 // # Scope
 //
-// The LAST RUN PER VM, IN MEMORY. Deliberately not: persistence across restarts,
-// a multi-run history, a storage format, pruning, or schema versioning. The
-// plan's decision log draws that line.
+// The LAST RUN OF EACH KIND, PER VM, IN MEMORY. Deliberately not: persistence
+// across restarts, a multi-run history, a storage format, pruning, or schema
+// versioning. The plan's decision log draws that line.
 
 import (
 	"context"
@@ -43,6 +57,34 @@ import (
 
 	"github.com/lullabot/sandbar/internal/vm"
 )
+
+// jobKind is WHICH of a VM's runs a job is. It is half of the registry's key, so
+// a copy can never be mistaken for — or overwrite — a build.
+type jobKind int
+
+const (
+	// kindProvision is a create or a reset: the run that owns the VM's existence,
+	// and the ONLY kind that moves the VM's derived status (Building/Failed).
+	kindProvision jobKind = iota
+	// kindTransfer is a file copy in either direction. It says nothing about the
+	// VM's own state — a VM whose upload failed is a healthy running VM with a
+	// failed copy — so it never touches the tile's status word.
+	kindTransfer
+)
+
+// jobKey identifies one run: the VM, and which of its runs.
+type jobKey struct {
+	vm   string
+	kind jobKind
+}
+
+func provisionKey(name string) jobKey { return jobKey{vm: name, kind: kindProvision} }
+func transferKey(name string) jobKey  { return jobKey{vm: name, kind: kindTransfer} }
+
+// keysFor is a VM's two possible slots, provision first. Every "does this VM have
+// a run" question is two map lookups rather than a scan, and the fixed order is
+// what makes the answers deterministic.
+func keysFor(name string) [2]jobKey { return [2]jobKey{provisionKey(name), transferKey(name)} }
 
 // jobState is a job's lifecycle state. A finished job — succeeded OR failed —
 // stays in the registry with its log: that retention is what makes the tile's
@@ -59,25 +101,29 @@ const (
 // reopened log says why it stops where it does.
 const cancelNotice = "\n^C — canceling, cleaning up…\n"
 
-// job is one VM's run: in flight, or retained after it finished. It lives only
-// inside the registry, always behind a pointer, and is never copied — which is
-// what makes the strings.Builder below safe here even though model.go bans one
-// on the model. (A Builder copied after first use panics on the next write; a
-// copied model would silently fork the log.)
+// job is one run: in flight, or retained after it finished. It lives only inside
+// the registry, always behind a pointer, and is never copied — which is what makes
+// the strings.Builder below safe here even though model.go bans one on the model.
+// (A Builder copied after first use panics on the next write; a copied model would
+// silently fork the log.)
 type job struct {
-	name  string
+	key   jobKey
 	title string // the progress screen's heading, e.g. `Creating web`
 	back  view   // the screen esc returns to from this job's progress view
+
+	// seq is the order this job was begun in, registry-wide. It is what lets the
+	// reopen-log verb pick between a VM's two retained runs (see logKey) without
+	// reaching for a clock.
+	seq uint64
 
 	state    jobState
 	err      error
 	canceled bool // the user pressed ctrl+c: partial state they asked for, NOT a failure
 
 	// cfg is the provision config for a create/reset, and the zero value for a
-	// transfer. A non-empty cfg.Name is what marks a job a PROVISION — the same
-	// distinction the old model.provCfg drew, now per-job: only a provision is
-	// recorded in the managed registry on success, and only a provision derives
-	// the Building/Failed tile status (see deriveStatus).
+	// transfer. Only a provision is recorded in the managed registry on success.
+	// The KEY, not this field, is what makes a job a provision: a config attached
+	// to the wrong job used to be enough to turn a `limactl copy` into a "build".
 	cfg vm.CreateConfig
 
 	// recreates marks a job that deletes and re-creates its own VM (Reset). Such a
@@ -126,16 +172,17 @@ func (s jobSnapshot) Running() bool { return s.State == jobRunning }
 // paint the VM red.
 func (s jobSnapshot) Failed() bool { return s.State == jobFailed && !s.Canceled }
 
-// jobRegistry holds every VM's run, keyed by VM name. The zero value is unusable;
-// use newJobRegistry. A nil *jobRegistry is safe to call every method on and
-// reports "no jobs", so a model built by hand (as tests do) needs no registry.
+// jobRegistry holds every run, keyed by jobKey. The zero value is unusable; use
+// newJobRegistry. A nil *jobRegistry is safe to call every method on and reports
+// "no jobs", so a model built by hand (as tests do) needs no registry.
 type jobRegistry struct {
 	mu   sync.Mutex
-	jobs map[string]*job
+	jobs map[jobKey]*job
+	seq  uint64 // hands each job its begin-order number
 }
 
 func newJobRegistry() *jobRegistry {
-	return &jobRegistry{jobs: make(map[string]*job)}
+	return &jobRegistry{jobs: make(map[jobKey]*job)}
 }
 
 // jobLookup (commandreg.go) is the seam task 02 left for this registry: it gates
@@ -147,54 +194,59 @@ var _ jobLookup = (*jobRegistry)(nil)
 // transfer. It gates Delete: a VM must not be deleted out from under its own
 // build.
 func (r *jobRegistry) Building(name string) bool {
-	s, ok := r.snapshot(name)
-	return ok && s.Running() && s.Provision
+	s, ok := r.snapshot(provisionKey(name))
+	return ok && s.Running()
 }
 
-// HasRetainedRun reports whether name has a run whose log can be reopened. That
-// includes a run still IN FLIGHT: the whole point of the un-frozen keyboard is
-// that the user can walk away from a build and come back to it, so "reopen this
-// VM's log" must work while it is still being written.
+// HasRetainedRun reports whether name has a run — of either kind — whose log can
+// be reopened. That includes a run still IN FLIGHT: the whole point of the
+// un-frozen keyboard is that the user can walk away from a build and come back to
+// it, so "reopen this VM's log" must work while it is still being written.
 func (r *jobRegistry) HasRetainedRun(name string) bool {
-	_, ok := r.snapshot(name)
+	_, ok := r.logKey(name)
 	return ok
 }
 
-// begin registers a new job, replacing any run name had retained. It REFUSES to
-// replace a job that is still running and reports false: two goroutines sharing
-// one key would orphan the first job's cancel func and leak its goroutine, so the
-// check and the insert have to be one atomic step rather than a caller's guess.
+// begin registers a new job, replacing any run this VM had retained IN THE SAME
+// SLOT — a re-run of the same kind supersedes the last one, and a run of the OTHER
+// kind never touches it. It REFUSES to replace a job that is still running and
+// reports false: two goroutines sharing one key would orphan the first job's
+// cancel func and leak its goroutine, so the check and the insert have to be one
+// atomic step rather than a caller's guess.
 func (r *jobRegistry) begin(j *job) bool {
 	if r == nil || j == nil {
 		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if old, ok := r.jobs[j.name]; ok && old.state == jobRunning {
+	if old, ok := r.jobs[j.key]; ok && old.state == jobRunning {
 		return false
 	}
-	r.jobs[j.name] = j
+	r.seq++
+	j.seq = r.seq
+	r.jobs[j.key] = j
 	return true
 }
 
-// markProvision attaches a provision's config to the job just begun for it,
-// which is what makes it a PROVISION rather than a transfer: only a job carrying
-// a config is recorded in the managed registry on success, and only one derives
-// the Building/Failed tile status. recreates flags a Reset — a job that deletes
-// and re-creates its own VM (see reconcile).
+// markProvision attaches a provision's config to the build just begun for it: the
+// config a successful run is recorded in the managed registry with, and reproduced
+// from on a future recreate. recreates flags a Reset — a job that deletes and
+// re-creates its own VM (see reconcile).
 //
-// It is a separate step from begin() on purpose: beginStream registers every job
-// WITHOUT a config, and only beginProvision/beginReset add one afterwards. That
-// is the same ordering the old code relied on (beginStream cleared m.provCfg;
-// beginProvision set it after), preserved per-job so a transfer can never be
-// mistaken for a build.
+// It only ever touches the PROVISION slot, and only while that build is still
+// running. Both halves matter, and the second is the one that bit: beginJob used
+// to call this even when beginStream had REFUSED to start anything, so the config
+// from a form the user filled in for a second VM landed on whatever run was
+// already in flight for that name — swapping a running build's cpus/memory/clone
+// URL/token, or turning a `limactl copy` into a "build" outright. beginStream now
+// reports whether it started the job, and only a started job is marked.
 func (r *jobRegistry) markProvision(name string, cfg vm.CreateConfig, recreates bool) {
 	if r == nil || cfg.Name == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[provisionKey(name)]
 	if !ok || j.state != jobRunning {
 		return
 	}
@@ -205,15 +257,18 @@ func (r *jobRegistry) markProvision(name string, cfg vm.CreateConfig, recreates 
 // addOutput folds one chunk of a job's stream into its log and its parsed Ansible
 // progress. It reports whether the job still exists: a reaped job's late chunks
 // are dropped, and the caller stops re-issuing its reader.
-func (r *jobRegistry) addOutput(name, chunk string) bool {
-	if r == nil || chunk == "" {
-		return r.exists(name)
+func (r *jobRegistry) addOutput(key jobKey, chunk string) bool {
+	if r == nil {
+		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[key]
 	if !ok {
 		return false
+	}
+	if chunk == "" {
+		return true
 	}
 	j.output.WriteString(chunk)
 	j.parser.feed(chunk)
@@ -224,13 +279,13 @@ func (r *jobRegistry) addOutput(name, chunk string) bool {
 // visible on the board until the user acts on it. It reports false when the job
 // is gone (reaped mid-flight), in which case its done message is stale and the
 // caller must do nothing with it.
-func (r *jobRegistry) finish(name string, err error) (jobSnapshot, bool) {
+func (r *jobRegistry) finish(key jobKey, err error) (jobSnapshot, bool) {
 	if r == nil {
 		return jobSnapshot{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[key]
 	if !ok {
 		return jobSnapshot{}, false
 	}
@@ -249,14 +304,14 @@ func (r *jobRegistry) finish(name string, err error) (jobSnapshot, bool) {
 	return snapshotOf(j), true
 }
 
-// cancelJob cancels name's in-flight run — and only that one. It reports whether
-// a running job was actually cancelled.
-func (r *jobRegistry) cancelJob(name string) bool {
+// cancelJob cancels one in-flight run — and only that one. It reports whether a
+// running job was actually cancelled.
+func (r *jobRegistry) cancelJob(key jobKey) bool {
 	if r == nil {
 		return false
 	}
 	r.mu.Lock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[key]
 	if !ok || j.state != jobRunning || j.canceled {
 		r.mu.Unlock()
 		return false
@@ -274,27 +329,32 @@ func (r *jobRegistry) cancelJob(name string) bool {
 	return true
 }
 
-// remove drops a VM's job outright, cancelling it first if it is still running.
-// This is "the user acted on it": deleting a VM leaves its retained run with
-// nothing to describe.
+// remove drops EVERY run a VM has — both slots — cancelling whichever are still
+// in flight. This is "the user acted on it": deleting a VM leaves its retained
+// runs with nothing to describe, and a copy still streaming into a VM that no
+// longer exists is not work worth finishing.
 func (r *jobRegistry) remove(name string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	var s stopper
-	if j, ok := r.jobs[name]; ok {
-		s = stopperFor(j)
-		delete(r.jobs, name)
+	var stopped []stopper
+	for _, k := range keysFor(name) {
+		if j, ok := r.jobs[k]; ok {
+			stopped = append(stopped, stopperFor(j))
+			delete(r.jobs, k)
+		}
 	}
 	r.mu.Unlock()
-	s.stop()
+	for _, s := range stopped {
+		s.stop()
+	}
 }
 
 // reconcile folds a fresh `limactl list` into the registry: it marks each running
 // job's VM as seen while it is present, and REAPS any running job whose VM has
 // disappeared — cancelling it and closing its pipe so its goroutine cannot leak.
-// It returns the names it reaped.
+// It returns the names it reaped, each once however many of its runs went with it.
 //
 // Two exemptions, both of them the difference between working and catastrophic:
 //
@@ -314,12 +374,13 @@ func (r *jobRegistry) reconcile(present map[string]bool) []string {
 	}
 	r.mu.Lock()
 	var reaped []string
+	seen := make(map[string]bool)
 	var stopped []stopper
-	for name, j := range r.jobs {
+	for key, j := range r.jobs {
 		if j.state != jobRunning {
 			continue
 		}
-		if present[name] {
+		if present[key.vm] {
 			j.seen = true
 			continue
 		}
@@ -327,8 +388,11 @@ func (r *jobRegistry) reconcile(present map[string]bool) []string {
 			continue
 		}
 		stopped = append(stopped, stopperFor(j))
-		delete(r.jobs, name) // deleting during a range is defined behaviour
-		reaped = append(reaped, name)
+		delete(r.jobs, key) // deleting during a range is defined behaviour
+		if !seen[key.vm] {
+			seen[key.vm] = true
+			reaped = append(reaped, key.vm)
+		}
 	}
 	r.mu.Unlock()
 
@@ -365,14 +429,14 @@ func (s stopper) stop() {
 	s.reader.close() // nil-safe
 }
 
-// snapshot returns a value copy of name's job, and whether it has one.
-func (r *jobRegistry) snapshot(name string) (jobSnapshot, bool) {
+// snapshot returns a value copy of one run, and whether it exists.
+func (r *jobRegistry) snapshot(key jobKey) (jobSnapshot, bool) {
 	if r == nil {
 		return jobSnapshot{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[key]
 	if !ok {
 		return jobSnapshot{}, false
 	}
@@ -382,53 +446,110 @@ func (r *jobRegistry) snapshot(name string) (jobSnapshot, bool) {
 // snapshotOf copies a job for a reader. Callers hold the lock.
 func snapshotOf(j *job) jobSnapshot {
 	return jobSnapshot{
-		VM:        j.name,
+		VM:        j.key.vm,
 		Title:     j.title,
 		Back:      j.back,
 		State:     j.state,
 		Err:       j.err,
 		Canceled:  j.canceled,
-		Provision: j.cfg.Name != "",
+		Provision: j.key.kind == kindProvision,
 		Output:    j.output.String(),
 		Progress:  j.parser.progress,
 	}
 }
 
-// config returns the provision config of name's job — the create form's input,
+// config returns the provision config of name's BUILD — the create form's input,
 // including its clone token. It is deliberately NOT on jobSnapshot: only the
 // provisionDoneMsg handler needs it (to record the VM as managed and seed its
-// GH_TOKEN), and nothing that renders should be able to reach a token.
+// GH_TOKEN), and nothing that renders should be able to reach a token. A VM with
+// no build (only a copy, or nothing) has none, which is exactly why a copy is
+// never recorded as a managed VM.
 func (r *jobRegistry) config(name string) (vm.CreateConfig, bool) {
 	if r == nil {
 		return vm.CreateConfig{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[name]
+	j, ok := r.jobs[provisionKey(name)]
 	if !ok {
 		return vm.CreateConfig{}, false
 	}
 	return j.cfg, true
 }
 
-// reader returns the read end of name's pipe, for the next readNextCmd.
-func (r *jobRegistry) reader(name string) *readPipe {
+// reader returns the read end of one job's pipe, for the next readNextCmd.
+func (r *jobRegistry) reader(key jobKey) *readPipe {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if j, ok := r.jobs[name]; ok {
+	if j, ok := r.jobs[key]; ok {
 		return j.reader
 	}
 	return nil
 }
 
-// isRunning reports whether name has a run in flight (of any kind: a provision or
-// a transfer).
+// isRunning reports whether name has ANY run in flight — a build or a copy. It is
+// what refuses a create/reset for a VM that is already busy, and what the quit
+// confirmation counts.
 func (r *jobRegistry) isRunning(name string) bool {
-	s, ok := r.snapshot(name)
-	return ok && s.Running()
+	_, ok := r.runningKey(name)
+	return ok
+}
+
+// runningKey names the run in flight for a VM — the build if both are (a copy can
+// legitimately be running against a VM that a reset is about to rebuild), since
+// the build is the one whose loss would cost the most.
+func (r *jobRegistry) runningKey(name string) (jobKey, bool) {
+	if r == nil {
+		return jobKey{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, k := range keysFor(name) {
+		if j, ok := r.jobs[k]; ok && j.state == jobRunning {
+			return k, true
+		}
+	}
+	return jobKey{}, false
+}
+
+// logKey picks WHICH of a VM's runs the reopen-log verb ('l') shows, and it is not
+// simply "the newest":
+//
+//   - A BUILD THAT IS RUNNING OR FAILED WINS OUTRIGHT. It is the run the tile's own
+//     status word is asserting, and a user pressing `l` on a red tile is asking WHY
+//     it is red. A copy run afterwards must never bury that answer — it used to
+//     delete it.
+//   - Otherwise the most recently begun run wins: a succeeded build is settled
+//     history, and the copy the user just ran is what "show me the log" means.
+//
+// It reports false when the VM has no run at all, which is what gates the verb off.
+func (r *jobRegistry) logKey(name string) (jobKey, bool) {
+	if r == nil {
+		return jobKey{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var best *job
+	for _, k := range keysFor(name) {
+		j, ok := r.jobs[k]
+		if !ok {
+			continue
+		}
+		if j.key.kind == kindProvision && (j.state == jobRunning || (j.state == jobFailed && !j.canceled)) {
+			return j.key, true
+		}
+		if best == nil || j.seq > best.seq {
+			best = j
+		}
+	}
+	if best == nil {
+		return jobKey{}, false
+	}
+	return best.key, true
 }
 
 // anyRunning reports whether ANY job is in flight. It drives the spinner: the
@@ -448,27 +569,38 @@ func (r *jobRegistry) anyRunning() bool {
 	return false
 }
 
-// exists reports whether name has a job at all.
-func (r *jobRegistry) exists(name string) bool {
-	_, ok := r.snapshot(name)
+// exists reports whether this exact run is still in the registry.
+func (r *jobRegistry) exists(key jobKey) bool {
+	_, ok := r.snapshot(key)
 	return ok
 }
 
-// names lists every VM that has a job, in no order. The board (task 08) needs it
-// because a VM being CREATED does not appear in `limactl list` until its clone
-// lands — minutes into its own build — so a board that walked only the Lima list
-// would show nothing at all for exactly the span the user is waiting on, and the
-// signature moment of the whole plan (press n, a building tile appears) would not
-// happen.
+// running reports whether this exact run is in flight.
+func (r *jobRegistry) running(key jobKey) bool {
+	s, ok := r.snapshot(key)
+	return ok && s.Running()
+}
+
+// names lists every VM that has a run — once each, however many kinds it has — in
+// no order. The board (task 08) needs it because a VM being CREATED does not
+// appear in `limactl list` until its clone lands — minutes into its own build — so
+// a board that walked only the Lima list would show nothing at all for exactly the
+// span the user is waiting on, and the signature moment of the whole plan (press
+// n, a building tile appears) would not happen.
 func (r *jobRegistry) names() []string {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	seen := make(map[string]bool, len(r.jobs))
 	names := make([]string, 0, len(r.jobs))
-	for name := range r.jobs {
-		names = append(names, name)
+	for key := range r.jobs {
+		if seen[key.vm] {
+			continue
+		}
+		seen[key.vm] = true
+		names = append(names, key.vm)
 	}
 	return names
 }
@@ -509,11 +641,12 @@ func (s derivedStatus) String() string {
 // would leave a reassuring green "Running" tile, failing quietly at the exact
 // moment the user most needs to be told.
 //
-// Only a PROVISION job moves the VM's status. A file transfer running (or
-// failing) against a VM says nothing about the VM's own state: a VM whose upload
-// failed is a healthy running VM with a failed copy, and painting its tile red
-// would be its own small lie. The transfer's failure surfaces where it belongs —
-// on the status line, and in its reopenable log.
+// Only a PROVISION job moves the VM's status, which is why the registry keys one
+// slot per kind and statusOf below reaches for the provision slot BY NAME. A file
+// transfer running (or failing) against a VM says nothing about the VM's own
+// state: a VM whose upload failed is a healthy running VM with a failed copy, and
+// painting its tile red would be its own small lie. The transfer's failure
+// surfaces where it belongs — on the status line, and in its reopenable log.
 func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 	if hasJob && job.Provision {
 		switch {
@@ -523,15 +656,17 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 			return statusFailed
 		}
 	}
-	if v.Status == "Running" {
+	if v.Status == limaRunning {
 		return statusRunning
 	}
 	return statusStopped
 }
 
 // statusOf is deriveStatus with the registry lookup already done — the form the
-// tile renderer and the board call.
+// tile renderer and the board call. It looks up the VM's BUILD, never "whatever
+// run it happens to have": a copy in flight is not a build, and must not be able
+// to become one by standing in the same slot.
 func (m model) statusOf(v vm.VM) derivedStatus {
-	job, ok := m.jobs.snapshot(v.Name)
+	job, ok := m.jobs.snapshot(provisionKey(v.Name))
 	return deriveStatus(v, job, ok)
 }

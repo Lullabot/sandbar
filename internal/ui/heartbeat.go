@@ -60,9 +60,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// limaRunning is the status Lima reports for a booted instance — the same literal
-// deriveStatus tests against, named once here because syncHeartbeats now asks the
-// same question for a different reason (is there a guest to open a shell into).
+// limaRunning is the status Lima reports for a booted instance. It is named ONCE,
+// here, and every comparison against a vm.VM.Status goes through it: deriveStatus'
+// fallback (jobs.go), the enabledFor predicates that gate start/stop/shell/copy on
+// a live guest (commandreg.go), stop-all's targets and the tile's up/last-used line
+// (board.go, tile.go), the secrets editor's apply-now branch (secrets.go), and
+// syncHeartbeats, which asks the same question for its own reason — is there a
+// guest to open a shell into.
+//
+// It is NOT the word the board prints: derivedStatus.String() renders sand's own
+// status labels (Running, Building, Failed, Stopped), which are a display concern
+// and deliberately not this constant.
 const limaRunning = "Running"
 
 const (
@@ -127,10 +135,6 @@ type guestSample struct {
 	// said 316 MB while MemAvailable said 1637 MB of 2015 MB.
 	MemUsed  uint64
 	MemTotal uint64
-
-	// At is when the host parsed the record. A tile can use it to grey out a reading
-	// that has gone stale.
-	At time.Time
 }
 
 // HasMem reports whether the sample carries a memory reading. Unlike cpu, memory is
@@ -341,7 +345,6 @@ type sampleWriter struct {
 
 func (w *sampleWriter) Write(b []byte) (int, error) {
 	for _, s := range w.p.feed(b) {
-		s.At = time.Now()
 		select {
 		case w.out <- s:
 		case <-w.ctx.Done():
@@ -590,9 +593,9 @@ func (r *heartbeatRegistry) forget(keep map[string]bool) {
 }
 
 // heartbeatSampleMsg carries one reading — or, with ok false, the end of that VM's
-// stream — back into Update. Like every job message it is VM-keyed, and it is epoch-
-// keyed too, so a reading from a connection that has since been replaced cannot be
-// recorded against its successor.
+// stream — back into Update. It is VM-keyed (a heartbeat, unlike a job, is one per
+// VM by definition), and epoch-keyed too, so a reading from a connection that has
+// since been replaced cannot be recorded against its successor.
 type heartbeatSampleMsg struct {
 	vm     string
 	epoch  uint64
