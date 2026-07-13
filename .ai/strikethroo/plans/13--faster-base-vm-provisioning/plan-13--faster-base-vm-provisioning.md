@@ -1,5 +1,5 @@
 ---
-id: 12
+id: 13
 summary: "Cut base VM provisioning time by measuring the build, slimming the Ansible bootstrap and apt/dpkg work, making the base tool-set configurable, re-applying the base in place instead of rebuilding it, and caching apt archives on the host for the base build only"
 created: 2026-07-13
 ---
