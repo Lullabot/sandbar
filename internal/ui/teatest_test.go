@@ -82,12 +82,16 @@ func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 // so any test that snapshots the board's rendered text (a golden, or a plain
 // substring check on the header) needs this or it is pinned to whatever this
 // one box happens to report.
+// It pins the CORE COUNT too, and that one is not optional: the header renders
+// "cpu 2.0/16" against runtime.NumCPU(), so a golden taken on a 16-core dev box
+// fails on a 4-core CI runner — which is exactly what it did.
 func pinHostCapacity(t *testing.T, memBytes, diskFreeBytes int64) {
 	t.Helper()
-	origMem, origDisk := hostMemBytesFn, hostDiskFreeFn
+	origMem, origDisk, origCPU := hostMemBytesFn, hostDiskFreeFn, hostCPUsFn
 	hostMemBytesFn = func() int64 { return memBytes }
 	hostDiskFreeFn = func() int64 { return diskFreeBytes }
-	t.Cleanup(func() { hostMemBytesFn, hostDiskFreeFn = origMem, origDisk })
+	hostCPUsFn = func() int { return 16 }
+	t.Cleanup(func() { hostMemBytesFn, hostDiskFreeFn, hostCPUsFn = origMem, origDisk, origCPU })
 }
 
 // seedManagedIndex writes names into the managed-VM index the program is about

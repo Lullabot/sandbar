@@ -162,6 +162,15 @@ func (f *fakeShell) opened(name string) int {
 	return f.opens[name]
 }
 
+// closed counts how many times a VM's heartbeat has been torn down. Unlike await,
+// it asserts on a NEGATIVE — "this must not have been closed" — which is what a
+// test of the idle gate's non-triggers (blur) needs.
+func (f *fakeShell) closed(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.events["close:"+name]
+}
+
 func (f *fakeShell) argvFor(name string) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -365,18 +374,34 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 	}
 	sh.await(t, "open:web")
 
-	// 2. THE TERMINAL LOST FOCUS — it was backgrounded.
+	// 2. BLUR DOES NOT CLOSE THE GATE, and must not. A terminal beside an editor is
+	//    blurred and fully visible — which is exactly when a user watches a build —
+	//    so tearing the heartbeats down on blur blanked the gauges of someone who was
+	//    looking straight at them. The scenario blur was defending against (a window
+	//    nobody is looking at) is already covered by the idle window in step 3.
+	closesBefore := sh.closed("web") // step 1 (leaving the board) already closed it once
 	l.send(tea.BlurMsg{})
-	sh.await(t, "close:web")
-	if l.m.shouldTick() {
-		t.Fatal("a blurred terminal must close the gate")
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")}) // a message, so the gate is re-evaluated
+	if !l.m.shouldTick() {
+		t.Fatal("a blurred but visible terminal must keep the gate OPEN — the user may still be watching")
+	}
+	if n := sh.closed("web") - closesBefore; n != 0 {
+		t.Fatalf("blur must not close web's heartbeat, got %d new close(s)", n)
 	}
 
+	// A FocusMsg still counts as the user being here: it refreshes the idle window,
+	// so returning to a long-idle terminal revives the gauges without a keypress.
+	l.m.lastInput = time.Now().Add(-2 * heartbeatIdleAfter)
+	if l.m.shouldTick() {
+		t.Fatal("precondition: a stale-input session should have the gate shut")
+	}
 	l.send(tea.FocusMsg{})
-	sh.await(t, "open:web")
+	if !l.m.shouldTick() {
+		t.Fatal("returning to the terminal should reopen the gate without a keypress")
+	}
 
-	// 3. NOBODY IS THERE. Focus alone does not survive the user walking away from a
-	//    foregrounded terminal, so stale input closes everything down too.
+	// 3. NOBODY IS THERE. The idle window is the real signal: input older than
+	//    heartbeatIdleAfter closes everything down, focused or not.
 	l.m.lastInput = time.Now().Add(-2 * heartbeatIdleAfter)
 	if l.m.shouldTick() {
 		t.Fatal("an idle session must close the gate")
