@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -753,5 +755,138 @@ func TestTaskTotalGuard(t *testing.T) {
 				t.Fatalf("listed=%q → %q, want %q", tc.listed, got, tc.want)
 			}
 		})
+	}
+}
+
+// baseRaceRunner models the one thing that matters here: `limactl list <base>`
+// reports what the base ACTUALLY is at the moment it is asked. It does not exist
+// until a base build starts; while that build runs Lima reports it Running (a
+// booted guest with Ansible inside it); once the build finishes it is Stopped.
+type baseRaceRunner struct {
+	mu                 sync.Mutex
+	builds             int      // how many times the base image was built
+	stops              int      // how many times the base image was stopped
+	seq                []string // the order of base-affecting calls, for diagnosis
+	building           bool
+	built              bool
+	stoppedDuringBuild bool
+	buildDelay         time.Duration
+}
+
+func (r *baseRaceRunner) baseStatus() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case r.building:
+		return "Running" // a base mid-build IS running: Ansible is inside it
+	case r.built:
+		return "Stopped"
+	default:
+		return ""
+	}
+}
+
+func (r *baseRaceRunner) Output(_ context.Context, args ...string) ([]byte, error) {
+	if len(args) > 2 && args[0] == "list" && args[1] == "claude-base" {
+		s := r.baseStatus()
+		if s == "" {
+			return nil, errors.New("instance not found")
+		}
+		return []byte(s + "\n"), nil
+	}
+	return nil, nil
+}
+
+func (r *baseRaceRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error {
+	return nil
+}
+
+// Stream is the one the lifecycle calls go through (Client.runStream).
+func (r *baseRaceRunner) Stream(_ context.Context, _ io.Reader, _ io.Writer, args ...string) error {
+	isBase := func() bool {
+		for _, a := range args {
+			if a == "claude-base" {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case args[0] == "start" && len(args) > 2 && args[1] == "--name" && args[2] == "claude-base":
+		r.mu.Lock()
+		r.builds++
+		r.building = true
+		r.seq = append(r.seq, "build-base")
+		r.mu.Unlock()
+
+		time.Sleep(r.buildDelay) // the base build is slow; that is the whole window
+
+		r.mu.Lock()
+		r.building = false
+		r.built = true
+		r.mu.Unlock()
+	case args[0] == "stop" && isBase():
+		r.mu.Lock()
+		r.stops++
+		if r.building {
+			// A stop landing while the base is MID-BUILD kills that build. BuildBase's
+			// own closing stop does not count: by then it has set building=false.
+			r.stoppedDuringBuild = true
+		}
+		r.seq = append(r.seq, "stop-base")
+		r.mu.Unlock()
+	}
+	return nil
+}
+
+// TWO CREATES AT ONCE MUST NOT BOTH BUILD THE BASE IMAGE — and, worse, the second
+// must not STOP the base out from under the first one's build.
+//
+// ensureBaseStopped reads the base's status and then acts on it, with nothing
+// between the two. Two provisions running concurrently (which the board exists to
+// allow) both see the base missing and both build it, under the same instance name;
+// and once one of them is building, Lima reports that base as Running — so the other
+// falls into the "not Stopped" branch and stops it, killing the build it is waiting
+// on. The board made this reachable: before it, a build froze the keyboard and there
+// could only ever be one.
+func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
+	r := &baseRaceRunner{buildDelay: 150 * time.Millisecond}
+	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
+
+	// Neither the version stamp nor the playbook matters here; pin them so the
+	// stale-base path does not fire.
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string) (string, error) { return "v1", nil }
+	readBaseVersionFn = func(string) string { return "v1" }
+	writeBaseVersionFn = func(string, string) error { return nil }
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	cfg := vm.CreateConfig{Name: "web", BaseName: "claude-base"}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = p.ensureBaseStopped(context.Background(), cfg, io.Discard)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("create %d failed: %v", i, err)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.builds != 1 {
+		t.Errorf("the base image was built %d times, want exactly 1 (calls: %v)", r.builds, r.seq)
+	}
+	if r.stoppedDuringBuild {
+		t.Errorf("the base image was stopped WHILE IT WAS BEING BUILT — the second create killed the first one's base build (calls: %v)", r.seq)
 	}
 }

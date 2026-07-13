@@ -228,6 +228,18 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // needs an idle source disk. An empty/error status means the instance is
 // absent, so the heavy base build runs; an existing but running base is stopped.
 func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	// EVERYTHING BELOW IS ONE ATOMIC DECISION, and it has to be: it reads the base's
+	// status and then acts on that reading — build it, stop it, or delete and rebuild
+	// it. Two concurrent creates (which the board exists to allow) would otherwise
+	// both find the base missing and both build it, and a create that arrives while
+	// another is building would see the base as Running and STOP IT, killing that
+	// build. See baselock.go.
+	release, err := lockBase(ctx, cfg.BaseName, out)
+	if err != nil {
+		return err // only a cancelled context gets here
+	}
+	defer release()
+
 	status, err := p.Lima.Status(cfg.BaseName)
 	exists := err == nil && status != ""
 
