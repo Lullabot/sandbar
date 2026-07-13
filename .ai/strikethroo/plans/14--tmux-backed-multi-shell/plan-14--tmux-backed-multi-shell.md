@@ -793,10 +793,10 @@ No circular dependencies. Every task appears in exactly one phase.
 - ✔️ Task 003 (`completed`): `sand shell <name>` subcommand — a third `switch` case in `cmd/sand/main.go`, real-TTY hand-off, "not running" refusal in words, usage string updated (depends on: 002)
 - ✔️ Task 004 (`completed`): The TUI's `S` registry verb — build argv from the seam, pass `--workdir`, and branch on host `$TMUX` to open a new host window as an ordinary `tea.Cmd` instead of suspending via `tea.ExecProcess`; rewrite `about` and the log copy; goldens must stay unchanged (depends on: 002)
 
-### Phase 4: Prove it and write it down
+### ✅ Phase 4: Prove it and write it down
 **Parallel Tasks:**
-- Task 005: Documentation — `README-sand.md` shell copy and a `sand shell` section, the tmux essentials (`C-a` prefix, `C-a d` detaches, closing the terminal no longer ends the session), AGENTS.md's third entrypoint + anti-drift seam. `CHANGELOG.md` is generated, not hand-edited (depends on: 003, 004)
-- Task 006: Real-VM validation and `limae2e` tests — attach, persistence across detach, grouped-session independence, the `destroy-unattached` cleanup asymmetry asserted on `tmux list-sessions`, the heartbeat surviving an attach, and the workdir fix (depends on: 003, 004)
+- ✔️ Task 005 (`completed`): Documentation — `README-sand.md` shell copy and a `sand shell` section, the tmux essentials (`C-a` prefix, `C-a d` detaches, closing the terminal no longer ends the session), AGENTS.md's third entrypoint + anti-drift seam. `CHANGELOG.md` is generated, not hand-edited (depends on: 003, 004)
+- ✔️ Task 006 (`completed`): Real-VM validation and `limae2e` tests — attach, persistence across detach, grouped-session independence, the `destroy-unattached` cleanup asymmetry asserted on `tmux list-sessions`, the heartbeat surviving an attach, and the workdir fix (depends on: 003, 004)
 
 ### Post-phase Actions
 

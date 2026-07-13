@@ -83,6 +83,45 @@ Common flags (run `sand create --help` for the full list and defaults):
 playbook embedded in the binary, there is no separate ref left to pin — see
 [Playbook resolution](#playbook-resolution-working-tree-first-embedded-fallback).
 
+## Shells (`sand shell`)
+
+`sand shell` attaches a shell to a running VM's **persistent tmux session**, from
+any terminal:
+
+```bash
+sand shell claude
+```
+
+**Closing the terminal does not kill your work.** That is the headline. The
+session and everything in it — a Claude Code job, a build, a long script — keeps
+running in the guest when you detach, close the terminal, or shut the laptop.
+Run `sand shell` again and it is all still there. (The VM itself must stay
+running: a detached session survives a closed terminal, not a stopped VM.)
+
+You are in tmux, so the prefix key is `C-a`:
+
+| Key | Action |
+|-----|--------|
+| `C-a c` | Open a new window |
+| `C-a \|` | Split into two panes, side by side |
+| `C-a S` | Split into two panes, one above the other |
+| `C-a d` | Detach (leaves everything running) |
+
+**`C-a` is the tmux prefix now, so it no longer jumps the cursor to the start of
+the line** the way readline binds it. That is the one thing worth knowing before
+it surprises you; press `C-a C-a` to send a literal `C-a` through to the shell.
+
+Run `sand shell` in a **second** terminal and you get the same set of windows but
+your **own** current window, so two terminals can sit on two different windows of
+the same VM — neither follows the other's window switches, and neither is
+squeezed to the size of the smaller terminal. Detaching that second terminal
+cleans up after itself; the first session (`main`) is the one that holds your
+work and is never torn down automatically.
+
+This is the supported way to get more than one shell into a VM. Reaching for
+`limactl shell <name>` directly gets you a bare, throwaway shell that dies with
+its terminal, and bypasses the session everything else attaches to.
+
 ## The board
 
 `sand`'s home surface is a **board**: a scrolling grid of tiles, one per VM,
@@ -164,7 +203,7 @@ does nothing when it is not offered:
 | `x` | Stop the VM (offered while it's running) |
 | `r` | Restart the VM (always offered — stop-then-start, whatever the current state) |
 | `R` | **Reset**: open the pre-filled form to re-clone the VM from its base image (managed VMs only) — see [Reset a VM](#reset-a-vm) |
-| `S` | Open an interactive shell in the VM (offered while it's running) |
+| `S` | Attach a shell to the guest's persistent tmux session (offered while it's running) — see [Shells](#shells-sand-shell) |
 | `d` | **Delete** the VM (opens a confirmation; withheld while the VM is mid-build) |
 | `u` | **Upload** a host file/directory into the VM (offered while it's running) — see [Moving files in and out](#moving-files-in-and-out) |
 | `g` | **Download** a guest file/directory to the host (offered while it's running) |
@@ -172,8 +211,16 @@ does nothing when it is not offered:
 | `l` | Reopen the VM's last build or transfer **log** — offered only when a run (finished or still in flight) is retained to show |
 | `esc` / `backspace` / `enter` | Back to the board (lands back on the same tile) |
 
-Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
-the TUI resumes when you exit the shell.
+Pressing `S` attaches you to the VM's persistent tmux session — the same one
+`sand shell` reaches, so **closing the terminal detaches rather than killing what
+you were running**, and you can pick it up again from any terminal. The tmux
+prefix is `C-a`; see [Shells](#shells-sand-shell) for the keys that matter.
+
+Normally sand suspends itself while you are in the shell and resumes when you
+detach (`C-a d`) or exit. The exception: if you launched the TUI from **inside a
+host tmux session**, `S` opens the shell in a new *host* window instead and does
+not suspend at all — so the board stays on screen beside it, still streaming any
+builds in flight.
 
 `d` is bound to delete on every screen: it is the most destructive key, so its
 meaning never changes under your fingers. Download took the rename to `g` (get).
