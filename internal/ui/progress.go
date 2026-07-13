@@ -58,6 +58,13 @@ type streamFunc func(ctx context.Context, out io.Writer) error
 // leak its goroutine. The user is shown the running one instead. A run of the
 // OTHER kind is left strictly alone — that is the point of keying by kind, and it
 // is what stops a file copy from evicting a failed build's tile and log.
+//
+// It deliberately does NOT change the view. Which screen a run lands on is the
+// CALLER's decision, and the two callers want opposite things: a build streams
+// onto its own tile while the board stays live, whereas a file transfer — launched
+// from the VM screen, with nothing on the board to watch — still opens its log.
+// Flipping to the full-screen log HERE is what made every run take the terminal
+// hostage, which is the takeover this registry exists to end.
 func (m *model) beginStream(key jobKey, title string, back view, run streamFunc) (tea.Cmd, bool) {
 	if m.jobs.running(key) {
 		m.logMsg(key.vm + " already has a run in flight — showing it")
@@ -84,10 +91,6 @@ func (m *model) beginStream(key jobKey, title string, back view, run streamFunc)
 		cancel()
 		return nil, false
 	}
-
-	m.progressJob = key
-	m.view = viewProgress
-	m.setOutput()
 
 	go func() {
 		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the
@@ -140,6 +143,12 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 		return cmd
 	}
 	m.jobs.markProvision(cfg.Name, cfg, recreates)
+	// The signature moment: submitting the create form drops the user back on the
+	// BOARD, where a new tile is already showing a building badge and a filling
+	// progress bar, and where they can arrow away and start a second VM. Landing on
+	// the full-screen Ansible dump instead is the screen-takeover this whole plan
+	// exists to remove; the log is still one `l` away from the tile.
+	m.view = viewBoard
 	return cmd
 }
 
@@ -161,15 +170,22 @@ func (m *model) showJob(key jobKey) tea.Cmd {
 	if !m.jobs.exists(key) {
 		return nil
 	}
-	m.progressJob = key
-	m.view = viewProgress
-	m.setOutput()
+	m.focusJob(key)
 	// A live job is still animating (the user may have walked away from it and
 	// come back); a retained one has nothing left to spin for.
 	if m.jobs.running(key) {
 		return m.tickSpinner()
 	}
 	return nil
+}
+
+// focusJob puts a run on the progress screen without starting a spinner — the
+// caller that has just begun a job already batched one, and a second tick loop
+// would run the spinner at double speed forever.
+func (m *model) focusJob(key jobKey) {
+	m.progressJob = key
+	m.view = viewProgress
+	m.setOutput()
 }
 
 // readNextCmd reads one chunk from a job's pipe. It emits a KEYED
