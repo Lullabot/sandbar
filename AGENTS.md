@@ -198,6 +198,26 @@ every bullet, not the constraint itself.
   script derives an exact denominator via `ansible-playbook --list-tasks` and
   echoes `SAND_ANSIBLE_TASK_TOTAL` so the tile's build progress bar has an
   honest fraction instead of an animated guess.
+- **`beginStream` starts a job; it does not choose a screen.** Which view a run
+  lands on belongs to the caller, and the two callers want opposite things: a
+  **build returns to the board**, where its tile carries the badge and the
+  progress bar (its log is one `l` away), while a **transfer opens its log**,
+  having no tile bar of its own. Flipping the view inside `beginStream` is how
+  every run ended up seizing the terminal with a full-screen Ansible dump —
+  the takeover the job registry exists to end. The suite did not catch it
+  because the suite asserted it; do not reintroduce either.
+- **`limactl copy`'s backend is pinned to `scp`, and the pin is load-bearing.**
+  Under limactl 2.1.3 the backend decides **where the files land**, not just how
+  fast: Lima's rsync backend appends a trailing slash to every path of a
+  recursive copy (`pkg/copytool/rsync.go`), and `srcdir/` means *the contents of*
+  `srcdir` to rsync — so it splats a directory into the destination and never
+  creates it, while scp nests it. `--backend=auto` prefers rsync **whenever the
+  guest has it installed**, which made placement a function of the sandbox's
+  packages. Do not "optimize" back to `auto` or `rsync`. For the same reason the
+  destination handed to `lima.Copy` is the user's directory **verbatim** — do not
+  reintroduce a basename-appending compensation layer, which nests correctly only
+  until the destination already contains the directory (the second upload of
+  `mydir` then lands in `dest/mydir/mydir`).
 - **Naming prohibition: no nautical metaphor anywhere.** No harbour/harbor,
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
