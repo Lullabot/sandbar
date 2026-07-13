@@ -1280,6 +1280,15 @@ The plan's premise — that a green suite is not evidence — was vindicated twi
    double-nested every re-upload on any other. Fixed in `b0f2848` by pinning the backend and deleting the
    compensation; `TestE2ECopyRoundTrip`, failing on `main` since before this branch, now passes.
 
+3. **The unit suite was writing the developer's real `~/.lima`.** The TUI tests build a real
+   `provision.Provisioner` over a fake `lima.Runner`, so driving a create walked
+   `ensureBaseStopped` → `writeBaseVersion`; only `XDG_DATA_HOME` was isolated, not `LIMA_HOME`. Every
+   `go test ./...` stamped the host's `claude-base` as freshly built from a playbook it had never seen —
+   which makes `baseStale` skip the rebuild the user needs and clone silently from a stale image. Fixed in
+   `8cd8fa7`; the host's real stamp was restored to the version its base was actually built from, and the
+   stamp is now byte-stable across a full `-race` run. A fake Runner stops a test from *running* limactl;
+   it does nothing about the files the code around it writes.
+
 #### Accepted deviations
 
 - **Idle CPU (success criterion 5)** is met in intent, not to the letter. Heartbeats stop as designed:
