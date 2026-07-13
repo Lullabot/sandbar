@@ -865,3 +865,159 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 		t.Fatal("the succeeded build must still be retained alongside the copy")
 	}
 }
+
+// A RESET DELETES ITS OWN VM AND CLONES IT BACK, and the refresh tick that fires
+// during that window must not read the gap as "this VM disappeared".
+//
+// It did, and the cost was permanent: manage.Reconcile dropped the absent VM from
+// the managed index and the handler then called sec.Remove on it, ERASING THE
+// USER'S HOST-STORED SECRETS — including the GH_TOKEN seeded at create. The reset
+// would finish, rebuild the VM, and apply an empty secrets.env to it, so git auth
+// inside the rebuilt sandbox stopped working with nothing on screen to say why.
+//
+// jobs.reconcile already exempted exactly this case (`!j.seen || j.recreates`).
+// The managed index and the secrets store did not. Unreachable before the board
+// went live, because a reset used to pin the user to the progress screen and no
+// list refresh ran underneath it.
+func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+	if err := m.sec.Set("web", map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
+		t.Fatalf("seed the VM's secrets: %v", err)
+	}
+
+	l := newTeaLoop(t, m)
+	job := newFakeJob()
+	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	if !l.m.jobs.isRunning("web") {
+		t.Fatal("precondition: the reset should be in flight")
+	}
+
+	// The reset has deleted the instance; the refresh tick lists Lima and web is gone.
+	l.send(vmsLoadedMsg{vms: []vm.VM{}})
+
+	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "ghp_precious" {
+		t.Fatalf("the reset's own delete must not erase the VM's secrets: GH_TOKEN = %q, want it intact", got)
+	}
+	if !l.m.reg.IsManaged("web") {
+		t.Fatal("a VM mid-reset must stay managed — its absence from limactl list is expected, not a disappearance")
+	}
+	if l.m.jobs.isRunning("web") {
+		job.done <- nil
+		l.pump("the reset to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	}
+}
+
+// NO VERB MAY DISRUPT A BUILD. Lima reports a provisioning VM as `Running` — the
+// guest is booted, Ansible is executing inside it — so every gate that reads only
+// vm.Status offers a verb that would kill the build it is watching: `x stop` and
+// `r restart` stop the VM mid-Ansible, `X` sweeps it into stop-all, `u`/`g` copy
+// files into a VM a reset is about to destroy, and `s start` even fires on a VM
+// Lima has never heard of (a create's clone has not landed, so the record is
+// synthetic with an empty Status).
+//
+// Only Delete consulted the job registry. The rest were protected by ACCIDENT: the
+// old full-screen progress view froze the keyboard for the whole build, so no key
+// could reach them. This plan removed that freeze on purpose — it is the headline
+// feature — and these gates are what replaces it.
+func TestNoVerbCanDisruptABuild(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 200, 40)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	// Lima reports the provisioning guest as Running — this is the whole trap.
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running", CPUs: 2}}})
+	l.m.focusName = "web"
+
+	web, _ := l.m.lookupVM("web")
+	if got := l.m.statusOf(web); got != statusBuilding {
+		t.Fatalf("precondition: the tile must read Building, got %v", got)
+	}
+	if web.Status != limaRunning {
+		t.Fatalf("precondition: Lima must report the building VM as Running, got %q", web.Status)
+	}
+
+	// Not advertised…
+	verbs := boardVerbs(l.m)
+	for _, v := range []string{"x stop", "r restart", "s start", "R reset", "u upload", "g download"} {
+		if strings.Contains(verbs, v) {
+			t.Errorf("a building VM must not advertise %q:\n%s", v, verbs)
+		}
+	}
+	// …and not dispatched.
+	for _, k := range []rune{'x', 'r', 's', 'R', 'u', 'g'} {
+		after, cmd := pressDispatch(t, l.m, runeKey(k))
+		if cmd != nil {
+			t.Errorf("%q on a building VM must dispatch nothing", k)
+		}
+		if after.acting || after.view != viewBoard {
+			t.Errorf("%q on a building VM must change nothing (acting=%v view=%v)", k, after.acting, after.view)
+		}
+	}
+	// And stop-all must not sweep it up.
+	if got := l.m.stopAllTargets(); len(got) != 0 {
+		t.Errorf("stop-all must not target a VM mid-build, got %v", got)
+	}
+
+	job.done <- nil
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+}
+
+// A VM DELETED OUTSIDE SAND MUST LOSE ITS TILE. The job registry retains every run
+// for the whole session, and the roster admitted any VM with a provision job — so a
+// VM created in sand and then deleted with `limactl delete` kept its tile forever:
+// Reconcile dropped it from the managed index, but the retained SUCCEEDED job kept
+// re-admitting it. The tile rendered from a synthetic record ("○ Stopped · disk ?/?
+// · never used") and every verb on it failed with "instance not found", with no way
+// to clear it short of restarting sand.
+//
+// A succeeded build's VM is in the managed index — that is what success means — so
+// the roster does not need the job to vouch for it. A failed or in-flight one still
+// does, and still gets its tile.
+func TestAVMDeletedOutsideSandLosesItsTile(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	job.done <- nil
+	l.pump("the build to succeed", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+
+	if !l.m.reg.IsManaged("web") {
+		t.Fatal("precondition: a succeeded build should record its VM as managed")
+	}
+	if len(l.m.boardVMs()) != 1 {
+		t.Fatalf("precondition: the built VM should have a tile, got %v", boardNames(l.m))
+	}
+
+	// The user deletes it from another terminal. Lima no longer reports it.
+	l.send(vmsLoadedMsg{vms: []vm.VM{}})
+
+	if got := boardNames(l.m); len(got) != 0 {
+		t.Fatalf("a VM deleted outside sand must lose its tile, got %v (the retained succeeded job re-admitted it)", got)
+	}
+	// The run's log is still retained — that is not what was wrong.
+	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+		t.Fatal("the run itself should still be retained; only the ROSTER must stop counting it")
+	}
+}
+
+// The mirror: a FAILED build still gets a tile even with no Lima record at all —
+// that tile is the only place its failure is reported and its log reopened.
+func TestAFailedBuildKeepsItsTileWithNoLimaRecord(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	job.done <- errAnsibleBoom
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{}})
+
+	if got := boardNames(l.m); len(got) != 1 || got[0] != "web" {
+		t.Fatalf("a failed build must keep its tile — it is the only report of the failure, got %v", got)
+	}
+}

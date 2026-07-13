@@ -106,6 +106,15 @@ type model struct {
 	// VM instead of opening the first one.
 	vmsLoaded bool
 
+	// headerMem / headerDiskFree are the header band's host capacity, sampled by
+	// listCmd OFF the Update goroutine rather than probed on every render (hostMemBytes
+	// reads /proc/meminfo; freeDiskBytes statfs's the Lima volume, which can block on a
+	// stale mount). Zero means "not sampled yet" and the header probes directly — see
+	// hostCapacityText. Distinct from the create form's own hostDiskFree below, which
+	// is a one-shot sample taken when that form opens.
+	headerMem      int64
+	headerDiskFree int64
+
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
 	// build and a later file copy are two runs, and the copy may not evict the
@@ -379,7 +388,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	nm.syncBoard()
-	return nm, tea.Batch(cmd, nm.syncHeartbeats(), nm.tickRefresh())
+	// The batch is built into a LOCAL before nm is returned. tickRefresh takes a
+	// POINTER receiver and sets nm.refreshing = true; Go orders the function calls in
+	// a return statement but not the copy of the plain `nm` operand sitting beside
+	// them, so a compiler free to copy nm first would return a model with
+	// refreshing=false while a tea.Tick was already armed — and every later message
+	// would arm another, stacking refresh loops until the list call rate ran away.
+	// gc happens to copy last today. This is the same hazard updateBoard already
+	// hoists around (see the note under Quit there); not leaning on it is free.
+	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.tickRefresh())
+	return nm, cmds
 }
 
 // dispatch is the single message-handling point. Key messages route by active view;
@@ -447,13 +465,35 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logMsg("list failed: " + msg.err.Error())
 			return m, nil
 		}
-		m.vms = msg.vms // DiskUsed is already measured in listCmd, off the Update goroutine
+		m.vms = msg.vms // DiskUsed / UpSince / LastUsed are measured in listCmd, off the Update goroutine
 		m.vmsLoaded = true
+		m.headerMem, m.headerDiskFree = msg.hostMem, msg.hostDiskFree
 		// Reconcile the managed index against reality so a VM deleted outside the
 		// TUI stops being flagged managed (and recreate-able). Shared with the
 		// headless `sand create` path (internal/manage) so the two entrypoints
 		// cannot drift.
-		dropped, err := manage.Reconcile(m.reg, msg.vms)
+		// A VM whose provision is STILL RUNNING is EXPECTED to be missing from
+		// `limactl list`, and its absence must not be read as a disappearance. A
+		// create's clone has not landed yet; a RESET has deliberately deleted its own
+		// instance and will clone it back minutes later. Treat both as present.
+		//
+		// This is not a cosmetic guard. Dropping such a VM here unmanages it and then
+		// DELETES ITS HOST-STORED SECRETS below — permanently, including the GH_TOKEN
+		// seeded at create. The reset then rebuilds the VM and applies an empty
+		// secrets.env to it, so git auth inside the rebuilt sandbox simply stops
+		// working, with nothing on screen to explain why. jobs.reconcile already
+		// exempts exactly these jobs (see `!j.seen || j.recreates`); the managed index
+		// and the secrets store need the same exemption, and had none. It was
+		// unreachable before this plan only because a reset pinned the user to the
+		// progress screen and no list refresh ran underneath it.
+		listed := present(msg.vms)
+		live := msg.vms
+		for _, name := range m.jobs.names() {
+			if m.jobs.Building(name) && !listed[name] {
+				live = append(live, vm.VM{Name: name})
+			}
+		}
+		dropped, err := manage.Reconcile(m.reg, live)
 		if err != nil {
 			m.logMsg("warning: could not update managed index: " + err.Error())
 		}

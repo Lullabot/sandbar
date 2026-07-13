@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // BaseDiskFloor is the virtual disk size the base image is built at. Clones are
@@ -27,6 +28,16 @@ type VM struct {
 	DiskUsed string // allocated on-disk bytes (raw string); "" = unknown/unmeasurable
 	Dir      string
 	Arch     string
+
+	// UpSince / LastUsed are the tile's closing line ("up 2h14m" / "last used 3d
+	// ago"), sampled from the Lima instance dir's files. They are ENRICHMENTS, like
+	// DiskUsed: `limactl list` does not report them, and they are filled in by the
+	// list command — which runs OFF the Bubble Tea goroutine — precisely so the
+	// blocking os.Stat behind them cannot run on the render path. The zero value
+	// means "unknown", which the tile renders as an absence, never as a fabricated
+	// time.
+	UpSince  time.Time // when the current boot began; zero unless running
+	LastUsed time.Time // when a stopped VM was last up; zero = never used
 }
 
 // CreateConfig mirrors the answers the original bash provisioner gathers.

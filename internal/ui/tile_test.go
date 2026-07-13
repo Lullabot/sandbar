@@ -461,8 +461,15 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The tile RENDERS a sampled time; it does not stat for one. listCmd does the
+	// stat, off the Bubble Tea goroutine (see its doc) — so the test samples the same
+	// way and hands the result to the tile, exactly as the real flow does.
+	upAt, ok := upSince(dir)
+	if !ok {
+		t.Fatal("upSince should read the boot time from ha.pid")
+	}
 	running := baseTileInput()
-	running.VM = vm.VM{Name: "web", Status: "Running", Dir: dir}
+	running.VM = vm.VM{Name: "web", Status: "Running", Dir: dir, UpSince: upAt}
 	running.Now = now
 	got := ansi.Strip(renderTile(running))
 	if !strings.Contains(got, "up 2h14m") {
@@ -477,8 +484,12 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(stoppedDir, "ha.stderr.log"), stopAt, stopAt); err != nil {
 		t.Fatal(err)
 	}
+	usedAt, ok := lastUsed(stoppedDir)
+	if !ok {
+		t.Fatal("lastUsed should read the shutdown time from ha.stderr.log")
+	}
 	stopped := baseTileInput()
-	stopped.VM = vm.VM{Name: "web", Status: "Stopped", Dir: stoppedDir}
+	stopped.VM = vm.VM{Name: "web", Status: "Stopped", Dir: stoppedDir, LastUsed: usedAt}
 	stopped.Now = now
 	got2 := ansi.Strip(renderTile(stopped))
 	if !strings.Contains(got2, "last used 3d ago") {
@@ -486,8 +497,11 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 	}
 
 	neverDir := t.TempDir()
+	if _, ok := lastUsed(neverDir); ok {
+		t.Fatal("a never-started VM has no ha.stderr.log, so lastUsed must report nothing")
+	}
 	never := baseTileInput()
-	never.VM = vm.VM{Name: "fresh", Status: "Stopped", Dir: neverDir}
+	never.VM = vm.VM{Name: "fresh", Status: "Stopped", Dir: neverDir} // zero LastUsed = never
 	never.Now = now
 	got3 := ansi.Strip(renderTile(never))
 	if !strings.Contains(got3, "never used") {

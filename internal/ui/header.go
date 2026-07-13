@@ -128,6 +128,16 @@ func (m model) hostCapacityText() string {
 		}
 	}
 
+	hostMem, hostDisk := m.headerMem, m.headerDiskFree
+	// Before the first list lands there is no sample, so probe directly — the board is
+	// empty at that point and this happens once, not on every frame.
+	if hostMem == 0 {
+		hostMem = hostMemBytesFn()
+	}
+	if hostDisk == 0 {
+		hostDisk = hostDiskFreeFn()
+	}
+
 	var parts []string
 	if hostCPUs := hostCPUsFn(); hostCPUs > 0 {
 		if haveCPU {
@@ -146,15 +156,15 @@ func (m model) hostCapacityText() string {
 			parts = append(parts, "cpu —")
 		}
 	}
-	if hostMem := hostMemBytesFn(); hostMem > 0 {
+	if hostMem > 0 {
 		if haveMem {
 			parts = append(parts, fmt.Sprintf("mem %s/%s", humanizeInt(memUsed), humanizeInt(hostMem)))
 		} else {
 			parts = append(parts, fmt.Sprintf("mem —/%s", humanizeInt(hostMem)))
 		}
 	}
-	if free := hostDiskFreeFn(); free > 0 {
-		parts = append(parts, fmt.Sprintf("%s disk free", humanizeInt(free)))
+	if hostDisk > 0 {
+		parts = append(parts, fmt.Sprintf("%s disk free", humanizeInt(hostDisk)))
 	}
 	return strings.Join(parts, ", ")
 }

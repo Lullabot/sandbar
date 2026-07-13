@@ -409,10 +409,19 @@ func (m *model) ensureFocusVisible() {
 // by an active name filter ('/') must still be stopped. That is a deliberate
 // choice — 'X' means "stop all", not "stop what I can currently see" — because
 // the opposite reading is defensible and a future reader will wonder.
+//
+// A VM MID-BUILD IS NOT A TARGET. Lima reports a provisioning VM as Running, so a
+// status-only filter sweeps it into the kill list and 'X' stops a VM out from
+// under its own Ansible run — the same hazard the per-VM verbs now gate on (see
+// notBuilding, commandreg.go). "Stop all" means the sandboxes the user is finished
+// with, not the one they are in the middle of creating.
 func (m model) stopAllTargets() []string {
 	var names []string
 	for _, v := range m.vms {
 		if v.Status != limaRunning || !m.reg.IsManaged(v.Name) || m.isBaseImage(v.Name) {
+			continue
+		}
+		if m.vmBuilding(v.Name) {
 			continue
 		}
 		names = append(names, v.Name)
@@ -858,11 +867,26 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 	}
 }
 
-// hasProvisionJob reports whether name has a build — running or retained — and so
-// is a VM of sand's whether or not the managed index knows it yet. It is one half
-// of the roster's membership rule (see boardVMs).
+// hasProvisionJob reports whether name has a build that ENTITLES IT TO A TILE the
+// managed index would not give it: one still in flight (a create's clone has not
+// landed in `limactl list` yet, and a reset has deleted its own instance), or one
+// that ended badly (a failed or cancelled build is never recorded managed, and its
+// tile is the only place its failure is reported, its log reopened, and the
+// half-built VM deleted from). It is one half of the roster's membership rule
+// (see boardVMs).
+//
+// A SUCCEEDED build is deliberately NOT one of them. Its VM is in the managed index
+// — that is what success means — so it already has a tile, and admitting it here as
+// well means the roster stops listening to the index. The job registry retains
+// every run for the whole session, so a VM created in sand and then deleted OUTSIDE
+// it (`limactl delete web`) kept its tile forever: Reconcile dropped it from the
+// index, but the retained succeeded job kept re-admitting it. The tile rendered
+// from a synthetic record — "○ Stopped · disk ?/? · never used" — and every verb on
+// it failed with "instance not found", with no way to clear it short of restarting
+// sand.
 func (m model) hasProvisionJob(name string) bool {
-	return m.jobs.exists(provisionKey(name))
+	s, ok := m.jobs.snapshot(provisionKey(name))
+	return ok && s.State != jobSucceeded
 }
 
 // tileGapBlock is the blank column between two adjacent tiles: as many lines as a

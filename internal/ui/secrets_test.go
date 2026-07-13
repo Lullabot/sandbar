@@ -422,3 +422,30 @@ func TestSecretsEditorSaveInvalidStaysAndDoesNotPersist(t *testing.T) {
 		t.Fatalf("an invalid save must not persist anything, Store.Get returned %v", got)
 	}
 }
+
+// A VALUE'S TRAILING WHITESPACE IS THE USER'S, NOT OURS. The CRLF guard cut the
+// TrimSpace'd line, which eats trailing spaces and tabs along with the \r — so a
+// value that legitimately ended in whitespace was silently truncated: the editor
+// showed it, the store recorded it shortened, and the guest exported something the
+// user never typed, with nothing to say so.
+//
+// The CRLF case must keep working: a buffer pasted with CRLF endings must not land
+// a "\r" inside every value, which Render would then single-quote into the guest's
+// secrets.env.
+func TestParseSecretsKeepsTrailingWhitespaceButStripsCR(t *testing.T) {
+	scopes, err := parseSecrets("PREFIX=sand \nTABBED=v\t\nCRLF=clean\r\nINNER=a b\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got := scopes[""]
+	for _, tc := range []struct{ key, want string }{
+		{"PREFIX", "sand "}, // a deliberate trailing space survives
+		{"TABBED", "v\t"},   // so does a tab
+		{"CRLF", "clean"},   // but the carriage return does NOT
+		{"INNER", "a b"},
+	} {
+		if got[tc.key] != tc.want {
+			t.Errorf("%s = %q, want %q", tc.key, got[tc.key], tc.want)
+		}
+	}
+}

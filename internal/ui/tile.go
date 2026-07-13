@@ -433,14 +433,20 @@ func tileRoleLine(p ansibleProgress) string {
 // actual entity in, and since when") — a Failed tile still has some real
 // underlying Lima state, which is exactly what this answers.
 func tileFooterLine(v vm.VM, now time.Time) string {
+	// These times are SAMPLED IN listCmd (commands.go), off the Bubble Tea goroutine,
+	// and only read here. They used to be stat'd right in this function — up to three
+	// os.Stat calls per tile, on every frame, and a building board redraws ~10x a
+	// second for its spinner. That is a blocking filesystem call on the render path,
+	// which listCmd's own doc already forbids for exactly the reason it forbids it:
+	// one stale mount and the whole UI stalls.
 	if v.Status == limaRunning {
-		if t, ok := upSince(v.Dir); ok {
-			return tileChromeStyle.Render("up " + formatUptime(now.Sub(t)))
+		if !v.UpSince.IsZero() {
+			return tileChromeStyle.Render("up " + formatUptime(now.Sub(v.UpSince)))
 		}
 		return tileChromeStyle.Render("up")
 	}
-	if t, ok := lastUsed(v.Dir); ok {
-		return tileChromeStyle.Render("last used " + formatAgo(now.Sub(t)))
+	if !v.LastUsed.IsZero() {
+		return tileChromeStyle.Render("last used " + formatAgo(now.Sub(v.LastUsed)))
 	}
 	return tileChromeStyle.Render("never used")
 }

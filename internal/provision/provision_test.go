@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -720,5 +721,37 @@ func TestReset_StartsStoppedSourceForStaging(t *testing.T) {
 	del := findCall(t, f.calls, 0, "delete", func(c []string) bool { return c[0] == "delete" })
 	if !(startSrc < stageOut && startSrc < del) {
 		t.Fatalf("source start (idx %d) must precede stage-out (%d) and delete (%d)", startSrc, stageOut, del)
+	}
+}
+
+// The task-total guard is SHELL, so it is tested by running it in a shell. Reading
+// the Go around it is exactly how the bug below survived review.
+//
+// `grep -c` prints "0" and exits 1 when it matches nothing, and the script's
+// `|| true` swallows the exit status — so $listed is the STRING "0": non-empty,
+// perfectly numeric, and therefore straight past a guard that only rejected empty
+// and non-numeric values. total became 0+1 = 1, the guest announced ONE task, and
+// the very first TASK banner rendered the tile's build bar at 100% for the whole
+// build. A bar pinned full and lying is strictly worse than the indeterminate 0%
+// bar the fallback exists to give.
+func TestTaskTotalGuard(t *testing.T) {
+	for _, tc := range []struct {
+		listed string
+		want   string
+	}{
+		{"72", "SAND_ANSIBLE_TASK_TOTAL=73"},  // the happy path: +1 for gather_facts
+		{"0", "SAND_ANSIBLE_TASK_TOTAL=0"},    // grep -c matched nothing — THE BUG
+		{"", "SAND_ANSIBLE_TASK_TOTAL=0"},     // no output at all
+		{"boom", "SAND_ANSIBLE_TASK_TOTAL=0"}, // not a number
+	} {
+		t.Run("listed="+tc.listed, func(t *testing.T) {
+			out, err := exec.Command("/bin/sh", "-c", "listed='"+tc.listed+"'\n"+taskTotalGuard).CombinedOutput()
+			if err != nil {
+				t.Fatalf("guard failed to run: %v\n%s", err, out)
+			}
+			if got := strings.TrimSpace(string(out)); got != tc.want {
+				t.Fatalf("listed=%q → %q, want %q", tc.listed, got, tc.want)
+			}
+		})
 	}
 }

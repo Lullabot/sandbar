@@ -208,7 +208,9 @@ GH_TOKEN=ghp_your_token_here
 - Keys must be valid environment variable names (`[A-Za-z_][A-Za-z0-9_]*`). A bad
   key, a bad scope, or a duplicate key within a scope aborts the save naming the
   offending line — nothing is written until the whole buffer is valid.
-- `ctrl+s` saves and shows "applies on next start" in the status line; `esc` discards.
+- `ctrl+s` saves. On a **running** VM the change is pushed into the live guest
+  immediately (the status line says so, and reports any failure); on a **stopped**
+  one it applies on its next start. `esc` discards.
 
 Values are shown in cleartext. See [Where secrets live](README.md#where-secrets-live)
 for the storage and trust model — they are stored **unencrypted** on the host.
