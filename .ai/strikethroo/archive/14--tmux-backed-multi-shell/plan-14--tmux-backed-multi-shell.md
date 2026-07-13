@@ -805,3 +805,84 @@ Per `POST_PHASE.md`: `gofmt -l .` (must be empty), `go vet ./...`, `go test ./..
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-13
+
+### Results
+
+All 6 tasks across 4 phases completed. sand now attaches both of its shell
+entrypoints to a persistent guest tmux session:
+
+- **`internal/lima/attach.go`** — `AttachArgv`, the one seam that knows tmux
+  exists. First client creates `main`; later clients get a grouped `sand-<pid>`
+  session carrying `destroy-unattached` (and `main` never does).
+- **`internal/lima/guest.go`** — `GuestHome`/`GuestUser`, lifted out of
+  `internal/ui` so both entrypoints resolve `--workdir` from one implementation.
+- **`cmd/sand/shell.go`** — `sand shell NAME`, the third entrypoint.
+- **`internal/ui/commands.go` + `commandreg.go`** — the `S` verb: attaches to the
+  persistent session, and when the TUI is itself inside host tmux, opens a new
+  *host* window as an ordinary `tea.Cmd` instead of suspending.
+- **`internal/ui/shell_e2e_test.go`** — `limae2e`-tagged coverage of the three
+  claims that need a real guest.
+- Docs: `README-sand.md` (new Shells section + corrected `S` copy), `AGENTS.md`
+  (third entrypoint + the anti-drift seam).
+
+Every Success Criterion was validated against a real VM. Highlights, with the
+observed evidence:
+
+| Criterion | Evidence |
+| --- | --- |
+| 1-2. Attach + windows | `sand shell` under a real PTY rendered the guest tmux status bar; `C-a c` added window 2 |
+| 3. **Persistence** | Both terminals closed → `main` survived with `sleep 987` (pid 2584) **still running** |
+| 4. Grouped independence | `main` + `sand-2597`, same window set; client 1 on window 1, client 2 on window 2; clients kept 200x50 and 100x30 — **no clamping** |
+| 5. Host-`$TMUX` fast path | New host window opened; TUI kept rendering the board, logging "the board keeps running" — never suspended |
+| 6. `--workdir` | Re-attach from a host dir absent in the guest → **zero** `bash: cd:` errors |
+| 7. Usage | `sand bogus` lists `sand shell NAME` |
+| 8. Heartbeat | Tile CPU gauge tracked a busy loop started *inside* the attached session: 1% → 51% |
+| 9. Gate | `S` withheld from stopped VMs; `enabledFor` unchanged |
+| 10. Build | `gofmt`/`vet`/`build`/`test` all clean; **board goldens byte-for-byte unchanged** |
+
+### Noteworthy Events
+
+- **The PTY question (the plan's #1 risk) resolved in favor of the primary path.**
+  `limactl shell` *does* allocate a PTY, so the `ssh -t` fallback was dropped
+  entirely. Critically, this could only be answered by *fabricating a terminal*
+  (host tmux / `script`), because an agent shell has no controlling TTY — a naive
+  probe fails with `not a terminal` for reasons that have nothing to do with Lima
+  and would have wrongly condemned the design to its fallback.
+- **A wrong claim was written into this plan and then retracted.** An early
+  Change Log entry asserted that a `--` separator breaks `limactl shell`. Direct
+  isolation disproved it (`limactl shell --workdir H NAME -- echo hello` → `hello`,
+  exit 0); the real hazard is a **misplaced `--workdir`**, which must precede the
+  instance name. The retraction is in the Change Log, and the code comment that
+  had inherited the false reason was corrected.
+- **`limactl` shell-escapes each argv element it forwards**, so the guest
+  expression had to be passed as `bash -c <expr>` rather than one compound
+  element. Task 01's probe could not have caught this (`tmux new-session` has no
+  shell metacharacters); task 02 found it by testing.
+- **`guestHome` was pre-lifted into `internal/lima` before phase 3** so the two
+  parallel entrypoint tasks could not race to create two divergent copies of it.
+- **A validation agent left a half-finished `limactl clone`**, which wedges
+  `limactl list` for *every* instance (a known Lima landmine documented in
+  AGENTS.md). It was killed and its fixture VMs deleted; `claude-base` and
+  `zoom-drive-uploader` were left exactly as found (Stopped, untouched), and the
+  probe VM was deleted at the end.
+- **The docs needed correction after generation**: they claimed the `C-a` prefix
+  meant "Control-Alt" (it is Control-a), used a section anchor that would not
+  resolve, and omitted the readline warning. The shipped `tmux.conf` binds
+  `C-a C-a` to `send-prefix`, so that — not `C-a a` — is the literal escape.
+
+### Necessary follow-ups
+
+None blocking. Deliberately deferred, and none foreclosed by this design:
+
+- `sand shell <name> -- <cmd>` for one-off guest exec (excluded under YAGNI).
+- A `--no-tmux` escape hatch (explicitly rejected; purely additive if ever wanted).
+- Surfacing Lima's per-instance `ssh.config` for VS Code Remote-SSH.
+- The `main` branch of the guest expression deliberately omits `-A`: a racing
+  double-attach fails loudly rather than silently degrading to a mirrored,
+  size-clamped client. If that race is ever observed in practice, it wants a retry,
+  not `-A`.
