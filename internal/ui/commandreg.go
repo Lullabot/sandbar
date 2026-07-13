@@ -21,6 +21,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -164,17 +165,27 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
-		about:   "Open an interactive shell in the guest. sand steps aside until you exit it.",
+		about: "Attach a shell to the guest's persistent tmux session. Work keeps running after " +
+			"you detach (C-a d) or close the terminal; C-a c opens another window.",
 		// Not while a build or a reset owns the VM, for the same reason as every other
-		// verb here — and shell is the worst of them to get wrong. It SUSPENDS THE WHOLE
-		// TUI (tea.ExecProcess) and hands the terminal to `limactl shell`, so pressing it
-		// on a VM a reset is about to force-delete drops the user into a session that
-		// dies under them, while the build they can no longer see streams into a
-		// suspended terminal. It was the one verb this gate was not applied to.
+		// verb here — and shell is the worst of them to get wrong: on a VM a reset is
+		// about to force-delete, it would drop the user into a session whose guest is
+		// destroyed under them, while the build they can no longer see streams into a
+		// (possibly suspended) terminal. It was the one verb this gate was not applied
+		// to. This holds regardless of which of shellCmd's two branches fires — even
+		// the host-tmux fast path, which does not suspend the TUI, still attaches a
+		// live session to a VM the reset is about to delete — so kept exactly as-is
+		// (considered and deliberately retained, not an oversight to "fix").
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
-			return shellCmd(v.Name)
+			// Same predicate shellCmd branches on, so the copy always describes the
+			// branch that actually fires.
+			if hostInTmux() {
+				m.logMsg("opened " + v.Name + " in a new tmux window — the board keeps running")
+			} else {
+				m.logMsg("attaching to " + v.Name + " — C-a d detaches; the TUI resumes when you detach or exit")
+			}
+			return shellCmd(v.Name, lima.GuestHome(v.Dir))
 		},
 	},
 	{
