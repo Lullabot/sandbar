@@ -124,10 +124,12 @@ every bullet, not the constraint itself.
   succeeds) and would erase a failed build's tile entirely, leaving the
   failure with nowhere to be reported or deleted from. Base images and
   unrelated Lima VMs get no tile and there is no key that brings them back.
-  **The header band's hidden count is what keeps this honest** (`headerCounts`
-  in `internal/ui/header.go`) — do not remove it; it is the entire mitigation
-  the plan accepted for making a stale, multi-gigabyte base image invisible
-  from the TUI. `X` (stop all) still means *every managed VM*, not the ones a
+  The header band used to carry a **hidden count** ("1 base, 2 external hidden")
+  as the mitigation for that, and it was **removed on request** in favour of the
+  live host readout. So the cost is now **unmitigated and deliberate**: a stale,
+  multi-gigabyte base image is invisible from the TUI and is managed with
+  `limactl`. If that invisibility ever bites, bring the count back — do not add a
+  second roster surface. `X` (stop all) still means *every managed VM*, not the ones a
   `/` search leaves visible (`stopAllTargets` walks `m.vms`, not the filtered
   view, on purpose).
 - **The managed/external badge is uniform, and therefore hidden, by
@@ -138,6 +140,19 @@ every bullet, not the constraint itself.
 - **The design targets 1–3 VMs, up to 10.** Density features (compact rows,
   virtualized scrolling beyond the simple row-scroll `board.go` already has,
   pagination) are deliberately absent. Do not add them speculatively.
+- **The header reports USE, not ALLOCATION**, and so do the tiles. Both read the
+  live guest heartbeat — the same and only source — so the two surfaces cannot
+  disagree. The header shows host vCPUs busy (each guest's `CPUPct` is a share of
+  ITS OWN vCPUs, so it is scaled by that VM's `CPUs` before being summed), the
+  memory the guests are actually holding, and free disk. It previously summed the
+  allocations; that number never moves and reads as a crisis on an idle machine.
+- **A metric with no reading renders as an em dash, never as 0.** A running VM
+  whose heartbeat has not reported yet — or whose heartbeat the idle gate tore
+  down — has an UNKNOWN cpu, not an idle one. `tileGaugeNoReading` (tile.go) and
+  the header both refuse the zero. Relatedly, **every gauge row is fixed**: cpu,
+  mem and disk each own a row on a running tile whether or not there is a reading.
+  Packing them from the top made disk slide up into a missing gauge's slot, so
+  leaving the board and coming back appeared to lose data that was never lost.
 - **`CPUs` and `Memory` on `vm.VM` are allocations, not utilization.** They
   are what Lima was told to give the guest, not what the guest is using.
   Rendering one as a filled utilization gauge is a lie with a progress bar
@@ -208,6 +223,23 @@ every bullet, not the constraint itself.
   script derives an exact denominator via `ansible-playbook --list-tasks` and
   echoes `SAND_ANSIBLE_TASK_TOTAL` so the tile's build progress bar has an
   honest fraction instead of an animated guess.
+- **`q` quits from the BOARD ONLY.** It is not in `detailChrome` or on any child
+  screen, deliberately: on a child screen the key that means "I am done here" is
+  `esc`, and a `q` sitting beside it turns one mistyped key into "close the
+  application" rather than "close this screen". The root screen is the only place
+  with nowhere left to go back to, so it is the only place that offers the exit.
+- **The ghost tile is a selectable CELL, not a printed instruction.** The empty
+  slot takes the focus ring like any tile (`ghostFocusName`, a sentinel holding a
+  NUL byte that Lima cannot produce, so it can never collide with a VM name), and
+  `enter` on it opens the create form; `n` still works from anywhere. Two rules
+  follow, and both are load-bearing: focus on the ghost is **sticky** — a VM
+  appearing must not steal the ring, or a user who deliberately arrowed onto the
+  empty slot would have focus yanked away on every refresh tick — but a **create
+  moves the ring to the new VM** (`beginJob`), because that is the user acting, not
+  the board reordering itself under them. `syncBoard` only adopts the ghost once
+  `vmsLoaded` is true: before the first `limactl list` lands the board is empty
+  because nothing is loaded, not because the host is bare, and the identity pin
+  would then hold the ring on the ghost as the real tiles arrived.
 - **`beginStream` starts a job; it does not choose a screen.** Which view a run
   lands on belongs to the caller, and the two callers want opposite things: a
   **build returns to the board**, where its tile carries the badge and the

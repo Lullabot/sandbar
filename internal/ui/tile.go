@@ -100,22 +100,38 @@ func renderTile(in tileInput) string {
 		// has not landed in `limactl list` yet — see jobRegistry's "seen"
 		// comment), so there is no honest up/last-used to compute yet.
 	} else {
-		row := 2
-		if status == statusRunning && in.HasSample {
-			if in.Sample.HasCPU {
-				lines[row] = tileGaugeLine("cpu", in.Sample.CPUPct/100,
+		// EVERY GAUGE HAS A FIXED ROW, and disk's is row 4 whatever else is known.
+		// These rows used to be packed from the top, so a running VM whose heartbeat
+		// had no reading yet dropped its cpu and mem rows and disk SLID UP into their
+		// slot. The heartbeat is torn down whenever the board is not the visible
+		// screen and after the idle window (heartbeat.go), so leaving the board and
+		// coming back — or simply sitting still for five minutes — made two gauges
+		// vanish and the third jump. The tile appeared to be losing data it had never
+		// actually lost.
+		//
+		// A running VM therefore always shows cpu and mem. When the heartbeat has no
+		// reading, they render as "no reading" (tileGaugeNoReading) — NOT as an empty
+		// bar at 0%, which would be the "zero standing in for no reading yet" lie this
+		// file exists to prevent. A stopped VM has no cpu or mem to report at all, so
+		// its rows stay blank: absent, not zeroed.
+		if status == statusRunning {
+			if in.HasSample && in.Sample.HasCPU {
+				lines[2] = tileGaugeLine("cpu", in.Sample.CPUPct/100,
 					fmt.Sprintf("%.0f%%", in.Sample.CPUPct), width)
-				row++
+			} else {
+				lines[2] = tileGaugeNoReading("cpu", width)
 			}
-			if in.Sample.HasMem() {
-				lines[row] = tileGaugeLine("mem", memFraction(in.Sample),
+			if in.HasSample && in.Sample.HasMem() {
+				lines[3] = tileGaugeLine("mem", memFraction(in.Sample),
 					humanizeBytes(strconv.FormatUint(in.Sample.MemUsed, 10))+"/"+
 						humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10)), width)
-				row++
+			} else {
+				lines[3] = tileGaugeNoReading("mem", width)
 			}
 		}
-		// Disk is real data today and always renders, running or stopped.
-		lines[row] = tileDiskLine(in.VM, width)
+		// Disk is real data today and always renders, running or stopped, and always
+		// on the same row.
+		lines[4] = tileDiskLine(in.VM, width)
 		lines[5] = tileFooterLine(in.VM, in.Now)
 	}
 
@@ -294,6 +310,25 @@ func tileGaugeLine(label string, frac float64, value string, width int) string {
 		barWidth = 3
 	}
 	return tileChromeStyle.Render(labelCol + tileGaugeBar(frac, barWidth) + " " + value)
+}
+
+// tileGaugeNoReading renders a gauge row for a metric that is REAL but currently
+// UNREAD — a running VM whose heartbeat has not reported yet, or whose heartbeat
+// the idle gate has torn down. It holds the row (so nothing below it moves) while
+// refusing to state a value.
+//
+// The bar is drawn in its own glyph, not the empty-bar glyph: an empty ░ bar is
+// how this tile says "0%", and reusing it here would turn "I don't know" into "it
+// is idle" — a busy VM would read as asleep. The em dash says the same thing in
+// the value column, where a number would otherwise go.
+func tileGaugeNoReading(label string, width int) string {
+	labelCol := fmt.Sprintf("%-6s", label)
+	const value = "—"
+	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
+	if barWidth < 3 {
+		barWidth = 3
+	}
+	return tileChromeStyle.Render(labelCol + strings.Repeat("·", barWidth) + " " + value)
 }
 
 // tileGaugeBar renders a filled/empty bar of exactly width cells for a

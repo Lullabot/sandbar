@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // secretsEditorChrome is the number of terminal rows secretsView spends on
@@ -45,6 +46,17 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	// otherwise paints a full-height vertical bar down every empty row.
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
+	// Drop the cursor-line highlight. bubbles/v2 gives the focused textarea's
+	// current line a solid background (Color 255 on light, 0 on dark — see
+	// textarea.DefaultStyles), which lands as an inverse bar across the line the
+	// user is actually typing on and makes it the HARDEST line on screen to read.
+	// The cursor already marks that line; it does not need a second, louder
+	// indicator fighting the text. Blurred is cleared for the same reason — it
+	// greys the line's foreground.
+	styles := ta.Styles()
+	styles.Focused.CursorLine = lipgloss.NewStyle()
+	styles.Blurred.CursorLine = lipgloss.NewStyle()
+	ta.SetStyles(styles)
 	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name)))
 	w, h := secretsEditorSize(m.layout)
 	ta.SetWidth(w)

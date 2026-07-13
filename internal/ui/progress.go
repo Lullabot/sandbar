@@ -148,6 +148,13 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 	// progress bar, and where they can arrow away and start a second VM. Landing on
 	// the full-screen Ansible dump instead is the screen-takeover this whole plan
 	// exists to remove; the log is still one `l` away from the tile.
+	//
+	// The ring goes to the VM the user just asked for. Focus is otherwise pinned to
+	// identity and never moves on its own — a refresh tick must never drag it — but
+	// this is not the board moving focus, it is the user creating the thing they are
+	// now looking at. Without it a create started from the empty slot leaves the ring
+	// on the empty slot, and `l` would not open the log of the build they just began.
+	m.focusName = cfg.Name
 	m.view = viewBoard
 	return cmd
 }
@@ -240,14 +247,10 @@ func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if (!ok || !job.Running()) && key.Matches(msg, m.keys.Quit) {
-		// The job on THIS screen is done, but another VM may still be building
-		// behind it — requestQuit (board.go) confirms before abandoning that one.
-		// It mutates m through a pointer receiver, so its result is taken into a
-		// local before m is returned (see the note in updateBoard).
-		cmd := m.requestQuit()
-		return m, cmd
-	}
+	// No `q` here. Quit belongs to the board alone — this is a child screen, and the
+	// key that leaves it is `esc` (which, note, does NOT cancel the run). A `q` next
+	// to a still-scrolling build log is one mistyped key between the user and the end
+	// of their session.
 
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -256,7 +259,8 @@ func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // progressHelp returns the bindings shown in the progress screen's help bar.
 // While the shown job runs, ctrl+c cancels it and esc leaves it running; once it
-// has finished, esc returns and q quits.
+// has finished, esc returns. Quit is not offered — it is the board's, and only the
+// board's.
 func (m model) progressHelp() []key.Binding {
 	if m.confirm != nil {
 		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
@@ -264,7 +268,7 @@ func (m model) progressHelp() []key.Binding {
 	if job, ok := m.shownJob(); ok && job.Running() {
 		return []key.Binding{m.keys.Interrupt, m.keys.Background}
 	}
-	return []key.Binding{m.keys.Back, m.keys.Quit}
+	return []key.Binding{m.keys.Back}
 }
 
 // progressView renders the spinner/title, the scrollable output box, the final

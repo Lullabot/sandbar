@@ -379,16 +379,20 @@ The interactive TUI's home surface is a **board**: a grid of tiles, one per
 sand-managed VM, with a focus ring you move with the arrow keys. It is the
 **only** roster — there is no table/list view to switch to. The board shows
 managed clones only, always, with **no toggle** to widen it; base images and
-unmanaged Lima instances are managed via `limactl` directly, and the header's
-hidden count says how many are out of view. Per-VM keys below act on the
-**focused tile** straight from the board — `enter` (open its own screen) is
-not required first.
+unmanaged Lima instances are invisible here and are managed via `limactl`
+directly. The header band reports the fleet count and a **live host readout** —
+the CPU and memory the sandboxes are actually using (not what they were
+allocated), and free disk. Per-VM keys below act on the **focused tile**
+straight from the board — `enter` (open its own screen) is not required first.
+
+The empty slot after the last tile is a real, selectable cell: arrow onto it and
+press `enter` to create a VM (`n` still works from anywhere on the board).
 
 **Board:**
 | Key | Action |
 |-----|--------|
 | `↑` `↓` `←` `→` | Move the focus ring |
-| `enter` | Open the focused VM's detail screen |
+| `enter` | Open the focused VM's detail screen — or, on the empty slot, create a VM |
 | `n` | Create a new VM |
 | `/` | Search by VM name (type to filter, `esc` to clear/exit, `enter` to keep) |
 | `X` | Stop every running **sand-managed** VM (unmanaged Lima instances and base images are never touched) |
@@ -408,7 +412,6 @@ not required first.
 | `e` | Edit the VM's secrets (works whether the VM is running or stopped; saving while it's running applies the change to the live guest immediately) |
 | `l` | Reopen the VM's last build/transfer log |
 | `esc` | Back to the board |
-| `q` | Quit (confirms first if a build or transfer is in flight) |
 
 Creating or resetting a VM streams into a progress view, but leaving it
 (`esc`/`enter`) no longer cancels the run — it keeps building in the

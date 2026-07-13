@@ -248,9 +248,16 @@ var detailCommands = []vmCommand{
 	},
 }
 
-// detailChrome is the detail screen's non-per-VM keys: back to the board, and
-// quit. Rendered/dispatched after detailCommands (see updateDetail/detailHelp
-// in detail.go) so a verb key never gets swallowed by chrome.
+// detailChrome is the detail screen's non-per-VM keys. Rendered/dispatched after
+// detailCommands (see updateDetail/detailHelp in detail.go) so a verb key never
+// gets swallowed by chrome.
+//
+// QUIT IS NOT HERE, DELIBERATELY. `q` ends the session only from the board — the
+// root screen, the one place where "back" has nowhere left to go. On a child
+// screen the key that means "I am done with this" is `esc`, and having `q` also
+// sitting there means a single mistyped key does not close a VM screen, it closes
+// the application. Every child screen leaves the same way, through esc, and only
+// the root offers the exit.
 var detailChrome = []chromeCommand{
 	{
 		// esc/backspace/enter all return to the board; only "esc" is shown in the
@@ -264,13 +271,5 @@ var detailChrome = []chromeCommand{
 			m.view = viewBoard
 			return nil
 		},
-	},
-	{
-		binding:    key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-		help:       "quit",
-		enabledFor: chromeAlwaysEnabled,
-		// requestQuit (board.go), not a bare tea.Quit: builds now run in the
-		// background, so the reflex that ends a session must not silently orphan one.
-		action: func(m *model) tea.Cmd { return m.requestQuit() },
 	},
 }
