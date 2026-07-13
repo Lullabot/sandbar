@@ -144,10 +144,13 @@ Prerequisites: [Lima](https://lima-vm.io/docs/installation/) (`limactl`).
 ### Interactive TUI
 
 `sand` run with no arguments (instead of `sand create`) opens a Bubble Tea
-terminal UI that manages these VMs (list, create, start/stop/restart, and
-delete/reset) using the same base-image / clone / finalize flow as headless
-`sand create`. See [README-sand.md](README-sand.md) for build, usage, and
-keybindings.
+terminal UI: a **board** of tiles, one per managed VM, offering create,
+start/stop/restart, and delete/reset using the same base-image / clone /
+finalize flow as headless `sand create`. Creating or resetting a VM no longer
+takes over the screen — the build streams into a progress view you can leave
+at any time while it keeps running in the background, so you can start
+another VM (or act on a different one) while the first is still building. See
+[README-sand.md](README-sand.md) for build, usage, and keybindings.
 
 **Reset a VM.** On a managed VM, `R` opens the create form **pre-filled** with
 the VM's last-used settings, with `Name` locked. Edit any field — for example a
@@ -372,32 +375,46 @@ This playbook creates a **disposable, single-purpose development VM** intended t
 
 ## TUI Keybindings
 
-The interactive TUI splits actions by screen. The **list screen** selects a VM and offers global actions; the **VM screen** (detail view) acts on the selected VM.
+The interactive TUI's home surface is a **board**: a grid of tiles, one per
+sand-managed VM, with a focus ring you move with the arrow keys. It is the
+**only** roster — there is no table/list view to switch to. The board shows
+managed clones only, always, with **no toggle** to widen it; base images and
+unmanaged Lima instances are managed via `limactl` directly, and the header's
+hidden count says how many are out of view. Per-VM keys below act on the
+**focused tile** straight from the board — `enter` (open its own screen) is
+not required first.
 
-**List screen:**
+**Board:**
 | Key | Action |
 |-----|--------|
-| `enter` | Open the selected VM's detail screen |
+| `↑` `↓` `←` `→` | Move the focus ring |
+| `enter` | Open the focused VM's detail screen |
 | `n` | Create a new VM |
-| `f` | Toggle filter: show all VMs ↔ only managed instances |
 | `/` | Search by VM name (type to filter, `esc` to clear/exit, `enter` to keep) |
 | `X` | Stop every running **sand-managed** VM (unmanaged Lima instances and base images are never touched) |
-| `q` | Quit |
+| `q` | Quit (confirms first if a build or transfer is in flight) |
 
-**VM screen (detail view):**
+**VM screen (detail view) — also usable directly from the board on the focused tile:**
 | Key | Action |
 |-----|--------|
 | `s` | Start the VM |
 | `x` | Stop the VM |
 | `r` | Restart the VM |
-| `R` | Reset the VM (re-clone from base; opens pre-filled form) |
+| `R` | Reset the VM (re-clone from base; opens pre-filled form; managed VMs only) |
 | `S` | Open an interactive shell in the VM |
 | `d` | Delete the VM (opens confirmation) |
 | `u` | Upload a file/directory from your host into the VM |
 | `g` | Download a file/directory from the VM to your host |
-| `e` | Edit the VM's secrets (works whether the VM is running or stopped) |
-| `esc` | Back to the list |
-| `q` | Quit |
+| `e` | Edit the VM's secrets (works whether the VM is running or stopped; saving while it's running applies the change to the live guest immediately) |
+| `l` | Reopen the VM's last build/transfer log |
+| `esc` | Back to the board |
+| `q` | Quit (confirms first if a build or transfer is in flight) |
+
+Creating or resetting a VM streams into a progress view, but leaving it
+(`esc`/`enter`) no longer cancels the run — it keeps building in the
+background and the tile shows live progress. See
+[README-sand.md](README-sand.md#the-board) for the full key reference,
+including which keys are offered only in certain VM states.
 
 ## Configurable Variables
 

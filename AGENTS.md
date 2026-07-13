@@ -88,6 +88,115 @@ gh run watch <id> --exit-status
 That is a `workflow_dispatch` run on the branch tip — distinct from the
 `pull_request` run that fires (on the same SHA) once the PR is opened.
 
+## The TUI: board architecture (read before touching `internal/ui`)
+
+The TUI's home surface was rewritten from a `bubbles/table` list to a **tile
+board** (`internal/ui/board.go`). The facts below are each a place a future
+agent's instinct will be *wrong* — the reason is the load-bearing half of
+every bullet, not the constraint itself.
+
+- **Charm v2.** This project is on `charm.land/bubbletea/v2`,
+  `charm.land/bubbles/v2`, and `charm.land/lipgloss/v2` — not
+  `github.com/charmbracelet/...`. Tests import
+  `github.com/charmbracelet/x/exp/teatest/v2`. Adding an import from the v1
+  module path will not just fail to compile cleanly against the rest of the
+  package — the v1 and v2 types are different and don't interoperate.
+- **The board is the only roster surface.** There is no table view and no
+  compact list to fall back to. Do not add one without a scope change — it
+  would be a second render path for "which VMs exist", and the two would
+  drift the way the old table's help bar already had before this rewrite.
+- **The board shows managed clones only, always — no toggle.** `f` and
+  `m.managedOnly` were deleted on purpose. The one exception is not a
+  loophole: a VM with a provision job in flight (or one whose last provision
+  *failed*) still gets a tile, even before `IsManaged` is true — because
+  filtering on `IsManaged` alone would hide a VM during its own build (Lima
+  doesn't report it yet, and it isn't recorded managed until the build
+  succeeds) and would erase a failed build's tile entirely, leaving the
+  failure with nowhere to be reported or deleted from. Base images and
+  unrelated Lima VMs get no tile and there is no key that brings them back.
+  **The header band's hidden count is what keeps this honest** (`headerCounts`
+  in `internal/ui/header.go`) — do not remove it; it is the entire mitigation
+  the plan accepted for making a stale, multi-gigabyte base image invisible
+  from the TUI. `X` (stop all) still means *every managed VM*, not the ones a
+  `/` search leaves visible (`stopAllTargets` walks `m.vms`, not the filtered
+  view, on purpose).
+- **The managed/external badge is uniform, and therefore hidden, by
+  construction.** Because every tile on the board is managed (see above), the
+  exception-only badge rule (`computeFleetUniformity` in `internal/ui/tile.go`)
+  never finds a VM to call out. It is not special-cased to hide it — it just
+  never has anything to show.
+- **The design targets 1–3 VMs, up to 10.** Density features (compact rows,
+  virtualized scrolling beyond the simple row-scroll `board.go` already has,
+  pagination) are deliberately absent. Do not add them speculatively.
+- **`CPUs` and `Memory` on `vm.VM` are allocations, not utilization.** They
+  are what Lima was told to give the guest, not what the guest is using.
+  Rendering one as a filled utilization gauge is a lie with a progress bar
+  around it. Live utilization comes only from the guest heartbeat
+  (`internal/ui/heartbeat.go`), and only for a running VM with an actual
+  sample (`guestSample.Has*`) — never a zeroed bar standing in for "no
+  reading yet".
+- **Lima reports only `Running` and `Stopped`.** A provisioning VM is
+  `Running` to Lima — Lima has no concept of "being provisioned". `Building`
+  and `Failed` are sand-side states derived from the job registry
+  (`deriveStatus`, consulted *ahead of* `vm.Status`) — see
+  `internal/ui/jobs.go`. **Never render `vm.Status` directly on a tile**: a
+  failed provision would show as a reassuring green "Running", and an
+  in-progress one would show as an idle VM with nothing happening.
+- **Tile order is alphabetical and stable; focus is pinned to VM identity,
+  not slot index.** Both are deliberate. Sorting by status (running-first)
+  looks like an improvement but makes pressing a destructive key (`x`, `d`)
+  teleport the focused tile across the board as a *side effect of the verb
+  just pressed* — exactly when the user is most likely to press another key.
+  Tracking focus by slot index has the same failure through a different
+  door: a refresh reorders the roster mid-keypress and a key meant for
+  `prod-box` lands on `dev-box`. `focusedVM()`/`syncBoard()` in `board.go`
+  are the only correct way to ask "what VM is the ring on".
+- **The job registry retains the last run per VM, in memory, including its
+  log — failed jobs are kept, not discarded.** Dropping a failed job on
+  completion would make a failed provision render as healthy the moment its
+  progress view closes. The log is reopenable from the tile (`l`, gated on
+  `HasRetainedRun`) specifically because a build that failed while the user
+  wasn't looking needs to stay explainable. Run history is **not** persisted
+  across restarts and there is no multi-run history — both are deliberately
+  out of scope; do not build a storage format for this without a scope
+  change.
+- **Keys, help text, and verb eligibility all derive from one command
+  registry** (`internal/ui/commandreg.go`). Do not reintroduce a
+  hand-maintained help list beside it — that duplication is what this
+  replaced, and it had already drifted: the old hand-maintained help switch
+  advertised `x stop`, `u upload`/`g download`, and `R reset` unconditionally,
+  so a stopped VM's footer offered actions that silently did nothing when
+  pressed. There is deliberately no fuzzy command palette; this file "stays
+  narrow on purpose" per its own header comment.
+- **An assertion must reach the boundary the user cares about.** A golden
+  test proves a screen *painted*. An in-process behavioural test proves the
+  model or the store changed. **Neither proves the guest changed.** This rule
+  is written in blood: the secrets editor shipped past a passing golden (it
+  dropped every keystroke because the textarea never had focus), and then its
+  replacement behavioural tests passed while `ctrl+s` still never reached the
+  guest. If a claim crosses into a VM, onto a disk, or across a process
+  boundary, test the far side — not just that the model or the screen agree
+  with themselves.
+- **Saving a secret applies it to a running guest immediately** (see
+  `updateSecrets` in `internal/ui/secrets.go`, which batches
+  `applySecretsCmd` when the VM is running). Do not "simplify" this back to a
+  store-only write with a generic "applies on next start" message — the apply
+  *is* the feature; without it, rotating a token on a VM you're actively
+  using requires a restart you shouldn't need.
+- **`limactl shell` forks an ssh child that inherits the exec pipes.**
+  Cancelling the context orphans the ssh process, which keeps the pipes open
+  and leaks the goroutine holding the SSH connection (this is how the guest
+  heartbeat talks to a running VM). `internal/lima/runner.go` sets
+  `cmd.WaitDelay` for exactly this reason — do not remove it as dead-looking
+  configuration.
+- **Ansible prints no task count anywhere in its own output.** The in-guest
+  script derives an exact denominator via `ansible-playbook --list-tasks` and
+  echoes `SAND_ANSIBLE_TASK_TOTAL` so the tile's build progress bar has an
+  honest fraction instead of an animated guess.
+- **Naming prohibition: no nautical metaphor anywhere.** No harbour/harbor,
+  slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
+  user-visible string, in this subsystem or elsewhere in the repo.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
