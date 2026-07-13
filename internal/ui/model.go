@@ -3,11 +3,12 @@
 // provision.Provisioner (create/reset), registry.Registry (which VMs are ours),
 // and secrets.Store (per-VM host-side secrets) packages.
 //
-// Screens divide by responsibility: the list selects a VM and owns the global
-// actions (new, filter, search, stop all); the VM screen owns every action that
-// targets one VM. All blocking I/O happens in tea.Cmds so Update never stalls,
-// and the long-running provisioner streams its output into a scrollable
-// progress pane.
+// Screens divide by responsibility: the BOARD (board.go) is the home surface and
+// the only roster — a grid of tiles, one per managed clone, with a focus ring and
+// the single-key verbs that act on the tile under it; the VM screen zooms one
+// tile to full screen and owns the same verbs there. All blocking I/O happens in
+// tea.Cmds so Update never stalls, and the long-running provisioner streams its
+// output into a scrollable progress pane.
 package ui
 
 import (
@@ -25,7 +26,6 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -34,21 +34,23 @@ import (
 )
 
 // confirmState is a pending destructive action awaiting the user's `y`. It is
-// screen-agnostic: the VM screen raises it for delete, and a future stop-all
-// (list screen) can raise it the same way — neither screen needs to know what
-// the other confirms. A nil *confirmState on the model means no confirmation
-// is pending.
+// screen-agnostic: the board raises it for stop-all and for a quit that would
+// abandon a run, and the VM screen raises it for delete — neither screen needs to
+// know what the other confirms. A nil *confirmState on the model means no
+// confirmation is pending.
 type confirmState struct {
 	prompt  string  // e.g. `Delete "web"?`
 	run     tea.Cmd // dispatched (via beginAction) when the user presses Confirm
 	working string  // status shown (with the live spinner) while run is in flight; "" leaves the status line untouched
 }
 
-// view is the active screen the model renders and routes keys to.
+// view is the active screen the model renders and routes keys to. viewBoard is
+// the default and the only roster: the table-backed list it replaced is gone,
+// with no toggle back to it.
 type view int
 
 const (
-	viewList view = iota
+	viewBoard view = iota
 	viewDetail
 	viewForm
 	viewProgress
@@ -76,11 +78,20 @@ type model struct {
 	layout layoutMode // budgets derived from width/height by classify (see layout.go); set by applySize
 	status string
 
-	// List + detail.
-	table       table.Model
-	vms         []vm.VM
-	detail      vm.VM
-	managedOnly bool // when true, the list shows only sand-managed VMs
+	// Board + detail. vms is every VM Lima reported; the board (board.go) derives
+	// its roster from it — managed clones only, always — and detail is the VM the
+	// full-screen VM screen is showing.
+	vms    []vm.VM
+	detail vm.VM
+
+	// focusName is the VM under the board's focus ring: AN IDENTITY, NEVER A SLOT
+	// INDEX. A refresh, an insertion, a deletion or a filter keystroke reorders the
+	// grid; the ring stays on the same VM, because a ring that tracked the index
+	// would silently slide onto a different VM and hand the next destructive key to
+	// it. scrollRow is the first tile ROW the grid viewport shows, and only
+	// ensureFocusVisible moves it — so the viewport cannot drift away from the ring.
+	focusName string
+	scrollRow int
 
 	// jobs is the VM-keyed job registry (jobs.go): every provision and transfer in
 	// flight, plus the last run each VM retained. It is a POINTER because the model
@@ -107,19 +118,21 @@ type model struct {
 
 	// Incremental name search. When searching is true, typed keys edit
 	// searchQuery instead of firing actions; searchQuery is a case-insensitive
-	// name substring filter applied in refreshRows (composes with managedOnly).
+	// name substring filter over the board's tiles (visibleVMs, board.go). It
+	// narrows what is SHOWN and nothing else: 'X' still stops every managed VM.
 	searching   bool
 	searchQuery string
 
-	// acting is true while a quick list lifecycle action (start/stop/restart/
-	// delete) is in flight. It drives the spinner beside the list status line so
-	// these blocking limactl calls show live feedback, and is cleared by the
-	// matching actionDoneMsg.
+	// acting is true while a quick lifecycle action (start/stop/restart/delete) is
+	// in flight. It drives the spinner beside the status line so these blocking
+	// limactl calls show live feedback, and is cleared by the matching
+	// actionDoneMsg.
 	acting bool
 
 	// Pending destructive-action confirmation (nil = inactive). Raised by
-	// whichever screen dispatches the action; routed and rendered from both
-	// viewList and viewDetail via updateConfirm/confirmView below.
+	// whichever screen dispatches the action; routed and rendered from the board,
+	// the VM screen and a finished progress screen via updateConfirm/confirmView
+	// below.
 	confirm *confirmState
 
 	// Create form.
@@ -205,8 +218,7 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		heartbeats: newHeartbeats(cli),
 		keys:       newKeyMap(),
 		help:       help.New(),
-		view:       viewList,
-		table:      newTable(),
+		view:       viewBoard,
 		viewport:   viewport.New(),
 		spinner:    sp,
 		// The session starts focused and freshly used; anything else and the idle
@@ -243,11 +255,20 @@ func (m *model) applySize(w, h int) {
 	m.width, m.height = w, h
 	m.layout = classify(w, h)
 
+	// The help bar is sized from the RAW width, not ContentWidth, and that is a
+	// known wart rather than an oversight: bubbles' ShortHelpView only truncates
+	// when it also has room for its ellipsis, and at ContentWidth the VM screen's
+	// full verb list lands exactly on that boundary — so a tighter budget makes it
+	// render the whole bar, unclipped, and overflow FURTHER. Task 09 owns the
+	// footer and can clip it honestly; until then this is the render that fits best.
 	m.help.SetWidth(w)
 	m.viewport.SetWidth(m.layout.ContentWidth)
 	m.viewport.SetHeight(m.layout.GridHeight)
-	m.table.SetWidth(m.layout.ContentWidth)
-	m.table.SetHeight(m.layout.GridHeight)
+
+	// A resize changes the grid's columns and its visible rows, so the focused tile
+	// can land outside the viewport without the ring moving at all. Re-park the
+	// scroll on it.
+	m.ensureFocusVisible()
 
 	// Resize an active file browser too (its inner list is only initialized
 	// while a transfer is in flight, so guard on the view to avoid touching a
@@ -292,23 +313,31 @@ func present(vms []vm.VM) map[string]bool {
 	return set
 }
 
-// Update dispatches the message, then reconciles the guest heartbeats against
-// whatever state that left behind.
+// Update dispatches the message, then reconciles two things against whatever
+// state that left behind: the board's focus ring, and the guest heartbeats.
 //
-// The reconcile runs after EVERY message rather than at the few places that
-// obviously matter, and that is deliberate: the heartbeat's gate (shouldTick) turns
-// on the active view, the terminal's focus, and how long ago the user last typed —
-// three things that change under a dozen different messages, in five different
-// files. A gate re-checked at "the places that change it" is a gate that is one
-// forgotten `m.view = …` away from holding an SSH connection open into every guest
-// on the machine, forever, with nobody watching. Checking it centrally costs a mutex
-// and a map walk over at most a handful of VMs, and it cannot be forgotten.
+// Both reconcile after EVERY message rather than at the few places that obviously
+// matter, and that is deliberate.
+//
+// The heartbeat's gate (shouldTick) turns on the active view, the terminal's
+// focus, and how long ago the user last typed — three things that change under a
+// dozen different messages, in five different files. A gate re-checked at "the
+// places that change it" is a gate that is one forgotten `m.view = …` away from
+// holding an SSH connection open into every guest on the machine, forever, with
+// nobody watching.
+//
+// The board's roster changes under exactly as many messages: a refresh, a delete,
+// a build starting on a VM Lima has never heard of, a filter keystroke. syncBoard
+// is what guarantees the ring is always on a VM that is actually on the board —
+// and a ring pointing anywhere else is a destructive key pointed at the wrong VM.
+// Both cost a map walk over at most a handful of VMs, and neither can be forgotten.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.dispatch(msg)
 	nm, ok := next.(model)
 	if !ok {
 		return next, cmd
 	}
+	nm.syncBoard()
 	return nm, tea.Batch(cmd, nm.syncHeartbeats())
 }
 
@@ -393,19 +422,23 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared"
 			// Nothing left to show for the run the user was watching.
 			if m.view == viewProgress && !m.jobs.exists(m.progressVM) {
-				m.view = viewList
+				m.view = viewBoard
 			}
 		}
-		m.refreshRows()
+		// The board's tiles come straight off m.vms + the registry + the job
+		// registry, so there is nothing to rebuild — only the focus ring has to be
+		// re-pinned against a fleet that may have gained or lost VMs, which Update
+		// does centrally (syncBoard) after this returns.
+		//
 		// The VM screen acts on the VM it displays, so its snapshot goes stale after
 		// every start/stop/restart. Re-seed it from the reloaded list; if the VM is
-		// gone (deleted, or removed outside the TUI), fall back to the list rather
+		// gone (deleted, or removed outside the TUI), fall back to the board rather
 		// than rendering a zero-value record.
 		if m.view == viewDetail {
 			if v, ok := m.lookupVM(m.detail.Name); ok {
 				m.detail = v
 			} else {
-				m.view = viewList
+				m.view = viewBoard
 			}
 		}
 		return m, nil
@@ -422,8 +455,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The record the VM screen was displaying no longer exists; only on
 			// this success path (msg.err != nil already returned above) — a failed
 			// delete leaves the VM in place, so the user should stay on its screen
-			// to see the error.
-			m.view = viewList
+			// to see the error. (Deleting from the BOARD leaves the view alone: the
+			// board is already the screen, and syncBoard hands the ring to a
+			// neighbour once the refresh drops the tile.)
+			if m.view == viewDetail {
+				m.view = viewBoard
+			}
 			// The user acted on this VM in the most final way there is, so its
 			// retained run goes with it: a failed build's sticky Failed status exists
 			// to be acted on, and deleting the VM is acting on it. (A run still in
@@ -549,8 +586,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		switch m.view {
-		case viewList:
-			return m.updateList(msg)
+		case viewBoard:
+			return m.updateBoard(msg)
 		case viewDetail:
 			return m.updateDetail(msg)
 		case viewForm:
@@ -591,7 +628,9 @@ func (m *model) setOutput() {
 }
 
 // forward delegates non-key, non-handled messages (blinks, internal ticks) to
-// whichever sub-component the active view owns.
+// whichever sub-component the active view owns. The board owns none: its tiles are
+// rendered from model state on every frame, not by a stateful sub-component with
+// its own message loop — which is exactly what the table it replaced was.
 func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {
@@ -616,14 +655,13 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.secretsArea, cmd = m.secretsArea.Update(msg)
 		return m, cmd
 	default:
-		m.table, cmd = m.table.Update(msg)
-		return m, cmd
+		return m, nil
 	}
 }
 
 // updateConfirm routes keys while a destructive-action confirmation is
-// pending. Both updateList and updateDetail hand off to it first whenever
-// m.confirm != nil, so neither view carries its own overlay key-handling.
+// pending. updateBoard, updateDetail and updateProgress each hand off to it first
+// whenever m.confirm != nil, so no view carries its own overlay key-handling.
 // Only the bound Confirm key ('y') dispatches the pending run; every other
 // key — including a stray repeat of whatever key raised the overlay — is
 // swallowed, so an accidental double-tap can never fire the action twice.
@@ -646,8 +684,8 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// confirmView renders the pending confirmation prompt. Shared by listView and
-// detailView so neither screen formats its own overlay text.
+// confirmView renders the pending confirmation prompt. Shared by boardView,
+// detailView and progressView so no screen formats its own overlay text.
 func (m model) confirmView() string {
 	return errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel")
 }
@@ -671,7 +709,7 @@ func (m model) View() tea.View {
 	case viewSecrets:
 		content = m.secretsView()
 	default:
-		content = m.listView()
+		content = m.boardView()
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true

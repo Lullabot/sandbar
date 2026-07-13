@@ -625,7 +625,8 @@ func heartbeatReadCmd(name string, epoch uint64, ch <-chan guestSample) tea.Cmd 
 // spinning in a cat/sleep loop for nobody. Three conditions, and all must hold:
 //
 //   - THE BOARD IS THE SCREEN THE USER IS ON. Gauges nobody can see are not worth an
-//     SSH connection. (viewList is the board; task 08 turns it into tiles.)
+//     SSH connection. The tile grid (viewBoard, board.go) is the only screen that
+//     draws them, so it is the only screen that may hold the connections open.
 //   - THE TERMINAL HAS FOCUS. A blurred terminal is a backgrounded one. Terminals
 //     that do not report focus never send a BlurMsg, so they simply never trip this
 //     — the gate degrades to "on", which is the only safe default: a heartbeat that
@@ -635,7 +636,7 @@ func heartbeatReadCmd(name string, epoch uint64, ch <-chan guestSample) tea.Cmd 
 //     everything down. The very next keypress reopens it: any key is a message, every
 //     message re-evaluates this gate, and lastInput is fresh again.
 func (m model) shouldTick() bool {
-	return m.view == viewList &&
+	return m.view == viewBoard &&
 		m.focused &&
 		time.Since(m.lastInput) < heartbeatIdleAfter
 }

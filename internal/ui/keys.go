@@ -11,7 +11,6 @@ import "charm.land/bubbles/v2/key"
 type keyMap struct {
 	Enter      key.Binding
 	New        key.Binding
-	Filter     key.Binding
 	Search     key.Binding
 	StopAll    key.Binding
 	Back       key.Binding
@@ -31,9 +30,12 @@ type keyMap struct {
 // newKeyMap builds the shared chrome/navigation keyMap.
 func newKeyMap() keyMap {
 	return keyMap{
-		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
-		New:      key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-		Filter:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter managed")),
+		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
+		New:   key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
+		// There is no managed-only TOGGLE any more: the board shows sand's managed
+		// clones and nothing else, unconditionally (see board.go). 'f' is gone with
+		// it — a filter you can turn off is a filter that can show a base image, and
+		// a base image is not a workspace.
 		Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		StopAll:  key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),

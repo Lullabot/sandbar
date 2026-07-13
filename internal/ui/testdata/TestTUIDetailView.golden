@@ -1,16 +1,16 @@
-                                                                                                   
-   VM: claude                                                                                      
-                                                                                                   
-  Name:              claude                                                                        
-  Status:            Running                                                                       
-  CPUs:              4                                                                             
-  Memory:            8 GiB                                                                         
-  Maximum Disk Size: 100 GiB                                                                       
-  Disk Used                                                                                        
-  (allocated):                                                                                     
-  Arch:              x86_64                                                                        
-  Dir:               /nonexistent/claude                                                           
-  Managed:           no                                                                            
-                                                                                                   
-  x stop • r restart • S shell • d delete • u upload • g download • e secrets • esc back • q quit  
-                                                                                                   
+                                                                                                      
+   VM: claude                                                                                         
+                                                                                                      
+  Name:              claude                                                                           
+  Status:            Running                                                                          
+  CPUs:              4                                                                                
+  Memory:            8 GiB                                                                            
+  Maximum Disk Size: 100 GiB                                                                          
+  Disk Used                                                                                           
+  (allocated):                                                                                        
+  Arch:              x86_64                                                                           
+  Dir:               /nonexistent/claude                                                              
+  Managed:           yes (sand)                                                                       
+                                                                                                      
+  x stop • r restart • R reset • S shell • d delete • u upload • g download • e secrets • esc back …  
+                                                                                                      

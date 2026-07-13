@@ -10,7 +10,7 @@
   (allocated):                            
   Arch:              x86_64               
   Dir:               /nonexistent/claude  
-  Managed:           no                   
+  Managed:           yes (sand)           
                                           
   Delete "claude"?  [y] yes   [n] cancel  
                                           

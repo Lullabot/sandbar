@@ -368,7 +368,7 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 // an action in flight (so the spinner animates and renders beside the
 // status), a spinner tick keeps animating while it runs, and the matching
 // actionDoneMsg clears it.
-func TestListActionShowsSpinnerUntilDone(t *testing.T) {
+func TestDetailActionShowsSpinnerUntilDone(t *testing.T) {
 	m := newTestModel(t)
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "claude", Status: "Stopped", CPUs: 2},
@@ -711,7 +711,7 @@ func TestResetEscClearsResetMode(t *testing.T) {
 
 	back, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = back.(model)
-	if m.view != viewList {
+	if m.view != viewBoard {
 		t.Fatalf("esc should return to the list, got view %v", m.view)
 	}
 	if m.resetMode {
@@ -766,7 +766,7 @@ func TestEscLeavesForm(t *testing.T) {
 
 	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = after.(model)
-	if m.view != viewList {
+	if m.view != viewBoard {
 		t.Fatalf("esc should return to the list, got view %v", m.view)
 	}
 }
@@ -1091,30 +1091,6 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 	}
 }
 
-// The list only selects a VM now; it no longer acts on one. Former list-only
-// lifecycle keys (start/stop/restart/shell/delete) are not bubbles/table
-// bindings either, so on the list they simply do nothing.
-func TestListKeysNoLongerDispatchLifecycleActions(t *testing.T) {
-	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Stopped", CPUs: 2},
-	}})
-	m = loaded.(model)
-
-	after, cmd := m.Update(runeKey('s'))
-	m = after.(model)
-
-	if cmd != nil {
-		t.Fatal("pressing 's' on the list should dispatch no command")
-	}
-	if m.acting {
-		t.Fatal("pressing 's' on the list should not mark an action in flight")
-	}
-	if m.view != viewList {
-		t.Fatalf("pressing 's' on the list should leave the view on viewList, got %v", m.view)
-	}
-}
-
 // The VM screen now owns per-VM lifecycle actions: pressing 's' there marks an
 // action in flight and dispatches a command against the displayed VM.
 func TestDetailActionsDispatchLifecycleCommands(t *testing.T) {
@@ -1162,7 +1138,7 @@ func TestDetailRefreshReseedsFromReloadedList(t *testing.T) {
 		{Name: "someone-else", Status: "Running"},
 	}})
 	m = gone.(model)
-	if m.view != viewList {
+	if m.view != viewBoard {
 		t.Fatalf("a reload where the displayed VM is gone should fall back to the list, got %v", m.view)
 	}
 }
@@ -1224,8 +1200,8 @@ func TestStopAllConfirmShowsSpinner(t *testing.T) {
 	if !strings.Contains(m.status, "stopping") {
 		t.Fatalf("confirming stop-all should seed a status, got %q", m.status)
 	}
-	if !strings.Contains(m.listView(), m.spinner.View()) {
-		t.Fatalf("the list view should render the spinner while stopping, got:\n%s", m.listView())
+	if !strings.Contains(m.boardView(), m.spinner.View()) {
+		t.Fatalf("the board should render the spinner while stopping, got:\n%s", m.boardView())
 	}
 }
 
@@ -1340,7 +1316,7 @@ func TestDeleteReturnsToListFromDetail(t *testing.T) {
 
 	done, _ := m.Update(actionDoneMsg{action: "delete", name: "claude"})
 	m = done.(model)
-	if m.view != viewList {
+	if m.view != viewBoard {
 		t.Fatalf("a successful delete should return to the list, view = %v", m.view)
 	}
 

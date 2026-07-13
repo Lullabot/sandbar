@@ -482,7 +482,7 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// backspace, which here must edit the focused field, not navigate away.
 	switch {
 	case msg.Code == tea.KeyEsc:
-		m.view = viewList
+		m.view = viewBoard
 		m.resetMode = false // a later create form must not inherit reset state
 		return m, nil
 	case key.Matches(msg, m.keys.Submit): // ctrl+s — submit from any field

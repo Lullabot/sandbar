@@ -114,7 +114,7 @@ func (m *model) beginReset(title string, run provisionFunc, cfg vm.CreateConfig)
 
 // beginJob is the shared body of beginProvision/beginReset.
 func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, recreates bool) tea.Cmd {
-	cmd := m.beginStream(cfg.Name, title, viewList, func(ctx context.Context, out io.Writer) error {
+	cmd := m.beginStream(cfg.Name, title, viewBoard, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
 	m.jobs.markProvision(cfg.Name, cfg, recreates)
@@ -178,17 +178,25 @@ func (m model) shownJob() (jobSnapshot, bool) {
 // quit while the shown job runs, so the reflex that ends a session does not
 // orphan a half-built VM.
 func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.confirm != nil {
+		return m.updateConfirm(msg)
+	}
 	job, ok := m.shownJob()
 
 	if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
-		m.view = viewList // a vanished job (its VM was deleted) has no back view left
+		m.view = viewBoard // a vanished job (its VM was deleted) has no back view left
 		if ok {
-			m.view = job.Back // detail for a transfer, list for a provision
+			m.view = job.Back // detail for a transfer, board for a provision
 		}
 		return m, nil
 	}
 	if (!ok || !job.Running()) && key.Matches(msg, m.keys.Quit) {
-		return m, tea.Quit
+		// The job on THIS screen is done, but another VM may still be building
+		// behind it — requestQuit (board.go) confirms before abandoning that one.
+		// It mutates m through a pointer receiver, so its result is taken into a
+		// local before m is returned (see the note in updateBoard).
+		cmd := m.requestQuit()
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -200,6 +208,9 @@ func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // While the shown job runs, ctrl+c cancels it and esc leaves it running; once it
 // has finished, esc returns and q quits.
 func (m model) progressHelp() []key.Binding {
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
 	if job, ok := m.shownJob(); ok && job.Running() {
 		return []key.Binding{m.keys.Interrupt, m.keys.Background}
 	}
@@ -216,7 +227,10 @@ func (m model) progressView() string {
 		// The job was reaped: its VM disappeared while the user watched it.
 		b.WriteString(titleStyle.Render("Run unavailable"))
 		b.WriteString("\n\n")
-		b.WriteString(statusStyle.Render("This VM is gone, and its run went with it. Press esc to return to the list."))
+		b.WriteString(statusStyle.Render("This VM is gone, and its run went with it. Press esc to return to the board."))
+		if m.confirm != nil {
+			b.WriteString("\n\n" + m.confirmView())
+		}
 		b.WriteString("\n\n" + m.help.ShortHelpView(m.progressHelp()))
 		return appStyle.Render(b.String())
 	}
@@ -231,7 +245,7 @@ func (m model) progressView() string {
 	b.WriteString("\n")
 
 	if !job.Running() {
-		back := "list"
+		back := "board"
 		if job.Back == viewDetail {
 			back = "VM"
 		}
@@ -243,6 +257,10 @@ func (m model) progressView() string {
 		default:
 			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the "+back+"."))
 		}
+	}
+	// A quit that would abandon another VM's build confirms first (requestQuit).
+	if m.confirm != nil {
+		b.WriteString("\n" + m.confirmView())
 	}
 
 	b.WriteString("\n" + m.help.ShortHelpView(m.progressHelp()))

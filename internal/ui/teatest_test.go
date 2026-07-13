@@ -12,6 +12,8 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -53,12 +55,32 @@ func (listFakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string
 // newTeaProgram builds the real tea.Model over the canned lima client, with the
 // managed-index/secrets store isolated to a temp dir, and boots it in an
 // 100x30 simulated terminal.
+//
+// Both canned VMs are recorded as sand-managed first: the board shows managed
+// clones and nothing else, always, so a program driven from the board has to
+// start with a fleet the board would actually show.
 func newTeaProgram(t *testing.T) *teatest.TestModel {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
 	return teatest.NewTestModel(t, New(cli, prov), teatest.WithInitialTermSize(100, 30))
+}
+
+// seedManagedIndex writes names into the managed-VM index the program is about
+// to load from (XDG_DATA_HOME must already point at the test's temp dir).
+func seedManagedIndex(t *testing.T, names ...string) {
+	t.Helper()
+	reg, err := registry.Load()
+	if err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	for _, name := range names {
+		if err := reg.Add(vm.CreateConfig{Name: name, BaseName: "claude-base"}); err != nil {
+			t.Fatalf("seed %s as managed: %v", name, err)
+		}
+	}
 }
 
 // waitForText blocks until the program's output contains want (ANSI stripped),
@@ -97,15 +119,7 @@ func finalScreen(t *testing.T, tm *teatest.TestModel) []byte {
 	return []byte(ansi.Strip(fm.View().Content) + "\n")
 }
 
-// The VM list renders with the canned instances, their sizes humanized and the
-// action help bar.
-func TestTUIListView(t *testing.T) {
-	tm := newTeaProgram(t)
-	waitForText(t, tm, "claude")
-	teatest.RequireEqualOutput(t, finalScreen(t, tm))
-}
-
-// Enter on the list opens the detail screen for the highlighted VM.
+// Enter on the board opens the VM screen for the focused tile.
 func TestTUIDetailView(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
@@ -208,8 +222,11 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir()}
 	tm := teatest.NewTestModel(t, New(cli, prov), teatest.WithInitialTermSize(100, 30))
 
+	// The managed index is empty here, so the canned VMs get no tile: the board
+	// opens on its empty-slot invitation.
+	waitForText(t, tm, ghostTileText)
+
 	// n → the create form → name it → ctrl+s → the provisioner starts streaming.
-	waitForText(t, tm, "claude")
 	tm.Send(runeKey('n'))
 	waitForText(t, tm, "New VM")
 	tm.Type("newvm")
@@ -223,9 +240,11 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	}
 	waitForText(t, tm, "Install Docker") // its output is streaming into the progress pane
 
-	// ESC — the key that used to do nothing at all here. The build must keep going.
+	// ESC — the key that used to do nothing at all here. The build must keep going,
+	// and the VM being built — which `limactl list` has never heard of, and which is
+	// not managed until the build SUCCEEDS — has a live tile on the board.
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEsc})
-	waitForText(t, tm, "stop all") // the list's help bar: we are back on a live list
+	waitForText(t, tm, "Building")
 
 	// And the whole UI is live: a SECOND VM can be started while the first builds.
 	tm.Send(runeKey('n'))
