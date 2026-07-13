@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.3.0](https://github.com/Lullabot/sandbar/compare/v0.2.0...v0.3.0) (2026-07-13)
+
+
+### Features
+
+* **tui:** board chrome — header, messages ring, state-gated footer, refresh tick ([819177d](https://github.com/Lullabot/sandbar/commit/819177d04a42ab3e1af7732b9e3294695814310f))
+* **tui:** command registry, layout classifier, job registry, guest heartbeat ([7f04be5](https://github.com/Lullabot/sandbar/commit/7f04be576f6e372df59dbbab2af99e21a5568987))
+* **tui:** delete the VM screen; the tile carries the core count ([6257d84](https://github.com/Lullabot/sandbar/commit/6257d84053b7c969ac6930a11511649d2df7a331))
+* **tui:** live host readout, a selectable empty slot, and steady gauges ([5c90d52](https://github.com/Lullabot/sandbar/commit/5c90d524e11b390d08848f80c7fbbd6625810d13))
+* **tui:** replace the table list with the tile board ([2afc1c3](https://github.com/Lullabot/sandbar/commit/2afc1c35d188e9864e9e73eca01a5816aec71263))
+* **tui:** show the build, wrap the footer, and add a ? keys screen ([11343ef](https://github.com/Lullabot/sandbar/commit/11343ef2f2804231a0413c0f9b7274f061312dcf))
+* **tui:** the header's cpu is a percentage of the whole host ([8bdae6e](https://github.com/Lullabot/sandbar/commit/8bdae6eca42c02b5b594dad0affe81d4753ef6ac))
+* **tui:** the tile — derived status, honest gauges, exception-only fields ([6d5c289](https://github.com/Lullabot/sandbar/commit/6d5c289b031b55e126a5615f79123cf74497b4c1))
+
+
+### Bug Fixes
+
+* close the races the last review's fixes left open ([e8701de](https://github.com/Lullabot/sandbar/commit/e8701ded01819487d31c4d5a51f19848fcc22b6b))
+* **lima:** pin the copy backend so files land where the user put them ([67708a5](https://github.com/Lullabot/sandbar/commit/67708a59652e6ba364ec05546fa228ebde8b6607))
+* **lima:** survive limactl list failing while an instance is cloned or deleted ([19cc742](https://github.com/Lullabot/sandbar/commit/19cc742585da5d81b7c40cb4eb6c491b2f3aad0c))
+* **provision:** serialize base-image preparation with a file lock ([d7507fd](https://github.com/Lullabot/sandbar/commit/d7507fdc575fa8e7fbc199a94d12dbbb0d9b92d5))
+* **test:** pin the host probes for every teatest golden, not just some ([44bff14](https://github.com/Lullabot/sandbar/commit/44bff1466d6cb687bdf2824837efd4612eabd185))
+* **test:** stop the unit suite writing the developer's real ~/.lima ([53fd1f4](https://github.com/Lullabot/sandbar/commit/53fd1f42c8b314eb3ae49380748e05a13b21b06f))
+* **test:** wait on the screen a TUI test navigated to, not on text the renderer reused ([6cac3c0](https://github.com/Lullabot/sandbar/commit/6cac3c089730a41b6a6058dde8a2c017677ade7e))
+* **tui:** a build streams onto its tile instead of seizing the terminal ([792b7a6](https://github.com/Lullabot/sandbar/commit/792b7a6e1897d22bd9780c49ddbd72ff3643300d))
+* **tui:** keep the gauges live when the terminal loses focus ([1e6d524](https://github.com/Lullabot/sandbar/commit/1e6d524dda0a47dd7eafceb7fabaf66549c8d356))
+* **tui:** re-gate the verbs the build freeze used to protect ([abbe0d9](https://github.com/Lullabot/sandbar/commit/abbe0d93c2a2ccefb92b9438ae913d83a2ab3621))
+* **tui:** stop a file copy from flipping a failed build's tile back to green ([d1a3001](https://github.com/Lullabot/sandbar/commit/d1a3001a6993a014130041f4c3e6fa02e57621de))
+* **user:** enable systemd linger so detached tmux survives logout ([a13b2b0](https://github.com/Lullabot/sandbar/commit/a13b2b0a58b8e912a47e22e7ec7e1b4e66ae8966))
+
 ## [0.2.0](https://github.com/Lullabot/sandbar/compare/v0.1.0...v0.2.0) (2026-07-12)
 
 
