@@ -41,25 +41,27 @@ type provisionFunc func(ctx context.Context, cfg vm.CreateConfig, out io.Writer)
 // It backs both provisioning and file transfers.
 type streamFunc func(ctx context.Context, out io.Writer) error
 
-// beginStream registers a job for the VM named name and sets up the io.Pipe →
+// beginStream registers the job identified by key and sets up the io.Pipe →
 // registry → viewport → spinner plumbing shared by provisioning and file
 // transfers. It spawns run in a goroutine feeding the pipe and returns the
-// commands that stream it. This is the non-blocking pattern: Update never runs
-// the operation — it only reacts to the VM-keyed messages this produces.
+// commands that stream it, AND WHETHER IT ACTUALLY STARTED THE JOB. This is the
+// non-blocking pattern: Update never runs the operation — it only reacts to the
+// keyed messages this produces.
 //
-// The job is registered WITHOUT a provision config, so a run is not recorded as
-// managed unless the caller sets one afterwards (beginProvision does). That
-// distinction — a transfer is not a managed VM — used to live in a single
-// m.provCfg field; it is now per-job, and it is also what keeps a transfer from
-// painting its VM's tile as Building.
+// That second return value is not decoration. beginJob used to attach a provision
+// config after calling this REGARDLESS, so a refused create mutated the run that
+// was already in flight — see markProvision. A caller that means to touch the job
+// it asked for has to know whether it got one.
 //
-// If a job is already in flight for this VM, no second one is started: the
-// registry is keyed by VM name, so a second job would orphan the first one's
-// cancel func and leak its goroutine. The user is shown the running job instead.
-func (m *model) beginStream(name, title string, back view, run streamFunc) tea.Cmd {
-	if m.jobs.isRunning(name) {
-		m.logMsg(name + " already has a run in flight — showing it")
-		return m.showJobLog(name)
+// If a run of the SAME KIND is already in flight for this VM, no second one is
+// started: two jobs sharing a key would orphan the first one's cancel func and
+// leak its goroutine. The user is shown the running one instead. A run of the
+// OTHER kind is left strictly alone — that is the point of keying by kind, and it
+// is what stops a file copy from evicting a failed build's tile and log.
+func (m *model) beginStream(key jobKey, title string, back view, run streamFunc) (tea.Cmd, bool) {
+	if m.jobs.running(key) {
+		m.logMsg(key.vm + " already has a run in flight — showing it")
+		return m.showJob(key), false
 	}
 
 	pr, pw := io.Pipe()
@@ -68,7 +70,7 @@ func (m *model) beginStream(name, title string, back view, run streamFunc) tea.C
 	ctx, cancel := context.WithCancel(context.Background())
 
 	j := &job{
-		name:   name,
+		key:    key,
 		title:  title,
 		back:   back, // where esc returns from this job's progress view
 		state:  jobRunning,
@@ -76,14 +78,14 @@ func (m *model) beginStream(name, title string, back view, run streamFunc) tea.C
 		reader: &readPipe{r: pr},
 	}
 	if !m.jobs.begin(j) {
-		// Unreachable: isRunning above already refused a live job, and only the
+		// Unreachable: the guard above already refused a live job, and only the
 		// Update goroutine begins jobs. Guarded anyway — the alternative is a leaked
 		// goroutine with no cancel func.
 		cancel()
-		return nil
+		return nil, false
 	}
 
-	m.progressVM = name
+	m.progressJob = key
 	m.view = viewProgress
 	m.setOutput()
 
@@ -93,13 +95,12 @@ func (m *model) beginStream(name, title string, back view, run streamFunc) tea.C
 		pw.CloseWithError(run(ctx, pw))
 	}()
 
-	return tea.Batch(readNextCmd(name, j.reader), m.tickSpinner())
+	return tea.Batch(readNextCmd(key, j.reader), m.tickSpinner()), true
 }
 
 // beginProvision launches a provisioner call through beginStream and records its
 // config on the job, so a successful run can be marked managed (and reproduced
-// faithfully on a future recreate). The config is attached AFTER beginStream, so
-// only provisions carry one — a transfer's job has none and is never recorded.
+// faithfully on a future recreate).
 func (m *model) beginProvision(title string, run provisionFunc, cfg vm.CreateConfig) tea.Cmd {
 	return m.beginJob(title, run, cfg, false)
 }
@@ -113,10 +114,31 @@ func (m *model) beginReset(title string, run provisionFunc, cfg vm.CreateConfig)
 }
 
 // beginJob is the shared body of beginProvision/beginReset.
+//
+// A VM that is ALREADY BUSY — building, or being copied to — gets no build started
+// against it. A create for a name that is mid-build is the user naming the wrong
+// VM (nothing in vm.CreateConfig.Validate rejects a duplicate name; it is a pure
+// value check and cannot see the registry), and a reset of a VM a copy is
+// streaming into would delete the copy's target out from under it. The form
+// catches both first, with the name still on screen to edit (submitForm); this is
+// the invariant behind that, for every other caller. It refuses honestly and shows
+// the run that is in the way rather than silently doing nothing.
+//
+// markProvision runs ONLY if beginStream started the job. Calling it regardless is
+// the bug this signature exists to prevent: it would attach this form's config —
+// its cpus, its clone URL, its GitHub token — to whatever run was already in
+// flight under that name.
 func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, recreates bool) tea.Cmd {
-	cmd := m.beginStream(cfg.Name, title, viewBoard, func(ctx context.Context, out io.Writer) error {
+	if key, busy := m.jobs.runningKey(cfg.Name); busy {
+		m.logMsg(cfg.Name + " already has a run in flight — wait for it to finish, or cancel it from its log")
+		return m.showJob(key)
+	}
+	cmd, started := m.beginStream(provisionKey(cfg.Name), title, viewBoard, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
+	if !started {
+		return cmd
+	}
 	m.jobs.markProvision(cfg.Name, cfg, recreates)
 	return cmd
 }
@@ -124,50 +146,62 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 // showJobLog puts a VM's run — live or retained — back on the progress screen.
 // It backs the reopen-log verb (commandreg.go): the registry holds the buffer
 // anyway, so a failed provision can be interrogated instead of merely announced.
+// logKey decides WHICH run a VM holding two of them shows; a failed build wins,
+// because that is the tile the user is pressing `l` on.
 func (m *model) showJobLog(name string) tea.Cmd {
-	if !m.jobs.exists(name) {
+	key, ok := m.jobs.logKey(name)
+	if !ok {
 		return nil
 	}
-	m.progressVM = name
+	return m.showJob(key)
+}
+
+// showJob puts one specific run on the progress screen.
+func (m *model) showJob(key jobKey) tea.Cmd {
+	if !m.jobs.exists(key) {
+		return nil
+	}
+	m.progressJob = key
 	m.view = viewProgress
 	m.setOutput()
 	// A live job is still animating (the user may have walked away from it and
 	// come back); a retained one has nothing left to spin for.
-	if m.jobs.isRunning(name) {
+	if m.jobs.running(key) {
 		return m.tickSpinner()
 	}
 	return nil
 }
 
-// readNextCmd reads one chunk from a job's pipe. It emits a VM-keyed
+// readNextCmd reads one chunk from a job's pipe. It emits a KEYED
 // provisionOutputMsg per chunk (Update re-issues it to read the next one) and a
 // provisionDoneMsg at EOF or on error. Reading happens off the Update goroutine,
-// and the VM name is what lets N of these run at once without their output
-// crossing streams — the message used to be a bare string, which is precisely why
-// only one job could ever exist.
-func readNextCmd(name string, rp *readPipe) tea.Cmd {
+// and the key is what lets N of these run at once without their output crossing
+// streams — the message used to be a bare string, which is precisely why only one
+// job could ever exist, and a bare VM name, which is why a VM's copy and its
+// build could not both stream at once.
+func readNextCmd(key jobKey, rp *readPipe) tea.Cmd {
 	return func() tea.Msg {
 		if rp == nil {
-			return provisionDoneMsg{vm: name}
+			return provisionDoneMsg{job: key}
 		}
 		buf := make([]byte, 4096)
 		n, err := rp.r.Read(buf)
 		if n > 0 {
-			return provisionOutputMsg{vm: name, chunk: string(buf[:n])}
+			return provisionOutputMsg{job: key, chunk: string(buf[:n])}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return provisionDoneMsg{vm: name}
+				return provisionDoneMsg{job: key}
 			}
-			return provisionDoneMsg{vm: name, err: err}
+			return provisionDoneMsg{job: key, err: err}
 		}
-		return provisionOutputMsg{vm: name}
+		return provisionOutputMsg{job: key}
 	}
 }
 
 // shownJob is the job the progress screen is displaying, if any.
 func (m model) shownJob() (jobSnapshot, bool) {
-	return m.jobs.snapshot(m.progressVM)
+	return m.jobs.snapshot(m.progressJob)
 }
 
 // updateProgress handles keys on the progress view. The screen no longer traps

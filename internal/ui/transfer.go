@@ -152,11 +152,14 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	run := func(ctx context.Context, out io.Writer) error {
 		return m.cli.Copy(ctx, out, recursive, src, dst)
 	}
-	// beginStream registers the job WITHOUT a provision config (only
-	// beginProvision/beginReset attach one), so provisionDoneMsg will NOT record
-	// the transfer in the managed registry — a copy is not a managed VM — and the
-	// VM's tile will not read as Building while it runs.
-	return m, m.beginStream(m.transferVM, title, viewDetail, run)
+	// The copy gets the VM's TRANSFER slot, never its provision slot. That is what
+	// keeps provisionDoneMsg from recording it in the managed registry (a copy is
+	// not a managed VM), what keeps the tile from reading as Building while it
+	// runs — and what stops it from evicting a retained failed build, whose red
+	// tile and Ansible log are the only record the user has of why that VM is
+	// broken. Both runs can be in flight at once; each has its own log.
+	cmd, _ := m.beginStream(transferKey(m.transferVM), title, viewDetail, run)
+	return m, cmd
 }
 
 // destHelp returns the bindings shown in the destination-prompt's help bar.

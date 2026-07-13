@@ -442,9 +442,31 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = err
 		return m, nil
 	}
+	if err := m.checkNotBusy(cfg.Name); err != nil {
+		m.formErr = err
+		return m, nil
+	}
 	m.formErr = nil
 	cmd := m.beginProvision("Creating "+cfg.Name, m.prov.CreateVM, cfg)
 	return m, cmd
+}
+
+// checkNotBusy refuses a create/reset for a VM that already has a run in flight.
+//
+// It lives HERE, beside the form's other validation, rather than only deeper in
+// beginJob, because this is the only place the user can still act on it: the name
+// they typed is on screen and editable. vm.CreateConfig.Validate cannot make this
+// check — it is a pure value validation and knows nothing about the job registry —
+// which is exactly how typing the name of a VM that was already building used to
+// sail through, whereupon beginStream refused the second run and the second form's
+// config was stamped onto the FIRST one's build: wrong cpus, wrong memory, wrong
+// clone URL, wrong token, recorded as managed when that build succeeded, and
+// rebuilt from the wrong config by any later Reset.
+func (m model) checkNotBusy(name string) error {
+	if !m.jobs.isRunning(name) {
+		return nil
+	}
+	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)
 }
 
 // submitReset validates a reset-mode form and dispatches provision.Reset. The
@@ -461,6 +483,13 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	floor, _ := parseLimaSize(vm.BaseDiskFloor)
 	if want, ok := parseLimaSize(cfg.Disk); ok && want < floor {
 		m.formErr = fmt.Errorf("disk %s is below the base floor of %s; a reset can only grow the disk", cfg.Disk, vm.BaseDiskFloor)
+		return m, nil
+	}
+	// A reset of a VM a copy is still streaming into would delete the copy's target
+	// out from under it; a reset of a VM that is already building is the same
+	// double-run the create path refuses.
+	if err := m.checkNotBusy(cfg.Name); err != nil {
+		m.formErr = err
 		return m, nil
 	}
 	m.formErr = nil

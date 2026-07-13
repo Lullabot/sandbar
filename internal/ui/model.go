@@ -99,9 +99,11 @@ type model struct {
 	focusName string
 	scrollRow int
 
-	// jobs is the VM-keyed job registry (jobs.go): every provision and transfer in
-	// flight, plus the last run each VM retained. It is a POINTER because the model
-	// is passed by value — a registry embedded here would fork on the first copy —
+	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
+	// transfer in flight, plus the last run of each kind a VM retained — a failed
+	// build and a later file copy are two runs, and the copy may not evict the
+	// build. It is a POINTER because the model is passed by value — a registry
+	// embedded here would fork on the first copy —
 	// and it satisfies the jobLookup seam in commandreg.go, which gates Delete
 	// while a VM builds and the reopen-log verb on a VM having a run to show. A nil
 	// registry is safe to call and reports "no jobs", so a model built by hand
@@ -163,9 +165,13 @@ type model struct {
 	// config and cancel func — now lives on that job in the registry above. What is
 	// left here is which job the progress SCREEN is showing, which is a property of
 	// the screen, not of the work: the job goes on whether or not anyone is looking.
-	viewport   viewport.Model
-	spinner    spinner.Model
-	progressVM string // the VM whose run the progress screen displays ("" = none)
+	viewport viewport.Model
+	spinner  spinner.Model
+
+	// progressJob is the RUN the progress screen displays — a VM plus which of its
+	// runs, because a VM can have both a build and a file copy in flight (jobs.go).
+	// A zero-value vm name means none.
+	progressJob jobKey
 
 	// spinning is true while exactly one spinner.Tick loop is in flight. Jobs and
 	// quick actions can now overlap (they could not while the old model-wide
@@ -298,7 +304,7 @@ func (m *model) applySize(w, h int) {
 		m.secretsArea.SetHeight(h)
 	}
 	// Reflow the shown job's streamed output to the new width so it stays wrapped.
-	if m.progressVM != "" {
+	if m.progressJob.vm != "" {
 		m.setOutput()
 	}
 }
@@ -323,7 +329,15 @@ func (m *model) tickSpinner() tea.Cmd {
 // help.Model's own width truncation. Shared by the board (board.go) and the
 // VM screen (detail.go) so the fix lands on both footers, not just one.
 func (m model) footerView(bindings []key.Binding) string {
-	return ansi.Truncate(m.help.ShortHelpView(bindings), m.layout.ContentWidth, "…")
+	return m.clipLine(m.help.ShortHelpView(bindings))
+}
+
+// clipLine truncates one rendered line to ContentWidth, ANSI-aware. Every line a
+// screen spends goes through here (or through a pane that already does it): a
+// board whose height fits but whose status line runs off the right edge is the
+// same clipping bug with the axes swapped.
+func (m model) clipLine(s string) string {
+	return ansi.Truncate(s, m.layout.ContentWidth, "…")
 }
 
 // present indexes a freshly loaded VM list by name, for jobRegistry.reconcile.
@@ -454,7 +468,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if reaped := m.jobs.reconcile(present(msg.vms)); len(reaped) > 0 {
 			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
 			// Nothing left to show for the run the user was watching.
-			if m.view == viewProgress && !m.jobs.exists(m.progressVM) {
+			if m.view == viewProgress && !m.jobs.exists(m.progressJob) {
 				m.view = viewBoard
 			}
 		}
@@ -530,28 +544,29 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listCmd(m.cli) // refresh after every action
 
 	case provisionOutputMsg:
-		// The chunk is keyed by VM, so N jobs can stream at once without their
-		// output crossing streams. addOutput reports false for a job that was
-		// reaped mid-flight: its late chunks are dropped and its reader is not
-		// re-issued, which is what ends that job's read loop.
-		if !m.jobs.addOutput(msg.vm, msg.chunk) {
+		// The chunk is keyed by RUN — the VM and which of its runs — so N jobs can
+		// stream at once without their output crossing streams, including a VM's
+		// build and a copy against that same VM. addOutput reports false for a job
+		// that was reaped mid-flight: its late chunks are dropped and its reader is
+		// not re-issued, which is what ends that job's read loop.
+		if !m.jobs.addOutput(msg.job, msg.chunk) {
 			return m, nil
 		}
-		if m.view == viewProgress && m.progressVM == msg.vm {
+		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
-		return m, readNextCmd(msg.vm, m.jobs.reader(msg.vm))
+		return m, readNextCmd(msg.job, m.jobs.reader(msg.job))
 
 	case provisionDoneMsg:
 		// finish retains the job — with its log — whether it succeeded or failed:
 		// that is what makes the tile's Failed status sticky and its log
 		// reopenable. It reports false only for a job already reaped, whose done
 		// message is stale.
-		job, ok := m.jobs.finish(msg.vm, msg.err)
+		job, ok := m.jobs.finish(msg.job, msg.err)
 		if !ok {
 			return m, nil
 		}
-		if m.view == viewProgress && m.progressVM == msg.vm {
+		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
 		// A user-canceled run leaves partial state behind; don't record it as
@@ -563,11 +578,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it. Shared with the headless
 		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
-		// A transfer's job carries no config, so it is never recorded — the
-		// distinction m.provCfg used to draw, now drawn per-job.
-		cfg, isProvision := m.jobs.config(msg.vm)
+		//
+		// A COPY IS NOT A BUILD, and the KIND is what says so — not the presence of a
+		// config, which is a property of the VM's build and outlives it. A copy
+		// finishing against a VM that also holds a retained build would otherwise
+		// re-record that build's config (and re-seed its GH_TOKEN) as if the copy had
+		// produced it.
+		cfg, isProvision := m.jobs.config(msg.job.vm)
 		var applyCmd tea.Cmd
-		if msg.err == nil && isProvision && cfg.Name != "" {
+		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
 			if err := manage.RecordSuccess(m.reg, cfg); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
@@ -615,7 +634,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// per-job now: with several builds in flight, the one on screen is the one
 			// the user is aiming at. Everywhere else — including a finished progress
 			// screen — ctrl+c quits.
-			if m.view == viewProgress && m.jobs.cancelJob(m.progressVM) {
+			if m.view == viewProgress && m.jobs.cancelJob(m.progressJob) {
 				m.setOutput()
 				return m, nil
 			}
@@ -721,9 +740,11 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // confirmView renders the pending confirmation prompt. Shared by boardView,
-// detailView and progressView so no screen formats its own overlay text.
+// detailView and progressView so no screen formats its own overlay text — and
+// clipped to ContentWidth like every other line, since a prompt that wrapped
+// would cost the screen a row it never budgeted.
 func (m model) confirmView() string {
-	return errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel")
+	return m.clipLine(errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel"))
 }
 
 // View renders the active screen. v2 moved the alt-screen toggle from a

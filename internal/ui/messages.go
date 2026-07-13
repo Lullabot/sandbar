@@ -70,7 +70,10 @@ func (m model) recentMessages(n int) []message {
 }
 
 // activityLineView renders the board/VM screen's single "what's happening
-// right now" line: the pending confirm prompt when one is open (it must
+// right now" line — ONE row, always, clipped to ContentWidth like every other
+// line the screens spend, because the footer band budgets exactly one row for
+// it (layout.go) and a status message long enough to wrap would take the help
+// bar's row with it: the pending confirm prompt when one is open (it must
 // interrupt, not queue behind history), the acting spinner beside the latest
 // logged message while a lifecycle action is in flight, or just the latest
 // logged message otherwise. "" means there is nothing to show, and callers
@@ -84,10 +87,10 @@ func (m model) activityLineView() string {
 		if text == "" {
 			text = "working…"
 		}
-		return statusStyle.Render(m.spinner.View() + " " + text)
+		return m.clipLine(statusStyle.Render(m.spinner.View() + " " + text))
 	default:
 		if text := m.lastMessage(); text != "" {
-			return statusStyle.Render(text)
+			return m.clipLine(statusStyle.Render(text))
 		}
 		return ""
 	}

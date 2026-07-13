@@ -32,7 +32,6 @@ import (
 
 // Line shapes the parser recognises, all anchored at the start of a line.
 const (
-	playPrefix    = "PLAY ["            // PLAY [Provision Claude Code development VM] ****
 	taskPrefix    = "TASK ["            // TASK [base : Set hostname] ****
 	handlerPrefix = "RUNNING HANDLER [" // RUNNING HANDLER [base : Reload sshd] ****
 	stepPrefix    = "==> "              // sand's own phase banner (see provision.step)
@@ -60,7 +59,6 @@ type ansibleProgress struct {
 	// It is the tile's only signal during those minutes.
 	Step string
 
-	Play string // the current play's name
 	Role string // the current task's role ("dev-tools"), empty for a role-less task
 	Task string // the current task's name ("Install Docker")
 
@@ -128,7 +126,7 @@ func (p *ansibleParser) line(l string) {
 		}
 		p.progress.Total = n
 		p.progress.Index = 0
-		p.progress.Play, p.progress.Role, p.progress.Task = "", "", ""
+		p.progress.Role, p.progress.Task = "", ""
 
 	case strings.HasPrefix(l, stepPrefix):
 		// A sand phase banner supersedes whatever Ansible was last doing: the
@@ -148,10 +146,6 @@ func (p *ansibleParser) line(l string) {
 			p.progress.Role, p.progress.Task = splitRoleTask(name)
 		}
 
-	case strings.HasPrefix(l, playPrefix):
-		if name, ok := bracketed(l, playPrefix); ok {
-			p.progress.Play = name
-		}
 	}
 }
 

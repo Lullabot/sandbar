@@ -34,19 +34,20 @@ type (
 		err    error
 		warn   string
 	}
-	// provisionOutputMsg is one chunk of streamed output from ONE VM's job. It
-	// used to be a bare string — which is precisely why only one job could ever
-	// exist: a chunk that does not say which VM it came from can only be appended
-	// to a single global buffer. vm is what lets N jobs stream at once, each into
-	// its own log.
+	// provisionOutputMsg is one chunk of streamed output from ONE job. It used to
+	// be a bare string — which is precisely why only one job could ever exist: a
+	// chunk that does not say which run it came from can only be appended to a
+	// single global buffer. The jobKey (VM + kind) is what lets N jobs stream at
+	// once, each into its own log — including a VM's build and a copy against that
+	// same VM, which are two runs and must not share a buffer.
 	provisionOutputMsg struct {
-		vm    string
+		job   jobKey
 		chunk string
 	}
-	// provisionDoneMsg signals that ONE VM's job goroutine finished. VM-keyed for
-	// the same reason.
+	// provisionDoneMsg signals that ONE job's goroutine finished. Keyed for the
+	// same reason.
 	provisionDoneMsg struct {
-		vm  string
+		job jobKey
 		err error
 	}
 )

@@ -362,7 +362,7 @@ func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 
 	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
 	m.view = viewBoard
-	if _, ok := m.jobs.finish("newvm", errAnsibleBoom); !ok {
+	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded build should finish")
 	}
 	// The refresh now reports the half-built VM Lima was left holding.
@@ -398,7 +398,7 @@ func TestFailedBuildKeepsItsTile(t *testing.T) {
 	m = resized(m, 120, 40)
 	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
 	m.view = viewBoard
-	if _, ok := m.jobs.finish("newvm", errAnsibleBoom); !ok {
+	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded job should finish")
 	}
 
@@ -899,4 +899,40 @@ func batchQuit(cmd tea.Cmd) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// THE GHOST TILE IS THE BOARD'S CALL TO ACTION, AND IT HAS TO BE REACHABLE.
+//
+// The empty-slot invitation is retained BECAUSE a 1–3 VM board is mostly empty:
+// the dominant state of the target user's board becomes "press n" instead of dead
+// space. But it is a CELL IN THE GRID, and the grid's scroll clamp counted only
+// the VMs — so at 80x24 (one column, two visible tile rows) a board with two VMs
+// filled the viewport and the ghost's row could never come on screen. The
+// affordance was visible with exactly one VM, and never again.
+func TestGhostTileIsReachableWithTwoVMsInOneColumn(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 80, 24)
+	m = loadManaged(t, m,
+		vm.VM{Name: "vm-a", Status: "Running"},
+		vm.VM{Name: "vm-b", Status: "Running"},
+	)
+	if m.layout.Columns != 1 || m.visibleTileRows() != 2 {
+		t.Fatalf("precondition: 80x24 should give one column and two tile rows, got %d column(s), %d row(s)",
+			m.layout.Columns, m.visibleTileRows())
+	}
+	m.focusName = "vm-a"
+
+	// Arrowing onto the last VM scrolls the grid to the bottom of its content — and
+	// the ghost cell is what sits there.
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.focusName != "vm-b" {
+		t.Fatalf("down from vm-a should focus vm-b, got %q", m.focusName)
+	}
+	view := ansi.Strip(m.boardView())
+	if !strings.Contains(view, ghostTileText) {
+		t.Fatalf("the %q affordance is unreachable with two VMs in one column:\n%s", ghostTileText, view)
+	}
+	if !strings.Contains(view, "vm-b") {
+		t.Fatalf("the focused tile must stay on screen:\n%s", view)
+	}
 }

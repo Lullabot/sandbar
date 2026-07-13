@@ -264,9 +264,41 @@ func (m *model) moveFocus(dx, dy int) {
 	m.ensureFocusVisible()
 }
 
+// showsGhost reports whether the grid is rendering the empty-slot invitation. It
+// is NOT offered while a filter is narrowing the board (the tiles missing there
+// are hidden, not absent) — and gridView and ensureFocusVisible both ask here, so
+// the cell the grid draws and the cell the scroll accounts for cannot disagree.
+// They did, and the affordance paid for it: see ensureFocusVisible.
+func (m model) showsGhost() bool { return m.searchQuery == "" }
+
+// gridCells is how many cells the grid lays out: one per visible VM, plus the
+// ghost.
+func (m model) gridCells() int {
+	n := len(m.visibleVMs())
+	if m.showsGhost() {
+		n++
+	}
+	return n
+}
+
 // ensureFocusVisible scrolls the grid so the focused tile is on screen. This is
 // the whole of "focus follows scroll": nothing else moves scrollRow, so the
 // viewport cannot drift away from the ring.
+//
+// THE GHOST CELL IS PART OF THE GRID, and the scroll has to count it. It used to
+// count VMs only, so its clamp pinned scrollRow to the last VM's row: at 80x24
+// (one column, two visible rows) a board with two VMs filled the viewport and the
+// ghost's row could never come on screen. The "press n to add a VM" affordance —
+// whose entire rationale is that a 1–3 VM board is mostly empty, so the empty
+// space becomes the call to action — was reachable with exactly one VM and never
+// again.
+//
+// Counting it in the clamp is necessary but not sufficient: nothing would ever
+// SCROLL there, because the ring only ever moves between VMs and the scroll only
+// ever moves to follow the ring. So when the ring lands on the last VM, the grid
+// scrolls to the BOTTOM of its content — which is the ghost's row, sitting
+// immediately after that VM, and therefore never at the cost of hiding the tile
+// the ring is on.
 func (m *model) ensureFocusVisible() {
 	vms := m.visibleVMs()
 	i := vmIndex(vms, m.focusName)
@@ -284,10 +316,17 @@ func (m *model) ensureFocusVisible() {
 	if row >= m.scrollRow+rows {
 		m.scrollRow = row - rows + 1
 	}
-	// Never scroll past the last row of tiles (a resize that grows the viewport
-	// would otherwise leave blank rows above a board pinned to the bottom).
-	if max := (len(vms)-1)/cols - rows + 1; m.scrollRow > max {
-		m.scrollRow = max
+
+	// The last row of the grid's CONTENT (the ghost cell included), and the scroll
+	// that parks the viewport on it.
+	bottom := (m.gridCells()-1)/cols - rows + 1
+	if lastVM := (len(vms) - 1) / cols; row == lastVM && bottom > m.scrollRow && bottom <= row {
+		m.scrollRow = bottom
+	}
+	// Never scroll past the bottom (a resize that grows the viewport would
+	// otherwise leave blank rows above a board pinned to it).
+	if m.scrollRow > bottom {
+		m.scrollRow = bottom
 	}
 	if m.scrollRow < 0 {
 		m.scrollRow = 0
@@ -314,9 +353,12 @@ func (m model) stopAllTargets() []string {
 	return names
 }
 
-// runningJobs names every run still in flight — a build or a file transfer —
-// sorted, so the quit confirmation below reads the same way twice.
-func (m model) runningJobs() []string {
+// busyVMs names every VM with work still in flight — a build, a file transfer, or
+// (in the narrow window where a copy is running against a VM a reset is about to
+// rebuild) both — sorted, so the quit confirmation below reads the same way twice.
+// A VM is named ONCE however many runs it has: the name is what the user acts on,
+// and quitting abandons everything on it.
+func (m model) busyVMs() []string {
 	var names []string
 	for _, name := range m.jobs.names() {
 		if m.jobs.isRunning(name) {
@@ -376,17 +418,20 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 // unconditional escape hatch: it is the key users press when they want out
 // regardless, and on the progress screen it cancels the run it is showing.
 func (m *model) requestQuit() tea.Cmd {
-	running := m.runningJobs()
-	if len(running) == 0 {
+	busy := m.busyVMs()
+	if len(busy) == 0 {
 		return tea.Quit
 	}
-	noun := "run"
-	if len(running) > 1 {
-		noun = "runs"
+	noun := "VM"
+	if len(busy) > 1 {
+		noun = "VMs"
 	}
+	// The count is of VMs, not runs, and the noun says so: a VM can hold two runs at
+	// once (jobs.go), and "abandon 1 run" while abandoning two would be a small lie
+	// told at the exact moment the user is deciding whether to walk away from work.
 	m.confirm = &confirmState{
-		prompt: fmt.Sprintf("Quit and abandon %d %s in flight (%s)?",
-			len(running), noun, summarizeNames(running, m.width)),
+		prompt: fmt.Sprintf("Quit and abandon work in flight on %d %s (%s)?",
+			len(busy), noun, summarizeNames(busy, m.width)),
 		run: tea.Quit,
 	}
 	return nil
@@ -550,10 +595,17 @@ func (m model) boardHelp() []key.Binding {
 	return append(bindings, m.keys.StopAll, m.keys.Quit)
 }
 
-// boardView renders the board top to bottom: the pinned header band, the
-// docked messages strip (when the terminal has room for it — see
-// messagesStripView), the tile grid, the status line, the search indicator,
-// and the footer.
+// boardView renders the board top to bottom: the pinned header band, the docked
+// messages strip (when the terminal has room for it — see messagesStripView), the
+// tile grid, and the footer band (the status line, the search indicator and the
+// help bar).
+//
+// EVERY ROW IT SPENDS IS A ROW CLASSIFY BUDGETED. That is not a nicety: this view
+// used to emit two blank separator rows nobody had budgeted for, so at 80x24 it
+// rendered 26 lines into a 24-row terminal, bubbletea's alt-screen clipped the
+// bottom two, and the entire help bar was invisible at the one size the plan calls
+// out as must-work. Each band below renders EXACTLY its budget — HeaderHeight,
+// MessagesHeight, GridHeight, FooterHeight — or fewer rows, never more.
 func (m model) boardView() string {
 	var b strings.Builder
 	b.WriteString(m.headerView())
@@ -564,23 +616,49 @@ func (m model) boardView() string {
 	}
 	b.WriteString(m.gridView())
 	b.WriteString("\n")
+	b.WriteString(m.footerBandView())
+	return appStyle.Render(b.String())
+}
 
+// footerBandView renders the board's closing band in EXACTLY FooterHeight rows:
+// the activity line (a pending confirmation, the acting spinner, or the last
+// logged message), the name-filter indicator, and the help bar — with blank lines
+// taking up whatever slack the optional two leave, so the band's height is a
+// constant classify can budget and the help bar can never be pushed off the bottom
+// of the terminal by a status line appearing.
+//
+// The help bar goes LAST and the band is clipped from the front, so if a budget
+// ever came in short it is the breathing room that goes, never the row that tells
+// the user which keys exist.
+func (m model) footerBandView() string {
+	var lines []string
 	if s := m.activityLineView(); s != "" {
-		b.WriteString("\n" + s)
+		lines = append(lines, s)
 	}
-
 	// Surface the name filter so it never hides tiles invisibly: a live prompt
 	// while typing, and a persistent indicator (with the key to clear it) once
 	// committed with enter.
 	switch {
 	case m.searching:
-		b.WriteString("\n" + statusStyle.Render("/"+m.searchQuery+"   enter: apply · esc: clear"))
+		lines = append(lines, m.clipLine(statusStyle.Render("/"+m.searchQuery+"   enter: apply · esc: clear")))
 	case m.searchQuery != "":
-		b.WriteString("\n" + statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery)))
+		lines = append(lines, m.clipLine(statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery))))
 	}
+	lines = append(lines, m.footerView(m.boardHelp()))
 
-	b.WriteString("\n\n" + m.footerView(m.boardHelp()))
-	return appStyle.Render(b.String())
+	height := m.layout.FooterHeight
+	if height < 1 {
+		height = 1
+	}
+	if len(lines) > height {
+		lines = lines[len(lines)-height:]
+	}
+	// Pad the slack ABOVE the band's lines: the help bar stays at the bottom of the
+	// band and the blank rows read as separation from the grid.
+	if pad := height - len(lines); pad > 0 {
+		lines = append(make([]string, pad), lines...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // gridView lays the tiles out in the grid the LAYOUT MODE budgets (columns and
@@ -618,7 +696,10 @@ func (m model) gridView() string {
 	frame := m.spinner.View()
 	cells := make([]string, 0, len(vms)+1)
 	for i, v := range vms {
-		job, hasJob := m.jobs.snapshot(v.Name)
+		// The tile reads the VM's BUILD — never "whatever run this VM happens to
+		// have". A file copy against a running VM is not a build and must not be able
+		// to become one by occupying the same slot (jobs.go).
+		job, hasJob := m.jobs.snapshot(provisionKey(v.Name))
 		sample, hasSample := m.sampleOf(v.Name)
 		cells = append(cells, renderTile(tileInput{
 			VM:        v,
@@ -634,10 +715,9 @@ func (m model) gridView() string {
 			Now:       now,
 		}))
 	}
-	// The empty slot after the last tile carries the call to action. It is not
-	// offered while a filter is narrowing the board (the tiles missing there are
-	// hidden, not absent).
-	if m.searchQuery == "" {
+	// The empty slot after the last tile carries the call to action, and
+	// ensureFocusVisible counts it in the scroll so it can actually be reached.
+	if m.showsGhost() {
 		cells = append(cells, renderGhostTile(m.layout.TileWidth))
 	}
 
@@ -670,7 +750,7 @@ func (m model) gridView() string {
 	if end > len(rows) {
 		end = len(rows)
 	}
-	return clipLines(strings.Join(rows[start:end], "\n"), m.layout.GridHeight)
+	return clipBlock(strings.Join(rows[start:end], "\n"), m.layout.GridHeight, m.layout.ContentWidth)
 }
 
 // traitsOf gathers one VM's exception-only field values for the fleet-uniformity
@@ -706,8 +786,7 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 // is a VM of sand's whether or not the managed index knows it yet. It is one half
 // of the roster's membership rule (see boardVMs).
 func (m model) hasProvisionJob(name string) bool {
-	job, ok := m.jobs.snapshot(name)
-	return ok && job.Provision
+	return m.jobs.exists(provisionKey(name))
 }
 
 // tileGapBlock is the blank column between two adjacent tiles: as many lines as a
@@ -747,15 +826,26 @@ func centerText(s string, width int) string {
 	return strings.Repeat(" ", pad) + s
 }
 
-// clipLines truncates a rendered block to at most n lines, so the grid can never
-// spend more rows than the layout mode budgeted it.
-func clipLines(s string, n int) string {
-	if n < 1 {
-		n = 1
+// clipBlock truncates a rendered block to at most height lines and width display
+// cells, so the grid can never spend more rows OR columns than the layout mode
+// budgeted it. Both clips are last-resort honesty rather than routine work: the
+// grid slices whole tile rows (so it is already within its row budget) and
+// classify's TileWidth already fits its columns — but a terminal narrower than a
+// tile's own border-plus-padding floor would otherwise push the board's right edge
+// past the terminal's, and lipgloss would happily render it.
+func clipBlock(s string, height, width int) string {
+	if height < 1 {
+		height = 1
+	}
+	if width < 1 {
+		width = 1
 	}
 	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
+	if len(lines) > height {
+		lines = lines[:height]
 	}
-	return strings.Join(lines[:n], "\n")
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, width, "")
+	}
+	return strings.Join(lines, "\n")
 }

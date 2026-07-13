@@ -24,16 +24,26 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// compactPrefix folds the title into the counts line when classify sheds the
+// title row. It is charged against the counts' width budget, not rendered on top
+// of it — a prefix outside the budget is a line seven cells wider than the band
+// it lives in, and lipgloss will happily paint it past the right edge of the
+// terminal.
+const compactPrefix = "sand · "
+
 // headerView renders the pinned header band, HeaderHeight lines exactly:
 // full (a title line plus the counts) when the terminal is tall enough, or
 // compact (folded onto one line) once classify sheds the title (layout.go).
-// Either way the counts line carries the hidden count — see headerCounts.
+// Either way the counts line carries the hidden count — see headerCounts — and
+// every line is clipped to ContentWidth, the same honest clip the footer and the
+// activity line take.
 func (m model) headerView() string {
-	counts := m.headerCounts()
 	if m.layout.HeaderFull {
-		return titleStyle.Render("sand") + "\n" + statusStyle.Render(counts)
+		return m.clipLine(titleStyle.Render("sand")) + "\n" +
+			m.clipLine(statusStyle.Render(m.headerCounts(m.layout.ContentWidth)))
 	}
-	return statusStyle.Render("sand · " + counts)
+	budget := m.layout.ContentWidth - ansi.StringWidth(compactPrefix)
+	return m.clipLine(statusStyle.Render(compactPrefix + m.headerCounts(budget)))
 }
 
 // headerCounts assembles the header's one line of truth, in priority order:
@@ -43,8 +53,10 @@ func (m model) headerView() string {
 // ContentWidth as a last-resort safety net for a pathologically narrow
 // terminal; in the realistic range (80 columns and up) that clip never
 // touches the fleet/hidden clauses, because capacity is what gave way first.
-func (m model) headerCounts() string {
-	width := m.layout.ContentWidth
+func (m model) headerCounts(width int) string {
+	if width < 1 {
+		width = 1
+	}
 	fleet := m.fleetCountsText()
 	hidden := hiddenCountText(m.hiddenCounts())
 

@@ -491,8 +491,8 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// would time out long before A's own clone+configure+start+finalize even
 	// finishes, since B would not even have started.
 	pumpTimeout(t, l, "both jobs to report real Ansible progress", 15*time.Minute, func(m model) bool {
-		sa, okA := m.jobs.snapshot(nameA)
-		sb, okB := m.jobs.snapshot(nameB)
+		sa, okA := m.jobs.snapshot(provisionKey(nameA))
+		sb, okB := m.jobs.snapshot(provisionKey(nameB))
 		return okA && okB && sa.Progress.Total > 0 && sb.Progress.Total > 0
 	})
 
@@ -501,7 +501,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// base image …`), so real cross-routing would leak the OTHER VM's name
 	// into this job's buffer — a failure mode two independently fed fake
 	// streams cannot exhibit, because nothing routes them but the test itself.
-	outA, outB := jobOutput(l.m, nameA), jobOutput(l.m, nameB)
+	outA, outB := jobOutput(l.m, provisionKey(nameA)), jobOutput(l.m, provisionKey(nameB))
 	if strings.Contains(outA, nameB) {
 		t.Fatalf("%s's job log contains %s's name — output crossed streams:\n%s", nameA, nameB, outA)
 	}
@@ -515,15 +515,15 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	l.m.view = viewDetail
 	l.m.detail = vm.VM{Name: nameA, Status: "Running"}
 	l.send(runeKey('l'))
-	if l.m.view != viewProgress || l.m.progressVM != nameA {
-		t.Fatalf("reopening %s's log should show it on the progress view (view=%v vm=%q)", nameA, l.m.view, l.m.progressVM)
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(nameA) {
+		t.Fatalf("reopening %s's log should show it on the progress view (view=%v job=%+v)", nameA, l.m.view, l.m.progressJob)
 	}
 	l.send(ctrlKey('c'))
 
 	pumpTimeout(t, l, nameA+" to finish cancelling", time.Minute, func(m model) bool {
 		return !m.jobs.isRunning(nameA)
 	})
-	if s, _ := l.m.jobs.snapshot(nameA); !s.Canceled {
+	if s, _ := l.m.jobs.snapshot(provisionKey(nameA)); !s.Canceled {
 		t.Fatalf("%s should be marked cancelled", nameA)
 	}
 	if !l.m.jobs.isRunning(nameB) {
@@ -534,15 +534,15 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	pumpTimeout(t, l, nameB+" to finish", 15*time.Minute, func(m model) bool {
 		return !m.jobs.isRunning(nameB)
 	})
-	sb, ok := l.m.jobs.snapshot(nameB)
+	sb, ok := l.m.jobs.snapshot(provisionKey(nameB))
 	if !ok {
 		t.Fatal("B's job should be retained")
 	}
 	if sb.Failed() {
 		t.Fatalf("B should have succeeded (a real create against a real, already-built base), got err=%v\noutput:\n%s", sb.Err, sb.Output)
 	}
-	if strings.Contains(jobOutput(l.m, nameB), "^C") {
-		t.Fatalf("A's cancel notice leaked into B's buffer:\n%s", jobOutput(l.m, nameB))
+	if strings.Contains(jobOutput(l.m, provisionKey(nameB)), "^C") {
+		t.Fatalf("A's cancel notice leaked into B's buffer:\n%s", jobOutput(l.m, provisionKey(nameB)))
 	}
 }
 
@@ -591,7 +591,7 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 		return !m.jobs.isRunning(name)
 	})
 
-	snap, ok := l.m.jobs.snapshot(name)
+	snap, ok := l.m.jobs.snapshot(provisionKey(name))
 	if !ok {
 		t.Fatal("the job should be retained after finishing")
 	}
@@ -648,10 +648,10 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	}
 	l.m.view = viewBoard
 	l.m.showJobLog(name)
-	if l.m.view != viewProgress || l.m.progressVM != name {
-		t.Fatalf("reopening the log should show the progress view for %s (view=%v vm=%q)", name, l.m.view, l.m.progressVM)
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(name) {
+		t.Fatalf("reopening the log should show the progress view for %s (view=%v job=%+v)", name, l.m.view, l.m.progressJob)
 	}
-	reopened, ok := l.m.jobs.snapshot(name)
+	reopened, ok := l.m.jobs.snapshot(provisionKey(name))
 	if !ok || reopened.Output != snap.Output {
 		t.Fatalf("the reopened log should be identical to the retained one (navigating away and back must not lose it)")
 	}
