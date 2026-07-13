@@ -147,7 +147,6 @@ type job struct {
 // jobSnapshot is a race-free value copy of one job, taken under the registry's
 // lock. It is what every reader outside the registry works from.
 type jobSnapshot struct {
-	VM       string
 	Title    string
 	State    jobState
 	Err      error
@@ -182,11 +181,6 @@ type jobRegistry struct {
 func newJobRegistry() *jobRegistry {
 	return &jobRegistry{jobs: make(map[jobKey]*job)}
 }
-
-// jobLookup (commandreg.go) is the seam task 02 left for this registry: it gates
-// Delete while a VM builds, and the reopen-log verb on whether a run exists to
-// reopen.
-var _ jobLookup = (*jobRegistry)(nil)
 
 // Building reports whether name has a PROVISION in flight — a build, not a file
 // transfer. It gates Delete: a VM must not be deleted out from under its own
@@ -366,13 +360,23 @@ func (r *jobRegistry) remove(name string) {
 //
 // Finished jobs are never reaped: a failed run is retained precisely so the board
 // keeps saying so.
-func (r *jobRegistry) reconcile(present map[string]bool) []string {
+//
+// It also returns PROTECTED: the VMs whose absence those two exemptions excuse.
+// They are the same fact, so they are decided here, once, under the one lock — and
+// they have a second consumer. `manage.Reconcile` drops any managed VM missing from
+// the list, and the caller then deletes that VM's host secrets; a VM that is merely
+// mid-reset would have had its GH_TOKEN erased. The caller used to re-derive the
+// exemption from outside with a DIFFERENT question (`Building(name)`), which is not
+// the same predicate and cannot be kept the same by hoping. Feeding `protected` into
+// the list `manage.Reconcile` sees makes the ordering a data dependency instead of a
+// paragraph of prose.
+func (r *jobRegistry) reconcile(present map[string]bool) (reaped, protected []string) {
 	if r == nil {
-		return nil
+		return nil, nil
 	}
 	r.mu.Lock()
-	var reaped []string
 	seen := make(map[string]bool)
+	spared := make(map[string]bool)
 	var stopped []stopper
 	for key, j := range r.jobs {
 		if j.state != jobRunning {
@@ -383,6 +387,13 @@ func (r *jobRegistry) reconcile(present map[string]bool) []string {
 			continue
 		}
 		if !j.seen || j.recreates {
+			// Legitimately absent: a build whose clone has not landed, or a reset that
+			// deleted its own VM. Not a disappearance — and nothing downstream may treat
+			// it as one.
+			if !spared[key.vm] {
+				spared[key.vm] = true
+				protected = append(protected, key.vm)
+			}
 			continue
 		}
 		stopped = append(stopped, stopperFor(j))
@@ -397,7 +408,7 @@ func (r *jobRegistry) reconcile(present map[string]bool) []string {
 	for _, s := range stopped {
 		s.stop()
 	}
-	return reaped
+	return reaped, protected
 }
 
 // stopper is everything needed to tear a job down, COPIED OUT UNDER THE LOCK.
@@ -444,7 +455,6 @@ func (r *jobRegistry) snapshot(key jobKey) (jobSnapshot, bool) {
 // snapshotOf copies a job for a reader. Callers hold the lock.
 func snapshotOf(j *job) jobSnapshot {
 	return jobSnapshot{
-		VM:        j.key.vm,
 		Title:     j.title,
 		State:     j.state,
 		Err:       j.err,

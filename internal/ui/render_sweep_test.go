@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/x/ansi"
@@ -138,4 +139,63 @@ func viewExtent(view string) (lines, width int) {
 		}
 	}
 	return len(rows), width
+}
+
+// EVERY footer is clipped to the terminal, on every screen. applySize calls
+// help.SetWidth(0) on purpose — bubbles' own truncation renders one item PAST the
+// budget rather than stopping — so a screen that calls help.ShortHelpView directly
+// is rendering an entirely UNCLIPPED help bar. Four of the five did.
+//
+// footerView is the one honest clip. This drives each screen at a width far too
+// narrow for its verbs and asserts nothing overflows.
+func TestEveryScreensFooterIsClippedToTheTerminal(t *testing.T) {
+	const w, h = 40, 24 // far too narrow for any of these help bars
+
+	m := newTestModel(t)
+	m = resized(m, w, h)
+	m = putOnBoard(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 2})
+
+	screens := map[string]func(model) string{
+		"board":   func(m model) string { return m.boardView() },
+		"form":    func(m model) string { return m.formView() },
+		"secrets": func(m model) string { return m.secretsView() },
+		"dest":    func(m model) string { return m.destView() },
+	}
+	models := map[string]model{"board": m}
+
+	form := m
+	form.openForm()
+	models["form"] = form
+
+	sec := openSecretsViaKey(t, m, "web", "Running")
+	models["secrets"] = sec
+
+	dest := m
+	dest.view = viewDest
+	dest.transferVM = "web"
+	dest.transferSrc = "/home/u/file.txt"
+	dest.dest, _ = browse.NewDestInput("Destination dir: ", "/tmp/host-dst", nil)
+	models["dest"] = dest
+
+	// Only the HELP BAR is under test. help.ShortHelpView separates items with "•",
+	// which nothing else on these screens renders, so that identifies the footer
+	// without depending on which verbs happen to be eligible.
+	for name, render := range screens {
+		saw := false
+		for _, line := range strings.Split(ansi.Strip(render(models[name])), "\n") {
+			if !strings.Contains(line, "•") {
+				continue
+			}
+			saw = true
+			// Trailing spaces are lipgloss padding every line in the block out to the
+			// widest one; they are not the footer's own text. Measure the text.
+			line = strings.TrimRight(line, " ")
+			if got := ansi.StringWidth(line); got > w {
+				t.Errorf("%s screen: the help bar overflows the %d-column terminal (%d cells): %q", name, w, got, line)
+			}
+		}
+		if !saw {
+			t.Errorf("%s screen rendered no help bar — the test proves nothing about it", name)
+		}
+	}
 }

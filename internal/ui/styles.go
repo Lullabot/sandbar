@@ -70,3 +70,16 @@ var (
 	// create a VM must never compete with a VM that actually exists.
 	tileGhostBorderColor = lipgloss.Color("240")
 )
+
+// The three shapes a tile frame can take, built ONCE rather than per tile per
+// frame: renderTile and renderGhostTile used to construct a fresh lipgloss.Style
+// (and a fresh border set) on every render, ~11 of them a frame at 10fps while a
+// build spinner runs. Render does not mutate a style, so they are safe to share.
+//
+// The focused frame differs by GLYPH SET, not just colour, so the focus ring
+// survives NO_COLOR and a monochrome terminal.
+var (
+	tileFrameStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tileUnfocusedBorderColor).Padding(0, 1)
+	tileFocusedFrameStyle = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(tileFocusedBorderColor).Padding(0, 1)
+	tileGhostFrameStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(tileGhostBorderColor).Padding(0, 1)
+)

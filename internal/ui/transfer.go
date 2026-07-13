@@ -181,7 +181,7 @@ func (m model) destView() string {
 	b.WriteString("\n\n")
 	b.WriteString(statusStyle.Render("The selected item is placed INSIDE this directory."))
 	b.WriteString("\n" + statusStyle.Render("Type to autocomplete · ↑/↓ choose · enter fills · ctrl+s copy · esc back"))
-	b.WriteString("\n\n" + m.help.ShortHelpView(m.destHelp()))
+	b.WriteString("\n\n" + m.footerView(m.destHelp()))
 	return appStyle.Render(b.String())
 }
 

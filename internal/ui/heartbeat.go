@@ -687,10 +687,7 @@ func (m model) syncHeartbeats() tea.Cmd {
 		return nil
 	}
 
-	roster := make(map[string]bool, len(m.vms))
-	for _, v := range m.boardVMs() {
-		roster[v.Name] = true
-	}
+	roster := present(m.boardVMs())
 	want := make(map[string]bool, len(m.vms))
 	for _, v := range m.vms {
 		if v.Status == limaRunning && roster[v.Name] {

@@ -24,6 +24,7 @@ package ui
 // out in a grid without measuring each one (see layout.go's tileHeight).
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,15 +140,13 @@ func renderTile(in tileInput) string {
 		lines[i] = tilePad(l, width)
 	}
 
-	border := lipgloss.RoundedBorder()
-	borderColor := tileUnfocusedBorderColor
+	// The focused tile's border differs by more than colour (a thicker glyph set), so
+	// focus survives NO_COLOR and a monochrome terminal. Both styles are built once
+	// (styles.go) rather than per tile per frame: Render does not mutate them.
+	style := tileFrameStyle
 	if in.Focused {
-		// The focused tile's border differs by more than colour (a thicker
-		// glyph set), so focus survives NO_COLOR and a monochrome terminal.
-		border = lipgloss.ThickBorder()
-		borderColor = tileFocusedBorderColor
+		style = tileFocusedFrameStyle
 	}
-	style := lipgloss.NewStyle().Border(border).BorderForeground(borderColor).Padding(0, 1)
 	return style.Render(strings.Join(lines, "\n"))
 }
 
@@ -323,12 +322,22 @@ func cpuLabel(v vm.VM) string {
 // the gauge's presence (or absence, for cpu/mem — see renderTile) is the
 // signal; the row itself is secondary to the title/status above it.
 func tileGaugeLine(label string, frac float64, value string, width int) string {
+	return tileGaugeRow(label, value, width, func(barWidth int) string {
+		return tileGaugeBar(frac, barWidth)
+	})
+}
+
+// tileGaugeRow is the row arithmetic every gauge shares: the label column, the bar
+// that fills what is left, and the value. Stated ONCE, because the fixed-row
+// alignment the tile depends on is exactly what drifts when two copies of it
+// disagree about the label width or the separator.
+func tileGaugeRow(label, value string, width int, bar func(barWidth int) string) string {
 	labelCol := fmt.Sprintf("%-*s", tileGaugeLabelWidth, label)
 	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
 	if barWidth < 3 {
 		barWidth = 3
 	}
-	return tileChromeStyle.Render(labelCol + tileGaugeBar(frac, barWidth) + " " + value)
+	return tileChromeStyle.Render(labelCol + bar(barWidth) + " " + value)
 }
 
 // tileGaugeNoReading renders a gauge row for a metric that is REAL but currently
@@ -341,13 +350,9 @@ func tileGaugeLine(label string, frac float64, value string, width int) string {
 // is idle" — a busy VM would read as asleep. The em dash says the same thing in
 // the value column, where a number would otherwise go.
 func tileGaugeNoReading(label string, width int) string {
-	labelCol := fmt.Sprintf("%-*s", tileGaugeLabelWidth, label)
-	const value = "—"
-	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
-	if barWidth < 3 {
-		barWidth = 3
-	}
-	return tileChromeStyle.Render(labelCol + strings.Repeat("·", barWidth) + " " + value)
+	return tileGaugeRow(label, "—", width, func(barWidth int) string {
+		return strings.Repeat("·", barWidth)
+	})
 }
 
 // tileGaugeBar renders a filled/empty bar of exactly width cells for a
@@ -415,10 +420,8 @@ func tileProgressBarLine(p ansibleProgress, width int) string {
 // silent minutes (see ansible.go's Step doc).
 func tileRoleLine(p ansibleProgress) string {
 	switch {
-	case p.Role != "":
-		return tileChromeStyle.Render(fmt.Sprintf("ansible: %s · %d/%d", p.Role, p.Index, p.Total))
-	case p.Task != "":
-		return tileChromeStyle.Render(fmt.Sprintf("ansible: %s · %d/%d", p.Task, p.Index, p.Total))
+	case cmp.Or(p.Role, p.Task) != "":
+		return tileChromeStyle.Render(fmt.Sprintf("ansible: %s · %d/%d", cmp.Or(p.Role, p.Task), p.Index, p.Total))
 	case p.Step != "":
 		return tileChromeStyle.Render(p.Step)
 	default:

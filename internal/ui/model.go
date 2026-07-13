@@ -120,8 +120,8 @@ type model struct {
 	// build and a later file copy are two runs, and the copy may not evict the
 	// build. It is a POINTER because the model is passed by value — a registry
 	// embedded here would fork on the first copy —
-	// and it satisfies the jobLookup seam in commandreg.go, which gates Delete
-	// while a VM builds and the reopen-log verb on a VM having a run to show. A nil
+	// It gates Delete while a VM builds, and the reopen-log verb on a VM having a run
+	// to show (see commandreg.go). A nil
 	// registry is safe to call and reports "no jobs", so a model built by hand
 	// behaves exactly as it did before this existed.
 	jobs *jobRegistry
@@ -256,6 +256,15 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
+
+		// Probe the host ONCE, here, so View never has to. Every list refresh
+		// re-samples these (off the Update goroutine — see listCmd), but the header
+		// renders before the first list lands, and a header that fell back to probing
+		// would statfs the Lima volume on every frame until then — and FOREVER on a
+		// host where the probe legitimately returns 0, because a zero sentinel is
+		// never replaced by another zero.
+		headerMem:      hostMemBytesFn(),
+		headerDiskFree: hostDiskFreeFn(),
 	}
 	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
 	// the model renders sensibly before the first real WindowSizeMsg arrives.
@@ -337,11 +346,18 @@ func (m *model) tickSpinner() tea.Cmd {
 	return m.spinner.Tick
 }
 
-// footerView renders bindings through the shared help.Model and then clips
-// the result HONESTLY to ContentWidth with an ANSI-aware truncation of its
-// own — see the note on applySize above for why it may not lean on
-// help.Model's own width truncation. Shared by the board (board.go) and the
-// VM screen (detail.go) so the fix lands on both footers, not just one.
+// footerView renders bindings through the shared help.Model and then clips the
+// result HONESTLY to ContentWidth with an ANSI-aware truncation of its own — see
+// the note on applySize above for why it may not lean on help.Model's own width
+// truncation (SetWidth(0) deliberately turns that off, because it renders one item
+// PAST the budget rather than stopping).
+//
+// EVERY footer goes through here. Four of the five screens used to call
+// m.help.ShortHelpView directly, which — with the internal truncation disabled —
+// meant they were rendering completely unclipped help bars: the overflow this
+// function exists to prevent, still live on the form, the secrets editor, the
+// destination prompt and the progress screen. A footer that is not clipped here is
+// not clipped at all.
 func (m model) footerView(bindings []key.Binding) string {
 	return m.clipLine(m.help.ShortHelpView(bindings))
 }
@@ -467,31 +483,47 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.vms = msg.vms // DiskUsed / UpSince / LastUsed are measured in listCmd, off the Update goroutine
 		m.vmsLoaded = true
-		m.headerMem, m.headerDiskFree = msg.hostMem, msg.hostDiskFree
-		// Reconcile the managed index against reality so a VM deleted outside the
-		// TUI stops being flagged managed (and recreate-able). Shared with the
-		// headless `sand create` path (internal/manage) so the two entrypoints
-		// cannot drift.
-		// A VM whose provision is STILL RUNNING is EXPECTED to be missing from
-		// `limactl list`, and its absence must not be read as a disappearance. A
-		// create's clone has not landed yet; a RESET has deliberately deleted its own
-		// instance and will clone it back minutes later. Treat both as present.
+		// Adopt a sample only if the message CARRIES one. listCmd always does; a message
+		// built by hand (a test, or any future caller) does not, and must not blank the
+		// startup probe by handing us a zero.
+		if msg.hostMem > 0 {
+			m.headerMem = msg.hostMem
+		}
+		if msg.hostDiskFree > 0 {
+			m.headerDiskFree = msg.hostDiskFree
+		}
+		// ORDER MATTERS, and it is enforced by the data, not by this comment.
 		//
-		// This is not a cosmetic guard. Dropping such a VM here unmanages it and then
-		// DELETES ITS HOST-STORED SECRETS below — permanently, including the GH_TOKEN
-		// seeded at create. The reset then rebuilds the VM and applies an empty
-		// secrets.env to it, so git auth inside the rebuilt sandbox simply stops
-		// working, with nothing on screen to explain why. jobs.reconcile already
-		// exempts exactly these jobs (see `!j.seen || j.recreates`); the managed index
-		// and the secrets store need the same exemption, and had none. It was
-		// unreachable before this plan only because a reset pinned the user to the
-		// progress screen and no list refresh ran underneath it.
+		// The job registry goes FIRST. It knows which absences are legitimate — a
+		// build whose clone has not landed, a reset that deleted its own VM — and it
+		// hands those names back as `protected`. Everything downstream then treats
+		// them as present.
+		//
+		// That is not bookkeeping. manage.Reconcile drops any managed VM missing from
+		// the list, and a dropped VM's HOST SECRETS ARE DELETED below — permanently,
+		// GH_TOKEN included. A VM mid-reset is missing from the list by design, so
+		// without this it was unmanaged and stripped of its secrets on the next 5s
+		// refresh; the reset then rebuilt it and applied an empty secrets.env, and git
+		// auth inside the rebuilt sandbox simply stopped working with nothing on screen
+		// to explain why. The exemption is decided ONCE, in the registry, rather than
+		// re-derived here from a different question.
 		listed := present(msg.vms)
-		live := msg.vms
-		for _, name := range m.jobs.names() {
-			if m.jobs.Building(name) && !listed[name] {
-				live = append(live, vm.VM{Name: name})
+		reaped, protected := m.jobs.reconcile(listed)
+		if len(reaped) > 0 {
+			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
+			// Nothing left to show for the run the user was watching.
+			if m.view == viewProgress && !m.jobs.exists(m.progressJob) {
+				m.view = viewBoard
 			}
+		}
+
+		// Reconcile the managed index against reality so a VM deleted outside the TUI
+		// stops being flagged managed (and recreate-able) — but a VM the registry just
+		// vouched for counts as present. Shared with the headless `sand create` path
+		// (internal/manage) so the two entrypoints cannot drift.
+		live := msg.vms
+		for _, name := range protected {
+			live = append(live, vm.VM{Name: name})
 		}
 		dropped, err := manage.Reconcile(m.reg, live)
 		if err != nil {
@@ -504,17 +536,6 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// isn't worth displacing the reconcile status above.
 		for _, name := range dropped {
 			_ = m.sec.Remove(name)
-		}
-		// Fold the fresh list into the job registry: a job whose VM has disappeared
-		// (deleted here or outside sand) is cancelled and reaped rather than left
-		// running against a VM that no longer exists. reconcile knows not to reap a
-		// build whose VM does not exist YET, nor a reset that deleted its own VM.
-		if reaped := m.jobs.reconcile(present(msg.vms)); len(reaped) > 0 {
-			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
-			// Nothing left to show for the run the user was watching.
-			if m.view == viewProgress && !m.jobs.exists(m.progressJob) {
-				m.view = viewBoard
-			}
 		}
 		// The board's tiles come straight off m.vms + the registry + the job
 		// registry, so there is nothing to rebuild — only the focus ring has to be

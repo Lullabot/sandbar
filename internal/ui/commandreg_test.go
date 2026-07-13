@@ -165,7 +165,7 @@ func TestBoardHelpAndDispatchAgree(t *testing.T) {
 				}
 			}
 			if enabled != shown {
-				t.Fatalf("%s: command %q: enabledFor=%v but shown-in-help=%v (must agree)", name, c.help, enabled, shown)
+				t.Fatalf("%s: command %q: enabledFor=%v but shown-in-help=%v (must agree)", name, c.binding.Help().Desc, enabled, shown)
 			}
 		}
 	}

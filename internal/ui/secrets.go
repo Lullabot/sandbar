@@ -259,6 +259,6 @@ func (m model) secretsView() string {
 		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section "+
 			"(e.g. [github.com/acme]) to scope git auth to that subtree.") + "\n")
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.secretsHelp()))
+	b.WriteString("\n" + m.footerView(m.secretsHelp()))
 	return appStyle.Render(b.String())
 }
