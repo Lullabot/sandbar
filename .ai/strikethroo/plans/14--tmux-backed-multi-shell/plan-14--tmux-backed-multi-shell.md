@@ -690,3 +690,100 @@ load-bearing rather than incidental.
     - **No user-facing decision was re-litigated.** tmux-by-default, no `--no-tmux`
       escape hatch, grouped sessions for later attaches, and the two hazards (the
       PTY question and the `destroy-unattached` asymmetry) all carry forward intact.
+
+- **2026-07-13 — PTY question settled (task 01). VERDICT: `limactl shell` DOES
+  allocate a PTY. The plan's primary path holds; the `ssh -t` fallback is NOT
+  needed and is now formally dropped.** Probed against a real sand VM
+  (`sand-tmux-probe`, cloned from `claude-base` and provisioned by `sand create`)
+  by running the attach inside a host tmux window on a private socket, which
+  supplies the real terminal an agent shell lacks:
+
+  ```
+  $ tmux -L sandprobe new-session -d -s probe -x 120 -y 30 \
+      "limactl shell sand-tmux-probe tmux new-session -A -s probe"
+  $ tmux -L sandprobe capture-pane -p -t probe
+  debian@sand-tmux-probe:~$
+  [probe] 1:bash*                              "sand-tmux-probe" 16:06 13-Jul-26
+  ```
+
+  That second line is a guest **tmux status bar**, and `limactl shell
+  sand-tmux-probe tmux list-sessions` independently reported `probe: 1 windows
+  … (attached)`. tmux did not print `open terminal failed: not a terminal`.
+
+  **`--workdir` confirmed** (`limactl shell --help` → `--workdir string   Working
+  directory`) **and confirmed to fix the papercut**, which reproduced live:
+
+  ```
+  $ limactl shell sand-tmux-probe echo hello
+  bash: line 1: cd: /home/debian/sandbar/.claude/worktrees/multi-shell-tmux: No such file or directory
+  bash: line 1: cd: /home/debian: No such file or directory
+  hello
+  $ limactl shell --workdir /home/debian.guest sand-tmux-probe echo hello
+  hello
+  ```
+
+  **Two argv details the builder (task 02) MUST honor, both learned the hard way
+  here:**
+    1. **`--workdir` goes BEFORE the instance name.** `limactl shell <name>
+       --workdir <dir> …` does *not* work — limactl forwards the flag to the
+       guest's bash, which dies with `/bin/bash: --: invalid option`. The correct
+       form is `limactl shell --workdir <dir> <name> <cmd…>`.
+    2. **Do NOT pass a `--` separator** before the guest command. `limactl shell
+       <name> -- <cmd>` forwards the `--` to the guest bash and fails the same
+       way. The guest command follows the instance name directly.
+
+  The guest home on this VM is `/home/debian.guest` — confirming it is
+  `/home/<user>.guest`, not `/home/<user>`, exactly as the plan warns.
+
+  Probe VM **`sand-tmux-probe` is left Running** for tasks 04 and 06; task 06
+  deletes it (`limactl delete -f sand-tmux-probe`). All probe tmux sessions
+  (guest and host) were cleaned up; the user's own tmux server was never touched.
+
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001["Task 001: Verify limactl PTY assumption<br/>(settles the attach mechanism)"] --> 002["Task 002: Shared attach-command builder<br/>(the one seam; grouped sessions)"]
+    002 --> 003["Task 003: sand shell subcommand"]
+    002 --> 004["Task 004: TUI S verb + host-$TMUX fast path"]
+    003 --> 005["Task 005: Docs (README-sand, AGENTS)"]
+    004 --> 005
+    003 --> 006["Task 006: Real-VM validation + limae2e tests"]
+    004 --> 006
+```
+
+No circular dependencies. Every task appears in exactly one phase.
+
+### ✅ Phase 1: De-risk — settle the PTY question
+**Parallel Tasks:**
+- ✔️ Task 001 (`completed`): Verify `limactl shell <vm> <cmd>` allocates a PTY against a real VM under a real terminal; choose `limactl shell` vs the `ssh -t` fallback and record the evidence in the plan's Change Log. Brings up the probe VM reused by phases 3–4.
+
+*Gate: nothing else may be implemented until the attach mechanism is evidence-backed. This is the plan's single highest-risk unknown and everything downstream depends on it.*
+
+### Phase 2: The seam
+**Parallel Tasks:**
+- Task 002: The shared attach-command builder — a pure `(name, guestHome) → argv` function that owns all tmux knowledge, creates `main` on first attach and a **grouped** session afterwards, and sets `destroy-unattached` on the grouped session **only, never on `main`** (depends on: 001)
+
+### Phase 3: The two entrypoints
+**Parallel Tasks:**
+- Task 003: `sand shell <name>` subcommand — a third `switch` case in `cmd/sand/main.go`, real-TTY hand-off, "not running" refusal in words, usage string updated (depends on: 002)
+- Task 004: The TUI's `S` registry verb — build argv from the seam, pass `--workdir`, and branch on host `$TMUX` to open a new host window as an ordinary `tea.Cmd` instead of suspending via `tea.ExecProcess`; rewrite `about` and the log copy; goldens must stay unchanged (depends on: 002)
+
+### Phase 4: Prove it and write it down
+**Parallel Tasks:**
+- Task 005: Documentation — `README-sand.md` shell copy and a `sand shell` section, the tmux essentials (`C-a` prefix, `C-a d` detaches, closing the terminal no longer ends the session), AGENTS.md's third entrypoint + anti-drift seam. `CHANGELOG.md` is generated, not hand-edited (depends on: 003, 004)
+- Task 006: Real-VM validation and `limae2e` tests — attach, persistence across detach, grouped-session independence, the `destroy-unattached` cleanup asymmetry asserted on `tmux list-sessions`, the heartbeat surviving an attach, and the workdir fix (depends on: 003, 004)
+
+### Post-phase Actions
+
+Per `POST_PHASE.md`: `gofmt -l .` (must be empty), `go vet ./...`, `go test ./...`, then a conventional commit per phase. Task statuses and phase headers are marked ✔️/✅ in this blueprint as they complete.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 6
