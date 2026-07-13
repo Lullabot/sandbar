@@ -659,6 +659,6 @@ func (m model) formView() string {
 		b.WriteString("\n" + warnStyle.Width(cw).Render(w) + "\n")
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.formHelp()))
+	b.WriteString("\n" + m.footerView(m.formHelp()))
 	return appStyle.Render(b.String())
 }

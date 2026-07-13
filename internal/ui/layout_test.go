@@ -39,11 +39,8 @@ func TestClassifySizeSweep(t *testing.T) {
 		if lm.FooterHeight <= 0 {
 			t.Errorf("classify(%d,%d).FooterHeight = %d, want > 0", sz.w, sz.h, lm.FooterHeight)
 		}
-		if lm.ShowMessages && lm.MessagesHeight <= 0 {
-			t.Errorf("classify(%d,%d).ShowMessages but MessagesHeight = %d, want > 0", sz.w, sz.h, lm.MessagesHeight)
-		}
-		if !lm.ShowMessages && lm.MessagesHeight != 0 {
-			t.Errorf("classify(%d,%d) hides messages but MessagesHeight = %d, want 0", sz.w, sz.h, lm.MessagesHeight)
+		if lm.MessagesHeight < 0 {
+			t.Errorf("classify(%d,%d).MessagesHeight = %d, want >= 0 (0 = the strip is shed)", sz.w, sz.h, lm.MessagesHeight)
 		}
 
 		// Every pane's height budget must sum within the terminal height — no

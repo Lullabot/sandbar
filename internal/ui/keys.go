@@ -30,7 +30,12 @@ type keyMap struct {
 // newKeyMap builds the shared chrome/navigation keyMap.
 func newKeyMap() keyMap {
 	return keyMap{
-		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
+		// The ONLY footer that shows this binding is the search bar, where enter keeps
+		// the filter. Its help used to read "detail", for the VM screen — which no
+		// longer exists — so the search footer advertised a screen that could not be
+		// opened. The board's own enter (on the empty slot) is advertised separately as
+		// ghostEnter, because there it means something else entirely.
+		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
 		New:   key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 		// There is no managed-only TOGGLE any more: the board shows sand's managed
 		// clones and nothing else, unconditionally (see board.go). 'f' is gone with

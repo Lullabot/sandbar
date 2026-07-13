@@ -26,10 +26,11 @@ type layoutMode struct {
 	HeaderHeight int
 	HeaderFull   bool
 
-	// ShowMessages/MessagesHeight: the messages strip is the first pane to go
-	// as the terminal shrinks. MessagesHeight is 0 whenever ShowMessages is
-	// false.
-	ShowMessages   bool
+	// MessagesHeight is the messages strip's row budget; the strip is the first pane
+	// to go as the terminal shrinks, and 0 means it is gone. There is deliberately no
+	// companion ShowMessages bool — it was one, and two fields that must agree are
+	// two fields that can disagree. `MessagesHeight > 0` IS the predicate, and it is
+	// the one messages.go already gated on.
 	MessagesHeight int
 
 	// GridHeight is the main scrollable pane's row budget — the tile grid on
@@ -158,7 +159,6 @@ func classify(w, h int) layoutMode {
 		HeaderHeight: headerHeight,
 		HeaderFull:   headerFull,
 
-		ShowMessages:   showMessages,
 		MessagesHeight: messagesHeight,
 
 		GridHeight: grid,

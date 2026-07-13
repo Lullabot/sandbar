@@ -128,15 +128,13 @@ func (m model) hostCapacityText() string {
 		}
 	}
 
+	// NO PROBING HERE. These are sampled in New (once, at startup) and re-sampled by
+	// listCmd, which runs off the Bubble Tea goroutine. hostMemBytes reads
+	// /proc/meminfo and freeDiskBytes walks parent dirs and statfs's the Lima volume;
+	// either one on the render path is a blocking syscall ~10 times a second, and on
+	// a host where the probe returns 0 a "fall back and probe" guard would never stop
+	// firing. Zero simply means unknown, and the clause is dropped.
 	hostMem, hostDisk := m.headerMem, m.headerDiskFree
-	// Before the first list lands there is no sample, so probe directly — the board is
-	// empty at that point and this happens once, not on every frame.
-	if hostMem == 0 {
-		hostMem = hostMemBytesFn()
-	}
-	if hostDisk == 0 {
-		hostDisk = hostDiskFreeFn()
-	}
 
 	var parts []string
 	if hostCPUs := hostCPUsFn(); hostCPUs > 0 {

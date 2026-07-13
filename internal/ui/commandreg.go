@@ -33,26 +33,8 @@ import (
 // itself doesn't carry — e.g. the job-registry seam below.
 type vmCommand struct {
 	binding    key.Binding
-	help       string // short name, for diagnostics/tests only (the binding carries the real help text)
 	enabledFor func(m model, v vm.VM) bool
 	action     func(m *model, v vm.VM) tea.Cmd
-}
-
-// jobLookup is the narrow view of the job registry (jobs.go) that this file's
-// predicates need. *jobRegistry is its only implementation; keeping the
-// interface makes the two things the registry gates here explicit, and keeps
-// them the only things it gates. A nil registry answers false to both, so a
-// model built without one behaves exactly as it did before jobs existed.
-type jobLookup interface {
-	// Building reports whether name has a build/provision in flight. It gates
-	// Delete below (a VM mid-build must not be deleted out from under itself).
-	// A file transfer is not a build, and does not gate it.
-	Building(name string) bool
-	// HasRetainedRun reports whether name has a run whose log can be reopened,
-	// INCLUDING one still in flight: now that leaving the progress screen no
-	// longer abandons a build, "show me this VM's log" has to work while it is
-	// still being written, not only after it stops. It gates the log verb below.
-	HasRetainedRun(name string) bool
 }
 
 // vmBuilding reports whether name is mid-build. Nil-safe: a model with no job
@@ -101,7 +83,6 @@ func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
 var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
-		help:       "start",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status != limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
@@ -111,7 +92,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
-		help:       "stop",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
@@ -120,7 +100,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
-		help:       "restart",
 		enabledFor: notBuilding,
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("restarting " + v.Name + "…")
@@ -130,7 +109,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "reset")),
-		help:    "reset",
 		// Reset clones from a Claude base, so it is only offered for VMs we
 		// created — otherwise it would replace an unrelated VM with a sandbox.
 		// Shared with the headless `sand create` path (internal/manage) so the
@@ -177,7 +155,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
-		help:       "shell",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
@@ -186,10 +163,9 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		help:    "delete",
 		// Delete raises the confirm overlay unconditionally today; the job
 		// registry (task 04) will additionally disable Delete while a VM is
-		// mid-build via vmBuilding — see jobLookup above.
+		// mid-build via vmBuilding.
 		enabledFor: func(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			name := v.Name
@@ -206,7 +182,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "upload")),
-		help:    "upload",
 		// Both directions require a running VM (limactl copy needs the guest up).
 		// This used to be an in-action check that surfaced a "must be running"
 		// status message and did nothing else — exactly the lying-footer pattern
@@ -229,7 +204,6 @@ var vmCommands = []vmCommand{
 		// rename to 'g'. 'g' deliberately collides with bubbles/table's GotoTop —
 		// harmless here since the detail screen has no table.
 		binding:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "download")),
-		help:       "download",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, false) // guest → host
@@ -239,7 +213,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "secrets")),
-		help:       "secrets",
 		enabledFor: alwaysEnabled, // secrets live on the host, editable whether or not the VM is up
 		action: func(m *model, v vm.VM) tea.Cmd {
 			return m.openSecrets(v.Name)
@@ -247,7 +220,6 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
-		help:    "log",
 		// Reopen the VM's last run in the progress viewport. Ansible's output used
 		// to be ephemeral — it streamed into that viewport and was gone the moment
 		// you left the screen — so a provision that failed while you looked away was

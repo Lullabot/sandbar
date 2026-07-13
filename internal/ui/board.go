@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/vm"
@@ -777,65 +778,83 @@ func (m model) gridView() string {
 	}
 	uniform := computeFleetUniformity(voters)
 
-	now := time.Now()
-	frame := m.spinner.View()
-	cells := make([]string, 0, len(vms)+1)
-	for i, v := range vms {
-		// The tile reads the VM's BUILD — never "whatever run this VM happens to
-		// have". A file copy against a running VM is not a build and must not be able
-		// to become one by occupying the same slot (jobs.go).
-		job, hasJob := m.jobs.snapshot(provisionKey(v.Name))
-		sample, hasSample := m.sampleOf(v.Name)
-		cells = append(cells, renderTile(tileInput{
-			VM:        v,
-			Job:       job,
-			HasJob:    hasJob,
-			Sample:    sample,
-			HasSample: hasSample,
-			Traits:    traits[i],
-			Uniform:   uniform,
-			Focused:   v.Name == m.focusName,
-			Width:     m.layout.TileWidth,
-			Spinner:   frame,
-			Now:       now,
-		}))
+	// ONLY THE CELLS ON SCREEN ARE RENDERED. The grid used to build every tile and
+	// then slice the off-screen rows away: at the plan's must-work 80x24 (one column,
+	// two visible rows) a ten-VM board rendered eleven tiles to show two, ten times a
+	// second while a build spinner ran — border, padding and ansi.Truncate work for
+	// nine tiles nobody could see, plus a job-registry and a heartbeat lock for each.
+	//
+	// The uniformity vote above is still fleet-wide, and must be: a badge answers "is
+	// this VM the odd one out", and it is odd against the whole fleet, not against the
+	// two tiles that happen to be scrolled into view. That loop is cheap; rendering is
+	// not.
+	cols := m.gridColumns()
+	total := m.gridCells()
+	rowsTotal := (total + cols - 1) / cols
+
+	first := m.scrollRow
+	if first > rowsTotal-1 {
+		first = rowsTotal - 1
 	}
-	// The empty slot after the last tile carries the call to action, and
-	// ensureFocusVisible counts it in the scroll so it can actually be reached.
-	if m.showsGhost() {
-		cells = append(cells, renderGhostTile(m.layout.TileWidth, m.focusIsGhost()))
+	if first < 0 {
+		first = 0
+	}
+	last := first + m.visibleTileRows()
+	if last > rowsTotal {
+		last = rowsTotal
 	}
 
-	cols := m.gridColumns()
+	firstCell, lastCell := first*cols, last*cols
+	if lastCell > total {
+		lastCell = total
+	}
+
+	now := time.Now()
+	frame := m.spinner.View()
 	gap := tileGapBlock()
-	rows := make([]string, 0, (len(cells)+cols-1)/cols)
-	for i := 0; i < len(cells); i += cols {
-		end := i + cols
-		if end > len(cells) {
-			end = len(cells)
+	rows := make([]string, 0, last-first)
+	for i := firstCell; i < lastCell; i += cols {
+		rowEnd := i + cols
+		if rowEnd > lastCell {
+			rowEnd = lastCell
 		}
-		blocks := make([]string, 0, 2*(end-i)-1)
-		for j := i; j < end; j++ {
+		blocks := make([]string, 0, 2*(rowEnd-i)-1)
+		for j := i; j < rowEnd; j++ {
 			if j > i {
 				blocks = append(blocks, gap)
 			}
-			blocks = append(blocks, cells[j])
+			blocks = append(blocks, m.renderCell(j, vms, traits, uniform, frame, now))
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, blocks...))
 	}
+	return clipBlock(strings.Join(rows, "\n"), m.layout.GridHeight, m.layout.ContentWidth)
+}
 
-	start := m.scrollRow
-	if start > len(rows)-1 {
-		start = len(rows) - 1
+// renderCell draws grid cell i: a VM's tile, or — for the cell just past the last
+// VM — the empty-slot ghost (see gridCells).
+func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUniformity, frame string, now time.Time) string {
+	if i >= len(vms) {
+		return renderGhostTile(m.layout.TileWidth, m.focusIsGhost())
 	}
-	if start < 0 {
-		start = 0
-	}
-	end := start + m.visibleTileRows()
-	if end > len(rows) {
-		end = len(rows)
-	}
-	return clipBlock(strings.Join(rows[start:end], "\n"), m.layout.GridHeight, m.layout.ContentWidth)
+	v := vms[i]
+	// The tile reads the VM's BUILD — never "whatever run this VM happens to have".
+	// A file copy against a running VM is not a build and must not be able to become
+	// one by occupying the same slot (jobs.go).
+	job, hasJob := m.jobs.snapshot(provisionKey(v.Name))
+	sample, hasSample := m.sampleOf(v.Name)
+	return renderTile(tileInput{
+		VM:        v,
+		Job:       job,
+		HasJob:    hasJob,
+		Sample:    sample,
+		HasSample: hasSample,
+		Traits:    traits[i],
+		Uniform:   uniform,
+		Focused:   v.Name == m.focusName,
+		Width:     m.layout.TileWidth,
+		Spinner:   frame,
+		Now:       now,
+	})
 }
 
 // traitsOf gathers one VM's exception-only field values for the fleet-uniformity
@@ -891,14 +910,14 @@ func (m model) hasProvisionJob(name string) bool {
 
 // tileGapBlock is the blank column between two adjacent tiles: as many lines as a
 // tile is tall, so lipgloss joins them without padding one of them out of shape.
-func tileGapBlock() string {
+var tileGapBlock = sync.OnceValue(func() string {
 	line := strings.Repeat(" ", tileGap)
 	lines := make([]string, tileHeight)
 	for i := range lines {
 		lines[i] = line
 	}
 	return strings.Join(lines, "\n")
-}
+})
 
 // renderGhostTile draws the empty slot's call to action: a tile-shaped, dimmed
 // outline of a VM that does not exist yet. It takes the focus ring like any tile
@@ -912,16 +931,10 @@ func renderGhostTile(width int, focused bool) string {
 	}
 	lines[2] = tileChromeStyle.Render(tilePad(centerText(ghostTileText, inner), inner))
 
-	border := lipgloss.RoundedBorder()
-	borderColor := tileGhostBorderColor
+	style := tileGhostFrameStyle
 	if focused {
-		border = lipgloss.ThickBorder()
-		borderColor = tileFocusedBorderColor
+		style = tileFocusedFrameStyle
 	}
-	style := lipgloss.NewStyle().
-		Border(border).
-		BorderForeground(borderColor).
-		Padding(0, 1)
 	return style.Render(strings.Join(lines, "\n"))
 }
 

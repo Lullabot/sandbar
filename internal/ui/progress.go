@@ -282,7 +282,7 @@ func (m model) progressView() string {
 		if m.confirm != nil {
 			b.WriteString("\n\n" + m.confirmView())
 		}
-		b.WriteString("\n\n" + m.help.ShortHelpView(m.progressHelp()))
+		b.WriteString("\n\n" + m.footerView(m.progressHelp()))
 		return appStyle.Render(b.String())
 	}
 
@@ -296,14 +296,13 @@ func (m model) progressView() string {
 	b.WriteString("\n")
 
 	if !job.Running() {
-		const back = "board"
 		switch {
 		case job.Canceled:
-			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the "+back+"."))
+			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the board."))
 		case job.Err != nil:
 			b.WriteString("\n" + errStyle.Render("Failed: "+job.Err.Error()))
 		default:
-			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the "+back+"."))
+			b.WriteString("\n" + okStyle.Render("Done — press esc to return to the "+"board."))
 		}
 	}
 	// A quit that would abandon another VM's build confirms first (requestQuit).
@@ -311,6 +310,6 @@ func (m model) progressView() string {
 		b.WriteString("\n" + m.confirmView())
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.progressHelp()))
+	b.WriteString("\n" + m.footerView(m.progressHelp()))
 	return appStyle.Render(b.String())
 }
