@@ -7,6 +7,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/vm"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -206,15 +207,17 @@ func TestFocusFallsToANeighbourWhenTheFocusedVMDisappears(t *testing.T) {
 		t.Fatalf("focus = %q after deleting the first tile, want db", m2.focusName)
 	}
 
-	// The last VM goes: nothing is focused, and nothing panics.
+	// The last VM goes: the ring lands on the ghost — the only cell left, and the
+	// one thing worth doing on an empty board — and nothing panics. It is still NOT
+	// a focused VM, so no per-VM verb can fire on it.
 	m3 := base
 	m3.focusName = "web"
 	m3 = loadManaged(t, m3)
-	if m3.focusName != "" {
-		t.Fatalf("an empty board should focus nothing, got %q", m3.focusName)
+	if !m3.focusIsGhost() {
+		t.Fatalf("an emptied board should focus the ghost, got %q", m3.focusName)
 	}
 	if _, ok := m3.focusedVM(); ok {
-		t.Fatal("an empty board must report no focused VM")
+		t.Fatal("the ghost is not a VM: an empty board must report no focused VM")
 	}
 }
 
@@ -629,12 +632,17 @@ func TestBoardScrollsToKeepTheFocusedTileVisible(t *testing.T) {
 	if m.focusName != "vm-a" || m.scrollRow != 0 {
 		t.Fatalf("arrowing back should return to vm-a at the top (focus=%q scrollRow=%d)", m.focusName, m.scrollRow)
 	}
-	// The ring never falls off the end of the board.
+	// The ring never falls off the end of the board. The last CELL is the ghost —
+	// it sits after the final tile — so that is where a run of downs comes to rest.
 	for i := 0; i < 10; i++ {
 		m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
+	if !m.focusIsGhost() {
+		t.Fatalf("focus = %q, want the ghost, the last cell (the ring must clamp, not wrap or vanish)", m.focusName)
+	}
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.focusName != "vm-e" {
-		t.Fatalf("focus = %q, want the last tile vm-e (the ring must clamp, not wrap or vanish)", m.focusName)
+		t.Fatalf("up from the ghost should return to the last tile vm-e, got %q", m.focusName)
 	}
 }
 
@@ -660,9 +668,17 @@ func TestBoardFocusMovesInTwoDimensions(t *testing.T) {
 	if m.focusName != "vm-b" {
 		t.Fatalf("right at the row's edge must not move (or wrap), got %q", m.focusName)
 	}
+	// Down from vm-b lands on the GHOST: three VMs in two columns put the empty
+	// slot directly beneath vm-b, and the ghost is a cell the ring moves over like
+	// any other. It used to clamp back onto vm-c, because the invitation was
+	// something the ring could not land on.
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if !m.focusIsGhost() {
+		t.Fatalf("down from vm-b (slot 1) should land on the ghost directly below it, got %q", m.focusName)
+	}
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.focusName != "vm-c" {
-		t.Fatalf("down from vm-b (slot 1) should clamp onto the last tile vm-c, got %q", m.focusName)
+		t.Fatalf("left from the ghost should focus vm-c beside it, got %q", m.focusName)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.focusName != "vm-c" {
@@ -828,16 +844,103 @@ func TestGhostTileInvitesTheFirstVM(t *testing.T) {
 	m = loaded.(model)
 
 	view := ansi.Strip(m.boardView())
-	if !strings.Contains(view, "press n to add a VM") {
+	if !strings.Contains(view, ghostTileText) {
 		t.Fatalf("an empty board should invite the first VM, got:\n%s", view)
+	}
+
+	// And the invitation is SELECTED: on an empty board the ghost is the only cell,
+	// so the ring is already on it and enter creates a VM. The invitation used to be
+	// an instruction the ring could never land on.
+	if !m.focusIsGhost() {
+		t.Fatalf("an empty board should focus the ghost, got focusName %q", m.focusName)
+	}
+	entered, _ := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if entered.view != viewForm {
+		t.Fatalf("enter on the ghost should open the create form, got view %v", entered.view)
 	}
 
 	// The invitation stays put in the next empty slot once a VM exists.
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
 	view = ansi.Strip(m.boardView())
-	if !strings.Contains(view, "web") || !strings.Contains(view, "press n to add a VM") {
+	if !strings.Contains(view, "web") || !strings.Contains(view, ghostTileText) {
 		t.Fatalf("a nearly-empty board should still invite another VM, got:\n%s", view)
 	}
+	// The ring STAYS on the ghost — the identity pin applies to the empty slot too.
+	// It must: the ring is on the ghost whenever the user deliberately arrowed there,
+	// and this same path runs on every refresh tick, so a rule that handed the ring
+	// to a VM whenever one existed would yank focus off the empty slot every few
+	// seconds. Nothing destructive can fire on the ghost, so leaving it there is
+	// safe; arrowing to the new tile is one keypress.
+	if !m.focusIsGhost() {
+		t.Fatalf("the ring should stay on the ghost the user is on, got %q", m.focusName)
+	}
+}
+
+// 'q' QUITS FROM THE BOARD ONLY. On a child screen the key that leaves is `esc`,
+// and a quit key sitting beside it turns one mistyped keystroke into the end of
+// the session instead of the end of the screen. The VM screen and the progress
+// screen both used to offer it, and neither advertised nor tested the difference —
+// which is exactly how it stayed there.
+func TestQuitIsOfferedOnTheBoardAndNowhereElse(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40) // the footer band needs a real terminal to render into
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+
+	// The board: q quits, and says so.
+	if _, cmd := press(t, m, runeKey('q')); !isQuitCmd(cmd) {
+		t.Fatal("q on the board should quit")
+	}
+	if !offersQuit(m.boardHelp()) {
+		t.Fatal("the board should advertise quit in its help bindings")
+	}
+
+	// The VM screen: q does nothing at all, and is not advertised.
+	d := m
+	d.view = viewDetail
+	d.detail = vm.VM{Name: "web", Status: "Running"}
+	after, cmd := press(t, d, runeKey('q'))
+	if isQuitCmd(cmd) || cmd != nil {
+		t.Fatalf("q on the VM screen must not quit (cmd=%v)", cmd)
+	}
+	if after.view != viewDetail {
+		t.Fatalf("q on the VM screen must not move anywhere, got view %v", after.view)
+	}
+	if offersQuit(d.detailHelp()) {
+		t.Fatal("the VM screen must not advertise quit")
+	}
+
+	// The progress screen, with its job finished (the case that used to quit).
+	p := m
+	job := newFakeJob()
+	l := newTeaLoop(t, p)
+	l.exec(l.m.beginProvision("Creating web2", job.run, vm.CreateConfig{Name: "web2", BaseName: "claude-base"}))
+	job.done <- nil
+	l.pump("web2 to finish", func(m model) bool { return !m.jobs.isRunning("web2") })
+	l.exec(l.m.showJobLog("web2"))
+	if l.m.view != viewProgress {
+		t.Fatalf("precondition: the log should be on screen, got view %v", l.m.view)
+	}
+	l.send(runeKey('q'))
+	if l.m.view != viewProgress {
+		t.Fatalf("q on a finished progress screen must not quit or navigate, got view %v", l.m.view)
+	}
+	if offersQuit(l.m.progressHelp()) {
+		t.Fatal("the progress screen must not advertise quit")
+	}
+}
+
+// offersQuit reports whether a screen's help bindings include the quit key. It
+// asks the REGISTRY, not the rendered footer: the footer truncates on a narrow
+// terminal, so a screen could still be dispatching a key it had no room to print.
+func offersQuit(bindings []key.Binding) bool {
+	for _, b := range bindings {
+		for _, k := range b.Keys() {
+			if k == "q" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // 'q' must not orphan work. Task 04 left the board's quit unconditional, so a
@@ -922,17 +1025,23 @@ func TestGhostTileIsReachableWithTwoVMsInOneColumn(t *testing.T) {
 	}
 	m.focusName = "vm-a"
 
-	// Arrowing onto the last VM scrolls the grid to the bottom of its content — and
-	// the ghost cell is what sits there.
+	// Arrowing down walks vm-a → vm-b → the ghost, scrolling as it goes. The ghost
+	// is a cell the ring lands on, so reaching it is just movement.
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.focusName != "vm-b" {
 		t.Fatalf("down from vm-a should focus vm-b, got %q", m.focusName)
+	}
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if !m.focusIsGhost() {
+		t.Fatalf("down from vm-b should reach the ghost, got %q", m.focusName)
 	}
 	view := ansi.Strip(m.boardView())
 	if !strings.Contains(view, ghostTileText) {
 		t.Fatalf("the %q affordance is unreachable with two VMs in one column:\n%s", ghostTileText, view)
 	}
-	if !strings.Contains(view, "vm-b") {
-		t.Fatalf("the focused tile must stay on screen:\n%s", view)
+	// And enter on it creates a VM — the affordance is not just visible, it works.
+	entered, _ := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if entered.view != viewForm {
+		t.Fatalf("enter on the reached ghost should open the create form, got view %v", entered.view)
 	}
 }

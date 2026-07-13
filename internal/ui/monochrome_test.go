@@ -24,9 +24,10 @@ func TestBoardSurfacesAreMonochromeSafe(t *testing.T) {
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "web", Status: "Running"},
-		{Name: "claude-base", Status: "Stopped"}, // hidden: exercises the header's hidden count
+		{Name: "claude-base", Status: "Stopped"}, // no tile: the board is managed-clones-only
 	}})
 	m = loaded.(model)
+	seedSample(&m, "web", guestSample{CPUPct: 25, HasCPU: true, MemUsed: 2 << 30, MemTotal: 8 << 30})
 	m.logMsg("stopping web…") // exercises the messages strip's TEXT, not just its colour
 
 	colored := m.boardView()
@@ -40,10 +41,11 @@ func TestBoardSurfacesAreMonochromeSafe(t *testing.T) {
 	if stripped == "" {
 		t.Fatal("the board must render SOMETHING with colour stripped — colour can never be the only carrier of a status")
 	}
-	// The header's hidden count — the plan's one honesty requirement for this
-	// task — survives stripping in full: it is plain text, never a colour swatch.
-	if !strings.Contains(stripped, "1 base") || !strings.Contains(stripped, "hidden") {
-		t.Fatalf("the hidden count must survive with colour stripped, got:\n%s", stripped)
+	// The header's live host readout survives stripping in full: it is plain text,
+	// never a colour swatch. Same for the tile's gauges — a bar whose fill was only
+	// a colour would vanish here, and the number beside it is what carries the value.
+	if !strings.Contains(stripped, "cpu") || !strings.Contains(stripped, "25%") {
+		t.Fatalf("the live readout and the tile's gauge must survive colour stripping, got:\n%s", stripped)
 	}
 	// The messages strip's logged text survives stripping too.
 	if !strings.Contains(stripped, "stopping web") {

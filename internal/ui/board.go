@@ -25,10 +25,13 @@ package ui
 //     focusedVM(), the VM under the ring.
 //
 // The roster is MANAGED CLONES ONLY, ALWAYS: no unmanaged VM, no base image, and
-// no `f` toggle to bring either back. That has a real cost the plan accepts
-// deliberately — base images become invisible and unmanageable from the TUI —
-// and the mitigation is ONE STRING (a hidden count in the header band, task 09),
-// not a second surface.
+// no `f` toggle to bring either back. That has a real cost, and it is now UNMITIGATED:
+// base images and foreign VMs are invisible and unmanageable from the TUI, and the
+// header no longer even counts them. The header band used to carry a "1 base, 2
+// external hidden" clause for exactly that reason; it was removed on request in
+// favour of a live host readout. Manage base images with `limactl` — and if the
+// invisibility ever bites, the honest fix is to bring that count back, not to add a
+// second roster surface.
 
 import (
 	"fmt"
@@ -51,10 +54,27 @@ import (
 // the board offers none of it.
 var boardMove = key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("↑↓←→", "move"))
 
+// ghostEnter is what the footer advertises for enter while the ring is on the
+// empty slot. Same key, different verb — see boardHelp.
+var ghostEnter = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new VM"))
+
 // ghostTileText is the empty-slot affordance. It is retained BECAUSE a 1–3 VM
 // board is mostly empty: the dominant state of the target user's board becomes a
 // call to action instead of dead space.
-const ghostTileText = "press n to add a VM"
+const ghostTileText = "press enter to add a VM"
+
+// ghostFocusName is the focus ring's sentinel for the ghost cell.
+//
+// The ring is pinned to a VM's NAME, not to a grid slot — that is the identity
+// pin the whole board rests on (see syncBoard) — so making the empty slot
+// selectable means giving it a name. This one contains a NUL byte, which Lima
+// cannot produce and will not accept in an instance name, so it can never collide
+// with a real VM: focusedVM() looks it up among the VMs, fails to find it, and
+// every per-VM verb correctly declines to fire on an empty slot. Ask
+// focusIsGhost, never `focusName == ""` — an empty focusName means the ring is on
+// NOTHING, which is a different state and still reachable (a filtered board with
+// no matches has no ghost either).
+const ghostFocusName = "\x00new"
 
 // isBaseImage reports whether name is a sand base image: a clone source for a
 // managed VM, or the default base name even before any clone exists. Base images
@@ -165,14 +185,59 @@ func (m model) focusedVM() (vm.VM, bool) {
 func (m *model) syncBoard() {
 	vms := m.visibleVMs()
 	if len(vms) == 0 {
-		m.focusName = ""
+		// No tiles. The ring goes to the ghost when there is one — an empty board is
+		// exactly when the invitation to create a VM should be the selected thing —
+		// and to nothing at all when there is not (a filter that matches no VM shows
+		// no ghost: the tiles are hidden, not absent, so there is nothing to invite).
+		//
+		// But only once the FIRST list has landed. Before that the board is empty
+		// because nothing is loaded, not because the host is bare, and adopting the
+		// ghost here would stick: the identity pin would then hold the ring on it as
+		// the real tiles arrived, so sand would open with the empty slot selected and
+		// enter would create a VM rather than open the first one.
+		if m.showsGhost() && m.vmsLoaded {
+			m.focusName = ghostFocusName
+		} else {
+			m.focusName = ""
+		}
 		m.scrollRow = 0
+		return
+	}
+	if m.focusIsGhost() {
+		m.ensureFocusVisible()
 		return
 	}
 	if vmIndex(vms, m.focusName) < 0 {
 		m.focusName = focusNeighbour(vms, m.focusName)
 	}
 	m.ensureFocusVisible()
+}
+
+// focusIsGhost reports whether the ring is on the empty slot. It insists the ghost
+// is actually being SHOWN, so a stale sentinel left behind by a filter (which
+// hides the ghost) can never be mistaken for a live selection.
+func (m model) focusIsGhost() bool {
+	return m.focusName == ghostFocusName && m.showsGhost()
+}
+
+// focusIndex is the ring's slot in the GRID — the cells gridView actually lays
+// out, which is the visible VMs plus the ghost, in that order — or -1 for a ring
+// on nothing. Focus movement and scrolling both go through this, so neither can
+// disagree with what is on screen about where the ring is.
+func (m model) focusIndex() int {
+	if m.focusIsGhost() {
+		return len(m.visibleVMs())
+	}
+	return vmIndex(m.visibleVMs(), m.focusName)
+}
+
+// focusCellName is focusIndex's inverse: the focus name for a grid slot.
+func (m model) focusCellName(i int) string {
+	vms := m.visibleVMs()
+	if i < len(vms) {
+		return vms[i].Name
+	}
+	return ghostFocusName
 }
 
 // focusNeighbour picks where the ring lands when the VM it was on LEAVES the
@@ -223,44 +288,48 @@ func (m model) visibleTileRows() int {
 // the first would put a destructive key over a VM at the opposite end of the
 // board). Moving past the viewport's edge SCROLLS — see ensureFocusVisible —
 // rather than trapping the ring at the last visible row.
+// It walks CELLS, not VMs: the ghost is one of them (gridCells), so the empty slot
+// is arrowed onto like any tile and `enter` on it opens the create form. That is
+// what makes the invitation reachable rather than merely visible — the affordance
+// used to be a printed instruction the ring could never land on.
 func (m *model) moveFocus(dx, dy int) {
-	vms := m.visibleVMs()
-	if len(vms) == 0 {
+	n := m.gridCells()
+	if n == 0 {
 		return
 	}
-	i := vmIndex(vms, m.focusName)
+	i := m.focusIndex()
 	if i < 0 {
-		// The ring is on nothing (an empty board that just gained its first tile):
-		// the first arrow key adopts the first tile rather than doing nothing.
-		m.focusName = vms[0].Name
+		// The ring is on nothing (a board that just gained its first cell): the first
+		// arrow key adopts the first one rather than doing nothing.
+		m.focusName = m.focusCellName(0)
 		m.ensureFocusVisible()
 		return
 	}
 
 	cols := m.gridColumns()
 	col, row := i%cols, i/cols
-	lastRow := (len(vms) - 1) / cols
+	lastRow := (n - 1) / cols
 	target := i
 	switch {
 	case dx < 0 && col > 0:
 		target = i - 1
-	case dx > 0 && col < cols-1 && i+1 < len(vms):
+	case dx > 0 && col < cols-1 && i+1 < n:
 		target = i + 1
 	case dy < 0 && row > 0:
 		target = i - cols
 	case dy > 0 && row < lastRow:
-		if next := i + cols; next < len(vms) {
+		if next := i + cols; next < n {
 			target = next
 		} else {
 			// The row below exists but is SHORT (a partial last row): land on its
-			// final tile instead of refusing to move.
-			target = len(vms) - 1
+			// final cell instead of refusing to move.
+			target = n - 1
 		}
 	}
 	if target == i {
 		return
 	}
-	m.focusName = vms[target].Name
+	m.focusName = m.focusCellName(target)
 	m.ensureFocusVisible()
 }
 
@@ -300,8 +369,7 @@ func (m model) gridCells() int {
 // immediately after that VM, and therefore never at the cost of hiding the tile
 // the ring is on.
 func (m *model) ensureFocusVisible() {
-	vms := m.visibleVMs()
-	i := vmIndex(vms, m.focusName)
+	i := m.focusIndex()
 	if i < 0 {
 		m.scrollRow = 0
 		return
@@ -317,14 +385,13 @@ func (m *model) ensureFocusVisible() {
 		m.scrollRow = row - rows + 1
 	}
 
-	// The last row of the grid's CONTENT (the ghost cell included), and the scroll
-	// that parks the viewport on it.
+	// Never scroll past the bottom of the content (a resize that grows the viewport
+	// would otherwise leave blank rows above a board pinned to it). The ghost is one
+	// of those cells, which is what keeps its row scrollable — and now that the ring
+	// can LAND on the ghost, following the ring is all it takes to reach it. This
+	// used to need a special case that scrolled to the bottom whenever focus reached
+	// the last VM, purely so the unreachable invitation could at least be seen.
 	bottom := (m.gridCells()-1)/cols - rows + 1
-	if lastVM := (len(vms) - 1) / cols; row == lastVM && bottom > m.scrollRow && bottom <= row {
-		m.scrollRow = bottom
-	}
-	// Never scroll past the bottom (a resize that grows the viewport would
-	// otherwise leave blank rows above a board pinned to it).
 	if m.scrollRow > bottom {
 		m.scrollRow = bottom
 	}
@@ -410,12 +477,15 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 	return tea.Batch(cmd, m.tickSpinner())
 }
 
-// requestQuit is the ONE quit path for every screen that offers 'q' (the board,
-// the VM screen, a finished progress screen). Quitting with a build in flight
-// orphans a half-built VM — the job registry (task 04) made concurrent
-// background builds possible and left this hole open — so when work is in flight,
-// 'q' CONFIRMS instead of quitting. ctrl+c is deliberately left as the
-// unconditional escape hatch: it is the key users press when they want out
+// requestQuit is the ONE quit path, and the BOARD IS THE ONLY SCREEN THAT OFFERS
+// 'q' AT ALL. Child screens leave with `esc`; a quit key sitting beside them turns
+// one mistyped keystroke into the end of the session rather than the end of the
+// screen.
+//
+// Quitting with a build in flight orphans a half-built VM — the job registry (task
+// 04) made concurrent background builds possible and left this hole open — so when
+// work is in flight, 'q' CONFIRMS instead of quitting. ctrl+c is deliberately left
+// as the unconditional escape hatch: it is the key users press when they want out
 // regardless, and on the progress screen it cancels the run it is showing.
 func (m *model) requestQuit() tea.Cmd {
 	busy := m.busyVMs()
@@ -497,6 +567,13 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case key.Matches(msg, m.keys.Enter):
+		// Enter on the empty slot creates a VM. `n` still does it from anywhere on
+		// the board — the shortcut is not replaced, it is just no longer the ONLY way
+		// in, which is what the ghost's own text used to have to explain.
+		if m.focusIsGhost() {
+			cmd := m.openForm()
+			return m, cmd
+		}
 		v, ok := m.focusedVM()
 		if !ok {
 			return m, nil
@@ -584,7 +661,15 @@ func (m model) boardHelp() []key.Binding {
 	if m.searching {
 		return []key.Binding{m.keys.Back, m.keys.Enter}
 	}
-	bindings := []key.Binding{boardMove, m.keys.Enter, m.keys.New, m.keys.Search}
+	// Enter does two different things depending on the cell under the ring, so the
+	// footer says which one. Advertising "enter detail" while the ring sits on the
+	// empty slot is precisely the drift the command registry exists to prevent — the
+	// help bar must describe the key that would actually fire.
+	enter := m.keys.Enter
+	if m.focusIsGhost() {
+		enter = ghostEnter
+	}
+	bindings := []key.Binding{boardMove, enter, m.keys.New, m.keys.Search}
 	if v, ok := m.focusedVM(); ok {
 		for _, c := range detailCommands {
 			if c.enabledFor(m, v) {
@@ -718,7 +803,7 @@ func (m model) gridView() string {
 	// The empty slot after the last tile carries the call to action, and
 	// ensureFocusVisible counts it in the scroll so it can actually be reached.
 	if m.showsGhost() {
-		cells = append(cells, renderGhostTile(m.layout.TileWidth))
+		cells = append(cells, renderGhostTile(m.layout.TileWidth, m.focusIsGhost()))
 	}
 
 	cols := m.gridColumns()
@@ -801,17 +886,26 @@ func tileGapBlock() string {
 }
 
 // renderGhostTile draws the empty slot's call to action: a tile-shaped, dimmed
-// outline of a VM that does not exist yet.
-func renderGhostTile(width int) string {
+// outline of a VM that does not exist yet. It takes the focus ring like any tile
+// — the same thick border a focused VM gets, so focus survives NO_COLOR — because
+// it is now a cell the ring can land on and press enter against.
+func renderGhostTile(width int, focused bool) string {
 	inner := tileInnerWidth(width)
 	lines := make([]string, tileContentRows)
 	for i := range lines {
 		lines[i] = tilePad("", inner)
 	}
 	lines[2] = tileChromeStyle.Render(tilePad(centerText(ghostTileText, inner), inner))
+
+	border := lipgloss.RoundedBorder()
+	borderColor := tileGhostBorderColor
+	if focused {
+		border = lipgloss.ThickBorder()
+		borderColor = tileFocusedBorderColor
+	}
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(tileGhostBorderColor).
+		Border(border).
+		BorderForeground(borderColor).
 		Padding(0, 1)
 	return style.Render(strings.Join(lines, "\n"))
 }

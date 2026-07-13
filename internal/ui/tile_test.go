@@ -114,20 +114,70 @@ func TestStoppedTileHasNoCPUOrMemGauge(t *testing.T) {
 }
 
 // A running VM's first heartbeat sample has HasCPU==false (the counters need
-// two readings for a delta) but HasMem()==true from the very first record:
-// the tile must draw mem and skip cpu, not treat the pair as all-or-nothing.
-func TestRunningTileFirstSampleDrawsMemNotCPU(t *testing.T) {
+// two readings for a delta) but HasMem()==true from the very first record: the
+// tile must draw the real mem gauge while REFUSING to state a cpu number — and
+// it must do so without dropping the cpu row, because a row that comes and goes
+// drags every row beneath it up and down (see the disk gauge, which used to
+// jump). The row holds; the value is an em dash until the second reading lands.
+func TestRunningTileFirstSampleShowsMemAndAnUnreadCPU(t *testing.T) {
 	in := baseTileInput()
 	in.VM = vm.VM{Name: "web", Status: "Running"}
 	in.Sample = guestSample{HasCPU: false, MemTotal: 100, MemUsed: 40}
 	in.HasSample = true
 
 	got := strings.ToLower(ansi.Strip(renderTile(in)))
-	if strings.Contains(got, "cpu") {
-		t.Fatalf("a first sample with HasCPU=false must render no cpu gauge, got:\n%s", got)
+	if !strings.Contains(got, "cpu") {
+		t.Fatalf("the cpu row must hold its place even with no reading, got:\n%s", got)
+	}
+	if !strings.Contains(got, "—") {
+		t.Fatalf("an unread cpu must render as an em dash, not a number, got:\n%s", got)
+	}
+	if strings.Contains(got, "0%") {
+		t.Fatalf("an unread cpu must NOT be rendered as 0%% — that invents an idle VM, got:\n%s", got)
 	}
 	if !strings.Contains(got, "mem") {
 		t.Fatalf("a first sample with mem data should still render the mem gauge, got:\n%s", got)
+	}
+}
+
+// The gauges of a running VM never move. A heartbeat that has not reported yet —
+// or one the idle gate tore down while the user was on another screen — leaves cpu
+// and mem unread, and the tile must hold both rows and keep disk exactly where it
+// was. This is the bug the fixed rows exist to close: leaving the board and coming
+// back made two gauges vanish and disk jump up into their slot, so a tile appeared
+// to lose data it had never lost.
+func TestRunningTileKeepsItsRowsWhenTheHeartbeatGoesQuiet(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "107374182400", DiskUsed: "10737418240"}
+
+	in.Sample = guestSample{HasCPU: true, CPUPct: 42, MemTotal: 100, MemUsed: 40}
+	in.HasSample = true
+	live := strings.Split(ansi.Strip(renderTile(in)), "\n")
+
+	in.Sample = guestSample{}
+	in.HasSample = false // the heartbeat is gone: no reading at all
+	quiet := strings.Split(ansi.Strip(renderTile(in)), "\n")
+
+	if len(live) != len(quiet) {
+		t.Fatalf("a tile must not change height when its heartbeat goes quiet (%d vs %d lines)", len(live), len(quiet))
+	}
+	diskRow := func(lines []string) int {
+		for i, l := range lines {
+			if strings.Contains(l, "disk") {
+				return i
+			}
+		}
+		return -1
+	}
+	if a, b := diskRow(live), diskRow(quiet); a < 0 || a != b {
+		t.Fatalf("disk must stay on the same row whether or not there is a reading (row %d live, %d quiet)", a, b)
+	}
+	q := strings.ToLower(strings.Join(quiet, "\n"))
+	if !strings.Contains(q, "cpu") || !strings.Contains(q, "mem") {
+		t.Fatalf("cpu and mem must keep their rows with no reading, got:\n%s", q)
+	}
+	if strings.Contains(q, "42%") {
+		t.Fatalf("a torn-down heartbeat must not keep showing its last reading, got:\n%s", q)
 	}
 }
 

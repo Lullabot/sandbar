@@ -92,10 +92,10 @@ view — the board replaced them, and there is no key that brings a table back.
 The board shows **sand-managed clones only, always** — no unmanaged Lima
 instance, no base image, and **no toggle** to bring either back (the old `f`
 filter is gone). That has a real, deliberate cost: a base image or someone
-else's Lima VM becomes invisible and unmanageable from the TUI. The
-mitigation is the header band's **hidden count** (e.g. "3 sandboxes · 1 base,
-2 external hidden") — read it if the fleet looks smaller than you expect, and
-manage anything hidden with `limactl` directly. A VM mid-build, and a VM
+else's Lima VM becomes invisible and unmanageable from the TUI — manage those
+with `limactl` directly. (The header used to carry a "1 base, 2 external hidden"
+count for exactly this reason; it was dropped in favour of the live host
+readout, so the board no longer tells you anything is out of view.) A VM mid-build, and a VM
 whose last build **failed**, still get a tile even before (or without ever)
 being recorded managed — otherwise a build in progress, or a failed one,
 would have nowhere to report on.
@@ -124,7 +124,7 @@ under the ring, and can never advertise one that would do nothing.
 | Key | Action |
 |-----|--------|
 | `↑` `↓` `←` `→` | Move the focus ring (arrows only — no vim keys; `l` and `g` are per-VM verbs below) |
-| `enter` | Open the focused VM's screen |
+| `enter` | Open the focused VM's screen — or, with the ring on the empty slot, open the create-VM form |
 | `n` | Open the create-VM form |
 | `/` | Incremental name search — type to filter the tiles by name; `esc` clears and exits, `enter` keeps the filter |
 | `X` | Stop all — every sand-managed VM currently running (see below) |
@@ -165,7 +165,6 @@ way:
 | `e` | Edit the VM's **secrets** — offered whether the VM is running or stopped; saving while it's running applies the change to the live guest immediately (not just "on next start") |
 | `l` | Reopen the VM's last build or transfer **log** — offered only when a run (finished or still in flight) is retained to show |
 | `esc` / `backspace` / `enter` | Back to the board (lands back on the same tile) |
-| `q` | Quit (confirms first if a build or transfer is in flight) |
 
 Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
 the TUI resumes when you exit the shell.
@@ -283,7 +282,7 @@ fail to grow to its full size once the volume fills.
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
 | `ctrl+c` (while running) | Cancel **this** build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
 | `esc` / `backspace`, `enter` | Back to the board (or the VM screen, for a transfer) — **immediately**, even while the run is still going. The run keeps going in the background; its tile shows a live progress bar |
-| `q` | Quit if nothing is running; otherwise confirms first (this run or another one elsewhere may still be in flight) |
+
 
 The slow lifecycle steps — building the base image, cloning, and booting — stream
 their `limactl` output live (with `==>` phase banners), so a first-ever creation

@@ -99,6 +99,15 @@ type model struct {
 	focusName string
 	scrollRow int
 
+	// vmsLoaded records that the FIRST `limactl list` has landed. Before it does,
+	// the board is empty because nothing has been loaded yet — not because the host
+	// has no VMs — and syncBoard must not read that transient emptiness as "this
+	// user has no sandboxes" and park the ring on the empty-slot invitation. It did,
+	// and the ring then stayed there (correctly, by the identity pin) even once the
+	// real tiles arrived: sand opened with the ring on the ghost and enter created a
+	// VM instead of opening the first one.
+	vmsLoaded bool
+
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
 	// build and a later file copy are two runs, and the copy may not evict the
@@ -445,6 +454,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.vms = msg.vms // DiskUsed is already measured in listCmd, off the Update goroutine
+		m.vmsLoaded = true
 		// Reconcile the managed index against reality so a VM deleted outside the
 		// TUI stops being flagged managed (and recreate-able). Shared with the
 		// headless `sand create` path (internal/manage) so the two entrypoints
