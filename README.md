@@ -388,6 +388,11 @@ straight from the board — `enter` (open its own screen) is not required first.
 The empty slot after the last tile is a real, selectable cell: arrow onto it and
 press `enter` to create a VM (`n` still works from anywhere on the board).
 
+The header's title row shows the build on the right — the release tag, or the git
+revision (with `-dirty` for an uncommitted tree) for a build from source. The
+footer wraps rather than truncating, so every verb that applies is visible, and
+`?` opens a full reference.
+
 **Board:**
 | Key | Action |
 |-----|--------|
@@ -396,6 +401,7 @@ press `enter` to create a VM (`n` still works from anywhere on the board).
 | `n` | Create a new VM |
 | `/` | Search by VM name (type to filter, `esc` to clear/exit, `enter` to keep) |
 | `X` | Stop every running **sand-managed** VM (unmanaged Lima instances and base images are never touched) |
+| `?` | Show every key with a one-line description (scroll with `↑`/`↓`, `esc` closes) |
 | `q` | Quit (confirms first if a build or transfer is in flight) |
 
 **Per-VM verbs — pressed on the focused tile, straight from the board:**

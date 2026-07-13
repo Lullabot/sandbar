@@ -46,6 +46,15 @@ type layoutMode struct {
 	// spent rows on chrome nobody had counted, and the terminal clipped the
 	// help bar right off the bottom.
 	FooterHeight int
+
+	// HelpLines is how many rows of the footer band the help bar is ALLOWED, which
+	// is not always how many it asked for. The bar wraps rather than truncating, and
+	// on a pathologically narrow terminal every item wraps onto its own line — at
+	// one column wide, eight verbs want twenty-eight rows and there is no terminal
+	// that can pay for them. classifyWithFooter grants what is affordable after the
+	// header, the messages strip and a minimal grid are paid for, and the band cuts
+	// the bar to fit. Wrapping is a courtesy; the grid is not.
+	HelpLines int
 }
 
 // Tile size budget, exported for task 07 (the board/tile renderer) and task
@@ -85,6 +94,11 @@ const (
 	// appearing. See footerBandView.
 	footerBandHeight = 3
 
+	// footerBandChrome is the band's two non-help rows: the activity line (which
+	// carries a pending confirmation, so it may never be shed) and the name-filter
+	// indicator. The help bar's own rows are added on top — see classifyWithFooter.
+	footerBandChrome = 2
+
 	// minBudget is the floor every derived budget is clamped to, so classify
 	// always returns a renderable mode — there is no terminal size at which
 	// sand shows a "terminal too small" wall.
@@ -109,7 +123,18 @@ const (
 // from. It is called from exactly one place: the WindowSizeMsg handler in
 // model.go's applySize. Nothing else may call it — every pane's size must
 // trace back to that single decision.
-func classify(w, h int) layoutMode {
+func classify(w, h int) layoutMode { return classifyWithFooter(w, h, 1) }
+
+// classifyWithFooter is classify with the help bar's ACTUAL line count, which is no
+// longer always one: the footer wraps rather than truncating (footerLines,
+// model.go), so a board offering eight verbs on a narrow terminal spends two or
+// three rows on them. Those rows have to be BUDGETED, not taken silently — a band
+// that renders more rows than the layout counted is exactly what pushed the help bar
+// off the bottom of an 80x24 terminal once already.
+func classifyWithFooter(w, h, helpLines int) layoutMode {
+	if helpLines < 1 {
+		helpLines = 1
+	}
 	contentWidth := clamp(w-appPaddingH, minBudget)
 	contentHeight := clamp(h-appPaddingV, minBudget)
 
@@ -130,7 +155,22 @@ func classify(w, h int) layoutMode {
 	if showMessages {
 		messagesHeight = messagesStripHeight
 	}
-	footerHeight := footerBandHeight
+	// Grant the help bar what is left once the header, the messages strip and a
+	// minimal grid are paid for. It may ask for more than the terminal has.
+	affordable := contentHeight - headerHeight - messagesHeight - footerBandChrome - minBudget
+	if affordable < 1 {
+		affordable = 1
+	}
+	if helpLines > affordable {
+		helpLines = affordable
+	}
+
+	// The band is the activity line + the filter indicator + the help bar's rows,
+	// never fewer than the three it has always been.
+	footerHeight := footerBandChrome + helpLines
+	if footerHeight < footerBandHeight {
+		footerHeight = footerBandHeight
+	}
 
 	grid := contentHeight - headerHeight - messagesHeight - footerHeight
 	// Shed the least-essential pane first as the budget goes negative: the
@@ -164,6 +204,7 @@ func classify(w, h int) layoutMode {
 		GridHeight: grid,
 
 		FooterHeight: footerHeight,
+		HelpLines:    helpLines,
 	}
 }
 

@@ -568,6 +568,10 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		cmd := m.requestQuit()
 		return m, cmd
 
+	case key.Matches(msg, m.keys.Help):
+		m.openHelp()
+		return m, nil
+
 	case key.Matches(msg, m.keys.Search):
 		m.searching = true
 		return m, nil
@@ -678,7 +682,7 @@ func (m model) boardHelp() []key.Binding {
 			}
 		}
 	}
-	return append(bindings, m.keys.StopAll, m.keys.Quit)
+	return append(bindings, m.keys.StopAll, m.keys.Quit, m.keys.Help)
 }
 
 // boardView renders the board top to bottom: the pinned header band, the docked
@@ -730,7 +734,15 @@ func (m model) footerBandView() string {
 	case m.searchQuery != "":
 		lines = append(lines, m.clipLine(statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery))))
 	}
-	lines = append(lines, m.footerView(m.boardHelp()))
+	// The help bar wraps, but only into the rows the layout granted it (HelpLines).
+	// What does not fit is cut, and the cut is MARKED — a footer that silently drops
+	// verbs is the truncation this replaced.
+	help := m.footerLines(m.boardHelp())
+	if n := m.layout.HelpLines; n > 0 && len(help) > n {
+		help = help[:n]
+		help[n-1] = m.clipLine(help[n-1] + " …")
+	}
+	lines = append(lines, help...)
 
 	height := m.layout.FooterHeight
 	if height < 1 {

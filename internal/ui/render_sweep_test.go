@@ -199,3 +199,57 @@ func TestEveryScreensFooterIsClippedToTheTerminal(t *testing.T) {
 		}
 	}
 }
+
+// THE FOOTER WRAPS RATHER THAN TRUNCATING. It used to be one clipped line, so a
+// board offering eight verbs simply ended in "…" and the rest were unfindable —
+// which defeats the point of deriving the footer from the command registry at all.
+// The rows come out of the grid, which has them to spare at 1-3 VMs.
+func TestFooterWrapsInsteadOfTruncating(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 80, 24) // the plan's must-work size, and too narrow for one line
+	m = putOnBoard(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 2})
+
+	lines := m.footerLines(m.boardHelp())
+	if len(lines) < 2 {
+		t.Fatalf("at 80 columns the board's verbs need more than one line, got %d", len(lines))
+	}
+	joined := ansi.Strip(strings.Join(lines, " "))
+	// The LAST verb survives. It was the first casualty of truncation.
+	for _, want := range []string{"q quit", "? keys", "e secrets", "g download"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the wrapped footer dropped %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "…") {
+		t.Errorf("nothing should be elided at 80 columns:\n%s", joined)
+	}
+	// And every line still fits.
+	for _, l := range lines {
+		if got := ansi.StringWidth(ansi.Strip(l)); got > m.layout.ContentWidth {
+			t.Errorf("a wrapped line overflows the content width (%d > %d): %q", got, m.layout.ContentWidth, l)
+		}
+	}
+}
+
+// The build is on the header's title row, right-aligned. It is the one question a
+// bug report always needs.
+func TestHeaderShowsTheBuildRightAligned(t *testing.T) {
+	m := newTestModel(t)
+	pinVersion(t, "v9.9.9-dirty")
+	m = resized(m, 100, 30)
+	m = putOnBoard(t, m, vm.VM{Name: "web", Status: "Running"})
+
+	title := ansi.Strip(strings.Split(m.headerView(), "\n")[0])
+	if !strings.Contains(title, "sand") || !strings.Contains(title, "v9.9.9-dirty") {
+		t.Fatalf("the title row should carry the app name and the build, got %q", title)
+	}
+	if !strings.HasSuffix(strings.TrimRight(title, " "), "v9.9.9-dirty") {
+		t.Fatalf("the build should be right-aligned, got %q", title)
+	}
+	// A terminal too narrow for both drops the version rather than truncating the
+	// hash — half a commit hash is worse than none.
+	narrow := resized(m, 12, 30)
+	if got := ansi.Strip(strings.Split(narrow.headerView(), "\n")[0]); strings.Contains(got, "v9.9") {
+		t.Fatalf("a narrow header should drop the build, not squeeze it: %q", got)
+	}
+}

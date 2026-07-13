@@ -77,6 +77,7 @@ func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	// silently started failing on CI with this developer's 15.6 GiB of RAM baked into
 	// it the moment that overlay moved onto the board.
 	pinHostCapacity(t, 16<<30, 100<<30)
+	pinVersion(t, "v1.2.3")
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
@@ -99,6 +100,15 @@ func pinHostCapacity(t *testing.T, memBytes, diskFreeBytes int64) {
 	hostDiskFreeFn = func() int64 { return diskFreeBytes }
 	hostCPUsFn = func() int { return 16 }
 	t.Cleanup(func() { hostMemBytesFn, hostDiskFreeFn, hostCPUsFn = origMem, origDisk, origCPU })
+}
+
+// pinVersion fixes the build string the header shows. Without it every golden would
+// carry the commit it was generated at and break on the next one.
+func pinVersion(t *testing.T, v string) {
+	t.Helper()
+	orig := buildVersion
+	buildVersion = v
+	t.Cleanup(func() { buildVersion = orig })
 }
 
 // seedManagedIndex writes names into the managed-VM index the program is about
