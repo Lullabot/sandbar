@@ -788,10 +788,10 @@ No circular dependencies. Every task appears in exactly one phase.
 **Parallel Tasks:**
 - ✔️ Task 002 (`completed`): The shared attach-command builder — a pure `(name, guestHome) → argv` function that owns all tmux knowledge, creates `main` on first attach and a **grouped** session afterwards, and sets `destroy-unattached` on the grouped session **only, never on `main`** (depends on: 001)
 
-### Phase 3: The two entrypoints
+### ✅ Phase 3: The two entrypoints
 **Parallel Tasks:**
-- Task 003: `sand shell <name>` subcommand — a third `switch` case in `cmd/sand/main.go`, real-TTY hand-off, "not running" refusal in words, usage string updated (depends on: 002)
-- Task 004: The TUI's `S` registry verb — build argv from the seam, pass `--workdir`, and branch on host `$TMUX` to open a new host window as an ordinary `tea.Cmd` instead of suspending via `tea.ExecProcess`; rewrite `about` and the log copy; goldens must stay unchanged (depends on: 002)
+- ✔️ Task 003 (`completed`): `sand shell <name>` subcommand — a third `switch` case in `cmd/sand/main.go`, real-TTY hand-off, "not running" refusal in words, usage string updated (depends on: 002)
+- ✔️ Task 004 (`completed`): The TUI's `S` registry verb — build argv from the seam, pass `--workdir`, and branch on host `$TMUX` to open a new host window as an ordinary `tea.Cmd` instead of suspending via `tea.ExecProcess`; rewrite `about` and the log copy; goldens must stay unchanged (depends on: 002)
 
 ### Phase 4: Prove it and write it down
 **Parallel Tasks:**

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -207,14 +208,84 @@ func stopAllCmd(cli *lima.Client, names []string) tea.Cmd {
 	}
 }
 
-// shellCmd opens an interactive shell inside a VM. It uses tea.ExecProcess to
-// suspend the TUI and hand the real terminal to `limactl shell <name>`, then
-// resumes the TUI when the shell exits. This deliberately bypasses lima.Runner
-// (which captures output) — an interactive session needs the actual TTY, which
-// only the real process attached to stdin/stdout can provide.
-func shellCmd(name string) tea.Cmd {
-	c := exec.Command("limactl", "shell", name)
+// shellCmd opens a shell into name's persistent guest tmux session (built
+// from lima.AttachArgv — the one seam that knows tmux exists on the guest
+// side; this function constructs no guest tmux command of its own) rooted at
+// guestHome (lima.GuestHome), so no shell greets the user with `bash: cd: …
+// No such file or directory`.
+//
+// It branches on whether the TUI is ITSELF already running inside host tmux:
+//
+//   - $TMUX unset (the common case — a plain terminal, an IDE pane, an SSH
+//     session): this is the only branch that suspends anything. A tmux
+//     CLIENT needs a real TTY, which only tea.ExecProcess can hand it — it
+//     releases the terminal, blocks until the child exits, then restores the
+//     TUI. The TUI resumes on detach (C-a d) or exit either way.
+//   - $TMUX set: instead of suspending, open a new HOST window with `tmux
+//     new-window` and let it run in the background. This is an ORDINARY
+//     tea.Cmd, deliberately NOT tea.ExecProcess: `tmux new-window` returns in
+//     milliseconds, and wrapping a command that fast in tea.ExecProcess would
+//     tear down the alt-screen and release input to suspend the TUI for
+//     essentially no time at all — defeating the entire point of the branch,
+//     which is to keep the live board and its in-flight job progress bars on
+//     screen next to the new shell. The new window re-enters through `sand
+//     shell <name>` rather than reaching into lima directly, so the fast path
+//     and a user typing the command by hand are the exact same code.
+func shellCmd(name, guestHome string) tea.Cmd {
+	if hostInTmux() {
+		return hostTmuxWindowCmd(name)
+	}
+
+	argv := lima.AttachArgv(name, guestHome)
+	c := exec.Command(argv[0], argv[1:]...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return actionDoneMsg{action: "shell", name: name, err: err}
 	})
+}
+
+// hostInTmux reports whether the TUI is itself running inside a host tmux
+// session, which is what decides between shellCmd's two branches. It is one
+// function rather than two reads of the environment because the `S` verb's log
+// line has to describe the branch that actually fired: two independent checks
+// would let the copy drift into telling the user the board stayed live while the
+// TUI was in fact suspending.
+func hostInTmux() bool { return os.Getenv("TMUX") != "" }
+
+// runHostTmuxNewWindow runs `tmux new-window shellCommand` on the host.
+// Indirected through a package-level var — the same seam header.go's
+// hostMemBytesFn/hostDiskFreeFn use — so a test can substitute a fake
+// without ever driving a real tmux server: this package must not require one
+// in a unit test, the same reason no test here may require a real limactl.
+var runHostTmuxNewWindow = func(shellCommand string) error {
+	return exec.Command("tmux", "new-window", shellCommand).Run()
+}
+
+// hostTmuxWindowCmd is shellCmd's fast-path branch: an ordinary (non-
+// suspending) tea.Cmd that opens name's shell in a new HOST tmux window. See
+// shellCmd's doc comment for why this must never be wrapped in
+// tea.ExecProcess.
+func hostTmuxWindowCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		self, err := os.Executable()
+		if err != nil {
+			self = "sand" // last resort: PATH lookup: os.Executable rarely fails
+		}
+		err = runHostTmuxNewWindow(hostTmuxShellCommand(self, name))
+		return actionDoneMsg{action: "shell", name: name, err: err}
+	}
+}
+
+// hostTmuxShellCommand builds the single shell-command string `tmux
+// new-window` runs in its new window. tmux hands that string to $SHELL -c,
+// so self (the running binary's own resolved path — NOT the bare word
+// "sand", which may not be on PATH for an absolute invocation or a `go run`)
+// and name are each quoted as one POSIX shell word rather than joined with a
+// bare space: a resolved binary path is not guaranteed to be space-free.
+func hostTmuxShellCommand(self, name string) string {
+	return shQuote(self) + " shell " + shQuote(name)
+}
+
+// shQuote quotes s as a single POSIX shell word.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

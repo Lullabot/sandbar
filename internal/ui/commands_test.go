@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -330,5 +331,71 @@ func TestReconcileDropPrunesSecrets(t *testing.T) {
 
 	if got := m.sec.Get("gone"); len(got) != 0 {
 		t.Fatalf("a VM dropped by Reconcile should have its secrets pruned, got %v", got)
+	}
+}
+
+// shellCmd's suspend branch (host $TMUX unset, the common case) must return
+// tea.ExecProcess's own message kind, not actionDoneMsg directly — calling
+// the tea.Cmd merely hands tea's runtime an execMsg to act on later; it does
+// not itself run anything. This is the branch a plain terminal takes: a
+// tmux CLIENT needs the real TTY only tea.ExecProcess can hand it.
+func TestShellCmdSuspendsWhenHostTMUXUnset(t *testing.T) {
+	t.Setenv("TMUX", "")
+
+	msg := shellCmd("claude", "/home/claude.guest")()
+
+	if _, ok := msg.(actionDoneMsg); ok {
+		t.Fatal("suspend branch must not resolve to actionDoneMsg directly — that is the fast path's shape, not tea.ExecProcess's")
+	}
+	if got := fmt.Sprintf("%T", msg); got != "tea.execMsg" {
+		t.Fatalf("suspend branch should yield tea.ExecProcess's internal execMsg, got %s", got)
+	}
+}
+
+// shellCmd's fast path (host $TMUX set: the TUI is itself running inside
+// host tmux) must be an ORDINARY tea.Cmd, not tea.ExecProcess — wrapping a
+// `tmux new-window` that returns in milliseconds would suspend the TUI
+// (tearing down the alt-screen, releasing input) for no reason, defeating
+// the entire point of the branch: keeping the live board and its job
+// progress bars on screen. Calling the returned tea.Cmd must resolve
+// directly to actionDoneMsg with no host process actually run (the real
+// `tmux new-window` invocation is stubbed via runHostTmuxNewWindow so this
+// test never touches a real tmux server — see AGENTS.md on not requiring
+// real external state in unit tests).
+func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,4242,0")
+
+	var gotShellCommand string
+	orig := runHostTmuxNewWindow
+	runHostTmuxNewWindow = func(shellCommand string) error {
+		gotShellCommand = shellCommand
+		return nil
+	}
+	t.Cleanup(func() { runHostTmuxNewWindow = orig })
+
+	msg := shellCmd("claude", "/home/claude.guest")()
+
+	done, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("fast path should resolve directly to actionDoneMsg (an ordinary tea.Cmd), got %T", msg)
+	}
+	if done.action != "shell" || done.name != "claude" || done.err != nil {
+		t.Fatalf("actionDoneMsg = %+v, want {action: shell, name: claude, err: nil}", done)
+	}
+	if !strings.Contains(gotShellCommand, "shell") || !strings.Contains(gotShellCommand, "claude") {
+		t.Fatalf("host tmux new-window shell-command = %q, want it to re-enter via `sand shell claude`", gotShellCommand)
+	}
+}
+
+// hostTmuxShellCommand is the pure argv-shaped builder behind the fast
+// path's `tmux new-window` call: tmux hands its shell-command string to
+// $SHELL -c, so both the resolved sand path and the VM name are quoted as
+// single POSIX shell words rather than joined with a bare space — a
+// resolved binary path is not guaranteed to be space-free.
+func TestHostTmuxShellCommandQuotesArguments(t *testing.T) {
+	got := hostTmuxShellCommand("/path with spaces/sand", "claude")
+	want := "'/path with spaces/sand' shell 'claude'"
+	if got != want {
+		t.Fatalf("hostTmuxShellCommand = %q, want %q", got, want)
 	}
 }
