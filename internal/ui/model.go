@@ -124,13 +124,12 @@ type model struct {
 	// A POINTER for the same reason jobs is, and nil-safe for the same reason.
 	heartbeats *heartbeatRegistry
 
-	// focused tracks whether the terminal has focus, and lastInput when the user
-	// last touched a key. Together with the active view they are the idle gate
-	// (shouldTick, heartbeat.go) that decides whether sand may hold SSH connections
-	// open into the guests. focused starts TRUE: a terminal that does not support
-	// focus reporting never sends a FocusMsg, and a gate that waited for one would
-	// leave the board permanently blank.
-	focused   bool
+	// lastInput is when the user last touched a key. Together with the active view
+	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
+	// hold SSH connections open into the guests. Terminal focus is deliberately NOT
+	// part of that gate — see shouldTick for why blur turned out to be the wrong
+	// signal — but a FocusMsg still refreshes this, because returning to the terminal
+	// is the user saying "I'm back".
 	lastInput time.Time
 
 	// Incremental name search. When searching is true, typed keys edit
@@ -247,9 +246,8 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 		view:       viewBoard,
 		viewport:   viewport.New(),
 		spinner:    sp,
-		// The session starts focused and freshly used; anything else and the idle
+		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
-		focused:   true,
 		lastInput: time.Now(),
 	}
 	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
@@ -396,17 +394,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.FocusMsg:
-		// The terminal came back to the foreground. That is the user returning, so it
-		// reopens the idle gate on both counts — and syncHeartbeats, above, reopens
-		// the connections.
-		m.focused = true
+		// The terminal came back to the foreground: the user is here, so the idle
+		// window restarts and syncHeartbeats (above) reopens the connections without
+		// waiting for a keypress.
+		//
+		// There is no BlurMsg case. Blur used to close the gate, on the theory that a
+		// blurred terminal is a backgrounded one — but a terminal beside an editor is
+		// blurred and fully visible, so every alt-tab blanked the gauges of a user who
+		// was still watching them. See shouldTick.
 		m.lastInput = time.Now()
-		return m, nil
-
-	case tea.BlurMsg:
-		// Backgrounded. Every heartbeat is an SSH connection into a guest, and nobody
-		// is looking at the gauges they feed.
-		m.focused = false
 		return m, nil
 
 	case heartbeatSampleMsg:
@@ -428,7 +424,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// This loop iteration is done; tickRefresh (called centrally after every
 		// message — see Update) re-arms the next one iff shouldTick still allows
 		// it, which is what makes the loop stop on its own once the board is no
-		// longer the active, focused, recently-used screen.
+		// longer the active, recently-used screen.
 		m.refreshing = false
 		if !m.shouldTick() {
 			return m, nil
@@ -780,11 +776,11 @@ func (m model) View() tea.View {
 	}
 	v := tea.NewView(content)
 	v.AltScreen = true
-	// Ask the terminal to report focus, which is what delivers the FocusMsg/BlurMsg
-	// that half the heartbeat's idle gate rests on (see shouldTick). A terminal that
-	// does not support it simply never sends one, and the gate falls back to "the
-	// user is here" — the only safe default, since the alternative is a board that
-	// never fills in.
+	// Ask the terminal to report focus. The FocusMsg it delivers is what lets a user
+	// returning to a long-idle window see live gauges again without pressing a key
+	// (see shouldTick — blur is NOT part of the gate). A terminal that does not
+	// support focus reporting simply never sends one, and nothing depends on it: the
+	// gate is then driven by keypresses alone.
 	v.ReportFocus = true
 	return v
 }

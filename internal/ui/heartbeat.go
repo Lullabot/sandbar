@@ -625,22 +625,31 @@ func heartbeatReadCmd(name string, epoch uint64, ch <-chan guestSample) tea.Cmd 
 // This is a hard requirement, not a polish item. Every heartbeat is an open SSH
 // connection into a guest. sand left running in a backgrounded terminal, over SSH,
 // on a laptop on battery, must not quietly hold N of them open and keep N guests
-// spinning in a cat/sleep loop for nobody. Three conditions, and all must hold:
+// spinning in a cat/sleep loop for nobody. Two conditions, and both must hold:
 //
 //   - THE BOARD IS THE SCREEN THE USER IS ON. Gauges nobody can see are not worth an
 //     SSH connection. The tile grid (viewBoard, board.go) is the only screen that
 //     draws them, so it is the only screen that may hold the connections open.
-//   - THE TERMINAL HAS FOCUS. A blurred terminal is a backgrounded one. Terminals
-//     that do not report focus never send a BlurMsg, so they simply never trip this
-//     — the gate degrades to "on", which is the only safe default: a heartbeat that
-//     never runs is a board that never fills in.
-//   - SOMEONE IS STILL THERE. Focus alone does not survive the user walking away
-//     from a foregrounded terminal, so input older than heartbeatIdleAfter closes
-//     everything down. The very next keypress reopens it: any key is a message, every
-//     message re-evaluates this gate, and lastInput is fresh again.
+//   - SOMEONE IS STILL THERE. Input older than heartbeatIdleAfter closes everything
+//     down. The very next keypress reopens it: any key is a message, every message
+//     re-evaluates this gate, and lastInput is fresh again.
+//
+// TERMINAL FOCUS IS DELIBERATELY NOT A CONDITION, and it used to be. The reasoning
+// was "a blurred terminal is a backgrounded one" — and that is simply false. A
+// terminal sitting beside an editor is blurred and FULLY VISIBLE, which is exactly
+// when a user watches a build's gauges. Every alt-tab tore down the heartbeats and
+// dropped the samples, so cpu and mem fell back to "no reading" (an em dash on a
+// dotted bar) while the user was looking straight at them.
+//
+// It also bought almost nothing. The scenario it was defending against — sand left
+// running in a window nobody is looking at — is already covered by the idle window
+// below: no input for heartbeatIdleAfter closes every connection whether the
+// terminal is focused or not. Blur only ever made that happen sooner, at the cost of
+// blanking the gauges of a user who was still watching. The bound is now "at most
+// heartbeatIdleAfter of connections after the user stops interacting", which is the
+// guarantee that was actually wanted.
 func (m model) shouldTick() bool {
 	return m.view == viewBoard &&
-		m.focused &&
 		time.Since(m.lastInput) < heartbeatIdleAfter
 }
 

@@ -25,14 +25,11 @@ func seedSample(m *model, name string, s guestSample) {
 	}
 }
 
-// pinHostForHeader fixes the three host probes so the header's text is exact and
-// portable — real core counts and disk sizes are not.
+// pinHostForHeader fixes the host probes so the header's text is exact and
+// portable — real core counts, RAM and disk sizes are none of those things.
 func pinHostForHeader(t *testing.T) {
 	t.Helper()
-	origCPU := hostCPUsFn
-	hostCPUsFn = func() int { return 16 }
-	t.Cleanup(func() { hostCPUsFn = origCPU })
-	pinHostCapacity(t, 16<<30, 60<<30) // 16GiB RAM, 60GiB disk free
+	pinHostCapacity(t, 16<<30, 60<<30) // 16 cores (pinned in the helper), 16GiB RAM, 60GiB free
 }
 
 // THE HEADER REPORTS USE, NOT ALLOCATION. A VM is GIVEN 8 vCPUs and 8GiB and may
