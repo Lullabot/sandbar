@@ -116,10 +116,10 @@ func renderTile(in tileInput) string {
 		// its rows stay blank: absent, not zeroed.
 		if status == statusRunning {
 			if in.HasSample && in.Sample.HasCPU {
-				lines[2] = tileGaugeLine("cpu", in.Sample.CPUPct/100,
+				lines[2] = tileGaugeLine(cpuLabel(in.VM), in.Sample.CPUPct/100,
 					fmt.Sprintf("%.0f%%", in.Sample.CPUPct), width)
 			} else {
-				lines[2] = tileGaugeNoReading("cpu", width)
+				lines[2] = tileGaugeNoReading(cpuLabel(in.VM), width)
 			}
 			if in.HasSample && in.Sample.HasMem() {
 				lines[3] = tileGaugeLine("mem", memFraction(in.Sample),
@@ -300,11 +300,30 @@ func fleetAgrees[T comparable](fleet []vmTraits, get func(vmTraits) T) bool {
 	return true
 }
 
+// tileGaugeLabelWidth is the gauge rows' shared label column. It is sized for the
+// widest label any tile can produce — "cpu (16c)" — so cpu, mem, disk and build
+// all start their bars in the same column and a VM with a two-digit core count
+// does not shove its bar out of line with the tile above it.
+const tileGaugeLabelWidth = 9
+
+// cpuLabel is the cpu gauge's label, carrying the VM's ALLOCATED core count:
+// "cpu (4c)". The count is the one fact the deleted VM screen had that the tile
+// did not, and it belongs next to the utilization it is the denominator of — the
+// gauge reads "how hard are these 4 cores working", which is unanswerable without
+// knowing there are 4. A VM Lima has not reported yet has no count to show (it is
+// mid-clone), and gets a bare "cpu" rather than an invented "(0c)".
+func cpuLabel(v vm.VM) string {
+	if v.CPUs <= 0 {
+		return "cpu"
+	}
+	return fmt.Sprintf("cpu (%dc)", v.CPUs)
+}
+
 // tileGaugeLine renders one "<label> <bar> <value>" row, dimmed as chrome:
 // the gauge's presence (or absence, for cpu/mem — see renderTile) is the
 // signal; the row itself is secondary to the title/status above it.
 func tileGaugeLine(label string, frac float64, value string, width int) string {
-	labelCol := fmt.Sprintf("%-6s", label) // fits "build" (5 chars) plus a separating space
+	labelCol := fmt.Sprintf("%-*s", tileGaugeLabelWidth, label)
 	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
 	if barWidth < 3 {
 		barWidth = 3
@@ -322,7 +341,7 @@ func tileGaugeLine(label string, frac float64, value string, width int) string {
 // is idle" — a busy VM would read as asleep. The em dash says the same thing in
 // the value column, where a number would otherwise go.
 func tileGaugeNoReading(label string, width int) string {
-	labelCol := fmt.Sprintf("%-6s", label)
+	labelCol := fmt.Sprintf("%-*s", tileGaugeLabelWidth, label)
 	const value = "—"
 	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
 	if barWidth < 3 {

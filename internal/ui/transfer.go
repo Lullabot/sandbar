@@ -58,12 +58,12 @@ func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
 }
 
 // updateBrowse routes keys while the source browser is active. Esc backs out to
-// the detail view (unless the user is mid-filter, where the browser cancels the
+// the board (unless the user is mid-filter, where the browser cancels the
 // filter). When the browser reports a selection, the flow advances to the
 // destination prompt pre-filled with a per-direction default directory.
 func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Back) && m.browser.NotFiltering() {
-		m.view = viewDetail
+		m.view = viewBoard
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -152,11 +152,11 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	// tile and Ansible log are the only record the user has of why that VM is
 	// broken. Both runs can be in flight at once; each has its own log.
 	key := transferKey(m.transferVM)
-	cmd, started := m.beginStream(key, title, viewDetail, run)
-	// A transfer opens its log, unlike a build. The build has a tile to render its
-	// progress onto and a board worth staying on; a transfer is launched from the VM
-	// screen, has no tile bar of its own, and its output is the only sign it is
-	// moving. `esc` still returns to the VM screen with the copy running.
+	cmd, started := m.beginStream(key, title, run)
+	// A transfer opens its log, unlike a build. A build has a tile to render its
+	// progress onto and a board worth staying on; a transfer has no tile bar of its
+	// own, and its output is the only sign it is moving. `esc` still returns to the
+	// board with the copy running.
 	if started {
 		m.focusJob(key)
 	}
@@ -206,7 +206,7 @@ func (m model) hostWorkDir() string {
 // reconstructed from the username. If that can't be read, fall back to the old
 // /home/<user> guess (ssh.config user, then recorded config, then host user).
 // dir is the VM's Lima instance directory, from the record the caller is acting
-// on (never m.detail — see startTransfer).
+// on (see startTransfer).
 func (m model) guestDefaultDir(dir string) string {
 	cfg, ok := m.reg.Config(m.transferVM)
 	home := guestHome(dir)

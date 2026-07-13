@@ -51,7 +51,6 @@ type view int
 
 const (
 	viewBoard view = iota
-	viewDetail
 	viewForm
 	viewProgress
 	viewBrowse
@@ -84,11 +83,10 @@ type model struct {
 	// Update goroutine ever writes to it.
 	messages []message
 
-	// Board + detail. vms is every VM Lima reported; the board (board.go) derives
-	// its roster from it — managed clones only, always — and detail is the VM the
-	// full-screen VM screen is showing.
-	vms    []vm.VM
-	detail vm.VM
+	// vms is every VM Lima reported; the board (board.go) derives its roster from it
+	// — managed clones only, always. There is no second per-VM screen to keep in
+	// sync with it: the VM screen was deleted, and the tile is the whole record.
+	vms []vm.VM
 
 	// focusName is the VM under the board's focus ring: AN IDENTITY, NEVER A SLOT
 	// INDEX. A refresh, an insertion, a deletion or a filter keystroke reorders the
@@ -482,18 +480,6 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// registry, so there is nothing to rebuild — only the focus ring has to be
 		// re-pinned against a fleet that may have gained or lost VMs, which Update
 		// does centrally (syncBoard) after this returns.
-		//
-		// The VM screen acts on the VM it displays, so its snapshot goes stale after
-		// every start/stop/restart. Re-seed it from the reloaded list; if the VM is
-		// gone (deleted, or removed outside the TUI), fall back to the board rather
-		// than rendering a zero-value record.
-		if m.view == viewDetail {
-			if v, ok := m.lookupVM(m.detail.Name); ok {
-				m.detail = v
-			} else {
-				m.view = viewBoard
-			}
-		}
 		return m, nil
 
 	case actionDoneMsg:
@@ -507,15 +493,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// returned from the interactive shell; nothing to report — logMsg("")
 			// below is a deliberate no-op, not a clear (a log has nothing to clear).
 		case msg.action == "delete":
-			// The record the VM screen was displaying no longer exists; only on
-			// this success path (msg.err != nil already returned above) — a failed
-			// delete leaves the VM in place, so the user should stay on its screen
-			// to see the error. (Deleting from the BOARD leaves the view alone: the
-			// board is already the screen, and syncBoard hands the ring to a
-			// neighbour once the refresh drops the tile.)
-			if m.view == viewDetail {
-				m.view = viewBoard
-			}
+			// Nothing to navigate away from: the board is the only screen a delete can
+			// be fired from, and syncBoard hands the ring to a neighbour once the
+			// refresh drops the tile.
+			//
 			// The user acted on this VM in the most final way there is, so its
 			// retained run goes with it: a failed build's sticky Failed status exists
 			// to be acted on, and deleting the VM is acting on it. (A run still in
@@ -649,8 +630,6 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.view {
 		case viewBoard:
 			return m.updateBoard(msg)
-		case viewDetail:
-			return m.updateDetail(msg)
 		case viewForm:
 			return m.updateForm(msg)
 		case viewProgress:
@@ -759,8 +738,6 @@ func (m model) confirmView() string {
 func (m model) View() tea.View {
 	var content string
 	switch m.view {
-	case viewDetail:
-		content = m.detailView()
 	case viewForm:
 		content = m.formView()
 	case viewProgress:

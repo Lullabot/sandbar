@@ -691,8 +691,12 @@ func TestBoardFocusMovesInTwoDimensions(t *testing.T) {
 }
 
 // enter opens the EXISTING full-screen VM screen for the focused tile, and esc
-// comes back to the board with the ring still on the same VM.
-func TestEnterOpensTheVMScreenAndEscReturnsWithFocus(t *testing.T) {
+// ENTER ON A VM TILE DOES NOTHING. It used to open a full-screen VM screen; that
+// screen is deleted, because the tile already showed everything it did — and the
+// one thing it had that the tile did not, the allocated core count, is now on the
+// cpu gauge's own label. Every verb it offered fires from the board. Enter is a
+// verb only on the empty slot, where it creates a VM.
+func TestEnterOnAVMTileDoesNothing(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m,
 		vm.VM{Name: "api", Status: "Running"},
@@ -700,20 +704,12 @@ func TestEnterOpensTheVMScreenAndEscReturnsWithFocus(t *testing.T) {
 	)
 	m.focusName = "web"
 
-	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.view != viewDetail {
-		t.Fatalf("enter should open the VM screen, view = %v", m.view)
+	after, cmd := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if after.view != viewBoard || cmd != nil {
+		t.Fatalf("enter on a VM tile must be a no-op (view=%v cmd=%v)", after.view, cmd)
 	}
-	if m.detail.Name != "web" {
-		t.Fatalf("the VM screen shows %q, want the focused web", m.detail.Name)
-	}
-
-	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.view != viewBoard {
-		t.Fatalf("esc should return to the board, view = %v", m.view)
-	}
-	if m.focusName != "web" {
-		t.Fatalf("focus = %q after returning from the VM screen, want web", m.focusName)
+	if after.focusName != "web" {
+		t.Fatalf("enter must not move the ring, got %q", after.focusName)
 	}
 }
 
@@ -804,26 +800,20 @@ func TestBoardVerbsFireOnlyWhenEnabledForTheFocusedVM(t *testing.T) {
 	}
 }
 
-// A verb must read its VM from the COMMAND REGISTRY's argument and nowhere else.
-// The transfer verbs used to read m.detail — the VM screen's own record — which
-// was harmless while the VM screen was the only place they could fire from. Fired
-// from the board, that is a wrong-VM bug with a file copy on the end of it: the
-// user focuses `web`, presses 'u', and uploads into whichever VM they last
-// zoomed into.
-func TestTransferFromTheBoardTargetsTheFocusedTileNotTheLastZoomedVM(t *testing.T) {
+// A verb reads its VM from the COMMAND REGISTRY's argument and nowhere else. The
+// transfer verbs used to read m.detail — the VM screen's own record — which was
+// harmless while that screen was the only place they could fire from, and a
+// wrong-VM bug with a file copy on the end of it once the board fired them too.
+// The record is gone with the screen; this pins that the verb follows the RING.
+func TestTransferFromTheBoardTargetsTheFocusedTile(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m,
 		vm.VM{Name: "api", Status: "Running", Dir: "/nonexistent/api"},
 		vm.VM{Name: "web", Status: "Running", Dir: "/nonexistent/web"},
 	)
 
-	// The user zooms into api, then comes back to the board and focuses web.
+	// The ring visits api first, then settles on web. Only web may be uploaded into.
 	m.focusName = "api"
-	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.detail.Name != "api" {
-		t.Fatalf("precondition: the VM screen should be showing api, got %q", m.detail.Name)
-	}
-	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m.focusName = "web"
 
 	m, _ = press(t, m, runeKey('u')) // upload
@@ -894,19 +884,17 @@ func TestQuitIsOfferedOnTheBoardAndNowhereElse(t *testing.T) {
 		t.Fatal("the board should advertise quit in its help bindings")
 	}
 
-	// The VM screen: q does nothing at all, and is not advertised.
-	d := m
-	d.view = viewDetail
-	d.detail = vm.VM{Name: "web", Status: "Running"}
-	after, cmd := press(t, d, runeKey('q'))
-	if isQuitCmd(cmd) || cmd != nil {
-		t.Fatalf("q on the VM screen must not quit (cmd=%v)", cmd)
+	// The secrets editor: q types a letter, it does not end the session.
+	e := openSecretsViaKey(t, m, "web", "Running")
+	if e.view != viewSecrets {
+		t.Fatalf("precondition: 'e' should open the secrets editor, got view %v", e.view)
 	}
-	if after.view != viewDetail {
-		t.Fatalf("q on the VM screen must not move anywhere, got view %v", after.view)
+	after, cmd := press(t, e, runeKey('q'))
+	if isQuitCmd(cmd) {
+		t.Fatal("q in the secrets editor must not quit — it is a character")
 	}
-	if offersQuit(d.detailHelp()) {
-		t.Fatal("the VM screen must not advertise quit")
+	if after.view != viewSecrets {
+		t.Fatalf("q in the secrets editor must not navigate, got view %v", after.view)
 	}
 
 	// The progress screen, with its job finished (the case that used to quit).
@@ -1043,5 +1031,26 @@ func TestGhostTileIsReachableWithTwoVMsInOneColumn(t *testing.T) {
 	entered, _ := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if entered.view != viewForm {
 		t.Fatalf("enter on the reached ghost should open the create form, got view %v", entered.view)
+	}
+}
+
+// The footer must not advertise a key that does nothing. `enter` opens no VM
+// screen any more — there is none — so it is offered ONLY on the empty slot,
+// where it creates a VM. The footer read "enter detail" for a while after the
+// screen was deleted, which is exactly the help-bar drift the command registry
+// exists to prevent.
+func TestEnterIsAdvertisedOnlyOnTheGhost(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+
+	m.focusName = "web"
+	if strings.Contains(boardVerbs(m), "enter") {
+		t.Fatalf("a VM tile must not advertise enter — it does nothing there:\n%s", boardVerbs(m))
+	}
+
+	m.focusName = ghostFocusName
+	if !strings.Contains(boardVerbs(m), "enter new VM") {
+		t.Fatalf("the ghost must advertise enter as the create verb:\n%s", boardVerbs(m))
 	}
 }

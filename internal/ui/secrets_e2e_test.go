@@ -159,7 +159,7 @@ func TestE2ESecretsSaveOnRunningVMReachesGuestWithoutRestart(t *testing.T) {
 	}
 	m = resized(m, 100, 30)
 	m.vms = []vm.VM{{Name: name, Status: "Running"}}
-	m = openSecretsViaKey(m, name, "Running")
+	m = openSecretsViaKey(t, m, name, "Running")
 	m = typeInto(m, "GH_TOKEN=new-token-e2e")
 
 	after, cmd := m.Update(ctrlKey('s'))
@@ -170,8 +170,8 @@ func TestE2ESecretsSaveOnRunningVMReachesGuestWithoutRestart(t *testing.T) {
 	if m.secretsErr != nil {
 		t.Fatalf("save should not have produced a parse/store error: %v", m.secretsErr)
 	}
-	if m.view != viewDetail {
-		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
 
 	done := e2eRunCmd(t, cmd)

@@ -192,7 +192,7 @@ func parseSecrets(text string) (map[string]map[string]string, error) {
 func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Code == tea.KeyEsc:
-		m.view = viewDetail
+		m.view = viewBoard
 		m.secretsErr = nil
 		return m, nil
 	case key.Matches(msg, m.keys.Save):
@@ -208,7 +208,7 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.secretsErr = nil
 		name := m.secretsVM
-		m.view = viewDetail
+		m.view = viewBoard
 		if v, ok := m.lookupVM(name); ok && v.Status == limaRunning {
 			m.logMsg("secrets saved for " + name + " — applying to the running VM…")
 			user, liveScopes := m.secretsFor(name)

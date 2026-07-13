@@ -133,7 +133,7 @@ How it spins up the VM:
   `limactl delete <name>` provably removes everything it produced — important
   when the whole point is to throw away potentially compromised code. Move
   files in or out with the TUI's **Upload**/**Download** actions on a VM's
-  detail view: each transfer is a discrete, user-initiated `limactl copy` under
+  board: each transfer is a discrete, user-initiated `limactl copy` under
   the hood, so there is still **no writable host mount or standing share** and
   `limactl delete` provably removes everything.
 - Your answers are passed to Ansible as `--extra-vars`, so there is no
@@ -310,7 +310,7 @@ it in GitHub, to supplying it at VM-create time, to rotating and revoking it.
 
 7. **Rotate, expire, revoke.** Fine-grained PATs must have an expiry. When a
    token expires or you rotate it, update the secret via the secrets editor
-   (press `e` on a VM's detail screen) or re-supply the new token on the next
+   (press `e` on a VM's tile) or re-supply the new token on the next
    create, then revoke the old token in GitHub settings.
 
 8. **Reset and the token.** The token lives in the host secrets store, never in
@@ -392,13 +392,13 @@ press `enter` to create a VM (`n` still works from anywhere on the board).
 | Key | Action |
 |-----|--------|
 | `↑` `↓` `←` `→` | Move the focus ring |
-| `enter` | Open the focused VM's detail screen — or, on the empty slot, create a VM |
+| `enter` | Create a VM, when the ring is on the empty slot (on a VM tile it does nothing) |
 | `n` | Create a new VM |
 | `/` | Search by VM name (type to filter, `esc` to clear/exit, `enter` to keep) |
 | `X` | Stop every running **sand-managed** VM (unmanaged Lima instances and base images are never touched) |
 | `q` | Quit (confirms first if a build or transfer is in flight) |
 
-**VM screen (detail view) — also usable directly from the board on the focused tile:**
+**Per-VM verbs — pressed on the focused tile, straight from the board:**
 | Key | Action |
 |-----|--------|
 | `s` | Start the VM |

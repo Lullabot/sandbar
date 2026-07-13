@@ -574,12 +574,11 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			cmd := m.openForm()
 			return m, cmd
 		}
-		v, ok := m.focusedVM()
-		if !ok {
-			return m, nil
-		}
-		m.detail = v
-		m.view = viewDetail
+		// On a VM tile, enter does NOTHING. It used to open a full-screen VM screen;
+		// that screen is gone, because the tile already shows everything it did — the
+		// one fact it had that the tile did not, the allocated core count, now rides on
+		// the cpu gauge's own label (cpuLabel, tile.go). Every verb it offered fires
+		// straight from the board, on the tile under the ring.
 		return m, nil
 
 	case key.Matches(msg, m.keys.StopAll):
@@ -600,19 +599,10 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	for _, c := range detailCommands {
+	for _, c := range vmCommands {
 		if key.Matches(msg, c.binding) && c.enabledFor(m, v) {
-			// The board and the VM screen run the SAME registry actions, and several
-			// of them open a screen that closes back onto the VM screen (the file
-			// browser, the destination prompt, the secrets editor, a transfer's
-			// progress view). m.detail is the record that screen renders, so it is
-			// seeded with the VM under the ring: without this, backing out of a
-			// transfer started from the board lands on whichever VM the user last
-			// zoomed into — or on a blank record, if they never did.
-			//
-			// It is NOT how the action learns which VM to act on. That comes from the
-			// registry's own argument, and from nowhere else.
-			m.detail = v
+			// There is exactly one source for "which VM is this verb acting on": the
+			// registry's own argument, the tile under the ring. Nothing else.
 			cmd := c.action(&m, v) // mutates m; see the note under Quit above
 			return m, cmd
 		}
@@ -653,7 +643,7 @@ func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // focus ring. That is the whole payoff of task 02's registry: the footer
 // cannot advertise a verb that would do nothing to the focused tile, and it
 // cannot drift from updateBoard's own dispatch loop above (both walk
-// detailCommands), because there is exactly one list to walk.
+// vmCommands), because there is exactly one list to walk.
 func (m model) boardHelp() []key.Binding {
 	if m.confirm != nil {
 		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
@@ -661,17 +651,18 @@ func (m model) boardHelp() []key.Binding {
 	if m.searching {
 		return []key.Binding{m.keys.Back, m.keys.Enter}
 	}
-	// Enter does two different things depending on the cell under the ring, so the
-	// footer says which one. Advertising "enter detail" while the ring sits on the
-	// empty slot is precisely the drift the command registry exists to prevent — the
-	// help bar must describe the key that would actually fire.
-	enter := m.keys.Enter
+	// Enter is a verb ONLY on the empty slot, where it creates a VM. On a VM tile it
+	// does nothing — the screen it used to open is gone — so it is not advertised
+	// there. A help bar offering a key that does nothing is exactly the drift the
+	// command registry exists to prevent; it read "enter detail" for a while after
+	// the VM screen was deleted, which is how this was caught.
+	bindings := []key.Binding{boardMove}
 	if m.focusIsGhost() {
-		enter = ghostEnter
+		bindings = append(bindings, ghostEnter)
 	}
-	bindings := []key.Binding{boardMove, enter, m.keys.New, m.keys.Search}
+	bindings = append(bindings, m.keys.New, m.keys.Search)
 	if v, ok := m.focusedVM(); ok {
-		for _, c := range detailCommands {
+		for _, c := range vmCommands {
 			if c.enabledFor(m, v) {
 				bindings = append(bindings, c.binding)
 			}

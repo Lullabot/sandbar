@@ -19,7 +19,7 @@ two halves that share one repo:
   through a `Runner` interface so code is testable without a real binary.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
-- `ui` — the Bubble Tea model, views, and commands (list/detail/form/secrets/…).
+- `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/…).
 - `secrets`, `registry`, `manage`, `browse`, `vm` — host-side secrets store,
   managed-VM index, shared registry bookkeeping, file browser, domain types.
 
@@ -111,6 +111,16 @@ every bullet, not the constraint itself.
   `github.com/charmbracelet/x/exp/teatest/v2`. Adding an import from the v1
   module path will not just fail to compile cleanly against the rest of the
   package — the v1 and v2 types are different and don't interoperate.
+- **There is NO VM SCREEN, and the board is the only per-VM surface.** It was
+  deleted: the tile already showed everything it did (state, live cpu/memory,
+  disk, uptime), and the one fact it had that the tile did not — the allocated
+  core count — now rides on the cpu gauge's own label, `cpu (4c)` (`cpuLabel`,
+  tile.go). Every verb fires on the tile under the focus ring, from `vmCommands`
+  (commandreg.go). `enter` on a VM tile does NOTHING; it is a verb only on the
+  ghost, where it creates a VM. Do not reintroduce a zoom/detail screen — it is a
+  second render path for facts the tile already carries, and the last one drifted
+  (it rendered `vm.Status` raw, so a failed build read as a green "Running" on the
+  very screen an alarmed user opened *because* the tile went red).
 - **The board is the only roster surface.** There is no table view and no
   compact list to fall back to. Do not add one without a scope change — it
   would be a second render path for "which VMs exist", and the two would
@@ -223,7 +233,7 @@ every bullet, not the constraint itself.
   script derives an exact denominator via `ansible-playbook --list-tasks` and
   echoes `SAND_ANSIBLE_TASK_TOTAL` so the tile's build progress bar has an
   honest fraction instead of an animated guess.
-- **`q` quits from the BOARD ONLY.** It is not in `detailChrome` or on any child
+- **`q` quits from the BOARD ONLY.** It is not on any child
   screen, deliberately: on a child screen the key that means "I am done here" is
   `esc`, and a `q` sitting beside it turns one mistyped key into "close the
   application" rather than "close this screen". The root screen is the only place

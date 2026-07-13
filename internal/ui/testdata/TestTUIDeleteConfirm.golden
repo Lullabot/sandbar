@@ -1,18 +1,26 @@
-                                          
-   VM: claude                             
-                                          
-  Name:              claude               
-  Status:            Running              
-  CPUs:              4                    
-  Memory:            8 GiB                
-  Maximum Disk Size: 100 GiB              
-  Disk Used                               
-  (allocated):                            
-  Arch:              x86_64               
-  Dir:               /nonexistent/claude  
-  Managed:           yes (sand)           
-                                          
-  Delete "claude"?  [y] yes   [n] cancel  
-                                          
-  y confirm • n cancel                    
-                                          
+                                                                                                    
+   sand                                                                                             
+  2 sandboxes (1 running) · cpu —, mem —/15.6 GiB, 7.7 GiB disk free                                
+                                                                                                    
+                                                                                                    
+                                                                                                    
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  ╭─────────────────────────────────────────────╮  
+  ┃ claude                                      ┃  │ web                                         │  
+  ┃ ● Running  arch x86_64                      ┃  │ ○ Stopped  arch aarch64                     │  
+  ┃ cpu (4c) ································ — ┃  │                                             │  
+  ┃ mem      ································ — ┃  │                                             │  
+  ┃ disk     ░░░░░░░░░░░░░░░░░░░░░░░░ ?/100 GiB ┃  │ disk     ░░░░░░░░░░░░░░░░░░░░░░░░░ ?/50 GiB │  
+  ┃ up                                          ┃  │ never used                                  │  
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  ╰─────────────────────────────────────────────╯  
+  ╭─────────────────────────────────────────────╮                                                   
+  │                                             │                                                   
+  │                                             │                                                   
+  │           press enter to add a VM           │                                                   
+  │                                             │                                                   
+  │                                             │                                                   
+  │                                             │                                                   
+  ╰─────────────────────────────────────────────╯                                                   
+                                                                                                    
+  Delete "claude"?  [y] yes   [n] cancel                                                            
+  y confirm • n cancel                                                                              
+                                                                                                    

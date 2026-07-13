@@ -166,32 +166,20 @@ func finalScreen(t *testing.T, tm *teatest.TestModel) []byte {
 	return []byte(ansi.Strip(fm.View().Content) + "\n")
 }
 
-// Enter on the board opens the VM screen for the focused tile.
-func TestTUIDetailView(t *testing.T) {
-	tm := newTeaProgram(t)
-	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
-	teatest.RequireEqualOutput(t, finalScreen(t, tm))
-}
-
-// 'd' on the VM screen raises the delete-confirmation overlay for that VM.
+// 'd' on the FOCUSED TILE raises the delete-confirmation overlay. Straight from
+// the board — there is no VM screen to open first.
 func TestTUIDeleteConfirm(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
 	tm.Send(runeKey('d'))
 	waitForText(t, tm, `Delete "`) // the screen, not the whole prompt — see waitForText
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
-// VM screen -> 'e' opens the (empty) secrets editor for the VM.
+// 'e' on the focused tile opens the (empty) secrets editor for that VM.
 func TestTUISecretsPanelEmpty(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
-	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
 	tm.Send(runeKey('e'))
 	waitForText(t, tm, "Secrets:") // the screen, not "Secrets: claude" — see waitForText
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))

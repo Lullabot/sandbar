@@ -131,9 +131,9 @@ under the ring, and can never advertise one that would do nothing.
 | `q` | Quit (confirms first if a build or transfer is in flight) |
 
 Per-VM verbs — `s`/`x`/`r`/`R`/`S`/`d`/`u`/`g`/`e`/`l` — act on the **focused
-tile** directly from the board, exactly as they do on the VM screen below;
+tile** directly from the board;
 `enter` is not required first. Each is shown in the footer, and fires, only
-when it applies to that VM (see [VM screen](#vm-screen) for what each one
+when it applies to that VM (see [Per-VM verbs](#per-vm-verbs) for what each one
 does and when it's offered).
 
 ### Stop all (`X`)
@@ -146,11 +146,16 @@ active `/` search are still stopped — `X` means "stop every managed VM", not
 one VM refuses to stop, the others still stop and the failure is reported by
 name.
 
-### VM screen
+### Per-VM verbs
 
-Press `enter` on the board (or a per-VM verb directly) to open a VM's
-detail screen. It shows the same verbs as the board's footer, gated the same
-way:
+Every verb below fires on the **focused tile**, straight from the board. There is
+no VM screen to open first — the tile shows everything one would have (its state,
+its live cpu/memory, its disk, its allocated cores on the cpu gauge's own label),
+so it was removed. `enter` on a VM tile does nothing; on the empty slot it creates
+a VM.
+
+The footer offers a verb **only when it applies** to the focused VM, and the key
+does nothing when it is not offered:
 
 | Key | Action |
 |-----|--------|
@@ -221,7 +226,7 @@ ever holds `(scope, KEY, VALUE)` triples.
 ### File browser (upload/download source)
 
 One `bubbles/list` browser is used for **both** the host and guest sides. It
-opens when you press `u`/`d` on the detail view.
+opens when you press `u`/`d` on the focused tile.
 
 | Key | Action |
 |-----|--------|
@@ -229,7 +234,7 @@ opens when you press `u`/`d` on the detail view.
 | `enter` | Enter the highlighted directory (or, on a file, select it) |
 | `ctrl+s` | **Select** the highlighted entry — a directory is copied recursively |
 | `/` | Fuzzy-filter the current directory |
-| `esc` | Back to the detail view |
+| `esc` | Back to the board |
 
 `..` navigates to the parent directory. Enter (navigate into) and `ctrl+s`
 (select for copy) are deliberately distinct, so choosing a directory as a
@@ -281,7 +286,7 @@ fail to grow to its full size once the volume fills.
 |-----|--------|
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
 | `ctrl+c` (while running) | Cancel **this** build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
-| `esc` / `backspace`, `enter` | Back to the board (or the VM screen, for a transfer) — **immediately**, even while the run is still going. The run keeps going in the background; its tile shows a live progress bar |
+| `esc` / `backspace`, `enter` | Back to the board — **immediately**, even while the run is still going. The run keeps going in the background; its tile shows a live progress bar |
 
 
 The slow lifecycle steps — building the base image, cloning, and booting — stream
@@ -292,14 +297,13 @@ instead of a silent spinner.
 Leaving this screen no longer abandons the run: `esc` was the "cancel and go
 back" key on the old list-blocking TUI, and it is not any more. Only `ctrl+c`
 cancels a run; `esc`/`enter` just stop watching it. Reopen it any time with
-`l` on the VM's tile or detail screen.
+`l` on the VM's tile.
 
 ## Moving files in and out
 
-Open a VM with `enter`, then press `u` (**Upload**, host → guest) or `d`
-(**Download**, guest → host) on the detail view. Both require the VM to be
-**Running** (the copy rides Lima's SSH transport); on a stopped VM the action
-explains why and does nothing.
+Press `u` (**Upload**, host → guest) or `g` (**Download**, guest → host) on the
+focused tile. Both require the VM to be **Running** (the copy rides Lima's SSH
+transport); on a stopped VM neither verb is offered and the key does nothing.
 
 Each transfer is a short, sequential wizard:
 
@@ -325,7 +329,7 @@ deliberately deferred.
 
 ## Reset a VM
 
-Pressing `R` on the VM screen (managed VMs only) opens the create form
+Pressing `R` on the focused tile (managed VMs only) opens the create form
 **pre-filled** with the VM's recorded settings, titled *Reset VM*. The `Name` is
 locked to the VM being reset; every other field is editable, so a reset doubles
 as the way to change a VM's CPUs, memory, disk, hostname, git identity, or clone
@@ -353,8 +357,8 @@ Claude login and `.env` token off the VM: **do not preserve if you suspect the V
 is compromised.** See the main [Security Model](README.md#security-model).
 
 **Disk sizing.** Each tile's `disk` gauge shows real allocated blocks against
-the VM's maximum virtual size; the detail view names the two figures
-`Disk Used (allocated)` and `Maximum Disk Size`. `Disk Used` sits well below
+the VM's maximum virtual size — allocated blocks over maximum size. `Disk Used`
+(the left figure) sits well below
 `Max Disk` because qcow2 disks are sparse — only written blocks are allocated. A
 VM's `Max Disk` can **grow** from the base floor (`20GiB`) but cannot **shrink**
 below the current base's virtual size — qcow2 cannot shrink a live disk — so the
@@ -376,8 +380,7 @@ base image, so pointing it at an unrelated VM would replace that VM with a sandb
 To prevent this, `sand` records the instances **it** creates and:
 
 - shows them (and only them, plus one currently mid-build or whose last build
-  failed) on the board, and labels a VM "base image (clone source)" on its own
-  detail screen if it is one,
+  failed) on the board,
 - offers **reset (`R`) only for managed VMs**, and
 - restricts **stop all (`X`)** to running managed VMs, so it never stops an
   unrelated Lima instance.
