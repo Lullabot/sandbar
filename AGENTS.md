@@ -258,6 +258,20 @@ every bullet, not the constraint itself.
   every run ended up seizing the terminal with a full-screen Ansible dump —
   the takeover the job registry exists to end. The suite did not catch it
   because the suite asserted it; do not reintroduce either.
+- **`limactl list` fails outright while ANY instance is mid-clone or mid-delete**
+  ([lima-vm/lima#5236](https://github.com/lima-vm/lima/issues/5236)). `limactl
+  clone` creates the instance directory before writing its `lima.yaml`, and
+  `limactl list` aborts on the first instance it cannot load instead of skipping
+  it — so it exits 1 and prints **nothing**, and every other instance vanishes
+  from the listing too. The window is 40–60s for a clone (i.e. most of a create
+  or reset) and sub-second for a delete. `limactl shell`, `start` and `stop` are
+  unaffected; only enumeration breaks.
+  `lima.ErrListRacedInstanceDir` recognises it and `vmsLoadedMsg`'s handler keeps
+  the fleet it already has, saying so **once** instead of on every 5s tick. Do not
+  "simplify" that away into a plain error: it is the difference between a build
+  the user is watching and a screen full of failures about a VM that is coming up
+  exactly as intended. If #5236 is fixed upstream, the error string stops
+  appearing and the workaround stops firing on its own.
 - **`limactl copy`'s backend is pinned to `scp`, and the pin is load-bearing.**
   Under limactl 2.1.3 the backend decides **where the files land**, not just how
   fast: Lima's rsync backend appends a trailing slash to every path of a

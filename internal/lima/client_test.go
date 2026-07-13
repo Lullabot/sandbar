@@ -196,3 +196,42 @@ func TestPreflightArgvAndErrors(t *testing.T) {
 		t.Fatalf("Preflight() with missing binary = %v, want exec.ErrNotFound wrapped", err)
 	}
 }
+
+// lima-vm/lima#5236: while another instance is mid-clone or mid-delete, its
+// directory exists without a lima.yaml, and `limactl list` does not skip it — it
+// exits 1 and prints nothing, so the whole listing is lost. That is not a failure
+// worth reporting to the user, and List says so with a sentinel.
+func TestListRacedInstanceDirIsDistinguishedFromARealFailure(t *testing.T) {
+	// limactl's real stderr in that window, folded into the error by Runner.Output.
+	const cloneWindow = `exit status 1: time="..." level=warning msg="The directory ` +
+		"`/home/u/.lima`" + ` does not look like a valid Lima directory: stat /home/u/.lima/web/lima.yaml: no such file or directory"
+time="..." level=fatal msg="unable to load instance web: open /home/u/.lima/web/lima.yaml: no such file or directory"`
+
+	_, err := New(errRunner{msg: cloneWindow}).List()
+	if !errors.Is(err, ErrListRacedInstanceDir) {
+		t.Fatalf("a clone/delete window must be reported as ErrListRacedInstanceDir, got %v", err)
+	}
+
+	// Anything else is a real failure and must NOT be swallowed as one.
+	for _, real := range []string{
+		"exit status 1: limactl not found",
+		`exit status 1: level=fatal msg="failed to connect to the daemon"`,
+	} {
+		_, err := New(errRunner{msg: real}).List()
+		if err == nil {
+			t.Fatalf("%q should fail", real)
+		}
+		if errors.Is(err, ErrListRacedInstanceDir) {
+			t.Fatalf("a genuine failure must not be mistaken for a clone window: %q", real)
+		}
+	}
+}
+
+// errRunner fails every command with a fixed message.
+type errRunner struct{ msg string }
+
+func (r errRunner) Output(context.Context, ...string) ([]byte, error) {
+	return nil, errors.New(r.msg)
+}
+func (r errRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error    { return nil }
+func (r errRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error { return nil }

@@ -3,12 +3,14 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/spinner"
@@ -1020,4 +1022,75 @@ func TestAFailedBuildKeepsItsTileWithNoLimaRecord(t *testing.T) {
 	if got := boardNames(l.m); len(got) != 1 || got[0] != "web" {
 		t.Fatalf("a failed build must keep its tile — it is the only report of the failure, got %v", got)
 	}
+}
+
+// A CLONE BREAKS `limactl list` FOR THE WHOLE MINUTE IT RUNS (lima-vm/lima#5236):
+// the instance directory exists before its lima.yaml does, and limactl aborts the
+// listing on the first instance it cannot load rather than skipping it. Every
+// refresh during a create or a reset therefore fails.
+//
+// That must not read as a fault. The board keeps the fleet it already has — the
+// other VMs have not changed, and the building VM's tile comes from the job
+// registry, not from Lima — and the condition is stated ONCE, not on every 5s tick
+// for the duration of the build.
+func TestAListRacingACloneKeepsTheBoardAndIsSaidOnce(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m,
+		vm.VM{Name: "api", Status: "Running"},
+		vm.VM{Name: "db", Status: "Stopped"},
+	)
+	before := len(m.boardVMs())
+
+	raced := vmsLoadedMsg{err: fmt.Errorf("%w: exit status 1", lima.ErrListRacedInstanceDir)}
+	for i := 0; i < 5; i++ { // five refresh ticks, as a real clone would produce
+		next, _ := m.Update(raced)
+		m = next.(model)
+	}
+
+	if got := len(m.boardVMs()); got != before {
+		t.Fatalf("a failed refresh must not empty the board: %d tiles, want %d", got, before)
+	}
+	if n := countMessages(m, "lima#5236"); n != 1 {
+		t.Fatalf("the pause must be reported once, not %d times — it lasts the whole build", n)
+	}
+	if countMessages(m, "list failed") != 0 {
+		t.Fatalf("a clone window is not a list failure and must not be reported as one:\n%v", m.messages)
+	}
+
+	// The clone finishes and listing recovers: the state resets, so a LATER clone
+	// says so again rather than staying quiet forever.
+	next, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "api", Status: "Running"}, {Name: "db", Status: "Stopped"}}})
+	m = next.(model)
+	if m.listRacing {
+		t.Fatal("a successful list must clear the paused state")
+	}
+	next, _ = m.Update(raced)
+	m = next.(model)
+	if n := countMessages(m, "lima#5236"); n != 2 {
+		t.Fatalf("a second clone should report the pause again, got %d reports", n)
+	}
+}
+
+// A REAL list failure is still reported, every time. The workaround above is
+// narrow on purpose: it must not turn a broken limactl into silence.
+func TestARealListFailureIsStillReported(t *testing.T) {
+	m := newTestModel(t)
+	for i := 0; i < 2; i++ {
+		next, _ := m.Update(vmsLoadedMsg{err: errors.New("limactl list: exit status 127: not found")})
+		m = next.(model)
+	}
+	if n := countMessages(m, "list failed"); n != 2 {
+		t.Fatalf("a genuine list failure must be reported every time, got %d", n)
+	}
+}
+
+// countMessages counts the messages in the ring whose text contains want.
+func countMessages(m model, want string) int {
+	n := 0
+	for _, msg := range m.messages {
+		if strings.Contains(msg.text, want) {
+			n++
+		}
+	}
+	return n
 }
