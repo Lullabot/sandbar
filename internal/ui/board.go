@@ -1,0 +1,758 @@
+package ui
+
+// board.go is sand's HOME SURFACE and its ONLY roster: a grid of tiles (task
+// 07 renders one; this file composes them), a focus ring that moves in two
+// dimensions, and the single-key verbs that act on the tile under the ring.
+// There is no second render path, no table, and no toggle back to one.
+//
+// Two properties are non-negotiable, and they are why this is a file of its own
+// rather than "render some cards":
+//
+//   - STABLE ORDER. Tiles sort ALPHABETICALLY, and a VM changing state does not
+//     move it. Grouping running-first is rejected on purpose: at ≤10 VMs the
+//     whole fleet is on screen, so grouping saves no scanning — while re-sorting
+//     on a state transition makes pressing `x` teleport the focused tile across
+//     the board as a DIRECT SIDE EFFECT OF THE VERB THE USER JUST PRESSED, at
+//     exactly the moment they are most likely to press another key. If you find
+//     yourself sorting by status, stop.
+//
+//   - IDENTITY-PINNED FOCUS. The ring tracks the VM's NAME, never the slot
+//     index. This is the difference between a board that is safe to hold a
+//     destructive key on and one that is not, and the failure is silent and
+//     severe: the user arrows to prod-box, a refresh tick lands, the fleet
+//     reorders, and `d` deletes dev-box. Every action key's old contract —
+//     "table.SelectedRow()[0] is the name" — is replaced by exactly one thing:
+//     focusedVM(), the VM under the ring.
+//
+// The roster is MANAGED CLONES ONLY, ALWAYS: no unmanaged VM, no base image, and
+// no `f` toggle to bring either back. That has a real cost the plan accepts
+// deliberately — base images become invisible and unmanageable from the TUI —
+// and the mitigation is ONE STRING (a hidden count in the header band, task 09),
+// not a second surface.
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/lullabot/sandbar/internal/vm"
+
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// boardMove is the help-bar entry for the four arrow keys. Navigation is arrows
+// ONLY, and deliberately not vim keys: `l` is the reopen-log verb and `g` is
+// download (see commandreg.go), so h/j/k/l cannot all mean movement here. A
+// half-vim map that moved vertically but not horizontally would be a trap, so
+// the board offers none of it.
+var boardMove = key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("↑↓←→", "move"))
+
+// ghostTileText is the empty-slot affordance. It is retained BECAUSE a 1–3 VM
+// board is mostly empty: the dominant state of the target user's board becomes a
+// call to action instead of dead space.
+const ghostTileText = "press n to add a VM"
+
+// isBaseImage reports whether name is a sand base image: a clone source for a
+// managed VM, or the default base name even before any clone exists. Base images
+// are the heavy, identity-free images each VM is cloned from — they are NOT
+// workspaces, they get no tile (see boardVMs), and stop-all skips them.
+func (m model) isBaseImage(name string) bool {
+	return m.reg.IsBase(name) || name == vm.DefaultCreateConfig().BaseName
+}
+
+// lookupVM looks up a loaded VM record by name, reporting whether it was found.
+// The miss case is distinguishable from a real zero-value record, and both
+// callers need that: the VM screen's re-seed must route back to the board when
+// its VM is gone, and the board itself must be able to raise a tile for a VM
+// that does not exist YET (a create's clone does not land in `limactl list`
+// until minutes into its own build — the vm.VM{Name: name} returned here is that
+// tile's record).
+func (m model) lookupVM(name string) (vm.VM, bool) {
+	for _, v := range m.vms {
+		if v.Name == name {
+			return v, true
+		}
+	}
+	return vm.VM{Name: name}, false
+}
+
+// boardVMs is THE ROSTER, alphabetically: every VM that gets a tile, and nothing
+// else.
+//
+// A tile exists iff the VM is a sand-managed clone — with one exception that is
+// not a loophole but the point: a VM with a PROVISION JOB gets a tile too.
+// A create's VM is absent from `limactl list` for the first minutes of its own
+// build, and it is not recorded managed until that build SUCCEEDS, so a roster
+// walking only Lima and the registry would show nothing at all for exactly the
+// span the user is waiting on — and a FAILED build's VM (never recorded managed)
+// would have no tile to report the failure on, or to delete it from.
+func (m model) boardVMs() []vm.VM {
+	on := make(map[string]bool, len(m.vms))
+	for _, v := range m.vms {
+		if m.reg.IsManaged(v.Name) {
+			on[v.Name] = true
+		}
+	}
+	for _, name := range m.jobs.names() {
+		if m.hasProvisionJob(name) {
+			on[name] = true
+		}
+	}
+
+	out := make([]vm.VM, 0, len(on))
+	for name := range on {
+		v, _ := m.lookupVM(name) // a miss is a VM being built: its record is its name
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// visibleVMs is the roster narrowed by the live name search ('/'). It is what the
+// grid renders and what the focus ring moves over — and it is deliberately NOT
+// what stop-all acts on (see stopAllTargets).
+func (m model) visibleVMs() []vm.VM {
+	vms := m.boardVMs()
+	if m.searchQuery == "" {
+		return vms
+	}
+	q := strings.ToLower(m.searchQuery)
+	out := vms[:0:0]
+	for _, v := range vms {
+		if strings.Contains(strings.ToLower(v.Name), q) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// vmIndex is the slot a name occupies in vms, or -1.
+func vmIndex(vms []vm.VM, name string) int {
+	for i, v := range vms {
+		if v.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// focusedVM is THE single-sourced contract every verb on this board depends on:
+// the VM under the ring. It reports false when the board is empty (or the ring's
+// VM is not on it), and every caller must respect that rather than acting on a
+// zero-value VM.
+func (m model) focusedVM() (vm.VM, bool) {
+	vms := m.visibleVMs()
+	i := vmIndex(vms, m.focusName)
+	if i < 0 {
+		return vm.VM{}, false
+	}
+	return vms[i], true
+}
+
+// syncBoard re-establishes the focus invariant — THE RING IS ALWAYS ON A VM THAT
+// IS ACTUALLY ON THE BOARD — and is called after EVERY message (see Update), for
+// the same reason syncHeartbeats is: the roster changes under a refresh, a
+// delete, a build starting, and a filter keystroke, in four different files, and
+// a rule re-checked only "where it obviously matters" is one forgotten call away
+// from a ring pointing at a VM the user cannot see.
+//
+// A VM that is still on the board KEEPS the ring, whatever slot it now occupies.
+// That is the identity pin, and it is the whole point.
+func (m *model) syncBoard() {
+	vms := m.visibleVMs()
+	if len(vms) == 0 {
+		m.focusName = ""
+		m.scrollRow = 0
+		return
+	}
+	if vmIndex(vms, m.focusName) < 0 {
+		m.focusName = focusNeighbour(vms, m.focusName)
+	}
+	m.ensureFocusVisible()
+}
+
+// focusNeighbour picks where the ring lands when the VM it was on LEAVES the
+// board — deleted, or hidden by the search filter. It takes the nearest tile
+// alphabetically BEFORE the departed VM, and only when there is none (it was the
+// first) the one that is now first. What it never does is leave the ring sitting
+// on "whatever now occupies the old slot index": the ring moves to a specific,
+// predictable identity, chosen from the board as it is now.
+//
+// vms is the sorted roster, so the last name that still sorts before `gone` is
+// that neighbour.
+func focusNeighbour(vms []vm.VM, gone string) string {
+	if len(vms) == 0 {
+		return ""
+	}
+	pick := vms[0].Name
+	for _, v := range vms {
+		if v.Name >= gone {
+			break
+		}
+		pick = v.Name
+	}
+	return pick
+}
+
+// gridColumns is how many tiles fit side by side — from the LAYOUT MODE (task
+// 03), never from an offset computed here.
+func (m model) gridColumns() int {
+	if m.layout.Columns < 1 {
+		return 1
+	}
+	return m.layout.Columns
+}
+
+// visibleTileRows is how many rows of tiles the grid viewport shows at once. At
+// 80x24 that is two, which is why the grid has to scroll: a power user with ten
+// VMs will run past the edge of it.
+func (m model) visibleTileRows() int {
+	rows := m.layout.GridHeight / tileHeight
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+// moveFocus walks the ring one tile in the grid's own two dimensions, clamping at
+// the board's edges (it never wraps: a ring that wrapped from the last tile to
+// the first would put a destructive key over a VM at the opposite end of the
+// board). Moving past the viewport's edge SCROLLS — see ensureFocusVisible —
+// rather than trapping the ring at the last visible row.
+func (m *model) moveFocus(dx, dy int) {
+	vms := m.visibleVMs()
+	if len(vms) == 0 {
+		return
+	}
+	i := vmIndex(vms, m.focusName)
+	if i < 0 {
+		// The ring is on nothing (an empty board that just gained its first tile):
+		// the first arrow key adopts the first tile rather than doing nothing.
+		m.focusName = vms[0].Name
+		m.ensureFocusVisible()
+		return
+	}
+
+	cols := m.gridColumns()
+	col, row := i%cols, i/cols
+	lastRow := (len(vms) - 1) / cols
+	target := i
+	switch {
+	case dx < 0 && col > 0:
+		target = i - 1
+	case dx > 0 && col < cols-1 && i+1 < len(vms):
+		target = i + 1
+	case dy < 0 && row > 0:
+		target = i - cols
+	case dy > 0 && row < lastRow:
+		if next := i + cols; next < len(vms) {
+			target = next
+		} else {
+			// The row below exists but is SHORT (a partial last row): land on its
+			// final tile instead of refusing to move.
+			target = len(vms) - 1
+		}
+	}
+	if target == i {
+		return
+	}
+	m.focusName = vms[target].Name
+	m.ensureFocusVisible()
+}
+
+// ensureFocusVisible scrolls the grid so the focused tile is on screen. This is
+// the whole of "focus follows scroll": nothing else moves scrollRow, so the
+// viewport cannot drift away from the ring.
+func (m *model) ensureFocusVisible() {
+	vms := m.visibleVMs()
+	i := vmIndex(vms, m.focusName)
+	if i < 0 {
+		m.scrollRow = 0
+		return
+	}
+	cols := m.gridColumns()
+	rows := m.visibleTileRows()
+	row := i / cols
+
+	if row < m.scrollRow {
+		m.scrollRow = row
+	}
+	if row >= m.scrollRow+rows {
+		m.scrollRow = row - rows + 1
+	}
+	// Never scroll past the last row of tiles (a resize that grows the viewport
+	// would otherwise leave blank rows above a board pinned to the bottom).
+	if max := (len(vms)-1)/cols - rows + 1; m.scrollRow > max {
+		m.scrollRow = max
+	}
+	if m.scrollRow < 0 {
+		m.scrollRow = 0
+	}
+}
+
+// stopAllTargets returns the sand-managed VMs that are currently running.
+// Base images are excluded: they are kept stopped by design and are a clone
+// source, not a workspace — though a base mid-build is running, which is
+// exactly why the exclusion is explicit rather than incidental.
+//
+// This walks m.vms (every loaded VM), NOT the visible tiles: a managed VM hidden
+// by an active name filter ('/') must still be stopped. That is a deliberate
+// choice — 'X' means "stop all", not "stop what I can currently see" — because
+// the opposite reading is defensible and a future reader will wonder.
+func (m model) stopAllTargets() []string {
+	var names []string
+	for _, v := range m.vms {
+		if v.Status != limaRunning || !m.reg.IsManaged(v.Name) || m.isBaseImage(v.Name) {
+			continue
+		}
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// runningJobs names every run still in flight — a build or a file transfer —
+// sorted, so the quit confirmation below reads the same way twice.
+func (m model) runningJobs() []string {
+	var names []string
+	for _, name := range m.jobs.names() {
+		if m.jobs.isRunning(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// summarizeNames renders up to a width-appropriate number of names for
+// display in a confirm prompt, summarizing any remainder as "and N more".
+// Display only: every target in names is still acted on regardless of how the
+// list is truncated here. Falls back to a sane budget when the terminal size
+// has not been reported yet (width == 0).
+func summarizeNames(names []string, width int) string {
+	budget := width - 40
+	if budget < 20 {
+		budget = 20
+	}
+	var b strings.Builder
+	shown := 0
+	for i, n := range names {
+		sep := ""
+		if i > 0 {
+			sep = ", "
+		}
+		if b.Len()+len(sep)+len(n) > budget && shown > 0 {
+			break
+		}
+		b.WriteString(sep)
+		b.WriteString(n)
+		shown++
+	}
+	if shown < len(names) {
+		fmt.Fprintf(&b, " and %d more", len(names)-shown)
+	}
+	return b.String()
+}
+
+// beginAction marks a quick lifecycle action (start/stop/restart/delete) as in
+// flight and batches its command with the spinner tick, so the screen shows a
+// live spinner beside the status line until the matching actionDoneMsg clears it.
+// tickSpinner is what keeps a second key press — or a build already running on
+// another VM — from stacking tick loops and spinning the animation at double
+// speed.
+func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
+	m.acting = true
+	return tea.Batch(cmd, m.tickSpinner())
+}
+
+// requestQuit is the ONE quit path for every screen that offers 'q' (the board,
+// the VM screen, a finished progress screen). Quitting with a build in flight
+// orphans a half-built VM — the job registry (task 04) made concurrent
+// background builds possible and left this hole open — so when work is in flight,
+// 'q' CONFIRMS instead of quitting. ctrl+c is deliberately left as the
+// unconditional escape hatch: it is the key users press when they want out
+// regardless, and on the progress screen it cancels the run it is showing.
+func (m *model) requestQuit() tea.Cmd {
+	running := m.runningJobs()
+	if len(running) == 0 {
+		return tea.Quit
+	}
+	noun := "run"
+	if len(running) > 1 {
+		noun = "runs"
+	}
+	m.confirm = &confirmState{
+		prompt: fmt.Sprintf("Quit and abandon %d %s in flight (%s)?",
+			len(running), noun, summarizeNames(running, m.width)),
+		run: tea.Quit,
+	}
+	return nil
+}
+
+// updateBoard handles keys on the board. Order matters: a pending confirmation
+// owns the keyboard, then the live search owns it (a typing mode and single-key
+// verbs compete for the same keystrokes, and the search must win while it is
+// open), then navigation and the board's own chrome, and only then the per-VM
+// verbs — which come from the COMMAND REGISTRY (commandreg.go), so a verb fires
+// iff enabledFor says it applies to the VM under the ring, exactly as it does on
+// the VM screen.
+func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.confirm != nil {
+		return m.updateConfirm(msg)
+	}
+	if m.searching {
+		return m.updateBoardSearch(msg)
+	}
+
+	switch msg.Code {
+	case tea.KeyUp:
+		m.moveFocus(0, -1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveFocus(0, 1)
+		return m, nil
+	case tea.KeyLeft:
+		m.moveFocus(-1, 0)
+		return m, nil
+	case tea.KeyRight:
+		m.moveFocus(1, 0)
+		return m, nil
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		// esc clears a committed name filter — the only thing esc means on the
+		// board. With no filter it is a no-op (there is nowhere to go back to from
+		// the home surface).
+		if m.searchQuery != "" {
+			m.searchQuery = ""
+			m.status = ""
+			m.syncBoard()
+		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.Quit):
+		// The command goes into a local, and only then is m returned. requestQuit
+		// (like openForm and every registry action below) takes a POINTER receiver
+		// and mutates m — and Go does not specify whether the bare `m` operand of a
+		// return statement is copied before or after a call sitting beside it. Not
+		// leaning on that ordering is free; the failure it would buy is a confirm
+		// overlay that silently vanishes on the one path guarding a running build.
+		cmd := m.requestQuit()
+		return m, cmd
+
+	case key.Matches(msg, m.keys.Search):
+		m.searching = true
+		return m, nil
+
+	case key.Matches(msg, m.keys.New):
+		cmd := m.openForm()
+		return m, cmd
+
+	case key.Matches(msg, m.keys.Enter):
+		v, ok := m.focusedVM()
+		if !ok {
+			return m, nil
+		}
+		m.detail = v
+		m.status = "" // the VM screen starts clean
+		m.view = viewDetail
+		return m, nil
+
+	case key.Matches(msg, m.keys.StopAll):
+		targets := m.stopAllTargets()
+		if len(targets) == 0 {
+			m.status = "no running sand VMs to stop"
+			return m, nil
+		}
+		m.confirm = &confirmState{
+			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
+			run:     stopAllCmd(m.cli, targets),
+			working: fmt.Sprintf("stopping %d sand VMs…", len(targets)),
+		}
+		return m, nil
+	}
+
+	v, ok := m.focusedVM()
+	if !ok {
+		return m, nil
+	}
+	for _, c := range detailCommands {
+		if key.Matches(msg, c.binding) && c.enabledFor(m, v) {
+			// The board and the VM screen run the SAME registry actions, and several
+			// of them open a screen that closes back onto the VM screen (the file
+			// browser, the destination prompt, the secrets editor, a transfer's
+			// progress view). m.detail is the record that screen renders, so it is
+			// seeded with the VM under the ring: without this, backing out of a
+			// transfer started from the board lands on whichever VM the user last
+			// zoomed into — or on a blank record, if they never did.
+			//
+			// It is NOT how the action learns which VM to act on. That comes from the
+			// registry's own argument, and from nowhere else.
+			m.detail = v
+			cmd := c.action(&m, v) // mutates m; see the note under Quit above
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// updateBoardSearch routes keys while the live name search is open. Typed keys
+// build the query and narrow the tiles as they land, taking priority over every
+// verb binding and the focus ring's own navigation — otherwise typing "stop-box"
+// would start, stop and delete VMs on the way through. ctrl+c never reaches here
+// (Update intercepts it), so it still quits.
+func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Code == tea.KeyEsc:
+		m.searching = false
+		m.searchQuery = ""
+	case msg.Code == tea.KeyEnter:
+		m.searching = false // keep the query; return to normal navigation
+	case msg.Code == tea.KeyBackspace:
+		if m.searchQuery != "" {
+			r := []rune(m.searchQuery)
+			m.searchQuery = string(r[:len(r)-1])
+		}
+	case msg.Text != "":
+		m.searchQuery += msg.Text
+	}
+	// Every other key (arrows, tab, …) is swallowed: while the search is open it
+	// neither navigates nor acts. The focus ring is re-pinned against whatever the
+	// query now hides — by identity, exactly as it is across a refresh.
+	m.syncBoard()
+	return m, nil
+}
+
+// boardHelp is a PLACEHOLDER help bar: task 09 owns the real footer (and the
+// header band and the messages strip), and derives it from the same command
+// registry the dispatcher above uses. This is the board's chrome only, so the
+// screen is usable in the meantime.
+func (m model) boardHelp() []key.Binding {
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
+	if m.searching {
+		return []key.Binding{m.keys.Back, m.keys.Enter}
+	}
+	return []key.Binding{
+		boardMove, m.keys.Enter, m.keys.New, m.keys.Search, m.keys.StopAll, m.keys.Quit,
+	}
+}
+
+// boardView renders the grid, a status line, the pending confirmation, and the
+// placeholder help bar.
+func (m model) boardView() string {
+	var b strings.Builder
+	b.WriteString(m.gridView())
+	b.WriteString("\n")
+
+	switch {
+	case m.confirm != nil:
+		b.WriteString("\n" + m.confirmView())
+	case m.acting:
+		// While a lifecycle action (including a confirmed stop-all) runs, lead the
+		// status with the live spinner — even with no status text, so the action
+		// never looks frozen.
+		status := m.status
+		if status == "" {
+			status = "working…"
+		}
+		b.WriteString("\n" + statusStyle.Render(m.spinner.View()+" "+status))
+	case m.status != "":
+		b.WriteString("\n" + statusStyle.Render(m.status))
+	}
+
+	// Surface the name filter so it never hides tiles invisibly: a live prompt
+	// while typing, and a persistent indicator (with the key to clear it) once
+	// committed with enter.
+	switch {
+	case m.searching:
+		b.WriteString("\n" + statusStyle.Render("/"+m.searchQuery+"   enter: apply · esc: clear"))
+	case m.searchQuery != "":
+		b.WriteString("\n" + statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery)))
+	}
+
+	b.WriteString("\n\n" + m.help.ShortHelpView(m.boardHelp()))
+	return appStyle.Render(b.String())
+}
+
+// gridView lays the tiles out in the grid the LAYOUT MODE budgets (columns and
+// tile width from classify, rows from GridHeight) and scrolls it to the row
+// ensureFocusVisible parked it on.
+func (m model) gridView() string {
+	vms := m.visibleVMs()
+	if len(vms) == 0 && m.searchQuery != "" {
+		// An empty board because of the FILTER is not an empty board: inviting the
+		// user to create a VM here would be a lie about why they see nothing.
+		return statusStyle.Render(fmt.Sprintf("no VMs match %q — esc clears the filter", m.searchQuery))
+	}
+
+	// The exception-only badge rule (task 07) is a genuine equality test across the
+	// fleet ON THE BOARD: a badge answers "is this VM the odd one out", and the
+	// tiles beside it are what it is odd against.
+	//
+	// A VM mid-create does not VOTE in that test. Lima has not reported it yet, so
+	// its architecture is not DIFFERENT, it is UNKNOWN — and letting an unknown
+	// value disagree with the rest would sprout an arch badge on every tile on the
+	// board the moment a build starts. That is the same "a zero standing in for no
+	// reading yet" failure the tile's gauges exist to avoid, and it is why the
+	// voters are the tiles whose facts Lima has actually reported.
+	traits := make([]vmTraits, len(vms))
+	voters := make([]vmTraits, 0, len(vms))
+	for i, v := range vms {
+		traits[i] = m.traitsOf(v)
+		if _, known := m.lookupVM(v.Name); known {
+			voters = append(voters, traits[i])
+		}
+	}
+	uniform := computeFleetUniformity(voters)
+
+	now := time.Now()
+	frame := m.spinner.View()
+	cells := make([]string, 0, len(vms)+1)
+	for i, v := range vms {
+		job, hasJob := m.jobs.snapshot(v.Name)
+		sample, hasSample := m.sampleOf(v.Name)
+		cells = append(cells, renderTile(tileInput{
+			VM:        v,
+			Job:       job,
+			HasJob:    hasJob,
+			Sample:    sample,
+			HasSample: hasSample,
+			Traits:    traits[i],
+			Uniform:   uniform,
+			Focused:   v.Name == m.focusName,
+			Width:     m.layout.TileWidth,
+			Spinner:   frame,
+			Now:       now,
+		}))
+	}
+	// The empty slot after the last tile carries the call to action. It is not
+	// offered while a filter is narrowing the board (the tiles missing there are
+	// hidden, not absent).
+	if m.searchQuery == "" {
+		cells = append(cells, renderGhostTile(m.layout.TileWidth))
+	}
+
+	cols := m.gridColumns()
+	gap := tileGapBlock()
+	rows := make([]string, 0, (len(cells)+cols-1)/cols)
+	for i := 0; i < len(cells); i += cols {
+		end := i + cols
+		if end > len(cells) {
+			end = len(cells)
+		}
+		blocks := make([]string, 0, 2*(end-i)-1)
+		for j := i; j < end; j++ {
+			if j > i {
+				blocks = append(blocks, gap)
+			}
+			blocks = append(blocks, cells[j])
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, blocks...))
+	}
+
+	start := m.scrollRow
+	if start > len(rows)-1 {
+		start = len(rows) - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + m.visibleTileRows()
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return clipLines(strings.Join(rows[start:end], "\n"), m.layout.GridHeight)
+}
+
+// traitsOf gathers one VM's exception-only field values for the fleet-uniformity
+// rule (task 07).
+//
+// Base and Managed are resolved the same way the ROSTER resolves them, not
+// straight off the registry, because a VM mid-create is not in the registry yet —
+// it is not recorded managed until its build SUCCEEDS. Reading the registry
+// blindly would paint the one tile the user is actually watching as "base none ·
+// external": a VM sand is building this second, labelled as somebody else's. Its
+// base comes from the job that is building it (BaseName only — the config also
+// carries the clone token, and nothing that renders may reach one), and it is
+// sand's by definition, because that is why it has a tile at all.
+//
+// Managed therefore ends up TRUE for every tile on the board, which makes it
+// uniform by construction and the managed/external badge unreachable — exactly
+// what tile.go predicts once the board filters to sand's own VMs.
+func (m model) traitsOf(v vm.VM) vmTraits {
+	base := m.reg.Base(v.Name)
+	if base == "" {
+		if cfg, ok := m.jobs.config(v.Name); ok {
+			base = cfg.BaseName
+		}
+	}
+	return vmTraits{
+		Arch:    v.Arch,
+		Base:    base,
+		Managed: m.reg.IsManaged(v.Name) || m.hasProvisionJob(v.Name),
+	}
+}
+
+// hasProvisionJob reports whether name has a build — running or retained — and so
+// is a VM of sand's whether or not the managed index knows it yet. It is one half
+// of the roster's membership rule (see boardVMs).
+func (m model) hasProvisionJob(name string) bool {
+	job, ok := m.jobs.snapshot(name)
+	return ok && job.Provision
+}
+
+// tileGapBlock is the blank column between two adjacent tiles: as many lines as a
+// tile is tall, so lipgloss joins them without padding one of them out of shape.
+func tileGapBlock() string {
+	line := strings.Repeat(" ", tileGap)
+	lines := make([]string, tileHeight)
+	for i := range lines {
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderGhostTile draws the empty slot's call to action: a tile-shaped, dimmed
+// outline of a VM that does not exist yet.
+func renderGhostTile(width int) string {
+	inner := tileInnerWidth(width)
+	lines := make([]string, tileContentRows)
+	for i := range lines {
+		lines[i] = tilePad("", inner)
+	}
+	lines[2] = tileChromeStyle.Render(tilePad(centerText(ghostTileText, inner), inner))
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tileGhostBorderColor).
+		Padding(0, 1)
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+// centerText left-pads s so it sits centered in width cells (tilePad trims or
+// right-pads it to exactly that afterwards).
+func centerText(s string, width int) string {
+	pad := (width - ansi.StringWidth(s)) / 2
+	if pad < 1 {
+		return s
+	}
+	return strings.Repeat(" ", pad) + s
+}
+
+// clipLines truncates a rendered block to at most n lines, so the grid can never
+// spend more rows than the layout mode budgeted it.
+func clipLines(s string, n int) string {
+	if n < 1 {
+		n = 1
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
+}

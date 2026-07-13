@@ -204,7 +204,7 @@ var detailCommands = []vmCommand{
 		// Shell was already fixed for. Gated the same way here.
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			next, cmd := m.startTransfer(true) // host → guest
+			next, cmd := m.startTransfer(v, true) // host → guest
 			*m = next.(model)
 			return cmd
 		},
@@ -218,7 +218,7 @@ var detailCommands = []vmCommand{
 		help:       "download",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			next, cmd := m.startTransfer(false) // guest → host
+			next, cmd := m.startTransfer(v, false) // guest → host
 			*m = next.(model)
 			return cmd
 		},
@@ -248,19 +248,20 @@ var detailCommands = []vmCommand{
 	},
 }
 
-// detailChrome is the detail screen's non-per-VM keys: back to the list, and
+// detailChrome is the detail screen's non-per-VM keys: back to the board, and
 // quit. Rendered/dispatched after detailCommands (see updateDetail/detailHelp
 // in detail.go) so a verb key never gets swallowed by chrome.
 var detailChrome = []chromeCommand{
 	{
-		// esc/backspace/enter all return to the list; only "esc" is shown in the
+		// esc/backspace/enter all return to the board; only "esc" is shown in the
 		// help bar (matching the pre-registry behaviour, where Enter worked as an
-		// undocumented alias).
+		// undocumented alias). The board's focus ring is pinned to the VM's NAME,
+		// so coming back lands on the same tile the user zoomed in from.
 		binding:    key.NewBinding(key.WithKeys("esc", "backspace", "enter"), key.WithHelp("esc", "back")),
 		help:       "back",
 		enabledFor: chromeAlwaysEnabled,
 		action: func(m *model) tea.Cmd {
-			m.view = viewList
+			m.view = viewBoard
 			return nil
 		},
 	},
@@ -268,6 +269,8 @@ var detailChrome = []chromeCommand{
 		binding:    key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		help:       "quit",
 		enabledFor: chromeAlwaysEnabled,
-		action:     func(m *model) tea.Cmd { return tea.Quit },
+		// requestQuit (board.go), not a bare tea.Quit: builds now run in the
+		// background, so the reflex that ends a session must not silently orphan one.
+		action: func(m *model) tea.Cmd { return m.requestQuit() },
 	},
 }

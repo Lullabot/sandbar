@@ -64,4 +64,9 @@ var (
 	// border glyphs themselves change, not just their colour.
 	tileFocusedBorderColor   = lipgloss.Color("63")
 	tileUnfocusedBorderColor = lipgloss.Color("245")
+
+	// tileGhostBorderColor outlines the board's empty-slot ghost tile (board.go).
+	// It is dimmer than an unfocused VM's border on purpose: the invitation to
+	// create a VM must never compete with a VM that actually exists.
+	tileGhostBorderColor = lipgloss.Color("240")
 )

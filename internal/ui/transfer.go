@@ -12,6 +12,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -25,9 +26,17 @@ import (
 // stopped VM never dispatches here at all rather than dispatching and
 // explaining itself. The browser is seeded with the appropriate DirLister and
 // start directory per direction.
-func (m model) startTransfer(upload bool) (tea.Model, tea.Cmd) {
+//
+// The VM is the one the COMMAND REGISTRY handed the action, passed in explicitly.
+// It used to be read off m.detail — the VM screen's own record — which was
+// harmless while the VM screen was the only place a verb could fire from, and is
+// a wrong-VM bug the moment the board fires the same verb on the tile under its
+// focus ring: the transfer would target whichever VM the user last zoomed into.
+// There is exactly one source for "which VM is this verb acting on", and it is
+// this argument.
+func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
 	m.status = ""
-	m.transferVM = m.detail.Name
+	m.transferVM = v.Name
 	m.transferUpload = upload
 
 	var lister browse.DirLister
@@ -40,7 +49,7 @@ func (m model) startTransfer(upload bool) (tea.Model, tea.Cmd) {
 	} else {
 		// Download: browse the GUEST for a source, starting at the project checkout.
 		lister = browse.NewGuestLister(m.cli, m.transferVM)
-		startDir = m.guestDefaultDir()
+		startDir = m.guestDefaultDir(v.Dir)
 		title = "Download — pick a guest file or directory"
 	}
 	m.browser = browse.NewBrowser(lister, title)
@@ -69,7 +78,11 @@ func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		def := m.hostWorkDir()
 		var destLister browse.DirLister = browse.NewLocalLister()
 		if m.transferUpload {
-			def = m.guestDefaultDir() // an upload lands in the guest
+			// The instance dir comes from the TRANSFER's VM (m.transferVM), looked up
+			// in the loaded fleet — not from m.detail, which is the VM screen's record
+			// and need not be this one now that the board fires transfers too.
+			target, _ := m.lookupVM(m.transferVM)
+			def = m.guestDefaultDir(target.Dir) // an upload lands in the guest
 			destLister = browse.NewGuestLister(m.cli, m.transferVM)
 		}
 		var initCmd tea.Cmd
@@ -189,11 +202,13 @@ func (m model) hostWorkDir() string {
 // places it at /home/<user>.guest — NOT /home/<user> — so it cannot be
 // reconstructed from the username. If that can't be read, fall back to the old
 // /home/<user> guess (ssh.config user, then recorded config, then host user).
-func (m model) guestDefaultDir() string {
+// dir is the VM's Lima instance directory, from the record the caller is acting
+// on (never m.detail — see startTransfer).
+func (m model) guestDefaultDir(dir string) string {
 	cfg, ok := m.reg.Config(m.transferVM)
-	home := guestHome(m.detail.Dir)
+	home := guestHome(dir)
 	if home == "" {
-		user := guestUser(m.detail.Dir)
+		user := guestUser(dir)
 		if user == "" && ok {
 			user = cfg.User
 		}

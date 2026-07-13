@@ -18,7 +18,7 @@ func TestProgressReturnsToBackView(t *testing.T) {
 		back view
 	}{
 		{"transfer returns to the detail view", viewDetail},
-		{"provision returns to the list", viewList},
+		{"provision returns to the board", viewBoard},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := newJobRegistry()
@@ -42,7 +42,7 @@ func TestProgressSurvivesAReapedJob(t *testing.T) {
 		t.Fatalf("a vanished run should still offer a way out, got:\n%s", out)
 	}
 	got, _ := m.updateProgress(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if v := got.(model).view; v != viewList {
+	if v := got.(model).view; v != viewBoard {
 		t.Fatalf("esc on a vanished run should return to the list, got %v", v)
 	}
 }

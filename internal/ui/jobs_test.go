@@ -140,7 +140,7 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	if !m.jobs.begin(&job{
 		name:   name,
 		title:  "Creating " + name,
-		back:   viewList,
+		back:   viewBoard,
 		state:  jobRunning,
 		cancel: func() {},
 	}) {
@@ -480,7 +480,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 	// esc backs out of the progress screen WITHOUT cancelling the build.
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if l.m.view != viewList {
+	if l.m.view != viewBoard {
 		t.Fatalf("esc during a build should return to the list, got view %v", l.m.view)
 	}
 	if !l.m.jobs.isRunning("web") {

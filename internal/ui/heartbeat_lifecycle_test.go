@@ -318,7 +318,7 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 
 	// Back to the board: they reopen.
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if l.m.view != viewList {
+	if l.m.view != viewBoard {
 		t.Fatalf("esc should return to the board, got view %v", l.m.view)
 	}
 	sh.await(t, "open:web")
