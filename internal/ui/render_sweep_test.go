@@ -139,34 +139,3 @@ func viewExtent(view string) (lines, width int) {
 	}
 	return len(rows), width
 }
-
-// The VM (detail) screen gets the same sweep: its footer is the one that
-// used to overflow the terminal (gap (a) task 08 handed task 09), so it is
-// worth its own pass rather than trusting the board's sweep to cover it.
-func TestDetailViewRendersAtEverySizeInTheSweep(t *testing.T) {
-	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "claude", Status: "Running", CPUs: 2}}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
-
-	for _, w := range []int{1, 10, 20, 40, 80, 100, 160, 400} {
-		for _, h := range []int{1, 5, 10, 24, 30, 60} {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						t.Fatalf("detailView panicked at %dx%d: %v", w, h, r)
-					}
-				}()
-				mm := resized(m, w, h)
-				view := ansi.Strip(mm.detailView())
-				if view == "" {
-					t.Fatalf("detailView() at %dx%d rendered nothing", w, h)
-				}
-				if strings.Contains(strings.ToLower(view), "too small") {
-					t.Fatalf("detailView() at %dx%d hit a \"terminal too small\" wall:\n%s", w, h, view)
-				}
-			}()
-		}
-	}
-}

@@ -512,8 +512,8 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// PER-JOB CANCELLATION TARGETS ONLY ITS OWN JOB. Reopen A's log (the
 	// retained-run verb) and ctrl+c: only A's real limactl subprocess may be
 	// killed.
-	l.m.view = viewDetail
-	l.m.detail = vm.VM{Name: nameA, Status: "Running"}
+	l.m.view = viewBoard
+	l.m.focusName = nameA
 	l.send(runeKey('l'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey(nameA) {
 		t.Fatalf("reopening %s's log should show it on the progress view (view=%v job=%+v)", nameA, l.m.view, l.m.progressJob)

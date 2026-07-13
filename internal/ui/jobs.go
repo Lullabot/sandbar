@@ -109,7 +109,6 @@ const cancelNotice = "\n^C — canceling, cleaning up…\n"
 type job struct {
 	key   jobKey
 	title string // the progress screen's heading, e.g. `Creating web`
-	back  view   // the screen esc returns to from this job's progress view
 
 	// seq is the order this job was begun in, registry-wide. It is what lets the
 	// reopen-log verb pick between a VM's two retained runs (see logKey) without
@@ -150,7 +149,6 @@ type job struct {
 type jobSnapshot struct {
 	VM       string
 	Title    string
-	Back     view
 	State    jobState
 	Err      error
 	Canceled bool
@@ -448,7 +446,6 @@ func snapshotOf(j *job) jobSnapshot {
 	return jobSnapshot{
 		VM:        j.key.vm,
 		Title:     j.title,
-		Back:      j.back,
 		State:     j.state,
 		Err:       j.err,
 		Canceled:  j.canceled,

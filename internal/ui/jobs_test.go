@@ -150,7 +150,6 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	if !m.jobs.begin(&job{
 		key:    key,
 		title:  "Creating " + name,
-		back:   viewBoard,
 		state:  jobRunning,
 		cancel: func() {},
 	}) {
@@ -258,8 +257,8 @@ func TestTwoJobsInFlight(t *testing.T) {
 
 	// CANCELLATION IS PER-JOB. Reopen alpha's log (the retained-run verb) so the
 	// progress screen targets alpha, then ctrl+c: only alpha may be cancelled.
-	l.m.view = viewDetail
-	l.m.detail = vm.VM{Name: "alpha", Status: "Running"}
+	l.m.view = viewBoard
+	l.m.focusName = "alpha"
 	l.send(runeKey('l'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey("alpha") {
 		t.Fatalf("reopening alpha's log should show it in the progress view (view=%v job=%+v)", l.m.view, l.m.progressJob)
@@ -367,7 +366,7 @@ func TestJobReapedWhenVMDisappears(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	cmd, _ := l.m.beginStream(transferKey("web"), "Uploading to web", viewDetail, run)
+	cmd, _ := l.m.beginStream(transferKey("web"), "Uploading to web", run)
 	l.exec(cmd)
 	<-blocked
 
@@ -507,8 +506,8 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 	// The still-running job keeps streaming into its own buffer while the user is
 	// elsewhere, and reopening its log shows it.
 	job.write(l, provisionKey("web"), "TASK [base : Node]\n")
-	l.m.view = viewDetail
-	l.m.detail = vm.VM{Name: "web", Status: "Running"}
+	l.m.view = viewBoard
+	l.m.focusName = "web"
 	l.send(runeKey('l'))
 	if l.m.view != viewProgress {
 		t.Fatalf("'l' should reopen the run's log, got view %v", l.m.view)
@@ -566,8 +565,8 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	// The log is not lost — it is one 'l' away from the tile.
-	l.m.view = viewDetail
-	l.m.detail = vm.VM{Name: "web", Status: "Running"}
+	l.m.view = viewBoard
+	l.m.focusName = "web"
 	l.send(runeKey('l'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey("web") {
 		t.Fatalf("'l' should reopen the build's log (view=%v job=%+v)", l.m.view, l.m.progressJob)
@@ -581,15 +580,13 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 // has never been built offers no log and pressing 'l' does nothing.
 func TestReopenLogGatedOnARetainedRun(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Running"}
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running"})
 
-	if strings.Contains(plainHelp(m.detailView()), "l log") {
-		t.Fatalf("a VM with no run must not offer the log verb, got:\n%s", plainHelp(m.detailView()))
+	if strings.Contains(boardVerbs(m), "l log") {
+		t.Fatalf("a VM with no run must not offer the log verb, got:\n%s", boardVerbs(m))
 	}
-	after, cmd := m.Update(runeKey('l'))
-	m = after.(model)
-	if m.view != viewDetail || cmd != nil {
+	m, cmd := pressDispatch(t, m, runeKey('l'))
+	if m.view != viewBoard || cmd != nil {
 		t.Fatalf("'l' with no retained run should be a silent no-op (view=%v cmd=%v)", m.view, cmd)
 	}
 }
@@ -625,7 +622,7 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	// The user uploads a file to it.
 	upload := newFakeJob()
-	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
 	// beginStream starts a job; it does not pick a screen. Mirror what the real
 	// caller (confirmDest, transfer.go) does after it, so this test exercises the
 	// transfer as the user gets it — a build would NOT do this, which is the whole
@@ -685,7 +682,7 @@ func TestARefusedCreateDoesNotPromoteAnInFlightTransfer(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	upload := newFakeJob()
-	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
 	l.exec(uploadCmd)
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 
@@ -820,7 +817,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 	}
 
 	upload := newFakeJob()
-	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
 	if !started {
 		t.Fatal("a copy must start on a VM whose build has finished")
 	}
@@ -851,7 +848,7 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 
 	upload := newFakeJob()
-	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
 	l.exec(uploadCmd)
 	upload.write(l, transferKey("web"), "copied notes.txt\n")
 	upload.done <- nil
@@ -866,35 +863,5 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 	// Both runs are still retained — the copy did not evict the build.
 	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
 		t.Fatal("the succeeded build must still be retained alongside the copy")
-	}
-}
-
-// A failed provision leaves a VM that Lima still calls "Running", and the tile
-// says Failed. The VM screen must not then say "Running" — that is the same lie
-// the tile derivation exists to prevent, told on the very screen an alarmed user
-// opens BECAUSE the tile went red.
-func TestDetailScreenDoesNotCallAFailedBuildRunning(t *testing.T) {
-	m := newTestModel(t)
-	m = resized(m, 100, 30)
-	l := newTeaLoop(t, m)
-
-	build := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
-	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED!\n")
-	build.done <- errAnsibleBoom
-	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
-	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
-
-	web, _ := l.m.lookupVM("web")
-	if got := l.m.statusOf(web); got != statusFailed {
-		t.Fatalf("precondition: the tile must read Failed, got %v", got)
-	}
-
-	got := l.m.detailStatus(web)
-	if !strings.Contains(got, "Failed") {
-		t.Errorf("the VM screen reported a failed build as %q — the tile says Failed", got)
-	}
-	if !strings.Contains(got, "Running") {
-		t.Errorf("the VM screen should still surface that Lima has the VM up, got %q", got)
 	}
 }

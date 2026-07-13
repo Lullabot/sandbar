@@ -65,7 +65,7 @@ type streamFunc func(ctx context.Context, out io.Writer) error
 // from the VM screen, with nothing on the board to watch — still opens its log.
 // Flipping to the full-screen log HERE is what made every run take the terminal
 // hostage, which is the takeover this registry exists to end.
-func (m *model) beginStream(key jobKey, title string, back view, run streamFunc) (tea.Cmd, bool) {
+func (m *model) beginStream(key jobKey, title string, run streamFunc) (tea.Cmd, bool) {
 	if m.jobs.running(key) {
 		m.logMsg(key.vm + " already has a run in flight — showing it")
 		return m.showJob(key), false
@@ -79,7 +79,6 @@ func (m *model) beginStream(key jobKey, title string, back view, run streamFunc)
 	j := &job{
 		key:    key,
 		title:  title,
-		back:   back, // where esc returns from this job's progress view
 		state:  jobRunning,
 		cancel: cancel,
 		reader: &readPipe{r: pr},
@@ -136,7 +135,7 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 		m.logMsg(cfg.Name + " already has a run in flight — wait for it to finish, or cancel it from its log")
 		return m.showJob(key)
 	}
-	cmd, started := m.beginStream(provisionKey(cfg.Name), title, viewBoard, func(ctx context.Context, out io.Writer) error {
+	cmd, started := m.beginStream(provisionKey(cfg.Name), title, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
 	if !started {
@@ -231,20 +230,18 @@ func (m model) shownJob() (jobSnapshot, bool) {
 // the user: esc/enter ALWAYS return to the job's back view and the job keeps
 // running behind them — that is the un-freezing this task exists for, and it is
 // what lets a user start a second VM while the first one builds. ctrl+c (handled
-// in Update) cancels the job being shown, and only that one. q still refuses to
-// quit while the shown job runs, so the reflex that ends a session does not
-// orphan a half-built VM.
+// in Update) cancels the job being shown, and only that one. There is no q here at
+// all — quit belongs to the board (see requestQuit).
 func (m model) updateProgress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
-	job, ok := m.shownJob()
-
 	if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Enter) {
-		m.view = viewBoard // a vanished job (its VM was deleted) has no back view left
-		if ok {
-			m.view = job.Back // detail for a transfer, board for a provision
-		}
+		// Every run returns to the BOARD. A job used to carry its own `back` view,
+		// because a transfer's log returned to the VM screen and a build's to the
+		// board; with the VM screen deleted there is one destination, so the field
+		// went with it rather than lingering as a constant.
+		m.view = viewBoard
 		return m, nil
 	}
 	// No `q` here. Quit belongs to the board alone — this is a child screen, and the
@@ -299,10 +296,7 @@ func (m model) progressView() string {
 	b.WriteString("\n")
 
 	if !job.Running() {
-		back := "board"
-		if job.Back == viewDetail {
-			back = "VM"
-		}
+		const back = "board"
 		switch {
 		case job.Canceled:
 			b.WriteString("\n" + statusStyle.Render("Canceled — press esc to return to the "+back+"."))

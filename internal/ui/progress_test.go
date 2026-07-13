@@ -9,24 +9,24 @@ import (
 )
 
 // After a finished run, esc/back returns to the view the JOB recorded: the VM
-// detail view for a file transfer, the list for a provision (create/recreate).
-// That "back" used to be a single field on the model, which is exactly why only
-// one run could exist at a time; it now travels with the job.
-func TestProgressReturnsToBackView(t *testing.T) {
+// EVERY RUN RETURNS TO THE BOARD. A job used to carry its own `back` view, because
+// a transfer's log returned to the VM screen and a build's to the board; the VM
+// screen is deleted, so there is one destination and the field went with it.
+func TestProgressReturnsToTheBoard(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		back view
+		key  jobKey
 	}{
-		{"transfer returns to the detail view", viewDetail},
-		{"provision returns to the board", viewBoard},
+		{"a provision returns to the board", provisionKey("claude")},
+		{"a transfer returns to the board too", transferKey("claude")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := newJobRegistry()
-			reg.begin(&job{key: provisionKey("claude"), back: tc.back, state: jobSucceeded})
-			m := model{view: viewProgress, progressJob: provisionKey("claude"), jobs: reg, keys: newKeyMap()}
+			reg.begin(&job{key: tc.key, state: jobSucceeded})
+			m := model{view: viewProgress, progressJob: tc.key, jobs: reg, keys: newKeyMap()}
 			got, _ := m.updateProgress(tea.KeyPressMsg{Code: tea.KeyEsc})
-			if v := got.(model).view; v != tc.back {
-				t.Fatalf("esc after done: view = %v, want %v", v, tc.back)
+			if v := got.(model).view; v != viewBoard {
+				t.Fatalf("esc after done: view = %v, want the board", v)
 			}
 		})
 	}

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/vm"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -217,12 +219,11 @@ func TestSecretsParseCRLFDoesNotCorruptValues(t *testing.T) {
 	}
 }
 
-// openSecretsViaKey drives the real 'e' key on the detail screen, mirroring a
-// real session rather than calling openSecrets directly.
-func openSecretsViaKey(m model, name, status string) model {
-	m.view = viewDetail
-	m.detail.Name = name
-	m.detail.Status = status
+// openSecretsViaKey drives the real 'e' key on the VM's tile, mirroring a real
+// session rather than calling openSecrets directly.
+func openSecretsViaKey(t *testing.T, m model, name, status string) model {
+	t.Helper()
+	m = putOnBoard(t, m, vm.VM{Name: name, Status: status})
 	after, _ := m.Update(runeKey('e'))
 	return after.(model)
 }
@@ -252,7 +253,7 @@ func typeInto(m model, s string) model {
 func TestSecretsEditorIsFocusedOnOpen(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 100, 30)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	if !m.secretsArea.Focused() {
 		t.Fatal("the secrets editor must be focused on open, or keystrokes are dropped")
@@ -266,7 +267,7 @@ func TestSecretsEditorIsFocusedOnOpen(t *testing.T) {
 func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 100, 30)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	m = typeInto(m, "FOO=bar")
 	if got := m.secretsArea.Value(); !strings.Contains(got, "FOO=bar") {
@@ -276,8 +277,8 @@ func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
-	if m.view != viewDetail {
-		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
 	if got := m.sec.Get("claude"); got["FOO"] != "bar" {
 		t.Fatalf("typed secret was not persisted, Store.Get = %v", got)
@@ -290,7 +291,7 @@ func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 30)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	m = typeInto(m, "EDITOR=vim\n[github.com/acme]\nGH_TOKEN=ghp_x")
 
@@ -314,7 +315,7 @@ func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 func TestSecretsEditorBackspaceEdits(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 100, 30)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	m = typeInto(m, "AB")
 	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -331,7 +332,7 @@ func TestSecretsEditorBackspaceEdits(t *testing.T) {
 func TestSecretsEditorHasNoGutterOrPromptBar(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 100, 30)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	if m.secretsArea.ShowLineNumbers {
 		t.Fatal("the secrets editor must not show a line-number gutter")
@@ -350,7 +351,7 @@ func TestSecretsEditorHasNoGutterOrPromptBar(t *testing.T) {
 // not the VM happens to be running.
 func TestSecretsEditorOpensRegardlessOfStatus(t *testing.T) {
 	m := newTestModel(t)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 
 	if m.view != viewSecrets {
 		t.Fatalf("'e' on a stopped VM should open the secrets editor, view = %v", m.view)
@@ -360,18 +361,18 @@ func TestSecretsEditorOpensRegardlessOfStatus(t *testing.T) {
 	}
 }
 
-// esc discards the buffer: it returns to the detail view and does not call
+// esc discards the buffer: it returns to the board and does not call
 // Store.Set (verified by checking nothing was persisted).
 func TestSecretsEditorEscDiscards(t *testing.T) {
 	m := newTestModel(t)
-	m = openSecretsViaKey(m, "claude", "Running")
+	m = openSecretsViaKey(t, m, "claude", "Running")
 	m.secretsArea.SetValue("A=1\n")
 
 	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = after.(model)
 
-	if m.view != viewDetail {
-		t.Fatalf("esc should return to the detail view, got %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("esc should return to the board, got %v", m.view)
 	}
 	if got := m.sec.Get("claude"); len(got) != 0 {
 		t.Fatalf("esc must not persist anything, Store.Get returned %v", got)
@@ -383,14 +384,14 @@ func TestSecretsEditorEscDiscards(t *testing.T) {
 // start (the only place the UI says so).
 func TestSecretsEditorSaveValidPersists(t *testing.T) {
 	m := newTestModel(t)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 	m.secretsArea.SetValue("A=1\nB=2\n")
 
 	after, _ := m.Update(ctrlKey('s'))
 	m = after.(model)
 
-	if m.view != viewDetail {
-		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
 	got := m.sec.Get("claude")
 	if got["A"] != "1" || got["B"] != "2" {
@@ -405,7 +406,7 @@ func TestSecretsEditorSaveValidPersists(t *testing.T) {
 // error, and Store.Set is never reached — nothing is persisted.
 func TestSecretsEditorSaveInvalidStaysAndDoesNotPersist(t *testing.T) {
 	m := newTestModel(t)
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 	m.secretsArea.SetValue("2BAD=x\n")
 
 	after, _ := m.Update(ctrlKey('s'))

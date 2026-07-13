@@ -33,7 +33,7 @@ func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 	// must decline to re-arm AND clear the running flag, so coming back to
 	// the board can start a fresh loop rather than being stuck behind a stale
 	// "already running" flag.
-	m.view = viewDetail
+	m.view = viewForm
 	if cmd := m.tickRefresh(); cmd != nil {
 		t.Fatal("tickRefresh must not re-arm once the board is not the active screen")
 	}
@@ -48,7 +48,7 @@ func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 // still land after it has closed).
 func TestRefreshTickMsgHonoursTheGateWhenNotOnBoard(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewDetail // off the board: the gate is closed
+	m.view = viewForm // off the board: the gate is closed
 
 	_, cmd := m.dispatch(refreshTickMsg{})
 	if cmd != nil {

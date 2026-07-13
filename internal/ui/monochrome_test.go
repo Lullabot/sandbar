@@ -57,21 +57,21 @@ func TestBoardSurfacesAreMonochromeSafe(t *testing.T) {
 	}
 }
 
-// The VM screen's footer gets the same check: its verbs are the ones the old
-// hand-maintained help switch used to get wrong (advertising a verb that did
-// nothing), and the fix must not be a colour-only fix.
-func TestDetailFooterIsMonochromeSafe(t *testing.T) {
+// The per-VM verbs get the same check. They are the ones the old hand-maintained
+// help switch used to get wrong (advertising a verb that did nothing), and the fix
+// must not be a colour-only fix: eligibility has to be legible with every escape
+// code stripped. They render on the BOARD's footer now — the VM screen that used
+// to carry them is gone.
+func TestBoardFooterVerbsAreMonochromeSafe(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "claude", Status: "Stopped", CPUs: 2}}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = resized(m, 200, 40) // wide enough that the footer elides nothing
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Stopped", CPUs: 2})
 
-	colored := m.detailView()
+	colored := m.boardView()
 	stripped := ansi.Strip(colored)
 
 	if colored == stripped {
-		t.Fatal("precondition: the unstripped detail view should carry ANSI colour codes")
+		t.Fatal("precondition: the unstripped board should carry ANSI colour codes")
 	}
 	if !strings.Contains(stripped, "s start") {
 		t.Fatalf("a stopped VM's footer must offer start in plain text, got:\n%s", stripped)

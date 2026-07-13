@@ -66,6 +66,49 @@ func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 	return m
 }
 
+// putOnBoard places a VM on the board — managed AND reported by Lima, which is
+// what earns it a tile — and puts the focus ring on it. Every per-VM verb fires on
+// the tile under the ring now that the VM screen is gone, so this is what a test
+// that used to say `m.view = viewDetail; m.detail = v` says instead.
+//
+// It edits m.vms in place rather than going through loadManaged, because a
+// vmsLoadedMsg RECONCILES the managed index against the list it is given — passing
+// one VM would quietly unmanage every other VM the test had already set up.
+func putOnBoard(t *testing.T, m model, v vm.VM) model {
+	t.Helper()
+	if !m.reg.IsManaged(v.Name) {
+		if err := m.reg.Add(vm.CreateConfig{Name: v.Name, BaseName: "claude-base"}); err != nil {
+			t.Fatalf("seed %s as managed: %v", v.Name, err)
+		}
+	}
+	found := false
+	for i := range m.vms {
+		if m.vms[i].Name == v.Name {
+			m.vms[i], found = v, true
+		}
+	}
+	if !found {
+		m.vms = append(m.vms, v)
+	}
+	m.view = viewBoard
+	m.focusName = v.Name
+	return m
+}
+
+// pressDispatch drives one key through the ACTIVE VIEW's dispatcher and returns the
+// command THAT VIEW produced — without the heartbeat and refresh ticks Update
+// batches onto every single message (see Update).
+//
+// A test asserting "this key dispatched nothing" cannot look at Update's command on
+// the board, because those ticks are always in it. That was safe to ignore while
+// these tests ran on the VM screen, which ticks nothing; it is not safe now that
+// every verb fires from the board.
+func pressDispatch(t *testing.T, m model, msg tea.Msg) (model, tea.Cmd) {
+	t.Helper()
+	next, cmd := m.dispatch(msg)
+	return next.(model), cmd
+}
+
 // resized drives a real tea.WindowSizeMsg through Update, exactly as a
 // terminal resize would, rather than poking m.width/m.height directly — the
 // layout budgets every screen sizes itself from (m.layout) are only
@@ -104,8 +147,7 @@ func TestDeleteKeyEntersConfirm(t *testing.T) {
 		t.Fatalf("model should not start with a pending confirmation")
 	}
 
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 	next, _ := m.Update(runeKey('d'))
 	m = next.(model)
 
@@ -128,12 +170,12 @@ func TestConfirmDeletePromptHasNoRecreateBranch(t *testing.T) {
 	}})
 	m = loaded.(model)
 
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = resized(m, 120, 40)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 	next, _ := m.Update(runeKey('d'))
 	m = next.(model)
 
-	rendered := m.detailView()
+	rendered := ansi.Strip(m.boardView())
 	if !strings.Contains(rendered, `Delete "claude"?  [y] yes   [n] cancel`) {
 		t.Fatalf("rendered prompt missing the expected text, got:\n%s", rendered)
 	}
@@ -147,16 +189,9 @@ func TestConfirmDeletePromptHasNoRecreateBranch(t *testing.T) {
 // other key (including a second 'd') is swallowed while confirming.
 func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Running", CPUs: 2},
-	}})
-	m = loaded.(model)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
-
-	first, cmd1 := m.Update(runeKey('d'))
-	m = first.(model)
+	m, cmd1 := pressDispatch(t, m, runeKey('d'))
 	if m.confirm == nil {
 		t.Fatal("first 'd' should raise the confirm overlay")
 	}
@@ -164,8 +199,7 @@ func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
 		t.Fatal("raising the overlay must not itself dispatch a command")
 	}
 
-	second, cmd2 := m.Update(runeKey('d'))
-	m = second.(model)
+	m, cmd2 := pressDispatch(t, m, runeKey('d'))
 	if m.confirm == nil {
 		t.Fatal("a second 'd' while confirming must not clear the overlay")
 	}
@@ -183,25 +217,39 @@ func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
 // (the reason is already visible in the VM record's Managed field) and
 // pressing 'R' is a silent no-op — no command, no status change.
 func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
+	// An unmanaged VM gets no tile at all, so the ONLY way one is on the board is
+	// boardVMs' single exception: a VM whose provision FAILED. It never became
+	// managed (only a successful build records it), yet it must keep a tile — that is
+	// where its failure is reported, and where it is deleted from. Reset is exactly
+	// what must not be offered on it: there is no recorded base to clone from.
 	m := newTestModel(t) // empty (temp) registry => nothing is managed
+	m = resized(m, 120, 40)
+	l := newTeaLoop(t, m)
 
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "default", Status: "Running", CPUs: 2},
-	}})
-	m = loaded.(model)
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating orphan", build.run, vm.CreateConfig{Name: "orphan", BaseName: "claude-base"}))
+	build.done <- errAnsibleBoom
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("orphan") })
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "orphan", Status: "Running", CPUs: 2}}})
 
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("default")
+	m = l.m
+	m.focusName = "orphan"
+	if m.reg.IsManaged("orphan") {
+		t.Fatal("precondition: a failed build must not be recorded managed")
+	}
+	if _, ok := m.focusedVM(); !ok {
+		t.Fatal("precondition: a failed build must still have a tile under the ring")
+	}
 
-	if strings.Contains(plainHelp(m.detailView()), "R reset") {
-		t.Fatalf("an unmanaged VM's help bar must not offer reset, got:\n%s", m.detailView())
+	if strings.Contains(boardVerbs(m), "R reset") {
+		t.Fatalf("an unmanaged VM's help bar must not offer reset, got:\n%s", boardVerbs(m))
 	}
 
 	after, cmd := m.Update(runeKey('R'))
 	m = after.(model)
 
-	if m.view != viewDetail {
-		t.Fatalf("reset on an unmanaged VM must not leave the detail screen, view = %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("reset on an unmanaged VM must not navigate anywhere, view = %v", m.view)
 	}
 	if cmd != nil {
 		t.Fatal("reset on an unmanaged VM should dispatch no command")
@@ -242,8 +290,8 @@ func openReset(t *testing.T, cfg vm.CreateConfig) model {
 	}})
 	m = loaded.(model)
 
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM(cfg.Name)
+	m.view = viewBoard
+	m.focusName = cfg.Name
 	after, _ := m.Update(runeKey('R'))
 	return after.(model)
 }
@@ -260,11 +308,11 @@ func TestResetGateManagedOffersReset(t *testing.T) {
 		{Name: cfg.Name, Status: "Stopped", CPUs: cfg.CPUs},
 	}})
 	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM(cfg.Name)
+	m.view = viewBoard
+	m.focusName = cfg.Name
 
-	if !strings.Contains(plainHelp(m.detailView()), "R reset") {
-		t.Fatalf("a sand-managed VM's help bar should offer reset, got:\n%s", m.detailView())
+	if !strings.Contains(boardVerbs(m), "R reset") {
+		t.Fatalf("a sand-managed VM's help bar should offer reset, got:\n%s", boardVerbs(m))
 	}
 }
 
@@ -385,18 +433,13 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	}
 }
 
-// A detail-screen lifecycle action shows a live spinner: starting a VM marks
-// an action in flight (so the spinner animates and renders beside the
-// status), a spinner tick keeps animating while it runs, and the matching
-// actionDoneMsg clears it.
-func TestDetailActionShowsSpinnerUntilDone(t *testing.T) {
+// A lifecycle action shows a live spinner: starting a VM marks an action in
+// flight (so the spinner animates and renders beside the status), a spinner tick
+// keeps animating while it runs, and the matching actionDoneMsg clears it.
+func TestLifecycleActionShowsSpinnerUntilDone(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Stopped", CPUs: 2},
-	}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = resized(m, 120, 40)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Stopped", CPUs: 2})
 
 	started, cmd := m.Update(runeKey('s'))
 	m = started.(model)
@@ -406,8 +449,8 @@ func TestDetailActionShowsSpinnerUntilDone(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("starting a VM should dispatch a command (action + spinner tick)")
 	}
-	if !strings.Contains(m.detailView(), "starting") {
-		t.Fatalf("the detail view should show the in-flight status, got:\n%s", m.detailView())
+	if !strings.Contains(ansi.Strip(m.boardView()), "starting") {
+		t.Fatalf("the board should show the in-flight status, got:\n%s", ansi.Strip(m.boardView()))
 	}
 
 	// While acting, a spinner tick keeps the animation going (returns a next tick).
@@ -431,11 +474,10 @@ func TestDetailActionShowsSpinnerUntilDone(t *testing.T) {
 // records the transfer direction/VM.
 func TestUploadOpensBrowserForRunningVM(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Running"}
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running"})
 
-	if !strings.Contains(plainHelp(m.detailView()), "u upload") {
-		t.Fatalf("a running VM's help bar should offer upload, got:\n%s", m.detailView())
+	if !strings.Contains(boardVerbs(m), "u upload") {
+		t.Fatalf("a running VM's help bar should offer upload, got:\n%s", boardVerbs(m))
 	}
 
 	after, cmd := m.Update(runeKey('u'))
@@ -459,11 +501,10 @@ func TestUploadOpensBrowserForRunningVM(t *testing.T) {
 // transfer.
 func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Running"}
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running"})
 
-	if !strings.Contains(plainHelp(m.detailView()), "g download") {
-		t.Fatalf("a running VM's help bar should offer download, got:\n%s", m.detailView())
+	if !strings.Contains(boardVerbs(m), "g download") {
+		t.Fatalf("a running VM's help bar should offer download, got:\n%s", boardVerbs(m))
 	}
 
 	// Download rebound from 'd' to 'g': 'd' is delete everywhere now.
@@ -490,10 +531,9 @@ func TestDownloadOpensBrowserForRunningVM(t *testing.T) {
 // TestDownloadOpensBrowserForRunningVM below.
 func TestTransferRequiresRunningVM(t *testing.T) {
 	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Stopped"}
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Stopped"})
 
-	rendered := plainHelp(m.detailView())
+	rendered := boardVerbs(m)
 	if strings.Contains(rendered, "u upload") {
 		t.Fatalf("a stopped VM's help bar must not offer upload, got:\n%s", rendered)
 	}
@@ -502,10 +542,9 @@ func TestTransferRequiresRunningVM(t *testing.T) {
 	}
 
 	for _, k := range []rune{'u', 'g'} {
-		after, cmd := m.Update(runeKey(k))
-		m2 := after.(model)
-		if m2.view != viewDetail {
-			t.Fatalf("%q on a stopped VM must stay on the detail view, view=%v", k, m2.view)
+		m2, cmd := pressDispatch(t, m, runeKey(k))
+		if m2.view != viewBoard {
+			t.Fatalf("%q on a stopped VM must stay on the board, view=%v", k, m2.view)
 		}
 		if cmd != nil {
 			t.Fatalf("%q on a stopped VM should not issue a command", k)
@@ -802,15 +841,9 @@ func TestEscLeavesForm(t *testing.T) {
 // on the detail screen, not the list.
 func TestShellRequiresRunningVM(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Stopped", CPUs: 2},
-	}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Stopped", CPUs: 2})
 
-	after, cmd := m.Update(runeKey('S'))
-	m = after.(model)
+	m, cmd := pressDispatch(t, m, runeKey('S'))
 	if cmd != nil {
 		t.Fatal("shell on a stopped VM should not issue a command")
 	}
@@ -826,14 +859,9 @@ func TestShellRequiresRunningVM(t *testing.T) {
 // command.
 func TestShellRunsForRunningVM(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Running", CPUs: 2},
-	}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 
-	if _, cmd := m.Update(runeKey('S')); cmd == nil {
+	if _, cmd := pressDispatch(t, m, runeKey('S')); cmd == nil {
 		t.Fatal("shell on a running VM should issue a command")
 	}
 }
@@ -1130,12 +1158,7 @@ func TestSubmitFormValidationKeepsForm(t *testing.T) {
 // action in flight and dispatches a command against the displayed VM.
 func TestDetailActionsDispatchLifecycleCommands(t *testing.T) {
 	m := newTestModel(t)
-	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Stopped", CPUs: 2},
-	}})
-	m = loaded.(model)
-	m.view = viewDetail
-	m.detail, _ = m.lookupVM("claude")
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Stopped", CPUs: 2})
 
 	after, cmd := m.Update(runeKey('s'))
 	m = after.(model)
@@ -1145,36 +1168,6 @@ func TestDetailActionsDispatchLifecycleCommands(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("pressing 's' on the detail view should dispatch a command")
-	}
-}
-
-// The VM screen's snapshot goes stale after a lifecycle action; a reload must
-// re-seed m.detail (by name) from the fresh list so Status reflects reality
-// without kicking the user back to the list — unless the VM is gone, in which
-// case there is nothing left to display and the model falls back to the list.
-func TestDetailRefreshReseedsFromReloadedList(t *testing.T) {
-	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Stopped", CPUs: 2}
-
-	updated, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "claude", Status: "Running", CPUs: 2},
-	}})
-	m = updated.(model)
-
-	if m.view != viewDetail {
-		t.Fatalf("a reload must not change the view while the VM still exists, got %v", m.view)
-	}
-	if m.detail.Status != "Running" {
-		t.Fatalf("m.detail.Status = %q, want %q", m.detail.Status, "Running")
-	}
-
-	gone, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
-		{Name: "someone-else", Status: "Running"},
-	}})
-	m = gone.(model)
-	if m.view != viewBoard {
-		t.Fatalf("a reload where the displayed VM is gone should fall back to the list, got %v", m.view)
 	}
 }
 
@@ -1337,31 +1330,5 @@ func TestSummarizeNamesTruncatesForNarrowWidth(t *testing.T) {
 		if !strings.Contains(full, n) {
 			t.Fatalf("summarizeNames with ample width should include %q, got %q", n, full)
 		}
-	}
-}
-
-// A successful delete makes the VM screen's record disappear, so the
-// completion message returns the user to the list rather than leaving them
-// stranded on a VM that no longer exists. A failed delete leaves the VM in
-// place, so the user stays on its screen to see the error.
-func TestDeleteReturnsToListFromDetail(t *testing.T) {
-	m := newTestModel(t)
-	m.view = viewDetail
-	m.detail = vm.VM{Name: "claude", Status: "Running"}
-
-	done, _ := m.Update(actionDoneMsg{action: "delete", name: "claude"})
-	m = done.(model)
-	if m.view != viewBoard {
-		t.Fatalf("a successful delete should return to the list, view = %v", m.view)
-	}
-
-	m2 := newTestModel(t)
-	m2.view = viewDetail
-	m2.detail = vm.VM{Name: "claude", Status: "Running"}
-
-	failed, _ := m2.Update(actionDoneMsg{action: "delete", name: "claude", err: errors.New("boom")})
-	m2 = failed.(model)
-	if m2.view != viewDetail {
-		t.Fatalf("a failed delete must keep the user on the detail view, view = %v", m2.view)
 	}
 }

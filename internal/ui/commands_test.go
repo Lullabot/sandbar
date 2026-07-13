@@ -241,14 +241,13 @@ func TestSecretsSaveOnRunningVMPushesToGuest(t *testing.T) {
 	m := newTestModelWithCli(t, cli)
 	m = resized(m, 100, 30)
 	m.vms = []vm.VM{{Name: "claude", Status: "Running"}}
-	m = openSecretsViaKey(m, "claude", "Running")
+	m = openSecretsViaKey(t, m, "claude", "Running")
 	m = typeInto(m, "GH_TOKEN=ghp_new")
 
-	after, cmd := m.Update(ctrlKey('s'))
-	m = after.(model)
+	m, cmd := pressDispatch(t, m, ctrlKey('s'))
 
-	if m.view != viewDetail {
-		t.Fatalf("a valid save should return to the detail view, got %v", m.view)
+	if m.view != viewBoard {
+		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
 	if got := m.sec.Get("claude"); got["GH_TOKEN"] != "ghp_new" {
 		t.Fatalf("the host store should still persist immediately, got %v", got)
@@ -298,11 +297,10 @@ func TestSecretsSaveOnStoppedVMDoesNotTouchGuest(t *testing.T) {
 	m := newTestModelWithCli(t, cli)
 	m = resized(m, 100, 30)
 	m.vms = []vm.VM{{Name: "claude", Status: "Stopped"}}
-	m = openSecretsViaKey(m, "claude", "Stopped")
+	m = openSecretsViaKey(t, m, "claude", "Stopped")
 	m = typeInto(m, "GH_TOKEN=ghp_new")
 
-	after, cmd := m.Update(ctrlKey('s'))
-	m = after.(model)
+	m, cmd := pressDispatch(t, m, ctrlKey('s'))
 
 	if cmd != nil {
 		t.Fatal("saving on a STOPPED VM must not dispatch a guest-apply command")

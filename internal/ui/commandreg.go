@@ -1,20 +1,18 @@
 package ui
 
-// commandreg.go is the VM (detail) screen's single command registry: for
-// every verb sand offers on a focused VM, one entry carries its key binding,
-// its help text, the enabledFor predicate that gates whether it applies to
-// that VM, and the action it runs. updateDetail (the dispatcher) and
-// detailHelp (the footer) both derive from this one list — see detail.go —
-// so they can no longer silently disagree the way the old hand-maintained
-// keymap-constructor / per-view-help-switch pair did: the old help switch
-// offered Start, Stop, Restart, Reset, Shell, Delete, Upload, Download, and
-// Secrets unconditionally, so a STOPPED VM's help bar advertised "x stop"
-// even though pressing it did nothing.
+// commandreg.go is the single command registry for every verb sand offers on a
+// focused VM: one entry carries its key binding, its help text, the enabledFor
+// predicate that gates whether it applies to that VM, and the action it runs.
+// updateBoard (the dispatcher) and boardHelp (the footer) both derive from this
+// one list — see board.go — so they can no longer silently disagree the way the
+// old hand-maintained keymap-constructor / per-view-help-switch pair did: the old
+// help switch offered Start, Stop, Restart, Reset, Shell, Delete, Upload,
+// Download, and Secrets unconditionally, so a STOPPED VM's help bar advertised
+// "x stop" even though pressing it did nothing.
 //
-// Two kinds of keys exist on this screen: per-VM verbs, gated by
-// enabledFor(model, vm.VM), and screen-local chrome (Back, Quit), which has
-// no VM to gate on. They are modeled as two distinct types (vmCommand,
-// chromeCommand) rather than passing a zero vm.VM to a chrome predicate.
+// Every verb fires on THE TILE UNDER THE RING, straight from the board. There is
+// no VM screen to open first — it was deleted, because the tile already showed
+// everything it did.
 //
 // This file stays narrow on purpose: it is exactly the verbs sand has today,
 // nothing more. It is not a fuzzy command palette or a general plugin
@@ -38,14 +36,6 @@ type vmCommand struct {
 	help       string // short name, for diagnostics/tests only (the binding carries the real help text)
 	enabledFor func(m model, v vm.VM) bool
 	action     func(m *model, v vm.VM) tea.Cmd
-}
-
-// chromeCommand is a detail-screen key with no VM to gate on.
-type chromeCommand struct {
-	binding    key.Binding
-	help       string
-	enabledFor func(m model) bool
-	action     func(m *model) tea.Cmd
 }
 
 // jobLookup is the narrow view of the job registry (jobs.go) that this file's
@@ -82,17 +72,15 @@ func (m model) vmHasRetainedRun(name string) bool {
 // VM's current status (a stopped VM's "stop" half is a harmless no-op, but
 // the "start" half is real work), and Secrets is legitimate to open and save
 // on both a running VM (task 06: applies live to the guest) and a stopped
-// one (it applies on next start) — see detailCommands below. Every other
+// one (it applies on next start) — see vmCommands below. Every other
 // command that used to sit here (Reset, Upload, Download) had a real
 // decline branch that advertised the verb and then did nothing but set a
 // status message; those now gate in enabledFor instead.
 func alwaysEnabled(model, vm.VM) bool { return true }
 
-// chromeAlwaysEnabled is alwaysEnabled's chromeCommand counterpart.
-func chromeAlwaysEnabled(model) bool { return true }
-
-// detailCommands is the VM screen's per-VM verbs, in help-bar display order.
-var detailCommands = []vmCommand{
+// vmCommands is every per-VM verb, in help-bar display order. They all fire on the
+// tile under the board's focus ring.
+var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
 		help:       "start",
@@ -244,32 +232,6 @@ var detailCommands = []vmCommand{
 		enabledFor: func(m model, v vm.VM) bool { return m.vmHasRetainedRun(v.Name) },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			return m.showJobLog(v.Name)
-		},
-	},
-}
-
-// detailChrome is the detail screen's non-per-VM keys. Rendered/dispatched after
-// detailCommands (see updateDetail/detailHelp in detail.go) so a verb key never
-// gets swallowed by chrome.
-//
-// QUIT IS NOT HERE, DELIBERATELY. `q` ends the session only from the board — the
-// root screen, the one place where "back" has nowhere left to go. On a child
-// screen the key that means "I am done with this" is `esc`, and having `q` also
-// sitting there means a single mistyped key does not close a VM screen, it closes
-// the application. Every child screen leaves the same way, through esc, and only
-// the root offers the exit.
-var detailChrome = []chromeCommand{
-	{
-		// esc/backspace/enter all return to the board; only "esc" is shown in the
-		// help bar (matching the pre-registry behaviour, where Enter worked as an
-		// undocumented alias). The board's focus ring is pinned to the VM's NAME,
-		// so coming back lands on the same tile the user zoomed in from.
-		binding:    key.NewBinding(key.WithKeys("esc", "backspace", "enter"), key.WithHelp("esc", "back")),
-		help:       "back",
-		enabledFor: chromeAlwaysEnabled,
-		action: func(m *model) tea.Cmd {
-			m.view = viewBoard
-			return nil
 		},
 	},
 }
