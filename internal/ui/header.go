@@ -131,9 +131,19 @@ func (m model) hostCapacityText() string {
 	var parts []string
 	if hostCPUs := hostCPUsFn(); hostCPUs > 0 {
 		if haveCPU {
-			parts = append(parts, fmt.Sprintf("cpu %.1f/%d", cpusUsed, hostCPUs))
+			// A share of the WHOLE HOST: 100% is every core of this machine pinned. The
+			// busy-vCPU total is divided by the host's core count rather than shown raw,
+			// so the number answers "how much of my machine are the sandboxes eating"
+			// without the reader having to know how many cores they have.
+			//
+			// It is deliberately NOT the same scale as the tile's cpu gauge, which is a
+			// share of that ONE VM's own vCPUs. Both are right, and they differ on
+			// purpose: a 2-vCPU VM pinning both cores reads 100% on its tile and 13% up
+			// here, on a 16-core host. The tile answers "is this sandbox busy"; the
+			// header answers "is my laptop in trouble".
+			parts = append(parts, fmt.Sprintf("cpu %.0f%%", cpusUsed/float64(hostCPUs)*100))
 		} else {
-			parts = append(parts, fmt.Sprintf("cpu —/%d", hostCPUs))
+			parts = append(parts, "cpu —")
 		}
 	}
 	if hostMem := hostMemBytesFn(); hostMem > 0 {
