@@ -342,7 +342,7 @@ screen in the TUI to open the editor. It:
 - Accepts one `KEY=VALUE` pair per line within a section; a line splits on its **first** `=`, so a value may contain `=`
 - Ignores blank lines and lines starting with `#` (comments)
 - Requires keys to match the shell variable name pattern `[A-Za-z_][A-Za-z0-9_]*` (letters, digits, underscore; not starting with a digit)
-- Saves changes with `Ctrl+S`; press `Esc` to discard edits without saving. Saving shows "applies on next start" — nothing is pushed to a running VM immediately
+- Saves changes with `Ctrl+S`; press `Esc` to discard edits without saving. Saving a **running** VM's secrets applies them to the live guest immediately — no restart needed; a **stopped** VM gets them on its next start
 
 **Convention, not a storage feature:** name a GitHub token `GH_TOKEN` and put it
 under an org-scoped section like `[github.com/acme]`. `sand` recognizes

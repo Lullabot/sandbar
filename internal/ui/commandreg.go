@@ -78,13 +78,31 @@ func (m model) vmHasRetainedRun(name string) bool {
 // status message; those now gate in enabledFor instead.
 func alwaysEnabled(model, vm.VM) bool { return true }
 
+// notBuilding gates every verb that would DISRUPT A BUILD, and it is the guard the
+// board's own liveness made necessary.
+//
+// A VM mid-provision is `Running` TO LIMA — Ansible is executing inside a booted
+// guest — so a gate that reads only vm.Status cheerfully offers "x stop" on a VM
+// whose build it would kill, and start's `Status != Running` even offers "s start"
+// on a VM Lima has never heard of (a create's clone has not landed; lookupVM hands
+// back a synthetic record with an empty Status). A RESET is worse still: it has
+// deleted its own instance and will clone it back, so a copy launched into it in
+// that window streams files into a VM that is about to be destroyed.
+//
+// Only Delete consulted the registry, because it was the only verb that could
+// obviously destroy a build. The others were protected by ACCIDENT: the old
+// full-screen progress view froze the keyboard for the whole build, so no key
+// could reach them. This plan removed that freeze — deliberately, it is the
+// headline feature — and these gates are what has to replace it.
+func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
+
 // vmCommands is every per-VM verb, in help-bar display order. They all fire on the
 // tile under the board's focus ring.
 var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
 		help:       "start",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status != limaRunning },
+		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status != limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
@@ -94,7 +112,7 @@ var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
 		help:       "stop",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
+		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
 			return m.beginAction(stopCmd(m.cli, v.Name))
@@ -103,7 +121,7 @@ var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 		help:       "restart",
-		enabledFor: alwaysEnabled,
+		enabledFor: notBuilding,
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("restarting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
@@ -125,6 +143,9 @@ var vmCommands = []vmCommand{
 		// way Status explains a hidden Start/Stop, so gating here loses no
 		// information a user could act on.
 		enabledFor: func(m model, v vm.VM) bool {
+			if !notBuilding(m, v) {
+				return false
+			}
 			_, ok := manage.RecreateBase(m.reg, v.Name)
 			return ok
 		},
@@ -190,7 +211,12 @@ var vmCommands = []vmCommand{
 		// This used to be an in-action check that surfaced a "must be running"
 		// status message and did nothing else — exactly the lying-footer pattern
 		// Shell was already fixed for. Gated the same way here.
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
+		//
+		// And NOT while a build owns the VM. A reset deletes its instance and clones
+		// it back, so a copy launched into it mid-reset streams the user's files into
+		// a VM that is about to be destroyed — and reports success. submitReset already
+		// refuses a reset while a copy runs; this is the other half of that guard.
+		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, true) // host → guest
 			*m = next.(model)
@@ -204,7 +230,7 @@ var vmCommands = []vmCommand{
 		// harmless here since the detail screen has no table.
 		binding:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "download")),
 		help:       "download",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
+		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, false) // guest → host
 			*m = next.(model)

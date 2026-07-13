@@ -61,13 +61,32 @@ rsync -a --delete --delete-excluded \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
 listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
-case "${listed:-}" in
-  ''|*[!0-9]*) total=0 ;;
-  *) total=$((listed + 1)) ;;
-esac
-echo "SAND_ANSIBLE_TASK_TOTAL=$total"
+` + taskTotalGuard + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
+
+// taskTotalGuard turns the raw count from `grep -c` into the denominator the tile's
+// build bar uses, and it is a const of its own so a test can execute it under a real
+// /bin/sh with a stubbed $listed (see TestTaskTotalGuard) — the bug it carries is a
+// shell-semantics bug and cannot be caught by reading Go.
+//
+// ZERO MUST BE REJECTED, not incremented. `grep -c` prints "0" and exits 1 when it
+// matches nothing; the `|| true` swallows the exit status, so $listed is the STRING
+// "0" — non-empty and perfectly numeric. It therefore sailed past the
+// ”|*[!0-9]* guard into total=$((0 + 1)) and the guest announced a total of ONE
+// task. The first `TASK [...]` banner then read 1/1 and the tile showed a filled bar
+// at 100% for the whole multi-minute build: a progress bar that is pinned full and
+// lying, which is strictly worse than the indeterminate 0% bar the fallback exists
+// to give. A guest whose --list-tasks pass fails, or whose ansible indents its
+// output differently, hits this every time.
+//
+// The +1 is the play's implicit gather_facts task, which --list-tasks does not list
+// but which the run does execute.
+const taskTotalGuard = `case "${listed:-}" in
+  ''|0|*[!0-9]*) total=0 ;;
+  *) total=$((listed + 1)) ;;
+esac
+echo "SAND_ANSIBLE_TASK_TOTAL=$total"`
 
 // Provisioner drives the base-build / clone / finalize sequence through a
 // lima.Client, streaming playbook output to the caller-supplied writer.

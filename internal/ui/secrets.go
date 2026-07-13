@@ -127,7 +127,8 @@ func renderPairsForEditor(scopes map[string]map[string]string) string {
 // pasted with CRLF line endings (Split(text, "\n") leaves a "\r" on the end
 // of every line) would otherwise land that "\r" inside every VALUE, and
 // Render single-quotes it straight into the guest's secrets.env. The key is
-// additionally trimmed on top of that. Any bad line aborts the whole parse —
+// additionally trimmed on top of that; the VALUE is not, so a trailing space or
+// tab the user typed on purpose survives. Any bad line aborts the whole parse —
 // a partial save would silently drop a secret the user typed. A duplicate KEY
 // is rejected only within the SAME scope; the same key may appear once per
 // scope. Kept free of model state so it is trivially testable on its own.
@@ -156,7 +157,13 @@ func parseSecrets(text string) (map[string]map[string]string, error) {
 			cur = existing
 			continue
 		}
-		k, v, ok := strings.Cut(trimmed, "=")
+		// Cut the line with ONLY its leading indent and its trailing carriage return
+		// removed — NOT the TrimSpace'd form. TrimSpace eats trailing spaces and tabs
+		// as well as the \r, so a value that legitimately ends in whitespace was
+		// silently truncated: the editor showed it, the store recorded it shortened,
+		// and the guest exported something the user never typed, with no error to say
+		// so. The CRLF problem this guard exists for is a trailing \r and nothing else.
+		k, v, ok := strings.Cut(strings.TrimLeft(strings.TrimRight(line, "\r"), " \t"), "=")
 		if !ok {
 			return nil, fmt.Errorf("line %d: expected KEY=VALUE, got %q", i+1, line)
 		}
@@ -246,7 +253,7 @@ func (m model) secretsView() string {
 	// the warning ran off the right edge.
 	b.WriteString("\n" + warnStyle.Width(cw).Render(
 		"Values are shown in cleartext and stored unencrypted on this host (0600). "+
-			"They are written into the VM on its next start.") + "\n")
+			"Saving applies them to a RUNNING VM immediately; a stopped one gets them on its next start.") + "\n")
 
 	b.WriteString("\n" + hintStyle.Width(cw).Render(
 		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section "+

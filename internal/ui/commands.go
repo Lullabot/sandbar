@@ -22,6 +22,13 @@ type (
 	vmsLoadedMsg struct {
 		vms []vm.VM
 		err error
+		// The host's own capacity, sampled in the same command for the same reason as
+		// the per-VM stats: hostMemBytes reads /proc/meminfo and hostDiskFree statfs's
+		// the Lima volume, and the header called BOTH on every render. Zero means "not
+		// sampled" — a test that hands the model a vmsLoadedMsg by hand — and the
+		// header falls back to probing directly (see hostCapacityText).
+		hostMem      int64
+		hostDiskFree int64
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -57,6 +64,13 @@ type (
 // NOT run in Update, so an unresponsive mount (stale NFS, sleeping USB, autofs)
 // can't stall the Bubble Tea event loop. A non-positive result leaves DiskUsed
 // empty so the cell renders blank.
+//
+// The tile's up/last-used times are sampled here for THE SAME REASON, and they were
+// not: the tile computed them inside View, so every frame ran up to three os.Stat
+// calls per tile against the Lima instance dir. A building board re-renders ~10x a
+// second for its spinner, so a three-VM fleet was issuing ~90 stat syscalls per
+// second on the Bubble Tea goroutine — and one stale mount would have stalled the
+// whole UI, which is precisely the hazard the comment above already forbids.
 func listCmd(cli *lima.Client) tea.Cmd {
 	return func() tea.Msg {
 		vms, err := cli.List()
@@ -65,9 +79,16 @@ func listCmd(cli *lima.Client) tea.Cmd {
 				if n := diskUsedBytes(vms[i].Dir); n > 0 {
 					vms[i].DiskUsed = strconv.FormatInt(n, 10)
 				}
+				if vms[i].Status == limaRunning {
+					if t, ok := upSince(vms[i].Dir); ok {
+						vms[i].UpSince = t
+					}
+				} else if t, ok := lastUsed(vms[i].Dir); ok {
+					vms[i].LastUsed = t
+				}
 			}
 		}
-		return vmsLoadedMsg{vms: vms, err: err}
+		return vmsLoadedMsg{vms: vms, err: err, hostMem: hostMemBytesFn(), hostDiskFree: hostDiskFreeFn()}
 	}
 }
 
