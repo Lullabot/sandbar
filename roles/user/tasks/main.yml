@@ -18,6 +18,20 @@
     password: "{{ user_password | password_hash('sha512') }}"
   when: provision_phase | default('full') != 'finalize'
 
+# Without linger, logind stops user@<uid>.service ten seconds after the user's
+# last login session goes away, which tears down any detached tmux server — and
+# with it a long-running Claude Code session. That is easy to miss because an
+# overlapping shell usually keeps the user manager alive; it only fires when
+# every connection drains at once, and it is logged as a clean shutdown rather
+# than an error. Linger keeps the user manager running with no sessions open, so
+# detached work survives disconnecting.
+- name: Enable systemd linger for {{ user_name }} so detached tmux survives logout
+  ansible.builtin.command:
+    cmd: loginctl enable-linger {{ user_name }}
+  args:
+    creates: /var/lib/systemd/linger/{{ user_name }}
+  when: provision_phase | default('full') != 'finalize'
+
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
     database: passwd

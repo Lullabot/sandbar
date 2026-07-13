@@ -126,6 +126,16 @@ jobs:
       - name: Assert apt update verifies signatures cleanly
         run: limactl shell claude-ci sudo apt-get update
 
+      # Without linger, logind stops user@<uid>.service ten seconds after the
+      # last session for the user closes, killing any detached tmux server and
+      # the long-running Claude Code session inside it.
+      - name: Assert systemd linger is enabled for the VM user
+        run: |
+          limactl shell claude-ci bash -lc '
+            set -e
+            loginctl show-user "$(id -un)" --property=Linger | grep -qx "Linger=yes"
+          '
+
       - name: Smoke-test the installed toolchain
         run: |
           limactl shell claude-ci bash -lc '
