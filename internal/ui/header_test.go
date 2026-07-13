@@ -50,8 +50,11 @@ func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	})
 
 	counts := m.headerCounts(m.layout.ContentWidth)
-	if !strings.Contains(counts, "cpu 2.0/16") {
-		t.Fatalf("header = %q, want the LIVE cpu load (25%% of 8 vCPUs = 2.0 busy of 16 host cores)", counts)
+	// 25% of its own 8 vCPUs = 2.0 busy cores; on a 16-core host that is 13% of the
+	// machine. The header's scale is the WHOLE HOST, unlike the tile's, which is a
+	// share of that one VM's vCPUs.
+	if !strings.Contains(counts, "cpu 12%") { // 12.5% rounds to 12
+		t.Fatalf("header = %q, want the live cpu load as a share of the host (2.0 of 16 cores)", counts)
 	}
 	if !strings.Contains(counts, "mem 2 GiB/16 GiB") {
 		t.Fatalf("header = %q, want the memory the guest is actually USING (2 GiB), not its 8 GiB allocation", counts)
@@ -60,10 +63,13 @@ func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	if strings.Contains(counts, "8 vCPU") {
 		t.Fatalf("header = %q, must not report the ALLOCATION", counts)
 	}
+	if !strings.Contains(counts, "mem 2 GiB/16 GiB") {
+		t.Fatalf("header = %q, want the memory the guest is actually USING (2 GiB), not its 8 GiB allocation", counts)
+	}
 	if !strings.Contains(counts, "disk free") {
 		t.Fatalf("header = %q, want free disk kept", counts)
 	}
-	if view := ansi.Strip(m.boardView()); !strings.Contains(view, "cpu 2.0/16") {
+	if view := ansi.Strip(m.boardView()); !strings.Contains(view, "cpu 12%") {
 		t.Fatalf("the live readout must reach the rendered board, got:\n%s", view)
 	}
 }
@@ -79,10 +85,10 @@ func TestHeaderRefusesToInventAZeroWhenNothingIsReporting(t *testing.T) {
 	// Deliberately no seedSample: the VM is up, nothing has reported.
 
 	counts := m.headerCounts(m.layout.ContentWidth)
-	if !strings.Contains(counts, "cpu —/16") || !strings.Contains(counts, "mem —/16 GiB") {
+	if !strings.Contains(counts, "cpu —") || !strings.Contains(counts, "mem —/16 GiB") {
 		t.Fatalf("header = %q, want an em dash for an unread metric, not a fabricated 0", counts)
 	}
-	if strings.Contains(counts, "cpu 0.0/16") || strings.Contains(counts, "mem 0 B/") {
+	if strings.Contains(counts, "cpu 0%") || strings.Contains(counts, "mem 0 B/") {
 		t.Fatalf("header = %q, must not claim an idle fleet when it simply has no reading", counts)
 	}
 }
@@ -129,7 +135,7 @@ func TestHeaderReadoutSurvivesAt80x24(t *testing.T) {
 	seedSample(&m, "web", guestSample{CPUPct: 50, HasCPU: true, MemUsed: 1 << 30, MemTotal: 4 << 30})
 
 	view := ansi.Strip(m.boardView())
-	if !strings.Contains(view, "cpu 2.0/16") {
+	if !strings.Contains(view, "cpu 12%") { // 50% of 4 vCPUs = 2.0 busy of 16 cores
 		t.Fatalf("80x24 must still carry the live host readout, got:\n%s", view)
 	}
 }
@@ -145,10 +151,13 @@ func TestHeaderAndTileAgreeOnTheSameSample(t *testing.T) {
 	seedSample(&m, "web", guestSample{CPUPct: 75, HasCPU: true, MemUsed: 3 << 30, MemTotal: 4 << 30})
 
 	view := ansi.Strip(m.boardView())
-	if !strings.Contains(view, "cpu 3.0/16") { // 75% of 4 vCPUs = 3.0 busy
-		t.Fatalf("header should report 3.0 host vCPUs busy, got:\n%s", view)
+	// ONE sample, TWO honest scales: the tile says 75% (of this VM's 4 vCPUs), the
+	// header says 19% (3.0 busy cores out of the host's 16). They must not be
+	// "reconciled" into one number — they answer different questions.
+	if !strings.Contains(view, "cpu 19%") {
+		t.Fatalf("header should report 3.0 of 16 host cores busy = 19%%, got:\n%s", view)
 	}
 	if !strings.Contains(view, "75%") { // the tile's own cpu gauge, same sample
-		t.Fatalf("the tile should show the same reading (75%%), got:\n%s", view)
+		t.Fatalf("the tile should show the same reading on ITS scale (75%%), got:\n%s", view)
 	}
 }
