@@ -521,6 +521,62 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning("web") })
 }
 
+// Submitting the create form lands on the BOARD, not on a full-screen Ansible log.
+//
+// This is the plan's signature moment, and the one the demo is built around: the
+// screen does not go dark with a full-screen dump — a tile appears, already
+// building, and the board stays live enough to start a second VM. It shipped
+// broken past this very suite, because beginStream flipped the view for EVERY
+// caller and the tests asserted the flip. So this test drives the real user path —
+// `n`, fill, `ctrl+s` — rather than calling beginProvision directly, and asserts on
+// what the user is looking at afterwards.
+func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	l.send(runeKey('n'))
+	if l.m.view != viewForm {
+		t.Fatalf("'n' should open the create form, got view %v", l.m.view)
+	}
+	for field, value := range map[int]string{
+		fName: "web", fHostname: "web-host", fUser: "ada",
+		fGitName: "Ada Lovelace", fGitEmail: "ada@example.com",
+		fCPUs: "2", fMemory: "2GiB", fDisk: vm.BaseDiskFloor,
+	} {
+		l.m.inputs[field].SetValue(value)
+	}
+	l.send(ctrlKey('s'))
+
+	if !l.m.jobs.isRunning("web") {
+		t.Fatal("submitting the form should start the build")
+	}
+	if l.m.view != viewBoard {
+		t.Fatalf("submitting the create form must land on the board, not the full-screen log — got view %v", l.m.view)
+	}
+	// The build is visible WHERE THE USER IS: the tile says Building, so the log
+	// they were not dumped into is not the only sign the VM is coming up.
+	if got := l.m.statusOf(vm.VM{Name: "web", Status: "Stopped"}); got != statusBuilding {
+		t.Fatalf("the new VM's tile should read Building, got %v", got)
+	}
+	// And the board is live: a second VM can be started without touching the first.
+	l.send(runeKey('n'))
+	if l.m.view != viewForm {
+		t.Fatalf("the board should stay live during a build ('n' → form), got view %v", l.m.view)
+	}
+	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
+
+	// The log is not lost — it is one 'l' away from the tile.
+	l.m.view = viewDetail
+	l.m.detail = vm.VM{Name: "web", Status: "Running"}
+	l.send(runeKey('l'))
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey("web") {
+		t.Fatalf("'l' should reopen the build's log (view=%v job=%+v)", l.m.view, l.m.progressJob)
+	}
+
+	l.send(ctrlKey('c'))
+	l.pump("web to finish cancelling", func(m model) bool { return !m.jobs.isRunning("web") })
+}
+
 // The reopen-log verb is state-gated on the VM having a run to show: a VM that
 // has never been built offers no log and pressing 'l' does nothing.
 func TestReopenLogGatedOnARetainedRun(t *testing.T) {
@@ -569,7 +625,14 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	// The user uploads a file to it.
 	upload := newFakeJob()
-	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", viewDetail, upload.stream)
+	// beginStream starts a job; it does not pick a screen. Mirror what the real
+	// caller (confirmDest, transfer.go) does after it, so this test exercises the
+	// transfer as the user gets it — a build would NOT do this, which is the whole
+	// difference between the two callers.
+	if started {
+		l.m.focusJob(transferKey("web"))
+	}
 	l.exec(uploadCmd)
 
 	// The transfer gets its own progress surface…

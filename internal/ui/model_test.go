@@ -332,7 +332,9 @@ func TestResetProjectToggleDisabledWithoutCloneURL(t *testing.T) {
 }
 
 // A reset whose disk is below the base floor is rejected (the form stays put with
-// an error); a valid reset dispatches and switches to the progress view.
+// an error); a valid reset dispatches and returns to the board, where the VM being
+// rebuilt shows a building tile. A reset is a build, and a build does not take the
+// screen — see TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog.
 func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m := openReset(t, resetConfig())
 
@@ -340,19 +342,19 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m.inputs[fDisk].SetValue("10GiB")
 	rejected, _ := m.Update(ctrlKey('s'))
 	m = rejected.(model)
-	if m.view == viewProgress || m.jobs.anyRunning() {
-		t.Fatalf("a sub-floor disk must not provision (view=%v)", m.view)
+	if m.view != viewForm || m.jobs.anyRunning() {
+		t.Fatalf("a sub-floor disk must not provision, and must keep the form on screen (view=%v)", m.view)
 	}
 	if m.formErr == nil {
 		t.Fatalf("a sub-floor disk should surface a validation error")
 	}
 
-	// At/above the floor: dispatch the reset and switch to the progress view.
+	// At/above the floor: dispatch the reset and drop back to the live board.
 	m.inputs[fDisk].SetValue("100GiB")
 	accepted, _ := m.Update(ctrlKey('s'))
 	m = accepted.(model)
-	if m.view != viewProgress || !m.jobs.isRunning("claude") {
-		t.Fatalf("a valid reset should provision (view=%v)", m.view)
+	if m.view != viewBoard || !m.jobs.isRunning("claude") {
+		t.Fatalf("a valid reset should provision and land on the board (view=%v)", m.view)
 	}
 	// A reset deletes and re-clones its own VM, so it must be exempt from the
 	// disappeared-VM reaper — see TestResetJobSurvivesItsOwnDelete.

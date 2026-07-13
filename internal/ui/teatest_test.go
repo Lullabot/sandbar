@@ -260,11 +260,20 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("submitting the form should have started the provisioner")
 	}
-	waitForText(t, tm, "Install Docker") // its output is streaming into the progress pane
+	// Submitting the form leaves the user ON THE BOARD, watching a tile that is
+	// already building. There is no full-screen Ansible dump to escape from — which
+	// is why this waits for the tile rather than pressing ESC to get back to it. The
+	// VM being built is one `limactl list` has never heard of, and is not managed
+	// until the build SUCCEEDS, yet it has a live tile throughout.
+	waitForText(t, tm, "Building")
 
-	// ESC — the key that used to do nothing at all here. The build must keep going,
-	// and the VM being built — which `limactl list` has never heard of, and which is
-	// not managed until the build SUCCEEDS — has a live tile on the board.
+	// The log is not lost, it is one key away: `l` on the building tile opens the
+	// run that has been streaming the whole time.
+	tm.Send(runeKey('l'))
+	waitForText(t, tm, "Install Docker")
+
+	// ESC — the key that used to do nothing at all here. The build keeps going and
+	// the board comes back.
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEsc})
 	waitForText(t, tm, "Building")
 
