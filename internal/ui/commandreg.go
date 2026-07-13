@@ -163,9 +163,15 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
-		binding:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
-		about:      "Open an interactive shell in the guest. sand steps aside until you exit it.",
-		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
+		binding: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
+		about:   "Open an interactive shell in the guest. sand steps aside until you exit it.",
+		// Not while a build or a reset owns the VM, for the same reason as every other
+		// verb here — and shell is the worst of them to get wrong. It SUSPENDS THE WHOLE
+		// TUI (tea.ExecProcess) and hands the terminal to `limactl shell`, so pressing it
+		// on a VM a reset is about to force-delete drops the user into a session that
+		// dies under them, while the build they can no longer see streams into a
+		// suspended terminal. It was the one verb this gate was not applied to.
+		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
 			return shellCmd(v.Name)

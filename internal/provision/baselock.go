@@ -1,5 +1,3 @@
-//go:build unix
-
 package provision
 
 // baselock.go serializes preparation of THE BASE IMAGE, which every VM is cloned
@@ -26,6 +24,11 @@ package provision
 // would serialize the TUI against itself and leave the interesting case open. flock
 // also conflicts between two file descriptors in the SAME process, so one mechanism
 // covers both.
+//
+// There is no non-unix build of this. sand drives Lima, Lima runs on Linux and macOS
+// (.goreleaser.yaml ships exactly those two), and syscall.Flock exists on both. A
+// `//go:build unix` tag with a no-op fallback beside it would be machinery kept alive
+// for a platform that cannot run sand at all.
 //
 // It is deliberately a lock and not a queue. A queue would need to model priority,
 // cancellation and fairness for something whose entire contract is "there is one

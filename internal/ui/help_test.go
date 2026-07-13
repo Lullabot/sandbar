@@ -29,7 +29,7 @@ func TestHelpScreenDescribesEveryVerb(t *testing.T) {
 			t.Errorf("the ? screen does not list %q", c.binding.Help().Key)
 		}
 	}
-	for _, k := range boardKeys {
+	for _, k := range m.boardKeys() {
 		if !strings.Contains(view, k.keys) {
 			t.Errorf("the ? screen does not list the board key %q", k.keys)
 		}

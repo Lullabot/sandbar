@@ -34,6 +34,30 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// maxFooterHelpLines is the number of rows the layout RESERVES for the wrapped help
+// bar. It is a constant on purpose, and that is the whole point: this budget sets
+// GridHeight, which sizes the tile grid, the progress viewport, the file browser and
+// the secrets editor. Deriving it from the verbs that happen to be eligible right now
+// made the layout a function of the FOCUS RING — a stopped VM offers fewer verbs than
+// a running one, and the ghost fewer still — so the grid's row count changed as the
+// user merely arrowed between tiles, and the panes went on rendering at a height from
+// a budget that no longer existed.
+//
+// Two, because two is what the board's real footer needs at the narrowest supported
+// terminal: at 80 columns a running VM's verbs wrap to exactly two rows and all of
+// them are visible. Budgeting for the union of every verb instead would reserve three
+// (it counts `s start` AND `x stop`, which can never both apply) and cost the board a
+// whole tile row at the one size the plan requires to work. A footer that needs more
+// rows than this is cut, and the cut is marked — see footerView.
+const maxFooterHelpLines = 2
+
+// listRaceLimit is how many consecutive refreshes may fail as an apparent clone
+// window before sand stops believing it. A clone of a large base takes 40-60s and
+// the refresh ticks every refreshInterval, so this is generously past any real one:
+// beyond it, the instance directory is broken rather than busy, and saying so is the
+// only thing that can help the user. See the vmsLoadedMsg handler.
+const listRaceLimit = 24
+
 // confirmState is a pending destructive action awaiting the user's `y`. It is
 // screen-agnostic: the board raises it for stop-all and for a quit that would
 // abandon a run, and the VM screen raises it for delete — neither screen needs to
@@ -111,11 +135,12 @@ type model struct {
 	// helpScroll is the `?` screen's scroll offset (help.go).
 	helpScroll int
 
-	// listRacing is true while `limactl list` is failing for the one reason that is
-	// not a failure: another instance is mid-clone or mid-delete (lima#5236). It
-	// exists so the condition is logged ONCE rather than on every 5s refresh for the
-	// minute a clone takes.
-	listRacing bool
+	// listRaceTicks counts CONSECUTIVE `limactl list` failures that look like the one
+	// failure which is not a failure: another instance mid-clone or mid-delete
+	// (lima#5236). One tick logs the pause; listRaceLimit ticks means it was never a
+	// clone window at all, and the real error is surfaced instead. Reset by any
+	// successful list.
+	listRaceTicks int
 
 	// headerMem / headerDiskFree are the header band's host capacity, sampled by
 	// listCmd OFF the Update goroutine rather than probed on every render (hostMemBytes
@@ -307,8 +332,20 @@ func (m *model) applySize(w, h int) {
 	// Two passes, because the footer's height depends on the content width and the
 	// grid's height depends on the footer's. The first pass settles the width (which
 	// depends on w alone); the second buys the help bar exactly the rows it needs.
+	// TWO PASSES. The first settles the content WIDTH (which depends on w alone); the
+	// second buys the help bar the rows it needs at that width.
+	//
+	// The budget is taken from the WIDEST the footer could ever be — every verb the
+	// board can offer — not from the verbs eligible right now. That is what keeps the
+	// layout a pure function of the terminal size, and it has to be: this budget sets
+	// GridHeight, which sizes the viewport, the file browser and the secrets editor
+	// below. Re-budgeting per message (which is what it did) meant the grid's row
+	// count changed as the focus ring merely MOVED — a stopped VM offers fewer verbs
+	// than a running one, so tiles jumped as the user arrowed between them — and the
+	// panes went on rendering at a height from a footer budget that no longer existed.
+	// A row of slack in the band is a cheap price for a layout that holds still.
 	m.layout = classify(w, h)
-	m.reflowFooter()
+	m.layout = classifyWithFooter(w, h, maxFooterHelpLines)
 
 	// The help bar's OWN width-based truncation is disabled (0): bubbles'
 	// ShortHelpView only stops adding items when it ALSO has room left for its
@@ -361,42 +398,6 @@ func (m *model) tickSpinner() tea.Cmd {
 	return m.spinner.Tick
 }
 
-// reflowFooter re-budgets the layout for the help bar the ACTIVE SCREEN is about to
-// render. The footer wraps rather than truncating, so its height depends on how many
-// verbs are eligible right now — which changes with the focus ring, the VM's state
-// and a job starting, not just with the terminal size. applySize alone would settle
-// it once at resize and then be wrong for the rest of the session, so this runs after
-// every message (Update), for the same reason syncBoard does.
-//
-// It is pure arithmetic over a handful of bindings; classify allocates nothing.
-func (m *model) reflowFooter() {
-	if m.width < 1 || m.height < 1 {
-		return
-	}
-	m.layout = classifyWithFooter(m.width, m.height, len(m.footerLines(m.activeHelp())))
-}
-
-// activeHelp is the bindings the current screen's footer shows. One switch, so the
-// rows the layout budgets and the rows the screen renders cannot disagree.
-func (m model) activeHelp() []key.Binding {
-	switch m.view {
-	case viewForm:
-		return m.formHelp()
-	case viewProgress:
-		return m.progressHelp()
-	case viewDest:
-		return m.destHelp()
-	case viewSecrets:
-		return m.secretsHelp()
-	case viewHelp:
-		return m.helpHelp()
-	case viewBrowse:
-		return nil // the browser renders its own help
-	default:
-		return m.boardHelp()
-	}
-}
-
 // footerView renders bindings through the shared help.Model and then clips the
 // result HONESTLY to ContentWidth with an ANSI-aware truncation of its own — see
 // the note on applySize above for why it may not lean on help.Model's own width
@@ -410,7 +411,17 @@ func (m model) activeHelp() []key.Binding {
 // destination prompt and the progress screen. A footer that is not clipped here is
 // not clipped at all.
 func (m model) footerView(bindings []key.Binding) string {
-	return strings.Join(m.footerLines(bindings), "\n")
+	lines := m.footerLines(bindings)
+	// The cap is enforced HERE, for every screen, not in the board's band. Only the
+	// board obeyed it, so the form, the secrets editor, the destination prompt and the
+	// progress screen could each render more help rows than the layout had budgeted —
+	// and a band that renders more rows than the layout counted is what pushed the help
+	// bar off the bottom of an 80x24 terminal in the first place.
+	if n := m.layout.HelpLines; n > 0 && len(lines) > n {
+		lines = lines[:n]
+		lines[n-1] = m.clipLine(lines[n-1] + " …")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // footerLines packs the help bar into as many lines as it needs, WRAPPING rather
@@ -505,7 +516,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	nm.syncBoard()
-	nm.reflowFooter()
 	// The batch is built into a LOCAL before nm is returned. tickRefresh takes a
 	// POINTER receiver and sets nm.refreshing = true; Go orders the function calls in
 	// a return statement but not the copy of the plain `nm` operand sitting beside
@@ -579,6 +589,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case vmsLoadedMsg:
+		// The host capacity is sampled by listCmd whether or not the LISTING succeeded,
+		// so adopt it before the error branches. It used to be adopted only on success —
+		// so during a clone window (lima#5236), which is exactly when a 20GiB base image
+		// is being copied onto the disk, the header's "free disk" figure froze at its
+		// startup value and told the user nothing was being consumed.
+		if msg.hostMem > 0 {
+			m.headerMem = msg.hostMem
+		}
+		if msg.hostDiskFree > 0 {
+			m.headerDiskFree = msg.hostDiskFree
+		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or
 			// deleted is not a failure — it is lima-vm/lima#5236, and it is the normal
@@ -594,28 +615,35 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The listing sand already has stays on screen — the other VMs have not
 			// changed, and the building VM's own tile comes from the job registry, not
 			// from Lima — and the condition is stated ONCE, when it starts.
+			// …but the suppression is BOUNDED, and it has to be. The signature is an
+			// error string, and it cannot tell a clone in flight from an instance
+			// directory that is permanently broken — a clone that was killed leaves
+			// exactly the same half-written directory, and `limactl list` then fails
+			// FOREVER. Suppressing that would leave sand sitting on an empty board with
+			// one stale line about a clone that finished hours ago, and no way for the
+			// user to find out why they have no VMs.
+			//
+			// A clone window is 40-60s. Anything still failing after listRaceLimit is not
+			// a window, and the real error — limactl's own stderr, naming the instance it
+			// cannot load — is the only thing that can get the user out of it.
 			if errors.Is(msg.err, lima.ErrListRacedInstanceDir) {
-				if !m.listRacing {
-					m.listRacing = true
+				m.listRaceTicks++
+				switch {
+				case m.listRaceTicks == 1:
 					m.logMsg("VM list paused while another instance is cloned or deleted (lima#5236)")
+				case m.listRaceTicks == listRaceLimit:
+					m.logMsg("VM list STILL failing — this is no longer a clone window. " +
+						"An instance directory is broken; remove it and sand will recover: " + msg.err.Error())
 				}
 				return m, nil
 			}
+			m.listRaceTicks = 0
 			m.logMsg("list failed: " + msg.err.Error())
 			return m, nil
 		}
-		m.listRacing = false
+		m.listRaceTicks = 0
 		m.vms = msg.vms // DiskUsed / UpSince / LastUsed are measured in listCmd, off the Update goroutine
 		m.vmsLoaded = true
-		// Adopt a sample only if the message CARRIES one. listCmd always does; a message
-		// built by hand (a test, or any future caller) does not, and must not blank the
-		// startup probe by handing us a zero.
-		if msg.hostMem > 0 {
-			m.headerMem = msg.hostMem
-		}
-		if msg.hostDiskFree > 0 {
-			m.headerDiskFree = msg.hostDiskFree
-		}
 		// ORDER MATTERS, and it is enforced by the data, not by this comment.
 		//
 		// The job registry goes FIRST. It knows which absences are legitimate — a

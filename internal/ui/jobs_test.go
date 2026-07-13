@@ -943,13 +943,13 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 
 	// Not advertised…
 	verbs := boardVerbs(l.m)
-	for _, v := range []string{"x stop", "r restart", "s start", "R reset", "u upload", "g download"} {
+	for _, v := range []string{"x stop", "r restart", "s start", "R reset", "u upload", "g download", "S shell"} {
 		if strings.Contains(verbs, v) {
 			t.Errorf("a building VM must not advertise %q:\n%s", v, verbs)
 		}
 	}
 	// …and not dispatched.
-	for _, k := range []rune{'x', 'r', 's', 'R', 'u', 'g'} {
+	for _, k := range []rune{'x', 'r', 's', 'R', 'u', 'g', 'S'} {
 		after, cmd := pressDispatch(t, l.m, runeKey(k))
 		if cmd != nil {
 			t.Errorf("%q on a building VM must dispatch nothing", k)
@@ -1061,13 +1061,39 @@ func TestAListRacingACloneKeepsTheBoardAndIsSaidOnce(t *testing.T) {
 	// says so again rather than staying quiet forever.
 	next, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "api", Status: "Running"}, {Name: "db", Status: "Stopped"}}})
 	m = next.(model)
-	if m.listRacing {
+	if m.listRaceTicks != 0 {
 		t.Fatal("a successful list must clear the paused state")
 	}
 	next, _ = m.Update(raced)
 	m = next.(model)
 	if n := countMessages(m, "lima#5236"); n != 2 {
 		t.Fatalf("a second clone should report the pause again, got %d reports", n)
+	}
+}
+
+// AND THE SUPPRESSION IS BOUNDED. The signature is an error string; it cannot tell a
+// clone in flight from an instance directory that is permanently broken — a killed
+// clone leaves exactly the same half-written directory, and `limactl list` then fails
+// forever. Suppressed, that would leave sand on an empty board with one stale line
+// about a clone that finished hours ago, and no way to find out why.
+func TestAPermanentListFailureIsNotHiddenAsACloneWindow(t *testing.T) {
+	m := newTestModel(t)
+	raced := vmsLoadedMsg{err: fmt.Errorf("%w: unable to load instance ghost: lima.yaml missing", lima.ErrListRacedInstanceDir)}
+
+	for i := 0; i < listRaceLimit; i++ {
+		next, _ := m.Update(raced)
+		m = next.(model)
+	}
+
+	if n := countMessages(m, "lima#5236"); n != 1 {
+		t.Fatalf("the pause itself should still be said once, got %d", n)
+	}
+	if countMessages(m, "STILL failing") != 1 {
+		t.Fatalf("after %d consecutive failures sand must stop believing it is a clone window:\n%v", listRaceLimit, m.messages)
+	}
+	// And the surfaced message carries limactl's own diagnosis, not just a shrug.
+	if countMessages(m, "unable to load instance ghost") != 1 {
+		t.Fatalf("the escalation must name the instance limactl cannot load:\n%v", m.messages)
 	}
 }
 
@@ -1093,4 +1119,52 @@ func countMessages(m model, want string) int {
 		}
 	}
 	return n
+}
+
+// A RESET THAT FAILED STILL DELETED THE VM — and the secrets must survive that too.
+//
+// The protection added for a reset in flight only covered RUNNING jobs, so the
+// moment the reset FAILED (after it had already deleted the instance and before it
+// could clone it back), the next refresh saw the VM missing, called it a
+// disappearance, unmanaged it and ERASED ITS HOST SECRETS. The user was then left
+// with a red tile they could not retry — `R` needs a managed VM — telling them to
+// retry, and a GH_TOKEN that was gone for good.
+//
+// The absence is still self-inflicted: OUR job deleted the VM. The user can clear
+// the state deliberately with `d`, which drops the job, the registry entry and the
+// secrets together — and that is the only way it should ever be reachable.
+func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+	if err := m.sec.Set("web", map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
+		t.Fatalf("seed secrets: %v", err)
+	}
+
+	l := newTeaLoop(t, m)
+	job := newFakeJob()
+	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+
+	// The reset deletes the instance, then FAILS before cloning it back.
+	job.done <- errAnsibleBoom
+	l.pump("the reset to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+
+	// The refresh lands: web is gone from Lima, because the reset deleted it.
+	l.send(vmsLoadedMsg{vms: []vm.VM{}})
+
+	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "ghp_precious" {
+		t.Fatalf("a FAILED reset must not erase the VM's secrets: GH_TOKEN = %q, want it intact", got)
+	}
+	if !l.m.reg.IsManaged("web") {
+		t.Fatal("a VM whose reset failed must stay managed — otherwise R is hidden and the user cannot retry the very thing the red tile is telling them to")
+	}
+	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+		t.Fatal("the failed run must be retained so the tile can report it")
+	}
+
+	// And `d` still clears everything deliberately.
+	l.m.focusName = "web"
+	l.send(actionDoneMsg{action: "delete", name: "web"})
+	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "" {
+		t.Fatalf("deleting the VM must take its secrets with it, got %q", got)
+	}
 }
