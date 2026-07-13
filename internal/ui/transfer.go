@@ -112,29 +112,22 @@ func (m model) updateDest(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// transferDest computes the final copy destination. A directory source is placed
-// INSIDE destDir as destDir/<name>: `limactl copy -r src dst` copies the source
-// directory's *contents* into dst with the rsync backend (and nests it with scp),
-// so without the appended name a directory transfer spills its contents into
-// destDir instead of creating the directory. Files go straight into destDir. The
-// join and the source basename use POSIX vs host path semantics per side (an
-// upload's dest is a guest path and its source a host path; a download's are
-// reversed).
-func transferDest(destDir, srcPath string, recursive, upload bool) string {
-	if !recursive {
-		return destDir
-	}
-	if upload {
-		return path.Join(destDir, filepath.Base(srcPath)) // guest dest, host source
-	}
-	return filepath.Join(destDir, path.Base(srcPath)) // host dest, guest source
-}
-
 // launchCopy builds the source/destination endpoints per direction and runs the
-// copy through the reused streaming plumbing (viewProgress). A directory source
-// is nested under the destination via transferDest.
+// copy through the reused streaming plumbing (viewProgress).
+//
+// The destination is the directory the user picked, VERBATIM — for a file and for
+// a directory alike. lima.Copy's contract is that the source is placed inside the
+// destination, which is what scp does natively and why that backend is pinned.
+//
+// There used to be a compensation layer here (transferDest) that appended the
+// source's basename for directory copies, because Lima's RSYNC backend splats a
+// directory's contents into the destination instead of nesting it. With the
+// backend pinned, that compensation is not merely redundant — it is a bug: scp
+// copying `mydir` into `dest/mydir` nests correctly only while `dest/mydir` does
+// not yet exist, so the SECOND upload of the same directory landed in
+// dest/mydir/mydir. Verified against real limactl 2.1.3.
 func (m model) launchCopy() (tea.Model, tea.Cmd) {
-	destDir := transferDest(m.dest.Value(), m.transferSrc, m.transferRecursive, m.transferUpload)
+	destDir := m.dest.Value()
 	var src, dst string
 	if m.transferUpload {
 		src, dst = m.transferSrc, lima.GuestPath(m.transferVM, destDir)

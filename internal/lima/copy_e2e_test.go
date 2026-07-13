@@ -106,4 +106,18 @@ func TestE2ECopyRoundTrip(t *testing.T) {
 	if catBuf.String() != nested {
 		t.Fatalf("recursive placement content = %q, want %q (dst-is-a-dir: srcdir nested under dest)", catBuf.String(), nested)
 	}
+
+	// And the directory is not SPLATTED: its contents must not appear loose in the
+	// destination. That is what the rsync backend does — it drops srcdir and copies
+	// what was inside it — and it is why the backend is pinned to scp. Asserting
+	// only on the file above is not enough: a splat that ALSO left a correct copy
+	// behind would pass, and more to the point, this is the assertion that names the
+	// failure. Without it the test says "the file is missing" when the truth is "the
+	// file is in the wrong place".
+	var splat bytes.Buffer
+	err = cli.Shell(ctx, name, nil, &splat, "test", "!", "-e", guestDir+"/nested.txt")
+	if err != nil {
+		t.Fatalf("a recursive copy must place srcdir INSIDE %s, not splat its contents there: "+
+			"%s/nested.txt exists (backend fell back to rsync?)\n%s", guestDir, guestDir, splat.String())
+	}
 }

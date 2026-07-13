@@ -179,15 +179,33 @@ func (c *Client) ShellOut(ctx context.Context, name string, argv ...string) ([]b
 	return c.r.Output(ctx, args...)
 }
 
-// Copy wraps `limactl copy`, streaming its verbose output to out. The auto
-// backend prefers rsync (resumable) and falls back to scp; -v streams progress;
-// -r is used for directory sources. Guest endpoints are formed with GuestPath
-// ("<vm>:/path"); host endpoints are plain paths. The caller's contract is that
-// dst is always a DIRECTORY and src is placed inside it, so the result is
-// identical whether rsync or scp runs. It goes through Runner.Stream so a
-// cancelled ctx kills the transfer, exactly like the *Streaming methods.
+// Copy wraps `limactl copy`, streaming its verbose output to out. -v streams
+// progress; -r is used for directory sources. Guest endpoints are formed with
+// GuestPath ("<vm>:/path"); host endpoints are plain paths. The caller's contract
+// is that dst is always a DIRECTORY and src is placed inside it. It goes through
+// Runner.Stream so a cancelled ctx kills the transfer, exactly like the
+// *Streaming methods.
+//
+// The backend is PINNED TO SCP, and the pin is load-bearing: under limactl 2.1.3
+// the choice of backend changes WHERE THE FILES LAND, not merely how fast they get
+// there.
+//
+//   - scp copies the source directory INTO the destination:
+//     `srcdir` + `vm:/dst` → /dst/srcdir/… — the contract above.
+//   - rsync copies the source's CONTENTS into the destination, dropping the
+//     directory itself: /dst/… — because Lima appends a trailing slash to every
+//     path of a recursive copy (pkg/copytool/rsync.go), and to rsync `srcdir/`
+//     means "the contents of srcdir".
+//
+// `--backend=auto` picks rsync when it is present on BOTH host and guest, so an
+// upload of ~/project would nest correctly on a guest without rsync and splat its
+// contents loose into the destination on a guest with it. Placement that depends
+// on which packages a sandbox happens to have installed is not a contract at all,
+// and the failure is silent: the bytes arrive, just not where the user put them.
+// Determinism is worth more here than rsync's resumability — sand copies project
+// files between a laptop and a local VM, not archives over a wide-area link.
 func (c *Client) Copy(ctx context.Context, out io.Writer, recursive bool, src, dst string) error {
-	args := []string{"copy", "-v", "--backend=auto"}
+	args := []string{"copy", "-v", "--backend=scp"}
 	if recursive {
 		args = append(args, "-r")
 	}
