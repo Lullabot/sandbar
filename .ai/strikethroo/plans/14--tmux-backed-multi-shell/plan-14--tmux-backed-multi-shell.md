@@ -722,15 +722,33 @@ load-bearing rather than incidental.
   hello
   ```
 
-  **Two argv details the builder (task 02) MUST honor, both learned the hard way
+  **One argv detail the builder (task 02) MUST honor, learned the hard way
   here:**
     1. **`--workdir` goes BEFORE the instance name.** `limactl shell <name>
-       --workdir <dir> …` does *not* work — limactl forwards the flag to the
-       guest's bash, which dies with `/bin/bash: --: invalid option`. The correct
-       form is `limactl shell --workdir <dir> <name> <cmd…>`.
-    2. **Do NOT pass a `--` separator** before the guest command. `limactl shell
-       <name> -- <cmd>` forwards the `--` to the guest bash and fails the same
-       way. The guest command follows the instance name directly.
+       --workdir <dir> …` does *not* work — once a positional (the instance
+       name) is seen, limactl stops parsing its own flags and forwards
+       everything after it to the guest command verbatim, so the guest's bash
+       chokes with `/bin/bash: --: invalid option`. The correct form is
+       `limactl shell --workdir <dir> <name> <cmd…>`.
+
+  **Correction (re-verified 2026-07-13, task 01 re-run):** an earlier version of
+  this entry additionally claimed that a bare `--` separator before the guest
+  command "forwards the `--` to the guest bash and fails the same way." That
+  claim was **wrong** and is retracted after direct re-testing — `--` is
+  harmless in every position tried:
+
+  ```
+  $ limactl shell sand-tmux-probe -- echo hello        # -- alone, no --workdir
+  bash: line 1: cd: … No such file or directory        # (the usual cd papercut)
+  hello                                                 # exit 0
+  $ limactl shell --workdir /home/debian.guest sand-tmux-probe -- echo hello
+  hello                                                 # exit 0, no cd error
+  $ limactl shell --workdir /home/debian.guest -- sand-tmux-probe echo hello
+  hello                                                 # exit 0, no cd error
+  ```
+
+  Only the position of `--workdir` **relative to the instance name** matters
+  (must precede it); `--` is not something task 02's builder needs to avoid.
 
   The guest home on this VM is `/home/debian.guest` — confirming it is
   `/home/<user>.guest`, not `/home/<user>`, exactly as the plan warns.
@@ -766,9 +784,9 @@ No circular dependencies. Every task appears in exactly one phase.
 
 *Gate: nothing else may be implemented until the attach mechanism is evidence-backed. This is the plan's single highest-risk unknown and everything downstream depends on it.*
 
-### Phase 2: The seam
+### ✅ Phase 2: The seam
 **Parallel Tasks:**
-- Task 002: The shared attach-command builder — a pure `(name, guestHome) → argv` function that owns all tmux knowledge, creates `main` on first attach and a **grouped** session afterwards, and sets `destroy-unattached` on the grouped session **only, never on `main`** (depends on: 001)
+- ✔️ Task 002 (`completed`): The shared attach-command builder — a pure `(name, guestHome) → argv` function that owns all tmux knowledge, creates `main` on first attach and a **grouped** session afterwards, and sets `destroy-unattached` on the grouped session **only, never on `main`** (depends on: 001)
 
 ### Phase 3: The two entrypoints
 **Parallel Tasks:**

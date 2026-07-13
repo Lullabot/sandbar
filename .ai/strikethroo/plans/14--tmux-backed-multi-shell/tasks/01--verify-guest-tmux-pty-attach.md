@@ -34,25 +34,26 @@ Nothing else in this plan may be implemented until this task completes.
 
 ## Acceptance Criteria
 
-- [ ] A real sand VM is running and is the probe target. `limactl list` shows it
+- [x] A real sand VM is running and is the probe target. `limactl list` shows it
       `Running`.
-- [ ] The probe is executed **under a real PTY** (an agent's shell has none — see
+- [x] The probe is executed **under a real PTY** (an agent's shell has none — see
       Implementation Notes for the two supported ways to get one) and its verdict
       is captured as literal terminal output, not inferred.
-- [ ] Running the equivalent of `limactl shell <vm> tmux new-session -A -s probe`
+- [x] Running the equivalent of `limactl shell <vm> tmux new-session -A -s probe`
       under that PTY is observed to either (a) attach — a tmux status bar is
       visible in captured pane output — or (b) fail with `open terminal failed:
       not a terminal`. The captured output is pasted into the plan.
-- [ ] If (b), the `ssh -t -F ~/.lima/<vm>/ssh.config lima-<vm> …` fallback is
+- [x] If (b), the `ssh -t -F ~/.lima/<vm>/ssh.config lima-<vm> …` fallback is
       probed the same way and shown to attach, so the plan has a known-good path.
-- [ ] `limactl shell --help` output confirming a `--workdir` flag exists is
+      **N/A — result was (a), attach succeeded, so the fallback was not probed.**
+- [x] `limactl shell --help` output confirming a `--workdir` flag exists is
       captured (it is depended on by task 4).
-- [ ] The **Change Log** section of
+- [x] The **Change Log** section of
       `.ai/strikethroo/plans/14--tmux-backed-multi-shell/plan-14--tmux-backed-multi-shell.md`
       gains a dated entry stating: the verdict, the captured evidence, the chosen
       mechanism (`limactl shell` or `ssh -t`), and the name of the probe VM left
       running for tasks 4 and 6.
-- [ ] The probe leaves no orphaned guest tmux sessions: `limactl shell <vm> tmux
+- [x] The probe leaves no orphaned guest tmux sessions: `limactl shell <vm> tmux
       kill-session -t probe` (and any grouped probes) run at the end, and
       `limactl shell <vm> tmux list-sessions` reports no `probe` session.
 
