@@ -70,6 +70,13 @@ func newTeaProgram(t *testing.T) *teatest.TestModel {
 func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	t.Helper()
 	isolateHostState(t)
+	// EVERY teatest golden now contains the board, so every one of them contains the
+	// header's host readout — real RAM, real free disk, real core count, none of them
+	// portable. Pinning here rather than per-test is what makes that structural: the
+	// delete-confirm golden used to snapshot the VM screen, which had no header, and
+	// silently started failing on CI with this developer's 15.6 GiB of RAM baked into
+	// it the moment that overlay moved onto the board.
+	pinHostCapacity(t, 16<<30, 100<<30)
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
@@ -320,7 +327,6 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 // are not portable, and a golden that baked them in would fail on every box
 // but the one it was generated on.
 func TestTUIBoardGolden80x24(t *testing.T) {
-	pinHostCapacity(t, 16<<30, 100<<30)
 	tm := newTeaProgramSized(t, 80, 24)
 	waitForText(t, tm, "claude")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
@@ -335,7 +341,6 @@ func TestTUIBoardGolden80x24(t *testing.T) {
 // refresh tick's gating) has its own real assertion elsewhere in this
 // package.
 func TestTUIBoardGoldenWide(t *testing.T) {
-	pinHostCapacity(t, 16<<30, 100<<30)
 	tm := newTeaProgramSized(t, 160, 40)
 	waitForText(t, tm, "claude")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
