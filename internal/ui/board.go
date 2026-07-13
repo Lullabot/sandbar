@@ -429,7 +429,6 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// the home surface).
 		if m.searchQuery != "" {
 			m.searchQuery = ""
-			m.status = ""
 			m.syncBoard()
 		}
 		return m, nil
@@ -458,14 +457,13 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.detail = v
-		m.status = "" // the VM screen starts clean
 		m.view = viewDetail
 		return m, nil
 
 	case key.Matches(msg, m.keys.StopAll):
 		targets := m.stopAllTargets()
 		if len(targets) == 0 {
-			m.status = "no running sand VMs to stop"
+			m.logMsg("no running sand VMs to stop")
 			return m, nil
 		}
 		m.confirm = &confirmState{
@@ -527,10 +525,13 @@ func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// boardHelp is a PLACEHOLDER help bar: task 09 owns the real footer (and the
-// header band and the messages strip), and derives it from the same command
-// registry the dispatcher above uses. This is the board's chrome only, so the
-// screen is usable in the meantime.
+// boardHelp is the board's footer, derived from THE SAME command registry
+// (commandreg.go) the VM screen's footer (detailHelp, detail.go) is, filtered
+// by the SAME enabledFor(model, vm.VM) predicate against the tile under the
+// focus ring. That is the whole payoff of task 02's registry: the footer
+// cannot advertise a verb that would do nothing to the focused tile, and it
+// cannot drift from updateBoard's own dispatch loop above (both walk
+// detailCommands), because there is exactly one list to walk.
 func (m model) boardHelp() []key.Binding {
 	if m.confirm != nil {
 		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
@@ -538,32 +539,34 @@ func (m model) boardHelp() []key.Binding {
 	if m.searching {
 		return []key.Binding{m.keys.Back, m.keys.Enter}
 	}
-	return []key.Binding{
-		boardMove, m.keys.Enter, m.keys.New, m.keys.Search, m.keys.StopAll, m.keys.Quit,
+	bindings := []key.Binding{boardMove, m.keys.Enter, m.keys.New, m.keys.Search}
+	if v, ok := m.focusedVM(); ok {
+		for _, c := range detailCommands {
+			if c.enabledFor(m, v) {
+				bindings = append(bindings, c.binding)
+			}
+		}
 	}
+	return append(bindings, m.keys.StopAll, m.keys.Quit)
 }
 
-// boardView renders the grid, a status line, the pending confirmation, and the
-// placeholder help bar.
+// boardView renders the board top to bottom: the pinned header band, the
+// docked messages strip (when the terminal has room for it — see
+// messagesStripView), the tile grid, the status line, the search indicator,
+// and the footer.
 func (m model) boardView() string {
 	var b strings.Builder
+	b.WriteString(m.headerView())
+	b.WriteString("\n")
+	if strip := m.messagesStripView(); strip != "" {
+		b.WriteString(strip)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.gridView())
 	b.WriteString("\n")
 
-	switch {
-	case m.confirm != nil:
-		b.WriteString("\n" + m.confirmView())
-	case m.acting:
-		// While a lifecycle action (including a confirmed stop-all) runs, lead the
-		// status with the live spinner — even with no status text, so the action
-		// never looks frozen.
-		status := m.status
-		if status == "" {
-			status = "working…"
-		}
-		b.WriteString("\n" + statusStyle.Render(m.spinner.View()+" "+status))
-	case m.status != "":
-		b.WriteString("\n" + statusStyle.Render(m.status))
+	if s := m.activityLineView(); s != "" {
+		b.WriteString("\n" + s)
 	}
 
 	// Surface the name filter so it never hides tiles invisibly: a live prompt
@@ -576,7 +579,7 @@ func (m model) boardView() string {
 		b.WriteString("\n" + statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery)))
 	}
 
-	b.WriteString("\n\n" + m.help.ShortHelpView(m.boardHelp()))
+	b.WriteString("\n\n" + m.footerView(m.boardHelp()))
 	return appStyle.Render(b.String())
 }
 

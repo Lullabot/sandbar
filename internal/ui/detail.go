@@ -88,22 +88,12 @@ func (m model) detailView() string {
 
 	// A transient status line surfaces the running-VM guard when Upload/Download
 	// can't proceed; the confirm prompt takes priority when a destructive
-	// action (delete) is pending.
-	switch {
-	case m.confirm != nil:
-		b.WriteString("\n" + m.confirmView() + "\n")
-	case m.acting:
-		// A lifecycle action (start/stop/restart/delete) is in flight — lead the
-		// status with the live spinner, matching the list screen.
-		status := m.status
-		if status == "" {
-			status = "working…"
-		}
-		b.WriteString("\n" + statusStyle.Render(m.spinner.View()+" "+status) + "\n")
-	case m.status != "":
-		b.WriteString("\n" + statusStyle.Render(m.status) + "\n")
+	// action (delete) is pending. Shared with the board (board.go) — see
+	// activityLineView (messages.go) — rather than a third copy of this switch.
+	if s := m.activityLineView(); s != "" {
+		b.WriteString("\n" + s + "\n")
 	}
 
-	b.WriteString("\n" + m.help.ShortHelpView(m.detailHelp()))
+	b.WriteString("\n" + m.footerView(m.detailHelp()))
 	return appStyle.Render(b.String())
 }

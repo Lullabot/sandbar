@@ -198,11 +198,11 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		name := m.secretsVM
 		m.view = viewDetail
 		if v, ok := m.lookupVM(name); ok && v.Status == "Running" {
-			m.status = "secrets saved for " + name + " — applying to the running VM…"
+			m.logMsg("secrets saved for " + name + " — applying to the running VM…")
 			user, liveScopes := m.secretsFor(name)
 			return m, m.beginAction(applySecretsCmd(m.cli, name, user, liveScopes))
 		}
-		m.status = "secrets saved for " + name + " — they apply on next start"
+		m.logMsg("secrets saved for " + name + " — they apply on next start")
 		return m, nil
 	}
 	var cmd tea.Cmd

@@ -98,7 +98,7 @@ var detailCommands = []vmCommand{
 		help:       "start",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status != "Running" },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			m.status = "starting " + v.Name + "…"
+			m.logMsg("starting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
 			return m.beginAction(startCmd(m.cli, v.Name, user, scopes))
 		},
@@ -108,7 +108,7 @@ var detailCommands = []vmCommand{
 		help:       "stop",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			m.status = "stopping " + v.Name + "…"
+			m.logMsg("stopping " + v.Name + "…")
 			return m.beginAction(stopCmd(m.cli, v.Name))
 		},
 	},
@@ -117,7 +117,7 @@ var detailCommands = []vmCommand{
 		help:       "restart",
 		enabledFor: alwaysEnabled,
 		action: func(m *model, v vm.VM) tea.Cmd {
-			m.status = "restarting " + v.Name + "…"
+			m.logMsg("restarting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
 			return m.beginAction(restartCmd(m.cli, v.Name, user, scopes))
 		},
@@ -171,7 +171,7 @@ var detailCommands = []vmCommand{
 		help:       "shell",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == "Running" },
 		action: func(m *model, v vm.VM) tea.Cmd {
-			m.status = "opening a shell in " + v.Name + " — the TUI resumes when you exit"
+			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
 			return shellCmd(v.Name)
 		},
 	},

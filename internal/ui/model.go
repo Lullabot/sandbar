@@ -76,7 +76,13 @@ type model struct {
 	width  int
 	height int
 	layout layoutMode // budgets derived from width/height by classify (see layout.go); set by applySize
-	status string
+
+	// messages is the session-only, bounded activity log (messages.go) that
+	// replaced the single overwritten status string this field used to be:
+	// logMsg appends, lastMessage/recentMessages read. It is a plain slice,
+	// not a pointer, because — unlike jobs/heartbeats — nothing outside the
+	// Update goroutine ever writes to it.
+	messages []message
 
 	// Board + detail. vms is every VM Lima reported; the board (board.go) derives
 	// its roster from it — managed clones only, always — and detail is the VM the
@@ -168,6 +174,11 @@ type model struct {
 	// flag.
 	spinning bool
 
+	// refreshing is true while exactly one board refresh-tick loop (refresh.go)
+	// is in flight — tickRefresh's guard against stacking loops, the same
+	// problem spinning solves for the spinner.
+	refreshing bool
+
 	// File transfer (Upload/Download). The browser and dest prompt are copy-safe
 	// (only a list.Model / textinput.Model plus small scalars), matching the
 	// value-passed model. destination is always a directory; the source is placed
@@ -232,11 +243,11 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 	// Neither load failure may silently shadow the other.
 	switch {
 	case loadErr != nil && secErr != nil:
-		m.status = "warning: " + loadErr.Error() + "; " + secErr.Error()
+		m.logMsg("warning: " + loadErr.Error() + "; " + secErr.Error())
 	case loadErr != nil:
-		m.status = "warning: " + loadErr.Error()
+		m.logMsg("warning: " + loadErr.Error())
 	case secErr != nil:
-		m.status = "warning: " + secErr.Error()
+		m.logMsg("warning: " + secErr.Error())
 	}
 	return m
 }
@@ -255,13 +266,15 @@ func (m *model) applySize(w, h int) {
 	m.width, m.height = w, h
 	m.layout = classify(w, h)
 
-	// The help bar is sized from the RAW width, not ContentWidth, and that is a
-	// known wart rather than an oversight: bubbles' ShortHelpView only truncates
-	// when it also has room for its ellipsis, and at ContentWidth the VM screen's
-	// full verb list lands exactly on that boundary — so a tighter budget makes it
-	// render the whole bar, unclipped, and overflow FURTHER. Task 09 owns the
-	// footer and can clip it honestly; until then this is the render that fits best.
-	m.help.SetWidth(w)
+	// The help bar's OWN width-based truncation is disabled (0): bubbles'
+	// ShortHelpView only stops adding items when it ALSO has room left for its
+	// own ellipsis — lacking that room, it silently renders one more item
+	// unclipped instead of stopping, which is what let the VM screen's longest
+	// footer overflow the terminal by ~2 cells. Rather than fight that logic
+	// with a width budget, ShortHelpView is left to render its full,
+	// UNCLIPPED list, and footerView (model.go) does the actual, honest clip
+	// itself with an ANSI-aware truncation to ContentWidth.
+	m.help.SetWidth(0)
 	m.viewport.SetWidth(m.layout.ContentWidth)
 	m.viewport.SetHeight(m.layout.GridHeight)
 
@@ -304,6 +317,15 @@ func (m *model) tickSpinner() tea.Cmd {
 	return m.spinner.Tick
 }
 
+// footerView renders bindings through the shared help.Model and then clips
+// the result HONESTLY to ContentWidth with an ANSI-aware truncation of its
+// own — see the note on applySize above for why it may not lean on
+// help.Model's own width truncation. Shared by the board (board.go) and the
+// VM screen (detail.go) so the fix lands on both footers, not just one.
+func (m model) footerView(bindings []key.Binding) string {
+	return ansi.Truncate(m.help.ShortHelpView(bindings), m.layout.ContentWidth, "…")
+}
+
 // present indexes a freshly loaded VM list by name, for jobRegistry.reconcile.
 func present(vms []vm.VM) map[string]bool {
 	set := make(map[string]bool, len(vms))
@@ -338,7 +360,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	nm.syncBoard()
-	return nm, tea.Batch(cmd, nm.syncHeartbeats())
+	return nm, tea.Batch(cmd, nm.syncHeartbeats(), nm.tickRefresh())
 }
 
 // dispatch is the single message-handling point. Key messages route by active view;
@@ -379,6 +401,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// one.
 		return m, heartbeatReadCmd(msg.vm, msg.epoch, m.heartbeats.fold(msg.vm, msg.epoch, msg.sample))
 
+	case refreshTickMsg:
+		// This loop iteration is done; tickRefresh (called centrally after every
+		// message — see Update) re-arms the next one iff shouldTick still allows
+		// it, which is what makes the loop stop on its own once the board is no
+		// longer the active, focused, recently-used screen.
+		m.refreshing = false
+		if !m.shouldTick() {
+			return m, nil
+		}
+		return m, listCmd(m.cli)
+
 	case spinner.TickMsg:
 		// The spinner animates for any job in flight (on any VM, whether or not its
 		// screen is showing) and for a quick lifecycle action; when neither is
@@ -394,7 +427,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case vmsLoadedMsg:
 		if msg.err != nil {
-			m.status = "list failed: " + msg.err.Error()
+			m.logMsg("list failed: " + msg.err.Error())
 			return m, nil
 		}
 		m.vms = msg.vms // DiskUsed is already measured in listCmd, off the Update goroutine
@@ -404,7 +437,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cannot drift.
 		dropped, err := manage.Reconcile(m.reg, msg.vms)
 		if err != nil {
-			m.status = "warning: could not update managed index: " + err.Error()
+			m.logMsg("warning: could not update managed index: " + err.Error())
 		}
 		// A VM that vanished outside the TUI (and so got dropped above) also loses
 		// its host-stored secrets — there is no guest left to apply them to, and
@@ -419,7 +452,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// running against a VM that no longer exists. reconcile knows not to reap a
 		// build whose VM does not exist YET, nor a reset that deleted its own VM.
 		if reaped := m.jobs.reconcile(present(msg.vms)); len(reaped) > 0 {
-			m.status = "canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared"
+			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
 			// Nothing left to show for the run the user was watching.
 			if m.view == viewProgress && !m.jobs.exists(m.progressVM) {
 				m.view = viewBoard
@@ -446,11 +479,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner
 		label := msg.action + " " + msg.name
+		var text string // built below, then logged ONCE at the end (see the warn append)
 		switch {
 		case msg.err != nil:
-			m.status = label + " failed: " + msg.err.Error()
+			text = label + " failed: " + msg.err.Error()
 		case msg.action == "shell":
-			m.status = "" // returned from the interactive shell; nothing to report
+			// returned from the interactive shell; nothing to report — logMsg("")
+			// below is a deliberate no-op, not a clear (a log has nothing to clear).
 		case msg.action == "delete":
 			// The record the VM screen was displaying no longer exists; only on
 			// this success path (msg.err != nil already returned above) — a failed
@@ -474,23 +509,24 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			secErr := m.sec.Remove(msg.name)
 			switch {
 			case regErr != nil && secErr != nil:
-				m.status = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
+				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
 			case regErr != nil:
-				m.status = label + " ok (warning: managed index not updated: " + regErr.Error() + ")"
+				text = label + " ok (warning: managed index not updated: " + regErr.Error() + ")"
 			case secErr != nil:
-				m.status = label + " ok (warning: secrets not pruned: " + secErr.Error() + ")"
+				text = label + " ok (warning: secrets not pruned: " + secErr.Error() + ")"
 			default:
-				m.status = label + " ok"
+				text = label + " ok"
 			}
 		default:
-			m.status = label + " ok"
+			text = label + " ok"
 		}
 		// A non-fatal ApplySecrets failure (start/restart/apply-secrets) is
-		// appended to whatever success status the switch above set; it must never
+		// appended to whatever success text the switch above built; it must never
 		// run on the failure branch, which already carries its own error message.
 		if msg.err == nil && msg.warn != "" {
-			m.status += " (warning: " + msg.warn + ")"
+			text += " (warning: " + msg.warn + ")"
 		}
+		m.logMsg(text)
 		return m, listCmd(m.cli) // refresh after every action
 
 	case provisionOutputMsg:
@@ -533,7 +569,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var applyCmd tea.Cmd
 		if msg.err == nil && isProvision && cfg.Name != "" {
 			if err := manage.RecordSuccess(m.reg, cfg); err != nil {
-				m.status = "VM ready, but recording it as managed failed: " + err.Error()
+				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// The create form's token becomes the VM's GH_TOKEN secret, so it can
 			// be edited later without a rebuild. It never enters the managed
@@ -549,7 +585,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				pairs := m.sec.Get(cfg.Name)
 				pairs["GH_TOKEN"] = cfg.CloneToken
 				if err := m.sec.Set(cfg.Name, pairs); err != nil {
-					m.status = "VM ready, but the token could not be saved as a secret: " + err.Error()
+					m.logMsg("VM ready, but the token could not be saved as a secret: " + err.Error())
 				}
 			}
 			// createVM/Reset each end with their own StartStreaming, which runs
@@ -669,11 +705,11 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Confirm): // y
 		run := m.confirm.run
-		// Seed the in-flight status so the spinner (raised by beginAction) has a
-		// label to sit beside — otherwise a confirmed stop-all/delete would spin
+		// Log the in-flight label so the spinner (raised by beginAction) has a
+		// message to sit beside — otherwise a confirmed stop-all/delete would spin
 		// against an empty or stale status line.
 		if m.confirm.working != "" {
-			m.status = m.confirm.working
+			m.logMsg(m.confirm.working)
 		}
 		m.confirm = nil
 		return m, m.beginAction(run)

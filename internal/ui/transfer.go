@@ -35,7 +35,6 @@ import (
 // There is exactly one source for "which VM is this verb acting on", and it is
 // this argument.
 func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
-	m.status = ""
 	m.transferVM = v.Name
 	m.transferUpload = upload
 

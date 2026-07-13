@@ -153,11 +153,11 @@ func TestSecretsWarnNotFailOnApplyFailure(t *testing.T) {
 	m := newTestModel(t)
 	next, _ := m.Update(done)
 	m = next.(model)
-	if !strings.Contains(m.status, "ok") {
-		t.Fatalf("status %q should still report the start as ok", m.status)
+	if !strings.Contains(m.lastMessage(), "ok") {
+		t.Fatalf("status %q should still report the start as ok", m.lastMessage())
 	}
-	if !strings.Contains(m.status, done.warn) {
-		t.Fatalf("status %q should include the warning %q", m.status, done.warn)
+	if !strings.Contains(m.lastMessage(), done.warn) {
+		t.Fatalf("status %q should include the warning %q", m.lastMessage(), done.warn)
 	}
 }
 
@@ -310,8 +310,8 @@ func TestSecretsSaveOnStoppedVMDoesNotTouchGuest(t *testing.T) {
 	if len(fr.streamCalls) != 0 {
 		t.Fatalf("saving on a stopped VM must not shell into the guest, got %d calls", len(fr.streamCalls))
 	}
-	if !strings.Contains(m.status, "claude") || !strings.Contains(m.status, "next start") {
-		t.Fatalf("status %q should name the VM and honestly say it applies on next start", m.status)
+	if !strings.Contains(m.lastMessage(), "claude") || !strings.Contains(m.lastMessage(), "next start") {
+		t.Fatalf("status %q should name the VM and honestly say it applies on next start", m.lastMessage())
 	}
 }
 
