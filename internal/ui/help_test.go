@@ -43,6 +43,24 @@ func TestHelpScreenDescribesEveryVerb(t *testing.T) {
 	if !strings.Contains(view, "Boot the VM") {
 		t.Fatal("the ? screen must describe start even when the focused VM is already running")
 	}
+
+	// EVERY SENTENCE APPEARS IN FULL, to its last word. The closing note took only
+	// the first wrapped line, so it stopped mid-sentence — a silent truncation, with
+	// no ellipsis to give it away, on the one screen whose whole job is to say things
+	// in full. Checking the LAST words of the longest sentences is what catches a
+	// dropped tail; checking that the text is "present" does not.
+	// Against the CONTENT, not the rendered view: the view is a scrolling window and
+	// the closing note is legitimately below the fold at most sizes.
+	flat := strings.Join(strings.Fields(ansi.Strip(strings.Join(m.helpLines(), " "))), " ")
+	for _, tail := range []string{
+		"The key does nothing when it is not offered.",                // the closing note
+		"form opens pre-filled so you can change the settings first.", // R, the longest verb
+		"X still stops every managed VM.",                             // the / entry
+	} {
+		if !strings.Contains(flat, tail) {
+			t.Errorf("a sentence was cut before its end — %q is missing", tail)
+		}
+	}
 }
 
 // ? opens the screen and closes it again, and esc closes it. It never leaves the

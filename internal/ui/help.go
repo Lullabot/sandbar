@@ -117,11 +117,16 @@ func (m model) helpLines() []string {
 	for _, c := range vmCommands {
 		entry(strings.Join(c.binding.Keys(), " "), c.about)
 	}
+	// The closing note WRAPS. It took wrapText(...)[0] — the first line and nothing
+	// else — so the sentence simply stopped mid-word, on the one screen whose entire
+	// job is to say things in full.
 	lines = append(lines, "")
-	lines = append(lines, statusStyle.Render(wrapText(
+	for _, l := range wrapText(
 		"A verb only appears in the footer when it applies to the focused VM — a stopped VM offers no shell, "+
-			"and a VM that is still building offers nothing that would interrupt its build. The key does nothing when it is not offered.",
-		width)[0]))
+			"and a VM that is still building offers nothing that would interrupt its build. The key does nothing "+
+			"when it is not offered.", width) {
+		lines = append(lines, statusStyle.Render(l))
+	}
 
 	return lines
 }
