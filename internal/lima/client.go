@@ -37,14 +37,47 @@ type listEntry struct {
 	Arch   string      `json:"arch"`
 }
 
+// ErrListRacedInstanceDir reports that `limactl list` failed ONLY because another
+// instance was mid-clone or mid-delete, and not because anything is wrong.
+//
+// lima-vm/lima#5236: `limactl clone` creates the instance directory before it
+// writes that directory's lima.yaml, and `limactl delete` removes the lima.yaml
+// before it removes the directory. In both windows `~/.lima/<name>/` exists without
+// a readable lima.yaml, and `limactl list` does not skip that instance — it exits 1
+// and prints NOTHING, so every other instance vanishes from the listing too.
+//
+// The window is sub-second for a delete and 40–60s for a clone of a large base
+// image, which is most of the time a `sand` create or reset is running. Callers get
+// this sentinel so they can keep the listing they already have instead of treating
+// a routine clone as a failure.
+var ErrListRacedInstanceDir = errors.New("limactl list raced an instance being cloned or deleted")
+
+// listRacePattern is the failure signature, matched against limactl's own stderr
+// (which Runner.Output folds into the error). Both halves are required: the message
+// names the instance it could not load AND the file it could not find, so a genuine
+// "this instance is corrupt" failure — which reports the same missing lima.yaml
+// while nothing is being cloned — is not what this matches. It is a narrow read of
+// one upstream error string, and if lima#5236 is fixed the string simply stops
+// appearing and this stops firing.
+func listRacedInstanceDir(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "unable to load instance") && strings.Contains(s, "lima.yaml")
+}
+
 // List parses `limactl list --format json`, which emits one JSON object per
 // line, into a slice of vm.VM. It decodes line by line and skips any line that
 // is not a JSON object, so a stray non-JSON line on stdout (a deprecation
 // notice, a leaked log line) degrades to "ignored" rather than failing the
 // whole listing.
+//
+// A listing that failed only because another instance is mid-clone or mid-delete
+// comes back as ErrListRacedInstanceDir — see that error.
 func (c *Client) List() ([]vm.VM, error) {
 	out, err := c.r.Output(context.Background(), "list", "--format", "json")
 	if err != nil {
+		if listRacedInstanceDir(err) {
+			return nil, fmt.Errorf("%w: %v", ErrListRacedInstanceDir, err)
+		}
 		return nil, fmt.Errorf("limactl list: %w", err)
 	}
 

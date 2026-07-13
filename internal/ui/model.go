@@ -12,6 +12,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -105,6 +106,12 @@ type model struct {
 	// real tiles arrived: sand opened with the ring on the ghost and enter created a
 	// VM instead of opening the first one.
 	vmsLoaded bool
+
+	// listRacing is true while `limactl list` is failing for the one reason that is
+	// not a failure: another instance is mid-clone or mid-delete (lima#5236). It
+	// exists so the condition is logged ONCE rather than on every 5s refresh for the
+	// minute a clone takes.
+	listRacing bool
 
 	// headerMem / headerDiskFree are the header band's host capacity, sampled by
 	// listCmd OFF the Update goroutine rather than probed on every render (hostMemBytes
@@ -478,9 +485,31 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case vmsLoadedMsg:
 		if msg.err != nil {
+			// A list that failed ONLY because another instance is being cloned or
+			// deleted is not a failure — it is lima-vm/lima#5236, and it is the normal
+			// state of the world for most of a create or a reset.
+			//
+			// `limactl clone` creates the instance directory before writing its
+			// lima.yaml, and `limactl list` aborts on the first instance it cannot load
+			// instead of skipping it, so EVERY listing fails for the 40–60s the clone
+			// takes. (`limactl delete` opens the same window, briefly.) Reporting that
+			// ten times over would bury the build the user is actually watching under
+			// errors about a VM that is coming up exactly as intended.
+			//
+			// The listing sand already has stays on screen — the other VMs have not
+			// changed, and the building VM's own tile comes from the job registry, not
+			// from Lima — and the condition is stated ONCE, when it starts.
+			if errors.Is(msg.err, lima.ErrListRacedInstanceDir) {
+				if !m.listRacing {
+					m.listRacing = true
+					m.logMsg("VM list paused while another instance is cloned or deleted (lima#5236)")
+				}
+				return m, nil
+			}
 			m.logMsg("list failed: " + msg.err.Error())
 			return m, nil
 		}
+		m.listRacing = false
 		m.vms = msg.vms // DiskUsed / UpSince / LastUsed are measured in listCmd, off the Update goroutine
 		m.vmsLoaded = true
 		// Adopt a sample only if the message CARRIES one. listCmd always does; a message
