@@ -58,7 +58,7 @@ type streamFunc func(ctx context.Context, out io.Writer) error
 // cancel func and leak its goroutine. The user is shown the running job instead.
 func (m *model) beginStream(name, title string, back view, run streamFunc) tea.Cmd {
 	if m.jobs.isRunning(name) {
-		m.status = name + " already has a run in flight — showing it"
+		m.logMsg(name + " already has a run in flight — showing it")
 		return m.showJobLog(name)
 	}
 

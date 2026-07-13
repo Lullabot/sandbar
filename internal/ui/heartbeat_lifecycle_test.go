@@ -181,10 +181,20 @@ func record(user, idle, memTotalKB, memAvailKB int) string {
 		heartbeatDelim + "\n"
 }
 
-// heartbeatModel is a model wired to a fake guest shell instead of a real limactl.
-func heartbeatModel(t *testing.T, sh *fakeShell) model {
+// heartbeatModel is a model wired to a fake guest shell instead of a real
+// limactl. managed names it as sand-managed BEFORE any vmsLoadedMsg lands:
+// syncHeartbeats only opens a shell for a VM that has a tile on the board
+// (task 09's roster-narrowing fix — see the comment on syncHeartbeats), and
+// the board is managed-clones-only, always, so a heartbeat test's VM needs a
+// tile exactly the way a board test's does (see board_test.go's loadManaged).
+func heartbeatModel(t *testing.T, sh *fakeShell, managed ...string) model {
 	t.Helper()
 	m := newTestModel(t)
+	for _, name := range managed {
+		if err := m.reg.Add(vm.CreateConfig{Name: name, BaseName: "claude-base"}); err != nil {
+			t.Fatalf("seed %s as managed: %v", name, err)
+		}
+	}
 	m.heartbeats = newHeartbeats(sh)
 	return m
 }
@@ -204,7 +214,7 @@ func vms(pairs ...string) []vm.VM {
 // to draw — not a zero, not a stale value, nothing.
 func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
 	sh := newFakeShell()
-	l := newTeaLoop(t, heartbeatModel(t, sh))
+	l := newTeaLoop(t, heartbeatModel(t, sh, "up", "down"))
 
 	l.send(vmsLoadedMsg{vms: vms("up", "Running", "down", "Stopped")})
 	sh.await(t, "open:up")
@@ -257,7 +267,7 @@ func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
 // the ordinary vmsLoadedMsg refresh, with no new polling machinery.
 func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 	sh := newFakeShell()
-	l := newTeaLoop(t, heartbeatModel(t, sh))
+	l := newTeaLoop(t, heartbeatModel(t, sh, "web"))
 
 	// Stopped: nothing.
 	l.send(vmsLoadedMsg{vms: vms("web", "Stopped")})
@@ -292,12 +302,44 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 	}
 }
 
+// GAP (b) TASK 08 LEFT OPEN, closed here: syncHeartbeats used to open a shell
+// for every VM Lima reported Running, whether or not it had a tile on the
+// board — an unmanaged VM, or a stray, got the exact same live SSH
+// connection as a managed one. That is a real resource cost (one SSH
+// connection, one goroutine, one guest cat/sleep loop, PER INVISIBLE VM), not
+// a cosmetic one, and it is exactly the "gauges nobody can see are not worth
+// an SSH connection" rationale shouldTick already applies to the screen — now
+// applied to the VM. Two VMs Lima reports Running, NEITHER managed (no tile
+// on the board at all): neither may ever get a heartbeat.
+func TestHeartbeatNeverOpensForAnUnmanagedVM(t *testing.T) {
+	sh := newFakeShell()
+	l := newTeaLoop(t, heartbeatModel(t, sh)) // nothing recorded as managed
+
+	l.send(vmsLoadedMsg{vms: vms("web", "Running", "stray", "Running")})
+
+	// There is no positive event to await for a shell that must never open, so
+	// pump a message the loop will actually react to (a spinner tick from a
+	// job would work too, but a second refresh is simplest) and then assert
+	// directly on the registry and the fake shell's open counts.
+	l.send(vmsLoadedMsg{vms: vms("web", "Running", "stray", "Running")})
+
+	if n := len(l.m.heartbeats.names()); n != 0 {
+		t.Fatalf("%d heartbeats open for a fleet with no managed VM at all — every one would be for a VM with no tile", n)
+	}
+	if got := sh.opened("web"); got != 0 {
+		t.Fatalf("web is unmanaged (no tile on the board): its shell must never open, got %d opens", got)
+	}
+	if got := sh.opened("stray"); got != 0 {
+		t.Fatalf("stray is unmanaged (no tile on the board): its shell must never open, got %d opens", got)
+	}
+}
+
 // THE IDLE GATE, which is a hard requirement and not a polish item. Every heartbeat
 // is an open SSH connection into a guest; sand in a backgrounded terminal, over SSH,
 // on battery, must not quietly hold them all open for nobody.
 func TestHeartbeatIsIdleGated(t *testing.T) {
 	sh := newFakeShell()
-	l := newTeaLoop(t, heartbeatModel(t, sh))
+	l := newTeaLoop(t, heartbeatModel(t, sh, "web"))
 
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")
@@ -357,7 +399,7 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 // until some later refresh notices — and its goroutine must be reaped.
 func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 	sh := newFakeShell()
-	l := newTeaLoop(t, heartbeatModel(t, sh))
+	l := newTeaLoop(t, heartbeatModel(t, sh, "web"))
 
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")

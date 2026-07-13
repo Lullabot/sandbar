@@ -123,7 +123,10 @@ func TestBoardOrderIsAlphabeticalAndStableAcrossAStateChange(t *testing.T) {
 		t.Fatalf("stopping the focused VM moved its tile from slot %d to %d — the order must not depend on status", before, got)
 	}
 	// And the rendered board agrees: still api, db, web, left-to-right, top-to-bottom.
-	view := ansi.Strip(m.boardView())
+	// The GRID specifically, not the whole screen: task 09's messages strip just
+	// logged "stopping db…" above it, and that "db" substring would otherwise be
+	// mistaken for the tile's.
+	view := ansi.Strip(m.gridView())
 	ai, di, wi := strings.Index(view, "api"), strings.Index(view, "db"), strings.Index(view, "web")
 	if ai < 0 || di < 0 || wi < 0 {
 		t.Fatalf("every managed VM should have a tile, got:\n%s", view)
@@ -239,8 +242,8 @@ func TestVerbAfterARefreshReachesTheVMUnderTheRing(t *testing.T) {
 	if done.action != "stop" || done.name != "web" {
 		t.Fatalf("'x' after a refresh dispatched %s on %q, want stop on web (the VM under the ring)", done.action, done.name)
 	}
-	if !strings.Contains(m.status, "web") {
-		t.Fatalf("status = %q, want it to name the VM the verb reached", m.status)
+	if !strings.Contains(m.lastMessage(), "web") {
+		t.Fatalf("status = %q, want it to name the VM the verb reached", m.lastMessage())
 	}
 }
 
@@ -695,6 +698,48 @@ func TestEnterOpensTheVMScreenAndEscReturnsWithFocus(t *testing.T) {
 	}
 	if m.focusName != "web" {
 		t.Fatalf("focus = %q after returning from the VM screen, want web", m.focusName)
+	}
+}
+
+// THE FOOTER IS THE PAYOFF FOR THE COMMAND REGISTRY (task 02): boardHelp
+// derives from the exact same detailCommands list and the exact same
+// enabledFor(model, vm.VM) predicate the dispatcher above uses, so it cannot
+// advertise a verb that would do nothing to the tile under the ring. Proven
+// here the way the plan's self-validation step 3f demands: focus a RUNNING
+// VM (footer offers Stop, not Start), stop it for real through the
+// dispatcher, and watch the footer flip — Stop disappears, Start appears —
+// once the refresh that follows the action reports the new state.
+func TestBoardFooterUpdatesAsTheFocusedVMsStateChanges(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+	m.focusName = "web"
+
+	rendered := plainHelp(m.boardView())
+	if !strings.Contains(rendered, "x stop") {
+		t.Fatalf("a running focused VM's footer should offer stop, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "s start") {
+		t.Fatalf("a running focused VM's footer must not offer start, got:\n%s", rendered)
+	}
+
+	// Stop it for real, through the dispatcher — not by hand-setting a field.
+	m, cmd := press(t, m, runeKey('x'))
+	done := actionDone(t, cmd)
+	if done.action != "stop" || done.name != "web" {
+		t.Fatalf("'x' dispatched %s on %q, want stop on web", done.action, done.name)
+	}
+	// The refresh that follows every action (actionDoneMsg's handler,
+	// model.go) reports web's new state — loadManaged stands in for it here,
+	// the same way TestBoardOrderIsAlphabeticalAndStableAcrossAStateChange
+	// (above) uses it to simulate the post-action refresh.
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Stopped"})
+
+	rendered = plainHelp(m.boardView())
+	if strings.Contains(rendered, "x stop") {
+		t.Fatalf("the footer must drop stop once web is stopped, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "s start") {
+		t.Fatalf("the footer must offer start once web is stopped, got:\n%s", rendered)
 	}
 }
 

@@ -187,8 +187,8 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("reset on an unmanaged VM should dispatch no command")
 	}
-	if m.status != "" {
-		t.Fatalf("reset on an unmanaged VM should be a silent no-op (help bar already omits it), got status %q", m.status)
+	if m.lastMessage() != "" {
+		t.Fatalf("reset on an unmanaged VM should be a silent no-op (help bar already omits it), got status %q", m.lastMessage())
 	}
 }
 
@@ -489,8 +489,8 @@ func TestTransferRequiresRunningVM(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("%q on a stopped VM should not issue a command", k)
 		}
-		if m2.status != "" {
-			t.Fatalf("%q on a stopped VM should be a silent no-op (help bar already omits it), got status %q", k, m2.status)
+		if m2.lastMessage() != "" {
+			t.Fatalf("%q on a stopped VM should be a silent no-op (help bar already omits it), got status %q", k, m2.lastMessage())
 		}
 	}
 }
@@ -796,8 +796,8 @@ func TestShellRequiresRunningVM(t *testing.T) {
 	if m.view == viewProgress || m.jobs.anyRunning() {
 		t.Fatal("shell on a stopped VM must not start anything")
 	}
-	if m.status != "" {
-		t.Fatalf("shell on a stopped VM should be a silent no-op (help bar already omits it), got status %q", m.status)
+	if m.lastMessage() != "" {
+		t.Fatalf("shell on a stopped VM should be a silent no-op (help bar already omits it), got status %q", m.lastMessage())
 	}
 }
 
@@ -945,14 +945,28 @@ func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
 	}
 }
 
-// isQuitCmd reports whether cmd is tea.Quit (it produces a tea.QuitMsg). The
-// fake runner makes any incidental command this triggers a harmless no-op.
+// isQuitCmd reports whether cmd is tea.Quit, or a tea.Batch containing it —
+// Update (model.go) always batches whatever a dispatch returns with
+// syncHeartbeats/tickRefresh, and since task 09 both are routinely non-nil
+// on a fresh idle model (shouldTick starts true), so a plain tea.Quit from
+// ctrl+c or 'q' now regularly arrives wrapped in a tea.BatchMsg rather than
+// bare. The fake runner makes any incidental command this triggers a
+// harmless no-op.
 func isQuitCmd(cmd tea.Cmd) bool {
 	if cmd == nil {
 		return false
 	}
-	_, ok := cmd().(tea.QuitMsg)
-	return ok
+	switch msg := cmd().(type) {
+	case tea.QuitMsg:
+		return true
+	case tea.BatchMsg:
+		for _, c := range msg {
+			if isQuitCmd(c) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Streamed output longer than the viewport width must wrap, not be truncated:
@@ -1197,8 +1211,8 @@ func TestStopAllConfirmShowsSpinner(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("confirming stop-all should dispatch a command (action + spinner tick)")
 	}
-	if !strings.Contains(m.status, "stopping") {
-		t.Fatalf("confirming stop-all should seed a status, got %q", m.status)
+	if !strings.Contains(m.lastMessage(), "stopping") {
+		t.Fatalf("confirming stop-all should seed a status, got %q", m.lastMessage())
 	}
 	if !strings.Contains(m.boardView(), m.spinner.View()) {
 		t.Fatalf("the board should render the spinner while stopping, got:\n%s", m.boardView())
@@ -1244,7 +1258,7 @@ func TestStopAllNoTargetsSetsStatusNoOverlay(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("with no running managed VMs, X must dispatch nothing")
 	}
-	if m.status == "" {
+	if m.lastMessage() == "" {
 		t.Fatal("X with no targets should explain via the status line")
 	}
 }

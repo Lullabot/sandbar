@@ -61,11 +61,33 @@ func (listFakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string
 // start with a fleet the board would actually show.
 func newTeaProgram(t *testing.T) *teatest.TestModel {
 	t.Helper()
+	return newTeaProgramSized(t, 100, 30)
+}
+
+// newTeaProgramSized is newTeaProgram's parametrized form, for the goldens
+// that pin the responsive range (80x24, and one wide size) at a size other
+// than the default 100x30.
+func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
+	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	return teatest.NewTestModel(t, New(cli, prov), teatest.WithInitialTermSize(100, 30))
+	return teatest.NewTestModel(t, New(cli, prov), teatest.WithInitialTermSize(w, h))
+}
+
+// pinHostCapacity overrides the header's host-capacity probes (header.go)
+// with deterministic values for the duration of the test. Real host RAM/disk
+// numbers are not portable across machines — see the note on hostMemBytesFn —
+// so any test that snapshots the board's rendered text (a golden, or a plain
+// substring check on the header) needs this or it is pinned to whatever this
+// one box happens to report.
+func pinHostCapacity(t *testing.T, memBytes, diskFreeBytes int64) {
+	t.Helper()
+	origMem, origDisk := hostMemBytesFn, hostDiskFreeFn
+	hostMemBytesFn = func() int64 { return memBytes }
+	hostDiskFreeFn = func() int64 { return diskFreeBytes }
+	t.Cleanup(func() { hostMemBytesFn, hostDiskFreeFn = origMem, origDisk })
 }
 
 // seedManagedIndex writes names into the managed-VM index the program is about
@@ -264,6 +286,37 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	if s.Progress.Task != "Install Docker" || s.Progress.Total != 19 {
 		t.Fatalf("the job should have parsed its Ansible progress, got %+v", s.Progress)
 	}
+}
+
+// GOLDEN 1 of 2 PINNING THE RESPONSIVE RANGE (the plan's own requirement):
+// 80x24, the classic terminal default and the narrowest realistic size. This
+// is the regression net for every magic offset task 03 deleted, proven here
+// against the board's REAL chrome — the header band, the messages strip, the
+// grid, the footer — not just classify's pure budgets (layout_test.go covers
+// those in isolation). The host-capacity probe is pinned (pinHostCapacity)
+// so the golden is reproducible across machines: real host RAM/disk numbers
+// are not portable, and a golden that baked them in would fail on every box
+// but the one it was generated on.
+func TestTUIBoardGolden80x24(t *testing.T) {
+	pinHostCapacity(t, 16<<30, 100<<30)
+	tm := newTeaProgramSized(t, 80, 24)
+	waitForText(t, tm, "claude")
+	teatest.RequireEqualOutput(t, finalScreen(t, tm))
+}
+
+// GOLDEN 2 of 2: a WIDE terminal, where classify grants multiple tile
+// columns and the header stays in its FULL (title + counts) form. Goldens
+// are layout-regression insurance and nothing more (see the package doc
+// above) — this and TestTUIBoardGolden80x24 assert the screen PAINTED
+// correctly at each end of the responsive range; every behavioural claim
+// about the board (the hidden count, the footer tracking VM state, the
+// refresh tick's gating) has its own real assertion elsewhere in this
+// package.
+func TestTUIBoardGoldenWide(t *testing.T) {
+	pinHostCapacity(t, 16<<30, 100<<30)
+	tm := newTeaProgramSized(t, 160, 40)
+	waitForText(t, tm, "claude")
+	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
 // finalModel quits the program and returns the concrete *model for state

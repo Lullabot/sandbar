@@ -645,11 +645,22 @@ func (m model) shouldTick() bool {
 // one, and is called after EVERY message (see Update) — which is what makes the gate
 // above continuous rather than something checked at a few remembered places.
 //
-// A heartbeat is opened for a VM that LIMA says is Running. Not deriveStatus's
-// Running: a VM mid-provision is Building to the board, but its guest is up and
-// shellable, and it is the one VM on the board whose cpu is genuinely worth
-// watching. What Lima's Running means here is precisely "there is a guest to open a
+// A heartbeat is opened for a VM that LIMA says is Running AND that has a tile
+// on the board (m.boardVMs(), board.go) — not deriveStatus's Running: a VM
+// mid-provision is Building to the board, but its guest is up and shellable,
+// and it is the one VM on the board whose cpu is genuinely worth watching.
+// What Lima's Running means here is precisely "there is a guest to open a
 // shell into", which is the only question this asks.
+//
+// THE ROSTER CHECK IS THE SECOND HALF OF THE GATE, and it earns its keep the
+// same way shouldTick does: task 08 filtered the board to managed clones
+// only, so an unmanaged VM Lima reports Running now has NO TILE to show a
+// gauge on — and "gauges nobody can see are not worth an SSH connection" is
+// exactly shouldTick's own rationale, restated for a VM instead of a screen.
+// Without this, every unmanaged Lima instance on the host gets a live shell
+// held open into it for nothing: a real resource cost (one SSH connection,
+// one goroutine, one guest cat/sleep loop, per invisible VM), not a
+// cosmetic one.
 //
 // A STOPPED VM NEVER GETS ONE, which is how "no gauge" is guaranteed to mean no
 // gauge: there is no heartbeat, so there is no sample, so latest() reports false and
@@ -664,9 +675,13 @@ func (m model) syncHeartbeats() tea.Cmd {
 		return nil
 	}
 
+	roster := make(map[string]bool, len(m.vms))
+	for _, v := range m.boardVMs() {
+		roster[v.Name] = true
+	}
 	want := make(map[string]bool, len(m.vms))
 	for _, v := range m.vms {
-		if v.Status == limaRunning {
+		if v.Status == limaRunning && roster[v.Name] {
 			want[v.Name] = true
 		}
 	}

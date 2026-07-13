@@ -396,8 +396,8 @@ func TestSecretsEditorSaveValidPersists(t *testing.T) {
 	if got["A"] != "1" || got["B"] != "2" {
 		t.Fatalf("Store.Get(%q) = %v, want {A:1 B:2}", "claude", got)
 	}
-	if !strings.Contains(m.status, "claude") || !strings.Contains(m.status, "next start") {
-		t.Fatalf("status %q should name the VM and note it applies on next start", m.status)
+	if !strings.Contains(m.lastMessage(), "claude") || !strings.Contains(m.lastMessage(), "next start") {
+		t.Fatalf("status %q should name the VM and note it applies on next start", m.lastMessage())
 	}
 }
 
