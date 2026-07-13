@@ -10,6 +10,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/ui"
+	buildversion "github.com/lullabot/sandbar/internal/version"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -27,7 +28,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "version":
-			fmt.Println(version)
+			fmt.Println(buildversion.String(version))
 			return
 		case "create":
 			if err := runCreate(os.Args[2:]); err != nil {
@@ -61,6 +62,8 @@ func runTUI() {
 
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
 
+	// Tell the TUI which build it is, so the header can say so.
+	ui.SetVersion(buildversion.String(version))
 	if _, err := tea.NewProgram(ui.New(cli, prov)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

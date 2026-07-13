@@ -32,7 +32,12 @@ import (
 // model (not just the VM) so a predicate can consult state the VM record
 // itself doesn't carry — e.g. the job-registry seam below.
 type vmCommand struct {
-	binding    key.Binding
+	binding key.Binding
+	// about is one sentence explaining what this verb does, for the `?` screen
+	// (help.go). The binding's own help text is a two-word label for the footer —
+	// "u upload" tells you the key, not what it copies where. This is the sentence a
+	// user reads once and then never needs again.
+	about      string
 	enabledFor func(m model, v vm.VM) bool
 	action     func(m *model, v vm.VM) tea.Cmd
 }
@@ -83,6 +88,7 @@ func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
 var vmCommands = []vmCommand{
 	{
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
+		about:      "Boot the VM. Its host-stored secrets are written into the guest as it comes up.",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status != limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
@@ -92,6 +98,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
+		about:      "Shut the VM down cleanly. Its disk and its secrets are kept.",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
@@ -100,6 +107,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
+		about:      "Stop the VM and start it again, applying any secrets you have changed since it booted.",
 		enabledFor: notBuilding,
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("restarting " + v.Name + "…")
@@ -109,6 +117,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "reset")),
+		about:   "Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the form opens pre-filled so you can change the settings first.",
 		// Reset clones from a Claude base, so it is only offered for VMs we
 		// created — otherwise it would replace an unrelated VM with a sandbox.
 		// Shared with the headless `sand create` path (internal/manage) so the
@@ -155,6 +164,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
+		about:      "Open an interactive shell in the guest. sand steps aside until you exit it.",
 		enabledFor: func(_ model, v vm.VM) bool { return v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("opening a shell in " + v.Name + " — the TUI resumes when you exit")
@@ -163,6 +173,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		about:   "Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it.",
 		// Delete raises the confirm overlay unconditionally today; the job
 		// registry (task 04) will additionally disable Delete while a VM is
 		// mid-build via vmBuilding.
@@ -182,6 +193,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "upload")),
+		about:   "Copy a file or directory from this machine into the guest. You pick the source, then the destination directory.",
 		// Both directions require a running VM (limactl copy needs the guest up).
 		// This used to be an in-action check that surfaced a "must be running"
 		// status message and did nothing else — exactly the lying-footer pattern
@@ -204,6 +216,7 @@ var vmCommands = []vmCommand{
 		// rename to 'g'. 'g' deliberately collides with bubbles/table's GotoTop —
 		// harmless here since the detail screen has no table.
 		binding:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "download")),
+		about:      "Copy a file or directory out of the guest onto this machine.",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			next, cmd := m.startTransfer(v, false) // guest → host
@@ -213,6 +226,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "secrets")),
+		about:      "Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start.",
 		enabledFor: alwaysEnabled, // secrets live on the host, editable whether or not the VM is up
 		action: func(m *model, v vm.VM) tea.Cmd {
 			return m.openSecrets(v.Name)
@@ -220,6 +234,7 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
+		about:   "Reopen the log of this VM's last build or file transfer, including one still running, and one that failed.",
 		// Reopen the VM's last run in the progress viewport. Ansible's output used
 		// to be ephemeral — it streamed into that viewport and was gone the moment
 		// you left the screen — so a provision that failed while you looked away was

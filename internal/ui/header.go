@@ -20,6 +20,17 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// buildVersion is what the header's title row shows on the right. main sets it from
+// the release tag GoReleaser stamps, falling back to the embedded git revision (see
+// internal/version). It is a package var rather than a constructor argument because
+// every test that renders the header would otherwise have to carry a version it does
+// not care about — and the goldens pin it (pinVersion) so a build from a different
+// commit cannot break them.
+var buildVersion = "dev"
+
+// SetVersion tells the TUI which build it is. Called once from main.
+func SetVersion(v string) { buildVersion = v }
+
 // compactPrefix folds the title into the counts line when classify sheds the
 // title row. It is charged against the counts' width budget, not rendered on top
 // of it — a prefix outside the budget is a line seven cells wider than the band
@@ -34,11 +45,28 @@ const compactPrefix = "sand · "
 // activity line take.
 func (m model) headerView() string {
 	if m.layout.HeaderFull {
-		return m.clipLine(titleStyle.Render("sand")) + "\n" +
+		return m.clipLine(m.titleRow()) + "\n" +
 			m.clipLine(statusStyle.Render(m.headerCounts(m.layout.ContentWidth)))
 	}
+	// Compact: the title row is gone, and so is the version with it. The counts and
+	// the live host readout are worth more than knowing which build you are on, and
+	// at this height there is no room to argue about it.
 	budget := m.layout.ContentWidth - ansi.StringWidth(compactPrefix)
 	return m.clipLine(statusStyle.Render(compactPrefix + m.headerCounts(budget)))
+}
+
+// titleRow is "sand" on the left and the build on the right, which is the one
+// question a bug report always needs and a user can never answer. The version is
+// dropped entirely rather than squeezed when the terminal cannot hold both — a
+// truncated commit hash is worse than no commit hash.
+func (m model) titleRow() string {
+	title := titleStyle.Render("sand")
+	ver := statusStyle.Render(buildVersion)
+	gap := m.layout.ContentWidth - ansi.StringWidth(title) - ansi.StringWidth(ver)
+	if gap < 1 {
+		return title
+	}
+	return title + strings.Repeat(" ", gap) + ver
 }
 
 // headerCounts assembles the header's one line: the fleet counts, then the live

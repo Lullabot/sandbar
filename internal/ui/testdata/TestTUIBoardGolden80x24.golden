@@ -1,5 +1,5 @@
                                                                                 
-   sand                                                                         
+   sand                                                                 v1.2.3  
   2 sandboxes (1 running) · cpu —, mem —/16 GiB, 100 GiB disk free              
   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  
   ┃ claude                                                                   ┃  
@@ -19,5 +19,6 @@
   ╰──────────────────────────────────────────────────────────────────────────╯  
                                                                                 
                                                                                 
-  ↑↓←→ move • n new • / search • x stop • r restart • R reset • S shell • d d…  
+  ↑↓←→ move • n new • / search • x stop • r restart • R reset • S shell         
+  d delete • u upload • g download • e secrets • X stop all • q quit • ? keys   
                                                                                 

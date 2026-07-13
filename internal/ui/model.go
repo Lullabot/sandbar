@@ -57,6 +57,7 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
+	viewHelp
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
@@ -106,6 +107,9 @@ type model struct {
 	// real tiles arrived: sand opened with the ring on the ghost and enter created a
 	// VM instead of opening the first one.
 	vmsLoaded bool
+
+	// helpScroll is the `?` screen's scroll offset (help.go).
+	helpScroll int
 
 	// listRacing is true while `limactl list` is failing for the one reason that is
 	// not a failure: another instance is mid-clone or mid-delete (lima#5236). It
@@ -300,7 +304,11 @@ func (m model) Init() tea.Cmd {
 // (to seed a pre-resize default) and the WindowSizeMsg handler.
 func (m *model) applySize(w, h int) {
 	m.width, m.height = w, h
+	// Two passes, because the footer's height depends on the content width and the
+	// grid's height depends on the footer's. The first pass settles the width (which
+	// depends on w alone); the second buys the help bar exactly the rows it needs.
 	m.layout = classify(w, h)
+	m.reflowFooter()
 
 	// The help bar's OWN width-based truncation is disabled (0): bubbles'
 	// ShortHelpView only stops adding items when it ALSO has room left for its
@@ -353,6 +361,42 @@ func (m *model) tickSpinner() tea.Cmd {
 	return m.spinner.Tick
 }
 
+// reflowFooter re-budgets the layout for the help bar the ACTIVE SCREEN is about to
+// render. The footer wraps rather than truncating, so its height depends on how many
+// verbs are eligible right now — which changes with the focus ring, the VM's state
+// and a job starting, not just with the terminal size. applySize alone would settle
+// it once at resize and then be wrong for the rest of the session, so this runs after
+// every message (Update), for the same reason syncBoard does.
+//
+// It is pure arithmetic over a handful of bindings; classify allocates nothing.
+func (m *model) reflowFooter() {
+	if m.width < 1 || m.height < 1 {
+		return
+	}
+	m.layout = classifyWithFooter(m.width, m.height, len(m.footerLines(m.activeHelp())))
+}
+
+// activeHelp is the bindings the current screen's footer shows. One switch, so the
+// rows the layout budgets and the rows the screen renders cannot disagree.
+func (m model) activeHelp() []key.Binding {
+	switch m.view {
+	case viewForm:
+		return m.formHelp()
+	case viewProgress:
+		return m.progressHelp()
+	case viewDest:
+		return m.destHelp()
+	case viewSecrets:
+		return m.secretsHelp()
+	case viewHelp:
+		return m.helpHelp()
+	case viewBrowse:
+		return nil // the browser renders its own help
+	default:
+		return m.boardHelp()
+	}
+}
+
 // footerView renders bindings through the shared help.Model and then clips the
 // result HONESTLY to ContentWidth with an ANSI-aware truncation of its own — see
 // the note on applySize above for why it may not lean on help.Model's own width
@@ -366,7 +410,57 @@ func (m *model) tickSpinner() tea.Cmd {
 // destination prompt and the progress screen. A footer that is not clipped here is
 // not clipped at all.
 func (m model) footerView(bindings []key.Binding) string {
-	return m.clipLine(m.help.ShortHelpView(bindings))
+	return strings.Join(m.footerLines(bindings), "\n")
+}
+
+// footerLines packs the help bar into as many lines as it needs, WRAPPING rather
+// than truncating.
+//
+// It used to be one clipped line, so a board with eight eligible verbs simply ended
+// in "…" and the rest were unfindable: the whole point of deriving the footer from
+// the command registry is that a user can see what they can do, and a verb the
+// footer had no room to print may as well not exist. The rows the extra lines cost
+// come out of the grid (see classify), which has them to spare — the board targets
+// 1-3 VMs.
+//
+// Items are packed greedily at their own boundaries, never mid-item: a wrapped
+// "u upl / oad" would be worse than the truncation it replaced. Each item is
+// rendered through the shared help.Model, so the styling is bubbles' own.
+func (m model) footerLines(bindings []key.Binding) []string {
+	width := m.layout.ContentWidth
+	if width < 1 {
+		width = 1
+	}
+	sep := m.help.Styles.ShortSeparator.Render(m.help.ShortSeparator)
+
+	var lines []string
+	cur := ""
+	for _, b := range bindings {
+		if !b.Enabled() {
+			continue
+		}
+		item := m.help.ShortHelpView([]key.Binding{b})
+		switch {
+		case cur == "":
+			cur = item
+		case ansi.StringWidth(cur)+ansi.StringWidth(sep)+ansi.StringWidth(item) <= width:
+			cur += sep + item
+		default:
+			lines = append(lines, cur)
+			cur = item
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	// A single item wider than the terminal still has to be cut somewhere.
+	for i, l := range lines {
+		lines[i] = m.clipLine(l)
+	}
+	return lines
 }
 
 // clipLine truncates one rendered line to ContentWidth, ANSI-aware. Every line a
@@ -411,6 +505,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	nm.syncBoard()
+	nm.reflowFooter()
 	// The batch is built into a LOCAL before nm is returned. tickRefresh takes a
 	// POINTER receiver and sets nm.refreshing = true; Go orders the function calls in
 	// a return statement but not the copy of the plain `nm` operand sitting beside
@@ -730,6 +825,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDest(msg)
 		case viewSecrets:
 			return m.updateSecrets(msg)
+		case viewHelp:
+			return m.updateHelp(msg)
 		}
 	}
 
@@ -838,6 +935,8 @@ func (m model) View() tea.View {
 		content = m.destView()
 	case viewSecrets:
 		content = m.secretsView()
+	case viewHelp:
+		content = m.helpView()
 	default:
 		content = m.boardView()
 	}

@@ -15,6 +15,7 @@ type keyMap struct {
 	StopAll    key.Binding
 	Back       key.Binding
 	Quit       key.Binding
+	Help       key.Binding
 	Tab        key.Binding
 	ShiftTab   key.Binding
 	Up         key.Binding
@@ -45,6 +46,7 @@ func newKeyMap() keyMap {
 		StopAll:  key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "keys")),
 		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
 		ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
 		Up:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "prev field")),

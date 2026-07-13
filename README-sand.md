@@ -128,6 +128,7 @@ under the ring, and can never advertise one that would do nothing.
 | `n` | Open the create-VM form |
 | `/` | Incremental name search — type to filter the tiles by name; `esc` clears and exits, `enter` keeps the filter |
 | `X` | Stop all — every sand-managed VM currently running (see below) |
+| `?` | **Keys**: every command with a one-sentence description, including the ones that don't apply to the focused VM right now. `↑`/`↓` scrolls, `esc` closes |
 | `q` | Quit (confirms first if a build or transfer is in flight) |
 
 Per-VM verbs — `s`/`x`/`r`/`R`/`S`/`d`/`u`/`g`/`e`/`l` — act on the **focused
