@@ -379,29 +379,51 @@ func (r *jobRegistry) reconcile(present map[string]bool) (reaped, protected []st
 	spared := make(map[string]bool)
 	var stopped []stopper
 	for key, j := range r.jobs {
-		if j.state != jobRunning {
-			continue
-		}
 		if present[key.vm] {
-			j.seen = true
-			continue
-		}
-		if !j.seen || j.recreates {
-			// Legitimately absent: a build whose clone has not landed, or a reset that
-			// deleted its own VM. Not a disappearance — and nothing downstream may treat
-			// it as one.
-			if !spared[key.vm] {
-				spared[key.vm] = true
-				protected = append(protected, key.vm)
+			if j.state == jobRunning {
+				j.seen = true
 			}
 			continue
 		}
-		stopped = append(stopped, stopperFor(j))
-		delete(r.jobs, key) // deleting during a range is defined behaviour
-		if !seen[key.vm] {
-			seen[key.vm] = true
-			reaped = append(reaped, key.vm)
+
+		// The VM is ABSENT from `limactl list`. Is that a disappearance, or did one of
+		// our own jobs put it there?
+		switch {
+		case j.state == jobRunning && (!j.seen || j.recreates):
+			// A build whose clone has not landed yet, or a reset that has deleted its own
+			// VM and not yet cloned it back.
+		case j.recreates && j.state != jobSucceeded:
+			// A RESET THAT FAILED (or was cancelled) deleted the VM itself and never
+			// brought it back, so the VM is absent BECAUSE OF US — the job merely stopped
+			// running before it could finish the job. Its absence is still self-inflicted.
+			//
+			// Treating it as a disappearance is not a cosmetic error: it unmanages the VM
+			// and DELETES ITS HOST SECRETS, so the user loses the GH_TOKEN the reset was
+			// going to re-apply AND the ability to retry (`R` needs a managed VM), while
+			// the failed tile sits there telling them to. The user can still clear it
+			// deliberately — `d` removes the job, the registry entry and the secrets
+			// together — which is the only way that state should ever be reachable.
+		default:
+			// A genuine disappearance. Reap a run still going against a VM that is gone;
+			// leave a finished one alone (a failed build is retained so the board keeps
+			// saying so).
+			if j.state != jobRunning {
+				continue
+			}
+			stopped = append(stopped, stopperFor(j))
+			delete(r.jobs, key) // deleting during a range is defined behaviour
+			if !seen[key.vm] {
+				seen[key.vm] = true
+				reaped = append(reaped, key.vm)
+			}
+			continue
 		}
+
+		if !spared[key.vm] {
+			spared[key.vm] = true
+			protected = append(protected, key.vm)
+		}
+		continue
 	}
 	r.mu.Unlock()
 

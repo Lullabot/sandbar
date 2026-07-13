@@ -23,21 +23,29 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// boardKeys are the keys that act on the BOARD rather than on a VM. They are not in
-// the command registry — they take no VM and have no enabledFor — so they are listed
-// here by hand. Keep this in sync with updateBoard; it is short, and it is the only
-// hand-maintained list left.
-var boardKeys = []struct {
+// boardKeys are the keys that act on the BOARD rather than on a VM. They take no VM
+// and have no enabledFor, so they are not in the command registry — but their KEY
+// LABELS still come from the one keymap that binds them, never re-typed here. A help
+// screen that spelled its own keys would be free to disagree with the keys that
+// actually fire, which is the drift the registry exists to abolish.
+func (m model) boardKeys() []struct {
 	keys  string
 	about string
-}{
-	{"↑ ↓ ← →", "Move the focus ring between tiles. Every verb below acts on the tile it is on."},
-	{"enter", "On the empty slot, create a VM. On a VM's tile it does nothing — the tile already shows everything sand knows."},
-	{"n", "Create a VM. Opens the form from anywhere on the board."},
-	{"/", "Filter the tiles by name as you type. esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
-	{"X", "Stop every running sand VM, after a confirmation. Base images and VMs sand did not create are never touched."},
-	{"q", "Quit. If a build or a file transfer is still running, it confirms first rather than orphaning it."},
-	{"?", "This screen."},
+} {
+	type entry = struct {
+		keys  string
+		about string
+	}
+	label := func(b key.Binding) string { return b.Help().Key }
+	return []entry{
+		{label(boardMove), "Move the focus ring between tiles. Every verb below acts on the tile it is on."},
+		{label(m.keys.Enter), "On the empty slot, create a VM. On a VM's tile it does nothing — the tile already shows everything sand knows."},
+		{label(m.keys.New), "Create a VM. Opens the form from anywhere on the board."},
+		{label(m.keys.Search), "Filter the tiles by name as you type. esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
+		{label(m.keys.StopAll), "Stop every running sand VM, after a confirmation. Base images and VMs sand did not create are never touched."},
+		{label(m.keys.Quit), "Quit. If a build or a file transfer is still running, it confirms first rather than orphaning it."},
+		{label(m.keys.Help), "This screen."},
+	}
 }
 
 // openHelp shows the `?` screen.
@@ -109,7 +117,7 @@ func (m model) helpLines() []string {
 	}
 
 	section("The board")
-	for _, k := range boardKeys {
+	for _, k := range m.boardKeys() {
 		entry(k.keys, k.about)
 	}
 

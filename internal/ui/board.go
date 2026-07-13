@@ -734,15 +734,8 @@ func (m model) footerBandView() string {
 	case m.searchQuery != "":
 		lines = append(lines, m.clipLine(statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery))))
 	}
-	// The help bar wraps, but only into the rows the layout granted it (HelpLines).
-	// What does not fit is cut, and the cut is MARKED — a footer that silently drops
-	// verbs is the truncation this replaced.
-	help := m.footerLines(m.boardHelp())
-	if n := m.layout.HelpLines; n > 0 && len(help) > n {
-		help = help[:n]
-		help[n-1] = m.clipLine(help[n-1] + " …")
-	}
-	lines = append(lines, help...)
+	// footerView applies the HelpLines cap for every screen, this one included.
+	lines = append(lines, strings.Split(m.footerView(m.boardHelp()), "\n")...)
 
 	height := m.layout.FooterHeight
 	if height < 1 {

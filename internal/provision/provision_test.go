@@ -769,7 +769,9 @@ type baseRaceRunner struct {
 	seq                []string // the order of base-affecting calls, for diagnosis
 	building           bool
 	built              bool
+	cloning            int
 	stoppedDuringBuild bool
+	deletedDuringClone bool
 	buildDelay         time.Duration
 }
 
@@ -787,6 +789,18 @@ func (r *baseRaceRunner) baseStatus() string {
 }
 
 func (r *baseRaceRunner) Output(_ context.Context, args ...string) ([]byte, error) {
+	// Delete is a BUFFERED call (Client.run -> Runner.Output), not a streamed one.
+	// Recording it in Stream, where it never arrives, is a fake that proves nothing.
+	if len(args) > 1 && args[0] == "delete" && args[1] == "claude-base" {
+		r.mu.Lock()
+		if r.cloning > 0 {
+			r.deletedDuringClone = true // the clone is reading the disk being deleted
+		}
+		r.built = false
+		r.seq = append(r.seq, "delete-base")
+		r.mu.Unlock()
+		return nil, nil
+	}
 	if len(args) > 2 && args[0] == "list" && args[1] == "claude-base" {
 		s := r.baseStatus()
 		if s == "" {
@@ -824,6 +838,17 @@ func (r *baseRaceRunner) Stream(_ context.Context, _ io.Reader, _ io.Writer, arg
 		r.mu.Lock()
 		r.building = false
 		r.built = true
+		r.mu.Unlock()
+	case args[0] == "clone":
+		r.mu.Lock()
+		r.cloning++
+		r.seq = append(r.seq, "clone-from-base")
+		r.mu.Unlock()
+
+		time.Sleep(r.buildDelay) // a clone reads the base's disk for a long time
+
+		r.mu.Lock()
+		r.cloning--
 		r.mu.Unlock()
 	case args[0] == "stop" && isBase():
 		r.mu.Lock()
@@ -863,7 +888,7 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
 
-	cfg := vm.CreateConfig{Name: "web", BaseName: "claude-base"}
+	names := []string{"web", "api"}
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -871,7 +896,7 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = p.ensureBaseStopped(context.Background(), cfg, io.Discard)
+			errs[i] = p.prepareBaseAndClone(context.Background(), vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, io.Discard)
 		}(i)
 	}
 	wg.Wait()
@@ -888,5 +913,69 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 	}
 	if r.stoppedDuringBuild {
 		t.Errorf("the base image was stopped WHILE IT WAS BEING BUILT — the second create killed the first one's base build (calls: %v)", r.seq)
+	}
+	if r.deletedDuringClone {
+		t.Errorf("the base image was DELETED while another create was cloning from it — the lock did not cover the clone (calls: %v)", r.seq)
+	}
+}
+
+// THE CLONE MUST BE INSIDE THE BASE LOCK, not just the decision that precedes it.
+//
+// The lock was taken and released inside ensureBaseStopped, so it guarded the choice
+// to build or rebuild the base and then let go — while the 40-60s clone that READS
+// that base ran unprotected. That leaves the stale-base path free to delete the base
+// out from under a clone, and the version it compares against is not a constant:
+// playbookVersionFn is the playbook checkout's git HEAD plus a "-dirty" suffix, so
+// editing any playbook file while a create is cloning FLIPS IT AT RUNTIME.
+//
+// So: create A builds the base and starts its (slow) clone. The playbook goes dirty.
+// Create B arrives, finds the base stale, and force-deletes the instance A is reading
+// its disk from. A's clone fails, or lands truncated.
+func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
+	r := &baseRaceRunner{buildDelay: 200 * time.Millisecond}
+	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
+
+	// The playbook version FLIPS once the first build has stamped it — exactly what an
+	// edit to the playbook checkout does mid-create.
+	var vmu sync.Mutex
+	version := "v1"
+	stamped := ""
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string) (string, error) {
+		vmu.Lock()
+		defer vmu.Unlock()
+		return version, nil
+	}
+	readBaseVersionFn = func(string) string {
+		vmu.Lock()
+		defer vmu.Unlock()
+		return stamped
+	}
+	writeBaseVersionFn = func(_, v string) error {
+		vmu.Lock()
+		stamped = v
+		version = "v2" // the tree goes dirty the moment the base is built
+		vmu.Unlock()
+		return nil
+	}
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	var wg sync.WaitGroup
+	for _, name := range []string{"web", "api"} {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			_ = p.prepareBaseAndClone(context.Background(),
+				vm.CreateConfig{Name: name, BaseName: "claude-base"}, io.Discard)
+		}(name)
+	}
+	wg.Wait()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deletedDuringClone {
+		t.Fatalf("the base was DELETED while another create was cloning from it — the lock did not cover the clone (calls: %v)", r.seq)
 	}
 }

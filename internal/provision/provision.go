@@ -190,13 +190,8 @@ func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // that guard use CreateVM. Recreate uses createVM directly because it has just
 // force-deleted the target.
 func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
-	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+	if err := p.prepareBaseAndClone(ctx, cfg, out); err != nil {
 		return err
-	}
-
-	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
-	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
-		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
 	// Size the clone before its first start: the base is built at a small disk
 	// floor, so this grows the disk (and applies cpus/memory) for this VM.
@@ -224,22 +219,52 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	return nil
 }
 
-// ensureBaseStopped makes sure the base image exists and is stopped — a clone
-// needs an idle source disk. An empty/error status means the instance is
-// absent, so the heavy base build runs; an existing but running base is stopped.
-func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
-	// EVERYTHING BELOW IS ONE ATOMIC DECISION, and it has to be: it reads the base's
-	// status and then acts on that reading — build it, stop it, or delete and rebuild
-	// it. Two concurrent creates (which the board exists to allow) would otherwise
-	// both find the base missing and both build it, and a create that arrives while
-	// another is building would see the base as Running and STOP IT, killing that
-	// build. See baselock.go.
+// prepareBaseAndClone is the base image's WHOLE critical section: prepare it, then
+// clone from it, with the base lock (baselock.go) held across BOTH.
+//
+// The clone has to be inside the lock, and it was not. The lock was taken and
+// released inside ensureBaseStopped, so it covered the decision to build or rebuild
+// the base and then let go — while the 40-60s clone that READS that base ran
+// unprotected. baselock.go's own doc lists "the stale-base path can DELETE the base
+// while another create is cloning from it" among the races it closes, and it did not
+// close that one: playbookVersionFn is the playbook checkout's git HEAD plus a
+// "-dirty" suffix, so it changes at RUNTIME. Edit a playbook file while a create is
+// cloning, start a second create, and that create takes the free lock, decides the
+// base is stale, and force-deletes the instance the first create is reading its disk
+// from.
+//
+// The cost is that two concurrent creates serialize their clones. That is the right
+// trade: a clone is seconds to a minute, while the Ansible run that follows it —
+// which is the expensive part, and the part concurrency was for — still overlaps
+// freely. The alternative (a shared/exclusive lock, readers cloning in parallel while
+// a writer rebuilds) buys back that minute at the price of lock-upgrade semantics
+// nobody should have to reason about while a VM's disk is being deleted underneath
+// them.
+func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	release, err := lockBase(ctx, cfg.BaseName, out)
 	if err != nil {
 		return err // only a cancelled context gets here
 	}
 	defer release()
 
+	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+		return err
+	}
+
+	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
+	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
+		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
+	}
+	return nil
+}
+
+// ensureBaseStopped makes sure the base image exists and is stopped — a clone
+// needs an idle source disk. An empty/error status means the instance is
+// absent, so the heavy base build runs; an existing but running base is stopped.
+func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	// The caller holds the base lock (prepareBaseAndClone). Everything here is one
+	// atomic decision — read the base's status, then act on that reading — and it must
+	// stay inside that lock. See baselock.go.
 	status, err := p.Lima.Status(cfg.BaseName)
 	exists := err == nil && status != ""
 
@@ -370,12 +395,8 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	}
 
 	// 3. Recreate sized from the base image.
-	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+	if err := p.prepareBaseAndClone(ctx, cfg, out); err != nil {
 		return wrap(err)
-	}
-	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
-	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
-		return wrap(fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err))
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
 		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
