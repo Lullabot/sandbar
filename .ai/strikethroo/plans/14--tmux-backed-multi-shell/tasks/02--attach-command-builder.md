@@ -2,7 +2,7 @@
 id: 2
 group: "guest-attach"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "opus"
 effort: "xhigh"
