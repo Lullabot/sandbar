@@ -83,57 +83,89 @@ Common flags (run `sand create --help` for the full list and defaults):
 playbook embedded in the binary, there is no separate ref left to pin — see
 [Playbook resolution](#playbook-resolution-working-tree-first-embedded-fallback).
 
-## Keybindings
+## The board
 
-The bindings below come from `internal/ui/keys.go` and the per-view handlers
-(`list.go`, `detail.go`, `form.go`, `progress.go`). `ctrl+c` quits from anywhere,
-except while a build is running on the progress view, where it cancels the build
-instead. The active view's keys are also shown in the help bar at the bottom of
-the screen.
+`sand`'s home surface is a **board**: a scrolling grid of tiles, one per VM,
+with a focus ring you move with the arrow keys. There is no table and no list
+view — the board replaced them, and there is no key that brings a table back.
 
-Actions divide by screen: the **list** selects a VM and owns the global actions;
-the **VM screen** owns every action that targets one VM.
+The board shows **sand-managed clones only, always** — no unmanaged Lima
+instance, no base image, and **no toggle** to bring either back (the old `f`
+filter is gone). That has a real, deliberate cost: a base image or someone
+else's Lima VM becomes invisible and unmanageable from the TUI. The
+mitigation is the header band's **hidden count** (e.g. "3 sandboxes · 1 base,
+2 external hidden") — read it if the fleet looks smaller than you expect, and
+manage anything hidden with `limactl` directly. A VM mid-build, and a VM
+whose last build **failed**, still get a tile even before (or without ever)
+being recorded managed — otherwise a build in progress, or a failed one,
+would have nowhere to report on.
 
-### List view
+**Provisioning no longer takes over the screen.** Creating or resetting a VM
+opens a progress view, but `esc`/`enter` return you to the board immediately
+and the build keeps running in the background — its tile shows a live
+progress bar. You can create a second VM, or act on an unrelated one, while
+the first is still building. `q` only quits outright when nothing is in
+flight; with a build or transfer running, it asks you to confirm abandoning
+it first. `ctrl+c` remains the unconditional cancel for whichever run you're
+currently looking at.
+
+Tile order is **alphabetical and stable** — a VM changing state never moves
+its tile — and focus tracks the VM's **identity**, not its slot, so a refresh
+or a state change landing mid-keypress can never shift a destructive key onto
+the wrong VM.
+
+The bindings below come from the single command registry
+(`internal/ui/commandreg.go`) and `internal/ui/keys.go`; the help bar at the
+bottom of the screen always shows exactly the verbs that apply to the tile
+under the ring, and can never advertise one that would do nothing.
+
+### Board keys
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` (also `k` / `j`) | Move the selection |
-| `enter` | Open the selected VM's screen |
+| `↑` `↓` `←` `→` | Move the focus ring (arrows only — no vim keys; `l` and `g` are per-VM verbs below) |
+| `enter` | Open the focused VM's screen |
 | `n` | Open the create-VM form |
-| `f` | Toggle the filter: show all VMs ↔ only sand instances (managed + base) |
-| `/` | Incremental name search — type to filter the list by name; `esc` clears and exits, `enter` keeps the filter |
-| `X` | Stop every running sand-managed VM (see below) |
-| `q` | Quit |
+| `/` | Incremental name search — type to filter the tiles by name; `esc` clears and exits, `enter` keeps the filter |
+| `X` | Stop all — every sand-managed VM currently running (see below) |
+| `q` | Quit (confirms first if a build or transfer is in flight) |
 
-The **Managed** column marks which VMs `sand` created: `yes` for a managed
-clone, `base` for a base image other VMs are cloned from (e.g. `claude-base`), and
-`no` otherwise. See [Managed VMs and safety](#managed-vms-and-safety) below.
+Per-VM verbs — `s`/`x`/`r`/`R`/`S`/`d`/`u`/`g`/`e`/`l` — act on the **focused
+tile** directly from the board, exactly as they do on the VM screen below;
+`enter` is not required first. Each is shown in the footer, and fires, only
+when it applies to that VM (see [VM screen](#vm-screen) for what each one
+does and when it's offered).
 
-### Stop all (on the list)
+### Stop all (`X`)
 
 `X` stops every VM that is sand-managed **and** currently running, after a
 confirmation naming them. Unmanaged Lima instances and base images are never
 touched, so an instance you run for unrelated work is safe. VMs hidden by an
-active `f` or `/` filter are still stopped — `X` means "stop all", not "stop what
-I can see". Stopping is sequential; if one VM refuses to stop, the others still
-stop and the failure is reported by name.
+active `/` search are still stopped — `X` means "stop every managed VM", not
+"stop what the current filter happens to show". Stopping is sequential; if
+one VM refuses to stop, the others still stop and the failure is reported by
+name.
 
-### VM view
+### VM screen
+
+Press `enter` on the board (or a per-VM verb directly) to open a VM's
+detail screen. It shows the same verbs as the board's footer, gated the same
+way:
 
 | Key | Action |
 |-----|--------|
-| `s` | Start the VM |
-| `x` | Stop the VM |
-| `r` | Restart the VM |
+| `s` | Start the VM (offered when it isn't already running) |
+| `x` | Stop the VM (offered while it's running) |
+| `r` | Restart the VM (always offered — stop-then-start, whatever the current state) |
 | `R` | **Reset**: open the pre-filled form to re-clone the VM from its base image (managed VMs only) — see [Reset a VM](#reset-a-vm) |
-| `S` | Open an interactive shell in the VM (must be running) |
-| `d` | **Delete** the VM (opens a confirmation) |
-| `u` | **Upload** a host file/directory into the VM (must be running) — see [Moving files in and out](#moving-files-in-and-out) |
-| `g` | **Download** a guest file/directory to the host (must be running) |
-| `e` | Edit the VM's **secrets** — works whether the VM is running or stopped |
-| `esc` / `backspace` | Back to the list |
-| `q` | Quit |
+| `S` | Open an interactive shell in the VM (offered while it's running) |
+| `d` | **Delete** the VM (opens a confirmation; withheld while the VM is mid-build) |
+| `u` | **Upload** a host file/directory into the VM (offered while it's running) — see [Moving files in and out](#moving-files-in-and-out) |
+| `g` | **Download** a guest file/directory to the host (offered while it's running) |
+| `e` | Edit the VM's **secrets** — offered whether the VM is running or stopped; saving while it's running applies the change to the live guest immediately (not just "on next start") |
+| `l` | Reopen the VM's last build or transfer **log** — offered only when a run (finished or still in flight) is retained to show |
+| `esc` / `backspace` / `enter` | Back to the board (lands back on the same tile) |
+| `q` | Quit (confirms first if a build or transfer is in flight) |
 
 Pressing `S` suspends the TUI and hands your terminal to `limactl shell <name>`;
 the TUI resumes when you exit the shell.
@@ -225,7 +257,7 @@ are stripped).
 | `↑` / `↓` (also `tab` / `shift+tab`) | Move between fields |
 | `enter` | Move to the next field (it does **not** create) |
 | `ctrl+s` | Create the VM (validates, then switches to the progress view) |
-| `esc` | Cancel, back to the list |
+| `esc` | Cancel, back to the board |
 
 Typing edits the focused field and `backspace` deletes a character; `q` is a
 literal character here, so only `ctrl+c` quits. Help for the focused field — its
@@ -249,14 +281,19 @@ fail to grow to its full size once the volume fills.
 | Key | Action |
 |-----|--------|
 | `↑` / `↓`, `pgup` / `pgdn` | Scroll the provisioner output |
-| `ctrl+c` (while running) | Cancel the build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
-| `q` | Quit (only after the run finishes; does nothing while a build is running) |
-| `esc` / `backspace`, `enter` | Return to the list (after the run finishes) |
+| `ctrl+c` (while running) | Cancel **this** build — kills the underlying `limactl` and returns a *Canceled* result (may leave a partial VM) |
+| `esc` / `backspace`, `enter` | Back to the board (or the VM screen, for a transfer) — **immediately**, even while the run is still going. The run keeps going in the background; its tile shows a live progress bar |
+| `q` | Quit if nothing is running; otherwise confirms first (this run or another one elsewhere may still be in flight) |
 
 The slow lifecycle steps — building the base image, cloning, and booting — stream
 their `limactl` output live (with `==>` phase banners), so a first-ever creation
 (which builds the base image before your VM is cloned) shows continuous progress
 instead of a silent spinner.
+
+Leaving this screen no longer abandons the run: `esc` was the "cancel and go
+back" key on the old list-blocking TUI, and it is not any more. Only `ctrl+c`
+cancels a run; `esc`/`enter` just stop watching it. Reopen it any time with
+`l` on the VM's tile or detail screen.
 
 ## Moving files in and out
 
@@ -316,9 +353,9 @@ your host and restores it after the reset. The form warns that this moves your
 Claude login and `.env` token off the VM: **do not preserve if you suspect the VM
 is compromised.** See the main [Security Model](README.md#security-model).
 
-**Disk sizing.** The list shows two disk columns — `Max Disk` (the VM's maximum
-virtual size) and `Disk Used` (its real allocated blocks); the detail view names
-them `Maximum Disk Size` and `Disk Used (allocated)`. `Disk Used` sits well below
+**Disk sizing.** Each tile's `disk` gauge shows real allocated blocks against
+the VM's maximum virtual size; the detail view names the two figures
+`Disk Used (allocated)` and `Maximum Disk Size`. `Disk Used` sits well below
 `Max Disk` because qcow2 disks are sparse — only written blocks are allocated. A
 VM's `Max Disk` can **grow** from the base floor (`20GiB`) but cannot **shrink**
 below the current base's virtual size — qcow2 cannot shrink a live disk — so the
@@ -328,25 +365,28 @@ the base at the floor on the next create/reset.
 
 ## Managed VMs and safety
 
-`limactl` lists **every** Lima instance on your machine, not just the ones this
-tool created — your `default` template VM, a Colima docker VM, and so on all show
-up in the list. You can safely list, inspect, start, stop, restart, and (with a
-confirmation) delete any of them; those are ordinary `limactl` operations.
+`limactl` knows about **every** Lima instance on your machine, not just the
+ones this tool created — your `default` template VM, a Colima docker VM, and
+so on. The board does **not** show them: it is sand-managed clones only,
+always, with no toggle to widen it (see [The board](#the-board)). Manage an
+unmanaged instance, or a base image, with `limactl` directly — `sand` deliberately
+gives them no tile.
 
 **Reset is different**: it deletes the instance and re-clones it from a Claude
 base image, so pointing it at an unrelated VM would replace that VM with a sandbox.
 To prevent this, `sand` records the instances **it** creates and:
 
-- marks them in the **Managed** column (and the VM screen),
-- offers **reset (`R`) only for managed VMs** (`f` filters the list down to
-  sand's own instances — managed clones and base images), and
+- shows them (and only them, plus one currently mid-build or whose last build
+  failed) on the board, and labels a VM "base image (clone source)" on its own
+  detail screen if it is one,
+- offers **reset (`R`) only for managed VMs**, and
 - restricts **stop all (`X`)** to running managed VMs, so it never stops an
   unrelated Lima instance.
 
 Base images (the heavy, identity-free images each VM is cloned from, such as
-`claude-base`) are shown as `base` in the **Managed** column and labelled "base
-image (clone source)" in the detail view, so they stand out from the disposable
-VMs cloned from them.
+`claude-base`) are never on the board — they are a clone source, not a
+workspace — and are managed via `limactl` (e.g. `limactl start claude-base`,
+`limactl delete claude-base`) rather than through `sand`.
 
 The index of managed VMs is a small JSON file at
 `${XDG_DATA_HOME:-$HOME/.local/share}/sandbar/managed-vms.json`. It is updated
