@@ -30,15 +30,34 @@ func newTestModel(t *testing.T) model {
 	return newTestModelWithCli(t, lima.New(fakeRunner{}))
 }
 
+// isolateHostState redirects every host location the app writes to into temp dirs,
+// so a unit test can never mutate the developer's machine.
+//
+// XDG_DATA_HOME covers the managed-VM index and the secrets store. LIMA_HOME covers
+// the base image's playbook-version stamp, and that one is not hypothetical: the TUI
+// tests build a REAL provision.Provisioner over a fake lima.Runner, so driving a
+// create walks ensureBaseStopped → writeBaseVersion, which wrote the CURRENT git
+// version into the real ~/.lima/_sand/claude-base.playbook-version — stamping the
+// developer's base image as freshly built from a playbook it had never seen, without
+// building anything at all. A stamp is only as good as the rebuild it records, and a
+// false one is worse than none: baseStale then reports the base as current and sand
+// SKIPS the rebuild the user actually needs, silently cloning from a stale image.
+//
+// A fake Runner stops a test from RUNNING limactl. It does nothing about the files
+// the code around it writes. Isolate the environment, not just the subprocess.
+func isolateHostState(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("LIMA_HOME", t.TempDir())
+}
+
 // newTestModelWithCli is newTestModel's parametrized form, for tests that need
 // to observe or control the lima.Client's underlying calls (e.g. a
 // secretsFakeRunner asserting exactly what ApplySecrets sent toward the
 // guest) rather than the no-op fakeRunner.
 func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 	t.Helper()
-	// Isolate the managed-VM registry to a temp dir so tests never read or write
-	// the developer's real index.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	isolateHostState(t)
 	prov := &provision.Provisioner{Lima: cli}
 	m, ok := New(cli, prov).(model)
 	if !ok {
