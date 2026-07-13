@@ -107,6 +107,27 @@ func seedManagedIndex(t *testing.T, names ...string) {
 
 // waitForText blocks until the program's output contains want (ANSI stripped),
 // so a test only snapshots once the target screen has actually rendered.
+//
+// THE OUTPUT STREAM IS NOT THE SCREEN, and `want` must be chosen accordingly.
+// tm.Output() is the raw bytes v2's CELL-DIFFING renderer emitted, and that
+// renderer is free to reuse what is already on the terminal rather than repaint
+// it. Retitling a line is the case that bites: going from the VM screen to the
+// secrets editor, it emitted
+//
+//	ESC[2;4H Sec ESC[4h rets: ESC[4l
+//
+// — moving the cursor, then writing "Secrets:" in INSERT mode so the terminal
+// shifts the "claude" already sitting on that row to the right. The finished
+// screen reads "Secrets: claude", but those two words are never adjacent in the
+// stream: "claude" was emitted for the PREVIOUS screen. Waiting on the full title
+// therefore hangs until the timeout, and whether it does depends on how frames
+// happen to coalesce on the machine — it passed on this developer's host for the
+// whole of plan 12 and failed on the first CI run.
+//
+// So: `want` names the SCREEN, not its content. Use a marker unique to the
+// destination screen that cannot be carried over from the one before it, and let
+// the GOLDEN — taken from FinalModel().View(), a real render, immune to all of
+// this — assert what is actually on it.
 func waitForText(t *testing.T, tm *teatest.TestModel, want string) {
 	t.Helper()
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
@@ -146,7 +167,7 @@ func TestTUIDetailView(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM: claude")
+	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
@@ -155,9 +176,9 @@ func TestTUIDeleteConfirm(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM: claude")
+	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
 	tm.Send(runeKey('d'))
-	waitForText(t, tm, `Delete "claude"?`)
+	waitForText(t, tm, `Delete "`) // the screen, not the whole prompt — see waitForText
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
@@ -166,9 +187,9 @@ func TestTUISecretsPanelEmpty(t *testing.T) {
 	tm := newTeaProgram(t)
 	waitForText(t, tm, "claude")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, tm, "VM: claude")
+	waitForText(t, tm, "VM:") // the screen, not "VM: claude" — see waitForText
 	tm.Send(runeKey('e'))
-	waitForText(t, tm, "Secrets: claude")
+	waitForText(t, tm, "Secrets:") // the screen, not "Secrets: claude" — see waitForText
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
