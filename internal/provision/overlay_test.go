@@ -33,7 +33,7 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"command -v rsync >/dev/null 2>&1",
 		"command -v curl >/dev/null 2>&1",
 		"command -v gpg >/dev/null 2>&1",
-		"apt-get install -y ansible-core rsync curl gnupg ca-certificates",
+		"apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates",
 	}
 	for _, s := range wantSubstrings {
 		if !strings.Contains(got, s) {
@@ -76,7 +76,7 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if len(doc.Provision) != 1 || doc.Provision[0].Mode != "dependency" {
 		t.Fatalf("provision = %+v, want one dependency entry", doc.Provision)
 	}
-	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y ansible-core rsync curl gnupg ca-certificates") {
+	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates") {
 		t.Errorf("dependency script missing ansible-core+rsync+curl+gnupg+ca-certificates install:\n%s", doc.Provision[0].Script)
 	}
 	// The bundled `ansible` package (200MB installed) must never be installed on
@@ -84,5 +84,13 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if strings.Contains(doc.Provision[0].Script, "install -y ansible ") ||
 		strings.HasSuffix(strings.TrimSpace(doc.Provision[0].Script), "install -y ansible") {
 		t.Errorf("dependency script installs the fat ansible bundle instead of ansible-core:\n%s", doc.Provision[0].Script)
+	}
+	// --no-install-recommends is load-bearing, not hygiene. Debian's ansible-core
+	// Recommends: ansible, so without the flag apt installs the fat bundle anyway
+	// and the whole point of bootstrapping ansible-core is silently lost. A live
+	// base build caught exactly that; this pins it so it cannot come back.
+	if !strings.Contains(doc.Provision[0].Script, "--no-install-recommends") {
+		t.Errorf("dependency script omits --no-install-recommends, so ansible-core's "+
+			"Recommends: ansible will drag the 200MB bundle back in:\n%s", doc.Provision[0].Script)
 	}
 }

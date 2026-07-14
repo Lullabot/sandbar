@@ -80,7 +80,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0600"
-  loop: "{{ lookup('ansible.builtin.file', '/tmp/' ~ user_name ~ '-github-keys').splitlines() }}"
+  loop: "{{ (lookup('ansible.builtin.file', '/tmp/' ~ user_name ~ '-github-keys').splitlines()) if (user_github_keys_url | length > 0) else [] }}"
   when:
     - user_github_keys_url | length > 0
     - provision_phase | default('full') != 'finalize'
