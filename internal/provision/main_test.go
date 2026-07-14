@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestMain isolates LIMA_HOME for the whole unit suite, so no test can write into
-// the developer's real ~/.lima.
+// TestMain isolates LIMA_HOME and XDG_CACHE_HOME for the whole unit suite, so
+// no test can write into the developer's real ~/.lima or ~/.cache.
 //
 // It is not hypothetical. This package's tests drive the real provisioning
 // orchestration over a fake lima.Runner, and that orchestration writes host state
@@ -17,6 +17,12 @@ import (
 // its test ran. A fake Runner stops a test from RUNNING limactl; it does nothing
 // about the files the code around it writes — the same lesson internal/ui's
 // isolateHostState records, learned again here.
+//
+// XDG_CACHE_HOME isolation exists for the same reason: aptcache.go's
+// defaultAptCacheHostDir() calls os.UserCacheDir(), and harvestAptCache
+// os.MkdirAll's it for real even though the Copy that follows goes through the
+// fake Runner — a test run must never create ~/.cache/sand/apt-cache on the
+// machine actually running `go test`.
 //
 // The limae2e tests are excluded (build tag): they boot real VMs and need the real
 // Lima home, which is the entire point of them.
@@ -28,7 +34,15 @@ func TestMain(m *testing.M) {
 	if err := os.Setenv("LIMA_HOME", dir); err != nil {
 		panic("isolate LIMA_HOME: " + err.Error())
 	}
+	cacheDir, err := os.MkdirTemp("", "sand-provision-test-cache-home-*")
+	if err != nil {
+		panic("isolate XDG_CACHE_HOME: " + err.Error())
+	}
+	if err := os.Setenv("XDG_CACHE_HOME", cacheDir); err != nil {
+		panic("isolate XDG_CACHE_HOME: " + err.Error())
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	_ = os.RemoveAll(cacheDir)
 	os.Exit(code)
 }

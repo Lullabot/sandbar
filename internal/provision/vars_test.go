@@ -24,6 +24,9 @@ func fullConfig() vm.CreateConfig {
 		CPUs:       4,
 		CloneURL:   "https://github.com/example/repo.git",
 		CloneToken: `tok"en\with-specials`,
+		WithDDEV:   true,
+		WithGo:     true,
+		WithJava:   true,
 	}
 }
 
@@ -38,7 +41,7 @@ func parseVars(t *testing.T, data []byte) map[string]any {
 
 func TestBuildExtraVars_BasePhase(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "claude-base")
+	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -71,12 +74,70 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 			t.Errorf("base phase unexpectedly emitted %q", k)
 		}
 	}
+
+	// The tool-set booleans are emitted for the base phase — that is where the
+	// tools are installed — as real bools, unconditionally (the samba_enabled
+	// precedent), not gated on being non-default like the docker-proxy vars.
+	for key, want := range map[string]bool{
+		"toolset_ddev": true,
+		"toolset_go":   true,
+		"toolset_java": true,
+	} {
+		v, ok := m[key]
+		if !ok {
+			t.Fatalf("%s missing; want %v", key, want)
+		}
+		if b, ok := v.(bool); !ok || b != want {
+			t.Errorf("%s = %v (%T), want bool %v", key, v, v, want)
+		}
+	}
+}
+
+// TestBuildExtraVars_ToolsetReflectsConfig proves the emitted booleans track
+// cfg, not a hardcoded true — a config with one tool deselected must emit
+// that one as false while the other two stay true.
+func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithJava = false
+	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+
+	if v, ok := m["toolset_java"].(bool); !ok || v {
+		t.Errorf("toolset_java = %v, want false", m["toolset_java"])
+	}
+	if v, ok := m["toolset_ddev"].(bool); !ok || !v {
+		t.Errorf("toolset_ddev = %v, want true", m["toolset_ddev"])
+	}
+	if v, ok := m["toolset_go"].(bool); !ok || !v {
+		t.Errorf("toolset_go = %v, want true", m["toolset_go"])
+	}
+}
+
+// TestBuildExtraVars_ToolsetOmittedOnFinalize: the tools are installed only
+// in the base phase, so emitting the toolset vars for finalize too would be
+// dead weight at best and, if any role read them without checking phase, a
+// source of drift at worst.
+func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
+	cfg := fullConfig()
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("finalize phase unexpectedly emitted %q", k)
+		}
+	}
 }
 
 func TestBuildExtraVars_FinalizePhase(t *testing.T) {
 	cfg := fullConfig()
 	cfg.DockerProxyHost = "proxy.lan:5000"
-	data, err := BuildExtraVars(cfg, "finalize", "myhost")
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -117,7 +178,7 @@ func TestBuildExtraVars_FinalizePhase(t *testing.T) {
 
 func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 	cfg := fullConfig() // DockerProxyHost empty
-	data, err := BuildExtraVars(cfg, "finalize", "myhost")
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -126,5 +187,52 @@ func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 		if _, ok := m[k]; ok {
 			t.Errorf("unexpected %q when DockerProxyHost is empty", k)
 		}
+	}
+}
+
+// TestBuildExtraVars_AptUpgradeOmittedByDefault: a plain base build/re-apply
+// (aptUpgrade=false) must never emit base_apt_upgrade — roles/base/tasks/main.yml
+// defaults it to false, but this pins the Go side of that contract too, so a
+// cold base build never gets a second apt pass (task 3's "one apt pass" property).
+func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
+	cfg := fullConfig()
+	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+	if _, ok := m["base_apt_upgrade"]; ok {
+		t.Errorf("base_apt_upgrade unexpectedly emitted when aptUpgrade=false: %v", m["base_apt_upgrade"])
+	}
+}
+
+// TestBuildExtraVars_AptUpgradeEmittedOnRefresh: the base self-refresh run
+// (aptUpgrade=true, base phase) must emit base_apt_upgrade: true — the only
+// signal roles/base/tasks/main.yml's "Upgrade all apt packages" task is gated
+// on.
+func TestBuildExtraVars_AptUpgradeEmittedOnRefresh(t *testing.T) {
+	cfg := fullConfig()
+	data, err := BuildExtraVars(cfg, "base", "claude-base", true)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+	if v, ok := m["base_apt_upgrade"].(bool); !ok || !v {
+		t.Errorf("base_apt_upgrade = %v, want bool true", m["base_apt_upgrade"])
+	}
+}
+
+// TestBuildExtraVars_AptUpgradeIgnoredOnFinalize: aptUpgrade must have no
+// effect outside the base phase — a clone's finalize pass never upgrades, even
+// if a caller passed aptUpgrade=true by mistake.
+func TestBuildExtraVars_AptUpgradeIgnoredOnFinalize(t *testing.T) {
+	cfg := fullConfig()
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", true)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+	if _, ok := m["base_apt_upgrade"]; ok {
+		t.Errorf("finalize phase unexpectedly emitted base_apt_upgrade: %v", m["base_apt_upgrade"])
 	}
 }

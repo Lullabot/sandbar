@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -151,10 +152,10 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"list", "claude", "--format", "{{.Status}}"},                            // exists-guard: target absent
-		{"list", "claude-base", "--format", "{{.Status}}"},                       // Status(base) -> Stopped
-		{"clone", "claude-base", "claude"},                                       // Clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "claude"}, // Configure clone sizes
+		{"list", "claude", "--format", "{{.Status}}"},      // exists-guard: target absent
+		{"list", "claude-base", "--format", "{{.Status}}"}, // Status(base) -> Stopped
+		{"clone", "claude-base", "claude"},                 // Clone
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // Start
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript}, // finalize provision
 		{"stop", "claude"},  // bounce: stop
@@ -264,6 +265,8 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 		{"list", "claude-base"},  // Status(base) -> absent
 		{"start", "--name"},      // BuildBase: Create(base)
 		{"shell", "claude-base"}, // BuildBase: base provision
+		{"shell", "claude-base"}, // BuildBase: harvest step 1 - clear apt lock/partial before the copy
+		{"copy", "-v"},           // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
 		{"stop", "claude-base"},  // BuildBase: stop base
 		{"clone", "claude-base"}, // Clone
 		{"edit", "--set"},        // Configure clone sizes
@@ -320,13 +323,31 @@ func stubBaseVersion(t *testing.T, current string, currentErr error, stamped map
 	t.Helper()
 	written := map[string]string{}
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return current, currentErr }
+	playbookVersionFn = func(string, string) (string, error) { return current, currentErr }
 	readBaseVersionFn = func(base string) string { return stamped[base] }
 	writeBaseVersionFn = func(base, v string) error { written[base] = v; return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
+	// This helper exists to drive the PLAYBOOK-VERSION staleness dimension
+	// (baseStale); default every base to freshly built so callers are not
+	// incidentally tripped by the unrelated 30-day age-refresh check
+	// (baseNeedsRefresh). Tests that exercise the age dimension itself
+	// (TestConcurrentCreatesRefreshTheAgedBaseOnce and friends) stub
+	// readBaseBuiltAtFn themselves, after calling this.
+	stubFreshBuiltAt(t)
 	return written
+}
+
+// stubFreshBuiltAt makes every base report a BuiltAt of "now" for the duration
+// of a test, so ensureBaseStopped's age check (baseNeedsRefresh) never fires
+// unless a test deliberately overrides readBaseBuiltAtFn afterwards to say
+// otherwise.
+func stubFreshBuiltAt(t *testing.T) {
+	t.Helper()
+	orig := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now(), true }
+	t.Cleanup(func() { readBaseBuiltAtFn = orig })
 }
 
 // firstSecond reduces a call sequence to its leading two argv tokens, matching
@@ -410,6 +431,8 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 		{"list", "claude-base"},  // Status(base) -> Stopped
 		{"start", "claude-base"}, // re-apply: start the EXISTING base (no delete, no `start --name`)
 		{"shell", "claude-base"}, // re-apply: re-run the base playbook against it
+		{"shell", "claude-base"}, // re-apply: harvest step 1 - clear apt lock/partial before the copy
+		{"copy", "-v"},           // re-apply: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
 		{"stop", "claude-base"},  // re-apply: stop it again for cloning
 		{"clone", "claude-base"}, // Clone
 		{"edit", "--set"},        // Configure clone sizes
@@ -450,6 +473,63 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 	script := f.calls[reapply][len(f.calls[reapply])-1]
 	if !strings.Contains(script, "SAND_ANSIBLE_TASK_TOTAL=") {
 		t.Errorf("the re-apply run must emit its own task-total marker, or the TUI's progress bar keeps counting against the previous run's total:\n%s", script)
+	}
+}
+
+// TestCreateVM_ShrinkingToolsetPrintsAdvisoryOnReapply is the shrink-detection
+// acceptance criterion: Ansible converges an in-place re-apply's ADDITIONS but
+// cannot converge a REMOVAL (it will not uninstall a package whose task no
+// longer applies), so a base stamped ddev+go+java that is converged toward a
+// ddev+go selection (Java de-selected) must print a clear advisory that Java
+// remains installed until the base is rebuilt — never leave stale software
+// installed silently.
+func TestCreateVM_ShrinkingToolsetPrintsAdvisoryOnReapply(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "v2:deadbeef:ddev+go", nil, map[string]string{"claude-base": "v2:deadbeef:ddev+go+java"})
+	stubConvergeableBase(t, "/playbook")
+
+	cfg := testConfig()
+	cfg.WithJava = false // de-selecting Java: a shrink relative to the stamped ddev+go+java
+
+	var out bytes.Buffer
+	if err := p.CreateVM(context.Background(), cfg, &out); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "java") {
+		t.Errorf("advisory did not name the de-selected tool (java):\n%s", got)
+	}
+	if !strings.Contains(got, "Ansible cannot uninstall") {
+		t.Errorf("advisory did not explain why the tool remains installed:\n%s", got)
+	}
+	if !strings.Contains(got, "--rebuild") {
+		t.Errorf("advisory did not point at the fix (sand create --rebuild):\n%s", got)
+	}
+	// Only the de-selected tool is named — ddev and go are still selected, so
+	// they must not appear as if THEY were the residue.
+	if strings.Contains(got, "ddev were") || strings.Contains(got, "go were") {
+		t.Errorf("advisory named a tool that was not de-selected:\n%s", got)
+	}
+}
+
+// TestCreateVM_GrowingToolsetPrintsNoAdvisory is the converse: Ansible CAN
+// converge an addition, so growing the selection (or leaving it unchanged)
+// must never print the shrink advisory — there is no residue to warn about.
+func TestCreateVM_GrowingToolsetPrintsNoAdvisory(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "v2:deadbeef:ddev+go+java", nil, map[string]string{"claude-base": "v2:deadbeef:ddev+go"})
+	stubConvergeableBase(t, "/playbook")
+
+	var out bytes.Buffer
+	if err := p.CreateVM(context.Background(), testConfig(), &out); err != nil { // default cfg: all three true
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	if got := out.String(); strings.Contains(got, "Ansible cannot uninstall") {
+		t.Errorf("a growing tool-set selection must not print the shrink advisory:\n%s", got)
 	}
 }
 
@@ -535,6 +615,8 @@ func TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds(t *testing.T) {
 				{"delete", "claude-base"}, // cannot be converged in place: rebuild instead
 				{"start", "--name"},       // BuildBase: Create(base) under the CURRENT overlay
 				{"shell", "claude-base"},  // BuildBase: base provision
+				{"shell", "claude-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
+				{"copy", "-v"},            // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
 				{"stop", "claude-base"},   // BuildBase: stop base
 				{"clone", "claude-base"},  // Clone
 				{"edit", "--set"},         // Configure clone sizes
@@ -580,6 +662,8 @@ func TestCreateVM_RebuildDestroysEvenAnUpToDateBase(t *testing.T) {
 		{"delete", "claude-base"}, // --rebuild: force-deleted UNDER THE BASE LOCK
 		{"start", "--name"},       // BuildBase: Create(base)
 		{"shell", "claude-base"},  // BuildBase: base provision
+		{"shell", "claude-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
+		{"copy", "-v"},            // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
 		{"stop", "claude-base"},   // BuildBase: stop base
 		{"clone", "claude-base"},  // Clone
 		{"edit", "--set"},         // Configure clone sizes
@@ -751,6 +835,215 @@ func TestCreateVM_FreshBaseReused(t *testing.T) {
 	}
 }
 
+// TestCreateVM_FreshBaseUnderAgeThresholdIsNotRefreshed: a base whose CONTENT
+// is current and whose BuiltAt is recent (well under baseMaxAge) must not be
+// touched at all — same posture as TestCreateVM_FreshBaseReused, but pinning
+// the AGE dimension explicitly rather than relying on stubBaseVersion's
+// default.
+func TestCreateVM_FreshBaseUnderAgeThresholdIsNotRefreshed(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"})
+	stubConvergeableBase(t, "/playbook")
+	origBuiltAt := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-29 * 24 * time.Hour), true }
+	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("a base under the age threshold must not be deleted: %v", f.calls)
+		}
+		if len(c) > 1 && c[1] == "claude-base" && (c[0] == "start" || c[0] == "shell") {
+			t.Fatalf("a base under the age threshold must not be refreshed: %v", f.calls)
+		}
+	}
+}
+
+// TestCreateVM_AgedBaseIsRefreshedInPlace is the acceptance criterion this task
+// exists for: a base whose CONTENT is current but whose BuiltAt is older than
+// baseMaxAge is started, upgraded (base_apt_upgrade emitted for that ONE
+// shell), re-stamped, and stopped — via reapplyBase, the SAME machinery a
+// playbook-version re-apply uses — and the CLONE's own finalize pass never
+// carries base_apt_upgrade, so the clone itself runs no upgrade.
+func TestCreateVM_AgedBaseIsRefreshedInPlace(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"}) // NOT stale
+	stubConvergeableBase(t, "/playbook")
+	origBuiltAt := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
+	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	type call = struct{ first, second string }
+	want := []call{
+		{"list", "claude"},       // exists-guard: target absent
+		{"list", "claude-base"},  // Status(base) -> Stopped
+		{"start", "claude-base"}, // refresh: start the EXISTING base (no delete, no `start --name`)
+		{"shell", "claude-base"}, // refresh: run the base playbook (apt upgrade) against it
+		{"shell", "claude-base"}, // refresh: harvest step 1 - clear apt lock/partial before the copy
+		{"copy", "-v"},           // refresh: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"stop", "claude-base"},  // refresh: stop it again for cloning
+		{"clone", "claude-base"}, // Clone
+		{"edit", "--set"},        // Configure clone sizes
+		{"start", "claude"},      // Start clone
+		{"shell", "claude"},      // finalize provision
+		{"stop", "claude"},       // bounce: stop
+		{"start", "claude"},      // bounce: start
+	}
+	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
+		t.Fatalf("aged-base refresh sequence mismatch:\n got %v\nwant %v", got, want)
+	}
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("an aged but convergeable base must be refreshed in place, never deleted: %v", f.calls)
+		}
+	}
+	if written["claude-base"] != "samesha" {
+		t.Errorf("refreshed base stamped %q, want samesha", written["claude-base"])
+	}
+
+	if len(f.streams) != 2 {
+		t.Fatalf("got %d streamed stdins, want 2 (base refresh + finalize)", len(f.streams))
+	}
+	if !strings.Contains(f.streams[0], "provision_phase: base") {
+		t.Errorf("first provision is not the base phase:\n%s", f.streams[0])
+	}
+	if !strings.Contains(f.streams[0], "base_apt_upgrade: true") {
+		t.Errorf("the base refresh's own provision must emit base_apt_upgrade: true:\n%s", f.streams[0])
+	}
+	if !strings.Contains(f.streams[1], "provision_phase: finalize") {
+		t.Errorf("second provision is not the finalize phase:\n%s", f.streams[1])
+	}
+	if strings.Contains(f.streams[1], "base_apt_upgrade") {
+		t.Errorf("the clone's finalize provision must never carry base_apt_upgrade:\n%s", f.streams[1])
+	}
+}
+
+// TestCreateVM_AgedUnconvergeableBaseRebuilds: an aged base whose overlay
+// cannot be converged in place (baseoverlay.go) must fall back to a full
+// rebuild — the same fallback the playbook-version staleness path takes — not
+// wedge waiting for a converge that can never succeed.
+func TestCreateVM_AgedUnconvergeableBaseRebuilds(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"}) // NOT stale
+	stubBaseOverlay(t, "/some/other/worktree", currentBootstrap(t))                            // unconvergeable
+	origBuiltAt := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
+	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	type call = struct{ first, second string }
+	want := []call{
+		{"list", "claude"},        // exists-guard: target absent
+		{"list", "claude-base"},   // Status(base) -> Stopped
+		{"delete", "claude-base"}, // cannot be refreshed in place: rebuild instead
+		{"start", "--name"},       // BuildBase: Create(base) under the CURRENT overlay
+		{"shell", "claude-base"},  // BuildBase: base provision
+		{"shell", "claude-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
+		{"copy", "-v"},            // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"stop", "claude-base"},   // BuildBase: stop base
+		{"clone", "claude-base"},  // Clone
+		{"edit", "--set"},         // Configure clone sizes
+		{"start", "claude"},       // Start clone
+		{"shell", "claude"},       // finalize provision
+		{"stop", "claude"},        // bounce: stop
+		{"start", "claude"},       // bounce: start
+	}
+	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
+		t.Fatalf("aged-unconvergeable-base rebuild sequence mismatch:\n got %v\nwant %v", got, want)
+	}
+	if written["claude-base"] != "samesha" {
+		t.Errorf("rebuilt base stamped %q, want samesha", written["claude-base"])
+	}
+}
+
+// TestConcurrentCreatesRefreshTheAgedBaseOnce is the double-checked-locking
+// discipline this task requires for the AGE dimension, mirroring
+// TestConcurrentCreatesReapplyTheStaleBaseOnce for the VERSION dimension: two
+// creates race for the base lock against an aged (>30-day) but
+// content-current base. The winner refreshes it and re-stamps a fresh
+// BuiltAt; the loser, on acquiring the lock, MUST re-read that fresh
+// timestamp and skip its own refresh — otherwise every queued create
+// redundantly re-upgrades the same base.
+func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
+	r := &baseRaceRunner{buildDelay: 150 * time.Millisecond, built: true} // the base already exists
+	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
+	stubConvergeableBase(t, p.PlaybookDir) // …created by this build of sand, from this playbook
+
+	// The playbook content never changes in this test — both creates always find
+	// the base's version CURRENT (baseStale = false) — so the only reason either
+	// of them would touch the base at all is the age check.
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
+	readBaseVersionFn = func(string) string { return "v1" }
+	writeBaseVersionFn = func(string, string) error { return nil }
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	// The base is 31 days old at the moment BOTH creates start; only the fresh
+	// BuiltAt the winner writes can tell the loser it no longer has work to do.
+	var bmu sync.Mutex
+	builtAt := time.Now().Add(-31 * 24 * time.Hour)
+	origBuiltAt := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) {
+		bmu.Lock()
+		defer bmu.Unlock()
+		return builtAt, true
+	}
+	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
+	// reapplyBase's stamp write is what a real refresh does to prove it happened;
+	// model it here by advancing builtAt to now, exactly as the real
+	// writeBaseVersion (RFC3339 "now") would.
+	writeBaseVersionFn = func(string, string) error {
+		bmu.Lock()
+		builtAt = time.Now()
+		bmu.Unlock()
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	names := []string{"web", "api"}
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = p.prepareBaseAndClone(context.Background(),
+				vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("create %d failed: %v", i, err)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reapplies != 1 {
+		t.Errorf("the aged base was refreshed %d times, want exactly 1 — the waiter must re-read BuiltAt AFTER the lock, not act on one it cached before it (calls: %v)", r.reapplies, r.seq)
+	}
+	if r.builds != 0 {
+		t.Errorf("the base was rebuilt from scratch %d times; an aged-but-current base is refreshed in place (calls: %v)", r.builds, r.seq)
+	}
+	if r.touchedDuringClone {
+		t.Errorf("the base was started/provisioned/stopped while another create was cloning from it (calls: %v)", r.seq)
+	}
+}
+
 // TestCreateVM_UnstampedBaseIsReappliedInPlace: a base with no recorded version
 // (built before stamping, or by an unknown path) is treated as stale — and, like
 // any other stale base whose playbook mount we can match, it is converged in
@@ -860,14 +1153,14 @@ func TestReset_NoPreserve(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"delete", "claude", "-f"},                                               // destroy
-		{"list", "claude-base", "--format", "{{.Status}}"},                       // ensureBaseStopped
-		{"clone", "claude-base", "claude"},                                       // re-clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB"`, "claude"}, // configure size
-		{"start", "claude"},                                                      // start clone
-		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},                 // finalize
-		{"stop", "claude"},                                                       // bounce: stop
-		{"start", "claude"},                                                      // bounce: start
+		{"delete", "claude", "-f"},                         // destroy
+		{"list", "claude-base", "--format", "{{.Status}}"}, // ensureBaseStopped
+		{"clone", "claude-base", "claude"},                 // re-clone
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
+		{"start", "claude"}, // start clone
+		{"shell", "claude", "sudo", "bash", "-c", inGuestScript}, // finalize
+		{"stop", "claude"},  // bounce: stop
+		{"start", "claude"}, // bounce: start
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("Reset(no preserve) call sequence mismatch:\n got %v\nwant %v", f.calls, want)
@@ -1371,14 +1664,16 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
 
 	// Neither the version stamp nor the playbook matters here; pin them so the
-	// stale-base path does not fire.
+	// stale-base path does not fire. Also pin every base to freshly built, so the
+	// unrelated age-refresh check does not fire either.
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v1", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
 	readBaseVersionFn = func(string) string { return "v1" }
 	writeBaseVersionFn = func(string, string) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
+	stubFreshBuiltAt(t)
 
 	names := []string{"web", "api"}
 
@@ -1432,7 +1727,7 @@ func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
 	var vmu sync.Mutex
 	stamped := "v1"
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v2", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v2", nil }
 	readBaseVersionFn = func(string) string {
 		vmu.Lock()
 		defer vmu.Unlock()
@@ -1447,6 +1742,10 @@ func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
+	// The version dimension is what this test exercises; keep every base
+	// reporting a fresh build time so the unrelated age-refresh check cannot
+	// also fire and inflate the reapply count this test asserts on.
+	stubFreshBuiltAt(t)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -1494,14 +1793,16 @@ func TestARebuildCannotDestroyTheBaseAnotherCreateIsCloning(t *testing.T) {
 	stubConvergeableBase(t, p.PlaybookDir)
 
 	// The base is CURRENT: nothing but --rebuild can delete it, so any delete this
-	// test sees is the rebuild's.
+	// test sees is the rebuild's. Also pin it to freshly built so the unrelated
+	// age-refresh check does not fire and start/shell/stop it before the clone.
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v1", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
 	readBaseVersionFn = func(string) string { return "v1" }
 	writeBaseVersionFn = func(string, string) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
+	stubFreshBuiltAt(t)
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
@@ -1573,7 +1874,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 	version := "v1"
 	stamped := ""
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
-	playbookVersionFn = func(string) (string, error) {
+	playbookVersionFn = func(string, string) (string, error) {
 		vmu.Lock()
 		defer vmu.Unlock()
 		return version, nil
@@ -1593,6 +1894,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
+	stubFreshBuiltAt(t)
 
 	var wg sync.WaitGroup
 	for _, name := range []string{"web", "api"} {

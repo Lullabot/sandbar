@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -138,8 +139,12 @@ func step(out io.Writer, format string, args ...any) {
 
 // runProvision streams one phase's extra-vars into the guest over stdin and runs
 // the playbook there. Mirrors the original bash provisioner's run_provision.
-func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, out io.Writer) error {
-	vars, err := BuildExtraVars(cfg, phase, hostname)
+//
+// aptUpgrade is threaded straight through to BuildExtraVars: true only for a
+// base self-refresh run (see reapplyBase), never for a cold base build and
+// never for finalize.
+func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, aptUpgrade bool, out io.Writer) error {
+	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade)
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
@@ -194,11 +199,20 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	}); err != nil {
 		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
 	}
+	// Best-effort: reuse whatever a previous build harvested, so this build's
+	// apt installs are CPU-bound rather than network-bound. See aptcache.go for
+	// why this is a `limactl copy` round trip rather than a host mount.
+	_ = timer.time("apt cache seed", func() error { return p.seedAptCache(ctx, cfg.BaseName, out) })
 	if err := timer.time("base playbook", func() error {
-		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out)
+		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, false, out)
 	}); err != nil {
 		return err
 	}
+	// Best-effort: harvest whatever apt fetched this run so the NEXT rebuild can
+	// reuse it. Only reached once the base playbook has actually succeeded
+	// (the `return err` above exits on failure), so a failed run never harvests
+	// a half-populated cache.
+	_ = timer.time("apt cache harvest", func() error { return p.harvestAptCache(ctx, cfg.BaseName, out) })
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
 	// needs an idle source disk.
 	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
@@ -212,7 +226,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// can detect drift and rebuild instead of silently cloning stale content. A
 	// missing stamp (version unknown, or write failed) just forces a rebuild next
 	// time, so neither branch here is fatal to the build.
-	if v, err := playbookVersionFn(p.PlaybookDir); err != nil {
+	if v, err := playbookVersionFn(p.PlaybookDir, cfg.ToolsetKey()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
 	} else if err := writeBaseVersionFn(cfg.BaseName, v); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
@@ -291,7 +305,7 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		return err
 	}
 	if err := timer.time("finalize playbook", func() error {
-		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, out)
+		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
 	}); err != nil {
 		return err
 	}
@@ -367,18 +381,20 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 
 // ensureBaseStopped makes sure the base image exists, is current, and is stopped —
 // a clone needs an idle source disk carrying the playbook this create was asked
-// for. It has three outcomes: build the base from scratch (it is absent, or
-// --rebuild asked for a fresh one), converge it in place (it exists but is stale),
-// or leave it alone (it is current), stopping it if something left it running.
+// for. It has four outcomes: build the base from scratch (it is absent, or
+// --rebuild asked for a fresh one), converge it in place (it exists but its
+// playbook version is stale), refresh it in place (it exists, its version is
+// current, but it has gone past baseMaxAge without an apt upgrade), or leave it
+// alone (it is current and fresh), stopping it if something left it running.
 //
 // EVERY READ HERE HAPPENS AFTER THE LOCK. The caller (prepareBaseAndClone) holds
 // the exclusive base lock around this whole function and the clone that follows
-// it, and the status and the version stamp are read INSIDE it, never cached
-// outside and carried in. That is not a formality: a create that blocked for
-// minutes behind someone else's rebuild must see what that rebuild left behind. A
-// staleness verdict formed before the wait is a verdict about a base that no
-// longer exists — act on it and this create redoes, from scratch, work that
-// finished while it queued.
+// it, and the status, the version stamp, AND the build timestamp are read INSIDE
+// it, never cached outside and carried in. That is not a formality: a create that
+// blocked for minutes behind someone else's rebuild or refresh must see what that
+// work left behind. A staleness or age verdict formed before the wait is a
+// verdict about a base that no longer exists in that state — act on it and this
+// create redoes work that finished while it queued.
 func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
 	status, err := p.Lima.Status(cfg.BaseName)
 	exists := err == nil && status != ""
@@ -399,7 +415,7 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 	// stamped with. The check is host-side (a content hash and a stamp file), adding
 	// no limactl calls to the common up-to-date path.
 	if exists {
-		if want, stale := p.baseStale(cfg.BaseName, out); stale {
+		if want, stale := p.baseStale(cfg, out); stale {
 			// Ansible is idempotent, so a playbook edit only needs its DELTA applied:
 			// converge the existing base in place instead of paying for a Debian
 			// re-download and a from-scratch run of every task in the play.
@@ -413,11 +429,46 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 			// which is the behaviour that existed before the re-apply did.
 			convergeable, why := p.baseConvergeable(cfg)
 			if convergeable {
-				return p.reapplyBase(ctx, cfg, want, status, out, timer)
+				// A converge-in-place applies the DELTA — additions only. If the new
+				// selection is a strict subset of what the base was stamped with, the
+				// de-selected tool's package stays installed: Ansible cannot converge a
+				// removal (see the doc comment above shrunkTools in baseversion.go). A
+				// full rebuild does not have this problem (it reinstalls fresh from the
+				// current selection), so the warning belongs only on this branch.
+				if lost := shrunkTools(readBaseVersionFn(cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
+					step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sand create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
+				}
+				return p.reapplyBase(ctx, cfg, want, status, out, timer, false)
 			}
 			step(out, "Base image %q cannot be updated in place (%s); rebuilding it from scratch…", cfg.BaseName, why)
 			if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
 				return fmt.Errorf("delete stale base image %q: %w", cfg.BaseName, err)
+			}
+			exists = false
+		} else if want != "" && p.baseNeedsRefresh(cfg, out) {
+			// The base's CONTENT is current (want came back non-empty: the version
+			// comparison actually succeeded and matched), but its PACKAGES have gone
+			// stale: apt upgrades have landed upstream since it was last built or
+			// refreshed. Bring it up to date with ONE in-place apt upgrade here, so
+			// every clone taken from it afterwards skips the upgrade entirely — instead
+			// of every clone re-paying for it in the finalize phase, which is what this
+			// task removes.
+			//
+			// want=="" means baseStale could not even determine the current playbook
+			// version (a genuine lookup error) and is already reusing the base as-is;
+			// piling an age-driven mutation on top of a base we cannot positively
+			// confirm is current would be acting on a guess, not a fact.
+			convergeable, why := p.baseConvergeable(cfg)
+			if convergeable {
+				return p.reapplyBase(ctx, cfg, want, status, out, timer, true)
+			}
+			// Un-convergeable (baseoverlay.go: different playbook mount or bootstrap
+			// script) — the same fallback the version-staleness branch above takes.
+			// Rebuilding from scratch both fixes the overlay mismatch and leaves the
+			// base freshly stamped, so this is not a wedge.
+			step(out, "Base image %q cannot be refreshed in place (%s); rebuilding it from scratch…", cfg.BaseName, why)
+			if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
+				return fmt.Errorf("delete base image %q for refresh: %w", cfg.BaseName, err)
 			}
 			exists = false
 		}
@@ -437,11 +488,13 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 	return nil
 }
 
-// reapplyBase converges a stale base image IN PLACE: start it, re-run the
+// reapplyBase converges an existing base image IN PLACE: start it, re-run the
 // base-phase playbook against it, re-stamp it, and stop it again, ready to be
 // cloned. It is the whole point of the playbook-development inner loop — an edit
 // to one role costs the delta Ansible actually has to apply, not a Debian download
-// and a from-scratch run of every task in the play.
+// and a from-scratch run of every task in the play. ensureBaseStopped's 30-day
+// self-refresh reuses this SAME machinery (start -> converge -> stamp -> stop)
+// rather than duplicating it, with aptUpgrade=true as the only difference.
 //
 // It runs under the base lock, held by prepareBaseAndClone across this AND the
 // clone that follows: the base is RUNNING for the duration of the playbook, and a
@@ -454,12 +507,18 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 // (the next create converges the difference); a stamp that is NEWER than the base
 // is a lie that no later create can detect.
 //
+// aptUpgrade is passed straight to runProvision/BuildExtraVars: true only for the
+// 30-day self-refresh (ensureBaseStopped's baseNeedsRefresh), which emits
+// base_apt_upgrade so roles/base/tasks/main.yml runs its "Upgrade all apt
+// packages" task; false for a playbook-version re-apply, which must not pay for
+// an upgrade it did not ask for.
+//
 // THE STAMP IS WRITTEN ONLY ON A FULL, SUCCESSFUL RUN. On any failure — a broken
 // task, a cancelled context, a killed limactl — the old stamp stays exactly where
-// it is, so the base remains unambiguously stale and the next create retries it. A
-// fresh stamp on a half-converged base is the worst outcome available here: it is
-// undetectable, and every clone taken from that base afterwards inherits it.
-func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, version, status string, out io.Writer, timer *phaseTimer) error {
+// it is, so the base remains unambiguously stale/aged and the next create retries
+// it. A fresh stamp on a half-converged base is the worst outcome available here:
+// it is undetectable, and every clone taken from that base afterwards inherits it.
+func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, version, status string, out io.Writer, timer *phaseTimer, aptUpgrade bool) error {
 	step(out, "Re-applying the playbook to base image %q (Ansible is idempotent: only the changes are applied)…", cfg.BaseName)
 
 	// The base is normally Stopped (that is how it is kept, for cloning). Anything
@@ -474,6 +533,9 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 		}
 	}
 
+	// Best-effort, same as buildBase: reuse whatever a previous build harvested.
+	_ = timer.time("apt cache seed", func() error { return p.seedAptCache(ctx, cfg.BaseName, out) })
+
 	// The same in-guest script as the build: the phase vars over stdin (never
 	// argv), the same rsync of the playbook fileset out of /mnt/playbook, and its
 	// own SAND_ANSIBLE_TASK_TOTAL marker — this is a THIRD Ansible run down the
@@ -481,10 +543,14 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 	// counting its task banners against the previous run's total
 	// (internal/ui/ansible.go).
 	if err := timer.time("base playbook", func() error {
-		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out)
+		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, aptUpgrade, out)
 	}); err != nil {
 		return err // NO STAMP: leave the base unambiguously stale (see above).
 	}
+
+	// Best-effort, same as buildBase: harvest for the next rebuild. Only reached
+	// once the base playbook above has actually succeeded.
+	_ = timer.time("apt cache harvest", func() error { return p.harvestAptCache(ctx, cfg.BaseName, out) })
 
 	// Converged. Stamp it before the stop: the stamp describes the base's CONTENT,
 	// which is now correct whatever the stop does next. A write failure is not fatal
@@ -515,8 +581,9 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 // version-lookup error (a genuine filesystem problem — the content-hash scheme
 // cannot fail merely for "not a git checkout" the way the old scheme did) is
 // treated as NOT stale: better to reuse the base than to churn it on every create.
-func (p *Provisioner) baseStale(baseName string, out io.Writer) (version string, stale bool) {
-	want, err := playbookVersionFn(p.PlaybookDir)
+func (p *Provisioner) baseStale(cfg vm.CreateConfig, out io.Writer) (version string, stale bool) {
+	baseName := cfg.BaseName
+	want, err := playbookVersionFn(p.PlaybookDir, cfg.ToolsetKey())
 	if err != nil {
 		step(out, "Note: could not determine the current playbook version (%v); reusing the existing base image %q.", err, baseName)
 		return "", false
@@ -534,6 +601,37 @@ func (p *Provisioner) baseStale(baseName string, out io.Writer) (version string,
 		step(out, "Base image %q was built from playbook %s but the current playbook is %s; bringing it up to date…", baseName, shortVersion(have), shortVersion(want))
 	}
 	return want, true
+}
+
+// baseMaxAge is how long a base image may run without a full `apt upgrade`
+// before a create refreshes it once, in place, under the base lock, instead of
+// every future clone paying for the upgrade itself in the finalize phase.
+const baseMaxAge = 30 * 24 * time.Hour
+
+// baseNeedsRefresh reports whether an already-current (non-stale) base has gone
+// past baseMaxAge since it was last built or refreshed, and streams the reason
+// when it has. It is called only after baseStale has said "not stale" for cfg —
+// staleness (a playbook edit) and age (apt drift) are independent dimensions,
+// and a base can be current in content while still needing an apt upgrade.
+//
+// A missing or unparseable BuiltAt — a base built before this task, or a
+// corrupt stamp — is read as "cannot prove this base is fresh" and refreshes it
+// once, the same "never guess" posture baseStale takes for an
+// unparseable/missing version. After that one refresh the stamp carries a real
+// timestamp and this reads normally from then on.
+func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool {
+	baseName := cfg.BaseName
+	builtAt, ok := readBaseBuiltAtFn(baseName)
+	if !ok {
+		step(out, "Base image %q has no recorded build time; refreshing it once now (other creates will queue behind this)…", baseName)
+		return true
+	}
+	age := time.Since(builtAt)
+	if age <= baseMaxAge {
+		return false
+	}
+	step(out, "Base image %q is older than %d days; refreshing it once now (other creates will queue behind this)…", baseName, int(baseMaxAge/(24*time.Hour)))
+	return true
 }
 
 // ResetOptions selects which of a VM's local state survives a reset. When both
@@ -644,7 +742,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if opts.PreserveProject && ok {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, out); err != nil {
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out); err != nil {
 		return wrap(err)
 	}
 

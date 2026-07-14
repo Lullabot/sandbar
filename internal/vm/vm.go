@@ -56,6 +56,16 @@ type CreateConfig struct {
 	DockerProxyHost string
 	CloneURL        string
 	CloneToken      string
+
+	// WithDDEV, WithGo, and WithJava select the configurable base-image
+	// tool-set (sand create --with-ddev/--with-go/--with-java). They configure
+	// the shared BASE image, not the individual clone — there is still exactly
+	// one base per user, its contents just differ by selection. All three
+	// default to true (see DefaultCreateConfig), so an unconfigured `sand
+	// create` installs everything today's base does; the flags are opt-OUT.
+	WithDDEV bool
+	WithGo   bool
+	WithJava bool
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
@@ -68,7 +78,38 @@ func DefaultCreateConfig() CreateConfig {
 		Domain:   "lan",
 		Locale:   "en_US.UTF-8",
 		CPUs:     2,
+		WithDDEV: true,
+		WithGo:   true,
+		WithJava: true,
 	}
+}
+
+// ToolsetKey renders the tool-set selection into a stable, order-independent
+// string that feeds the base image's version stamp (see
+// provision.PlaybookVersion): changing the selection changes this string,
+// which changes the stamp, which marks the base stale so it converges (or
+// rebuilds) instead of silently cloning a base with the wrong contents.
+//
+// Order is fixed (ddev, go, java) so the same selection always renders
+// identically no matter which order the booleans were assigned in. An empty
+// selection renders as "none" rather than "" — an empty string would be
+// indistinguishable from "no toolset information at all" when a stamp is
+// parsed back apart (see provision.toolsetFromStamp).
+func (c CreateConfig) ToolsetKey() string {
+	var on []string
+	if c.WithDDEV {
+		on = append(on, "ddev")
+	}
+	if c.WithGo {
+		on = append(on, "go")
+	}
+	if c.WithJava {
+		on = append(on, "java")
+	}
+	if len(on) == 0 {
+		return "none"
+	}
+	return strings.Join(on, "+")
 }
 
 // Validate enforces the same required-field and consistency rules as the

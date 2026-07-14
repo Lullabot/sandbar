@@ -7,7 +7,17 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
+
+	"github.com/lullabot/sandbar/internal/vm"
 )
+
+// allToolsConfig is a vm.CreateConfig with BaseName set and the default
+// (everything-on) tool-set — the shape most baseStale tests want, so they can
+// focus on the version/stamp comparison rather than the toolset selection.
+func allToolsConfig(baseName string) vm.CreateConfig {
+	return vm.CreateConfig{BaseName: baseName, WithDDEV: true, WithGo: true, WithJava: true}
+}
 
 // samplePlaybookFS returns a minimal fstest.MapFS that mirrors the real
 // playbook fileset (site.yml, ansible.cfg, inventory, roles/**, group_vars/**)
@@ -160,7 +170,7 @@ func TestContentPlaybookVersion_NonGitDirSucceeds(t *testing.T) {
 	dir := t.TempDir() // plain temp dir, deliberately not a git checkout
 	writePlaybookFiles(t, dir, false)
 
-	v, err := contentPlaybookVersion(dir)
+	v, err := contentPlaybookVersion(dir, "ddev+go+java")
 	if err != nil {
 		t.Fatalf("contentPlaybookVersion on a non-git dir returned an error: %v", err)
 	}
@@ -178,7 +188,7 @@ func TestContentPlaybookVersion_NonGitDirSucceeds(t *testing.T) {
 func TestContentPlaybookVersion_UnrelatedFileUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	writePlaybookFiles(t, dir, false)
-	before, err := contentPlaybookVersion(dir)
+	before, err := contentPlaybookVersion(dir, "ddev+go+java")
 	if err != nil {
 		t.Fatalf("contentPlaybookVersion before: %v", err)
 	}
@@ -188,7 +198,7 @@ func TestContentPlaybookVersion_UnrelatedFileUnchanged(t *testing.T) {
 		t.Fatalf("write README.md: %v", err)
 	}
 
-	after, err := contentPlaybookVersion(dir)
+	after, err := contentPlaybookVersion(dir, "ddev+go+java")
 	if err != nil {
 		t.Fatalf("contentPlaybookVersion after: %v", err)
 	}
@@ -203,7 +213,7 @@ func TestContentPlaybookVersion_UnrelatedFileUnchanged(t *testing.T) {
 func TestContentPlaybookVersion_PlaybookChangeChangesStamp(t *testing.T) {
 	dir := t.TempDir()
 	writePlaybookFiles(t, dir, false)
-	before, err := contentPlaybookVersion(dir)
+	before, err := contentPlaybookVersion(dir, "ddev+go+java")
 	if err != nil {
 		t.Fatalf("contentPlaybookVersion before: %v", err)
 	}
@@ -212,12 +222,58 @@ func TestContentPlaybookVersion_PlaybookChangeChangesStamp(t *testing.T) {
 		t.Fatalf("write site.yml: %v", err)
 	}
 
-	after, err := contentPlaybookVersion(dir)
+	after, err := contentPlaybookVersion(dir, "ddev+go+java")
 	if err != nil {
 		t.Fatalf("contentPlaybookVersion after: %v", err)
 	}
 	if before == after {
 		t.Errorf("editing a playbook file did not change the stamp (%q)", before)
+	}
+}
+
+// TestPlaybookVersion_ConfigsDifferingOnlyInWithJavaProduceDifferentStamps is
+// the literal acceptance criterion: two vm.CreateConfig values that differ in
+// nothing but WithJava must stamp the SAME playbook fileset differently, end
+// to end through CreateConfig.ToolsetKey() -> PlaybookVersion — proving the
+// tool-set selection actually reaches, and changes, the base version stamp.
+func TestPlaybookVersion_ConfigsDifferingOnlyInWithJavaProduceDifferentStamps(t *testing.T) {
+	fsys := samplePlaybookFS(false)
+
+	withJava := vm.CreateConfig{WithDDEV: true, WithGo: true, WithJava: true}
+	withoutJava := vm.CreateConfig{WithDDEV: true, WithGo: true, WithJava: false}
+
+	a, err := PlaybookVersion(fsys, withJava.ToolsetKey())
+	if err != nil {
+		t.Fatalf("PlaybookVersion (WithJava=true): %v", err)
+	}
+	b, err := PlaybookVersion(fsys, withoutJava.ToolsetKey())
+	if err != nil {
+		t.Fatalf("PlaybookVersion (WithJava=false): %v", err)
+	}
+	if a == b {
+		t.Errorf("configs differing only in WithJava produced the same stamp: %q", a)
+	}
+}
+
+// TestContentPlaybookVersion_DifferentToolsetDifferentStamp is the wiring
+// this task exists to land: contentPlaybookVersion must fold its toolset
+// argument into the stamp, not a hardcoded placeholder, so changing
+// vm.CreateConfig's tool-set selection alone (no playbook edit at all) still
+// marks the base stale.
+func TestContentPlaybookVersion_DifferentToolsetDifferentStamp(t *testing.T) {
+	dir := t.TempDir()
+	writePlaybookFiles(t, dir, false)
+
+	allThree, err := contentPlaybookVersion(dir, "ddev+go+java")
+	if err != nil {
+		t.Fatalf("contentPlaybookVersion (ddev+go+java): %v", err)
+	}
+	noJava, err := contentPlaybookVersion(dir, "ddev+go")
+	if err != nil {
+		t.Fatalf("contentPlaybookVersion (ddev+go): %v", err)
+	}
+	if allThree == noJava {
+		t.Errorf("changing the toolset selection did not change the stamp (%q)", allThree)
 	}
 }
 
@@ -228,12 +284,12 @@ func TestContentPlaybookVersion_PlaybookChangeChangesStamp(t *testing.T) {
 // an unrelated reason — the point is that the *format* alone is disqualifying.
 func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
 	readBaseVersionFn = func(string) string { return "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" } // v1-style 40-hex git SHA
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale("claude-base", io.Discard); !stale {
+	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); !stale {
 		t.Fatal("a v1-style (bare git-hash) stamp must be treated as stale")
 	}
 }
@@ -242,12 +298,12 @@ func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 // unreadable/absent stamp counts as stale.
 func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
 	readBaseVersionFn = func(string) string { return "" }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale("claude-base", io.Discard); !stale {
+	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); !stale {
 		t.Fatal("an empty stamp must be treated as stale")
 	}
 }
@@ -256,12 +312,238 @@ func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 // that matches the current computed version is not stale.
 func TestBaseStale_MatchingV2StampNotStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
-	playbookVersionFn = func(string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
+	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
 	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go+java" }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale("claude-base", io.Discard); stale {
+	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); stale {
 		t.Fatal("a matching v2 stamp must not be treated as stale")
+	}
+}
+
+// TestBaseStale_PassesConfigToolsetKey is the wiring this task lands:
+// baseStale must ask playbookVersionFn for the stamp using cfg's OWN
+// ToolsetKey(), not a hardcoded placeholder — so a create with a
+// non-default tool-set selection is compared against the right "want".
+func TestBaseStale_PassesConfigToolsetKey(t *testing.T) {
+	var gotToolset string
+	origVer, origRead := playbookVersionFn, readBaseVersionFn
+	playbookVersionFn = func(_ string, toolset string) (string, error) {
+		gotToolset = toolset
+		return "v2:deadbeef:" + toolset, nil
+	}
+	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go+java" }
+	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
+
+	p := &Provisioner{PlaybookDir: "/playbook"}
+	cfg := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: false}
+	if _, stale := p.baseStale(cfg, io.Discard); !stale {
+		t.Fatal("a toolset that differs from the stamp must be stale")
+	}
+	if want := cfg.ToolsetKey(); gotToolset != want {
+		t.Errorf("baseStale passed toolset %q to playbookVersionFn, want cfg.ToolsetKey() = %q", gotToolset, want)
+	}
+}
+
+// TestShrunk_ReturnsOnlyDeselectedTools proves shrunk() returns exactly the
+// tools that were on in stamped but are off in want — nothing else, whatever
+// the map iteration order happens to be (hence sorted).
+func TestShrunk_ReturnsOnlyDeselectedTools(t *testing.T) {
+	stamped := map[string]bool{"ddev": true, "go": true, "java": true}
+	want := map[string]bool{"ddev": true, "go": false, "java": false}
+
+	got := shrunk(stamped, want)
+	if len(got) != 2 || got[0] != "go" || got[1] != "java" {
+		t.Errorf("shrunk() = %v, want [go java]", got)
+	}
+}
+
+// TestShrunk_NoShrinkReturnsEmpty covers growing and unchanged selections:
+// neither is a shrink, so nothing should be reported.
+func TestShrunk_NoShrinkReturnsEmpty(t *testing.T) {
+	tests := []struct {
+		name            string
+		stamped, wanted map[string]bool
+	}{
+		{"identical", map[string]bool{"ddev": true}, map[string]bool{"ddev": true}},
+		{"growing", map[string]bool{"ddev": true}, map[string]bool{"ddev": true, "go": true}},
+		{"both empty", map[string]bool{}, map[string]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shrunk(tt.stamped, tt.wanted); len(got) != 0 {
+				t.Errorf("shrunk(%v, %v) = %v, want empty", tt.stamped, tt.wanted, got)
+			}
+		})
+	}
+}
+
+// TestParseToolset_RoundTripsToolsetKey proves parseToolset is the inverse of
+// vm.CreateConfig.ToolsetKey() for every selection shape that key can
+// produce: the full set, a subset, and the empty ("none") selection.
+func TestParseToolset_RoundTripsToolsetKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want map[string]bool
+	}{
+		{"ddev+go+java", map[string]bool{"ddev": true, "go": true, "java": true}},
+		{"go", map[string]bool{"go": true}},
+		{"none", map[string]bool{}},
+		{"", map[string]bool{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			got := parseToolset(tt.key)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseToolset(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+			for k, v := range tt.want {
+				if got[k] != v {
+					t.Errorf("parseToolset(%q)[%q] = %v, want %v", tt.key, k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestToolsetFromStamp_ExtractsSuffix pins the "v2:<hash>:<toolset>" parsing,
+// including the negative cases (older scheme, empty) that must NOT be
+// mistaken for an explicit empty toolset.
+func TestToolsetFromStamp_ExtractsSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		stamp string
+		want  string
+	}{
+		{"v2 with toolset", "v2:deadbeef:ddev+go+java", "ddev+go+java"},
+		{"v2 with none", "v2:deadbeef:none", "none"},
+		{"v1-style bare hash", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", ""},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toolsetFromStamp(tt.stamp); got != tt.want {
+				t.Errorf("toolsetFromStamp(%q) = %q, want %q", tt.stamp, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWriteBaseVersion_RoundTripsVersionAndBuiltAt is the real filesystem round
+// trip task 8 adds: writeBaseVersion must record BOTH the version AND a
+// BuiltAt timestamp close to "now", and readBaseVersion/readBaseBuiltAt must
+// read them back correctly through the real stamp file (not a stub).
+func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
+	t.Setenv("LIMA_HOME", t.TempDir())
+
+	before := time.Now()
+	if err := writeBaseVersion("claude-base", "v2:deadbeef:ddev+go+java"); err != nil {
+		t.Fatalf("writeBaseVersion: %v", err)
+	}
+	after := time.Now()
+
+	if got := readBaseVersion("claude-base"); got != "v2:deadbeef:ddev+go+java" {
+		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
+	}
+
+	builtAt, ok := readBaseBuiltAt("claude-base")
+	if !ok {
+		t.Fatal("readBaseBuiltAt: ok = false, want true for a stamp writeBaseVersion just wrote")
+	}
+	if builtAt.Before(before.Add(-time.Second)) || builtAt.After(after.Add(time.Second)) {
+		t.Errorf("readBaseBuiltAt = %v, want between %v and %v", builtAt, before, after)
+	}
+}
+
+// TestReadBaseBuiltAt_MissingStampIsNotOk: no stamp file at all (a base that has
+// never been built/stamped) must report ok=false — the caller
+// (baseNeedsRefresh) treats that as "cannot prove fresh" and refreshes.
+func TestReadBaseBuiltAt_MissingStampIsNotOk(t *testing.T) {
+	t.Setenv("LIMA_HOME", t.TempDir())
+
+	if _, ok := readBaseBuiltAt("claude-base"); ok {
+		t.Fatal("readBaseBuiltAt on a missing stamp returned ok=true, want false")
+	}
+}
+
+// TestReadBaseBuiltAt_PreTimestampStampIsNotOk: a stamp written by a sand
+// binary that predates this task (version only, no second line) must report
+// ok=false for BuiltAt — never guess a build time — while readBaseVersion
+// keeps reading the version line exactly as before.
+func TestReadBaseBuiltAt_PreTimestampStampIsNotOk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	writeRawStamp(t, home, "claude-base", "v2:deadbeef:ddev+go+java\n")
+
+	if got := readBaseVersion("claude-base"); got != "v2:deadbeef:ddev+go+java" {
+		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
+	}
+	if _, ok := readBaseBuiltAt("claude-base"); ok {
+		t.Fatal("readBaseBuiltAt on a pre-timestamp (version-only) stamp returned ok=true, want false")
+	}
+}
+
+// TestReadBaseBuiltAt_UnparseableTimestampIsNotOk: a corrupt second line (not
+// RFC3339) must also report ok=false rather than an incorrect time.Time zero
+// value being mistaken for a real (very stale) build time.
+func TestReadBaseBuiltAt_UnparseableTimestampIsNotOk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	writeRawStamp(t, home, "claude-base", "v2:deadbeef:ddev+go+java\nnot-a-timestamp\n")
+
+	if _, ok := readBaseBuiltAt("claude-base"); ok {
+		t.Fatal("readBaseBuiltAt on an unparseable timestamp returned ok=true, want false")
+	}
+}
+
+// writeRawStamp writes raw content directly to a base's stamp path, bypassing
+// writeBaseVersion, so a test can construct stamp shapes writeBaseVersion
+// itself would never produce (pre-timestamp, corrupt).
+func writeRawStamp(t *testing.T, limaHome, baseName, content string) {
+	t.Helper()
+	dir := filepath.Join(limaHome, "_sand")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, baseName+".playbook-version"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestParseBaseStamp_EmptyIsNotOk pins parseBaseStamp's base case: an empty
+// stamp file parses to an empty version and ok=false, matching readBaseVersion
+// returning "" for an unreadable/missing file.
+func TestParseBaseStamp_EmptyIsNotOk(t *testing.T) {
+	stamp, ok := parseBaseStamp([]byte(""))
+	if ok {
+		t.Fatal("parseBaseStamp(\"\") returned ok=true, want false")
+	}
+	if stamp.Version != "" {
+		t.Errorf("parseBaseStamp(\"\").Version = %q, want empty", stamp.Version)
+	}
+}
+
+// TestShrunkTools_DetectsAndOmitsCorrectly is the end-to-end shrink-detection
+// case this task's advisory depends on: a base stamped with the full
+// tool-set, reapplied with Java deselected, must report exactly ["java"] —
+// and a growing or unchanged selection must report nothing.
+func TestShrunkTools_DetectsAndOmitsCorrectly(t *testing.T) {
+	fullStamp := "v2:deadbeef:ddev+go+java"
+
+	if got := shrunkTools(fullStamp, "ddev+go"); len(got) != 1 || got[0] != "java" {
+		t.Errorf("shrunkTools(full, ddev+go) = %v, want [java]", got)
+	}
+	if got := shrunkTools(fullStamp, "ddev+go+java"); len(got) != 0 {
+		t.Errorf("shrunkTools(full, full) = %v, want empty (no shrink)", got)
+	}
+	if got := shrunkTools(fullStamp, "ddev+go+java"); len(got) != 0 {
+		t.Errorf("shrunkTools with an identical selection = %v, want empty", got)
+	}
+	// A base with no toolset info in its stamp (older scheme / unstamped): no
+	// comparison to make, so nothing to warn about here — the stale-base
+	// machinery already forces a rebuild/reapply for that case regardless.
+	if got := shrunkTools("v1-style-stamp", "go"); len(got) != 0 {
+		t.Errorf("shrunkTools with no toolset info in the stamp = %v, want empty", got)
 	}
 }
