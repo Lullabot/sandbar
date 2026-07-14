@@ -504,7 +504,12 @@ finishes — no webhook configuration required.
 
 ## Roles
 
-- **base** — Hostname, locale, APT packages
+- **base** — Hostname, locale, APT packages. The base-phase transaction installs
+  with **recommends off**, so `base_packages` is the whole answer: to add
+  something to the image, name it there. (This is why `build-essential` and
+  `python3-dev` are listed explicitly — the C toolchain used to arrive only as a
+  recommends of Go and the JDK, and `node-gyp`, cgo and pip C extensions all
+  need it.)
 - **user** — User creation, sudo, SSH, tmux, git, bashrc
 - **samba** — Samba file sharing for the user's home directory (skipped by the Lima flow; `samba_enabled: false`)
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
