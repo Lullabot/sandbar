@@ -12,8 +12,8 @@ import (
 )
 
 // limaRunning is the status string limactl reports for a running instance
-// (mirrors internal/ui's identically-named, unexported constant — see
-// limaBaseDeleter's Status doc in create.go for the same "Running" contract).
+// (mirrors internal/ui's identically-named, unexported constant, and the same
+// "Running" contract lima.Client.Status returns).
 const limaRunning = "Running"
 
 // vmLister is the narrow lima.Client surface shellAttachArgv needs: listing

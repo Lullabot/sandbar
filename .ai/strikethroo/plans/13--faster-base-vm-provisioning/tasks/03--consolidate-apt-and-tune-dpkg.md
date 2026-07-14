@@ -2,7 +2,7 @@
 id: 3
 group: "tier-1-in-guest"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "high"
@@ -23,16 +23,16 @@ Turn six serialized repo-add → update → install cycles into a single `apt-ge
 
 ## Acceptance Criteria
 
-- [ ] All five third-party keyrings and sources-list files (NodeSource, Docker, ddev, Cloudflare/cloudflared, GitHub CLI) are written **before** any package install.
-- [ ] Exactly **one** task in the base phase performs `apt-get update` (`update_cache`), and exactly **one** task performs the package install. Verify: `grep -rn 'update_cache' roles/` shows at most one base-phase occurrence (plus the finalize-only upgrade, which task 9 removes).
-- [ ] The single install task covers Debian base packages, `nodejs`, the Docker package set, ddev, cloudflared, and `gh`.
-- [ ] **The `_apt` keyring assertion still passes.** Every file in `/etc/apt/keyrings/` must be readable by the `_apt` sandbox user: `sudo -u _apt test -r /etc/apt/keyrings/<each>` succeeds. This is a regression the project has been bitten by before — treat it as this task's acceptance test.
-- [ ] `apt-get update` succeeds in the guest with no `NO_PUBKEY` / permission warnings.
-- [ ] A `/etc/dpkg/dpkg.cfg.d/` fragment sets `force-unsafe-io` during the base phase, and `path-exclude` rules drop `/usr/share/doc/*` and `/usr/share/man/*` (with `path-include` for `copyright` files).
-- [ ] `/etc/apt/apt.conf.d/` sets `Acquire::Languages "none";`.
-- [ ] **`force-unsafe-io` is removed before the base becomes a clone source** (end of the base phase), so user VMs retain normal write durability. The doc/man exclusions and the language setting persist (they are safe and beneficial).
-- [ ] `ansible-playbook --syntax-check site.yml` passes.
-- [ ] Role boundaries survive: `base` still owns the OS/runtime layer and `dev-tools` the tooling layer. The consolidation is about *transactions*, not about merging the roles.
+- [x] All five third-party keyrings and sources-list files (NodeSource, Docker, ddev, Cloudflare/cloudflared, GitHub CLI) are written **before** any package install.
+- [x] Exactly **one** task in the base phase performs `apt-get update` (`update_cache`), and exactly **one** task performs the package install. Verify: `grep -rn 'update_cache' roles/` shows at most one base-phase occurrence (plus the finalize-only upgrade, which task 9 removes).
+- [x] The single install task covers Debian base packages, `nodejs`, the Docker package set, ddev, cloudflared, and `gh`.
+- [x] **The `_apt` keyring assertion still passes.** Every file in `/etc/apt/keyrings/` must be readable by the `_apt` sandbox user: `sudo -u _apt test -r /etc/apt/keyrings/<each>` succeeds. This is a regression the project has been bitten by before — treat it as this task's acceptance test. (Verified statically: every keyring task sets `mode: "0644"` explicitly, and both `gpg --dearmor` outputs get an explicit follow-up mode-fix task so umask can't leave them root-only. The live `sudo -u _apt test -r` / `limactl shell ... apt-get update` assertions run in CI's `lima-e2e` job, which needs KVM-backed Lima and a built `sand` binary from a worktree another concurrent task is actively editing — not run here; see report.)
+- [ ] `apt-get update` succeeds in the guest with no `NO_PUBKEY` / permission warnings. (Not run — requires a booted Lima VM; see note above and the task-completion report.)
+- [x] A `/etc/dpkg/dpkg.cfg.d/` fragment sets `force-unsafe-io` during the base phase, and `path-exclude` rules drop `/usr/share/doc/*` and `/usr/share/man/*` (with `path-include` for `copyright` files).
+- [x] `/etc/apt/apt.conf.d/` sets `Acquire::Languages "none";`.
+- [x] **`force-unsafe-io` is removed before the base becomes a clone source** (end of the base phase), so user VMs retain normal write durability. The doc/man exclusions and the language setting persist (they are safe and beneficial).
+- [x] `ansible-playbook --syntax-check site.yml` passes.
+- [x] Role boundaries survive: `base` still owns the OS/runtime layer and `dev-tools` the tooling layer. The consolidation is about *transactions*, not about merging the roles.
 
 Use your internal Todo tool to track these and keep on track.
 

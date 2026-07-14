@@ -20,7 +20,13 @@ import (
 // fakeRunner records the argv of every limactl call (and the stdin of every
 // streamed call) and returns canned output, so the integration tests assert the
 // orchestration's ordered calls without spawning a real limactl/ansible.
+//
+// It is mutex-guarded because the base-lock tests drive it from a goroutine while
+// the test body reads the recorded sequence — an unguarded slice append racing a
+// read is exactly what `go test -race` exists to catch, and a fake that races is a
+// fake nobody can trust.
 type fakeRunner struct {
+	mu      sync.Mutex
 	calls   [][]string
 	streams []string          // stdin contents captured from Stream calls, in order
 	status  map[string][]byte // per-instance canned `list <name> --format` output
@@ -31,6 +37,10 @@ type fakeRunner struct {
 	// stage-out tar — while every other call still succeeds.
 	failOn  func([]string) bool
 	failErr error
+	// hook, when non-nil, runs as a call is answered, before its result is
+	// decided. It lets a test act at one precise point in the sequence — e.g.
+	// cancel the create's own context the moment the base playbook starts.
+	hook func([]string)
 }
 
 // callErr returns the error a given call should produce: failErr for a call the
@@ -45,8 +55,43 @@ func (f *fakeRunner) callErr(args []string) error {
 	return f.err
 }
 
-func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
+// record appends one call (and any stdin it carried) to the recorded sequence.
+func (f *fakeRunner) record(args []string, stdin io.Reader) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
+	if stdin != nil {
+		data, _ := io.ReadAll(stdin)
+		f.streams = append(f.streams, string(data))
+	}
+}
+
+// mark writes a synthetic entry into the recorded sequence, so a test can assert
+// that a real call lands on the far side of a host-side event the runner cannot
+// see — notably the release of the base lock.
+func (f *fakeRunner) mark(label string) {
+	f.record([]string{label}, nil)
+}
+
+// snapshot copies the recorded sequence under the lock, for a test that reads it
+// while a create is still running.
+func (f *fakeRunner) snapshot() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.calls...)
+}
+
+func (f *fakeRunner) Output(ctx context.Context, args ...string) ([]byte, error) {
+	f.record(args, nil)
+	if f.hook != nil {
+		f.hook(args)
+	}
+	// A killed limactl reports the cancellation, so the fake must too: the
+	// provisioner's cancellation behaviour is only real if a cancelled ctx can
+	// actually fail a call.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := f.callErr(args); err != nil {
 		return nil, err
 	}
@@ -67,11 +112,13 @@ func (f *fakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
 	return f.outputs[args[0]], f.err
 }
 
-func (f *fakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	f.calls = append(f.calls, args)
-	if stdin != nil {
-		data, _ := io.ReadAll(stdin)
-		f.streams = append(f.streams, string(data))
+func (f *fakeRunner) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
+	f.record(args, stdin)
+	if f.hook != nil {
+		f.hook(args)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	return f.callErr(args)
 }
@@ -297,13 +344,61 @@ func firstSecond(calls [][]string) []struct{ first, second string } {
 	return got
 }
 
-// TestCreateVM_StaleBaseRebuilds: an existing base whose recorded playbook
-// version differs from the current one is force-deleted and rebuilt before the
-// clone, and the rebuilt base is stamped with the new version.
-func TestCreateVM_StaleBaseRebuilds(t *testing.T) {
+// stubBaseOverlay makes the base image report the overlay it was created from —
+// which playbook directory it mounts, and the bootstrap script Lima runs in it —
+// without materialising a Lima instance on disk. The real implementation reads the
+// instance's own lima.yaml (baseoverlay.go, tested against a real Lima instance
+// file there); an empty dir stands for a base whose overlay cannot be read at all.
+//
+// Only a base whose overlay matches the one this create would use may be converged
+// in place; everything else is rebuilt from scratch. See baseoverlay.go.
+func stubBaseOverlay(t *testing.T, dir string, bootstrap string) {
+	t.Helper()
+	orig := baseOverlayFn
+	baseOverlayFn = func(string) (baseOverlay, bool) {
+		if dir == "" {
+			return baseOverlay{}, false
+		}
+		return baseOverlay{PlaybookDir: dir, Bootstrap: bootstrap}, true
+	}
+	t.Cleanup(func() { baseOverlayFn = orig })
+}
+
+// currentBootstrap is the bootstrap script the CURRENT base overlay installs — what
+// a base created by this build of sand carries, and therefore the only bootstrap a
+// base may have and still be converged in place.
+func currentBootstrap(t *testing.T) string {
+	t.Helper()
+	y, err := RenderBaseOverlay(vm.DefaultCreateConfig(), "/playbook")
+	if err != nil {
+		t.Fatalf("RenderBaseOverlay: %v", err)
+	}
+	o, ok := parseBaseOverlay(y)
+	if !ok {
+		t.Fatalf("could not parse the current base overlay:\n%s", y)
+	}
+	return o.Bootstrap
+}
+
+// stubConvergeableBase makes the base look exactly like one this build of sand
+// created from the playbook at dir: the case — and the only case — in which a stale
+// base is converged in place rather than rebuilt.
+func stubConvergeableBase(t *testing.T, dir string) {
+	t.Helper()
+	stubBaseOverlay(t, dir, currentBootstrap(t))
+}
+
+// TestCreateVM_StaleBaseIsReappliedInPlace: an existing base whose recorded
+// playbook version differs from the current one is NOT destroyed. Ansible is
+// idempotent, so the base is started, the base-phase playbook is re-run against
+// it (converging only the delta), it is re-stamped, and it is stopped again ready
+// to be cloned. A from-scratch rebuild would re-download Debian and re-run every
+// task for what may be a one-line playbook edit.
+func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 	written := stubBaseVersion(t, "newsha", nil, map[string]string{"claude-base": "oldsha"})
+	stubConvergeableBase(t, "/playbook") // a base this build of sand created, from this playbook
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
 		t.Fatalf("CreateVM: %v", err)
@@ -311,9 +406,178 @@ func TestCreateVM_StaleBaseRebuilds(t *testing.T) {
 
 	type call = struct{ first, second string }
 	want := []call{
+		{"list", "claude"},       // exists-guard: target absent
+		{"list", "claude-base"},  // Status(base) -> Stopped
+		{"start", "claude-base"}, // re-apply: start the EXISTING base (no delete, no `start --name`)
+		{"shell", "claude-base"}, // re-apply: re-run the base playbook against it
+		{"stop", "claude-base"},  // re-apply: stop it again for cloning
+		{"clone", "claude-base"}, // Clone
+		{"edit", "--set"},        // Configure clone sizes
+		{"start", "claude"},      // Start clone
+		{"shell", "claude"},      // finalize provision
+		{"stop", "claude"},       // bounce: stop
+		{"start", "claude"},      // bounce: start
+	}
+	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stale-base re-apply sequence mismatch:\n got %v\nwant %v", got, want)
+	}
+	for _, c := range f.calls {
+		if c[0] == "delete" {
+			t.Fatalf("a stale base must be converged in place, never deleted: %v", f.calls)
+		}
+	}
+	if written["claude-base"] != "newsha" {
+		t.Errorf("re-applied base stamped %q, want newsha", written["claude-base"])
+	}
+
+	// The re-apply is the BASE phase, run through the same in-guest script as the
+	// build: vars over stdin (never argv), no git identity on the base image, and
+	// its own SAND_ANSIBLE_TASK_TOTAL marker — a third Ansible run down one pipe
+	// whose banners would otherwise be counted against the previous run's total
+	// (internal/ui/ansible.go).
+	if len(f.streams) != 2 {
+		t.Fatalf("got %d streamed stdins, want 2 (base re-apply, finalize)", len(f.streams))
+	}
+	if !strings.Contains(f.streams[0], "provision_phase: base") {
+		t.Errorf("the re-apply must run the base phase:\n%s", f.streams[0])
+	}
+	if strings.Contains(f.streams[0], "user_git_user_name") {
+		t.Errorf("the base re-apply must not carry the git identity:\n%s", f.streams[0])
+	}
+	reapply := findCall(t, f.calls, 0, "base re-apply shell", func(c []string) bool {
+		return c[0] == "shell" && len(c) > 1 && c[1] == "claude-base"
+	})
+	script := f.calls[reapply][len(f.calls[reapply])-1]
+	if !strings.Contains(script, "SAND_ANSIBLE_TASK_TOTAL=") {
+		t.Errorf("the re-apply run must emit its own task-total marker, or the TUI's progress bar keeps counting against the previous run's total:\n%s", script)
+	}
+}
+
+// TestCreateVM_ReapplyFailureDoesNotStampTheBase is the poisoning guard: a base
+// whose re-apply FAILS is left unambiguously stale (its old stamp untouched), so
+// the next create retries it. Stamping a half-converged base would be silent
+// corruption — every clone taken from it afterwards would carry content the stamp
+// swears it does not.
+func TestCreateVM_ReapplyFailureDoesNotStampTheBase(t *testing.T) {
+	f := &fakeRunner{
+		status: map[string][]byte{"claude-base": []byte("Stopped\n")},
+		failOn: func(c []string) bool { // the base playbook blows up mid-run
+			return c[0] == "shell" && len(c) > 1 && c[1] == "claude-base"
+		},
+		failErr: errors.New("ansible: task failed"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "newsha", nil, map[string]string{"claude-base": "oldsha"})
+	stubConvergeableBase(t, "/playbook")
+
+	err := p.CreateVM(context.Background(), testConfig(), io.Discard)
+	if err == nil {
+		t.Fatal("CreateVM must fail when the base re-apply fails")
+	}
+	if v, ok := written["claude-base"]; ok {
+		t.Fatalf("a FAILED re-apply stamped the base %q — every later clone would be silently poisoned by a base that only claims to be current", v)
+	}
+	// And it must not have cloned from the half-converged base either.
+	for _, c := range f.calls {
+		if c[0] == "clone" {
+			t.Fatalf("a failed re-apply must not be followed by a clone: %v", f.calls)
+		}
+	}
+}
+
+// TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds: a re-apply cannot
+// change the base's OVERLAY — the lima.yaml Lima wrote when the instance was
+// created and re-applies to it on every start. Two of its fields decide whether an
+// in-place converge is even meaningful, and a base that fails either one is rebuilt
+// from scratch instead (which re-creates it under the current overlay):
+//
+//   - THE PLAYBOOK MOUNT. The guest rsyncs its playbook out of /mnt/playbook, i.e.
+//     out of the host directory the base was CREATED with. A git worktree beside the
+//     main tree — or a released binary, which extracts the embedded playbook to a
+//     fresh temp dir on every run — gives the base a mount pointing somewhere else.
+//     Re-applying there runs a DIFFERENT playbook and then stamps it with OUR
+//     version: a base that claims content it does not have, cloned into every VM
+//     from then on, and never detected again because the stamp matches.
+//
+//   - THE BOOTSTRAP SCRIPT. Lima's dependency script installs what the playbook is
+//     allowed to assume (ansible-core, rsync, curl, gnupg — the base role shells out
+//     to `gpg --dearmor` and names them as guaranteed). A base created under an older
+//     script does not carry that guarantee: the run fails, the base is correctly left
+//     stale, and the next create fails the same way. A wedge, not a rebuild.
+func TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mount     string
+		bootstrap string
+	}{
+		{"the base mounts another checkout", "/some/other/worktree", ""},
+		{"the base's overlay cannot be read", "", ""},
+		{"the base was created with an older bootstrap", "/playbook", "#!/bin/bash\napt-get install -y ansible\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+			p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+			written := stubBaseVersion(t, "newsha", nil, map[string]string{"claude-base": "oldsha"})
+			bootstrap := tc.bootstrap
+			if bootstrap == "" {
+				bootstrap = currentBootstrap(t) // isolate the field under test
+			}
+			stubBaseOverlay(t, tc.mount, bootstrap)
+
+			if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+				t.Fatalf("CreateVM: %v", err)
+			}
+
+			type call = struct{ first, second string }
+			want := []call{
+				{"list", "claude"},        // exists-guard: target absent
+				{"list", "claude-base"},   // Status(base) -> Stopped
+				{"delete", "claude-base"}, // cannot be converged in place: rebuild instead
+				{"start", "--name"},       // BuildBase: Create(base) under the CURRENT overlay
+				{"shell", "claude-base"},  // BuildBase: base provision
+				{"stop", "claude-base"},   // BuildBase: stop base
+				{"clone", "claude-base"},  // Clone
+				{"edit", "--set"},         // Configure clone sizes
+				{"start", "claude"},       // Start clone
+				{"shell", "claude"},       // finalize provision
+				{"stop", "claude"},        // bounce: stop
+				{"start", "claude"},       // bounce: start
+			}
+			if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
+				t.Fatalf("unconvergeable-overlay rebuild sequence mismatch:\n got %v\nwant %v", got, want)
+			}
+			// The force flag must be set when deleting the base.
+			for _, c := range f.calls {
+				if c[0] == "delete" && (len(c) < 3 || c[2] != "-f") {
+					t.Errorf("base delete missing -f: %v", c)
+				}
+			}
+			if written["claude-base"] != "newsha" {
+				t.Errorf("rebuilt base stamped %q, want newsha", written["claude-base"])
+			}
+		})
+	}
+}
+
+// TestCreateVM_RebuildDestroysEvenAnUpToDateBase: --rebuild is the escape hatch
+// for a base the idempotent re-apply cannot fix, so it destroys and rebuilds the
+// base from scratch regardless of what the version stamp says.
+func TestCreateVM_RebuildDestroysEvenAnUpToDateBase(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"}) // NOT stale
+	stubConvergeableBase(t, "/playbook")
+
+	err := p.CreateVMWithOptions(context.Background(), testConfig(), CreateOptions{Rebuild: true}, io.Discard)
+	if err != nil {
+		t.Fatalf("CreateVM(--rebuild): %v", err)
+	}
+
+	type call = struct{ first, second string }
+	want := []call{
 		{"list", "claude"},        // exists-guard: target absent
 		{"list", "claude-base"},   // Status(base) -> Stopped
-		{"delete", "claude-base"}, // stale base force-deleted
+		{"delete", "claude-base"}, // --rebuild: force-deleted UNDER THE BASE LOCK
 		{"start", "--name"},       // BuildBase: Create(base)
 		{"shell", "claude-base"},  // BuildBase: base provision
 		{"stop", "claude-base"},   // BuildBase: stop base
@@ -325,25 +589,151 @@ func TestCreateVM_StaleBaseRebuilds(t *testing.T) {
 		{"start", "claude"},       // bounce: start
 	}
 	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
-		t.Fatalf("stale-base rebuild sequence mismatch:\n got %v\nwant %v", got, want)
+		t.Fatalf("--rebuild sequence mismatch:\n got %v\nwant %v", got, want)
 	}
-	// The force flag must be set when deleting the stale base.
-	for _, c := range f.calls {
-		if c[0] == "delete" && (len(c) < 3 || c[2] != "-f") {
-			t.Errorf("stale base delete missing -f: %v", c)
+	if written["claude-base"] != "samesha" {
+		t.Errorf("rebuilt base stamped %q, want samesha", written["claude-base"])
+	}
+}
+
+// TestRebuildDeletesTheBaseOnlyWhileHoldingTheBaseLock is the ordering proof for
+// the race this task closes.
+//
+// `sand create --rebuild` used to delete the base in the CLI layer
+// (cmd/sand/create.go), BEFORE the provisioner — and therefore before the base
+// lock was ever taken. Another create holding that lock could be mid-clone from
+// the very base being force-deleted underneath it: the exact race baselock.go's
+// doc comment says the lock exists to close. The destroy now lives inside
+// ensureBaseStopped, which runs with the lock held.
+//
+// The proof does not stub the lock: it takes the REAL flock, exactly as a
+// concurrent create would, and shows the rebuild cannot get past it.
+func TestRebuildDeletesTheBaseOnlyWhileHoldingTheBaseLock(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	// An up-to-date base: nothing but --rebuild can possibly delete it.
+	stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"})
+	stubConvergeableBase(t, "/playbook")
+
+	// Another create is preparing/cloning the base and holds its lock.
+	release, err := lockBase(context.Background(), "claude-base", io.Discard)
+	if err != nil {
+		t.Fatalf("lockBase: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.CreateVMWithOptions(context.Background(), testConfig(), CreateOptions{Rebuild: true}, io.Discard)
+	}()
+
+	// Wait until the rebuild is definitely running (its exists-guard has fired),
+	// then give it several lock polls (baseLockPoll) to misbehave.
+	waitFor(t, 2*time.Second, func() bool {
+		return countCalls(f.snapshot(), func(c []string) bool { return c[0] == "list" && c[1] == "claude" }) == 1
+	}, "the rebuild to reach the base lock")
+	time.Sleep(4 * baseLockPoll)
+
+	for _, c := range f.snapshot() {
+		if c[0] == "delete" {
+			release()
+			t.Fatalf("--rebuild DELETED the base while another create held the base lock — it may have been mid-clone from it: %v", f.snapshot())
 		}
 	}
-	if written["claude-base"] != "newsha" {
-		t.Errorf("rebuilt base stamped %q, want newsha", written["claude-base"])
+
+	f.mark("base-lock-released")
+	release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CreateVM(--rebuild) after the lock was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("CreateVM(--rebuild) never completed after the base lock was released")
+	}
+
+	// The recorded sequence proves the ordering: the delete lands strictly after
+	// the lock became free.
+	calls := f.snapshot()
+	freed := findCall(t, calls, 0, "base-lock-released", func(c []string) bool { return c[0] == "base-lock-released" })
+	del := findCall(t, calls, 0, "delete claude-base", func(c []string) bool {
+		return c[0] == "delete" && len(c) > 1 && c[1] == "claude-base"
+	})
+	if del < freed {
+		t.Fatalf("the base was deleted at call %d, BEFORE the base lock was released at %d: %v", del, freed, calls)
+	}
+}
+
+// waitFor polls cond until it is true or the timeout expires, failing the test
+// with what it was waiting for. Polling (rather than sleeping a fixed duration)
+// keeps the base-lock tests fast when the code is right and unambiguous when it
+// is not.
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out after %s waiting for %s", timeout, what)
+}
+
+// TestCancelledReapplyReleasesTheBaseLock: a user who hits ctrl+c while the base
+// is being re-applied must not wedge every other create on this machine. The lock
+// is released on the way out of a cancelled run, so the next create takes it and
+// proceeds — and, the re-apply having failed, it finds the base still stale and
+// retries it rather than cloning a half-converged image.
+func TestCancelledReapplyReleasesTheBaseLock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	f.hook = func(c []string) {
+		if c[0] == "shell" && len(c) > 1 && c[1] == "claude-base" {
+			cancel() // ctrl+c, mid-re-apply
+		}
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	written := stubBaseVersion(t, "newsha", nil, map[string]string{"claude-base": "oldsha"})
+	stubConvergeableBase(t, "/playbook")
+
+	if err := p.CreateVM(ctx, testConfig(), io.Discard); err == nil {
+		t.Fatal("a cancelled re-apply must fail the create")
+	}
+	if v, ok := written["claude-base"]; ok {
+		t.Fatalf("a CANCELLED re-apply stamped the base %q; it must be left stale so the next create retries it", v)
+	}
+
+	// The next create must not hang: it takes the freed lock and clones.
+	f2 := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p2 := &Provisioner{Lima: lima.New(f2), PlaybookDir: "/playbook"}
+	next := make(chan error, 1)
+	go func() {
+		cfg := testConfig()
+		cfg.Name = "web"
+		next <- p2.prepareBaseAndClone(context.Background(), cfg, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
+	}()
+	select {
+	case err := <-next:
+		if err != nil {
+			t.Fatalf("the create after a cancelled re-apply failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled re-apply did NOT release the base lock — every other create on this machine is wedged behind it")
 	}
 }
 
 // TestCreateVM_FreshBaseReused: when the base's stamp matches the current
-// playbook version, the base is reused as-is — no delete, no rebuild.
+// playbook version, the base is reused as-is — no delete, no rebuild, and no
+// re-apply either (the whole point of the stamp is to skip the Ansible run when
+// there is provably nothing to converge).
 func TestCreateVM_FreshBaseReused(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 	stubBaseVersion(t, "samesha", nil, map[string]string{"claude-base": "samesha"})
+	stubConvergeableBase(t, "/playbook")
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
 		t.Fatalf("CreateVM: %v", err)
@@ -355,30 +745,38 @@ func TestCreateVM_FreshBaseReused(t *testing.T) {
 		if c[0] == "start" && len(c) > 1 && c[1] == "--name" {
 			t.Fatalf("up-to-date base must not be rebuilt: %v", f.calls)
 		}
+		if len(c) > 1 && c[1] == "claude-base" && (c[0] == "start" || c[0] == "shell") {
+			t.Fatalf("up-to-date base must not be re-applied: %v", f.calls)
+		}
 	}
 }
 
-// TestCreateVM_UnstampedBaseRebuilds: a base with no recorded version (built
-// before stamping, or by an unknown path) is treated as stale and rebuilt.
-func TestCreateVM_UnstampedBaseRebuilds(t *testing.T) {
+// TestCreateVM_UnstampedBaseIsReappliedInPlace: a base with no recorded version
+// (built before stamping, or by an unknown path) is treated as stale — and, like
+// any other stale base whose playbook mount we can match, it is converged in
+// place rather than destroyed.
+func TestCreateVM_UnstampedBaseIsReappliedInPlace(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-	stubBaseVersion(t, "anysha", nil, map[string]string{}) // no stamp
+	written := stubBaseVersion(t, "anysha", nil, map[string]string{}) // no stamp
+	stubConvergeableBase(t, "/playbook")
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
 		t.Fatalf("CreateVM: %v", err)
 	}
-	var deleted, rebuilt bool
 	for _, c := range f.calls {
-		if c[0] == "delete" && len(c) > 1 && c[1] == "claude-base" {
-			deleted = true
+		if c[0] == "delete" {
+			t.Fatalf("an unstamped base must be converged in place, not deleted: %v", f.calls)
 		}
 		if c[0] == "start" && len(c) > 1 && c[1] == "--name" {
-			rebuilt = true
+			t.Fatalf("an unstamped base must not be rebuilt from scratch: %v", f.calls)
 		}
 	}
-	if !deleted || !rebuilt {
-		t.Fatalf("unstamped base should be deleted+rebuilt (deleted=%v rebuilt=%v): %v", deleted, rebuilt, f.calls)
+	findCall(t, f.calls, 0, "base re-apply", func(c []string) bool {
+		return c[0] == "shell" && len(c) > 1 && c[1] == "claude-base"
+	})
+	if written["claude-base"] != "anysha" {
+		t.Errorf("re-applied base stamped %q, want anysha", written["claude-base"])
 	}
 }
 
@@ -824,7 +1222,8 @@ func TestTaskTotalGuard(t *testing.T) {
 // booted guest with Ansible inside it); once the build finishes it is Stopped.
 type baseRaceRunner struct {
 	mu                 sync.Mutex
-	builds             int      // how many times the base image was built
+	builds             int      // how many times the base image was built from scratch
+	reapplies          int      // how many times the existing base was converged in place
 	stops              int      // how many times the base image was stopped
 	seq                []string // the order of base-affecting calls, for diagnosis
 	building           bool
@@ -832,6 +1231,7 @@ type baseRaceRunner struct {
 	cloning            int
 	stoppedDuringBuild bool
 	deletedDuringClone bool
+	touchedDuringClone bool
 	buildDelay         time.Duration
 }
 
@@ -846,6 +1246,16 @@ func (r *baseRaceRunner) baseStatus() string {
 	default:
 		return ""
 	}
+}
+
+// cloningNow reports whether a clone is reading the base's disk right now. A test
+// uses it to release a second create at the ONE instant that matters — mid-clone —
+// rather than firing both off at once and hoping the dangerous interleaving is the
+// one that happens to occur.
+func (r *baseRaceRunner) cloningNow() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cloning > 0
 }
 
 func (r *baseRaceRunner) Output(_ context.Context, args ...string) ([]byte, error) {
@@ -885,6 +1295,18 @@ func (r *baseRaceRunner) Stream(_ context.Context, _ io.Reader, _ io.Writer, arg
 		}
 		return false
 	}
+
+	// ANY call that touches the base while another create is cloning from it is a
+	// lock failure — the clone is reading that disk. `clone` itself names the base
+	// (clone claude-base web), so it is not one of them.
+	if args[0] != "clone" && isBase() {
+		r.mu.Lock()
+		if r.cloning > 0 {
+			r.touchedDuringClone = true
+		}
+		r.mu.Unlock()
+	}
+
 	switch {
 	case args[0] == "start" && len(args) > 2 && args[1] == "--name" && args[2] == "claude-base":
 		r.mu.Lock()
@@ -899,6 +1321,16 @@ func (r *baseRaceRunner) Stream(_ context.Context, _ io.Reader, _ io.Writer, arg
 		r.building = false
 		r.built = true
 		r.mu.Unlock()
+	case args[0] == "start" && len(args) == 2 && args[1] == "claude-base":
+		// The in-place re-apply: the existing base is started and the base playbook
+		// is re-run against it. Slow, like the build — and, like the build, it must
+		// hold the lock for the whole of it.
+		r.mu.Lock()
+		r.reapplies++
+		r.seq = append(r.seq, "reapply-base")
+		r.mu.Unlock()
+
+		time.Sleep(r.buildDelay)
 	case args[0] == "clone":
 		r.mu.Lock()
 		r.cloning++
@@ -956,7 +1388,7 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = p.prepareBaseAndClone(context.Background(), vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, io.Discard, newPhaseTimer(io.Discard))
+			errs[i] = p.prepareBaseAndClone(context.Background(), vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
 		}(i)
 	}
 	wg.Wait()
@@ -979,6 +1411,141 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 	}
 }
 
+// TWO CONCURRENT CREATES MUST CONVERGE A STALE BASE ONCE, NOT TWICE — and the
+// second one must not re-run a playbook the first one has just finished applying.
+//
+// This is the double-checked-locking discipline ensureBaseStopped exists to
+// enforce: the base's status AND its version stamp are read AFTER the lock is
+// acquired, never cached before it. A create that blocked for minutes behind
+// another's re-apply re-reads the stamp the moment it gets in, finds the base
+// current, and clones straight away. Hoist those reads out of the locked section —
+// read staleness before you queue — and the waiter re-applies an already-converged
+// base, doubling the cost of every concurrent create.
+func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
+	r := &baseRaceRunner{buildDelay: 150 * time.Millisecond, built: true} // the base already exists
+	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
+	stubConvergeableBase(t, p.PlaybookDir) // …created by this build of sand, from this playbook
+
+	// The base is stamped v1; the playbook is now v2. It is stale for BOTH creates
+	// at the moment they start — only the stamp the winner writes can tell the
+	// loser it no longer has work to do.
+	var vmu sync.Mutex
+	stamped := "v1"
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string) (string, error) { return "v2", nil }
+	readBaseVersionFn = func(string) string {
+		vmu.Lock()
+		defer vmu.Unlock()
+		return stamped
+	}
+	writeBaseVersionFn = func(_, v string) error {
+		vmu.Lock()
+		stamped = v
+		vmu.Unlock()
+		return nil
+	}
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	names := []string{"web", "api"}
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = p.prepareBaseAndClone(context.Background(),
+				vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("create %d failed: %v", i, err)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.reapplies != 1 {
+		t.Errorf("the stale base was re-applied %d times, want exactly 1 — the waiter must re-read the stamp AFTER the lock, not act on one it cached before it (calls: %v)", r.reapplies, r.seq)
+	}
+	if r.builds != 0 {
+		t.Errorf("the base was rebuilt from scratch %d times; a stale base is converged in place (calls: %v)", r.builds, r.seq)
+	}
+	if r.touchedDuringClone {
+		t.Errorf("the base was started/provisioned/stopped while another create was cloning from it (calls: %v)", r.seq)
+	}
+}
+
+// A --rebuild MUST NOT DESTROY A BASE ANOTHER CREATE IS CLONING FROM.
+//
+// This is the race this task closes. `sand create --rebuild` deleted the base in
+// the CLI layer, before the provisioner and therefore before the base lock was
+// ever taken, while a concurrent create held that lock and spent 40-60s cloning
+// the very disk being deleted. Neither create is doing anything wrong; the destroy
+// was simply outside the critical section. Now it happens inside
+// ensureBaseStopped, under the lock, so it can only ever run when no clone is in
+// flight.
+func TestARebuildCannotDestroyTheBaseAnotherCreateIsCloning(t *testing.T) {
+	r := &baseRaceRunner{buildDelay: 200 * time.Millisecond, built: true} // an existing, up-to-date base
+	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
+	stubConvergeableBase(t, p.PlaybookDir)
+
+	// The base is CURRENT: nothing but --rebuild can delete it, so any delete this
+	// test sees is the rebuild's.
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string) (string, error) { return "v1", nil }
+	readBaseVersionFn = func(string) string { return "v1" }
+	writeBaseVersionFn = func(string, string) error { return nil }
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+
+	// The first create takes the lock and starts its (slow) clone.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs[0] = p.prepareBaseAndClone(context.Background(),
+			vm.CreateConfig{Name: "web", BaseName: "claude-base"}, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
+	}()
+
+	// The rebuild arrives at the ONE moment that is fatal: while that clone is
+	// reading the base's disk. Firing both goroutines off together would leave it to
+	// chance whether the destroy lands inside the clone at all — and a race test
+	// that only sometimes reaches the race is a test that only sometimes fails.
+	waitFor(t, 5*time.Second, r.cloningNow, "the first create to start cloning from the base")
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs[1] = p.prepareBaseAndClone(context.Background(),
+			vm.CreateConfig{Name: "api", BaseName: "claude-base"}, CreateOptions{Rebuild: true}, io.Discard, newPhaseTimer(io.Discard))
+	}()
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("create %d failed: %v", i, err)
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.deletedDuringClone {
+		t.Fatalf("--rebuild DELETED the base while another create was cloning from it (calls: %v)", r.seq)
+	}
+	if r.touchedDuringClone {
+		t.Fatalf("--rebuild rebuilt the base while another create was cloning from it (calls: %v)", r.seq)
+	}
+	if r.builds != 1 {
+		t.Errorf("the base was built %d times, want exactly 1 (the rebuild's) (calls: %v)", r.builds, r.seq)
+	}
+}
+
 // THE CLONE MUST BE INSIDE THE BASE LOCK, not just the decision that precedes it.
 //
 // The lock was taken and released inside ensureBaseStopped, so it guarded the choice
@@ -991,6 +1558,11 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 // So: create A builds the base and starts its (slow) clone. The playbook changes.
 // Create B arrives, finds the base stale, and force-deletes the instance A is reading
 // its disk from. A's clone fails, or lands truncated.
+//
+// The stale base here takes the REBUILD branch, not the in-place re-apply: the mount
+// is left unstubbed, so basePlaybookMount finds no instance file for it under the
+// test's LIMA_HOME and the base cannot be proved to mount this playbook (basemount.go).
+// That is deliberate — the branch that DELETES is the one this test is about.
 func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 	r := &baseRaceRunner{buildDelay: 200 * time.Millisecond}
 	p := &Provisioner{Lima: lima.New(r), PlaybookDir: t.TempDir()}
@@ -1028,7 +1600,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 		go func(name string) {
 			defer wg.Done()
 			_ = p.prepareBaseAndClone(context.Background(),
-				vm.CreateConfig{Name: name, BaseName: "claude-base"}, io.Discard, newPhaseTimer(io.Discard))
+				vm.CreateConfig{Name: name, BaseName: "claude-base"}, CreateOptions{}, io.Discard, newPhaseTimer(io.Discard))
 		}(name)
 	}
 	wg.Wait()

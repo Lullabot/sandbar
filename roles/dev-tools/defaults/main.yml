@@ -1,10 +1,18 @@
 ---
+# Both package lists below are consumed by the single consolidated apt
+# transaction in roles/base/tasks/main.yml ("Install every base-phase
+# package"), not by a task in this role — the role boundary is about which
+# role *owns* the variable, not which role runs the apt module.
 devtools_docker_packages:
   - docker-ce
   - docker-ce-cli
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
+devtools_packages:
+  - ddev
+  - cloudflared
+  - gh
 devtools_docker_registry_proxy_enabled: false
 devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 devtools_docker_registry_proxy_port: 3128

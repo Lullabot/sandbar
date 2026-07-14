@@ -2,6 +2,10 @@ base_hostname: claude
 base_domain: lan
 base_locale: en_CA.UTF-8
 base_nodejs_major_version: 24
+# Installed alongside base_packages in the single consolidated apt transaction
+# (roles/base/tasks/main.yml, "Install every base-phase package").
+base_nodejs_packages:
+  - nodejs
 base_packages:
   - acl
   - bash-completion

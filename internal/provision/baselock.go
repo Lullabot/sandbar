@@ -18,6 +18,16 @@ package provision
 //   - And the stale-base path can DELETE the base while another create is cloning
 //     from it.
 //
+// That last one is why every destructive step on the base — the from-scratch build,
+// the in-place re-apply (which RUNS the base while a clone would be reading its
+// disk), and `sand create --rebuild`'s destroy — lives inside ensureBaseStopped,
+// which prepareBaseAndClone calls with this lock held, and which holds it through
+// the clone as well. --rebuild used to delete the base up in the CLI (cmd/sand/
+// create.go), before the provisioner and therefore before this lock existed for
+// that run: the doc above claimed a guarantee the code did not give. Nothing may
+// destroy the base outside this lock. There is no exception, and a caller that
+// thinks it has one is the race.
+//
 // The lock is a FILE lock, not a mutex, because the second racer is not always in
 // this process: `sand create` (headless, cmd/sand/create.go) builds its own
 // Provisioner and can run in another terminal while the TUI is building. A mutex

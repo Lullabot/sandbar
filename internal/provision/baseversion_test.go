@@ -233,7 +233,7 @@ func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if !p.baseStale("claude-base", io.Discard) {
+	if _, stale := p.baseStale("claude-base", io.Discard); !stale {
 		t.Fatal("a v1-style (bare git-hash) stamp must be treated as stale")
 	}
 }
@@ -247,7 +247,7 @@ func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if !p.baseStale("claude-base", io.Discard) {
+	if _, stale := p.baseStale("claude-base", io.Discard); !stale {
 		t.Fatal("an empty stamp must be treated as stale")
 	}
 }
@@ -261,7 +261,7 @@ func TestBaseStale_MatchingV2StampNotStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if p.baseStale("claude-base", io.Discard) {
+	if _, stale := p.baseStale("claude-base", io.Discard); stale {
 		t.Fatal("a matching v2 stamp must not be treated as stale")
 	}
 }
