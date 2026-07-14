@@ -1,0 +1,64 @@
+site_name: sandbar
+site_url: https://lullabot.github.io/sandbar/
+repo_url: https://github.com/lullabot/sandbar
+site_description: Disposable Claude Code development VMs on Lima.
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  version:
+    provider: mike
+    alias: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - About sand: getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Your First VM: getting-started/first-vm.md
+    - How Provisioning Works: getting-started/how-it-works.md
+  - Using sand:
+    - The Board (TUI): using-sand/tui.md
+    - CLI Reference: using-sand/cli-reference.md
+    - Secrets: using-sand/secrets.md
+    - Files and Shells: using-sand/files-and-shells.md
+  - Reference:
+    - Files and State: reference/files-and-state.md
+    - Security Model: reference/security-model.md
+    - Troubleshooting: reference/troubleshooting.md
+  - Contributing:
+    - Development: contributing/development.md
+    - The Embedded Playbook: contributing/ansible-playbook.md
+    - Releases: contributing/releases.md

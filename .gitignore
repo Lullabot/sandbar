@@ -7,3 +7,6 @@ dist/
 
 # `go build ./cmd/sand` drops the binary at the repo root
 /sand
+
+# MkDocs build output
+site/
