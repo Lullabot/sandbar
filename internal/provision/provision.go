@@ -197,8 +197,19 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	if err := timer.time("base image creation", func() error {
 		return p.Lima.CreateStreaming(ctx, cfg.BaseName, f.Name(), out)
 	}); err != nil {
+		// buildBase only ever runs when the base is ABSENT or is being rebuilt from
+		// scratch (the caller force-deleted it first), so the instance here is one
+		// this run created — and a ^C during the Debian download leaves it
+		// half-written, which makes every later `limactl list` fatal. Ours to clean
+		// up. See cleanup.go.
+		p.cleanupInstance(cfg.BaseName, out)
 		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
 	}
+	// A failure PAST this point leaves a base that booted and has a valid
+	// lima.yaml: it is stale, not broken, and the next create converges or rebuilds
+	// it. It is deliberately left alone — an unstamped base is already treated as
+	// stale (baseversion.go), so nothing is lost by keeping it, and the apt cache it
+	// has already downloaded is worth keeping.
 	// Best-effort: reuse whatever a previous build harvested, so this build's
 	// apt installs are CPU-bound rather than network-bound. See aptcache.go for
 	// why this is a `limactl copy` round trip rather than a host mount.
@@ -287,6 +298,12 @@ func (p *Provisioner) CreateVMWithOptions(ctx context.Context, cfg vm.CreateConf
 func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer) error {
 	timer := newPhaseTimer(out)
 	if err := p.prepareBaseAndClone(ctx, cfg, opts, out, timer); err != nil {
+		// The clone is where this VM's directory first appears, so a ^C or a failure
+		// in there can leave one half-written — and a half-written instance dir
+		// (disk + cidata, no lima.yaml) makes every later `limactl list` FATAL, which
+		// wedges the whole board, not just this VM. Clean up what we started. See
+		// cleanup.go.
+		p.cleanupInstance(cfg.Name, out)
 		return err
 	}
 	step(out, "Starting %q…", cfg.Name)
@@ -302,8 +319,15 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		}
 		return nil
 	}); err != nil {
+		// Still "never finished being created": the clone exists but has never
+		// booted, so there is nothing in it to inspect and nothing to keep.
+		p.cleanupInstance(cfg.Name, out)
 		return err
 	}
+	// PAST THIS POINT THE VM IS NOT CLEANED UP. It booted, its lima.yaml is valid,
+	// and `limactl list` is happy with it — so a failed or cancelled PLAYBOOK leaves
+	// a VM the user can shell into and a retained log they can read, which is the
+	// point of keeping a failed run. Deleting it here would throw away the evidence.
 	if err := timer.time("finalize playbook", func() error {
 		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
 	}); err != nil {

@@ -2097,3 +2097,83 @@ func TestReapplyBase_ContentOnlyReapplyPreservesTheAptClock(t *testing.T) {
 			"actively-edited playbook, and no VM ever gets a security update.", gotBuiltAt, tenDaysAgo)
 	}
 }
+
+// A ^C (or a failure) during the CLONE leaves a half-written instance directory,
+// and that is not just untidy: a directory with a disk but no lima.yaml makes
+// every later `limactl list` FATAL — the board cannot render, and sand is wedged
+// by a VM that was never created. The run that made the mess must clear it.
+//
+// The nastiest half of this is the fallback: limactl cannot DELETE an instance it
+// cannot LOAD, so the very directory that wedges the tool is the one `limactl
+// delete` refuses to touch. Here limactl's delete fails (as it does on a dir with
+// no lima.yaml) and the directory must still go.
+func TestCreateVM_CanceledCloneRemovesTheHalfWrittenInstanceDir(t *testing.T) {
+	limaHomeDir := t.TempDir()
+	t.Setenv("LIMA_HOME", limaHomeDir)
+
+	// The half-written instance: a disk, a cidata.iso, and no lima.yaml — exactly
+	// what a killed `limactl clone` leaves behind.
+	dir := filepath.Join(limaHomeDir, testConfig().Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("seed instance dir: %v", err)
+	}
+	for _, f := range []string{"disk", "cidata.iso"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", f, err)
+		}
+	}
+
+	f := &fakeRunner{
+		status: map[string][]byte{"claude-base": []byte("Stopped\n")},
+		// The clone dies (the ^C), and delete fails the way it does on a dir limactl
+		// cannot load — so only the directory removal can save us.
+		failOn: func(args []string) bool {
+			return len(args) > 0 && (args[0] == "clone" || args[0] == "delete")
+		},
+		failErr: errors.New("context canceled"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: t.TempDir()}
+	stubBaseVersion(t, "v2:same:claude+ddev+go+java", nil, map[string]string{"claude-base": "v2:same:claude+ddev+go+java"})
+
+	err := p.CreateVM(context.Background(), testConfig(), io.Discard)
+	if err == nil {
+		t.Fatal("a failed clone must return an error")
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("the half-written instance dir %s survived a failed clone — every later `limactl list` will be fatal", dir)
+	}
+}
+
+// …but a VM whose PLAYBOOK failed is KEPT. It booted, its lima.yaml is valid,
+// `limactl list` is happy with it, and its retained log is the whole point of a
+// failed run: deleting it would throw away the evidence the user needs.
+func TestCreateVM_FailedPlaybookKeepsTheVM(t *testing.T) {
+	limaHomeDir := t.TempDir()
+	t.Setenv("LIMA_HOME", limaHomeDir)
+
+	dir := filepath.Join(limaHomeDir, testConfig().Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("seed instance dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lima.yaml"), []byte("cpus: 2\n"), 0o644); err != nil {
+		t.Fatalf("seed lima.yaml: %v", err)
+	}
+
+	f := &fakeRunner{
+		status: map[string][]byte{"claude-base": []byte("Stopped\n")},
+		// The finalize playbook fails — it runs over `limactl shell`.
+		failOn: func(args []string) bool {
+			return len(args) > 0 && args[0] == "shell"
+		},
+		failErr: errors.New("ansible: task failed"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: t.TempDir()}
+	stubBaseVersion(t, "v2:same:claude+ddev+go+java", nil, map[string]string{"claude-base": "v2:same:claude+ddev+go+java"})
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err == nil {
+		t.Fatal("a failed playbook must return an error")
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Errorf("the VM was removed after its playbook failed: %v — a booted VM with a valid lima.yaml is inspectable, and its log is the point of keeping a failed run", statErr)
+	}
+}
