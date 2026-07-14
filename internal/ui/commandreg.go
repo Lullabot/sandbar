@@ -232,7 +232,7 @@ var vmCommands = []vmCommand{
 			// Same predicate shellCmd branches on, so the copy always describes the
 			// branch that actually fires.
 			if hostInTmux() {
-				m.logMsg("opened " + v.Name + " in a new tmux window — the board keeps running")
+				m.logMsg("opened " + v.Name + " in a new tmux window")
 			} else {
 				m.logMsg("attaching to " + v.Name + " — C-a d detaches; the TUI resumes when you detach or exit")
 			}
