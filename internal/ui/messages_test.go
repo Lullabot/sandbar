@@ -193,3 +193,39 @@ func TestMessagesBoxTakesOnlySpareRows(t *testing.T) {
 		t.Errorf("below the floor the box must be shed, got MessagesHeight=%d", got)
 	}
 }
+
+// The box must line up with the TILES, not with the terminal. TileWidth is an
+// integer division of the space the columns share, so the remainder (up to
+// Columns-1 cells) is left over — and a box drawn to ContentWidth overhangs the
+// grid by exactly that much. At 160 and 200 columns that is a visible two cells,
+// which is what this pins.
+func TestMessagesBoxLinesUpWithTheTiles(t *testing.T) {
+	widest := func(s string) int {
+		w := 0
+		for _, line := range strings.Split(ansi.Strip(s), "\n") {
+			if n := ansi.StringWidth(strings.TrimRight(line, " ")); n > w {
+				w = n
+			}
+		}
+		return w
+	}
+
+	for _, w := range []int{80, 100, 120, 137, 160, 200} {
+		m := newTestModel(t)
+		m = resized(m, w, 40)
+		// Enough VMs to fill a full row at every width under test, so the widest
+		// rendered tile row IS the grid's full width.
+		m = loadManaged(t, m,
+			vm.VM{Name: "api", Status: "Running"}, vm.VM{Name: "db", Status: "Running"},
+			vm.VM{Name: "web", Status: "Running"}, vm.VM{Name: "x1", Status: "Running"},
+		)
+		if m.layout.MessagesHeight < 1 {
+			t.Fatalf("w=%d: precondition: the box must be shown", w)
+		}
+
+		gridW, boxW := widest(m.gridView()), widest(m.messagesStripView())
+		if gridW != boxW {
+			t.Errorf("w=%d: the tiles are %d wide but the Messages box is %d — they must line up", w, gridW, boxW)
+		}
+	}
+}
