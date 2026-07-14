@@ -603,3 +603,53 @@ func TestShrunkTools_DetectsAndOmitsCorrectly(t *testing.T) {
 		t.Errorf("shrunkTools with no toolset info in the stamp = %v, want empty", got)
 	}
 }
+
+// TestBaseToolset_ReadsBackWhatTheBaseWasBuiltWith is the whole point of the
+// read-back: a create must be able to ask the base what it CONTAINS, rather
+// than assuming the all-on default and making the user re-de-select the same
+// tools on every VM.
+func TestBaseToolset_ReadsBackWhatTheBaseWasBuiltWith(t *testing.T) {
+	orig := readBaseVersionFn
+	defer func() { readBaseVersionFn = orig }()
+
+	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go" }
+	set, ok := BaseToolset("claude-base")
+	if !ok {
+		t.Fatal("a v2 stamp carries a tool-set; BaseToolset must report ok")
+	}
+	if !set["ddev"] || !set["go"] || set["claude"] || set["java"] {
+		t.Errorf("BaseToolset = %v, want exactly {ddev, go}", set)
+	}
+}
+
+// A base built with NOTHING selected stamps "none". That is a real answer, not
+// a missing one: reporting ok=false here would send the caller back to its
+// all-on default and re-install every tool the user just opted out of — the
+// exact bug the read-back exists to kill.
+func TestBaseToolset_NoneIsAnAnswerNotAnAbsence(t *testing.T) {
+	orig := readBaseVersionFn
+	defer func() { readBaseVersionFn = orig }()
+
+	readBaseVersionFn = func(string) string { return "v2:deadbeef:none" }
+	set, ok := BaseToolset("claude-base")
+	if !ok {
+		t.Fatal(`a base stamped "none" was built with no tools; that must be reported as ok, or the caller falls back to all-on and re-installs them`)
+	}
+	if len(set) != 0 {
+		t.Errorf("BaseToolset = %v, want an empty set", set)
+	}
+}
+
+// No stamp (no base built yet) and an older stamp that carries no tool-set
+// suffix are both "no information" — the caller keeps its own default.
+func TestBaseToolset_NoToolsetInformation(t *testing.T) {
+	orig := readBaseVersionFn
+	defer func() { readBaseVersionFn = orig }()
+
+	for _, stamp := range []string{"", "somegitsha", "v2:deadbeef"} {
+		readBaseVersionFn = func(string) string { return stamp }
+		if set, ok := BaseToolset("claude-base"); ok {
+			t.Errorf("BaseToolset(%q) = %v, ok=true; want ok=false (no tool-set information to adopt)", stamp, set)
+		}
+	}
+}

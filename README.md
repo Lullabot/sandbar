@@ -94,11 +94,20 @@ finalize does not touch packages or groups.
   occasional `sand create` noticeably slower than the rest — that's the base
   catching up, not something gone wrong.
 - **The base-image tool-set.** `--with-claude` / `--with-ddev` / `--with-go` /
-  `--with-java` (all default **on**) choose which optional tools are installed
-  into the shared base image every VM is cloned from. In the TUI, the same four
-  choices are toggles on the create form. Claude Code is one of them rather than
-  a fixture of the image: pass `--with-claude=false` to build a base without it
-  and install your own agent instead.
+  `--with-java` choose which optional tools are installed into the shared base
+  image every VM is cloned from. In the TUI, the same four choices are toggles
+  on the create form. Claude Code is one of them rather than a fixture of the
+  image: pass `--with-claude=false` to build a base without it and install your
+  own agent instead.
+
+  **The selection is remembered.** Each of these defaults to whatever the
+  existing base image was actually *built* with — sand records the tool-set in
+  the base's version stamp and reads it back — so you choose once, not on every
+  VM. The create form's toggles open showing what the base contains, and a flag
+  you don't pass adopts it. Only when there is no base yet do they all default
+  **on**, so a first `sand create` installs everything. Passing a flag
+  explicitly still wins, which is how you *add* a tool to an existing base
+  (`--with-go` on a base built without it converges it in).
 - **`--rebuild`** (headless flag) and the form's **"Rebuild base image"**
   toggle destroy the base and build it again from scratch, instead of
   converging it in place. You need this after **de-selecting** a tool

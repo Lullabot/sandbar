@@ -103,6 +103,28 @@ Flags:
 	}
 	cfg.CPUs = n
 
+	// A tool-set flag the user did NOT pass adopts what the existing base was
+	// actually built with, instead of DefaultCreateConfig's all-on default. The
+	// tool-set belongs to the SHARED base, so defaulting it to "everything" meant
+	// a user who built a base with --with-go=false had to keep repeating that on
+	// every later create — and if they forgot once, that create silently marked
+	// the base stale and re-converged the Go toolchain back onto it.
+	//
+	// Explicit flags still win (fs.Visit reports only what was actually passed),
+	// which is what makes ADDING a tool to an existing base work: --with-go on a
+	// base without it is a real request, not an accidental default. With no base
+	// yet, or one stamped by an older sand, there is nothing to adopt and the
+	// all-on default stands.
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if base, ok := provision.BaseToolset(cfg.BaseName); ok {
+		for tool, selected := range cfg.ToolPtrs() {
+			if !explicit["with-"+tool] {
+				*selected = base[tool]
+			}
+		}
+	}
+
 	// Lima creates a guest user matching the host username; default cfg.User to
 	// it when --user is omitted, exactly as the TUI form and the original bash
 	// provisioner do. Passing an empty user_name would otherwise override the
