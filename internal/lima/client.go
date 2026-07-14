@@ -271,7 +271,16 @@ func (c *Client) Copy(ctx context.Context, out io.Writer, recursive bool, src, d
 		args = append(args, "-r")
 	}
 	args = append(args, src, dst)
-	return c.runStream(ctx, out, args...)
+	if out == nil {
+		return c.runStream(ctx, out, args...)
+	}
+	// -v is here for progress, but it also switches on ssh's debug1 logging.
+	f := &scpDebugFilter{w: out}
+	err := c.runStream(ctx, f, args...)
+	if ferr := f.Flush(); err == nil {
+		err = ferr
+	}
+	return err
 }
 
 // GuestPath forms a limactl guest endpoint ("<instance>:<path>") for copy/shell.
