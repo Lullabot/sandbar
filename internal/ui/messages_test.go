@@ -156,3 +156,40 @@ func TestTheFramedStripStillNeverCostsATileRow(t *testing.T) {
 		t.Errorf("at %d rows the strip must be shed, got MessagesHeight=%d", messagesMinHeight-1, short.MessagesHeight)
 	}
 }
+
+// The box asks for ten lines of history but must never buy them with a tile row.
+// It takes what is spare: ten on a terminal tall enough, fewer as the terminal
+// shrinks, and none at all below the floor — while two rows of tiles survive at
+// EVERY height. A fixed ten-line box would instead have been shed outright on
+// every terminal under ~36 rows, which is most of them.
+func TestMessagesBoxTakesOnlySpareRows(t *testing.T) {
+	for h := messagesMinHeight - 4; h <= 60; h++ {
+		lm := classify(120, h)
+
+		if lm.GridHeight < 2*tileHeight {
+			t.Fatalf("h=%d: grid=%d, less than the %d two tile rows need — the box has taken a tile row",
+				h, lm.GridHeight, 2*tileHeight)
+		}
+		if lm.MessagesHeight == 0 {
+			continue // shed: legal at any height, and the only option below the floor
+		}
+		lines := lm.MessagesHeight - messagesStripChrome
+		if lines < messagesStripMinLines || lines > messagesStripMaxLines {
+			t.Fatalf("h=%d: box shows %d lines, want between %d and %d (or be shed)",
+				h, lines, messagesStripMinLines, messagesStripMaxLines)
+		}
+	}
+
+	// Tall enough: the full ten.
+	if lines := classify(120, 40).MessagesHeight - messagesStripChrome; lines != messagesStripMaxLines {
+		t.Errorf("at 40 rows the box shows %d lines, want the full %d", lines, messagesStripMaxLines)
+	}
+	// At the floor: the smallest box worth drawing, not a sliver.
+	if lines := classify(120, messagesMinHeight).MessagesHeight - messagesStripChrome; lines != messagesStripMinLines {
+		t.Errorf("at the floor (%d rows) the box shows %d lines, want %d", messagesMinHeight, lines, messagesStripMinLines)
+	}
+	// Below it: shed, rather than squeezed.
+	if got := classify(120, messagesMinHeight-1).MessagesHeight; got != 0 {
+		t.Errorf("below the floor the box must be shed, got MessagesHeight=%d", got)
+	}
+}
