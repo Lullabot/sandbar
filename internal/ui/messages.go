@@ -134,7 +134,11 @@ func (m model) messagesStripView() string {
 	if height < 1 {
 		return ""
 	}
-	width := m.layout.ContentWidth
+	// The box lines up with the TILES, not with the terminal: TileWidth is an
+	// integer division of the space the columns share, so a box drawn to
+	// ContentWidth overhangs the grid it sits under by the remainder (up to two
+	// cells at a common width). GridWidth is what a full row of tiles measures.
+	width := m.layout.GridWidth()
 	rows := height - messagesStripChrome // the message lines inside the frame
 
 	// A frame needs room for its two vertical edges and a space either side of the

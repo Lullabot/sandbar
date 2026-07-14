@@ -57,6 +57,24 @@ type layoutMode struct {
 	HelpLines int
 }
 
+// GridWidth is how wide a FULL row of tiles actually renders: the columns plus
+// the gaps between them. It is NOT ContentWidth — TileWidth is an integer
+// division of the space the columns share, so the remainder (up to Columns-1
+// cells) is left over, and a pane drawn to ContentWidth overhangs the tiles it
+// sits with by exactly that much. Anything that must line up with the grid — the
+// messages box — measures itself against this, not against the terminal.
+func (l layoutMode) GridWidth() int {
+	cols := l.Columns
+	if cols < 1 {
+		cols = 1
+	}
+	w := cols*l.TileWidth + tileGap*(cols-1)
+	if w > l.ContentWidth {
+		w = l.ContentWidth // a single tile forced narrower than tileMinWidth
+	}
+	return clamp(w, minBudget)
+}
+
 // Tile size budget, exported for task 07 (the board/tile renderer) and task
 // 08 to build against. A tile's content is at most six lines (title, status,
 // cpu, mem, disk, up/last-used) plus a rounded border top and bottom, hence
@@ -76,10 +94,11 @@ const (
 	appPaddingH = 4
 )
 
-// Fixed row budgets for the header/messages/footer bands. headerHeightFull is
-// the title plus a VM-count line; headerHeightCompact folds the counts into
-// the title line. messagesStripHeight is the messages pane shown between the
-// grid and the footer band. footerBandHeight is the closing band below it.
+// Row budgets for the header/messages/footer bands. headerHeightFull is the
+// title plus a VM-count line; headerHeightCompact folds the counts into the
+// title line. The messages box (between the grid and the footer band) is the one
+// pane whose height is NOT fixed — see below. footerBandHeight is the closing
+// band under it.
 const (
 	headerHeightFull    = 2
 	headerHeightCompact = 1
