@@ -7,9 +7,50 @@ actions (start / stop / restart), edit their secrets, and delete or reset them.
 
 It provisions the heavy, identity-free install once into a stopped **base
 image**, then makes each VM a fast `limactl clone` of that base, and runs a
-light **finalize** pass on the clone (hostname, git identity, `apt upgrade`,
-optional repo clone). Creating and recreating a VM streams the provisioner's
-output into a scrollable progress pane.
+light **finalize** pass on the clone (hostname, git identity, optional repo
+clone). Creating and recreating a VM streams the provisioner's output into a
+scrollable progress pane.
+
+### The base image's lifecycle
+
+The base is not just "built once and reused forever" — it stays current
+across two independent axes, both checked (and, if needed, acted on) every
+time a create needs the base, under a file lock that serializes concurrent
+creates:
+
+- **Content staleness.** The base is stamped with a version derived from the
+  playbook **content** it was built from — a hash of the exact fileset that
+  reaches the guest (`site.yml`, `ansible.cfg`, `inventory`, `roles/`,
+  `group_vars/`) combined with the requesting create's tool-set selection
+  (`CreateConfig.ToolsetKey()`) — not a git commit. Content hashing works the
+  same way whether the playbook came from a working-tree checkout or the
+  fileset embedded in a released binary, so a non-git install stales and
+  converges exactly like a checkout does. When the current playbook's version
+  differs from the base's stamp, the base is **converged in place**: it is
+  started, the playbook is re-run against it (Ansible applies only the
+  delta), it is re-stamped, and it is stopped again — a full rebuild only
+  happens when the base can't be converged (its overlay doesn't match what
+  this create would use) or when `--rebuild` asks for one explicitly.
+- **Package age.** Alongside the content hash, the stamp also records the
+  moment the base was last built or converged (`BuiltAt`, RFC3339). A base
+  that has gone more than 30 days without a full `apt upgrade` is refreshed
+  once, in place — same start/converge/stamp/stop machinery, with the
+  upgrade turned on — the next time a create needs it, rather than every
+  future clone re-paying for stale packages during finalize.
+- **De-selecting a tool needs a rebuild, not a converge.** Ansible can
+  converge an *addition* to the tool-set (install a newly-selected package)
+  but not a *removal* — it will not uninstall a package whose task no longer
+  applies. A converge-in-place that shrinks the selection leaves the
+  de-selected tool's package installed on the base; `sand` warns about this
+  when it happens. `--rebuild` (or the form's "Rebuild base image" toggle) is
+  the only thing that actually removes it, because a rebuild reinstalls
+  fresh from the current selection.
+- **Everything that can destroy or mutate the base — build, rebuild,
+  converge, refresh, and `--rebuild`'s destroy — runs under one lock**, so two
+  concurrent `sand create` runs never race each other into deleting or
+  half-converging the same base. The cost is that concurrent creates
+  serialize their (fast) clone step; the expensive Ansible run that follows
+  still overlaps freely.
 
 `sand` ships in two modes from the same binary:
 
@@ -41,6 +82,27 @@ or `sand create`. To build from a checkout of this repository instead:
 go build ./cmd/sand
 ./sand
 ```
+
+## Profiling a provisioning run
+
+Set `SAND_PROFILE=1` (any value other than empty or `0`) in the host
+environment before running `sand create` or the TUI to get a per-task timing
+breakdown of the Ansible run, on top of the phase-level `[timing]` lines every
+run already prints:
+
+```bash
+SAND_PROFILE=1 sand create
+```
+
+The default path installs only `ansible-core` in the guest (a deliberate size
+trade — see `internal/provision/overlay.go`), and `profile_tasks` — the
+callback that prints per-task durations — lives in the `ansible.posix`
+collection, not `ansible-core`. Rather than baking that collection into every
+base image just so it sits unused on the common path, the profiling variant
+of the in-guest script installs `ansible.posix` **on demand**, immediately
+before the playbook run, only when `SAND_PROFILE` is set
+(`internal/provision/provision.go`, `sandProfileEnabled` /
+`profileGuestScript`). The default, non-profiling path stays collection-free.
 
 ## Playbook resolution: working-tree-first, embedded-fallback
 
@@ -76,8 +138,9 @@ Common flags (run `sand create --help` for the full list and defaults):
 | `--git-name` / `--git-email` | git identity written into the VM (required) |
 | `--cpus` / `--memory` / `--disk` | VM sizing (defaults mirror the TUI form) |
 | `--clone-url` / `--clone-token` | Optional private repo to clone into the VM |
+| `--with-ddev` / `--with-go` / `--with-java` | Include DDEV / Go / a headless JDK in the shared base image (default: all three on) |
 | `--recreate` | If the named instance exists and is sand-managed, delete and re-clone it |
-| `--rebuild` | Delete and rebuild the base image first, then create |
+| `--rebuild` | Delete and rebuild the base image from scratch instead of converging it in place (needed to actually remove a de-selected tool — see [The base image's lifecycle](#the-base-images-lifecycle)) |
 
 `--ref` (pinning a playbook git ref) is deliberately not a flag: with the
 playbook embedded in the binary, there is no separate ref left to pin — see

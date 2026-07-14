@@ -6,7 +6,9 @@
   # cloned cheaply:
   #   full     - everything in one pass (default; the non-clone / curl|bash flow)
   #   base     - heavy, identity-free setup baked into the clone source
-  #   finalize - light per-clone work (hostname, git identity, apt upgrade, repo)
+  #   finalize - light per-clone work (hostname, git identity, repo). No apt
+  #              upgrade: that is paid once on the base by its 30-day
+  #              self-refresh (base_apt_upgrade), not re-paid by every clone.
   # Tasks gate on this with `when:`; fact-gathering stays ungated so both phases
   # see it. dev-tools/claude-code are heavy (skip in finalize); project is
   # per-clone (skip in base).

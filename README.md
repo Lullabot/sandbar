@@ -77,15 +77,33 @@ stopped base image (`claude-base` by default), then makes each VM a fast
 provisioned disk (near-instant on a copy-on-write filesystem), so a new VM is
 ready in seconds instead of minutes.
 
-After cloning, a light **finalize** pass applies the per-VM bits: hostname, your
-git identity, an `apt upgrade` (so a clone off an older base isn't carrying
-stale packages), and the optional repo clone. The split is driven by the
+After cloning, a light **finalize** pass applies the per-VM bits: hostname,
+your git identity, and the optional repo clone. The split is driven by the
 `provision_phase` variable (`base` / `finalize` / `full`); heavy roles are
-skipped on `finalize`, the `project` role is skipped on `base`.
+skipped on `finalize`, the `project` role is skipped on `base`. Package
+installs — including group membership like `docker` — happen once, in the
+**base** phase, so every clone already carries them before it ever boots;
+finalize does not touch packages or groups.
 
-- The base is built automatically the first time. Use `--rebuild` to recreate
-  it after changing the playbook or to refresh installed packages — this rebuilds
-  the base, then makes the VM.
+- The base is built automatically the first time. After that, `sand` keeps it
+  current on its own: editing the playbook and running `sand create` again
+  converges the existing base **in place** (Ansible only applies what
+  changed) instead of rebuilding it from scratch, and a base that has gone
+  30+ days without a full package upgrade is refreshed the same way,
+  automatically, the next time it's used. Either of these can make an
+  occasional `sand create` noticeably slower than the rest — that's the base
+  catching up, not something gone wrong.
+- **The base-image tool-set.** `--with-ddev` / `--with-go` / `--with-java`
+  (all default **on**) choose which optional tools are installed into the
+  shared base image every VM is cloned from. In the TUI, the same three
+  choices are toggles on the create form.
+- **`--rebuild`** (headless flag) and the form's **"Rebuild base image"**
+  toggle destroy the base and build it again from scratch, instead of
+  converging it in place. You need this after **de-selecting** a tool
+  (turning `--with-java` off, say): Ansible can converge an *addition* to the
+  base, but it cannot *uninstall* a package whose task no longer applies —
+  only a from-scratch rebuild actually removes it. It's also the manual
+  escape hatch for a base left half-broken by an interrupted run.
 - `--recreate` deletes and re-clones the **named** VM from the existing base (a
   fast reset of one VM, without rebuilding the base).
 - With `sand create` (headless mode), `cpus` / `memory` / `disk` are set when
@@ -93,9 +111,9 @@ skipped on `finalize`, the `project` role is skipped on `base`.
   change. (`disk` is baked into the base image, so growing it on a clone built
   this way needs `limactl disk resize`.)
 
-After cloning, `sand` restarts the VM once so your first shell lands with
-the right group membership (e.g. `docker`), the new hostname, and any kernel or
-library updates the finalize `apt upgrade` installed.
+After cloning, `sand` starts the VM and finalizes it; a restart happens only
+when the guest itself reports a pending reboot (e.g. a kernel/libc update) —
+most creates boot straight through with no bounce.
 
 **Per-VM disk sizing.** `sand` sizes each VM individually rather than
 inheriting the base's size. It builds the base at a small virtual-disk floor

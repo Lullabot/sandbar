@@ -478,9 +478,9 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 - ✔️ Task 09: Conditional bounce; tmux-safe `Reset` (depends on: 08) — `completed`
 - ✔️ Task 11: CI covers the cold `--rebuild` build **and** the reuse path (depends on: 08, 05) — `completed` (live CI run pending)
 
-### Phase 6: Documentation
+### ✅ Phase 6: Documentation
 **Parallel Tasks:**
-- Task 12: README / README-sand / AGENTS + load-bearing code comments (depends on: 06, 09, 10)
+- ✔️ Task 12: README / README-sand / AGENTS + load-bearing code comments (depends on: 06, 09, 10) — `completed`
 
 *Runs late by design: several tasks have empirical decision points (does the macOS mount work, or did Tier 2 fall back to the tarball? does the hostname actually need a bounce?). Document what shipped, not what was planned.*
 
