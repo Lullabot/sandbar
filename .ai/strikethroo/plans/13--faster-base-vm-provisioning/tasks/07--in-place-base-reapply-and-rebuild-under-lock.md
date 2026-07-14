@@ -2,7 +2,7 @@
 id: 7
 group: "tier-1-staleness"
 dependencies: [4]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "opus"
 effort: "xhigh"
@@ -25,17 +25,21 @@ Collapse the playbook-development inner loop from a from-scratch rebuild into an
 
 ## Acceptance Criteria
 
-- [ ] On staleness, the base is **re-applied in place**: start the existing base, re-run the base-phase playbook against it (same in-guest script, same stdin-fed vars, same rsync of the playbook fileset), re-stamp it, and stop it again. No Debian image re-download, no base deletion.
-- [ ] The absent-base case is unchanged: it still builds from scratch.
-- [ ] `sand create --rebuild` still performs a full destroy-and-rebuild — but the **destroy now happens inside `ensureBaseStopped`, under the base lock**, not in the CLI layer before the provisioner is called.
-- [ ] `cmd/sand/create.go`'s `doHeadlessCreate` no longer calls `ld.Delete(cfg.BaseName, true)` before the provisioner. The rebuild **intent** is passed down instead.
-- [ ] **No new locking is introduced.** The re-apply lives inside `ensureBaseStopped`, which its caller `prepareBaseAndClone` already runs while holding the exclusive base lock.
-- [ ] **Staleness is read AFTER the lock is acquired**, never cached before it. A create that blocked for minutes behind another's rebuild must re-read the stamp and skip redundant work. (This is the double-checked-locking discipline `ensureBaseStopped` already follows — do not hoist the reads out of it.)
-- [ ] The lock is released on context cancellation, so a cancelled build does not wedge every other create.
-- [ ] **Stamp only on full success.** A failed or partial re-apply must leave the base unambiguously stale (old stamp retained or cleared) — never silently half-converged with a fresh stamp, which would poison every subsequent clone.
-- [ ] Existing guarantees survive: extra-vars travel over **stdin, never argv**; the rsync filter stays in step with `playbook_embed.go`.
-- [ ] A test proves two concurrent creates cannot have one delete the base while the other clones from it — **including when one passes `--rebuild`**.
-- [ ] `go vet ./...` and `go test ./...` are green.
+- [x] On staleness, the base is **re-applied in place**: start the existing base, re-run the base-phase playbook against it (same in-guest script, same stdin-fed vars, same rsync of the playbook fileset), re-stamp it, and stop it again. No Debian image re-download, no base deletion. (`reapplyBase`, provision.go; `TestCreateVM_StaleBaseIsReappliedInPlace`)
+- [x] The absent-base case is unchanged: it still builds from scratch. (`TestCreateVM_BuildsBaseWhenAbsent`)
+- [x] `sand create --rebuild` still performs a full destroy-and-rebuild — but the **destroy now happens inside `ensureBaseStopped`, under the base lock**, not in the CLI layer before the provisioner is called. (`TestRebuildDeletesTheBaseOnlyWhileHoldingTheBaseLock` takes the real flock and proves the ordering.)
+- [x] `cmd/sand/create.go`'s `doHeadlessCreate` no longer calls `ld.Delete(cfg.BaseName, true)` before the provisioner. The rebuild **intent** is passed down instead. (`provision.CreateOptions{Rebuild}`; the `limaBaseDeleter` interface is gone — that layer no longer has a lima client to delete with.)
+- [x] **No new locking is introduced.** The re-apply lives inside `ensureBaseStopped`, which its caller `prepareBaseAndClone` already runs while holding the exclusive base lock.
+- [x] **Staleness is read AFTER the lock is acquired**, never cached before it. (`TestConcurrentCreatesReapplyTheStaleBaseOnce`: two creates, one re-apply — the waiter re-reads the stamp and finds its work already done.)
+- [x] The lock is released on context cancellation, so a cancelled build does not wedge every other create. (`TestCancelledReapplyReleasesTheBaseLock`)
+- [x] **Stamp only on full success.** A failed or partial re-apply must leave the base unambiguously stale — never silently half-converged with a fresh stamp. (`TestCreateVM_ReapplyFailureDoesNotStampTheBase`)
+- [x] Existing guarantees survive: extra-vars travel over **stdin, never argv** (the re-apply reuses `runProvision`/`inGuestScript` verbatim); the rsync filter stays in step with `playbook_embed.go`.
+- [x] A test proves two concurrent creates cannot have one delete the base while the other clones from it — **including when one passes `--rebuild`**. (`TestARebuildCannotDestroyTheBaseAnotherCreateIsCloning`, which releases the rebuild at the exact instant the other create is mid-clone.)
+- [x] `go vet ./...` and `go test ./...` are green (also `go test -race ./...`).
+
+### Added beyond the brief (and why it is not optional)
+
+- [x] **A stale base is only converged in place when its OVERLAY matches the one this create would build from** — same `/mnt/playbook` mount, same Lima bootstrap script — otherwise it is rebuilt from scratch, exactly as before. (`baseoverlay.go`, `TestBaseConvergeable`, `TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds`.) A re-apply cannot change a base's overlay, and both halves are live hazards today: the base image on the machine this was written on mounts a *different git worktree* (re-applying would have rsynced someone else's playbook in and stamped it as ours — undetectable afterwards, since the stamp would match), and its baked bootstrap script predates task 02's, so it never installs the `curl`/`gnupg` that task 03's base role now shells out to (`gpg --dearmor`) and documents as "guaranteed present by the Lima dependency script" — a re-apply there fails, correctly refuses to stamp, and then fails identically on every retry: a wedge, not a rebuild.
 
 Use your internal Todo tool to track these and keep on track.
 

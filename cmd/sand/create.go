@@ -17,22 +17,17 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// limaBaseDeleter is the narrow lima.Client surface the --rebuild path needs:
-// checking whether the base image exists and force-deleting it. An interface
-// so doHeadlessCreate can be unit-tested with a stub instead of a real
-// lima.Client (which would need a real limactl).
-type limaBaseDeleter interface {
-	Status(name string) (string, error)
-	Delete(name string, force bool) error
-}
-
 // headlessProvisioner is the narrow provision.Provisioner surface runCreate
-// drives (mirroring the TUI's provisionFunc in internal/ui/progress.go). An
-// interface so doHeadlessCreate's bookkeeping can be unit-tested with a stub
-// that "succeeds" without a real limactl/ansible run.
+// drives. An interface so doHeadlessCreate's bookkeeping can be unit-tested with
+// a stub that "succeeds" without a real limactl/ansible run.
+//
+// It is the option-taking pair of methods, not the plain CreateVM/Recreate the
+// TUI uses, because --rebuild is an intent this layer must hand DOWN rather than
+// act on: the base image may only be destroyed under the base lock, which lives
+// inside the provisioner (internal/provision/baselock.go).
 type headlessProvisioner interface {
-	CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
-	Recreate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error
+	CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error
+	RecreateWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error
 }
 
 // runCreate implements the headless `sand create` subcommand: it parses a
@@ -80,7 +75,7 @@ Flags:
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
-	rebuild := fs.Bool("rebuild", false, "Delete and rebuild the base image first, then create")
+	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
 	// sand's playbook is
@@ -157,7 +152,7 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return doHeadlessCreate(ctx, reg, cli, prov, cfg, *recreate, *rebuild, os.Stdout)
+	return doHeadlessCreate(ctx, reg, prov, cfg, *recreate, *rebuild, os.Stdout)
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs
@@ -173,14 +168,17 @@ Flags:
 // VM — recreate clones from a Claude base image and would replace ANY
 // instance it is pointed at, so it must never be offered for a VM sand did
 // not create.
-func doHeadlessCreate(ctx context.Context, reg *registry.Registry, ld limaBaseDeleter, prov headlessProvisioner, cfg vm.CreateConfig, recreate, rebuild bool, out io.Writer) error {
-	if rebuild {
-		if status, err := ld.Status(cfg.BaseName); err == nil && status != "" {
-			if err := ld.Delete(cfg.BaseName, true); err != nil {
-				return fmt.Errorf("delete base image %q for rebuild: %w", cfg.BaseName, err)
-			}
-		}
-	}
+//
+// IT DOES NOT DELETE THE BASE IMAGE. It used to: --rebuild force-deleted the base
+// here, before the provisioner was ever called — and therefore before the base
+// lock was ever taken. Another create, holding that lock, could be forty seconds
+// into cloning the very disk this line removed. baselock.go's own doc comment
+// names that race as one the lock exists to close, and --rebuild was the hole in
+// it. The intent goes down to the provisioner instead, which destroys the base
+// inside ensureBaseStopped with the lock held and no clone in flight; this
+// function no longer has a lima client to delete anything with.
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, recreate, rebuild bool, out io.Writer) error {
+	opts := provision.CreateOptions{Rebuild: rebuild}
 
 	if recreate {
 		base, ok := manage.RecreateBase(reg, cfg.Name)
@@ -188,11 +186,11 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, ld limaBaseDe
 			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
 		cfg.BaseName = base
-		if err := prov.Recreate(ctx, cfg, out); err != nil {
+		if err := prov.RecreateWithOptions(ctx, cfg, opts, out); err != nil {
 			return err
 		}
 	} else {
-		if err := prov.CreateVM(ctx, cfg, out); err != nil {
+		if err := prov.CreateVMWithOptions(ctx, cfg, opts, out); err != nil {
 			return err
 		}
 	}

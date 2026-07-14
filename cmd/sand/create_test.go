@@ -5,29 +5,32 @@ import (
 	"io"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// stubProvisioner is a no-op headlessProvisioner double: CreateVM/Recreate
-// both "succeed" without touching lima, so TestHeadlessCreateRecordsManagedVM
-// exercises only the managed-registry bookkeeping doHeadlessCreate performs
-// after a successful run (the parity guarantee with the TUI).
-type stubProvisioner struct{}
+// stubProvisioner is a headlessProvisioner double: CreateVM/Recreate both
+// "succeed" without touching lima, recording the options they were handed so a
+// test can assert what intent doHeadlessCreate passed DOWN to the provisioner
+// (rather than acting on itself).
+type stubProvisioner struct {
+	created   int
+	recreated int
+	opts      provision.CreateOptions
+}
 
-func (stubProvisioner) CreateVM(_ context.Context, _ vm.CreateConfig, _ io.Writer) error {
+func (s *stubProvisioner) CreateVMWithOptions(_ context.Context, _ vm.CreateConfig, opts provision.CreateOptions, _ io.Writer) error {
+	s.created++
+	s.opts = opts
 	return nil
 }
 
-func (stubProvisioner) Recreate(_ context.Context, _ vm.CreateConfig, _ io.Writer) error {
+func (s *stubProvisioner) RecreateWithOptions(_ context.Context, _ vm.CreateConfig, opts provision.CreateOptions, _ io.Writer) error {
+	s.recreated++
+	s.opts = opts
 	return nil
 }
-
-// stubBaseDeleter is a no-op limaBaseDeleter double for the --rebuild path.
-type stubBaseDeleter struct{}
-
-func (stubBaseDeleter) Status(_ string) (string, error) { return "", nil }
-func (stubBaseDeleter) Delete(_ string, _ bool) error   { return nil }
 
 // TestHeadlessCreateRecordsManagedVM is the load-bearing parity guarantee
 // called out in task 3: a headless `sand create` must record the VM as
@@ -47,7 +50,7 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 		Disk:     "100GiB",
 	}
 
-	err := doHeadlessCreate(context.Background(), reg, stubBaseDeleter{}, stubProvisioner{}, cfg, false, false, io.Discard)
+	err := doHeadlessCreate(context.Background(), reg, &stubProvisioner{}, cfg, false, false, io.Discard)
 	if err != nil {
 		t.Fatalf("doHeadlessCreate: %v", err)
 	}
@@ -61,5 +64,63 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 	}
 	if got != cfg {
 		t.Fatalf("recorded config = %+v, want %+v (round-trip mismatch)", got, cfg)
+	}
+}
+
+// TestHeadlessCreatePassesRebuildDownToTheProvisioner is the CLI half of the race
+// this task closes.
+//
+// doHeadlessCreate used to force-delete the base image ITSELF, before calling the
+// provisioner — and therefore before the base lock (internal/provision/baselock.go)
+// was ever taken. A concurrent create holding that lock could be mid-clone from the
+// base being deleted underneath it. The delete now happens inside the provisioner,
+// under the lock; the CLI only passes the INTENT down. This test is what stops
+// anyone from "helpfully" reintroducing the up-front delete: doHeadlessCreate no
+// longer even has a lima client to do it with, and the intent must arrive at the
+// provisioner instead.
+func TestHeadlessCreatePassesRebuildDownToTheProvisioner(t *testing.T) {
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+
+	for _, tc := range []struct {
+		name    string
+		rebuild bool
+	}{
+		{"rebuild", true},
+		{"no rebuild", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prov := &stubProvisioner{}
+			if err := doHeadlessCreate(context.Background(), registry.NewEmpty(), prov, cfg, false, tc.rebuild, io.Discard); err != nil {
+				t.Fatalf("doHeadlessCreate: %v", err)
+			}
+			if prov.created != 1 {
+				t.Fatalf("CreateVMWithOptions called %d times, want 1", prov.created)
+			}
+			if prov.opts.Rebuild != tc.rebuild {
+				t.Fatalf("provisioner got Rebuild=%v, want %v — the rebuild intent must reach the provisioner, which destroys the base UNDER the base lock", prov.opts.Rebuild, tc.rebuild)
+			}
+		})
+	}
+}
+
+// TestHeadlessRecreatePassesRebuildDownToTheProvisioner: --recreate and --rebuild
+// are independent (one targets the clone, the other the base) and may be combined,
+// so the recreate path has to carry the rebuild intent down too.
+func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	reg := registry.NewEmpty()
+	if err := reg.Add(cfg); err != nil { // recreate is gated on the VM being sand-managed
+		t.Fatalf("seed registry: %v", err)
+	}
+
+	prov := &stubProvisioner{}
+	if err := doHeadlessCreate(context.Background(), reg, prov, cfg, true, true, io.Discard); err != nil {
+		t.Fatalf("doHeadlessCreate(--recreate --rebuild): %v", err)
+	}
+	if prov.recreated != 1 || prov.created != 0 {
+		t.Fatalf("--recreate took the wrong path (recreated=%d created=%d)", prov.recreated, prov.created)
+	}
+	if !prov.opts.Rebuild {
+		t.Fatal("--recreate --rebuild did not pass the rebuild intent to the provisioner")
 	}
 }

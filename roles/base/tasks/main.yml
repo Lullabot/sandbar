@@ -50,11 +50,194 @@
     mode: "0644"
   when: provision_phase | default('full') != 'finalize'
 
-- name: Install base packages
+# --- dpkg/apt tuning, written before anything is installed so the very first
+# install below already benefits. The doc/man exclusions and the language
+# setting are safe and persist past the base phase; force-unsafe-io is
+# removed near the end of this file, before the image becomes a clone source.
+- name: Speed up dpkg for the base build (disposable builder — removed before cloning)
+  ansible.builtin.copy:
+    dest: /etc/dpkg/dpkg.cfg.d/99-sand-base-speed
+    mode: "0644"
+    content: |
+      force-unsafe-io
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Stop unpacking docs and man pages
+  ansible.builtin.copy:
+    dest: /etc/dpkg/dpkg.cfg.d/99-sand-nodoc
+    mode: "0644"
+    content: |
+      path-exclude=/usr/share/doc/*
+      path-include=/usr/share/doc/*/copyright
+      path-exclude=/usr/share/man/*
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Stop fetching translation indexes
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99-sand-no-languages
+    mode: "0644"
+    content: |
+      Acquire::Languages "none";
+  when: provision_phase | default('full') != 'finalize'
+
+# --- Register every third-party apt keyring and source below, before the
+# single update+install pass further down. curl and gnupg are guaranteed
+# present by the Lima dependency script, so all repos can be registered in
+# this one playbook pass. Every keyring file below is mode 0644 so the _apt
+# sandbox user (which apt drops privileges to for fetching) can read it. ---
+- name: Ensure /etc/apt/keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+  when: provision_phase | default('full') != 'finalize'
+
+# Node.js (NodeSource)
+- name: Download NodeSource GPG key
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /tmp/nodesource.gpg.key
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Dearmor NodeSource GPG key
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource.gpg.key
+  args:
+    creates: /etc/apt/keyrings/nodesource.gpg
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Make the NodeSource keyring readable by _apt
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/nodesource.gpg
+    mode: "0644" # MUST be readable by the _apt sandbox user
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Remove temporary NodeSource GPG key file
+  ansible.builtin.file:
+    path: /tmp/nodesource.gpg.key
+    state: absent
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Deploy NodeSource APT repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ base_nodejs_major_version }}.x nodistro main\n"
+    dest: /etc/apt/sources.list.d/nodesource.list
+    owner: root
+    group: root
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+# Docker CE
+- name: Download Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644" # MUST be readable by the _apt sandbox user
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Deploy Docker APT repository
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: https://download.docker.com/linux/debian
+      Suites: trixie
+      Components: stable
+      Signed-By: /etc/apt/keyrings/docker.asc
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+# ddev
+- name: Download ddev GPG key
+  ansible.builtin.get_url:
+    url: https://pkg.ddev.com/apt/gpg.key
+    dest: /tmp/ddev-gpg.key
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Dearmor ddev GPG key
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/ddev.gpg /tmp/ddev-gpg.key
+  args:
+    creates: /etc/apt/keyrings/ddev.gpg
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Make the ddev keyring readable by _apt
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/ddev.gpg
+    mode: "0644" # MUST be readable by the _apt sandbox user
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Remove temporary ddev GPG key file
+  ansible.builtin.file:
+    path: /tmp/ddev-gpg.key
+    state: absent
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Deploy ddev APT repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/etc/apt/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *\n"
+    dest: /etc/apt/sources.list.d/ddev.list
+    owner: root
+    group: root
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+# Cloudflared
+- name: Download Cloudflare GPG key
+  ansible.builtin.get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /etc/apt/keyrings/cloudflare.gpg
+    mode: "0644" # MUST be readable by the _apt sandbox user
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Deploy Cloudflare APT repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/etc/apt/keyrings/cloudflare.gpg] https://pkg.cloudflare.com/cloudflared any main\n"
+    dest: /etc/apt/sources.list.d/cloudflare.list
+    owner: root
+    group: root
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+# GitHub CLI (gh)
+- name: Download GitHub CLI GPG key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    mode: "0644" # MUST be readable by the _apt sandbox user
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Deploy GitHub CLI APT repository
+  ansible.builtin.copy:
+    content: |
+      Types: deb
+      URIs: https://cli.github.com/packages
+      Suites: stable
+      Components: main
+      Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    dest: /etc/apt/sources.list.d/github-cli.sources
+    owner: root
+    group: root
+    mode: "0644"
+  when: provision_phase | default('full') != 'finalize'
+
+# --- One update, one install for the whole base phase. All repos above are
+# registered before this point, so this is the only apt-get update and the
+# only package install transaction the base phase performs. ---
+- name: Refresh apt indexes (the only update in the base phase)
   ansible.builtin.apt:
-    name: "{{ base_packages }}"
-    state: present
     update_cache: true
+  when: provision_phase | default('full') != 'finalize'
+
+- name: Install every base-phase package in a single transaction
+  ansible.builtin.apt:
+    name: "{{ base_packages + base_nodejs_packages + devtools_docker_packages + devtools_packages }}"
+    state: present
+    update_cache: false # already refreshed above; keep false so a future edit can't silently reintroduce a second refresh
   when: provision_phase | default('full') != 'finalize'
 
 # `limactl shell` (and ssh) forward COLORTERM from the host when present, but
@@ -73,46 +256,10 @@
   notify: Reload sshd
   when: provision_phase | default('full') != 'finalize'
 
-# Node.js from NodeSource
-- name: Ensure /etc/apt/keyrings directory exists
+# Removed only once the base build itself is finished (phase == 'base'), so
+# clones get stock dpkg write durability.
+- name: Restore safe dpkg IO before this image is used as a clone source
   ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
-  when: provision_phase | default('full') != 'finalize'
-
-- name: Download NodeSource GPG key
-  ansible.builtin.get_url:
-    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
-    dest: /tmp/nodesource.gpg.key
-    mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
-
-- name: Dearmor NodeSource GPG key
-  ansible.builtin.command:
-    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource.gpg.key
-  args:
-    creates: /etc/apt/keyrings/nodesource.gpg
-  when: provision_phase | default('full') != 'finalize'
-
-- name: Remove temporary NodeSource GPG key file
-  ansible.builtin.file:
-    path: /tmp/nodesource.gpg.key
+    path: /etc/dpkg/dpkg.cfg.d/99-sand-base-speed
     state: absent
-  when: provision_phase | default('full') != 'finalize'
-
-- name: Deploy NodeSource APT repository
-  ansible.builtin.copy:
-    content: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_{{ base_nodejs_major_version }}.x nodistro main\n"
-    dest: /etc/apt/sources.list.d/nodesource.list
-    owner: root
-    group: root
-    mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
-
-- name: Install Node.js
-  ansible.builtin.apt:
-    name: nodejs
-    state: present
-    update_cache: true
-  when: provision_phase | default('full') != 'finalize'
+  when: provision_phase | default('full') == 'base'

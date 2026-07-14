@@ -220,11 +220,41 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	return nil
 }
 
+// CreateOptions carries per-run INTENT — what this create is asking for — as
+// distinct from vm.CreateConfig, which describes the VM being made.
+//
+// The distinction is load-bearing, not stylistic: a successful create records its
+// vm.CreateConfig verbatim in the managed-VM registry (registry.Add), and that
+// recorded config is what a later reset rebuilds the VM from. A Rebuild flag
+// living on it would be persisted with the VM and would silently force a
+// from-scratch base rebuild on every future reset of it.
+type CreateOptions struct {
+	// Rebuild destroys the base image and builds it again from the raw Debian
+	// image, whatever its version stamp says. It is the escape hatch for a base
+	// that the idempotent re-apply cannot fix — a hand-broken guest, or an image
+	// left half-converged by something that died mid-run.
+	//
+	// It is an INTENT, passed down, and the destroy it asks for happens inside
+	// ensureBaseStopped: under the base lock, with no clone in flight. A caller
+	// that deletes the base itself before calling the provisioner deletes it
+	// outside that lock — where another create may be mid-clone from the very disk
+	// being removed. That is the race baselock.go exists to close, and `sand
+	// create --rebuild` used to be the hole in it.
+	Rebuild bool
+}
+
 // CreateVM ensures a stopped base image exists, clones it into the target VM,
 // starts it, runs the light finalize pass (hostname, git identity, optional repo
 // clone), then bounces the VM so the first shell starts cleanly. Mirrors the
 // original bash provisioner's launch sequence.
 func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	return p.CreateVMWithOptions(ctx, cfg, CreateOptions{}, out)
+}
+
+// CreateVMWithOptions is CreateVM with the per-run intent the TUI has no way to
+// express (CreateVM's signature is the TUI's provisionFunc — see
+// internal/ui/progress.go — and every job it starts is a plain create).
+func (p *Provisioner) CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer) error {
 	// Refuse an existing target rather than colliding on clone — the original
 	// bash provisioner has the same guard. A definite status (no error,
 	// non-empty) means the instance is already there. Recreate calls createVM
@@ -233,16 +263,16 @@ func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
 		return fmt.Errorf("instance %q already exists — delete it first, or choose a different name", cfg.Name)
 	}
-	return p.createVM(ctx, cfg, out)
+	return p.createVM(ctx, cfg, opts, out)
 }
 
 // createVM clones and finalizes the target, building the base image first if
 // absent. It does NOT check whether the target already exists; callers that need
 // that guard use CreateVM. Recreate uses createVM directly because it has just
 // force-deleted the target.
-func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer) error {
 	timer := newPhaseTimer(out)
-	if err := p.prepareBaseAndClone(ctx, cfg, out, timer); err != nil {
+	if err := p.prepareBaseAndClone(ctx, cfg, opts, out, timer); err != nil {
 		return err
 	}
 	step(out, "Starting %q…", cfg.Name)
@@ -299,6 +329,12 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // lock, decides the base is stale, and force-deletes the instance the first create
 // is reading its disk from.
 //
+// Everything that can destroy or mutate the base image is therefore reached through
+// HERE and nowhere else — the from-scratch build, the in-place re-apply, and
+// --rebuild's destroy (CreateOptions.Rebuild). A caller that "helpfully" deletes the
+// base before calling the provisioner puts that destroy back outside the lock, which
+// is precisely the bug this closed.
+//
 // The cost is that two concurrent creates serialize their clones. That is the right
 // trade: a clone is seconds to a minute, while the Ansible run that follows it —
 // which is the expensive part, and the part concurrency was for — still overlaps
@@ -306,14 +342,17 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // a writer rebuilds) buys back that minute at the price of lock-upgrade semantics
 // nobody should have to reason about while a VM's disk is being deleted underneath
 // them.
-func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
+func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
 	release, err := lockBase(ctx, cfg.BaseName, out)
 	if err != nil {
 		return err // only a cancelled context gets here
 	}
+	// Released on EVERY exit, including a cancelled build's. A build that dies
+	// holding this lock wedges every other create on the machine behind a job that
+	// is already over.
 	defer release()
 
-	if err := p.ensureBaseStopped(ctx, cfg, out, timer); err != nil {
+	if err := p.ensureBaseStopped(ctx, cfg, opts, out, timer); err != nil {
 		return err
 	}
 
@@ -326,25 +365,62 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 	return nil
 }
 
-// ensureBaseStopped makes sure the base image exists and is stopped — a clone
-// needs an idle source disk. An empty/error status means the instance is
-// absent, so the heavy base build runs; an existing but running base is stopped.
-func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
-	// The caller holds the base lock (prepareBaseAndClone). Everything here is one
-	// atomic decision — read the base's status, then act on that reading — and it must
-	// stay inside that lock. See baselock.go.
+// ensureBaseStopped makes sure the base image exists, is current, and is stopped —
+// a clone needs an idle source disk carrying the playbook this create was asked
+// for. It has three outcomes: build the base from scratch (it is absent, or
+// --rebuild asked for a fresh one), converge it in place (it exists but is stale),
+// or leave it alone (it is current), stopping it if something left it running.
+//
+// EVERY READ HERE HAPPENS AFTER THE LOCK. The caller (prepareBaseAndClone) holds
+// the exclusive base lock around this whole function and the clone that follows
+// it, and the status and the version stamp are read INSIDE it, never cached
+// outside and carried in. That is not a formality: a create that blocked for
+// minutes behind someone else's rebuild must see what that rebuild left behind. A
+// staleness verdict formed before the wait is a verdict about a base that no
+// longer exists — act on it and this create redoes, from scratch, work that
+// finished while it queued.
+func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
 	status, err := p.Lima.Status(cfg.BaseName)
 	exists := err == nil && status != ""
 
-	// A base built from an older playbook would clone stale content into every new
-	// VM, so rebuild it when the current playbook differs from what it was stamped
-	// with. The check is host-side (git + a stamp file), adding no limactl calls to
-	// the common up-to-date path.
-	if exists && p.baseStale(cfg.BaseName, out) {
+	// --rebuild: destroy the base and build it again from the raw Debian image.
+	// THIS is where that destroy belongs — under the lock, with no clone in flight
+	// (see CreateOptions.Rebuild).
+	if exists && opts.Rebuild {
+		step(out, "Rebuilding base image %q from scratch…", cfg.BaseName)
 		if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
-			return fmt.Errorf("delete stale base image %q: %w", cfg.BaseName, err)
+			return fmt.Errorf("delete base image %q for rebuild: %w", cfg.BaseName, err)
 		}
 		exists = false
+	}
+
+	// A base built from an older playbook would clone stale content into every new
+	// VM, so bring it up to date when the current playbook differs from what it was
+	// stamped with. The check is host-side (a content hash and a stamp file), adding
+	// no limactl calls to the common up-to-date path.
+	if exists {
+		if want, stale := p.baseStale(cfg.BaseName, out); stale {
+			// Ansible is idempotent, so a playbook edit only needs its DELTA applied:
+			// converge the existing base in place instead of paying for a Debian
+			// re-download and a from-scratch run of every task in the play.
+			//
+			// But ONLY a base that was created from the same overlay this create would
+			// use — same playbook mount, same bootstrap script. A base created from a
+			// different one either runs a playbook that is not ours (and gets stamped
+			// as if it were) or runs ours without the prerequisites it is allowed to
+			// assume. baseoverlay.go is entirely about why. When it cannot be
+			// converged, rebuild it: that re-creates it under the current overlay,
+			// which is the behaviour that existed before the re-apply did.
+			convergeable, why := p.baseConvergeable(cfg)
+			if convergeable {
+				return p.reapplyBase(ctx, cfg, want, status, out, timer)
+			}
+			step(out, "Base image %q cannot be updated in place (%s); rebuilding it from scratch…", cfg.BaseName, why)
+			if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
+				return fmt.Errorf("delete stale base image %q: %w", cfg.BaseName, err)
+			}
+			exists = false
+		}
 	}
 
 	switch {
@@ -361,35 +437,103 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 	return nil
 }
 
+// reapplyBase converges a stale base image IN PLACE: start it, re-run the
+// base-phase playbook against it, re-stamp it, and stop it again, ready to be
+// cloned. It is the whole point of the playbook-development inner loop — an edit
+// to one role costs the delta Ansible actually has to apply, not a Debian download
+// and a from-scratch run of every task in the play.
+//
+// It runs under the base lock, held by prepareBaseAndClone across this AND the
+// clone that follows: the base is RUNNING for the duration of the playbook, and a
+// clone taken from a running base copies a disk that is being written to.
+//
+// version is the stamp to record on success — read (under the lock) BEFORE the
+// run, not recomputed after it. The playbook directory is a live working tree; if
+// it is edited while the run is in flight, a recomputed stamp would swear the base
+// carries content it never saw. A stamp that is older than the base is harmless
+// (the next create converges the difference); a stamp that is NEWER than the base
+// is a lie that no later create can detect.
+//
+// THE STAMP IS WRITTEN ONLY ON A FULL, SUCCESSFUL RUN. On any failure — a broken
+// task, a cancelled context, a killed limactl — the old stamp stays exactly where
+// it is, so the base remains unambiguously stale and the next create retries it. A
+// fresh stamp on a half-converged base is the worst outcome available here: it is
+// undetectable, and every clone taken from that base afterwards inherits it.
+func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, version, status string, out io.Writer, timer *phaseTimer) error {
+	step(out, "Re-applying the playbook to base image %q (Ansible is idempotent: only the changes are applied)…", cfg.BaseName)
+
+	// The base is normally Stopped (that is how it is kept, for cloning). Anything
+	// else means a previous run left it up — including a re-apply that was
+	// interrupted between its playbook and its stop — and starting a running
+	// instance is a no-op worth skipping rather than relying on.
+	if status != "Running" {
+		if err := timer.time("base start", func() error {
+			return p.Lima.StartStreaming(ctx, cfg.BaseName, out)
+		}); err != nil {
+			return fmt.Errorf("start base image %q for re-apply: %w", cfg.BaseName, err)
+		}
+	}
+
+	// The same in-guest script as the build: the phase vars over stdin (never
+	// argv), the same rsync of the playbook fileset out of /mnt/playbook, and its
+	// own SAND_ANSIBLE_TASK_TOTAL marker — this is a THIRD Ansible run down the
+	// same pipe, and without its own denominator the TUI's progress bar would keep
+	// counting its task banners against the previous run's total
+	// (internal/ui/ansible.go).
+	if err := timer.time("base playbook", func() error {
+		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out)
+	}); err != nil {
+		return err // NO STAMP: leave the base unambiguously stale (see above).
+	}
+
+	// Converged. Stamp it before the stop: the stamp describes the base's CONTENT,
+	// which is now correct whatever the stop does next. A write failure is not fatal
+	// to the create — an unstamped base simply reads as stale and is converged again
+	// next time, the same posture buildBase takes.
+	if err := writeBaseVersionFn(cfg.BaseName, version); err != nil {
+		step(out, "Note: could not record the base image's playbook version (%v); it will be re-applied again on the next create.", err)
+	}
+
+	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
+	if err := timer.time("base stop", func() error {
+		return p.Lima.StopStreaming(ctx, cfg.BaseName, out)
+	}); err != nil {
+		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
+	}
+	return nil
+}
+
 // baseStale reports whether an existing base image was built from a different
-// playbook version than the one that would be mounted now, and streams the
-// reason when it returns true. A missing/unreadable stamp counts as stale, so
-// a base built before version stamping is rebuilt once. So does a stamp
-// written by the old git-HEAD scheme (no "v2:" prefix): an upgrading user
-// converges onto the content-hash scheme once rather than trusting a stamp a
-// different versioning scheme vouched for. A version-lookup error (a genuine
-// filesystem problem — the content-hash scheme cannot fail merely for "not a
-// git checkout" the way the old scheme did) is treated as NOT stale — better
-// to reuse the base than to rebuild it on every create.
-func (p *Provisioner) baseStale(baseName string, out io.Writer) bool {
+// playbook version than the one that would be mounted now — and, when it was, the
+// version the base has to be brought up to (which its caller records only once the
+// base actually carries it). It streams the reason whenever it says yes.
+//
+// A missing/unreadable stamp counts as stale, so a base built before version
+// stamping is converged once. So does a stamp written by the old git-HEAD scheme
+// (no "v2:" prefix): an upgrading user converges onto the content-hash scheme once
+// rather than trusting a stamp a different versioning scheme vouched for. A
+// version-lookup error (a genuine filesystem problem — the content-hash scheme
+// cannot fail merely for "not a git checkout" the way the old scheme did) is
+// treated as NOT stale: better to reuse the base than to churn it on every create.
+func (p *Provisioner) baseStale(baseName string, out io.Writer) (version string, stale bool) {
 	want, err := playbookVersionFn(p.PlaybookDir)
 	if err != nil {
 		step(out, "Note: could not determine the current playbook version (%v); reusing the existing base image %q.", err, baseName)
-		return false
+		return "", false
 	}
 	have := readBaseVersionFn(baseName)
 	if have == want {
-		return false
+		return want, false
 	}
 	switch {
 	case have == "":
-		step(out, "Base image %q has no recorded playbook version; rebuilding it from the current playbook (%s)…", baseName, shortVersion(want))
+		step(out, "Base image %q has no recorded playbook version; bringing it up to date with the current playbook (%s)…", baseName, shortVersion(want))
 	case !strings.HasPrefix(have, playbookVersionPrefix):
-		step(out, "Base image %q was built by an older version scheme; converging it to the current playbook (%s)…", baseName, shortVersion(want))
+		step(out, "Base image %q was built by an older version scheme; bringing it up to date with the current playbook (%s)…", baseName, shortVersion(want))
 	default:
-		step(out, "Base image %q was built from playbook %s but the current playbook is %s; rebuilding it…", baseName, shortVersion(have), shortVersion(want))
+		step(out, "Base image %q was built from playbook %s but the current playbook is %s; bringing it up to date…", baseName, shortVersion(have), shortVersion(want))
 	}
-	return true
+	return want, true
 }
 
 // ResetOptions selects which of a VM's local state survives a reset. When both
@@ -469,11 +613,13 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
 	}
 
-	// 3. Recreate sized from the base image. Reset does not surface a per-phase
-	// timing summary (only "sand create" does; see phaseTimer's doc comment) —
-	// prepareBaseAndClone still needs a timer to share its signature with
-	// createVM, so give it one whose readings are simply discarded here.
-	if err := p.prepareBaseAndClone(ctx, cfg, out, newPhaseTimer(out)); err != nil {
+	// 3. Recreate sized from the base image. A reset re-clones ONE VM; it never
+	// asks for a base rebuild (CreateOptions zero value), it just takes the base as
+	// the base lock finds it. Reset does not surface a per-phase timing summary
+	// (only "sand create" does; see phaseTimer's doc comment) — prepareBaseAndClone
+	// still needs a timer to share its signature with createVM, so give it one whose
+	// readings are simply discarded here.
+	if err := p.prepareBaseAndClone(ctx, cfg, CreateOptions{}, out, newPhaseTimer(out)); err != nil {
 		return wrap(err)
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
@@ -532,10 +678,21 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 // image — a fast way to reset one VM. Mirrors the original bash provisioner's
 // --recreate path.
 func (p *Provisioner) Recreate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	return p.RecreateWithOptions(ctx, cfg, CreateOptions{}, out)
+}
+
+// RecreateWithOptions is Recreate with the per-run intent (CreateOptions). The
+// two flags are independent — --recreate targets the CLONE, --rebuild the BASE —
+// and `sand create --recreate --rebuild` asks for both, so the recreate path has
+// to carry the base intent down as well.
+//
+// The delete here is of the TARGET VM, not the base image, so it needs no base
+// lock: nothing clones from a target.
+func (p *Provisioner) RecreateWithOptions(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer) error {
 	if err := p.Lima.Delete(cfg.Name, true); err != nil {
 		return fmt.Errorf("delete %q: %w", cfg.Name, err)
 	}
 	// Skip CreateVM's exists-guard: we just deleted the target, and re-querying it
 	// could spuriously refuse the recreate if the delete hasn't fully settled.
-	return p.createVM(ctx, cfg, out)
+	return p.createVM(ctx, cfg, opts, out)
 }

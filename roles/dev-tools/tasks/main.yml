@@ -8,37 +8,12 @@
   ansible.builtin.set_fact:
     devtools_user_home: "{{ ansible_facts.getent_passwd[devtools_user_name][4] }}"
 
-# Docker CE
-- name: Ensure /etc/apt/keyrings directory exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    mode: "0755"
-
-- name: Download Docker GPG key
-  ansible.builtin.get_url:
-    url: https://download.docker.com/linux/debian/gpg
-    dest: /etc/apt/keyrings/docker.asc
-    mode: "0644"
-
-- name: Deploy Docker APT repository
-  ansible.builtin.copy:
-    content: |
-      Types: deb
-      URIs: https://download.docker.com/linux/debian
-      Suites: trixie
-      Components: stable
-      Signed-By: /etc/apt/keyrings/docker.asc
-    dest: /etc/apt/sources.list.d/docker.sources
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Install Docker packages
-  ansible.builtin.apt:
-    name: "{{ devtools_docker_packages }}"
-    state: present
-    update_cache: true
+# Docker CE, ddev, cloudflared, and gh are all registered (keyrings + apt
+# sources) and installed in roles/base/tasks/main.yml as part of the single
+# consolidated apt transaction for the base phase — see the "Register every
+# third-party apt keyring and source" block there. This role only owns the
+# non-apt setup for those tools below (service enablement, group membership,
+# non-apt installs, proxy config).
 
 - name: Enable and start Docker service
   ansible.builtin.systemd_service:
@@ -51,80 +26,6 @@
     name: "{{ devtools_user_name }}"
     groups: docker
     append: true
-
-# ddev
-- name: Download ddev GPG key
-  ansible.builtin.get_url:
-    url: https://pkg.ddev.com/apt/gpg.key
-    dest: /tmp/ddev-gpg.key
-    mode: "0644"
-
-- name: Dearmor ddev GPG key
-  ansible.builtin.command:
-    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/ddev.gpg /tmp/ddev-gpg.key
-  args:
-    creates: /etc/apt/keyrings/ddev.gpg
-
-- name: Deploy ddev APT repository
-  ansible.builtin.copy:
-    content: "deb [signed-by=/etc/apt/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *\n"
-    dest: /etc/apt/sources.list.d/ddev.list
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Install ddev
-  ansible.builtin.apt:
-    name: ddev
-    state: present
-    update_cache: true
-
-# Cloudflared
-- name: Download Cloudflare GPG key
-  ansible.builtin.get_url:
-    url: https://pkg.cloudflare.com/cloudflare-main.gpg
-    dest: /etc/apt/keyrings/cloudflare.gpg
-    mode: "0644"
-
-- name: Deploy Cloudflare APT repository
-  ansible.builtin.copy:
-    content: "deb [signed-by=/etc/apt/keyrings/cloudflare.gpg] https://pkg.cloudflare.com/cloudflared any main\n"
-    dest: /etc/apt/sources.list.d/cloudflare.list
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Install cloudflared
-  ansible.builtin.apt:
-    name: cloudflared
-    state: present
-    update_cache: true
-
-# GitHub CLI (gh)
-- name: Download GitHub CLI GPG key
-  ansible.builtin.get_url:
-    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
-    dest: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-    mode: "0644"
-
-- name: Deploy GitHub CLI APT repository
-  ansible.builtin.copy:
-    content: |
-      Types: deb
-      URIs: https://cli.github.com/packages
-      Suites: stable
-      Components: main
-      Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-    dest: /etc/apt/sources.list.d/github-cli.sources
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Install GitHub CLI
-  ansible.builtin.apt:
-    name: gh
-    state: present
-    update_cache: true
 
 # uv
 - name: Install uv

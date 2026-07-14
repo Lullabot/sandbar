@@ -461,10 +461,10 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 - ✔️ Task 02: `ansible-core` bootstrap, drop both collection uses (depends on: 01) — `completed`
 - ✔️ Task 04: Content-hash version stamp (depends on: 01) — `completed`
 
-### Phase 3: Build on the foundations
+### ✅ Phase 3: Build on the foundations
 **Parallel Tasks:**
-- Task 03: Collapse six apt passes into one; dpkg tuning (depends on: 02)
-- Task 07: In-place base re-apply + move `--rebuild`'s destroy under the lock (depends on: 04)
+- ✔️ Task 03: Collapse six apt passes into one; dpkg tuning (depends on: 02) — `completed`
+- ✔️ Task 07: In-place base re-apply + move `--rebuild`'s destroy under the lock (depends on: 04) — `completed`
 
 ### Phase 4: Tool-set, freshness, cache
 **Parallel Tasks:**

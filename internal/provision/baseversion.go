@@ -133,18 +133,27 @@ func contentPlaybookVersion(dir string) (string, error) {
 	return PlaybookVersion(os.DirFS(dir), toolsetPlaceholder)
 }
 
+// limaHome is the directory Lima keeps its instances in (LIMA_HOME, or ~/.lima).
+// Both Lima's own per-instance state and sand's state ABOUT an instance live
+// under it: the base's version stamp (baseVersionPath), its lock
+// (baseLockPath), and the instance file the base's playbook mount is read from
+// (basePlaybookMount).
+func limaHome() string {
+	if home := os.Getenv("LIMA_HOME"); home != "" {
+		return home
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, ".lima")
+	}
+	return ""
+}
+
 // baseVersionPath is the host file recording which playbook version a base
 // image was built from. It sits under the Lima home so it lives beside the
 // base it describes, namespaced in a subdir to avoid colliding with Lima's own
 // state.
 func baseVersionPath(baseName string) string {
-	home := os.Getenv("LIMA_HOME")
-	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			home = filepath.Join(h, ".lima")
-		}
-	}
-	return filepath.Join(home, "_sand", baseName+".playbook-version")
+	return filepath.Join(limaHome(), "_sand", baseName+".playbook-version")
 }
 
 // readBaseVersion returns the stamped playbook version for a base image, or ""
