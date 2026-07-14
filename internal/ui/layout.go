@@ -83,7 +83,14 @@ const (
 const (
 	headerHeightFull    = 2
 	headerHeightCompact = 1
-	messagesStripHeight = 3
+	// messagesStripHeight is the strip's TOTAL rows: messagesStripChrome for the
+	// titled frame plus the message lines inside it. The frame's two rows are
+	// BUDGETED here rather than taken out of the message lines — a box that fits
+	// itself by showing less than it used to is a worse pane than the unframed one
+	// it replaced.
+	messagesStripChrome = 2 // the frame's top (with the "Messages" title) and bottom
+	messagesStripLines  = 3 // messages shown inside it
+	messagesStripHeight = messagesStripChrome + messagesStripLines
 
 	// footerBandHeight is the closing band: the activity line (which carries a
 	// pending confirmation, so it may never be shed), the name-filter
@@ -109,14 +116,22 @@ const (
 	// hides, respectively. They encode the shedding order: messages strip
 	// first, then a compact header; the grid and footer never go.
 	//
-	// messagesMinHeight is 27 because THE STRIP MAY NOT COST A TILE ROW. At 26
-	// rows and below, its three lines are exactly what would drop the 80x24
-	// board from two tiles to one — and the tiles are the board's reason to
-	// exist, while the strip's newest line is already on the activity line
-	// below the grid. 27 is the shortest terminal that affords both (2 header +
-	// 3 strip + 16 tiles + 3 footer band + 2 padding = 26 <= 27).
+	// messagesMinHeight exists because THE STRIP MAY NOT COST A TILE ROW: the
+	// tiles are the board's reason to exist, and the strip's newest line is the
+	// least of what a short terminal can lose. So the threshold is the shortest
+	// terminal that affords the strip AND two rows of tiles:
+	//
+	//	2 padding + 2 header + 5 strip + 16 tiles (2 rows of tileHeight 8) + 3 footer = 28
+	//
+	// It is 29, not 28, to keep the one spare row the unframed strip had — the
+	// grid budget at the threshold is 17 either way, exactly as before.
+	//
+	// It moved 27 -> 29 when the strip gained its frame: the frame costs two rows,
+	// and this is where that cost is PAID. Leaving the threshold at 27 would have
+	// let the framed strip take the second tile row on a 27-row terminal — the very
+	// thing this constant exists to prevent.
 	fullHeaderMinHeight = 20
-	messagesMinHeight   = 27
+	messagesMinHeight   = 29
 )
 
 // classify maps a terminal size to the budgets every screen sizes itself
