@@ -1168,3 +1168,63 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 		t.Fatalf("deleting the VM must take its secrets with it, got %q", got)
 	}
 }
+
+// ^C on a building VM now DELETES the half-built instance (the create cleans up
+// after itself — internal/provision/cleanup.go), so the VM is gone from `limactl
+// list`. The board must not keep a tile for it: it rendered from a synthetic
+// record whose status is "", which the tile paints as "○ Stopped" — a VM that does
+// not exist, reported as merely stopped, with every verb on it doomed to fail and
+// `d` with nothing to delete.
+func TestCanceledBuildWhoseVMIsGoneLeavesNoTile(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+	if !l.m.jobs.isRunning("web") {
+		t.Fatal("precondition: web must be mid-build")
+	}
+
+	// ^C, and the run reports back cancelled.
+	l.m.jobs.cancelJob(provisionKey("web"))
+	l.send(provisionDoneMsg{job: provisionKey("web"), err: context.Canceled})
+
+	// The refresh that follows: the VM is gone — the create cleaned it up.
+	l.send(vmsLoadedMsg{vms: nil})
+
+	for _, v := range l.m.boardVMs() {
+		if v.Name == "web" {
+			t.Fatalf("a cancelled build whose VM was cleaned up still has a tile (status %q) — limactl has never heard of it", v.Status)
+		}
+	}
+}
+
+// …but a ^C during the PLAYBOOK leaves a booted, half-provisioned VM behind (the
+// cleanup deliberately keeps it: it exists, and its lima.yaml is valid). That one
+// must keep its tile — it is real, it is not managed, and the tile is how `d`
+// clears it.
+func TestCanceledBuildWhoseVMSurvivesKeepsItsTile(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+
+	l.m.jobs.cancelJob(provisionKey("web"))
+	l.send(provisionDoneMsg{job: provisionKey("web"), err: context.Canceled})
+
+	// The VM booted before the ^C, so it is still there.
+	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
+
+	found := false
+	for _, v := range l.m.boardVMs() {
+		if v.Name == "web" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a cancelled build whose VM survived lost its tile — it exists, it is unmanaged, and the tile is the only way to delete it")
+	}
+}
