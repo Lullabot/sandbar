@@ -14,9 +14,18 @@ var (
 			Padding(0, 1)
 
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
-	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+
+	// The messages strip's frame (messages.go). Deliberately DIMMER (238) than the
+	// message text it holds (241): the box is furniture, and it must not out-shout
+	// the log inside it or compete with the tile borders below, which are what the
+	// eye should land on. The title is a shade brighter than the frame so it reads
+	// as a label rather than as part of the line.
+	frameStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	frameTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	warnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	okStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 
 	labelStyle        = lipgloss.NewStyle().Width(18).Foreground(lipgloss.Color("245"))
 	focusedLabelStyle = lipgloss.NewStyle().Width(18).Bold(true).Foreground(lipgloss.Color("63"))

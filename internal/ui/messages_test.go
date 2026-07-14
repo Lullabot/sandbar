@@ -80,7 +80,7 @@ func TestRecentMessagesOrderAndCap(t *testing.T) {
 // what must interrupt (a confirm, the spinner).
 func TestALoggedMessageIsNotPrintedTwice(t *testing.T) {
 	m := newTestModel(t)
-	m = resized(m, 120, 40) // tall enough for the strip (messagesMinHeight = 27)
+	m = resized(m, 120, 40) // tall enough for the strip (see messagesMinHeight)
 	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
 	if m.layout.MessagesHeight < 1 {
 		t.Fatal("precondition: this terminal must be tall enough to show the messages strip")
@@ -110,5 +110,49 @@ func TestAMessageStillShowsWhenTheStripIsShed(t *testing.T) {
 	view := ansi.Strip(m.boardView())
 	if got := strings.Count(view, "stopping db…"); got != 1 {
 		t.Errorf("the message rendered %d times, want exactly 1 (with no strip, the activity line must carry it):\n%s", got, view)
+	}
+}
+
+// The strip is a titled box, and the title sits IN its top edge.
+func TestMessagesStripIsFramedAndTitled(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight < 1 {
+		t.Fatal("precondition: the terminal must be tall enough to show the strip")
+	}
+
+	m.logMsg("stopping db…")
+	strip := ansi.Strip(m.messagesStripView())
+
+	if !strings.Contains(strip, "╭─ Messages ") {
+		t.Errorf("the strip must be a frame titled Messages, got:\n%s", strip)
+	}
+	if !strings.Contains(strip, "stopping db…") {
+		t.Errorf("the frame must hold the messages, got:\n%s", strip)
+	}
+	// Exactly MessagesHeight rows, frame included — the grid below must not shift
+	// as the log fills in.
+	if got := len(strings.Split(strip, "\n")); got != m.layout.MessagesHeight {
+		t.Errorf("the strip rendered %d rows, want exactly MessagesHeight=%d", got, m.layout.MessagesHeight)
+	}
+}
+
+// THE STRIP MAY NOT COST A TILE ROW — the invariant messagesMinHeight exists for,
+// and the one the frame could quietly have broken by costing two rows more than
+// the strip it replaced. At the shortest terminal that shows the strip, the grid
+// must still afford TWO rows of tiles.
+func TestTheFramedStripStillNeverCostsATileRow(t *testing.T) {
+	lm := classify(120, messagesMinHeight)
+	if lm.MessagesHeight < 1 {
+		t.Fatalf("precondition: the strip must be shown at messagesMinHeight=%d", messagesMinHeight)
+	}
+	if lm.GridHeight < 2*tileHeight {
+		t.Errorf("at %d rows the strip leaves GridHeight=%d, which is less than the %d two tile rows need — the strip has taken a tile row",
+			messagesMinHeight, lm.GridHeight, 2*tileHeight)
+	}
+	// And one row shorter, the strip is shed rather than the tile row.
+	if short := classify(120, messagesMinHeight-1); short.MessagesHeight != 0 {
+		t.Errorf("at %d rows the strip must be shed, got MessagesHeight=%d", messagesMinHeight-1, short.MessagesHeight)
 	}
 }

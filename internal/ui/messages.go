@@ -111,32 +111,78 @@ func (m model) activityLineView() string {
 	}
 }
 
-// messagesStripView renders the DOCKED activity log: up to MessagesHeight of
-// the session's most recently logged lines, newest at the bottom. It is
-// padded to EXACTLY MessagesHeight lines (blank where there is no message
-// yet) so the grid below it never shifts as the log fills in — the same
-// reasoning tile.go's fixed tileHeight uses.
+// messagesStripView renders the DOCKED activity log: a titled "Messages" frame
+// holding the session's most recently logged lines, newest at the bottom. It
+// renders EXACTLY MessagesHeight rows — frame included — padded with blank lines
+// where nothing has been logged yet, so the grid below it never shifts as the log
+// fills in (the same reasoning tile.go's fixed tileHeight uses).
 //
-// This is the FIRST pane the layout classifier sheds as the terminal
-// contracts (see layout.go): MessagesHeight is 0 below messagesMinHeight, and
-// this renders "" in that case — the board must, and does, render correctly
-// without it. The pending confirm / acting spinner are NOT duplicated here:
-// activityLineView (above) already renders them, unconditionally, below the
-// grid — so a confirmation the user must answer is never lost just because
-// the terminal is too short to show the strip.
+// The frame is drawn here rather than by a lipgloss border style because the
+// title has to sit IN the top edge ("╭─ Messages ───╮") and lipgloss v2.0.5 has
+// no titled border. Its two rows are budgeted in layout.go (messagesStripChrome),
+// not taken from the message lines.
+//
+// This is the FIRST pane the layout classifier sheds as the terminal contracts
+// (see layout.go): MessagesHeight is 0 below messagesMinHeight, and this renders
+// "" in that case — the board must, and does, render correctly without it. The
+// pending confirm / acting spinner are NOT duplicated here: activityLineView
+// (above) already renders them, unconditionally, below the grid — so a
+// confirmation the user must answer is never lost just because the terminal is
+// too short to show the strip.
 func (m model) messagesStripView() string {
 	height := m.layout.MessagesHeight
 	if height < 1 {
 		return ""
 	}
-	recent := m.recentMessages(height)
-	lines := make([]string, height)
-	for i := 0; i < height; i++ {
-		idx := len(recent) - height + i
-		if idx < 0 {
-			continue // pad with a blank line; nothing logged for this slot yet
-		}
-		lines[i] = statusStyle.Render(ansi.Truncate(recent[idx].text, m.layout.ContentWidth, "…"))
+	width := m.layout.ContentWidth
+	rows := height - messagesStripChrome // the message lines inside the frame
+
+	// A frame needs room for its two vertical edges and a space either side of the
+	// text. On a terminal too narrow to afford that (or too short to afford the
+	// chrome), fall back to the bare lines: the messages matter, the box does not.
+	inner := width - 4
+	if rows < 1 || inner < 1 {
+		return strings.Join(m.messageLines(height, width), "\n")
 	}
-	return strings.Join(lines, "\n")
+
+	out := make([]string, 0, height)
+	out = append(out, messagesFrameTop(width))
+	for _, text := range m.messageLines(rows, inner) {
+		pad := inner - ansi.StringWidth(ansi.Strip(text))
+		if pad < 0 {
+			pad = 0
+		}
+		out = append(out, frameStyle.Render("│")+" "+text+strings.Repeat(" ", pad)+" "+frameStyle.Render("│"))
+	}
+	out = append(out, frameStyle.Render("╰"+strings.Repeat("─", width-2)+"╯"))
+	return strings.Join(out, "\n")
+}
+
+// messagesFrameTop is the frame's top edge with the title spliced into it —
+// "╭─ Messages ─────╮" — falling back to a plain edge when the terminal is too
+// narrow to carry the label.
+func messagesFrameTop(width int) string {
+	const label = " Messages "
+	fill := width - 2 - 1 - len(label) // corners, the leading ─, the label
+	if fill < 0 {
+		return frameStyle.Render("╭" + strings.Repeat("─", width-2) + "╮")
+	}
+	return frameStyle.Render("╭─") + frameTitleStyle.Render(label) +
+		frameStyle.Render(strings.Repeat("─", fill)+"╮")
+}
+
+// messageLines is the last n logged messages, oldest first, each clipped to
+// width — padded at the FRONT with blanks when fewer than n have been logged, so
+// the newest always sits on the bottom row and the pane never changes height.
+func (m model) messageLines(n, width int) []string {
+	recent := m.recentMessages(n)
+	lines := make([]string, n)
+	for i := 0; i < n; i++ {
+		idx := len(recent) - n + i
+		if idx < 0 {
+			continue // blank: nothing logged for this slot yet
+		}
+		lines[i] = statusStyle.Render(ansi.Truncate(recent[idx].text, width, "…"))
+	}
+	return lines
 }
