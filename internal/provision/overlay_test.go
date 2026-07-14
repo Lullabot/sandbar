@@ -36,6 +36,11 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"python3 -c 'import passlib' >/dev/null 2>&1",
 		"apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib",
 	}
+	// Lima's own container stack is redundant (the playbook installs Docker) and
+	// expensive: its setup runs in cloud-final on EVERY boot, costing ~19s of a
+	// clone's ~58s start, and it plants ~575MB of nerdctl-full in the base that
+	// every clone copies. Dropping either line silently hands both back.
+	wantSubstrings = append(wantSubstrings, "containerd:", "system: false", "user: false")
 	for _, s := range wantSubstrings {
 		if !strings.Contains(got, s) {
 			t.Errorf("overlay missing %q\n--- overlay ---\n%s", s, got)

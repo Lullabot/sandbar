@@ -93,6 +93,18 @@ finalize does not touch packages or groups.
   automatically, the next time it's used. Either of these can make an
   occasional `sand create` noticeably slower than the rest — that's the base
   catching up, not something gone wrong.
+- **Lima's own container stack is switched off** in the base overlay
+  (`containerd: {system: false, user: false}`). Lima otherwise installs the
+  nerdctl-full bundle and runs rootless containerd on every boot, which is
+  redundant here — the playbook installs Docker, and that's the runtime these
+  VMs use. Measured on a clone: it costs ~19s of a ~58s boot (all of it in
+  `cloud-final`) and plants ~575MB in the base image that every clone then
+  copies. Docker is unaffected.
+
+  A base's `lima.yaml` is fixed when the base is created, so an **existing**
+  base keeps containerd — converging it in place cannot remove it. Run `sand
+  create --rebuild` once to rebuild from scratch and pick up the faster, smaller
+  base; new bases get it automatically.
 - **The base-image tool-set.** `--with-claude` / `--with-ddev` / `--with-go` /
   `--with-java` choose which optional tools are installed into the shared base
   image every VM is cloned from. In the TUI, the same four choices are toggles
