@@ -93,10 +93,12 @@ finalize does not touch packages or groups.
   automatically, the next time it's used. Either of these can make an
   occasional `sand create` noticeably slower than the rest — that's the base
   catching up, not something gone wrong.
-- **The base-image tool-set.** `--with-ddev` / `--with-go` / `--with-java`
-  (all default **on**) choose which optional tools are installed into the
-  shared base image every VM is cloned from. In the TUI, the same three
-  choices are toggles on the create form.
+- **The base-image tool-set.** `--with-claude` / `--with-ddev` / `--with-go` /
+  `--with-java` (all default **on**) choose which optional tools are installed
+  into the shared base image every VM is cloned from. In the TUI, the same four
+  choices are toggles on the create form. Claude Code is one of them rather than
+  a fixture of the image: pass `--with-claude=false` to build a base without it
+  and install your own agent instead.
 - **`--rebuild`** (headless flag) and the form's **"Rebuild base image"**
   toggle destroy the base and build it again from scratch, instead of
   converging it in place. You need this after **de-selecting** a tool
@@ -485,7 +487,7 @@ finishes — no webhook configuration required.
 - **user** — User creation, sudo, SSH, tmux, git, bashrc
 - **samba** — Samba file sharing for the user's home directory (skipped by the Lima flow; `samba_enabled: false`)
 - **dev-tools** — Docker, ddev, cloudflared, uv, mkcert, Docker registry proxy
-- **claude-code** — Claude Code CLI installation and configuration
+- **claude-code** — Claude Code CLI installation and configuration (only runs when `toolset_claude` is true, i.e. not `--with-claude=false`)
 - **project** — Optional initial repo clone + per-org `.env`/direnv setup (only runs when `project_clone_url` is set)
 
 ## Releases and the Homebrew tap

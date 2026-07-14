@@ -1,6 +1,10 @@
 package vm
 
-import "testing"
+import (
+	"sort"
+	"strings"
+	"testing"
+)
 
 // validConfig returns a CreateConfig that passes Validate, so each test can
 // mutate exactly the one field under test.
@@ -94,18 +98,32 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.CPUs != 2 {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
-	if !c.WithDDEV || !c.WithGo || !c.WithJava {
-		t.Errorf("WithDDEV/WithGo/WithJava = %v/%v/%v, want all true (backwards compatibility: an unconfigured `sand create` must install everything today's base does)", c.WithDDEV, c.WithGo, c.WithJava)
+	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
+		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (backwards compatibility: an unconfigured `sand create` must install everything today's base does)", c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
 	}
 }
 
-// TestToolsetKey_DefaultIsAllThree locks the canonical rendering of the
+// TestToolsetKey_DefaultIsEveryTool locks the canonical rendering of the
 // default (everything-on) selection, which baseversion.go's
 // toolsetPlaceholder used to hardcode until this key replaced it.
-func TestToolsetKey_DefaultIsAllThree(t *testing.T) {
+func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)
+	}
+}
+
+// TestToolsetKey_IsSorted pins the rendering order to ALPHABETICAL, not
+// declaration order. provision.toolsetKey rebuilds this same string from a
+// parsed stamp (map iteration, so it sorts); if the two disagreed, a base would
+// be perpetually stale against its own stamp and re-converge on every create.
+// Appending a new tool to the end of ToolsetKey instead of its sorted position
+// is exactly how that regression would arrive, so assert the invariant here.
+func TestToolsetKey_IsSorted(t *testing.T) {
+	got := DefaultCreateConfig().ToolsetKey()
+	tools := strings.Split(got, "+")
+	if !sort.StringsAreSorted(tools) {
+		t.Errorf("ToolsetKey() = %q, whose tools are not in sorted order; provision.toolsetKey sorts, and the two renderings must agree exactly", got)
 	}
 }
 

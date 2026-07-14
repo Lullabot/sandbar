@@ -23,7 +23,12 @@
         - provision_phase | default('full') != 'finalize'
     - role: dev-tools
       when: provision_phase | default('full') != 'finalize'
+    # Claude Code is part of the configurable base tool-set (sand create
+    # --with-claude), not a fixture of the image: a user can de-select it and
+    # install their own agent instead.
     - role: claude-code
-      when: provision_phase | default('full') != 'finalize'
+      when:
+        - toolset_claude | default(true) | bool
+        - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'

@@ -217,16 +217,15 @@ func TestCreateFormJavaToggleOff(t *testing.T) {
 		t.Fatalf("openForm must reset toggleFocus to -1, got %d", m.toggleFocus)
 	}
 
-	// Walk from the last text input onto the toggles: DDEV (0), Go (1), Java (2).
+	// Walk from the last text input onto the toggles: Claude (0), DDEV (1),
+	// Go (2), Java (3).
 	m.focusIdx = fCloneToken
-	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m = next.(model)
-	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m = next.(model)
-	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	m = next.(model)
-	if m.toggleFocus != 2 {
-		t.Fatalf("expected focus on the Java toggle (index 2), got toggleFocus=%d", m.toggleFocus)
+	for i := 0; i < 4; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+	}
+	if m.toggleFocus != 3 {
+		t.Fatalf("expected focus on the Java toggle (index 3), got toggleFocus=%d", m.toggleFocus)
 	}
 
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -239,12 +238,50 @@ func TestCreateFormJavaToggleOff(t *testing.T) {
 	if cfg.WithJava {
 		t.Fatalf("WithJava = true after flipping the Java toggle off, want false")
 	}
-	if !cfg.WithDDEV || !cfg.WithGo {
-		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v", cfg.WithDDEV, cfg.WithGo)
+	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo {
+		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v", cfg.WithClaude, cfg.WithDDEV, cfg.WithGo)
 	}
 }
 
-// TestCreateFormRebuildToggle pins that the fourth create-mode toggle
+// TestCreateFormClaudeToggleOff pins that Claude Code is a de-selectable tool
+// like any other — the point of making it optional is that a user can bring
+// their own agent — and that de-selecting it leaves the other tools alone.
+func TestCreateFormClaudeToggleOff(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Dev")
+	m.inputs[fGitEmail].SetValue("dev@example.com")
+
+	if !m.toolClaude {
+		t.Fatalf("Claude Code must default ON: an unconfigured create installs what it always did")
+	}
+
+	m.focusIdx = fCloneToken
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	if m.toggleFocus != 0 {
+		t.Fatalf("expected focus on the Claude Code toggle (index 0), got toggleFocus=%d", m.toggleFocus)
+	}
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if cfg.WithClaude {
+		t.Fatalf("WithClaude = true after flipping the Claude Code toggle off, want false")
+	}
+	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
+		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v", cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+	}
+	if got, want := cfg.ToolsetKey(), "ddev+go+java"; got != want {
+		t.Fatalf("ToolsetKey() = %q, want %q", got, want)
+	}
+}
+
+// TestCreateFormRebuildToggle pins that the last create-mode toggle
 // ("Rebuild base image") is reachable and flips independently of the tool
 // toggles.
 func TestCreateFormRebuildToggle(t *testing.T) {
@@ -252,12 +289,12 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 	m.openForm()
 	m.focusIdx = fCloneToken
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 3 {
-		t.Fatalf("expected focus on the Rebuild toggle (index 3), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 4 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 4), got toggleFocus=%d", m.toggleFocus)
 	}
 	if m.toolRebuild {
 		t.Fatalf("rebuild should default off")
@@ -286,15 +323,16 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 func TestResetReplaysTheRecordedToolset(t *testing.T) {
 	m := newTestModel(t)
 	recorded := vm.CreateConfig{
-		Name:     "vm1",
-		GitName:  "A",
-		GitEmail: "a@example.com",
-		CPUs:     4,
-		Memory:   "8GiB",
-		Disk:     "20GiB",
-		WithDDEV: true,
-		WithGo:   false, // explicitly opted out
-		WithJava: false, // explicitly opted out
+		Name:       "vm1",
+		GitName:    "A",
+		GitEmail:   "a@example.com",
+		CPUs:       4,
+		Memory:     "8GiB",
+		Disk:       "20GiB",
+		WithClaude: false, // explicitly opted out (brought their own agent)
+		WithDDEV:   true,
+		WithGo:     false, // explicitly opted out
+		WithJava:   false, // explicitly opted out
 	}
 	m.openResetForm("vm1", recorded)
 
@@ -302,10 +340,10 @@ func TestResetReplaysTheRecordedToolset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	if cfg.WithDDEV != true || cfg.WithGo != false || cfg.WithJava != false {
-		t.Errorf("reset rebuilt the tool-set as ddev=%v go=%v java=%v, want the VM's recorded ddev=true go=false java=false.\n"+
+	if cfg.WithClaude != false || cfg.WithDDEV != true || cfg.WithGo != false || cfg.WithJava != false {
+		t.Errorf("reset rebuilt the tool-set as claude=%v ddev=%v go=%v java=%v, want the VM's recorded claude=false ddev=true go=false java=false.\n"+
 			"A reset must not re-converge the shared base back to the full tool-set.",
-			cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+			cfg.WithClaude, cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
 	}
 	if got, want := cfg.ToolsetKey(), "ddev"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)

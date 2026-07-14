@@ -78,6 +78,7 @@ Flags:
 	// All three default true, so these are opt-OUT flags: an unconfigured `sand
 	// create` installs everything today's base does. They configure the SHARED
 	// base image, not this individual clone.
+	fs.BoolVar(&cfg.WithClaude, "with-claude", cfg.WithClaude, "Install Claude Code in the base image")
 	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
 	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")

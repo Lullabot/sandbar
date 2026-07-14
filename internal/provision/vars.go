@@ -47,13 +47,15 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 		)
 	}
 
-	// The tool-set booleans are emitted only for the base phase — that is
-	// where DDEV/Go/Java are installed (roles/base/tasks/main.yml's single
-	// consolidated apt transaction) — and unconditionally, like samba_enabled
-	// above, so the base always receives the actual selection rather than
-	// falling back to a role default that may disagree with it.
+	// The tool-set booleans are emitted only for the base phase — that is where
+	// Claude Code/DDEV/Go/Java are installed (the claude-code role, and
+	// roles/base/tasks/main.yml's single consolidated apt transaction) — and
+	// unconditionally, like samba_enabled above, so the base always receives the
+	// actual selection rather than falling back to a role default that may
+	// disagree with it.
 	if phase == "base" {
 		items = append(items,
+			varItem{"toolset_claude", cfg.WithClaude},
 			varItem{"toolset_ddev", cfg.WithDDEV},
 			varItem{"toolset_go", cfg.WithGo},
 			varItem{"toolset_java", cfg.WithJava},
