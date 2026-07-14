@@ -92,9 +92,9 @@ func (m model) activityLineView() string {
 		// A plain logged message is the STRIP's job, and only the strip's. When it
 		// is on screen (MessagesHeight >= 1) it already shows this exact line —
 		// it renders the most recent messages, newest last — so repeating it here
-		// printed the newest message TWICE on the same screen, once above the grid
-		// and once below it, which reads as a rendering bug rather than as two
-		// panes doing different jobs.
+		// printed the newest message TWICE on the same screen — once in the box and
+		// once again on this line, a few rows below it — which reads as a rendering
+		// bug rather than as two panes doing different jobs.
 		//
 		// The two cases above still render unconditionally, and that is the whole
 		// reason this line exists: a confirm the user must answer, and the spinner
@@ -126,9 +126,9 @@ func (m model) activityLineView() string {
 // (see layout.go): MessagesHeight is 0 below messagesMinHeight, and this renders
 // "" in that case — the board must, and does, render correctly without it. The
 // pending confirm / acting spinner are NOT duplicated here: activityLineView
-// (above) already renders them, unconditionally, below the grid — so a
+// (above) already renders them, unconditionally, in the footer band — so a
 // confirmation the user must answer is never lost just because the terminal is
-// too short to show the strip.
+// too short to show the box.
 func (m model) messagesStripView() string {
 	height := m.layout.MessagesHeight
 	if height < 1 {
