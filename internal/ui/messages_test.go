@@ -2,7 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/vm"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // THE RING IS BOUNDED: session-only, capped at maxMessages, so a long-lived
@@ -64,5 +69,46 @@ func TestRecentMessagesOrderAndCap(t *testing.T) {
 	}
 	if got := m.recentMessages(0); got != nil {
 		t.Fatalf("recentMessages(0) = %v, want nil", got)
+	}
+}
+
+// A logged message must appear ONCE on the board, not twice. The docked strip
+// (above the grid) and the activity line (below it) were both rendering the most
+// recent message, so every message printed twice on any terminal tall enough to
+// show the strip — which reads as a rendering bug, not as two panes doing
+// different jobs. The strip owns message history; the activity line keeps only
+// what must interrupt (a confirm, the spinner).
+func TestALoggedMessageIsNotPrintedTwice(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40) // tall enough for the strip (messagesMinHeight = 27)
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight < 1 {
+		t.Fatal("precondition: this terminal must be tall enough to show the messages strip")
+	}
+
+	m.logMsg("stopping db…")
+
+	view := ansi.Strip(m.boardView())
+	if got := strings.Count(view, "stopping db…"); got != 1 {
+		t.Errorf("the message rendered %d times, want exactly 1 (the strip shows it; the activity line must not repeat it):\n%s", got, view)
+	}
+}
+
+// …but on a terminal too SHORT for the strip, the activity line is the only
+// place a message can go, so it must still show it. Shedding the strip must not
+// mean shedding the message with it.
+func TestAMessageStillShowsWhenTheStripIsShed(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 24) // below messagesMinHeight: no strip
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight >= 1 {
+		t.Fatal("precondition: this terminal must be too short for the messages strip")
+	}
+
+	m.logMsg("stopping db…")
+
+	view := ansi.Strip(m.boardView())
+	if got := strings.Count(view, "stopping db…"); got != 1 {
+		t.Errorf("the message rendered %d times, want exactly 1 (with no strip, the activity line must carry it):\n%s", got, view)
 	}
 }

@@ -89,6 +89,21 @@ func (m model) activityLineView() string {
 		}
 		return m.clipLine(statusStyle.Render(m.spinner.View() + " " + text))
 	default:
+		// A plain logged message is the STRIP's job, and only the strip's. When it
+		// is on screen (MessagesHeight >= 1) it already shows this exact line —
+		// it renders the most recent messages, newest last — so repeating it here
+		// printed the newest message TWICE on the same screen, once above the grid
+		// and once below it, which reads as a rendering bug rather than as two
+		// panes doing different jobs.
+		//
+		// The two cases above still render unconditionally, and that is the whole
+		// reason this line exists: a confirm the user must answer, and the spinner
+		// for an action in flight, must survive the strip being shed on a short
+		// terminal (layout.go drops it first). History can be lost to a small
+		// terminal; a question cannot.
+		if m.layout.MessagesHeight >= 1 {
+			return ""
+		}
 		if text := m.lastMessage(); text != "" {
 			return m.clipLine(statusStyle.Render(text))
 		}
