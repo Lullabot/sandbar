@@ -83,14 +83,16 @@ const (
 const (
 	headerHeightFull    = 2
 	headerHeightCompact = 1
-	// messagesStripHeight is the strip's TOTAL rows: messagesStripChrome for the
-	// titled frame plus the message lines inside it. The frame's two rows are
-	// BUDGETED here rather than taken out of the message lines — a box that fits
-	// itself by showing less than it used to is a worse pane than the unframed one
-	// it replaced.
-	messagesStripChrome = 2 // the frame's top (with the "Messages" title) and bottom
-	messagesStripLines  = 3 // messages shown inside it
-	messagesStripHeight = messagesStripChrome + messagesStripLines
+	// The messages box asks for messagesStripMaxLines of history and settles for
+	// as few as messagesStripMinLines when the terminal cannot afford ten — below
+	// that it is shed entirely rather than shrink to a sliver. Its height is
+	// therefore NOT a constant: classify grants it whatever is spare once the
+	// header, the footer and TWO ROWS OF TILES are paid for (see there), because
+	// the box may never cost a tile row. The frame's two rows are budgeted on top
+	// of the lines, never taken out of them.
+	messagesStripChrome   = 2  // the frame's top (with the "Messages" title) and bottom
+	messagesStripMinLines = 3  // fewer than this and the box is not worth its frame
+	messagesStripMaxLines = 10 // all the history the box will ever show at once
 
 	// footerBandHeight is the closing band: the activity line (which carries a
 	// pending confirmation, so it may never be shed), the name-filter
@@ -116,22 +118,20 @@ const (
 	// hides, respectively. They encode the shedding order: messages strip
 	// first, then a compact header; the grid and footer never go.
 	//
-	// messagesMinHeight exists because THE STRIP MAY NOT COST A TILE ROW: the
-	// tiles are the board's reason to exist, and the strip's newest line is the
-	// least of what a short terminal can lose. So the threshold is the shortest
-	// terminal that affords the strip AND two rows of tiles:
+	// messagesMinHeight exists because THE BOX MAY NOT COST A TILE ROW: the tiles
+	// are the board's reason to exist, and the box's oldest line is the least of
+	// what a short terminal can lose. So the threshold is the shortest terminal
+	// that affords two rows of tiles AND the smallest box worth drawing:
 	//
-	//	2 padding + 2 header + 5 strip + 16 tiles (2 rows of tileHeight 8) + 3 footer = 28
+	//	2 padding + 2 header + (2 frame + 3 lines) + 16 tiles (2 rows of tileHeight 8) + 3 footer = 28
 	//
-	// It is 29, not 28, to keep the one spare row the unframed strip had — the
-	// grid budget at the threshold is 17 either way, exactly as before.
-	//
-	// It moved 27 -> 29 when the strip gained its frame: the frame costs two rows,
-	// and this is where that cost is PAID. Leaving the threshold at 27 would have
-	// let the framed strip take the second tile row on a 27-row terminal — the very
-	// thing this constant exists to prevent.
+	// It is DERIVED, not a magic number, so raising messagesStripMaxLines cannot
+	// silently push the threshold out from under it: a taller box simply shows
+	// fewer lines on a shorter terminal (classify grants it the spare rows), and
+	// this stays the floor at which it is shed instead.
 	fullHeaderMinHeight = 20
-	messagesMinHeight   = 29
+	messagesMinHeight   = appPaddingV + headerHeightFull + messagesStripChrome +
+		messagesStripMinLines + 2*tileHeight + footerBandHeight
 )
 
 // classify maps a terminal size to the budgets every screen sizes itself
@@ -166,13 +166,16 @@ func classifyWithFooter(w, h, helpLines int) layoutMode {
 	if headerFull {
 		headerHeight = headerHeightFull
 	}
-	messagesHeight := 0
+	// Grant the help bar what is left once the header, the SMALLEST box we would
+	// draw, and a minimal grid are paid for. It may ask for more than the terminal
+	// has. The smallest box is the right reservation here: the box is sized below,
+	// out of what survives THIS decision, so assuming a big one would starve the
+	// help bar — and the help bar is the row that tells the user which keys exist.
+	minMessages := 0
 	if showMessages {
-		messagesHeight = messagesStripHeight
+		minMessages = messagesStripChrome + messagesStripMinLines
 	}
-	// Grant the help bar what is left once the header, the messages strip and a
-	// minimal grid are paid for. It may ask for more than the terminal has.
-	affordable := contentHeight - headerHeight - messagesHeight - footerBandChrome - minBudget
+	affordable := contentHeight - headerHeight - minMessages - footerBandChrome - minBudget
 	if affordable < 1 {
 		affordable = 1
 	}
@@ -185,6 +188,24 @@ func classifyWithFooter(w, h, helpLines int) layoutMode {
 	footerHeight := footerBandChrome + helpLines
 	if footerHeight < footerBandHeight {
 		footerHeight = footerBandHeight
+	}
+
+	// The box takes what is SPARE once the header, the footer and two rows of tiles
+	// are paid for — capped at messagesStripMaxLines, and shed outright below
+	// messagesStripMinLines rather than shrunk to a sliver. This is what lets it ask
+	// for ten lines without that becoming a tax on every terminal too short to seat
+	// them: a shorter terminal simply shows fewer messages, and only a terminal that
+	// cannot seat three loses the box. It may never take the second tile row, which
+	// is why 2*tileHeight is subtracted BEFORE the box is sized rather than after.
+	messagesHeight := 0
+	if showMessages {
+		lines := contentHeight - headerHeight - footerHeight - 2*tileHeight - messagesStripChrome
+		if lines > messagesStripMaxLines {
+			lines = messagesStripMaxLines
+		}
+		if lines >= messagesStripMinLines {
+			messagesHeight = messagesStripChrome + lines
+		}
 	}
 
 	grid := contentHeight - headerHeight - messagesHeight - footerHeight
