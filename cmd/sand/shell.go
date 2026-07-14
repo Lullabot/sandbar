@@ -17,13 +17,19 @@ import (
 // "Running" contract lima.Client.Status returns).
 const limaRunning = "Running"
 
-// vmLister is the narrow lima.Client surface shellAttachArgv needs: listing
-// instances so status and Dir can be resolved together (Dir only comes back
-// from List, not Status). An interface so the decision logic can be unit
-// tested with a stub instead of a real lima.Client, which would need a real
-// limactl (AGENTS.md, hard rule).
-type vmLister interface {
-	List() ([]vm.VM, error)
+// vmGetter is the narrow lima.Client surface shellAttachArgv needs: ONE instance
+// by name, resolving its status and its Dir together (Dir does not come back from
+// Status). An interface so the decision logic can be unit tested with a stub
+// instead of a real lima.Client, which would need a real limactl (AGENTS.md, hard
+// rule).
+//
+// Get, not List, and that is the fix for a real bug: `limactl list` with no name
+// fails outright while ANY instance is mid-clone (lima#5236), so scanning the full
+// listing to find one VM made `sand shell web` die instantly for the 40-60s a
+// create of some OTHER VM was cloning — and from a host tmux, the new window it
+// died in closed before the error could be read. See lima.Client.Get.
+type vmGetter interface {
+	Get(name string) (vm.VM, error)
 }
 
 // runShell implements the `sand shell <name>` subcommand: it resolves the named
@@ -122,21 +128,13 @@ or 'sand create' to make one).
 // out from runShell so it can be tested with a stub vmLister; the exec
 // hand-off above needs a real TTY and a real VM (task 6's job) and is
 // deliberately left untested here.
-func shellAttachArgv(l vmLister, name string) ([]string, error) {
-	vms, err := l.List()
+func shellAttachArgv(l vmGetter, name string) ([]string, error) {
+	found, err := l.Get(name)
 	if err != nil {
-		return nil, fmt.Errorf("sand shell: %w", err)
-	}
-
-	var found *vm.VM
-	for i := range vms {
-		if vms[i].Name == name {
-			found = &vms[i]
-			break
+		if errors.Is(err, lima.ErrNoSuchInstance) {
+			return nil, fmt.Errorf("sand shell: no VM named %q (run 'sand' to list instances)", name)
 		}
-	}
-	if found == nil {
-		return nil, fmt.Errorf("sand shell: no VM named %q (run 'sand' to list instances)", name)
+		return nil, fmt.Errorf("sand shell: %w", err)
 	}
 	if found.Status != limaRunning {
 		return nil, fmt.Errorf("sand shell: VM %q is not running (status: %s); start it first", name, found.Status)

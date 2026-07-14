@@ -281,8 +281,19 @@ func hostTmuxWindowCmd(name string) tea.Cmd {
 // "sand", which may not be on PATH for an absolute invocation or a `go run`)
 // and name are each quoted as one POSIX shell word rather than joined with a
 // bare space: a resolved binary path is not guaranteed to be space-free.
+//
+// THE WINDOW IS HELD OPEN ON FAILURE. tmux closes a window the instant its command
+// exits, so a `sand shell` that fails — the VM stopped between the keypress and the
+// attach, limactl not on PATH, a guest with no tmux — printed its error into a
+// window that vanished in the same frame. What the user sees is "a tmux window
+// opened and immediately closed", with no way to find out why; the board, meanwhile,
+// reports the failure on one status line that the next message scrolls away. On a
+// non-zero exit we pause for a keypress so the error can actually be read. A clean
+// exit (a detach, or the guest shell exiting) closes the window as before — the hold
+// must not tax the normal path.
 func hostTmuxShellCommand(self, name string) string {
-	return shQuote(self) + " shell " + shQuote(name)
+	attach := shQuote(self) + " shell " + shQuote(name)
+	return attach + ` || { printf '\n[sand] shell exited with an error — press enter to close this window.'; read -r _; }`
 }
 
 // shQuote quotes s as a single POSIX shell word.

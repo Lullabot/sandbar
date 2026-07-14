@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -235,3 +236,42 @@ func (r errRunner) Output(context.Context, ...string) ([]byte, error) {
 }
 func (r errRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error    { return nil }
 func (r errRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+
+// Get must ask limactl about ONE instance, and this is not a style preference.
+// `limactl list` with no name FAILS OUTRIGHT — exit 1, no output at all — while
+// any instance directory is mid-clone (lima#5236: clone creates the directory
+// before it writes lima.yaml), a window lasting 40-60s for a large base. A caller
+// that scans the full listing to find one VM is therefore broken for the whole
+// time a create of some OTHER VM is running: that is what made `sand shell web`
+// die instantly, and from a host tmux, close its new window before the error could
+// be read. A scoped list loads only that instance and survives the sibling.
+func TestGetAsksAboutOneInstanceNotTheWholeListing(t *testing.T) {
+	f := &fakeRunner{outputs: map[string][]byte{
+		"list": []byte(`{"name":"web","status":"Running","dir":"/home/u/.lima/web","arch":"x86_64","cpus":4}` + "\n"),
+	}}
+	c := New(f)
+
+	got, err := c.Get("web")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Name != "web" || got.Status != "Running" || got.Dir != "/home/u/.lima/web" {
+		t.Errorf("Get = %+v, want the named instance with its status and dir", got)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("Get made %d calls, want 1: %v", len(f.calls), f.calls)
+	}
+	want := []string{"list", "web", "--format", "json"}
+	if strings.Join(f.calls[0], " ") != strings.Join(want, " ") {
+		t.Errorf("Get called %v, want %v — a BARE `list` takes down every instance when any one of them is mid-clone", f.calls[0], want)
+	}
+}
+
+// An unknown name is a clean sentinel, not a raw limactl error, so the caller can
+// say "no VM named x" rather than leaking "unmatched instances" at the user.
+func TestGetUnknownInstance(t *testing.T) {
+	f := &fakeRunner{err: errors.New(`limactl list nope: fatal msg="unmatched instances"`)}
+	if _, err := New(f).Get("nope"); !errors.Is(err, ErrNoSuchInstance) {
+		t.Errorf("Get(unknown) = %v, want ErrNoSuchInstance", err)
+	}
+}
