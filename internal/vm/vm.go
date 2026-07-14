@@ -57,30 +57,34 @@ type CreateConfig struct {
 	CloneURL        string
 	CloneToken      string
 
-	// WithDDEV, WithGo, and WithJava select the configurable base-image
-	// tool-set (sand create --with-ddev/--with-go/--with-java). They configure
-	// the shared BASE image, not the individual clone — there is still exactly
-	// one base per user, its contents just differ by selection. All three
-	// default to true (see DefaultCreateConfig), so an unconfigured `sand
-	// create` installs everything today's base does; the flags are opt-OUT.
-	WithDDEV bool
-	WithGo   bool
-	WithJava bool
+	// WithClaude, WithDDEV, WithGo, and WithJava select the configurable
+	// base-image tool-set (sand create --with-claude/--with-ddev/--with-go/
+	// --with-java). They configure the shared BASE image, not the individual
+	// clone — there is still exactly one base per user, its contents just differ
+	// by selection. All four default to true (see DefaultCreateConfig), so an
+	// unconfigured `sand create` installs everything today's base does; the flags
+	// are opt-OUT. Claude Code is one selection among the tools rather than a
+	// fixture of the image, so a user can bring their own agent instead.
+	WithClaude bool
+	WithDDEV   bool
+	WithGo     bool
+	WithJava   bool
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
 func DefaultCreateConfig() CreateConfig {
 	return CreateConfig{
-		Name:     "claude",
-		BaseName: "claude-base",
-		Memory:   "8GiB",
-		Disk:     "100GiB",
-		Domain:   "lan",
-		Locale:   "en_US.UTF-8",
-		CPUs:     2,
-		WithDDEV: true,
-		WithGo:   true,
-		WithJava: true,
+		Name:       "claude",
+		BaseName:   "claude-base",
+		Memory:     "8GiB",
+		Disk:       "100GiB",
+		Domain:     "lan",
+		Locale:     "en_US.UTF-8",
+		CPUs:       2,
+		WithClaude: true,
+		WithDDEV:   true,
+		WithGo:     true,
+		WithJava:   true,
 	}
 }
 
@@ -90,13 +94,19 @@ func DefaultCreateConfig() CreateConfig {
 // which changes the stamp, which marks the base stale so it converges (or
 // rebuilds) instead of silently cloning a base with the wrong contents.
 //
-// Order is fixed (ddev, go, java) so the same selection always renders
-// identically no matter which order the booleans were assigned in. An empty
-// selection renders as "none" rather than "" — an empty string would be
-// indistinguishable from "no toolset information at all" when a stamp is
-// parsed back apart (see provision.toolsetFromStamp).
+// Order is fixed so the same selection always renders identically no matter
+// which order the booleans were assigned in, and it is ALPHABETICAL because
+// provision.toolsetKey — which rebuilds this string from a parsed stamp when
+// merging tool-sets — sorts. The two must agree exactly or a base would be
+// perpetually stale against its own stamp, so a new tool goes in sorted
+// position, not on the end. An empty selection renders as "none" rather than
+// "" — an empty string would be indistinguishable from "no toolset information
+// at all" when a stamp is parsed back apart (see provision.toolsetFromStamp).
 func (c CreateConfig) ToolsetKey() string {
 	var on []string
+	if c.WithClaude {
+		on = append(on, "claude")
+	}
 	if c.WithDDEV {
 		on = append(on, "ddev")
 	}

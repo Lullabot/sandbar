@@ -24,6 +24,7 @@ func fullConfig() vm.CreateConfig {
 		CPUs:       4,
 		CloneURL:   "https://github.com/example/repo.git",
 		CloneToken: `tok"en\with-specials`,
+		WithClaude: true,
 		WithDDEV:   true,
 		WithGo:     true,
 		WithJava:   true,
@@ -79,9 +80,10 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 	// tools are installed — as real bools, unconditionally (the samba_enabled
 	// precedent), not gated on being non-default like the docker-proxy vars.
 	for key, want := range map[string]bool{
-		"toolset_ddev": true,
-		"toolset_go":   true,
-		"toolset_java": true,
+		"toolset_claude": true,
+		"toolset_ddev":   true,
+		"toolset_go":     true,
+		"toolset_java":   true,
 	} {
 		v, ok := m[key]
 		if !ok {
@@ -95,7 +97,7 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 
 // TestBuildExtraVars_ToolsetReflectsConfig proves the emitted booleans track
 // cfg, not a hardcoded true — a config with one tool deselected must emit
-// that one as false while the other two stay true.
+// that one as false while the others stay true.
 func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithJava = false
@@ -108,11 +110,35 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 	if v, ok := m["toolset_java"].(bool); !ok || v {
 		t.Errorf("toolset_java = %v, want false", m["toolset_java"])
 	}
+	if v, ok := m["toolset_claude"].(bool); !ok || !v {
+		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
+	}
 	if v, ok := m["toolset_ddev"].(bool); !ok || !v {
 		t.Errorf("toolset_ddev = %v, want true", m["toolset_ddev"])
 	}
 	if v, ok := m["toolset_go"].(bool); !ok || !v {
 		t.Errorf("toolset_go = %v, want true", m["toolset_go"])
+	}
+}
+
+// TestBuildExtraVars_ClaudeCanBeDeselected: toolset_claude=false is what gates
+// the claude-code role off in site.yml, so if this var stopped being emitted
+// the role would fall back to its default (true) and install Claude Code onto
+// the base of a user who explicitly asked for their own agent instead.
+func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithClaude = false
+	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+
+	if v, ok := m["toolset_claude"].(bool); !ok || v {
+		t.Errorf("toolset_claude = %v, want false", m["toolset_claude"])
+	}
+	if v, ok := m["toolset_ddev"].(bool); !ok || !v {
+		t.Errorf("toolset_ddev = %v, want true", m["toolset_ddev"])
 	}
 }
 

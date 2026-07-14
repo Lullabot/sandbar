@@ -210,6 +210,7 @@ type model struct {
 	// would fall back to DefaultCreateConfig()'s all-on selection and a reset
 	// would silently re-converge the SHARED base back to the full tool-set —
 	// installing a Go toolchain and a JDK the user had explicitly opted out of.
+	resetWithClaude      bool
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
@@ -224,6 +225,10 @@ type model struct {
 	// createToggles' help text. toolRebuild carries the same intent as
 	// `sand create --rebuild` (provision.CreateOptions.Rebuild), the only way to
 	// actually remove a de-selected tool (Ansible cannot uninstall).
+	// toolClaude is Claude Code: a tool-set selection like the rest, so a user
+	// can de-select it and install their own agent. Not to be confused with
+	// preserveClaude above, which is reset mode's keep-my-~/.claude toggle.
+	toolClaude  bool
 	toolDDEV    bool
 	toolGo      bool
 	toolJava    bool

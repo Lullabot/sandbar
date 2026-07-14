@@ -205,6 +205,7 @@ func (m *model) openForm() tea.Cmd {
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
 	m.toggleFocus = -1  // openResetForm already did this; create mode now has toggles too
+	m.toolClaude = true
 	m.toolDDEV = true
 	m.toolGo = true
 	m.toolJava = true
@@ -243,6 +244,7 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
+	m.resetWithClaude = cfg.WithClaude
 	m.resetWithDDEV = cfg.WithDDEV
 	m.resetWithGo = cfg.WithGo
 	m.resetWithJava = cfg.WithJava
@@ -299,6 +301,12 @@ func baseWideHelp(tool string) string {
 // `sand create --rebuild` uses — see submitForm).
 func (m model) createToggles() []formToggle {
 	return []formToggle{
+		{
+			label: "Install Claude Code",
+			help:  baseWideHelp("Claude Code"),
+			get:   func(m *model) bool { return m.toolClaude },
+			set:   func(m *model, v bool) { m.toolClaude = v },
+		},
 		{
 			label: "Install DDEV",
 			help:  baseWideHelp("DDEV"),
@@ -474,12 +482,15 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		// recorded selection (captured in openResetForm). cfg starts life as
 		// DefaultCreateConfig(), whose tools are all on; leaving them there would
 		// make every reset request the full tool-set, mark the SHARED base stale
-		// against its stamp, and re-converge it — installing the very Go/Java the
-		// user opted out of, silently, from a form that never mentions them.
+		// against its stamp, and re-converge it — installing the very Claude
+		// Code/Go/Java the user opted out of, silently, from a form that never
+		// mentions them.
+		cfg.WithClaude = m.resetWithClaude
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
 	} else {
+		cfg.WithClaude = m.toolClaude
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava

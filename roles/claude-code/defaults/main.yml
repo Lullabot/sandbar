@@ -1,3 +1,8 @@
 ---
-# No tunable defaults: Claude Code is installed and configured with remote
-# control enabled at startup. Authenticate by running `claude` once in the VM.
+# No tunable defaults: when this role runs, Claude Code is installed and
+# configured with remote control enabled at startup. Authenticate by running
+# `claude` once in the VM.
+#
+# WHETHER it runs is a tool-set selection, toolset_claude (sand create
+# --with-claude), which gates the role from site.yml. That default lives with
+# the other toolset_* selections in roles/base/defaults/main.yml.
