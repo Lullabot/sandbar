@@ -2,7 +2,7 @@
 id: 9
 group: "tier-1-freshness"
 dependencies: [8]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "medium"
@@ -21,12 +21,12 @@ Remove tens of seconds of pure latency from the common create path by bouncing (
 
 ## Acceptance Criteria
 
-- [ ] The unconditional stop+start after finalize in `createVM` is replaced by a conditional bounce, triggered by `/var/run/reboot-required` existing in the guest.
-- [ ] **The hostname dependency is verified before the bounce is dropped.** A `hostnamectl` change does not require a reboot; what must be confirmed is whether anything in the first interactive shell depends on the restart to observe the new hostname. Record the finding. If it genuinely requires the restart, keep the bounce for that reason and skip it only when demonstrably unnecessary.
-- [ ] A create whose VM needs no reboot performs **no** stop+start — verify from task 1's timing summary that the bounce phase is absent and its cost is gone from the total.
-- [ ] Touching `/var/run/reboot-required` in a VM and creating/finalizing **does** produce a bounce.
-- [ ] **`Reset`'s unconditional bounce becomes conditional and tmux-safe**: it must not silently destroy a live `main` tmux session. Detect a live session and warn (or refuse) rather than bouncing through it.
-- [ ] `go vet ./...` and `go test ./...` are green, including a test that a VM with no `reboot-required` marker is not bounced.
+- [x] The unconditional stop+start after finalize in `createVM` is replaced by a conditional bounce, triggered by `/var/run/reboot-required` existing in the guest.
+- [x] **The hostname dependency is verified before the bounce is dropped.** A `hostnamectl` change does not require a reboot; what must be confirmed is whether anything in the first interactive shell depends on the restart to observe the new hostname. Record the finding. If it genuinely requires the restart, keep the bounce for that reason and skip it only when demonstrably unnecessary.
+- [x] A create whose VM needs no reboot performs **no** stop+start — verify from task 1's timing summary that the bounce phase is absent and its cost is gone from the total.
+- [x] Touching `/var/run/reboot-required` in a VM and creating/finalizing **does** produce a bounce.
+- [x] **`Reset`'s unconditional bounce becomes conditional and tmux-safe**: it must not silently destroy a live `main` tmux session. Detect a live session and warn (or refuse) rather than bouncing through it.
+- [x] `go vet ./...` and `go test ./...` are green, including a test that a VM with no `reboot-required` marker is not bounced.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -99,3 +99,23 @@ In `Reset`, bounce only when `needsReboot`; and if `hasLiveTmux` is true and a b
 **5. Test.** Fake Runner: guest without the reboot marker → assert `Stop`/`Start` are NOT called after finalize. Guest with the marker → assert they ARE. That is enough; don't build a broad suite.
 
 </details>
+
+## Completion notes
+
+**Hostname finding (empirical, verified against a real running VM, not assumed):**
+`limactl` was available in this environment with a running instance (`test`). Ran
+`limactl shell test -- sudo hostnamectl set-hostname sandtest` (the same
+mechanism `roles/base`'s "Set hostname" task uses via
+`ansible.builtin.hostname`), then immediately opened a brand-new
+`limactl shell test` (a fresh login, exactly what the first interactive shell
+after a create/reset is). It reported `sandtest` for `hostname`,
+`cat /etc/hostname`, and `hostnamectl`'s Static hostname — all correct, with
+**no reboot**. Restored the hostname to `test` afterward. Conclusion: nothing
+caches the pre-change name across a fresh process; `sethostname()` is
+system-wide and immediate, and `/etc/hosts` is rewritten by the same playbook
+run (a template task, unconditional on `provision_phase`). The bounce's
+hostname rationale does not hold and the bounce was made conditional as
+described.
+
+**Nothing could not be checked** — the hostname question was the one open
+empirical item and it was verified directly, not assumed.

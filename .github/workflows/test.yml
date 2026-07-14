@@ -92,16 +92,21 @@ jobs:
       - name: Build sand from the checkout
         run: go build -o sand ./cmd/sand
 
-      # Run the actual entrypoint, non-interactively. This builds the base
-      # image, clones it to `claude-ci`, finalizes, and restarts — the full
-      # path that can't run inside the nested-virt-less dev VM. Modest resources
-      # to fit the hosted runner (4 vCPU / 16 GB).
-      - name: Provision a VM with sand (built from the checkout)
+      # Run the actual entrypoint, non-interactively, forcing a true
+      # from-scratch base build with --rebuild. Base reuse/re-apply is the
+      # default path now (a stale base converges in place rather than
+      # rebuilding — see internal/provision/provision.go), so the cold build
+      # must be requested explicitly to be exercised by intent rather than
+      # merely because this runner happens to start with no base image.
+      # This builds the base image, clones it to `claude-ci`, finalizes, and
+      # restarts — the full path that can't run inside the nested-virt-less
+      # dev VM. Modest resources to fit the hosted runner (4 vCPU / 16 GB).
+      - name: Create a VM (cold — force a from-scratch base build)
         run: |
-          ./sand create \
+          ./sand create --rebuild \
             --name claude-ci \
             --git-name "CI Bot" --git-email ci@example.com \
-            --cpus 2 --memory 6GiB --disk 30GiB
+            --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee cold.log
 
       # The reason this branch exists: keyrings created by `gpg --dearmor`
       # (ddev.gpg, nodesource.gpg) obey the provisioning shell's umask. A global
@@ -145,9 +150,57 @@ jobs:
             node --version
           '
 
-      # On failure, surface the in-VM provisioning log for debugging.
+      # Free the clone's disk before the second create — the BASE (claude-base)
+      # is a separate `limactl clone` source and is untouched by deleting a
+      # clone taken from it. This is what keeps a second qcow2 within budget:
+      # base + one clone at a time, same footprint as before this task, rather
+      # than base + two clones at once.
+      - name: Delete the cold clone (base image survives — it must, for reuse below)
+        run: limactl delete -f claude-ci
+
+      # Change the playbook's actual byte content (a `touch` would not move the
+      # content hash that decides staleness — see baseversion.go's
+      # playbookContentHash) so the second create below hits the re-apply
+      # branch instead of silently reusing the base as-is. This proves the
+      # in-place re-apply path specifically, not just "no error occurred".
+      - name: Dirty the playbook so the next create re-applies it in place
+        run: |
+          echo '# ci - force a re-apply for the lima-e2e warm-path assertion' >> roles/base/tasks/main.yml
+
+      # Second create: same base name (fixed as "claude-base" — see
+      # vm.DefaultCreateConfig), no --rebuild. The base already exists, so this
+      # must take the in-place re-apply branch of ensureBaseStopped, not the
+      # cold-build branch.
+      - name: Create a second VM (warm — must re-apply the base in place, not rebuild it)
+        run: |
+          ./sand create \
+            --name claude-ci-warm \
+            --git-name "CI Bot" --git-email ci@example.com \
+            --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee warm.log
+
+      # Assert the warm create took the re-apply branch (provision.go:522,
+      # "Re-applying the playbook to base image ... Ansible is idempotent") and
+      # never the from-scratch branches (provision.go:196 "Building base
+      # image...", provision.go:406/443/469 "Rebuilding base image .../
+      # ...rebuilding it from scratch..."). A from-scratch branch means the
+      # base was deleted and rebuilt (re-downloading Debian) instead of
+      # converged in place.
+      - name: Assert the base was re-applied, not rebuilt from scratch
+        run: |
+          if grep -qE 'Building base image|Rebuilding base image|rebuilding it from scratch' warm.log; then
+            echo "::error::the warm create rebuilt the base from scratch instead of re-applying it in place"
+            exit 1
+          fi
+          if ! grep -qF 'Re-applying the playbook to base image' warm.log; then
+            echo "::error::the warm create did not show the expected re-apply banner"
+            exit 1
+          fi
+
+      # On failure, surface the captured `sand create` output for debugging.
+      # (Provisioning is not logged inside the guest — it streams to sand's
+      # own stdout, which is what cold.log/warm.log captured above.)
       - name: Dump provisioning logs on failure
         if: failure()
         run: |
-          limactl shell claude-ci sudo tail -n 100 /var/log/sand-provision.log || true
-          limactl shell claude-ci sudo tail -n 100 /var/log/sand-finalize.log || true
+          tail -n 200 cold.log || true
+          tail -n 200 warm.log || true

@@ -157,8 +157,9 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 		{"clone", "claude-base", "claude"},                 // Clone
 		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // Start
-		{"shell", "claude", "sudo", "bash", "-c", inGuestScript}, // finalize provision
-		{"stop", "claude"},  // bounce: stop
+		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize provision
+		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check
+		{"stop", "claude"},  // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"}, // bounce: start
 	}
 	if !reflect.DeepEqual(f.calls, want) {
@@ -174,6 +175,71 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 	if !strings.Contains(f.streams[0], "user_git_user_name: Andrew Berry") {
 		t.Errorf("finalize stdin missing git identity:\n%s", f.streams[0])
+	}
+}
+
+// TestCreateVM_NoBounceWithoutRebootMarker is the conditional-bounce
+// acceptance criterion: a guest that does not report
+// /var/run/reboot-required must not be stopped and started after finalize —
+// the two stated reasons for the old unconditional bounce (the finalize apt
+// upgrade, removed in task 8; and docker-group membership, granted in the
+// BASE phase and baked into the image) are both gone, so a create that never
+// asked the guest to reboot pays none of that latency.
+func TestCreateVM_NoBounceWithoutRebootMarker(t *testing.T) {
+	f := &fakeRunner{
+		status: map[string][]byte{"claude-base": []byte("Stopped\n")},
+		failOn: func(c []string) bool { // the guest has no reboot-required marker
+			return len(c) > 0 && c[0] == "shell" && hasTok(c, "/var/run/reboot-required")
+		},
+		failErr: errors.New("exit status 1"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	for _, c := range f.calls {
+		if c[0] == "stop" || (c[0] == "start" && hasTok(c, "claude") && !hasTok(c, "--name")) {
+			// The clone's own "start claude" (bringing the VM up before
+			// finalize) is expected; only a stop, or a start AFTER one, means a
+			// bounce happened. Fail on any stop outright.
+			if c[0] == "stop" {
+				t.Fatalf("no reboot-required marker: CreateVM must not bounce (stop/start) the VM: %v", f.calls)
+			}
+		}
+	}
+	// Belt and suspenders: the reboot-required probe ran, and it is the LAST
+	// call — nothing follows it (no stop, no start).
+	last := f.calls[len(f.calls)-1]
+	if last[0] != "shell" || !hasTok(last, "/var/run/reboot-required") {
+		t.Fatalf("expected the needsReboot probe to be the final call when no bounce is needed, got %v", f.calls)
+	}
+}
+
+// TestCreateVM_BouncesWhenRebootRequired is the converse: a guest that DOES
+// report /var/run/reboot-required (the fake's default: every call succeeds
+// unless told otherwise) is bounced — stop immediately followed by start —
+// after finalize.
+func TestCreateVM_BouncesWhenRebootRequired(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	probe := findCall(t, f.calls, 0, "needsReboot probe", func(c []string) bool {
+		return c[0] == "shell" && hasTok(c, "/var/run/reboot-required")
+	})
+	if probe+2 >= len(f.calls) {
+		t.Fatalf("expected a stop and a start after the needsReboot probe, got %v", f.calls)
+	}
+	if f.calls[probe+1][0] != "stop" {
+		t.Fatalf("call after needsReboot probe = %v, want stop", f.calls[probe+1])
+	}
+	if f.calls[probe+2][0] != "start" {
+		t.Fatalf("call after bounce stop = %v, want start", f.calls[probe+2])
 	}
 }
 
@@ -228,7 +294,11 @@ func TestRunProvision_SandProfileUnsetStaysDefault(t *testing.T) {
 	}
 
 	for _, call := range f.calls {
-		if len(call) > 0 && call[0] == "shell" {
+		// Only inspect calls that actually run the provisioning script (`shell
+		// <name> sudo bash -c <script>`) — the needsReboot check is also a
+		// `shell` call, but a one-liner probe (`test -e ...`), not the
+		// provisioning script, and must not be compared against it.
+		if len(call) > 0 && call[0] == "shell" && hasTok(call, "bash") && hasTok(call, "-c") {
 			script := call[len(call)-1]
 			if script != inGuestScript {
 				t.Errorf("SAND_PROFILE unset must run the default inGuestScript verbatim, got:\n%s", script)
@@ -272,7 +342,8 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 		{"edit", "--set"},        // Configure clone sizes
 		{"start", "claude"},      // Start clone
 		{"shell", "claude"},      // finalize provision
-		{"stop", "claude"},       // bounce: stop
+		{"shell", "claude"},      // needsReboot check
+		{"stop", "claude"},       // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"},      // bounce: start
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -438,7 +509,8 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 		{"edit", "--set"},        // Configure clone sizes
 		{"start", "claude"},      // Start clone
 		{"shell", "claude"},      // finalize provision
-		{"stop", "claude"},       // bounce: stop
+		{"shell", "claude"},      // needsReboot check
+		{"stop", "claude"},       // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"},      // bounce: start
 	}
 	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
@@ -622,7 +694,8 @@ func TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds(t *testing.T) {
 				{"edit", "--set"},         // Configure clone sizes
 				{"start", "claude"},       // Start clone
 				{"shell", "claude"},       // finalize provision
-				{"stop", "claude"},        // bounce: stop
+				{"shell", "claude"},       // needsReboot check
+				{"stop", "claude"},        // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 				{"start", "claude"},       // bounce: start
 			}
 			if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
@@ -669,7 +742,8 @@ func TestCreateVM_RebuildDestroysEvenAnUpToDateBase(t *testing.T) {
 		{"edit", "--set"},         // Configure clone sizes
 		{"start", "claude"},       // Start clone
 		{"shell", "claude"},       // finalize provision
-		{"stop", "claude"},        // bounce: stop
+		{"shell", "claude"},       // needsReboot check
+		{"stop", "claude"},        // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"},       // bounce: start
 	}
 	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
@@ -894,7 +968,8 @@ func TestCreateVM_AgedBaseIsRefreshedInPlace(t *testing.T) {
 		{"edit", "--set"},        // Configure clone sizes
 		{"start", "claude"},      // Start clone
 		{"shell", "claude"},      // finalize provision
-		{"stop", "claude"},       // bounce: stop
+		{"shell", "claude"},      // needsReboot check
+		{"stop", "claude"},       // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"},      // bounce: start
 	}
 	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
@@ -957,7 +1032,8 @@ func TestCreateVM_AgedUnconvergeableBaseRebuilds(t *testing.T) {
 		{"edit", "--set"},         // Configure clone sizes
 		{"start", "claude"},       // Start clone
 		{"shell", "claude"},       // finalize provision
-		{"stop", "claude"},        // bounce: stop
+		{"shell", "claude"},       // needsReboot check
+		{"stop", "claude"},        // bounce: stop (fakeRunner defaults to success, so needsReboot reads true)
 		{"start", "claude"},       // bounce: start
 	}
 	if got := firstSecond(f.calls); !reflect.DeepEqual(got, want) {
@@ -1158,7 +1234,9 @@ func TestReset_NoPreserve(t *testing.T) {
 		{"clone", "claude-base", "claude"},                 // re-clone
 		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // start clone
-		{"shell", "claude", "sudo", "bash", "-c", inGuestScript}, // finalize
+		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize
+		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check
+		{"shell", "claude", "tmux", "has-session", "-t", "=main"},     // hasLiveTmux check (fakeRunner defaults to success, so both read true)
 		{"stop", "claude"},  // bounce: stop
 		{"start", "claude"}, // bounce: start
 	}
@@ -1172,6 +1250,70 @@ func TestReset_NoPreserve(t *testing.T) {
 	}
 	if !strings.Contains(f.streams[0], "project_clone_url") {
 		t.Errorf("no-preserve finalize must keep project_clone_url:\n%s", f.streams[0])
+	}
+}
+
+// TestReset_NoBounceWithoutRebootMarker mirrors
+// TestCreateVM_NoBounceWithoutRebootMarker for Reset: a freshly finalized
+// clone that never asked for a reboot must not be bounced.
+func TestReset_NoBounceWithoutRebootMarker(t *testing.T) {
+	f := &fakeRunner{
+		status: map[string][]byte{"claude-base": []byte("Stopped\n")},
+		failOn: func(c []string) bool {
+			return len(c) > 0 && c[0] == "shell" && hasTok(c, "/var/run/reboot-required")
+		},
+		failErr: errors.New("exit status 1"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.Reset(context.Background(), testConfig(), ResetOptions{}, io.Discard); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	for _, c := range f.calls {
+		if c[0] == "stop" {
+			t.Fatalf("no reboot-required marker: Reset must not bounce (stop/start) the VM: %v", f.calls)
+		}
+	}
+	// The tmux check is only meaningful ahead of a bounce; without a reboot
+	// pending there is nothing to warn about, so it must not even run.
+	for _, c := range f.calls {
+		if hasTok(c, "tmux") {
+			t.Fatalf("hasLiveTmux must not be probed when no bounce is needed: %v", f.calls)
+		}
+	}
+}
+
+// TestReset_WarnsButStillBouncesOverLiveTmuxSession is the tmux-safety
+// acceptance criterion: when a reboot IS required and the guest's
+// persistent `main` tmux session is up (fakeRunner's default: every call
+// succeeds, so `tmux has-session -t =main` reads as live), Reset must not
+// bounce SILENTLY. It emits a loud step() warning naming the destructive
+// consequence before doing it — Reset chooses "warn and proceed" over
+// "refuse" (see the code comment on Reset's bounce), since by the time the
+// bounce runs, Reset's own destructive work (delete + reclone + restore +
+// finalize) is already committed and cannot be cleanly walked back.
+func TestReset_WarnsButStillBouncesOverLiveTmuxSession(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	var out bytes.Buffer
+	if err := p.Reset(context.Background(), testConfig(), ResetOptions{}, &out); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	// The bounce still happens — Reset does not refuse.
+	stop := findCall(t, f.calls, 0, "bounce stop", func(c []string) bool { return c[0] == "stop" })
+	findCall(t, f.calls, stop+1, "bounce start", func(c []string) bool { return c[0] == "start" })
+
+	// The tmux session was checked, and its presence was surfaced loudly.
+	tmuxCheck := findCall(t, f.calls, 0, "hasLiveTmux probe", func(c []string) bool {
+		return c[0] == "shell" && hasTok(c, "tmux") && hasTok(c, "has-session")
+	})
+	if tmuxCheck >= stop {
+		t.Fatalf("hasLiveTmux must be checked BEFORE the bounce, got check at %d, stop at %d: %v", tmuxCheck, stop, f.calls)
+	}
+	if got := out.String(); !strings.Contains(got, "tmux") || !strings.Contains(got, "claude") {
+		t.Errorf("Reset must warn loudly about the live tmux session before bouncing through it, got:\n%s", got)
 	}
 }
 

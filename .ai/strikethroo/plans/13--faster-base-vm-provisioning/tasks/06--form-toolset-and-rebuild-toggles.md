@@ -2,7 +2,7 @@
 id: 6
 group: "tier-1-toolset"
 dependencies: [5]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "medium"
@@ -23,16 +23,16 @@ Expose the base-image tool-set (DDEV / Go / Java) as toggles in the create form,
 
 ## Acceptance Criteria
 
-- [ ] The form's toggle handling is **generalized** from the two hard-coded `preserve*` booleans into a toggle list, and **create mode** gains the same toggle focus path that reset mode has today.
-- [ ] Create mode shows four toggles: DDEV, Go, Java (defaulting **on**), and "Rebuild base image" (defaulting **off**).
-- [ ] Tab/Shift-Tab/Up/Down focus walks the text inputs and then the toggles, wrapping — matching the existing reset-mode idiom.
-- [ ] Space/Enter flips the focused toggle instead of navigating (matching `updateResetForm`'s behavior).
-- [ ] Reset mode's existing two `preserve*` toggles keep working exactly as before — no regression.
-- [ ] The per-field help text for the three tool toggles **states plainly that they configure the shared base image**, and that changing one re-converges (or, when a tool is removed, requires rebuilding) the base every future VM is cloned from. A base-wide effect must never be a surprise from a per-VM screen.
-- [ ] The "Rebuild base image" toggle maps to the existing `--rebuild` behavior.
-- [ ] The tool-set shrink advisory from task 5 points the user at this toggle.
-- [ ] `buildConfig` populates `WithDDEV` / `WithGo` / `WithJava` and the rebuild flag from the toggles.
-- [ ] `go vet ./...` and `go test ./...` are green, including a test that toggling Java off in create mode produces a `CreateConfig` with `WithJava: false`.
+- [x] The form's toggle handling is **generalized** from the two hard-coded `preserve*` booleans into a toggle list, and **create mode** gains the same toggle focus path that reset mode has today.
+- [x] Create mode shows four toggles: DDEV, Go, Java (defaulting **on**), and "Rebuild base image" (defaulting **off**).
+- [x] Tab/Shift-Tab/Up/Down focus walks the text inputs and then the toggles, wrapping — matching the existing reset-mode idiom.
+- [x] Space/Enter flips the focused toggle instead of navigating (matching `updateResetForm`'s behavior).
+- [x] Reset mode's existing two `preserve*` toggles keep working exactly as before — no regression.
+- [x] The per-field help text for the three tool toggles **states plainly that they configure the shared base image**, and that changing one re-converges (or, when a tool is removed, requires rebuilding) the base every future VM is cloned from. A base-wide effect must never be a surprise from a per-VM screen.
+- [x] The "Rebuild base image" toggle maps to the existing `--rebuild` behavior.
+- [x] The tool-set shrink advisory from task 5 points the user at this toggle.
+- [x] `buildConfig` populates `WithDDEV` / `WithGo` / `WithJava` and the rebuild flag from the toggles.
+- [x] `go vet ./...` and `go test ./...` are green, including a test that toggling Java off in create mode produces a `CreateConfig` with `WithJava: false`.
 
 Use your internal Todo tool to track these and keep on track.
 

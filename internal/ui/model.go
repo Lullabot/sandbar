@@ -209,7 +209,17 @@ type model struct {
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
 	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
-	toggleFocus          int    // -1 = focus is in the text inputs; 0 = Claude toggle; 1 = project toggle (only reachable when projectToggleEnabled)
+	toggleFocus          int    // -1 = focus is in the text inputs; index into m.toggles() otherwise
+
+	// Create-mode tool-set + rebuild toggles (defaults set in openForm). The
+	// tool toggles configure the SHARED base image, not this one VM — see
+	// createToggles' help text. toolRebuild carries the same intent as
+	// `sand create --rebuild` (provision.CreateOptions.Rebuild), the only way to
+	// actually remove a de-selected tool (Ansible cannot uninstall).
+	toolDDEV    bool
+	toolGo      bool
+	toolJava    bool
+	toolRebuild bool
 
 	// Progress / streaming. Everything that used to be a single job's state on the
 	// model — its title, back view, output buffer, running flag, error, reader,
