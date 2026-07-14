@@ -26,7 +26,17 @@ tenant or a determined attacker.
 - **Samba is forced off** for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.
 - **`sand` does not provision a Claude Code credential.** You log in inside
-  the VM yourself; no host-side Claude Code token is copied in.
+  the VM yourself; no host-side Claude Code token is copied in. See
+  [Logging into Claude Code](../getting-started/first-vm.md#logging-into-claude-code).
+- **Claude Code runs with permission prompts skipped.** The provisioned
+  settings set `skipDangerousModePermissionPrompt: true` and alias `claude`
+  to `claude --dangerously-skip-permissions`, so Claude Code operates
+  without interactive approval prompts. This is deliberate, not an
+  oversight: it's appropriate specifically because the VM is ephemeral and
+  isolated, and can be torn down and reprovisioned at any time.
+- **Remote control is on by default** (`remoteControlAtStartup: true` in the
+  provisioned settings), so you can drive and monitor a session from the
+  Claude app once you've logged in inside the VM.
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in

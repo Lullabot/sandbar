@@ -13,6 +13,11 @@ two halves that share one repo:
 - **An Ansible provisioner** (`site.yml`, `roles/…`, `group_vars/`) that
   configures a VM once it boots. The Go side embeds and runs it.
 
+User-facing documentation lives in a published MkDocs Material site
+(`docs/`, `mkdocs.yml` at the repo root) — see "Docs" under Build, run,
+format below. `README.md` is a short landing page that points at the site;
+it is not where prose belongs.
+
 ### Go package layout (`internal/`)
 
 - `lima` — typed wrapper over the `limactl` CLI. All subprocess execution goes
@@ -40,6 +45,20 @@ go vet ./...
 ```
 
 There is no Makefile.
+
+## Docs
+
+The documentation site (`docs/`, `mkdocs.yml`) is built with MkDocs
+Material, invoked through [`uv`](https://docs.astral.sh/uv/)'s `uvx` — no
+global Python, no virtualenv, no Node toolchain:
+
+```
+uvx --with-requirements docs/requirements.txt mkdocs serve          # live preview
+uvx --with-requirements docs/requirements.txt mkdocs build --strict # check (CI gate on PRs)
+```
+
+`--strict` fails the build on any broken link or a `nav:` entry pointing at
+a missing page. Run it locally before pushing a docs change.
 
 ## Testing
 
@@ -89,6 +108,12 @@ Three jobs:
 
 **Triggers:** `push` only on `main`, plus `pull_request` and
 `workflow_dispatch`. A plain feature-branch push therefore runs **no** CI.
+
+A separate workflow, `.github/workflows/docs.yml`, covers the docs site: a
+`mkdocs build --strict` job on every `pull_request`, and on `push` to `main`
+or a release tag (`v*`), a `mike deploy` that commits the built site to the
+`gh-pages` branch (`push`-to-branch, not the OIDC `actions/deploy-pages`
+flow). A release tag additionally moves the `latest` alias.
 
 To validate a branch before a PR exists, dispatch it:
 

@@ -54,3 +54,26 @@ its first run, but the site returns a 404 until this setting is switched —
 automation cannot flip it, since it requires repository admin access. This
 is the one thing every future maintainer needs to know to unblock a fresh
 fork or a repository transfer.
+
+## One-time human prerequisites
+
+Before the *first* release can run, a repository admin has to do a few
+things by hand — none of this is created by CI:
+
+1. Create the `lullabot/homebrew-sandbar` repository. It has to exist before
+   GoReleaser's first `brews:` push.
+2. Create a dedicated org GitHub App with `Contents: write`, installed only
+   on `lullabot/homebrew-sandbar`, and set its App ID as the
+   `HOMEBREW_TAP_APP_ID` repository variable and its private key as the
+   `HOMEBREW_TAP_APP_PRIVATE_KEY` secret on **this** repo. GoReleaser mints a
+   short-lived, tap-scoped token from that App at release time — no
+   long-lived PAT sits in the repo's secrets.
+3. Install the org release-please App on this repo (`contents: write`,
+   `pull-requests: write`) and set its `RELEASE_PLEASE_APP_ID` variable and
+   `RELEASE_PLEASE_PRIVATE_KEY` secret. release-please authenticates as this
+   App — not the default `GITHUB_TOKEN` — specifically so the release PR it
+   opens is able to trigger the test workflow; events authored with
+   `GITHUB_TOKEN` don't trigger other workflows.
+
+See `.github/workflows/release-please.yml` for exactly where each
+credential is consumed.

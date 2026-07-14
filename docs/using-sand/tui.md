@@ -37,7 +37,7 @@ These act on the board itself, regardless of which tile is focused.
 | `enter` (on the ghost tile) | Create a new VM |
 | `n` | Create a new VM |
 | `/` | Search / filter tiles by name |
-| `X` | Stop all VMs |
+| `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. An unmanaged Lima instance or a base image is never touched, even if it's running, so an instance you use for unrelated work is safe. |
 | `?` | Show the keys screen |
 | `q` | Quit |
 
@@ -67,6 +67,36 @@ changes meaning under your fingers. Download deliberately does **not** use
 
 For the full set of `sand` subcommands and flags (including `sand shell`),
 see the [CLI Reference](cli-reference.md).
+
+## Resetting a VM
+
+Pressing `R` on a managed tile opens the create form again, titled *Reset
+VM*, pre-filled with that VM's recorded settings. `Name` is locked; every
+other field — CPUs, memory, disk, hostname, git identity, clone URL — is
+editable, so a reset doubles as the way to resize a VM or change its
+identity. Confirm with `ctrl+s` to delete the VM and re-clone it from the
+base image with the edited settings; the new settings are then recorded, so
+the *next* reset defaults to them.
+
+Two **preserve toggles** follow the fields (space/enter flips the focused
+one). Both default off:
+
+- **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`
+  (your Claude Code login and history) across the reset.
+- **Preserve ~/&lt;host&gt;/&lt;org&gt;** — named for the exact directory it
+  protects, e.g. `Preserve ~/github.com/lullabot` — keeps the cloned
+  project's checkout and its `.env`. Enabling it also **skips the re-clone**
+  during the reset's finalize pass, so you don't need to re-supply a clone
+  token to reset a VM that had cloned a private repo (see
+  [Reset and the token](secrets.md#reset-and-the-token)). This toggle is
+  hidden entirely when the VM cloned no project, since there'd be nothing to
+  preserve.
+
+Enabling either toggle copies that data out of the VM to a private host
+temp directory and restores it into the freshly cloned VM, then deletes the
+temporary copy. The form warns that this moves your Claude Code login and
+project token off the VM: **do not preserve if you suspect the VM is
+compromised** — see [Security Model](../reference/security-model.md).
 
 ## Keybinding sources
 
