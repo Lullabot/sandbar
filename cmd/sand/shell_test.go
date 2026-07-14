@@ -2,13 +2,15 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// stubVMLister is a no-limactl vmLister double: it returns a fixed instance
+// stubVMLister is a no-limactl vmGetter double: it answers from a fixed instance
 // list so shellAttachArgv's decision logic (not-running message, unknown-name
 // message) can be exercised without a real limactl (AGENTS.md, hard rule).
 type stubVMLister struct {
@@ -16,7 +18,18 @@ type stubVMLister struct {
 	err error
 }
 
-func (s stubVMLister) List() ([]vm.VM, error) { return s.vms, s.err }
+// Get mirrors lima.Client.Get: the named instance, or ErrNoSuchInstance.
+func (s stubVMLister) Get(name string) (vm.VM, error) {
+	if s.err != nil {
+		return vm.VM{}, s.err
+	}
+	for _, v := range s.vms {
+		if v.Name == name {
+			return v, nil
+		}
+	}
+	return vm.VM{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+}
 
 // TestShellAttachArgvNotRunning verifies task 3's central refusal: a VM that
 // exists but is not Running must produce a clear, actionable message quoting

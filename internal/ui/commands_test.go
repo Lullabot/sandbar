@@ -394,8 +394,13 @@ func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
 // resolved binary path is not guaranteed to be space-free.
 func TestHostTmuxShellCommandQuotesArguments(t *testing.T) {
 	got := hostTmuxShellCommand("/path with spaces/sand", "claude")
-	want := "'/path with spaces/sand' shell 'claude'"
-	if got != want {
-		t.Fatalf("hostTmuxShellCommand = %q, want %q", got, want)
+	if want := "'/path with spaces/sand' shell 'claude'"; !strings.HasPrefix(got, want) {
+		t.Fatalf("hostTmuxShellCommand = %q, want it to start with %q", got, want)
+	}
+	// tmux closes a window the instant its command exits, so a failure would flash
+	// past unread ("a window opened and immediately closed"). The command holds the
+	// window open on a NON-ZERO exit only — a clean detach must still close it.
+	if !strings.Contains(got, "||") || !strings.Contains(got, "read -r _") {
+		t.Fatalf("hostTmuxShellCommand = %q, want it to hold the window open on failure", got)
 	}
 }
