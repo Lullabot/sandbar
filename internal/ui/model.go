@@ -379,8 +379,13 @@ func (m *model) applySize(w, h int) {
 	// UNCLIPPED list, and footerView (model.go) does the actual, honest clip
 	// itself with an ANSI-aware truncation to ContentWidth.
 	m.help.SetWidth(0)
-	m.viewport.SetWidth(m.layout.ContentWidth)
-	m.viewport.SetHeight(m.layout.GridHeight)
+	// The log viewport is rendered INSIDE boxStyle (progressView), whose border and
+	// padding are drawn around it — so the viewport gets the pane's budget MINUS
+	// that chrome. Sized to the full budget it fit nowhere: the box came out
+	// ContentWidth+4 wide, the terminal clipped the overrun, and the box lost its
+	// right-hand border (and, vertically, its bottom one) to the clip.
+	m.viewport.SetWidth(clamp(m.layout.ContentWidth-boxChromeH, minBudget))
+	m.viewport.SetHeight(clamp(m.layout.GridHeight-boxChromeV, minBudget))
 
 	// A resize changes the grid's columns and its visible rows, so the focused tile
 	// can land outside the viewport without the ring moving at all. Re-park the
