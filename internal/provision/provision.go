@@ -121,6 +121,13 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 // base-phase playbook over a shell, and stops the instance (kept as the clone
 // source). Mirrors the original bash provisioner's build_base.
 func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+	return p.buildBase(ctx, cfg, out, newPhaseTimer(out))
+}
+
+// buildBase is BuildBase's implementation, taking a timer so a caller already
+// running a per-phase timed sequence (createVM, Reset) can share one timer and
+// summary across the whole run instead of BuildBase starting its own.
+func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
 	overlay, err := RenderBaseOverlay(cfg, p.PlaybookDir)
 	if err != nil {
 		return fmt.Errorf("render base overlay: %w", err)
@@ -144,16 +151,22 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	}
 
 	step(out, "Building base image %q — downloads Debian and boots once; the first run takes several minutes…", cfg.BaseName)
-	if err := p.Lima.CreateStreaming(ctx, cfg.BaseName, f.Name(), out); err != nil {
+	if err := timer.time("base image creation", func() error {
+		return p.Lima.CreateStreaming(ctx, cfg.BaseName, f.Name(), out)
+	}); err != nil {
 		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
 	}
-	if err := p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out); err != nil {
+	if err := timer.time("base playbook", func() error {
+		return p.runProvision(ctx, cfg.BaseName, "base", cfg.BaseName, cfg, out)
+	}); err != nil {
 		return err
 	}
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
 	// needs an idle source disk.
 	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
-	if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
+	if err := timer.time("base stop", func() error {
+		return p.Lima.StopStreaming(ctx, cfg.BaseName, out)
+	}); err != nil {
 		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
 	}
 
@@ -190,19 +203,28 @@ func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // that guard use CreateVM. Recreate uses createVM directly because it has just
 // force-deleted the target.
 func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
-	if err := p.prepareBaseAndClone(ctx, cfg, out); err != nil {
+	timer := newPhaseTimer(out)
+	if err := p.prepareBaseAndClone(ctx, cfg, out, timer); err != nil {
 		return err
 	}
-	// Size the clone before its first start: the base is built at a small disk
-	// floor, so this grows the disk (and applies cpus/memory) for this VM.
-	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
-		return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
-	}
 	step(out, "Starting %q…", cfg.Name)
-	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-		return fmt.Errorf("start %q: %w", cfg.Name, err)
+	if err := timer.time("clone start", func() error {
+		// Size the clone before its first start: the base is built at a small
+		// disk floor, so this grows the disk (and applies cpus/memory) for this
+		// VM.
+		if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+			return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
+		}
+		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+			return fmt.Errorf("start %q: %w", cfg.Name, err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, out); err != nil {
+	if err := timer.time("finalize playbook", func() error {
+		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, out)
+	}); err != nil {
 		return err
 	}
 
@@ -210,12 +232,18 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 	// apt upgrade may have pulled a new kernel/libraries, and the hostname change
 	// takes full effect on a fresh boot.
 	step(out, "Restarting %q for a clean first boot…", cfg.Name)
-	if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
-		return fmt.Errorf("stop %q: %w", cfg.Name, err)
+	if err := timer.time("bounce", func() error {
+		if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
+			return fmt.Errorf("stop %q: %w", cfg.Name, err)
+		}
+		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+			return fmt.Errorf("restart %q: %w", cfg.Name, err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-		return fmt.Errorf("restart %q: %w", cfg.Name, err)
-	}
+	timer.summary()
 	return nil
 }
 
@@ -240,19 +268,21 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // a writer rebuilds) buys back that minute at the price of lock-upgrade semantics
 // nobody should have to reason about while a VM's disk is being deleted underneath
 // them.
-func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
 	release, err := lockBase(ctx, cfg.BaseName, out)
 	if err != nil {
 		return err // only a cancelled context gets here
 	}
 	defer release()
 
-	if err := p.ensureBaseStopped(ctx, cfg, out); err != nil {
+	if err := p.ensureBaseStopped(ctx, cfg, out, timer); err != nil {
 		return err
 	}
 
 	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
-	if err := p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out); err != nil {
+	if err := timer.time("clone", func() error {
+		return p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out)
+	}); err != nil {
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
 	return nil
@@ -261,7 +291,7 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 // ensureBaseStopped makes sure the base image exists and is stopped — a clone
 // needs an idle source disk. An empty/error status means the instance is
 // absent, so the heavy base build runs; an existing but running base is stopped.
-func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
 	// The caller holds the base lock (prepareBaseAndClone). Everything here is one
 	// atomic decision — read the base's status, then act on that reading — and it must
 	// stay inside that lock. See baselock.go.
@@ -281,7 +311,7 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 
 	switch {
 	case !exists:
-		if err := p.BuildBase(ctx, cfg, out); err != nil {
+		if err := p.buildBase(ctx, cfg, out, timer); err != nil {
 			return err
 		}
 	case status != "Stopped":
@@ -394,8 +424,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
 	}
 
-	// 3. Recreate sized from the base image.
-	if err := p.prepareBaseAndClone(ctx, cfg, out); err != nil {
+	// 3. Recreate sized from the base image. Reset does not surface a per-phase
+	// timing summary (only "sand create" does; see phaseTimer's doc comment) —
+	// prepareBaseAndClone still needs a timer to share its signature with
+	// createVM, so give it one whose readings are simply discarded here.
+	if err := p.prepareBaseAndClone(ctx, cfg, out, newPhaseTimer(out)); err != nil {
 		return wrap(err)
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {

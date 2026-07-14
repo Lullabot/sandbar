@@ -896,7 +896,7 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = p.prepareBaseAndClone(context.Background(), vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, io.Discard)
+			errs[i] = p.prepareBaseAndClone(context.Background(), vm.CreateConfig{Name: names[i], BaseName: "claude-base"}, io.Discard, newPhaseTimer(io.Discard))
 		}(i)
 	}
 	wg.Wait()
@@ -968,7 +968,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 		go func(name string) {
 			defer wg.Done()
 			_ = p.prepareBaseAndClone(context.Background(),
-				vm.CreateConfig{Name: name, BaseName: "claude-base"}, io.Discard)
+				vm.CreateConfig{Name: name, BaseName: "claude-base"}, io.Discard, newPhaseTimer(io.Discard))
 		}(name)
 	}
 	wg.Wait()
