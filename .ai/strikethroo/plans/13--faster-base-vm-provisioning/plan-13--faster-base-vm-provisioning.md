@@ -419,6 +419,86 @@ Every stage keeps the existing contracts intact: extra-vars travel over stdin an
 - **Tier 3 (publishing a pre-provisioned golden image) is explicitly out of scope.** Nothing here should download, host, or publish a prebuilt image. The work in this plan is nonetheless the right precursor: a leaner, single-transaction, cache-backed playbook is exactly what a published image would run on top of, and the Tier 0 instrumentation is what would justify Tier 3 later.
 - The diagnosis that motivated this plan is that **the bottleneck is dpkg and serialized apt work, not bandwidth**. If the Tier 0 histogram contradicts that — for example if Lima boot or the Debian image download dominates — the ordering of Tier 1's stages should be revisited before proceeding, rather than pressing ahead with optimizations the data does not support.
 
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[01: Per-phase timings + profile_tasks] --> T2[02: ansible-core, drop collections]
+    T1 --> T4[04: Content-hash version stamp]
+    T2 --> T3[03: One apt transaction + dpkg tuning]
+    T4 --> T7[07: In-place re-apply + --rebuild under lock]
+    T3 --> T5[05: Configurable base tool-set]
+    T4 --> T5
+    T7 --> T8[08: Base self-refresh; clones skip apt upgrade]
+    T3 --> T8
+    T7 --> T10[10: Tier 2 apt cache + clone mount strip]
+    T5 --> T6[06: Form tool-set + rebuild toggles]
+    T8 --> T9[09: Conditional bounce, tmux-safe]
+    T8 --> T11[11: CI cold + reuse paths]
+    T5 --> T11
+    T6 --> T12[12: Documentation + code comments]
+    T9 --> T12
+    T10 --> T12
+    T11 --> T13[13: Self Validation + measurement]
+    T12 --> T13
+```
+
+Verified acyclic. Every task appears in exactly one phase below, and no task runs before its dependencies.
+
+### ✅ Phase 1: Measurement first
+**Parallel Tasks:**
+- ✔️ Task 01: Per-phase wall-clock timings + `profile_tasks` (no dependencies) — `completed`
+
+*Gate: this phase must land before any optimization. It is also the last moment `profile_tasks` works for free — the next phase removes the collection bundle that vendors it.*
+
+### Phase 2: Independent foundations
+**Parallel Tasks:**
+- Task 02: `ansible-core` bootstrap, drop both collection uses (depends on: 01)
+- Task 04: Content-hash version stamp (depends on: 01)
+
+### Phase 3: Build on the foundations
+**Parallel Tasks:**
+- Task 03: Collapse six apt passes into one; dpkg tuning (depends on: 02)
+- Task 07: In-place base re-apply + move `--rebuild`'s destroy under the lock (depends on: 04)
+
+### Phase 4: Tool-set, freshness, cache
+**Parallel Tasks:**
+- Task 05: Configurable base-image tool-set (depends on: 03, 04)
+- Task 08: Base self-refresh at 30d; clones skip `apt upgrade` (depends on: 07, 03)
+- Task 10: Tier 2 apt cache mount + **clone-side strip** (depends on: 07)
+
+### Phase 5: Surfaces and gates
+**Parallel Tasks:**
+- Task 06: Form tool-set toggles + "Rebuild base image" toggle (depends on: 05)
+- Task 09: Conditional bounce; tmux-safe `Reset` (depends on: 08)
+- Task 11: CI covers the cold `--rebuild` build **and** the reuse path (depends on: 08, 05)
+
+### Phase 6: Documentation
+**Parallel Tasks:**
+- Task 12: README / README-sand / AGENTS + load-bearing code comments (depends on: 06, 09, 10)
+
+*Runs late by design: several tasks have empirical decision points (does the macOS mount work, or did Tier 2 fall back to the tarball? does the hostname actually need a bounce?). Document what shipped, not what was planned.*
+
+### Phase 7: Prove it
+**Parallel Tasks:**
+- Task 13: Execute the plan's Self Validation; record before/after numbers (depends on: 11, 12)
+
+### Post-phase Actions
+
+- After Phase 1: capture the cold-build and warm-create baseline. Every later claim is measured against it.
+- After Phase 3: the concurrency tests from task 07 are the gate — no phase 4 work merges on a racy base lock.
+- After Phase 4: task 10's clone-strip test must be shown to **fail** when the strip is removed. An assert-only-green security test is not a control.
+- After Phase 7: if Tier 2's marginal win is negligible, record that finding rather than papering over it.
+
+### Execution Summary
+- Total Phases: 7
+- Total Tasks: 13
+
 ### Refinement change log
 
 - **2026-07-13 (second pass)** — Rebased onto `origin/main` (`ae49566`, which brought release 0.3.0 and the persistent-tmux shell). The provisioning surface this plan targets was untouched by those commits, so every cost claim still holds — but pressure-testing the plan against the code turned up **three defects in the plan itself**, two of them load-bearing:
