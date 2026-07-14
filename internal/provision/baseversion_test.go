@@ -338,11 +338,67 @@ func TestBaseStale_PassesConfigToolsetKey(t *testing.T) {
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
 	cfg := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: false}
-	if _, stale := p.baseStale(cfg, io.Discard); !stale {
-		t.Fatal("a toolset that differs from the stamp must be stale")
+	if _, stale := p.baseStale(cfg, io.Discard); stale {
+		t.Fatal("de-selecting a tool must NOT make the base stale: the base still CONTAINS it " +
+			"(a converge-in-place cannot uninstall), so re-applying changes nothing. Calling it " +
+			"stale is what made alternating selections re-converge the shared base forever.")
 	}
 	if want := cfg.ToolsetKey(); gotToolset != want {
 		t.Errorf("baseStale passed toolset %q to playbookVersionFn, want cfg.ToolsetKey() = %q", gotToolset, want)
+	}
+}
+
+// TestBaseStale_NewlySelectedToolIsStale is the other half of the tool-set
+// staleness rule: de-selecting is a no-op (above), but SELECTING a tool the base
+// does not carry must still mark it stale, or the tool would never be installed.
+func TestBaseStale_NewlySelectedToolIsStale(t *testing.T) {
+	origVer, origRead := playbookVersionFn, readBaseVersionFn
+	playbookVersionFn = func(_ string, toolset string) (string, error) {
+		return "v2:deadbeef:" + toolset, nil
+	}
+	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev" } // no go, no java
+	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
+
+	p := &Provisioner{PlaybookDir: "/playbook"}
+	cfg := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: false}
+	want, stale := p.baseStale(cfg, io.Discard)
+	if !stale {
+		t.Fatal("selecting a tool the base does not carry must be stale, or it never gets installed")
+	}
+	// And the version it converges TO records the union of what the base already
+	// has and what was asked for — what the base will actually contain afterwards.
+	if want != "v2:deadbeef:ddev+go" {
+		t.Errorf("target stamp = %q, want the union %q", want, "v2:deadbeef:ddev+go")
+	}
+}
+
+// TestBaseStale_ReselectingAfterDeselectDoesNotPingPong is the regression this
+// whole union scheme exists for. With one shared base and additive convergence,
+// stamping only the REQUESTED tool-set makes each alternating create disagree
+// with the last, so both re-converge forever. Walk that exact sequence and prove
+// it settles instead.
+func TestBaseStale_ReselectingAfterDeselectDoesNotPingPong(t *testing.T) {
+	stamp := "v2:deadbeef:ddev+go+java" // base built with everything
+	origVer, origRead := playbookVersionFn, readBaseVersionFn
+	playbookVersionFn = func(_ string, toolset string) (string, error) {
+		return "v2:deadbeef:" + toolset, nil
+	}
+	readBaseVersionFn = func(string) string { return stamp }
+	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
+
+	p := &Provisioner{PlaybookDir: "/playbook"}
+	noGo := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: false, WithJava: true}
+	all := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: true}
+
+	// `sand create --with-go=false`: go stays installed, nothing to converge.
+	if _, stale := p.baseStale(noGo, io.Discard); stale {
+		t.Fatal("--with-go=false against a base that already has go must not re-converge it")
+	}
+	// A plain create right after it must also be a no-op — the base never lost go,
+	// so there is nothing to add back. Before the union scheme this flipped the
+	// stamp and each create re-applied the base for minutes, forever.
+	if _, stale := p.baseStale(all, io.Discard); stale {
+		t.Fatal("a default create following a --with-go=false create must not re-converge the base")
 	}
 }
 
@@ -438,7 +494,7 @@ func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
 	before := time.Now()
-	if err := writeBaseVersion("claude-base", "v2:deadbeef:ddev+go+java"); err != nil {
+	if err := writeBaseVersion("claude-base", "v2:deadbeef:ddev+go+java", time.Now()); err != nil {
 		t.Fatalf("writeBaseVersion: %v", err)
 	}
 	after := time.Now()

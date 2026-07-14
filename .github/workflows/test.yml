@@ -103,6 +103,11 @@ jobs:
       # dev VM. Modest resources to fit the hosted runner (4 vCPU / 16 GB).
       - name: Create a VM (cold — force a from-scratch base build)
         run: |
+          # pipefail, or `| tee` swallows the exit status and a failed provision
+          # sails past this step (GitHub's default shell is `bash -e`, not `-eo
+          # pipefail`). The whole point of this job is to go red when the base
+          # build breaks; without this it goes red later, somewhere confusing.
+          set -o pipefail
           ./sand create --rebuild \
             --name claude-ci \
             --git-name "CI Bot" --git-email ci@example.com \
@@ -173,6 +178,8 @@ jobs:
       # cold-build branch.
       - name: Create a second VM (warm — must re-apply the base in place, not rebuild it)
         run: |
+          # See the cold create above: `| tee` without pipefail hides a failure.
+          set -o pipefail
           ./sand create \
             --name claude-ci-warm \
             --git-name "CI Bot" --git-email ci@example.com \

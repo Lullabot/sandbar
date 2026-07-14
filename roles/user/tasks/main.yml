@@ -70,6 +70,20 @@
     - user_github_keys_url | length > 0
     - provision_phase | default('full') != 'finalize'
 
+# Read the fetched file into a variable rather than reaching for it from the
+# loop. Ansible templates a task's `loop` BEFORE it evaluates the task's `when`,
+# so a file lookup in the loop expression runs even in the finalize phase — where
+# the fetch above is skipped and the file does not exist — and the whole play
+# dies with "could not locate file in lookup". Keying the loop off `is defined`
+# short-circuits instead: when the slurp is skipped, there is nothing to iterate.
+- name: Read the fetched authorized_keys
+  ansible.builtin.slurp:
+    src: "/tmp/{{ user_name }}-github-keys"
+  register: _github_keys
+  when:
+    - user_github_keys_url | length > 0
+    - provision_phase | default('full') != 'finalize'
+
 # File mode and ownership are load-bearing: sshd ignores authorized_keys that
 # is group/world-writable or not owned by the user.
 - name: Install fetched authorized_keys
@@ -80,10 +94,8 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0600"
-  loop: "{{ (lookup('ansible.builtin.file', '/tmp/' ~ user_name ~ '-github-keys').splitlines()) if (user_github_keys_url | length > 0) else [] }}"
-  when:
-    - user_github_keys_url | length > 0
-    - provision_phase | default('full') != 'finalize'
+  loop: "{{ (_github_keys.content | b64decode).splitlines() if (_github_keys.content is defined) else [] }}"
+  when: _github_keys.content is defined
 
 - name: Remove temporary GitHub keys file
   ansible.builtin.file:
