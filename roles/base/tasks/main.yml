@@ -37,11 +37,16 @@
   register: _locale_line
   when: provision_phase | default('full') != 'finalize'
 
+# Deliberately NOT gated on `_locale_line.changed`. The line edit and the compile
+# are two steps, and a run interrupted between them leaves the line present but no
+# compiled locale — after which `changed` is forever false and the locale would
+# never be generated, while /etc/default/locale below still names it. Every shell
+# in the base and in every clone from it then falls back to C with a `setlocale`
+# warning and nothing in the provisioning output says why. locale-gen is
+# idempotent and cheap, so just run it.
 - name: Generate the locale
   ansible.builtin.command: locale-gen
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - _locale_line.changed
+  when: provision_phase | default('full') != 'finalize'
   changed_when: _locale_line.changed
 
 - name: Set default locale
@@ -271,10 +276,13 @@
   notify: Reload sshd
   when: provision_phase | default('full') != 'finalize'
 
-# Removed only once the base build itself is finished (phase == 'base'), so
-# clones get stock dpkg write durability.
+# Mirror the write guard exactly (`!= 'finalize'`, i.e. both 'base' and 'full').
+# Gating the removal on `== 'base'` alone left force-unsafe-io installed forever
+# on a host provisioned directly with `ansible-playbook -i inventory site.yml`,
+# which runs in the 'full' phase — that host writes the drop-in but never removed
+# it, so every later apt run on a long-lived machine ran dpkg without fsync.
 - name: Restore safe dpkg IO before this image is used as a clone source
   ansible.builtin.file:
     path: /etc/dpkg/dpkg.cfg.d/99-sand-base-speed
     state: absent
-  when: provision_phase | default('full') == 'base'
+  when: provision_phase | default('full') != 'finalize'

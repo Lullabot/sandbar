@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -92,7 +93,21 @@ or 'sand create' to make one).
 		if errors.As(err, &exitErr) {
 			// Propagate the child's real exit code rather than collapsing every
 			// failure to main.go's blanket os.Exit(1).
-			os.Exit(exitErr.ExitCode())
+			//
+			// A child killed by a signal (the terminal window closes while the
+			// tmux client is attached, so limactl takes a SIGHUP/SIGTERM) has no
+			// exit code: ExitCode() returns -1, and os.Exit(-1) is out of range
+			// and surfaces as a bare 255. Report the shell convention 128+N so a
+			// caller can tell "the terminal went away" from a real failure.
+			code := exitErr.ExitCode()
+			if code < 0 {
+				if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+					code = 128 + int(ws.Signal())
+				} else {
+					code = 1
+				}
+			}
+			os.Exit(code)
 		}
 		return fmt.Errorf("sand shell: %w", err)
 	}

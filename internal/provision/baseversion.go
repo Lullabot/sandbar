@@ -219,20 +219,27 @@ func readBaseBuiltAt(baseName string) (time.Time, bool) {
 }
 
 // writeBaseVersion records the playbook version a freshly built, re-applied, or
-// refreshed base was made from, together with the moment it was written. Every
-// call site (buildBase, reapplyBase) represents "this base's content is current
-// as of right now", so stamping time.Now() here — rather than threading a
-// timestamp argument through every caller — is the one place that can never
-// disagree with what was actually just done.
+// refreshed base was made from, together with builtAt — the moment its PACKAGES
+// were last known current, which is the clock baseNeedsRefresh measures the
+// 30-day apt-upgrade age against.
+//
+// builtAt is a parameter rather than an internal time.Now() precisely because
+// those two things are not the same event. A content-only re-apply (a playbook
+// edit, aptUpgrade=false) updates what the base CONTAINS without upgrading a
+// single package, so stamping "now" for it would silently restart the apt clock.
+// Anyone editing the playbook more often than every 30 days would then reset the
+// clock on every create, baseNeedsRefresh would never fire, and — since finalize
+// no longer runs apt upgrade — no VM would ever receive a security update again.
+// reapplyBase therefore carries the PRIOR builtAt forward on a content-only run.
 //
 // A write failure is non-fatal to the build: a missing/stale stamp just forces
 // a rebuild or refresh on the next create.
-func writeBaseVersion(baseName, version string) error {
+func writeBaseVersion(baseName, version string, builtAt time.Time) error {
 	path := baseVersionPath(baseName)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	content := version + "\n" + time.Now().UTC().Format(time.RFC3339) + "\n"
+	content := version + "\n" + builtAt.UTC().Format(time.RFC3339) + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
@@ -314,4 +321,74 @@ func shrunkTools(haveStamp, want string) []string {
 		return nil
 	}
 	return shrunk(stamped, parseToolset(want))
+}
+
+// hashFromStamp extracts the playbook content hash from a v2 stamp
+// ("v2:<hash>:<toolset>"), or "" for anything that is not one.
+func hashFromStamp(stamp string) string {
+	if !strings.HasPrefix(stamp, playbookVersionPrefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(stamp, playbookVersionPrefix)
+	if i := strings.Index(rest, ":"); i >= 0 {
+		return rest[:i]
+	}
+	return rest
+}
+
+// toolsetKey renders a tool set back into the canonical string
+// vm.CreateConfig.ToolsetKey() produces: the enabled tools joined by "+" in
+// sorted order, or "none" when the set is empty. It is the inverse of
+// parseToolset, and must agree with vm.CreateConfig.ToolsetKey() exactly or a
+// base would be perpetually stale against its own stamp.
+func toolsetKey(set map[string]bool) string {
+	var on []string
+	for tool, enabled := range set {
+		if enabled {
+			on = append(on, tool)
+		}
+	}
+	if len(on) == 0 {
+		return "none"
+	}
+	sort.Strings(on)
+	return strings.Join(on, "+")
+}
+
+// mergeToolsetVersion returns the stamp a converged-in-place base will
+// TRUTHFULLY carry: the current playbook hash (from want), with the UNION of the
+// tools the base is already stamped with (have) and the tools this create asks
+// for.
+//
+// The union — rather than simply want's toolset — is what makes a single shared
+// base stable. There is exactly one base per user, and a converge-in-place can
+// only ADD: Ansible will not uninstall a package whose task no longer applies
+// (see shrunkTools above). Stamping only the requested set would therefore claim
+// the base had LOST tools it demonstrably still has, so the next create with the
+// other selection would see a mismatch, converge again, and stamp it back the
+// other way — an unbreakable ping-pong in which alternating `--with-go=false`
+// and default creates each pay a multi-minute re-apply, forever, while still
+// getting Go anyway. Recording what the base actually CONTAINS ends that: a
+// de-selected tool stays installed (ensureBaseStopped warns, and only a
+// --rebuild truly removes it), while a NEWLY selected tool is still absent from
+// the union and so still registers as stale and still gets installed.
+//
+// A from-scratch build does not go through here: buildBase stamps exactly the
+// requested selection, because a fresh base really does contain only that.
+func mergeToolsetVersion(want, have string) string {
+	// Only a v2 stamp has a toolset suffix to merge. Anything else — "" from a
+	// version-lookup error, or a version in some other scheme — is passed through
+	// untouched rather than being re-spelled as a v2 stamp with an invented empty
+	// hash, which would make the base perpetually stale against a version it never
+	// claimed to have.
+	if !strings.HasPrefix(want, playbookVersionPrefix) {
+		return want
+	}
+	merged := parseToolset(toolsetFromStamp(want))
+	for tool, enabled := range parseToolset(toolsetFromStamp(have)) {
+		if enabled {
+			merged[tool] = true
+		}
+	}
+	return playbookVersionPrefix + hashFromStamp(want) + ":" + toolsetKey(merged)
 }

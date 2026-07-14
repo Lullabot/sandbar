@@ -243,6 +243,9 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
+	m.resetWithDDEV = cfg.WithDDEV
+	m.resetWithGo = cfg.WithGo
+	m.resetWithJava = cfg.WithJava
 	m.preserveClaude = false
 	m.preserveProject = false
 	orgRel, ok := provision.OrgRelDir(cfg.CloneURL)
@@ -469,9 +472,17 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.DockerProxyHost = m.field(fDockerProxyHost)
 	cfg.CloneURL = m.field(fCloneURL)
 	cfg.CloneToken = m.field(fCloneToken)
-	if !m.resetMode {
-		// Reset mode has no tool-set toggles (it reuses the VM's recorded
-		// config as-is); only create mode's toggles drive the tool-set.
+	if m.resetMode {
+		// Reset mode shows no tool-set toggles, so it has to REPLAY the VM's
+		// recorded selection (captured in openResetForm). cfg starts life as
+		// DefaultCreateConfig(), whose tools are all on; leaving them there would
+		// make every reset request the full tool-set, mark the SHARED base stale
+		// against its stamp, and re-converge it — installing the very Go/Java the
+		// user opted out of, silently, from a form that never mentions them.
+		cfg.WithDDEV = m.resetWithDDEV
+		cfg.WithGo = m.resetWithGo
+		cfg.WithJava = m.resetWithJava
+	} else {
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava

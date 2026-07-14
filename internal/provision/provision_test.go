@@ -396,7 +396,7 @@ func stubBaseVersion(t *testing.T, current string, currentErr error, stamped map
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return current, currentErr }
 	readBaseVersionFn = func(base string) string { return stamped[base] }
-	writeBaseVersionFn = func(base, v string) error { written[base] = v; return nil }
+	writeBaseVersionFn = func(base, v string, _ time.Time) error { written[base] = v; return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -1063,7 +1063,7 @@ func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
 	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string) error { return nil }
+	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -1082,7 +1082,7 @@ func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
 	// reapplyBase's stamp write is what a real refresh does to prove it happened;
 	// model it here by advancing builtAt to now, exactly as the real
 	// writeBaseVersion (RFC3339 "now") would.
-	writeBaseVersionFn = func(string, string) error {
+	writeBaseVersionFn = func(string, string, time.Time) error {
 		bmu.Lock()
 		builtAt = time.Now()
 		bmu.Unlock()
@@ -1811,7 +1811,7 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
 	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string) error { return nil }
+	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -1875,7 +1875,7 @@ func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
 		defer vmu.Unlock()
 		return stamped
 	}
-	writeBaseVersionFn = func(_, v string) error {
+	writeBaseVersionFn = func(_, v string, _ time.Time) error {
 		vmu.Lock()
 		stamped = v
 		vmu.Unlock()
@@ -1940,7 +1940,7 @@ func TestARebuildCannotDestroyTheBaseAnotherCreateIsCloning(t *testing.T) {
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
 	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string) error { return nil }
+	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -2026,7 +2026,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 		defer vmu.Unlock()
 		return stamped
 	}
-	writeBaseVersionFn = func(_, v string) error {
+	writeBaseVersionFn = func(_, v string, _ time.Time) error {
 		vmu.Lock()
 		stamped = v
 		version = "v2" // the tree changes the moment the base is built
@@ -2053,5 +2053,47 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 	defer r.mu.Unlock()
 	if r.deletedDuringClone {
 		t.Fatalf("the base was DELETED while another create was cloning from it — the lock did not cover the clone (calls: %v)", r.seq)
+	}
+}
+
+// TestReapplyBase_ContentOnlyReapplyPreservesTheAptClock pins the distinction
+// between the two things the stamp records: WHAT the base contains (the version)
+// and WHEN its packages were last known current (BuiltAt, the clock
+// baseNeedsRefresh measures the 30-day apt-upgrade age against).
+//
+// A playbook edit converges content and upgrades nothing, so it must carry the
+// prior BuiltAt forward. Stamping "now" for it silently restarts the apt clock —
+// and since a developer (or CI) touches the playbook far more often than every 30
+// days, the refresh would never fire. With finalize's apt upgrade gone, that means
+// no VM ever receives a security update again. This is the guard for that.
+func TestReapplyBase_ContentOnlyReapplyPreservesTheAptClock(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	var gotBuiltAt time.Time
+	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+	playbookVersionFn = func(string, string) (string, error) { return "v2:newsha:ddev+go+java", nil }
+	readBaseVersionFn = func(string) string { return "v2:oldsha:ddev+go+java" } // stale CONTENT
+	writeBaseVersionFn = func(_, _ string, builtAt time.Time) error { gotBuiltAt = builtAt; return nil }
+	t.Cleanup(func() {
+		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
+	})
+
+	// The base's packages were last refreshed 10 days ago: stale content, but the
+	// apt clock has NOT run out (baseMaxAge is 30 days), so this re-apply upgrades
+	// nothing and must leave the clock alone.
+	tenDaysAgo := time.Now().Add(-10 * 24 * time.Hour)
+	origBuiltAt := readBaseBuiltAtFn
+	readBaseBuiltAtFn = func(string) (time.Time, bool) { return tenDaysAgo, true }
+	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
+	stubConvergeableBase(t, "/playbook")
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	if !gotBuiltAt.Equal(tenDaysAgo) {
+		t.Errorf("a content-only re-apply stamped BuiltAt %v, want the prior %v carried forward.\n"+
+			"Restarting the clock here means the 30-day apt refresh never fires on an "+
+			"actively-edited playbook, and no VM ever gets a security update.", gotBuiltAt, tenDaysAgo)
 	}
 }

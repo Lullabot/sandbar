@@ -202,9 +202,17 @@ type model struct {
 
 	// Reset mode reuses the create form to reset a managed VM: the Name is locked
 	// to the target and two preserve toggles follow the inputs.
-	resetMode            bool
-	resetName            string // locked Name when in reset mode
-	resetBaseName        string // base image the reset clones from
+	resetMode     bool
+	resetName     string // locked Name when in reset mode
+	resetBaseName string // base image the reset clones from
+	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
+	// form shows no tool toggles, so without carrying these the rebuilt config
+	// would fall back to DefaultCreateConfig()'s all-on selection and a reset
+	// would silently re-converge the SHARED base back to the full tool-set —
+	// installing a Go toolchain and a JDK the user had explicitly opted out of.
+	resetWithDDEV        bool
+	resetWithGo          bool
+	resetWithJava        bool
 	preserveClaude       bool
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)

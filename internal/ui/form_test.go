@@ -275,3 +275,39 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 		t.Fatalf("wrap after the last toggle: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fName", m.toggleFocus, m.focusIdx)
 	}
 }
+
+// TestResetReplaysTheRecordedToolset pins the tool-set through a reset. The reset
+// form deliberately shows no tool toggles, so buildConfig must REPLAY the VM's
+// recorded selection. It used to just leave cfg at DefaultCreateConfig()'s
+// all-on values, which meant resetting a VM created with --with-go=false silently
+// asked for the full tool-set — marking the SHARED base stale against its stamp
+// and re-converging it, installing a Go toolchain and a JDK the user had
+// explicitly opted out of, from a form that never mentions them.
+func TestResetReplaysTheRecordedToolset(t *testing.T) {
+	m := newTestModel(t)
+	recorded := vm.CreateConfig{
+		Name:     "vm1",
+		GitName:  "A",
+		GitEmail: "a@example.com",
+		CPUs:     4,
+		Memory:   "8GiB",
+		Disk:     "20GiB",
+		WithDDEV: true,
+		WithGo:   false, // explicitly opted out
+		WithJava: false, // explicitly opted out
+	}
+	m.openResetForm("vm1", recorded)
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if cfg.WithDDEV != true || cfg.WithGo != false || cfg.WithJava != false {
+		t.Errorf("reset rebuilt the tool-set as ddev=%v go=%v java=%v, want the VM's recorded ddev=true go=false java=false.\n"+
+			"A reset must not re-converge the shared base back to the full tool-set.",
+			cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+	}
+	if got, want := cfg.ToolsetKey(), "ddev"; got != want {
+		t.Errorf("ToolsetKey() = %q, want %q", got, want)
+	}
+}

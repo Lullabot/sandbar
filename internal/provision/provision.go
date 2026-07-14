@@ -228,7 +228,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// time, so neither branch here is fatal to the build.
 	if v, err := playbookVersionFn(p.PlaybookDir, cfg.ToolsetKey()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
-	} else if err := writeBaseVersionFn(cfg.BaseName, v); err != nil {
+	} else if err := writeBaseVersionFn(cfg.BaseName, v, time.Now()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
 	}
 	return nil
@@ -452,6 +452,15 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 	// stamped with. The check is host-side (a content hash and a stamp file), adding
 	// no limactl calls to the common up-to-date path.
 	if exists {
+		// Report retained tools regardless of which branch below runs. The base is
+		// shared and a converge-in-place cannot uninstall (see mergeToolsetVersion),
+		// so a de-selected tool stays on the base — and therefore in this clone —
+		// whether or not anything else about the base is stale. Warning only on the
+		// converge branch would mean the plain `--with-go=false` case, where nothing
+		// else changed and nothing is re-applied, said nothing at all.
+		if lost := shrunkTools(readBaseVersionFn(cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
+			step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sand create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
+		}
 		if want, stale := p.baseStale(cfg, out); stale {
 			// Ansible is idempotent, so a playbook edit only needs its DELTA applied:
 			// converge the existing base in place instead of paying for a Debian
@@ -466,15 +475,6 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 			// which is the behaviour that existed before the re-apply did.
 			convergeable, why := p.baseConvergeable(cfg)
 			if convergeable {
-				// A converge-in-place applies the DELTA — additions only. If the new
-				// selection is a strict subset of what the base was stamped with, the
-				// de-selected tool's package stays installed: Ansible cannot converge a
-				// removal (see the doc comment above shrunkTools in baseversion.go). A
-				// full rebuild does not have this problem (it reinstalls fresh from the
-				// current selection), so the warning belongs only on this branch.
-				if lost := shrunkTools(readBaseVersionFn(cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
-					step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sand create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
-				}
 				return p.reapplyBase(ctx, cfg, want, status, out, timer, false)
 			}
 			step(out, "Base image %q cannot be updated in place (%s); rebuilding it from scratch…", cfg.BaseName, why)
@@ -593,7 +593,20 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 	// which is now correct whatever the stop does next. A write failure is not fatal
 	// to the create — an unstamped base simply reads as stale and is converged again
 	// next time, the same posture buildBase takes.
-	if err := writeBaseVersionFn(cfg.BaseName, version); err != nil {
+	//
+	// The stamp's timestamp is the apt-age clock (baseNeedsRefresh), NOT "when did
+	// we last touch the base". A content-only re-apply upgrades no packages, so it
+	// carries the prior build time forward: stamping "now" here would restart the
+	// 30-day clock on every playbook edit, and a base edited more often than that
+	// would never be upgraded at all — which, with finalize's apt upgrade gone, means
+	// no VM would ever get a security update. Only the aptUpgrade run resets it.
+	builtAt := time.Now()
+	if !aptUpgrade {
+		if prior, ok := readBaseBuiltAtFn(cfg.BaseName); ok {
+			builtAt = prior
+		}
+	}
+	if err := writeBaseVersionFn(cfg.BaseName, version, builtAt); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will be re-applied again on the next create.", err)
 	}
 
@@ -626,6 +639,14 @@ func (p *Provisioner) baseStale(cfg vm.CreateConfig, out io.Writer) (version str
 		return "", false
 	}
 	have := readBaseVersionFn(baseName)
+
+	// Compare against what the base will actually CONTAIN once converged — the
+	// current playbook hash plus the union of its existing and requested tools —
+	// not against the requested selection alone. A converge-in-place only adds, so
+	// a bare de-selection changes nothing on the base and must not read as stale;
+	// treating it as stale is what made alternating selections re-converge the one
+	// shared base forever (mergeToolsetVersion explains the ping-pong in full).
+	want = mergeToolsetVersion(want, have)
 	if have == want {
 		return want, false
 	}
