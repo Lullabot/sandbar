@@ -33,7 +33,8 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"command -v rsync >/dev/null 2>&1",
 		"command -v curl >/dev/null 2>&1",
 		"command -v gpg >/dev/null 2>&1",
-		"apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates",
+		"python3 -c 'import passlib' >/dev/null 2>&1",
+		"apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib",
 	}
 	for _, s := range wantSubstrings {
 		if !strings.Contains(got, s) {
@@ -76,8 +77,17 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if len(doc.Provision) != 1 || doc.Provision[0].Mode != "dependency" {
 		t.Fatalf("provision = %+v, want one dependency entry", doc.Provision)
 	}
-	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates") {
-		t.Errorf("dependency script missing ansible-core+rsync+curl+gnupg+ca-certificates install:\n%s", doc.Provision[0].Script)
+	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib") {
+		t.Errorf("dependency script missing ansible-core+rsync+curl+gnupg+ca-certificates+passlib install:\n%s", doc.Provision[0].Script)
+	}
+	// passlib is not optional and not a recommendation we can inherit: the user
+	// role hashes the account password with password_hash('sha512'), which fails
+	// at play time with "Unable to encrypt nor hash, passlib must be installed"
+	// unless python3-passlib is on the box. --no-install-recommends means nothing
+	// else drags it in, so a live base build broke on exactly this. Pin it.
+	if !strings.Contains(doc.Provision[0].Script, "python3-passlib") {
+		t.Errorf("dependency script omits python3-passlib, so the user role's "+
+			"password_hash('sha512') filter will fail at play time:\n%s", doc.Provision[0].Script)
 	}
 	// The bundled `ansible` package (200MB installed) must never be installed on
 	// the default path; only the lean ansible-core (8MB) is acceptable here.

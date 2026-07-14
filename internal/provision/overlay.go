@@ -26,7 +26,9 @@ base:
 // NOT run here so its output can stream to the terminal. ansible-core (8MB
 // installed) replaces Debian's fat `ansible` bundle (200MB installed) — the
 // playbook is collection-free on the default path, so the bundle's vendored
-// collections are unneeded. curl/gnupg/ca-certificates are installed here
+// collections are unneeded — but passlib, which the bundle used to supply, has
+// to be named explicitly because the user role's password_hash filter needs it.
+// curl/gnupg/ca-certificates are installed here
 // too so a later, single consolidated apt install has them already present.
 const overlayProvision = `provision:
 - mode: dependency
@@ -41,7 +43,8 @@ const overlayProvision = `provision:
     if command -v ansible-playbook >/dev/null 2>&1 \
        && command -v rsync >/dev/null 2>&1 \
        && command -v curl >/dev/null 2>&1 \
-       && command -v gpg >/dev/null 2>&1; then
+       && command -v gpg >/dev/null 2>&1 \
+       && python3 -c 'import passlib' >/dev/null 2>&1; then
       exit 0
     fi
     export DEBIAN_FRONTEND=noninteractive
@@ -51,7 +54,14 @@ const overlayProvision = `provision:
     # bundle (~436MB of ansible_collections on disk) that installing ansible-core
     # instead of ansible exists to avoid. Dropping this flag silently restores
     # the fat bundle and the slim-bootstrap win with it.
-    apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates
+    #
+    # python3-passlib is what --no-install-recommends costs us: the user role
+    # hashes the generated account password with the password_hash('sha512')
+    # filter, which imports passlib at runtime. The fat ansible bundle used to
+    # pull it in as a Recommends, so dropping the bundle broke the play with
+    # "Unable to encrypt nor hash, passlib must be installed". Name it
+    # explicitly rather than leaning on another package's recommendation.
+    apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
 `
 
 // RenderBaseOverlay produces the Lima overlay YAML for the base image: the
