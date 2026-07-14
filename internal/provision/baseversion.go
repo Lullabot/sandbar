@@ -323,6 +323,30 @@ func shrunkTools(haveStamp, want string) []string {
 	return shrunk(stamped, parseToolset(want))
 }
 
+// BaseToolset reports the tool-set the existing base image was actually BUILT
+// with, read back out of its version stamp, as the set of enabled tool names
+// (the same names vm.CreateConfig.ToolsetKey renders).
+//
+// It exists so a create does not have to guess. The tool-set is a property of
+// the SHARED base, but it is chosen on a per-VM screen whose fields default to
+// the all-on DefaultCreateConfig — so a user who built a base with no tools was
+// shown four ticked boxes on the next create, and had to un-tick them again
+// every time or silently re-converge the base back to the full tool-set. The
+// base already records what it contains; the create path just has to read it.
+//
+// ok=false means "no toolset information": no stamp (no base built yet), or one
+// written by an older sand whose scheme carried no toolset suffix. Callers fall
+// back to their own default (all on) in that case. A base built with NOTHING
+// selected stamps "none", which parses to an empty set with ok=TRUE — an empty
+// selection is a real answer and must not be confused with an absent one.
+func BaseToolset(baseName string) (map[string]bool, bool) {
+	suffix := toolsetFromStamp(readBaseVersionFn(baseName))
+	if suffix == "" {
+		return nil, false
+	}
+	return parseToolset(suffix), true
+}
+
 // hashFromStamp extracts the playbook content hash from a v2 stamp
 // ("v2:<hash>:<toolset>"), or "" for anything that is not one.
 func hashFromStamp(stamp string) string {

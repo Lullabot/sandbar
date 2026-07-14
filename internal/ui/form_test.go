@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -347,5 +350,73 @@ func TestResetReplaysTheRecordedToolset(t *testing.T) {
 	}
 	if got, want := cfg.ToolsetKey(), "ddev"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)
+	}
+}
+
+// writeBaseStamp plants a base-image version stamp in the isolated LIMA_HOME,
+// standing in for a base that was actually built with that tool-set.
+func writeBaseStamp(t *testing.T, baseName, toolset string) {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("LIMA_HOME"), "_sand")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	stamp := "v2:deadbeef:" + toolset + "\n" + time.Now().UTC().Format(time.RFC3339) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, baseName+".playbook-version"), []byte(stamp), 0o644); err != nil {
+		t.Fatalf("write stamp: %v", err)
+	}
+}
+
+// TestCreateFormSeedsTogglesFromTheBuiltBase: the create form's tool toggles
+// must show what the SHARED base actually CONTAINS, read back from its stamp.
+// They used to open all-on unconditionally, so a user who built a base with no
+// tools was shown four ticked boxes on the very next create — and either
+// un-ticked all four again by hand, every time, or unknowingly asked for the
+// full tool-set and silently converged it back onto the base.
+func TestCreateFormSeedsTogglesFromTheBuiltBase(t *testing.T) {
+	m := newTestModel(t)
+	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "none")
+
+	m.openForm()
+
+	if m.toolClaude || m.toolDDEV || m.toolGo || m.toolJava {
+		t.Errorf("form opened with claude=%v ddev=%v go=%v java=%v against a base built with NO tools; every toggle must start off",
+			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
+	}
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Dev")
+	m.inputs[fGitEmail].SetValue("dev@example.com")
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if got, want := cfg.ToolsetKey(), "none"; got != want {
+		t.Errorf("ToolsetKey() = %q, want %q — submitting the untouched form must not re-converge the base", got, want)
+	}
+}
+
+// The partial case: a base built with only DDEV opens with only DDEV ticked.
+func TestCreateFormSeedsTogglesFromAPartialToolset(t *testing.T) {
+	m := newTestModel(t)
+	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "ddev+java")
+
+	m.openForm()
+
+	if m.toolClaude || m.toolGo {
+		t.Errorf("claude=%v go=%v, want both off: the base does not have them", m.toolClaude, m.toolGo)
+	}
+	if !m.toolDDEV || !m.toolJava {
+		t.Errorf("ddev=%v java=%v, want both on: the base was built with them", m.toolDDEV, m.toolJava)
+	}
+}
+
+// With no base built yet there is nothing to adopt, so the form keeps its all-on
+// default — a first create still installs everything sand always has.
+func TestCreateFormWithNoBaseKeepsTheAllOnDefault(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	if !m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
+		t.Errorf("with no base stamp the form must open all-on, got claude=%v ddev=%v go=%v java=%v",
+			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
 	}
 }

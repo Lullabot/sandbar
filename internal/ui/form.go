@@ -205,10 +205,21 @@ func (m *model) openForm() tea.Cmd {
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
 	m.toggleFocus = -1  // openResetForm already did this; create mode now has toggles too
-	m.toolClaude = true
-	m.toolDDEV = true
-	m.toolGo = true
-	m.toolJava = true
+	// The tool toggles show what the SHARED base actually contains, read back
+	// from its version stamp — not a fresh all-on default. Otherwise a user who
+	// built a base with no tools was shown four ticked boxes on the next create
+	// and had to un-tick them every time, and forgetting once silently converged
+	// the whole tool-set back onto the base. With no base yet (or one stamped by
+	// an older sand that recorded no tool-set), there is nothing to show but the
+	// default: everything on.
+	cfg := vm.DefaultCreateConfig()
+	if base, ok := provision.BaseToolset(cfg.BaseName); ok {
+		cfg.ApplyToolset(base)
+	}
+	m.toolClaude = cfg.WithClaude
+	m.toolDDEV = cfg.WithDDEV
+	m.toolGo = cfg.WithGo
+	m.toolJava = cfg.WithJava
 	m.toolRebuild = false
 	m.view = viewForm
 	return m.inputs[0].Focus()

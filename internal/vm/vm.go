@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,37 +89,62 @@ func DefaultCreateConfig() CreateConfig {
 	}
 }
 
+// ToolPtrs maps each tool's canonical name — the name that appears in the base
+// image's version stamp, and in the --with-<name> flag — to the field holding
+// its selection. It is the ONE place the tool names live: ToolsetKey renders
+// from it, ApplyToolset assigns through it, and `sand create` adopts the base's
+// recorded selection through it. Adding a tool means adding a field, a line
+// here, and its flag; nothing else has to learn the name.
+func (c *CreateConfig) ToolPtrs() map[string]*bool {
+	return map[string]*bool{
+		"claude": &c.WithClaude,
+		"ddev":   &c.WithDDEV,
+		"go":     &c.WithGo,
+		"java":   &c.WithJava,
+	}
+}
+
+// ApplyToolset overwrites the selection with the given set of enabled tool
+// names — how a create adopts what an existing base was actually built with
+// (provision.BaseToolset). Names absent from the set are set to FALSE, not left
+// alone: the set is the whole answer, and a base that lacks a tool must produce
+// a config that does not ask for it. Unknown names are ignored, so a stamp
+// written by a NEWER sand that knows a tool this binary does not degrades to
+// "not selected" rather than panicking.
+func (c *CreateConfig) ApplyToolset(set map[string]bool) {
+	for name, p := range c.ToolPtrs() {
+		*p = set[name]
+	}
+}
+
 // ToolsetKey renders the tool-set selection into a stable, order-independent
 // string that feeds the base image's version stamp (see
 // provision.PlaybookVersion): changing the selection changes this string,
 // which changes the stamp, which marks the base stale so it converges (or
 // rebuilds) instead of silently cloning a base with the wrong contents.
 //
-// Order is fixed so the same selection always renders identically no matter
-// which order the booleans were assigned in, and it is ALPHABETICAL because
-// provision.toolsetKey — which rebuilds this string from a parsed stamp when
-// merging tool-sets — sorts. The two must agree exactly or a base would be
-// perpetually stale against its own stamp, so a new tool goes in sorted
-// position, not on the end. An empty selection renders as "none" rather than
-// "" — an empty string would be indistinguishable from "no toolset information
-// at all" when a stamp is parsed back apart (see provision.toolsetFromStamp).
+// The names are SORTED, so the same selection always renders identically no
+// matter what order anything was assigned in — and, critically, identically to
+// provision.toolsetKey, which rebuilds this same string from a parsed stamp and
+// also sorts. The two renderings must agree exactly or a base would be
+// perpetually stale against its own stamp and re-converge on every create.
+// Sorting here (rather than relying on a hand-maintained field order that
+// happens to be alphabetical) is what makes that true by construction.
+//
+// An empty selection renders as "none" rather than "" — an empty string would
+// be indistinguishable from "no toolset information at all" when a stamp is
+// parsed back apart (see provision.toolsetFromStamp).
 func (c CreateConfig) ToolsetKey() string {
 	var on []string
-	if c.WithClaude {
-		on = append(on, "claude")
-	}
-	if c.WithDDEV {
-		on = append(on, "ddev")
-	}
-	if c.WithGo {
-		on = append(on, "go")
-	}
-	if c.WithJava {
-		on = append(on, "java")
+	for name, enabled := range c.ToolPtrs() {
+		if *enabled {
+			on = append(on, name)
+		}
 	}
 	if len(on) == 0 {
 		return "none"
 	}
+	sort.Strings(on)
 	return strings.Join(on, "+")
 }
 
