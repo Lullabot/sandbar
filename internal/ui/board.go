@@ -937,9 +937,28 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 // from a synthetic record — "○ Stopped · disk ?/? · never used" — and every verb on
 // it failed with "instance not found", with no way to clear it short of restarting
 // sand.
+// A CANCELLED build whose VM IS GONE is not one of them either, and that is a
+// tile the cleanup on cancel (internal/provision/cleanup.go) newly created. A ^C
+// during the clone now deletes the half-built instance, so there is no VM left:
+// the tile rendered from a synthetic record — status "", which the tile paints as
+// "○ Stopped" — for a VM that limactl has never heard of. Every verb on it would
+// fail, `d` has nothing to delete, and the "Stopped" is simply a lie. The user
+// cancelled it on purpose and the VM was cleaned up; there is nothing left to say.
+//
+// A cancelled build whose VM SURVIVES still gets its tile: a ^C during the
+// playbook leaves a booted, half-provisioned VM that is absolutely worth showing —
+// it exists, it is not managed, and `d` is how it gets cleared.
 func (m model) hasProvisionJob(name string) bool {
 	s, ok := m.jobs.snapshot(provisionKey(name))
-	return ok && s.State != jobSucceeded
+	if !ok || s.State == jobSucceeded {
+		return false
+	}
+	if s.Canceled {
+		if _, known := m.lookupVM(name); !known {
+			return false
+		}
+	}
+	return true
 }
 
 // tileGapBlock is the blank column between two adjacent tiles: as many lines as a
