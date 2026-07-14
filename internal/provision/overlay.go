@@ -21,9 +21,13 @@ base:
 `
 
 // overlayProvision is the fixed dependency provision script. It installs just
-// enough (ansible + rsync) for the playbook to be run later over `limactl
-// shell`; the heavy playbook itself is NOT run here so its output can stream to
-// the terminal. Reproduced verbatim from render_base_overlay.
+// enough (ansible-core, rsync, and task 3's apt prerequisites) for the
+// playbook to be run later over `limactl shell`; the heavy playbook itself is
+// NOT run here so its output can stream to the terminal. ansible-core (8MB
+// installed) replaces Debian's fat `ansible` bundle (200MB installed) — the
+// playbook is collection-free on the default path, so the bundle's vendored
+// collections are unneeded. curl/gnupg/ca-certificates are installed here
+// too so a later, single consolidated apt install has them already present.
 const overlayProvision = `provision:
 - mode: dependency
   script: |
@@ -31,20 +35,25 @@ const overlayProvision = `provision:
     set -eux -o pipefail
     # Install just enough to run the playbook over ` + "`limactl shell`" + `; skip the
     # apt work once present so restarts stay fast. The playbook itself is run
-    # separately (over a shell) so its output is visible.
-    if command -v ansible >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1; then
+    # separately (over a shell) so its output is visible. This script reruns on
+    # every boot (including every clone's), so the guard must check for every
+    # tool it installs or a stale check will leave later boots missing one.
+    if command -v ansible-playbook >/dev/null 2>&1 \
+       && command -v rsync >/dev/null 2>&1 \
+       && command -v curl >/dev/null 2>&1 \
+       && command -v gpg >/dev/null 2>&1; then
       exit 0
     fi
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y ansible rsync
+    apt-get install -y ansible-core rsync curl gnupg ca-certificates
 `
 
 // RenderBaseOverlay produces the Lima overlay YAML for the base image: the
 // inherited Debian 13 template, cpus/memory/disk, a read-only mount of the
 // playbook directory at /mnt/playbook, and the dependency provision script that
-// installs ansible + rsync. It mirrors the original bash provisioner's
-// render_base_overlay.
+// installs ansible-core, rsync, and task 3's apt prerequisites. It mirrors the
+// original bash provisioner's render_base_overlay.
 func RenderBaseOverlay(cfg vm.CreateConfig, playbookDir string) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(overlayHeader)

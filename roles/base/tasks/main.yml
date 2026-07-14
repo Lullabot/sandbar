@@ -25,11 +25,21 @@
   delay: 5
   when: provision_phase | default('full') == 'finalize'
 
-- name: Generate locale
-  community.general.locale_gen:
-    name: "{{ base_locale }}"
+- name: Ensure the locale is enabled in /etc/locale.gen
+  ansible.builtin.lineinfile:
+    path: /etc/locale.gen
+    regexp: '^#?\s*{{ base_locale }} UTF-8'
+    line: "{{ base_locale }} UTF-8"
     state: present
+  register: _locale_line
   when: provision_phase | default('full') != 'finalize'
+
+- name: Generate the locale
+  ansible.builtin.command: locale-gen
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - _locale_line.changed
+  changed_when: _locale_line.changed
 
 - name: Set default locale
   ansible.builtin.copy:

@@ -2,7 +2,7 @@
 id: 2
 group: "tier-1-in-guest"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "high"

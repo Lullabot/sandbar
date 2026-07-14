@@ -2,7 +2,7 @@
 id: 4
 group: "tier-1-staleness"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "high"
@@ -23,16 +23,16 @@ Replace the git-HEAD-plus-`-dirty` base version stamp with a content hash of the
 
 ## Acceptance Criteria
 
-- [ ] The stamped value is a content hash (e.g. SHA-256) over the playbook fileset, combined with a tool-set selection string.
-- [ ] The stamp is computed and written **outside a git checkout** (embedded FS / released binary). Verify with a test that builds the version from a non-git directory and asserts a non-empty stamp.
-- [ ] The hash covers **exactly** the fileset that reaches the guest — the same set the `go:embed` directives in `playbook_embed.go` and the rsync filter in `provision.go` agree on (already pinned by `TestGuestSyncCopiesOnlyThePlaybook`).
-- [ ] Changing a playbook file changes the stamp. Verify with a test.
-- [ ] A commit that touches **no** playbook file does **not** change the stamp. Verify with a test (this is a property the old git-HEAD scheme got wrong).
-- [ ] Changing the tool-set selection string changes the stamp. Verify with a test.
-- [ ] The `-dirty` suffix mechanism is removed — it is unnecessary once content is hashed.
-- [ ] An **old-format (git-hash) stamp is treated as stale**, so upgrading users converge once rather than silently serving a base built by the old scheme. Verify with a test.
-- [ ] An unreadable/absent stamp still counts as stale (preserve today's behavior).
-- [ ] `go vet ./...` and `go test ./...` are green.
+- [x] The stamped value is a content hash (e.g. SHA-256) over the playbook fileset, combined with a tool-set selection string.
+- [x] The stamp is computed and written **outside a git checkout** (embedded FS / released binary). Verify with a test that builds the version from a non-git directory and asserts a non-empty stamp.
+- [x] The hash covers **exactly** the fileset that reaches the guest — the same set the `go:embed` directives in `playbook_embed.go` and the rsync filter in `provision.go` agree on (already pinned by `TestGuestSyncCopiesOnlyThePlaybook`).
+- [x] Changing a playbook file changes the stamp. Verify with a test.
+- [x] A commit that touches **no** playbook file does **not** change the stamp. Verify with a test (this is a property the old git-HEAD scheme got wrong).
+- [x] Changing the tool-set selection string changes the stamp. Verify with a test.
+- [x] The `-dirty` suffix mechanism is removed — it is unnecessary once content is hashed.
+- [x] An **old-format (git-hash) stamp is treated as stale**, so upgrading users converge once rather than silently serving a base built by the old scheme. Verify with a test.
+- [x] An unreadable/absent stamp still counts as stale (preserve today's behavior).
+- [x] `go vet ./...` and `go test ./...` are green.
 
 Use your internal Todo tool to track these and keep on track.
 
