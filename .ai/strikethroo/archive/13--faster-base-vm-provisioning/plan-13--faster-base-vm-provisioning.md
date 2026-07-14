@@ -523,9 +523,9 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 
 *Runs late by design: several tasks have empirical decision points (does the macOS mount work, or did Tier 2 fall back to the tarball? does the hostname actually need a bounce?). Document what shipped, not what was planned.*
 
-### Phase 7: Prove it
+### ✅ Phase 7: Prove it
 **Parallel Tasks:**
-- Task 13: Execute the plan's Self Validation; record before/after numbers (depends on: 11, 12)
+- ✔️ Task 13: Execute the plan's Self Validation; record before/after numbers (depends on: 11, 12) — `completed`
 
 ### Post-phase Actions
 
@@ -555,3 +555,44 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
     - **TUI rewrite (new on main).** The create form survives and is still the interactive surface; the tool-set becomes create flags plus form toggles that follow the existing reset-mode toggle idiom (today hard-coded to the two `preserve*` booleans and wired only into reset — generalizing it is part of the work). The form must state that the toggles re-converge the shared base.
     - **Timing output re-routed.** A build now streams onto its tile, and `internal/ui/ansible.go` treats a `==> ` banner as a progress *reset*. Tier 0's timings must therefore be plain writes into the retained job log (`l`) plus an end-of-run summary — **not** `step()` calls, which would blank the tile's progress bar mid-run.
     - Scope decisions from plan creation (tool-set configures the base and defaults to all three; in-place re-apply by default; clones skip `apt upgrade`; Tier 2 mounts in the base overlay only; Tier 3 out of scope) are unchanged. *(The "base overlay only" item was **superseded by the second pass above**: clones DO inherit the base's mounts, so the mount must be explicitly stripped from each clone.)*
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-14
+
+### Results
+
+All 13 tasks across 7 phases landed and are verified. Measured on real Lima/QEMU/KVM hardware:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Cold base build (all three tools) | — | **9m40s** |
+| Playbook-edit inner loop | full from-scratch rebuild | **3m45s** (base-playbook phase 4m18s → **48s**, ~5.4×) |
+| Base-phase apt passes | 6 update+install cycles | **1** update, **1** install transaction |
+| Ansible bootstrap | `ansible` bundle, ~200MB + 436MB collections | **`ansible-core` only**, bundle `not-installed`, collections tree absent |
+| `apt upgrade` | every clone, forever | once on the base, at 30 days; clones skip entirely |
+| Bounce (stop+start) | unconditional on every create | only on `/var/run/reboot-required` |
+| Tool-set | `golang` + `default-jdk-headless` unconditional | opt-out (`--with-go` / `--with-java` / `--with-ddev`); Java off ⇒ base-playbook phase **~21% faster** |
+| Warm apt cache (570MB) | full re-download | **zero** `Get:` lines across 200+ packages |
+| Base version stamp | git HEAD + `-dirty`; **inert outside a git checkout** | content hash of the playbook fileset + tool-set; works for released binaries |
+| Writable host mount on a work VM | invariant *assumed* | invariant **enforced** by a mutation-proven strip |
+
+### Noteworthy Events
+
+1. **The plan's Tier 2 security argument was false, and the refinement caught it.** The plan asserted clones never inherit the base's mount. They do — `limactl clone` copies the whole instance dir including `lima.yaml`. Shipped as written, a writable apt-cache mount would have landed on **every work VM**, the exact machines the no-writable-mount invariant protects.
+2. **Tier 2 shipped via the pre-approved fallback, not a mount.** The writable mount was built, then tested against a real Lima VM and backed out: without `virtiofsd`, Lima falls back to reverse-sshfs, which refuses the guest `chown _apt` apt needs for `Dir::Cache::archives`. The cache now seeds/harvests the guest's own archives via `limactl copy` — no host mount anywhere. `Client.Configure` still strips **any** writable mount from every clone, kept as a standing guard; it is mutation-proven and tested against the real `limactl` binary.
+3. **`--rebuild` raced the base lock.** It deleted the base in the CLI layer *before* the flock was taken — able to destroy a base another create was mid-clone from, the precise race `baselock.go` exists to close. Fixed by pushing the rebuild intent under the lock.
+4. **The version stamp did nothing outside a git checkout.** `baseStale` returned *not-stale* on a git error and `BuildBase` could not stamp, so released binaries never rebuilt and never stamped — the whole staleness redesign would have been dead code for them.
+5. **A re-apply cannot change a base's overlay.** Converging a base whose `lima.yaml` points at a different playbook mount would rsync that playbook in and stamp it as ours — corruption undetectable afterwards, because the stamp would match. In-place converge is now gated on overlay compatibility.
+6. **The live validation gate earned its keep — it caught two defects every static check missed.**
+   - A **build-breaking regression**: Ansible evaluates a task's `loop:` source *before* `when:`-skipping, so the `authorized_keys` lookup ran and errored even with `user_github_keys_url` unset — the default for every user. Cold creates crashed. Invisible to syntax-check, unit tests, and review.
+   - **The headline bootstrap claim was false**: Debian's `ansible-core` **`Recommends: ansible`**, so without `--no-install-recommends` apt reinstalled the very 200MB bundle the task existed to remove. A fresh base had *both*. Now fixed and pinned by a test that fails without the flag.
+7. **The bounce's folklore was wrong.** Its docker-group rationale was already void (the group is granted in the *base* phase), and the hostname rationale was disproved empirically against a running VM (`hostnamectl` takes effect immediately; a fresh `limactl shell` sees it with no reboot).
+
+### Necessary follow-ups
+
+- **`lima-e2e` has never actually run** against these changes. The workflow is authored and its assertion strings verified against source, but a live green run (and the disk budget with two creates) is unverified until CI executes it. This is the highest-value remaining check — it is what would have caught defect 6a.
+- **Pre-existing, unrelated:** the base overlay never installs `sshfs`. On a host without `virtiofsd`, Lima's boot-time "sshfs to be installed" requirement can stall `limactl start` for minutes. This affects the existing read-only playbook mount too and predates this plan. Worth its own ticket.
+- **Pre-existing, unrelated:** in embedded mode `LocatePlaybook` extracts to a per-process temp dir that is never cleaned up; a base built by one run bakes that path into its `lima.yaml`, so a later clone can reference a directory `/tmp` cleanup has removed.
+- Concurrency was verified by `-race` unit tests using a real flock, but not re-driven with two live concurrent `sand create` processes.
