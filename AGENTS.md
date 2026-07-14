@@ -291,6 +291,61 @@ every bullet, not the constraint itself.
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
 
+## The base image / clone / finalize provisioner (read before touching `internal/provision`)
+
+- **Clones inherit the base image's `lima.yaml` — including its mounts.**
+  `limactl clone` copies the base's entire instance directory. The only
+  post-clone config write is `Configure` (`internal/lima/client.go`), which
+  sets cpus/memory/disk **and strips writable mounts**. This is why the
+  read-only playbook mount works inside a clone (finalize rsyncs from
+  `/mnt/playbook`), and it is why any writable mount ever added to the base
+  builder **must** be stripped from the clone: work VMs run Claude
+  unsupervised, and "delete the VM and everything it produced is gone"
+  depends on there being no writable host mount. The strip is a **security
+  control**, not a tidy-up, and a test enforces it
+  (`TestConfigureStripsWritableMountAgainstRealLimactl`). Today the base
+  overlay (`internal/provision/overlay.go`) does not add a writable mount at
+  all — a writable apt-archive-cache mount was tried and backed out in favour
+  of a `limactl copy` seed/harvest (`internal/provision/aptcache.go`) that
+  needs no mount — so the strip currently has nothing to remove. It stays
+  anyway, as a standing guard. Do not remove it, and do not add a writable
+  mount to the clone path believing the base's precedent generalizes to work
+  VMs.
+- **`playbook_embed.go`'s `go:embed` set and the rsync filter in
+  `internal/provision/provision.go` (`inGuestScript`) must stay in step.**
+  Both spell out the same fileset — `site.yml`, `ansible.cfg`, `inventory`,
+  `roles/`, `group_vars/` — and the base version stamp
+  (`internal/provision/baseversion.go`, `playbookFileset`) now hashes exactly
+  that fileset too, so a test pinning the embed set to the rsync filter
+  (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's correctness as
+  well. Add a file to one and forget the other two, and either the guest gets
+  content the stamp never sees, or the stamp churns on content the guest
+  never gets.
+- **Every base mutation belongs inside the base lock held by
+  `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
+  refresh, and `--rebuild`'s destroy are all reached through
+  `ensureBaseStopped`, called only from inside `prepareBaseAndClone`'s
+  `lockBase`/`release` pair — never from a caller that deletes or mutates the
+  base on its own. Staleness and age decisions (`baseStale`,
+  `baseNeedsRefresh`) must be **read after the lock is acquired**, not cached
+  outside it and carried in: a create that queued behind someone else's
+  rebuild must see what that rebuild left behind, not act on a verdict formed
+  before the wait. This is the easiest property in the codebase to regress —
+  a "helpful" refactor that hoists a staleness check above the lock, or adds
+  a new way to delete the base, reopens the exact race (`baselock.go`'s doc
+  comment; `prepareBaseAndClone`'s doc comment in `provision.go`) this
+  machinery exists to close.
+- **The `docker` group (and every other package/group grant) happens in the
+  BASE phase**, gated `when: provision_phase != 'finalize'` in `site.yml` —
+  not in finalize. A clone already has the group in `/etc/group` before it
+  ever boots, and every `limactl shell` does a fresh login with a fresh
+  `initgroups()`, so finalize needs no bounce to make group membership
+  effective. This corrects the folklore that used to justify an unconditional
+  post-finalize restart: `createVM` (`internal/provision/provision.go`) now
+  bounces the VM only when the guest itself reports
+  `/var/run/reboot-required` (a kernel/libc upgrade), and `Reset` warns
+  instead of silently destroying a live tmux session before bouncing one.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
