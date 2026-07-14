@@ -258,6 +258,21 @@
     name: "{{ base_packages + base_nodejs_packages + devtools_docker_packages + devtools_packages + devtools_ddev_packages + toolset_packages }}"
     state: present
     update_cache: false # already refreshed above; keep false so a future edit can't silently reintroduce a second refresh
+    # Recommends are OFF: the base installs what it asks for, and anything it
+    # actually needs is NAMED in base_packages. Measured on the Debian-repo
+    # subset of this transaction, recommends pulled 346 packages / 362MB of
+    # downloads versus 264 / 340MB with them off and the toolchain named back
+    # explicitly — ~80 fewer packages for dpkg to unpack and configure, and no
+    # silent growth the next time an upstream adds a Recommends.
+    #
+    # The catch, and why base_packages now names build-essential and python3-dev:
+    # gcc/g++/make/libc6-dev reach this image ONLY as recommends of golang and
+    # the JDK. Turning recommends off without naming them removes the C toolchain
+    # — which breaks node-gyp (so any npm/npx package with a native module), cgo
+    # (go build defaults to CGO_ENABLED=1), and pip packages with C extensions.
+    # A missing compiler fails far from here and reads as "npm is broken", so the
+    # two settings are one change: do not flip this without checking that list.
+    install_recommends: false
   when: provision_phase | default('full') != 'finalize'
 
 # `limactl shell` (and ssh) forward COLORTERM from the host when present, but
