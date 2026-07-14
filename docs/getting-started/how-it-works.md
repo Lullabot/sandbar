@@ -22,6 +22,15 @@ tools, Claude Code, and everything else that every VM needs, none of which
 depends on who you are. The base image is built at a 20 GiB virtual-disk
 floor.
 
+**What's installed:** Docker CE, ddev, cloudflared, the [GitHub CLI
+(`gh`)](https://cli.github.com/) — configured as the git credential helper
+for HTTPS authentication — Node.js, Go, Python 3, `uv`, `mkcert`, a headless
+JDK, and the Claude Code CLI, plus common CLI utilities (`jq`, `htop`,
+`tmux`, `direnv`, and more). tmux, git, and bashrc configuration are
+deployed for the VM's user, and systemd linger is enabled so a detached
+tmux session (and anything running inside it, including a Claude Code
+session) keeps running after you disconnect.
+
 Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — `sand` rebuilds it automatically if the
 underlying provisioning logic has changed since it was built, or you can

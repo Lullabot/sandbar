@@ -25,6 +25,21 @@ Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
 (`internal/manage`), the TUI, and a standalone `sand shell`
 (`cmd/sand/shell.go`).
 
+### Why the `limactl` CLI, not a Go API
+
+Lima is written in Go, but it doesn't publish a stable public Go API — its
+`pkg/…` packages are internal and change between releases, and importing
+them would pull Lima's whole dependency tree into `sand` and pin it to a
+single Lima version. `internal/lima` instead wraps the `limactl` CLI itself,
+using its structured output (`--format json` for `list`, `--format
+'{{ .Field }}'` templates for single values) as the supported, documented
+integration surface. Because `limactl` logs to **stderr**
+(`time=… level=… msg=…` lines) and writes its JSON/template output to
+**stdout**, the runner captures the two streams separately — only stdout is
+parsed, stderr is surfaced as diagnostics on failure — and the list parser
+skips any stdout line that isn't a JSON object, so a stray notice degrades
+to "ignored" rather than failing the listing.
+
 ## Build, run, format, vet
 
 ```

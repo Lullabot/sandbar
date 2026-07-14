@@ -234,18 +234,18 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001 (`completed`): MkDocs + Material + mike scaffold, `mkdocs.yml` with the full nav tree, stub pages, `site/` gitignored — establishes the strict build that gates every later task.
 
-### Phase 2: Author the content and the publishing pipeline
+### ✅ Phase 2: Author the content and the publishing pipeline
 **Parallel Tasks:**
-- Task 002: Getting Started — about, installation, first VM, how provisioning works (depends on: 001)
-- Task 003: Using sand — the TUI board, secrets, files and shells (depends on: 001)
-- Task 004: CLI reference — every command, every flag, verified against `--help` (depends on: 001)
-- Task 005: Reference — files and state, security model, troubleshooting (depends on: 001)
-- Task 006: Contributing — development, the embedded playbook, releases (depends on: 001)
-- Task 007: `.github/workflows/docs.yml` — mike deploy on main/tags, strict build on PRs (depends on: 001)
+- ✔️ Task 002 (`completed`): Getting Started — about, installation, first VM, how provisioning works (depends on: 001)
+- ✔️ Task 003 (`completed`): Using sand — the TUI board, secrets, files and shells (depends on: 001)
+- ✔️ Task 004 (`completed`): CLI reference — every command, every flag, verified against `--help` (depends on: 001)
+- ✔️ Task 005 (`completed`): Reference — files and state, security model, troubleshooting (depends on: 001)
+- ✔️ Task 006 (`completed`): Contributing — development, the embedded playbook, releases (depends on: 001)
+- ✔️ Task 007 (`completed`): `.github/workflows/docs.yml` — mike deploy on main/tags, strict build on PRs (depends on: 001)
 
-### Phase 3: Retire what the site replaces
+### ✅ Phase 3: Retire what the site replaces
 **Parallel Tasks:**
-- Task 008: Rewrite `README.md` as a landing page, delete `README-sand.md`, reconcile `AGENTS.md` (depends on: 002, 003, 004, 005, 006, 007)
+- ✔️ Task 008 (`completed`): Rewrite `README.md` as a landing page, delete `README-sand.md`, reconcile `AGENTS.md` (depends on: 002, 003, 004, 005, 006, 007)
 
 ### Post-phase Actions
 - Per `POST_PHASE.md`: run `gofmt -l .`, `go vet ./...`, `go test ./...` (the Go tree must stay green even though this is a docs plan), plus `mkdocs build --strict`. Commit each phase as a conventional commit.
@@ -259,3 +259,29 @@ graph TD
 - **No test tasks were generated.** Under the project's test philosophy ("write a few tests, mostly integration"), this plan adds no custom business logic — it adds prose, a static-site config, and a CI workflow. The verification that matters here is `mkdocs build --strict` (which fails on broken links and bad nav) and the `--help`-diff in task 004, both of which are acceptance criteria rather than test suites. The existing Go test suite must continue to pass, and is checked at every phase gate.
 - **Fact-verification is embedded, not separate.** Rather than a distinct "check the docs are accurate" task, every content task carries verification-against-source in its acceptance criteria, because the failure mode being fixed is precisely that prose was copied without being re-checked.
 - **Task 008 is `high` effort** despite being editorial: it is the task that deletes things, and the boundary between "stale Ansible instructions" (remove) and "load-bearing Ansible assets" (keep) is the single place this plan can cause real damage.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-14
+
+### Results
+
+A 15-page MkDocs Material documentation site now lives under `docs/`, built with the same toolchain as `Lullabot/playwright-drupal` (MkDocs + Material + `mike`, pinned in `docs/requirements.txt`, invoked through `uvx` — no Node toolchain was introduced, and the repo still has no `package.json`). `.github/workflows/docs.yml` deploys it with `mike` to a `gh-pages` branch on pushes to `main` and on `v*` release tags, and runs `mkdocs build --strict` on every pull request — a gate the reference repository does not have.
+
+The stale Ansible-era documentation is gone. `README.md` went from 526 lines titled "Claude Code Development VM Playbook" to 46 lines titled `sandbar` that defer to the site; `README-sand.md` (512 lines) was deleted after its content was verified to have a home on the site. The self-serve `ansible-playbook` path — `apt install ansible`, `cp group_vars/all.yml.example`, `ansible-playbook -i inventory site.yml` — is removed. Ansible itself is untouched and still load-bearing: `site.yml`, `ansible.cfg`, `inventory`, `roles/`, and `group_vars/` are all intact, the playbook is still embedded in the binary, and `go build ./cmd/sand && go test ./...` passes. The mechanism is now documented for contributors at `docs/contributing/ansible-playbook.md` rather than presented to users as a way to drive the product.
+
+Every documented fact was verified against the source rather than copied. That caught and fixed the specific contradictions the plan set out to resolve: the download keybinding is `g` (not the `u`/`d` `README-sand.md` claimed — confirmed at `internal/ui/commandreg.go:235`); `--git-name`/`--git-email` fall back to host `git config` and are not required; the Ansible variable table documenting `user_name: claude`, `en_CA.UTF-8`, and `samba_enabled: true` is gone, because `sand` overrides all three before it ever invokes the playbook. All 16 `sand create` flags are now documented, diffed flag-by-flag against `sand create --help`; previously 6 of them were.
+
+### Noteworthy Events
+
+- **A success criterion was too blunt and was tightened, deliberately.** Primary criterion 2 and Self Validation step 3 called for a repo-wide grep finding *zero* occurrences of `ansible-playbook` outside `.ai/`, `.claude/`, `.agents/`, and `CHANGELOG.md`. As written, that grep also condemns `docs/contributing/ansible-playbook.md` — whose hits are an explicit disclaimer ("this is not an instruction to install Ansible"), a statement that the host never runs Ansible, and a description of the CI syntax-check job — and a pre-existing `AGENTS.md:261` line describing how the progress denominator is derived. All are accurate contributor-facing descriptions of an internal mechanism, not instructions. Deleting them to satisfy a literal regex would have made the documentation worse. The criterion was therefore read as its evident intent — no *instruction* to a user to install or run Ansible — and verified that way. This is recorded rather than quietly redefined.
+- **Task 008's gap audit found six things the old READMEs covered that the new site did not**, and they were written into the site *before* the old files were deleted: the `GH_TOKEN` convention and the `includeIf "gitdir:"` git-credential wiring, the reset preserve-toggles, the fact that `sand` provisions no Claude Code credential (you must run `claude` once, and headless token auth is unsupported), what is actually installed in the VM (Docker CE, ddev, cloudflared, `gh`, Node, Go, Python, `uv`, `mkcert`, JDK), the "why `limactl` CLI rather than a Go API" rationale, and the one-time human prerequisites of the release pipeline. Without that audit the deletion would have silently lost real content.
+- **`mkdocs serve` mounts the site under `/sandbar/`**, not `/`, because `site_url` carries that path. The first round of validation curls 404'd against `/` until this was understood. Worth knowing before anyone concludes the local preview is broken.
+- No task failed and no phase was retried. `gofmt`, `go vet`, and `go test ./...` were green at every phase gate.
+
+### Necessary follow-ups
+
+1. **A human must enable GitHub Pages** — *Settings → Pages → Source: "Deploy from a branch" → `gh-pages` / `/ (root)`*. The workflow creates the branch on its first run, but the site will 404 until this is flipped. This is the one step automation cannot perform, and the site is **not live** until it happens. No deploy has been exercised.
+2. **`group_vars/all.yml.example`** is now arguably vestigial: it existed to support the self-serve `ansible-playbook` path that these docs stopped advertising, and nothing in the `sand` flow reads it. It was deliberately **not** deleted, because the plan's boundary was "no Ansible asset is removed" and `site.yml` still supports `provision_phase: full`. Worth a separate decision.
+3. The `inventory` file still contains `ansible_host=CHANGE_ME` and is embedded into the binary despite being unused on the `sand` path. Documented as vestigial in `docs/contributing/ansible-playbook.md`; removing it is a separate, code-touching change.
