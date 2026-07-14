@@ -2,7 +2,7 @@
 id: 5
 group: "tier-1-toolset"
 dependencies: [3, 4]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "high"
@@ -25,16 +25,16 @@ Let a user who does not need DDEV, Go, or Java stop paying for them (~500–700 
 
 ## Acceptance Criteria
 
-- [ ] `vm.CreateConfig` gains three booleans (e.g. `WithDDEV`, `WithGo`, `WithJava`), **all defaulting to `true`** in `vm.DefaultCreateConfig()`.
-- [ ] `sand create` gains `--with-ddev`, `--with-go`, `--with-java` flags (defaulting true, so they are opt-**out**).
-- [ ] **Backwards compatibility**: `sand create` with no tool flags produces a VM containing DDEV, Go, and Java exactly as today. Verify by diffing the resolved package list against the current `base_packages`.
-- [ ] `provision.BuildExtraVars` emits the three booleans as real YAML bools (follow the existing `samba_enabled` / `devtools_docker_registry_proxy_enabled` precedent).
-- [ ] `golang` and `default-jdk-headless` are removed from the unconditional `base_packages` in `roles/base/defaults/main.yml` and are added to the install list only when their var is true.
-- [ ] ddev's repo registration and package install are gated on the DDEV var.
-- [ ] **`tmux` and `ncurses-term` remain in `base_packages` under every selection** — main's persistent-shell feature (`sand shell`, the TUI `S` verb) hard-fails without a guest tmux. Same for the base-phase-only `~/.tmux.conf` template and the `loginctl enable-linger` task.
-- [ ] The tool-set selection feeds the version stamp from task 4, so changing the selection marks the base stale. Verify with a test: two configs differing only in `WithJava` produce different stamps.
-- [ ] `sand` detects a **shrinking** selection (the new selection is a strict subset of the stamped one) and prints a clear advisory that the de-selected tools remain installed until the base is rebuilt. It must NOT silently leave stale software installed.
-- [ ] `go vet ./...`, `go test ./...`, and `ansible-playbook --syntax-check site.yml` are green.
+- [x] `vm.CreateConfig` gains three booleans (e.g. `WithDDEV`, `WithGo`, `WithJava`), **all defaulting to `true`** in `vm.DefaultCreateConfig()`.
+- [x] `sand create` gains `--with-ddev`, `--with-go`, `--with-java` flags (defaulting true, so they are opt-**out**).
+- [x] **Backwards compatibility**: `sand create` with no tool flags produces a VM containing DDEV, Go, and Java exactly as today. Verify by diffing the resolved package list against the current `base_packages`.
+- [x] `provision.BuildExtraVars` emits the three booleans as real YAML bools (follow the existing `samba_enabled` / `devtools_docker_registry_proxy_enabled` precedent).
+- [x] `golang` and `default-jdk-headless` are removed from the unconditional `base_packages` in `roles/base/defaults/main.yml` and are added to the install list only when their var is true.
+- [x] ddev's repo registration and package install are gated on the DDEV var.
+- [x] **`tmux` and `ncurses-term` remain in `base_packages` under every selection** — main's persistent-shell feature (`sand shell`, the TUI `S` verb) hard-fails without a guest tmux. Same for the base-phase-only `~/.tmux.conf` template and the `loginctl enable-linger` task.
+- [x] The tool-set selection feeds the version stamp from task 4, so changing the selection marks the base stale. Verify with a test: two configs differing only in `WithJava` produce different stamps.
+- [x] `sand` detects a **shrinking** selection (the new selection is a strict subset of the stamped one) and prints a clear advisory that the de-selected tools remain installed until the base is rebuilt. It must NOT silently leave stale software installed.
+- [x] `go vet ./...`, `go test ./...`, and `ansible-playbook --syntax-check site.yml` are green.
 
 Use your internal Todo tool to track these and keep on track.
 

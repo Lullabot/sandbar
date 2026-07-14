@@ -2,7 +2,7 @@
 id: 8
 group: "tier-1-freshness"
 dependencies: [7, 3]
-status: "pending"
+status: "completed"
 created: 2026-07-13
 model: "sonnet"
 effort: "high"
@@ -25,15 +25,15 @@ Stop paying the same `apt upgrade dist` on every single clone. Move freshness fr
 
 ## Acceptance Criteria
 
-- [ ] The base carries a **build timestamp** (it has none today — the stamp records only a version). Store it alongside the content hash from task 4.
-- [ ] When the base is older than **30 days** (configurable), it is started, upgraded, re-stamped (fresh timestamp), and stopped — reusing task 7's `reapplyBase` machinery.
-- [ ] The refresh runs **inside the base lock** (i.e. inside `ensureBaseStopped`). **No new locking.**
-- [ ] The refresh **blocks and announces**: the create that trips it says so via `step()` (this IS a phase banner — it is user-facing news, unlike timing lines). Concurrent creates queue behind it, which is exactly what they already do behind a rebuild.
-- [ ] **The age check is re-read AFTER the lock is acquired.** A create that waited behind someone else's refresh must observe the fresh timestamp and skip its own — otherwise every queued create redundantly re-upgrades. Verify with a test.
-- [ ] `apt upgrade dist` is **removed from the finalize phase** — clones run no upgrade at all.
-- [ ] A clone taken from a fresh (<30-day-old) base runs no `apt upgrade`/`dist-upgrade` task. Verify from the finalize task list.
-- [ ] Artificially ageing the base stamp beyond the threshold and creating again runs the upgrade once on the **base** (not on the clone), and refreshes the timestamp.
-- [ ] `go vet ./...`, `go test ./...`, and `ansible-playbook --syntax-check site.yml` are green.
+- [x] The base carries a **build timestamp** (it has none today — the stamp records only a version). Store it alongside the content hash from task 4.
+- [x] When the base is older than **30 days** (configurable), it is started, upgraded, re-stamped (fresh timestamp), and stopped — reusing task 7's `reapplyBase` machinery.
+- [x] The refresh runs **inside the base lock** (i.e. inside `ensureBaseStopped`). **No new locking.**
+- [x] The refresh **blocks and announces**: the create that trips it says so via `step()` (this IS a phase banner — it is user-facing news, unlike timing lines). Concurrent creates queue behind it, which is exactly what they already do behind a rebuild.
+- [x] **The age check is re-read AFTER the lock is acquired.** A create that waited behind someone else's refresh must observe the fresh timestamp and skip its own — otherwise every queued create redundantly re-upgrades. Verify with a test.
+- [x] `apt upgrade dist` is **removed from the finalize phase** — clones run no upgrade at all.
+- [x] A clone taken from a fresh (<30-day-old) base runs no `apt upgrade`/`dist-upgrade` task. Verify from the finalize task list.
+- [x] Artificially ageing the base stamp beyond the threshold and creating again runs the upgrade once on the **base** (not on the clone), and refreshes the timestamp.
+- [x] `go vet ./...`, `go test ./...`, and `ansible-playbook --syntax-check site.yml` are green.
 
 Use your internal Todo tool to track these and keep on track.
 

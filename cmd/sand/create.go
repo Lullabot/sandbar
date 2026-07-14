@@ -74,6 +74,13 @@ Flags:
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
+	// The base-image tool-set (~500-700MB installed between Go and Java alone).
+	// All three default true, so these are opt-OUT flags: an unconfigured `sand
+	// create` installs everything today's base does. They configure the SHARED
+	// base image, not this individual clone.
+	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
+	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
+	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's

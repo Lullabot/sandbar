@@ -94,4 +94,70 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.CPUs != 2 {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
+	if !c.WithDDEV || !c.WithGo || !c.WithJava {
+		t.Errorf("WithDDEV/WithGo/WithJava = %v/%v/%v, want all true (backwards compatibility: an unconfigured `sand create` must install everything today's base does)", c.WithDDEV, c.WithGo, c.WithJava)
+	}
+}
+
+// TestToolsetKey_DefaultIsAllThree locks the canonical rendering of the
+// default (everything-on) selection, which baseversion.go's
+// toolsetPlaceholder used to hardcode until this key replaced it.
+func TestToolsetKey_DefaultIsAllThree(t *testing.T) {
+	c := DefaultCreateConfig()
+	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
+		t.Errorf("ToolsetKey() = %q, want %q", got, want)
+	}
+}
+
+// TestToolsetKey_OrderIndependent proves the key is order-independent: it is
+// a rendering of a SET, not the order fields happened to be assigned in, so
+// two configs built by assigning the same three booleans in different
+// sequences still hash the base identically.
+func TestToolsetKey_OrderIndependent(t *testing.T) {
+	var a CreateConfig
+	a.WithJava = true
+	a.WithDDEV = true
+	a.WithGo = true
+
+	var b CreateConfig
+	b.WithGo = true
+	b.WithJava = true
+	b.WithDDEV = true
+
+	if a.ToolsetKey() != b.ToolsetKey() {
+		t.Errorf("ToolsetKey() depended on assignment order: %q vs %q", a.ToolsetKey(), b.ToolsetKey())
+	}
+}
+
+// TestToolsetKey_Empty is the shrink floor: deselecting everything must still
+// render a stable, non-empty string ("none") rather than an empty one, since
+// an empty string would collide with "no toolset info at all" when parsed
+// back out of a stamp.
+func TestToolsetKey_Empty(t *testing.T) {
+	var c CreateConfig
+	if got, want := c.ToolsetKey(), "none"; got != want {
+		t.Errorf("ToolsetKey() = %q, want %q", got, want)
+	}
+}
+
+// TestToolsetKey_PartialSelections pins the fixed field order (ddev, go,
+// java) the key renders in regardless of which subset is on.
+func TestToolsetKey_PartialSelections(t *testing.T) {
+	tests := []struct {
+		name            string
+		ddev, goo, java bool
+		want            string
+	}{
+		{"go only", false, true, false, "go"},
+		{"java only", false, false, true, "java"},
+		{"ddev+java", true, false, true, "ddev+java"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := CreateConfig{WithDDEV: tt.ddev, WithGo: tt.goo, WithJava: tt.java}
+			if got := c.ToolsetKey(); got != tt.want {
+				t.Errorf("ToolsetKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

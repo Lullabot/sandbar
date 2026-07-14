@@ -22,7 +22,14 @@ type varItem struct {
 // are neither needed nor wanted baked into the long-lived base disk. Scalars are
 // marshaled with gopkg.in/yaml.v3, which replaces the script's hand-rolled
 // yaml_str quoting.
-func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string) ([]byte, error) {
+//
+// aptUpgrade emits base_apt_upgrade: true, which roles/base/tasks/main.yml
+// gates its "Upgrade all apt packages" task on. It must be true ONLY for a base
+// self-refresh run (internal/provision/provision.go's reapplyBase, called with
+// aptUpgrade=true from ensureBaseStopped's 30-day age check) — never for the
+// cold base build and never for a clone's finalize phase, so every clone from a
+// fresh base skips the upgrade entirely.
+func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool) ([]byte, error) {
 	items := []varItem{
 		{"user_name", cfg.User},
 		{"base_hostname", hostname},
@@ -38,6 +45,22 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string) ([]byte, error)
 			varItem{"devtools_docker_registry_proxy_enabled", true},
 			varItem{"devtools_docker_registry_proxy_host", cfg.DockerProxyHost},
 		)
+	}
+
+	// The tool-set booleans are emitted only for the base phase — that is
+	// where DDEV/Go/Java are installed (roles/base/tasks/main.yml's single
+	// consolidated apt transaction) — and unconditionally, like samba_enabled
+	// above, so the base always receives the actual selection rather than
+	// falling back to a role default that may disagree with it.
+	if phase == "base" {
+		items = append(items,
+			varItem{"toolset_ddev", cfg.WithDDEV},
+			varItem{"toolset_go", cfg.WithGo},
+			varItem{"toolset_java", cfg.WithJava},
+		)
+		if aptUpgrade {
+			items = append(items, varItem{"base_apt_upgrade", true})
+		}
 	}
 
 	if phase != "base" {

@@ -10,9 +10,15 @@ devtools_docker_packages:
   - docker-buildx-plugin
   - docker-compose-plugin
 devtools_packages:
-  - ddev
   - cloudflared
   - gh
+
+# ddev is part of the configurable base tool-set (sand create --with-ddev);
+# folded into the single apt transaction in roles/base/tasks/main.yml only
+# when toolset_ddev is true (see roles/base/defaults/main.yml for the other
+# toolset_* selections and their default).
+devtools_ddev_packages: >-
+  {{ ['ddev'] if toolset_ddev | bool else [] }}
 devtools_docker_registry_proxy_enabled: false
 devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 devtools_docker_registry_proxy_port: 3128

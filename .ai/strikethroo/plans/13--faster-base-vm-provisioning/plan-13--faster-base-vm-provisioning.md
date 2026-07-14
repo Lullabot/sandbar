@@ -466,11 +466,11 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 - ✔️ Task 03: Collapse six apt passes into one; dpkg tuning (depends on: 02) — `completed`
 - ✔️ Task 07: In-place base re-apply + move `--rebuild`'s destroy under the lock (depends on: 04) — `completed`
 
-### Phase 4: Tool-set, freshness, cache
+### ✅ Phase 4: Tool-set, freshness, cache
 **Parallel Tasks:**
-- Task 05: Configurable base-image tool-set (depends on: 03, 04)
-- Task 08: Base self-refresh at 30d; clones skip `apt upgrade` (depends on: 07, 03)
-- Task 10: Tier 2 apt cache mount + **clone-side strip** (depends on: 07)
+- ✔️ Task 05: Configurable base-image tool-set (depends on: 03, 04) — `completed`
+- ✔️ Task 08: Base self-refresh at 30d; clones skip `apt upgrade` (depends on: 07, 03) — `completed`
+- ✔️ Task 10: Tier 2 apt cache + **clone-side strip** (depends on: 07) — `completed` (shipped via the pre-approved `limactl copy` fallback, not a mount — see Noteworthy Events)
 
 ### Phase 5: Surfaces and gates
 **Parallel Tasks:**

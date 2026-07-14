@@ -138,13 +138,41 @@ func (c *Client) Delete(name string, force bool) error {
 // Clone creates a new instance as a copy of an existing base image.
 func (c *Client) Clone(base, name string) error { return c.run("clone", base, name) }
 
-// Configure sets a STOPPED instance's cpus/memory/disk via `limactl edit --set`.
+// Configure sets a STOPPED clone's cpus/memory/disk — and strips any writable
+// mount the clone inherited from its base.
+//
+// Clones inherit the base's lima.yaml wholesale (`limactl clone` copies the
+// whole instance dir), so ANY writable mount RenderBaseOverlay ever puts on
+// the base (internal/provision/overlay.go) arrives here whether wanted or
+// not. Work VMs must carry NO writable host mount — that is the invariant
+// that makes "delete the VM and everything it produced is gone" true, and it
+// does not hold by itself; it holds because this strip runs on every clone,
+// every time. RenderBaseOverlay does not currently add a writable mount
+// (strikethroo plan 13, task 10 tried a writable apt-archive-cache mount and
+// backed it out — see that function's doc comment — in favour of an
+// `limactl copy` seed/harvest that needs no mount at all), so today this strip
+// has nothing to remove. It stays anyway, as a standing guard: the day
+// someone adds a writable mount back to the base overlay, this is what stops
+// it from silently reaching every clone.
+//
+// The strip selects OUT any mount with `writable: true`, rather than removing
+// one specific mount by mountPoint. That guarantees the property we actually
+// want — no writable mount, full stop — so a future writable mount added to
+// the base overlay is stripped automatically instead of silently surviving
+// because nobody updated this expression to name it. The read-only playbook
+// mount is preserved: finalize rsyncs from /mnt/playbook inside the clone.
+//
 // Applied on next start; disk may only grow (qcow2 cannot shrink live). memory
 // and disk are Lima size strings (e.g. "8GiB", "100GiB"). The grow-on-start
-// behaviour (qcow2 resize + the Debian image's growpart) is validated manually
-// on a real Lima host; the tests only cover command construction.
+// behaviour (qcow2 resize + the Debian image's growpart) and the yq mount
+// filter are validated manually against a real Lima host; the unit tests only
+// cover command construction and, where limactl is on PATH, a real
+// `limactl edit` round trip (see TestConfigureStripsWritableMountAgainstRealLimactl
+// in configure_strip_test.go) — do not remove either without replacing it.
 func (c *Client) Configure(name string, cpus int, memory, disk string) error {
-	expr := fmt.Sprintf(`.cpus=%d | .memory=%q | .disk=%q`, cpus, memory, disk)
+	expr := fmt.Sprintf(
+		`.cpus=%d | .memory=%q | .disk=%q | .mounts |= map(select(.writable != true))`,
+		cpus, memory, disk)
 	return c.run("edit", "--set", expr, name)
 }
 

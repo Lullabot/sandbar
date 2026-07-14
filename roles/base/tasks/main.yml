@@ -11,10 +11,13 @@
     group: root
     mode: "0644"
 
-# Clones boot from a base image that may be days old; refresh every apt package
-# so a freshly cloned VM is not carrying stale (and possibly insecure) builds.
-# Finalize-only: the base build and the single-pass `full` flow install current
-# versions directly, so there is nothing to catch up there.
+# A base image can sit unused for weeks; when it is older than the 30-day
+# threshold (internal/provision/provision.go's baseMaxAge), the create that
+# notices starts it, runs this once, in place, under the base lock, and
+# re-stamps it — so every clone taken from it afterwards is already current and
+# skips this entirely. base_apt_upgrade is emitted ONLY for that self-refresh
+# run (BuildExtraVars, aptUpgrade=true); a cold base build and a clone's
+# finalize phase never set it, so they never pay for it here.
 - name: Upgrade all apt packages
   ansible.builtin.apt:
     upgrade: dist
@@ -23,7 +26,7 @@
   until: _apt_upgrade is succeeded
   retries: 3
   delay: 5
-  when: provision_phase | default('full') == 'finalize'
+  when: base_apt_upgrade | default(false) | bool
 
 - name: Ensure the locale is enabled in /etc/locale.gen
   ansible.builtin.lineinfile:
@@ -150,32 +153,42 @@
     mode: "0644"
   when: provision_phase | default('full') != 'finalize'
 
-# ddev
+# ddev — part of the configurable base tool-set (sand create --with-ddev);
+# registering this repo/keyring at all is pointless when the package won't be
+# installed (see devtools_ddev_packages in roles/dev-tools/defaults/main.yml).
 - name: Download ddev GPG key
   ansible.builtin.get_url:
     url: https://pkg.ddev.com/apt/gpg.key
     dest: /tmp/ddev-gpg.key
     mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - toolset_ddev | bool
 
 - name: Dearmor ddev GPG key
   ansible.builtin.command:
     cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/ddev.gpg /tmp/ddev-gpg.key
   args:
     creates: /etc/apt/keyrings/ddev.gpg
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - toolset_ddev | bool
 
 - name: Make the ddev keyring readable by _apt
   ansible.builtin.file:
     path: /etc/apt/keyrings/ddev.gpg
     mode: "0644" # MUST be readable by the _apt sandbox user
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - toolset_ddev | bool
 
 - name: Remove temporary ddev GPG key file
   ansible.builtin.file:
     path: /tmp/ddev-gpg.key
     state: absent
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - toolset_ddev | bool
 
 - name: Deploy ddev APT repository
   ansible.builtin.copy:
@@ -184,7 +197,9 @@
     owner: root
     group: root
     mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - toolset_ddev | bool
 
 # Cloudflared
 - name: Download Cloudflare GPG key
@@ -235,7 +250,7 @@
 
 - name: Install every base-phase package in a single transaction
   ansible.builtin.apt:
-    name: "{{ base_packages + base_nodejs_packages + devtools_docker_packages + devtools_packages }}"
+    name: "{{ base_packages + base_nodejs_packages + devtools_docker_packages + devtools_packages + devtools_ddev_packages + toolset_packages }}"
     state: present
     update_cache: false # already refreshed above; keep false so a future edit can't silently reintroduce a second refresh
   when: provision_phase | default('full') != 'finalize'
