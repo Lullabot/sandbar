@@ -690,13 +690,11 @@ func TestBoardFocusMovesInTwoDimensions(t *testing.T) {
 	}
 }
 
-// enter opens the EXISTING full-screen VM screen for the focused tile, and esc
-// ENTER ON A VM TILE DOES NOTHING. It used to open a full-screen VM screen; that
-// screen is deleted, because the tile already showed everything it did — and the
-// one thing it had that the tile did not, the allocated core count, is now on the
-// cpu gauge's own label. Every verb it offered fires from the board. Enter is a
-// verb only on the empty slot, where it creates a VM.
-func TestEnterOnAVMTileDoesNothing(t *testing.T) {
+// Enter on a VM tile does the one obvious thing for the state that tile is in:
+// shell into a running VM. It carries no action of its own — it routes to an
+// existing registry verb (enterTarget) — so these tests pin the ROUTING, and the
+// verbs' own tests still cover what each one does.
+func TestEnterOnARunningVMShellsIn(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m,
 		vm.VM{Name: "api", Status: "Running"},
@@ -705,11 +703,64 @@ func TestEnterOnAVMTileDoesNothing(t *testing.T) {
 	m.focusName = "web"
 
 	after, cmd := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if after.view != viewBoard || cmd != nil {
-		t.Fatalf("enter on a VM tile must be a no-op (view=%v cmd=%v)", after.view, cmd)
+	if cmd == nil {
+		t.Fatal("enter on a running VM must shell in, got no command")
 	}
 	if after.focusName != "web" {
 		t.Fatalf("enter must not move the ring, got %q", after.focusName)
+	}
+	// The shell verb announces itself on the status line, and it is the only verb
+	// Enter can route a running VM to.
+	if !strings.Contains(after.lastMessage(), "web") {
+		t.Fatalf("enter on a running VM should report attaching to it, got status %q", after.lastMessage())
+	}
+}
+
+// A STOPPED VM starts. This is the case that makes Enter worth having: the tile
+// says "Stopped" and the obvious next thing is to wake it up.
+func TestEnterOnAStoppedVMStartsIt(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Stopped"})
+	m.focusName = "web"
+
+	after, cmd := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter on a stopped VM must start it, got no command")
+	}
+	if !strings.Contains(after.lastMessage(), "starting web") {
+		t.Fatalf("enter on a stopped VM should report starting it, got status %q", after.lastMessage())
+	}
+}
+
+// A BUILDING VM shows its log — and must NOT be shelled into or started. A VM
+// mid-provision is `Running` to Lima (Ansible runs inside a booted guest), so
+// routing on Status alone would drop the user into a guest its own build owns.
+// enterTarget checks "building" first, and this is the test that says so.
+func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
+	m := newTestModel(t)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+
+	// Back to the board, where the tile for the in-flight build sits under the ring.
+	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if l.m.view != viewBoard {
+		t.Fatalf("esc during a build should return to the board, got view %v", l.m.view)
+	}
+	l.m.focusName = "web"
+	if !l.m.vmBuilding("web") {
+		t.Fatal("precondition: web must be mid-build")
+	}
+
+	l.send(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if l.m.view != viewProgress {
+		t.Fatalf("enter on a building VM must reopen its log (viewProgress), got view %v", l.m.view)
+	}
+	if l.m.jobs.isRunning("web") != true {
+		t.Fatal("showing the log must not disturb the build")
 	}
 }
 
@@ -1034,19 +1085,28 @@ func TestGhostTileIsReachableWithTwoVMsInOneColumn(t *testing.T) {
 	}
 }
 
-// The footer must not advertise a key that does nothing. `enter` opens no VM
-// screen any more — there is none — so it is offered ONLY on the empty slot,
-// where it creates a VM. The footer read "enter detail" for a while after the
-// screen was deleted, which is exactly the help-bar drift the command registry
-// exists to prevent.
-func TestEnterIsAdvertisedOnlyOnTheGhost(t *testing.T) {
+// The footer must NAME the verb enter would run, because enter means something
+// different on every tile — "enter" alone would tell the user nothing, and a
+// footer that named the wrong verb would be worse. Both the footer and the
+// dispatcher read enterTarget, so they cannot disagree.
+func TestEnterIsAdvertisedWithTheVerbItRuns(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"}, vm.VM{Name: "api", Status: "Stopped"})
 
-	m.focusName = "web"
-	if strings.Contains(boardVerbs(m), "enter") {
-		t.Fatalf("a VM tile must not advertise enter — it does nothing there:\n%s", boardVerbs(m))
+	// The verb enter routes to carries BOTH keys, rather than enter getting a line
+	// of its own that repeats the same word.
+	m.focusName = "web" // running -> shell
+	if !strings.Contains(boardVerbs(m), "enter/S shell") {
+		t.Fatalf("a running tile must advertise enter alongside S on the shell verb:\n%s", boardVerbs(m))
+	}
+	if strings.Contains(boardVerbs(m), "enter shell") {
+		t.Fatalf("enter must not get a duplicate line of its own:\n%s", boardVerbs(m))
+	}
+
+	m.focusName = "api" // stopped -> start
+	if !strings.Contains(boardVerbs(m), "enter/s start") {
+		t.Fatalf("a stopped tile must advertise enter alongside s on the start verb:\n%s", boardVerbs(m))
 	}
 
 	m.focusName = ghostFocusName

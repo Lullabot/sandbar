@@ -33,6 +33,12 @@ import (
 // model (not just the VM) so a predicate can consult state the VM record
 // itself doesn't carry — e.g. the job-registry seam below.
 type vmCommand struct {
+	// id names the verb for the ONE caller that needs to reach a specific one
+	// rather than walk them all: enterTarget, which routes Enter to whichever of
+	// these a VM's current state calls for. Set only on the verbs Enter can pick;
+	// "" everywhere else. Enter runs the entry it finds here — it does not carry
+	// its own copy of the action — so the two can never drift.
+	id      string
 	binding key.Binding
 	// about is one sentence explaining what this verb does, for the `?` screen
 	// (help.go). The binding's own help text is a two-word label for the footer —
@@ -84,10 +90,54 @@ func alwaysEnabled(model, vm.VM) bool { return true }
 // headline feature — and these gates are what has to replace it.
 func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
 
+// enterTarget is what Enter does to the tile under the ring: the ONE obvious
+// thing for the state that tile is in.
+//
+//	building  -> log    (show me what it is doing)
+//	running   -> shell  (let me in)
+//	otherwise -> start  (wake it up)
+//
+// Enter is a shortcut, not a fourth verb: it returns an existing entry from
+// vmCommands and the caller runs THAT entry's action, so Enter cannot drift from
+// the key it stands in for, and it inherits that verb's enabledFor for free —
+// which is what makes the gates hold. Pressing Enter on a VM mid-build cannot
+// start or shell into it, because the verb it would route to is disabled and
+// this returns false.
+//
+// The building case is checked FIRST and deliberately: a VM mid-provision is
+// `Running` to Lima (Ansible is executing inside a booted guest), so asking about
+// Status first would route Enter to shell and drop the user into a guest that a
+// build — or a reset that is about to force-delete it — currently owns.
+//
+// ok=false means Enter does nothing here, and boardHelp must not advertise it.
+// That happens when the routed verb is gated off: a building VM whose run is not
+// retained (nothing to show yet), for instance.
+func (m model) enterTarget(v vm.VM) (vmCommand, bool) {
+	var want string
+	switch {
+	case m.vmBuilding(v.Name):
+		want = "log"
+	case v.Status == limaRunning:
+		want = "shell"
+	default:
+		want = "start"
+	}
+	for _, c := range vmCommands {
+		if c.id == want {
+			if !c.enabledFor(m, v) {
+				return vmCommand{}, false
+			}
+			return c, true
+		}
+	}
+	return vmCommand{}, false
+}
+
 // vmCommands is every per-VM verb, in help-bar display order. They all fire on the
 // tile under the board's focus ring.
 var vmCommands = []vmCommand{
 	{
+		id:         "start",
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
 		about:      "Boot the VM. Its host-stored secrets are written into the guest as it comes up.",
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status != limaRunning },
@@ -164,6 +214,7 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		id:      "shell",
 		binding: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "shell")),
 		about: "Attach a shell to the guest's persistent tmux session. Work keeps running after " +
 			"you detach (C-a d) or close the terminal; C-a c opens another window.",
@@ -250,6 +301,7 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		id:      "log",
 		binding: key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
 		about:   "Reopen the log of this VM's last build or file transfer, including one still running, and one that failed.",
 		// Reopen the VM's last run in the progress viewport. Ansible's output used

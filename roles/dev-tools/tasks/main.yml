@@ -15,11 +15,31 @@
 # non-apt setup for those tools below (service enablement, group membership,
 # non-apt installs, proxy config).
 
-- name: Enable and start Docker service
+# Docker is SOCKET-activated, not started at boot. docker.service is ~2-4.5s and
+# it sits on the boot critical path: it gates multi-user.target, which gates
+# cloud-final (Lima's per-boot script), which is what `limactl start` waits for.
+# Nothing needs the daemon DURING boot — the first client to touch
+# /var/run/docker.sock (a docker command, ddev, the Docker SDK) starts it — so
+# every VM was paying for it on every boot to have it ready a few seconds sooner.
+#
+# docker.socket is enabled and docker.service is explicitly NOT: leaving the
+# service enabled would start it at boot anyway and make the socket unit
+# pointless. The daemon still restarts on its own after a crash (Restart=always
+# in its unit), and once started it stays up.
+#
+# Consequence to know about: `systemctl is-active docker` reads "inactive" on a
+# freshly booted VM until something opens the socket. `docker info` works — it
+# opens the socket, which is the trigger.
+- name: Enable the Docker socket (activates the daemon on first use)
   ansible.builtin.systemd_service:
-    name: docker
+    name: docker.socket
     state: started
     enabled: true
+
+- name: Keep the Docker service off the boot path
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: false
 
 - name: Add claude user to docker group
   ansible.builtin.user:

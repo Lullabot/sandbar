@@ -588,12 +588,22 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			cmd := m.openForm()
 			return m, cmd
 		}
-		// On a VM tile, enter does NOTHING. It used to open a full-screen VM screen;
-		// that screen is gone, because the tile already shows everything it did — the
-		// one fact it had that the tile did not, the allocated core count, now rides on
-		// the cpu gauge's own label (cpuLabel, tile.go). Every verb it offered fires
-		// straight from the board, on the tile under the ring.
-		return m, nil
+		// On a VM tile, Enter does the one obvious thing for the state that tile is
+		// in: show the log while it builds, shell in while it runs, start it when it
+		// is stopped (enterTarget, commandreg.go). It does not open a screen — the VM
+		// screen is gone, because the tile already showed everything it did — and it
+		// carries no action of its own: it runs an EXISTING verb from the registry, so
+		// it inherits that verb's gate and cannot drift from the key it stands in for.
+		v, ok := m.focusedVM()
+		if !ok {
+			return m, nil
+		}
+		c, ok := m.enterTarget(v)
+		if !ok {
+			return m, nil
+		}
+		cmd := c.action(&m, v) // mutates m; see the note under Quit above
+		return m, cmd
 
 	case key.Matches(msg, m.keys.StopAll):
 		targets := m.stopAllTargets()
@@ -665,21 +675,35 @@ func (m model) boardHelp() []key.Binding {
 	if m.searching {
 		return []key.Binding{m.keys.Back, m.keys.Enter}
 	}
-	// Enter is a verb ONLY on the empty slot, where it creates a VM. On a VM tile it
-	// does nothing — the screen it used to open is gone — so it is not advertised
-	// there. A help bar offering a key that does nothing is exactly the drift the
-	// command registry exists to prevent; it read "enter detail" for a while after
-	// the VM screen was deleted, which is how this was caught.
+	// Enter creates a VM on the empty slot; on a VM tile it runs whichever verb
+	// that tile's state calls for (enterTarget). It is NOT advertised as a line of
+	// its own: Enter never does anything a listed verb does not already do, so a
+	// separate entry would print the same word twice ("enter shell" above "S
+	// shell") and, at 80 columns, push the footer into truncation to say nothing
+	// new. Instead the verb Enter routes to shows BOTH its keys — "enter/S shell"
+	// — which is where a user looking for what Enter does will actually look.
 	bindings := []key.Binding{boardMove}
 	if m.focusIsGhost() {
 		bindings = append(bindings, ghostEnter)
 	}
 	bindings = append(bindings, m.keys.New, m.keys.Search)
 	if v, ok := m.focusedVM(); ok {
+		enter, hasEnter := m.enterTarget(v)
 		for _, c := range vmCommands {
-			if c.enabledFor(m, v) {
-				bindings = append(bindings, c.binding)
+			if !c.enabledFor(m, v) {
+				continue
 			}
+			b := c.binding
+			if hasEnter && c.id == enter.id {
+				// This is the verb Enter runs on this tile: advertise both keys on the
+				// one line rather than printing the verb twice.
+				h := c.binding.Help()
+				b = key.NewBinding(
+					key.WithKeys(append(c.binding.Keys(), "enter")...),
+					key.WithHelp("enter/"+h.Key, h.Desc),
+				)
+			}
+			bindings = append(bindings, b)
 		}
 	}
 	return append(bindings, m.keys.StopAll, m.keys.Quit, m.keys.Help)

@@ -159,7 +159,14 @@ func TestBoardHelpAndDispatchAgree(t *testing.T) {
 			enabled := c.enabledFor(mm, focused)
 			shown := false
 			for _, hb := range mm.boardHelp() {
-				if hb.Help() == c.binding.Help() {
+				h := hb.Help()
+				// The verb Enter routes to is advertised with BOTH keys on one line
+				// ("enter/S shell" rather than a separate "enter shell" entry), so match
+				// on the verb — the Desc — and accept either key label. What this test
+				// guards is that an enabled verb IS offered and a disabled one is NOT;
+				// which keys reach it is boardHelp's business, and TestEnter…AdvertisedWith
+				// pins the merged label itself.
+				if h.Desc == c.binding.Help().Desc && (h.Key == c.binding.Help().Key || h.Key == "enter/"+c.binding.Help().Key) {
 					shown = true
 					break
 				}
