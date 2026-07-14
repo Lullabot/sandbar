@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -88,6 +89,39 @@ const taskTotalGuard = `case "${listed:-}" in
 esac
 echo "SAND_ANSIBLE_TASK_TOTAL=$total"`
 
+// profileGuestScript is the opt-in variant of inGuestScript, selected when the
+// host has SAND_PROFILE set (see sandProfileEnabled). ansible.cfg enables the
+// profile_tasks callback unconditionally, but that callback lives in the
+// ansible.posix collection, not ansible-core (strikethroo plan 13, task 02),
+// and the default Lima dependency script installs only ansible-core. This
+// variant installs ansible.posix on demand, right before the playbook run, so
+// the callback loads and prints its timing; the default path (inGuestScript)
+// never does this and stays collection-free.
+const profileGuestScript = `set -eu -o pipefail
+vars=/dev/shm/sand-vars.yml
+trap 'rm -f "$vars"' EXIT
+install -m 600 /dev/null "$vars"
+cat > "$vars"
+rsync -a --delete --delete-excluded \
+  --include=/site.yml --include=/ansible.cfg --include=/inventory \
+  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
+  /mnt/playbook/ /root/playbook/
+cd /root/playbook
+ansible-galaxy collection install ansible.posix
+listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
+` + taskTotalGuard + `
+ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
+`
+
+// sandProfileEnabled reports whether the host opted into profiling via
+// SAND_PROFILE (any non-empty value other than "0"). It gates the only place
+// that ever installs an Ansible collection in the Lima flow: the default path
+// stays collection-free.
+func sandProfileEnabled() bool {
+	v := os.Getenv("SAND_PROFILE")
+	return v != "" && v != "0"
+}
+
 // Provisioner drives the base-build / clone / finalize sequence through a
 // lima.Client, streaming playbook output to the caller-supplied writer.
 type Provisioner struct {
@@ -110,8 +144,12 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
 	step(out, "Provisioning %q (%s phase, Ansible)…", name, phase)
+	script := inGuestScript
+	if sandProfileEnabled() {
+		script = profileGuestScript
+	}
 	// Vars go over STDIN, never argv (secret hygiene).
-	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", inGuestScript); err != nil {
+	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", script); err != nil {
 		return fmt.Errorf("provisioning (%s) failed for %q: %w", phase, name, err)
 	}
 	return nil
@@ -255,11 +293,11 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // the base and then let go — while the 40-60s clone that READS that base ran
 // unprotected. baselock.go's own doc lists "the stale-base path can DELETE the base
 // while another create is cloning from it" among the races it closes, and it did not
-// close that one: playbookVersionFn is the playbook checkout's git HEAD plus a
-// "-dirty" suffix, so it changes at RUNTIME. Edit a playbook file while a create is
-// cloning, start a second create, and that create takes the free lock, decides the
-// base is stale, and force-deletes the instance the first create is reading its disk
-// from.
+// close that one: playbookVersionFn is a content hash of the playbook fileset, so
+// it changes at RUNTIME whenever a playbook file is edited. Edit a playbook file
+// while a create is cloning, start a second create, and that create takes the free
+// lock, decides the base is stale, and force-deletes the instance the first create
+// is reading its disk from.
 //
 // The cost is that two concurrent creates serialize their clones. That is the right
 // trade: a clone is seconds to a minute, while the Ansible run that follows it —
@@ -325,9 +363,13 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 
 // baseStale reports whether an existing base image was built from a different
 // playbook version than the one that would be mounted now, and streams the
-// reason when it returns true. A missing/unreadable stamp counts as stale, so a
-// base built before version stamping is rebuilt once. A version-lookup error
-// (e.g. the playbook dir is not a git checkout) is treated as NOT stale — better
+// reason when it returns true. A missing/unreadable stamp counts as stale, so
+// a base built before version stamping is rebuilt once. So does a stamp
+// written by the old git-HEAD scheme (no "v2:" prefix): an upgrading user
+// converges onto the content-hash scheme once rather than trusting a stamp a
+// different versioning scheme vouched for. A version-lookup error (a genuine
+// filesystem problem — the content-hash scheme cannot fail merely for "not a
+// git checkout" the way the old scheme did) is treated as NOT stale — better
 // to reuse the base than to rebuild it on every create.
 func (p *Provisioner) baseStale(baseName string, out io.Writer) bool {
 	want, err := playbookVersionFn(p.PlaybookDir)
@@ -339,9 +381,12 @@ func (p *Provisioner) baseStale(baseName string, out io.Writer) bool {
 	if have == want {
 		return false
 	}
-	if have == "" {
+	switch {
+	case have == "":
 		step(out, "Base image %q has no recorded playbook version; rebuilding it from the current playbook (%s)…", baseName, shortVersion(want))
-	} else {
+	case !strings.HasPrefix(have, playbookVersionPrefix):
+		step(out, "Base image %q was built by an older version scheme; converging it to the current playbook (%s)…", baseName, shortVersion(want))
+	default:
 		step(out, "Base image %q was built from playbook %s but the current playbook is %s; rebuilding it…", baseName, shortVersion(have), shortVersion(want))
 	}
 	return true

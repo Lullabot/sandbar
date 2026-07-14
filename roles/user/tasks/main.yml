@@ -62,10 +62,33 @@
 # user. Lima injects its own key for `limactl shell`, so user_github_keys_url
 # is left empty by default and this task is skipped.
 - name: Fetch SSH authorized_keys from a URL
-  ansible.posix.authorized_key:
-    user: "{{ user_name }}"
-    key: "{{ user_github_keys_url }}"
-    exclusive: false
+  ansible.builtin.get_url:
+    url: "{{ user_github_keys_url }}"
+    dest: "/tmp/{{ user_name }}-github-keys"
+    mode: "0600"
+  when:
+    - user_github_keys_url | length > 0
+    - provision_phase | default('full') != 'finalize'
+
+# File mode and ownership are load-bearing: sshd ignores authorized_keys that
+# is group/world-writable or not owned by the user.
+- name: Install fetched authorized_keys
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.ssh/authorized_keys"
+    line: "{{ item }}"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0600"
+  loop: "{{ lookup('ansible.builtin.file', '/tmp/' ~ user_name ~ '-github-keys').splitlines() }}"
+  when:
+    - user_github_keys_url | length > 0
+    - provision_phase | default('full') != 'finalize'
+
+- name: Remove temporary GitHub keys file
+  ansible.builtin.file:
+    path: "/tmp/{{ user_name }}-github-keys"
+    state: absent
   when:
     - user_github_keys_url | length > 0
     - provision_phase | default('full') != 'finalize'

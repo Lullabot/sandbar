@@ -456,10 +456,10 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 
 *Gate: this phase must land before any optimization. It is also the last moment `profile_tasks` works for free — the next phase removes the collection bundle that vendors it.*
 
-### Phase 2: Independent foundations
+### ✅ Phase 2: Independent foundations
 **Parallel Tasks:**
-- Task 02: `ansible-core` bootstrap, drop both collection uses (depends on: 01)
-- Task 04: Content-hash version stamp (depends on: 01)
+- ✔️ Task 02: `ansible-core` bootstrap, drop both collection uses (depends on: 01) — `completed`
+- ✔️ Task 04: Content-hash version stamp (depends on: 01) — `completed`
 
 ### Phase 3: Build on the foundations
 **Parallel Tasks:**

@@ -29,8 +29,11 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"mountPoint: /mnt/playbook",
 		"writable: false",
 		"mode: dependency",
-		"command -v ansible >/dev/null 2>&1 && command -v rsync",
-		"apt-get install -y ansible rsync",
+		"command -v ansible-playbook >/dev/null 2>&1",
+		"command -v rsync >/dev/null 2>&1",
+		"command -v curl >/dev/null 2>&1",
+		"command -v gpg >/dev/null 2>&1",
+		"apt-get install -y ansible-core rsync curl gnupg ca-certificates",
 	}
 	for _, s := range wantSubstrings {
 		if !strings.Contains(got, s) {
@@ -73,7 +76,13 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if len(doc.Provision) != 1 || doc.Provision[0].Mode != "dependency" {
 		t.Fatalf("provision = %+v, want one dependency entry", doc.Provision)
 	}
-	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y ansible rsync") {
-		t.Errorf("dependency script missing ansible+rsync install:\n%s", doc.Provision[0].Script)
+	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y ansible-core rsync curl gnupg ca-certificates") {
+		t.Errorf("dependency script missing ansible-core+rsync+curl+gnupg+ca-certificates install:\n%s", doc.Provision[0].Script)
+	}
+	// The bundled `ansible` package (200MB installed) must never be installed on
+	// the default path; only the lean ansible-core (8MB) is acceptable here.
+	if strings.Contains(doc.Provision[0].Script, "install -y ansible ") ||
+		strings.HasSuffix(strings.TrimSpace(doc.Provision[0].Script), "install -y ansible") {
+		t.Errorf("dependency script installs the fat ansible bundle instead of ansible-core:\n%s", doc.Provision[0].Script)
 	}
 }

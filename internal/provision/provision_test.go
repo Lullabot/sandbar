@@ -129,6 +129,66 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 }
 
+// TestDefaultGuestScriptStaysCollectionFree pins the default (SAND_PROFILE
+// unset) in-guest script to never install any Ansible collection: profile_tasks
+// lives in ansible.posix, which the default Lima dependency script does not
+// install (strikethroo plan 13, task 02), so the default path must not depend
+// on it either.
+func TestDefaultGuestScriptStaysCollectionFree(t *testing.T) {
+	if strings.Contains(inGuestScript, "ansible-galaxy") || strings.Contains(inGuestScript, "collection") {
+		t.Errorf("default inGuestScript must stay collection-free:\n%s", inGuestScript)
+	}
+}
+
+// TestRunProvision_SandProfileInstallsAnsiblePosix verifies the SAND_PROFILE
+// opt-in: when set, the guest script run over `limactl shell` installs the
+// ansible.posix collection on demand so the profile_tasks callback (enabled
+// unconditionally in ansible.cfg) actually loads. Unset, CreateVM must keep
+// using the default collection-free script.
+func TestRunProvision_SandProfileInstallsAnsiblePosix(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	t.Setenv("SAND_PROFILE", "1")
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	var sawInstall bool
+	for _, call := range f.calls {
+		if len(call) > 0 && call[0] == "shell" {
+			script := call[len(call)-1]
+			if strings.Contains(script, "ansible-galaxy collection install ansible.posix") {
+				sawInstall = true
+			}
+		}
+	}
+	if !sawInstall {
+		t.Errorf("SAND_PROFILE=1 did not select a script that installs ansible.posix; calls:\n%v", f.calls)
+	}
+}
+
+// TestRunProvision_SandProfileUnsetStaysDefault confirms the unset (default)
+// case runs the unmodified inGuestScript, never touching ansible-galaxy.
+func TestRunProvision_SandProfileUnsetStaysDefault(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"claude-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	for _, call := range f.calls {
+		if len(call) > 0 && call[0] == "shell" {
+			script := call[len(call)-1]
+			if script != inGuestScript {
+				t.Errorf("SAND_PROFILE unset must run the default inGuestScript verbatim, got:\n%s", script)
+			}
+		}
+	}
+}
+
 // TestCreateVM_BuildsBaseWhenAbsent: with no base image (empty status), CreateVM
 // builds the base first (create -> base provision -> stop) and only then clones
 // and finalizes. The base provision must NOT carry the git identity; the
@@ -925,10 +985,10 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 // to build or rebuild the base and then let go — while the 40-60s clone that READS
 // that base ran unprotected. That leaves the stale-base path free to delete the base
 // out from under a clone, and the version it compares against is not a constant:
-// playbookVersionFn is the playbook checkout's git HEAD plus a "-dirty" suffix, so
+// playbookVersionFn is a content hash of the playbook fileset, so
 // editing any playbook file while a create is cloning FLIPS IT AT RUNTIME.
 //
-// So: create A builds the base and starts its (slow) clone. The playbook goes dirty.
+// So: create A builds the base and starts its (slow) clone. The playbook changes.
 // Create B arrives, finds the base stale, and force-deletes the instance A is reading
 // its disk from. A's clone fails, or lands truncated.
 func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
@@ -954,7 +1014,7 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 	writeBaseVersionFn = func(_, v string) error {
 		vmu.Lock()
 		stamped = v
-		version = "v2" // the tree goes dirty the moment the base is built
+		version = "v2" // the tree changes the moment the base is built
 		vmu.Unlock()
 		return nil
 	}
