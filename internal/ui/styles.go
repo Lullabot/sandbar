@@ -40,6 +40,15 @@ var (
 			BorderForeground(lipgloss.Color("63")).
 			Padding(0, 1)
 
+	// boxChromeH/boxChromeV are what boxStyle ADDS AROUND whatever it renders: a
+	// rounded border (1 cell each side, 1 row top and bottom) and Padding(0, 1)
+	// (1 more cell each side). Content sized to the full budget and then wrapped in
+	// boxStyle does not fit the budget — it overruns it by exactly this much, and
+	// the terminal clips the overrun, which is how the log viewport lost the box's
+	// right-hand border. Anything boxStyle wraps must subtract these first.
+	boxChromeH = 4 // 2 border + 2 padding
+	boxChromeV = 2 // 2 border
+
 	// fieldInfoStyle renders the focused field's help under the create form: a
 	// dim, left-bordered block so multi-line help (the GitHub token guidance)
 	// reads as an aside rather than part of the form.
