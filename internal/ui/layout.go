@@ -79,7 +79,7 @@ const (
 // Fixed row budgets for the header/messages/footer bands. headerHeightFull is
 // the title plus a VM-count line; headerHeightCompact folds the counts into
 // the title line. messagesStripHeight is the messages pane shown between the
-// header and the grid. footerBandHeight is the closing band below it.
+// grid and the footer band. footerBandHeight is the closing band below it.
 const (
 	headerHeightFull    = 2
 	headerHeightCompact = 1

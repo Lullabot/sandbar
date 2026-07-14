@@ -709,10 +709,10 @@ func (m model) boardHelp() []key.Binding {
 	return append(bindings, m.keys.StopAll, m.keys.Quit, m.keys.Help)
 }
 
-// boardView renders the board top to bottom: the pinned header band, the docked
-// messages strip (when the terminal has room for it — see messagesStripView), the
-// tile grid, and the footer band (the status line, the search indicator and the
-// help bar).
+// boardView renders the board top to bottom: the pinned header band, the tile
+// grid, the docked messages box (when the terminal has room for it — see
+// messagesStripView), and the footer band (the status line, the search indicator
+// and the help bar).
 //
 // EVERY ROW IT SPENDS IS A ROW CLASSIFY BUDGETED. That is not a nicety: this view
 // used to emit two blank separator rows nobody had budgeted for, so at 80x24 it
@@ -724,12 +724,17 @@ func (m model) boardView() string {
 	var b strings.Builder
 	b.WriteString(m.headerView())
 	b.WriteString("\n")
+	b.WriteString(m.gridView())
+	b.WriteString("\n")
+	// The messages box sits BELOW the tiles, between them and the footer band: the
+	// tiles are what the board is for, so they start directly under the header
+	// rather than being pushed down by a log that is usually empty. It stays a
+	// fixed-height pane (see messagesStripView), so the grid above it does not
+	// shift as the log fills in.
 	if strip := m.messagesStripView(); strip != "" {
 		b.WriteString(strip)
 		b.WriteString("\n")
 	}
-	b.WriteString(m.gridView())
-	b.WriteString("\n")
 	b.WriteString(m.footerBandView())
 	return appStyle.Render(b.String())
 }
