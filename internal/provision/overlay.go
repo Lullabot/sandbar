@@ -46,7 +46,12 @@ const overlayProvision = `provision:
     fi
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y ansible-core rsync curl gnupg ca-certificates
+    # --no-install-recommends is load-bearing, not hygiene: Debian's ansible-core
+    # Recommends: ansible, so without it apt pulls the very 200MB collection
+    # bundle (~436MB of ansible_collections on disk) that installing ansible-core
+    # instead of ansible exists to avoid. Dropping this flag silently restores
+    # the fat bundle and the slim-bootstrap win with it.
+    apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates
 `
 
 // RenderBaseOverlay produces the Lima overlay YAML for the base image: the
