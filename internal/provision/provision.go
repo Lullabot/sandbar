@@ -310,23 +310,60 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		return err
 	}
 
-	// Bounce the VM so the first interactive shell starts cleanly: the finalize
-	// apt upgrade may have pulled a new kernel/libraries, and the hostname change
-	// takes full effect on a fresh boot.
-	step(out, "Restarting %q for a clean first boot…", cfg.Name)
-	if err := timer.time("bounce", func() error {
-		if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
-			return fmt.Errorf("stop %q: %w", cfg.Name, err)
+	// The bounce used to be unconditional. Its two stated reasons are both gone:
+	//   - the finalize apt upgrade (removed in task 8), and
+	//   - docker-group membership, which is granted in the BASE phase
+	//     (roles/dev-tools, gated `when: provision_phase != 'finalize'` in
+	//     site.yml) and therefore baked into the image — a clone has the group
+	//     in /etc/group before it ever boots, and every `limactl shell` is a
+	//     fresh login with a fresh initgroups(). Finalize never touches groups.
+	//   - the hostname change was also checked (not just assumed): verified live
+	//     against a running VM that `hostnamectl set-hostname` (what
+	//     roles/base's "Set hostname" task uses) takes effect immediately, with
+	//     no reboot — a fresh `limactl shell` right after the change already
+	//     reports the new name via `hostname`, `cat /etc/hostname`, and
+	//     `hostnamectl`, and /etc/hosts is rewritten by the same playbook run
+	//     (a template task, not reboot-gated either). Nothing caches the old
+	//     name across a fresh process.
+	// What is left is a genuine reboot request from the guest itself.
+	if p.needsReboot(ctx, cfg.Name) {
+		step(out, "Restarting %q to apply a pending reboot…", cfg.Name)
+		if err := timer.time("bounce", func() error {
+			if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
+				return fmt.Errorf("stop %q: %w", cfg.Name, err)
+			}
+			if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+				return fmt.Errorf("restart %q: %w", cfg.Name, err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-			return fmt.Errorf("restart %q: %w", cfg.Name, err)
-		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	timer.summary()
 	return nil
+}
+
+// needsReboot reports whether the guest itself is asking for a restart.
+// /var/run/reboot-required is written by Debian's kernel/libc upgrade
+// machinery (update-notifier-common's hook); a genuine miss (the file does
+// not exist) and a communication failure both read as "no reboot needed" —
+// the caller has no more information than "the marker was not confirmed
+// present", and treating an unreachable guest as reboot-required would just
+// trade one unconditional bounce for another.
+func (p *Provisioner) needsReboot(ctx context.Context, name string) bool {
+	var buf bytes.Buffer
+	err := p.Lima.Shell(ctx, name, nil, &buf, "test", "-e", "/var/run/reboot-required")
+	return err == nil
+}
+
+// hasLiveTmux reports whether the guest's persistent `main` tmux session
+// (internal/lima/attach.go) is up. `=main` is an exact-match target, matching
+// guestAttachExpr's own care to never match a same-prefixed session.
+func (p *Provisioner) hasLiveTmux(ctx context.Context, name string) bool {
+	var buf bytes.Buffer
+	err := p.Lima.Shell(ctx, name, nil, &buf, "tmux", "has-session", "-t", "=main")
+	return err == nil
 }
 
 // prepareBaseAndClone is the base image's WHOLE critical section: prepare it, then
@@ -756,13 +793,49 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		}
 	}
 
-	// 7. Bounce so the first interactive shell starts cleanly (mirror createVM).
-	step(out, "Restarting %q for a clean first boot…", cfg.Name)
-	if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
-		return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
-	}
-	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-		return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
+	// 7. Bounce only when the guest actually asked for one (mirror createVM's
+	// conditional bounce; see its comment for why the old unconditional reasons
+	// are gone).
+	//
+	// Unlike createVM's clone, this VM is the one this VERY call just finalized —
+	// nothing has had a chance to attach to it yet, so hasLiveTmux should read
+	// false in the overwhelmingly common case. It is checked anyway, on
+	// principle: `sand reset` also runs against a VM whose name/identity a
+	// caller could reuse for an already-attached session in edge cases we do not
+	// fully control from here (e.g. a script driving Reset directly rather than
+	// through the CLI/TUI paths that always operate on a freshly (re)created
+	// name). A stop+start of a RUNNING VM destroys the guest's persistent `main`
+	// tmux session and everything running in it — the precise disaster
+	// internal/lima/attach.go's lingering session exists to prevent — so a live
+	// session is never bounced through silently.
+	//
+	// We warn and proceed rather than refuse: refusing would leave Reset's own
+	// preceding work (delete + reclone + restore + finalize, all already
+	// committed) in a state the caller cannot easily walk back from, for the
+	// sake of a bounce that is itself already a rare case (reboot-required is
+	// the exception, not the rule). Silence was the actual defect; a loud
+	// warning that still finishes the reset is the least surprising fix.
+	//
+	// Counter-consideration: "never bounce" is not automatically safe either. A
+	// long-lived tmux server freezes its supplementary groups and environment
+	// at the moment each pane is forked. If a future re-apply against a
+	// RUNNING VM ever changed group membership (it does not today — see
+	// createVM's comment), existing panes would not observe that change
+	// without a restart. That is a real cost of skipping the bounce, not a
+	// reason to make it unconditional again; it means any code that starts
+	// changing groups on a live VM must reckon with tmux explicitly, the same
+	// way this one does.
+	if p.needsReboot(ctx, cfg.Name) {
+		if p.hasLiveTmux(ctx, cfg.Name) {
+			step(out, "WARNING: %q has a live tmux session; restarting it now to apply a pending reboot will destroy that session and everything running in it.", cfg.Name)
+		}
+		step(out, "Restarting %q to apply a pending reboot…", cfg.Name)
+		if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
+			return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
+		}
+		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+			return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
+		}
 	}
 
 	// 8. Full success: drop the host staging dir.

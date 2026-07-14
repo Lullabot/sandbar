@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/vm"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // staleDisabledToggleLabel is the old (now-removed) disabled-toggle
@@ -192,5 +194,84 @@ func TestOpenResetFormNoOrgSegment(t *testing.T) {
 	view := m.formView()
 	if strings.Contains(view, "Preserve ~/") {
 		t.Fatalf("formView for a no-org-segment URL contains %q, want no project-preserve line", "Preserve ~/")
+	}
+}
+
+// TestCreateFormJavaToggleOff walks create-mode focus onto the Java toggle,
+// flips it with space, and asserts buildConfig produces WithJava: false while
+// the other two tool toggles (left untouched, default on) stay true. This is
+// the create-mode analogue of TestResetToggleFlipsAndWarns: create mode's
+// focus walk and space/enter handling must reach and flip its own toggles,
+// not just reset mode's.
+func TestCreateFormJavaToggleOff(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+
+	// Fill the required fields so buildConfig/Validate don't fail on something
+	// unrelated to the toggle under test.
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Dev")
+	m.inputs[fGitEmail].SetValue("dev@example.com")
+
+	if m.toggleFocus != -1 {
+		t.Fatalf("openForm must reset toggleFocus to -1, got %d", m.toggleFocus)
+	}
+
+	// Walk from the last text input onto the toggles: DDEV (0), Go (1), Java (2).
+	m.focusIdx = fCloneToken
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	if m.toggleFocus != 2 {
+		t.Fatalf("expected focus on the Java toggle (index 2), got toggleFocus=%d", m.toggleFocus)
+	}
+
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if cfg.WithJava {
+		t.Fatalf("WithJava = true after flipping the Java toggle off, want false")
+	}
+	if !cfg.WithDDEV || !cfg.WithGo {
+		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v", cfg.WithDDEV, cfg.WithGo)
+	}
+}
+
+// TestCreateFormRebuildToggle pins that the fourth create-mode toggle
+// ("Rebuild base image") is reachable and flips independently of the tool
+// toggles.
+func TestCreateFormRebuildToggle(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.focusIdx = fCloneToken
+
+	for i := 0; i < 4; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+	}
+	if m.toggleFocus != 3 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 3), got toggleFocus=%d", m.toggleFocus)
+	}
+	if m.toolRebuild {
+		t.Fatalf("rebuild should default off")
+	}
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+	if !m.toolRebuild {
+		t.Fatalf("space on the Rebuild toggle should enable it")
+	}
+
+	// One more Tab wraps back around to the first text input.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	if m.toggleFocus != -1 || m.focusIdx != fName {
+		t.Fatalf("wrap after the last toggle: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fName", m.toggleFocus, m.focusIdx)
 	}
 }

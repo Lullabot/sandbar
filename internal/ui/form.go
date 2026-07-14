@@ -204,6 +204,11 @@ func (m *model) openForm() tea.Cmd {
 	m.formErr = nil
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
+	m.toggleFocus = -1  // openResetForm already did this; create mode now has toggles too
+	m.toolDDEV = true
+	m.toolGo = true
+	m.toolJava = true
+	m.toolRebuild = false
 	m.view = viewForm
 	return m.inputs[0].Focus()
 }
@@ -265,27 +270,128 @@ func (m model) hasStoredToken(name string) bool {
 	return false
 }
 
-// focusNext / focusPrev move the cursor between fields, wrapping around.
+// formToggle is one checkbox in the form: a label, its per-field help, and
+// get/set closures onto the model field it drives. Both form modes (create
+// and reset) build their own list of these and share one focus walk and one
+// space/enter handler — see toggles, formFocusNext/Prev, and updateForm's
+// toggleFocus guard.
+type formToggle struct {
+	label string
+	help  string // shown as the focused-field help; "" renders nothing (reset mode's toggles)
+	get   func(*model) bool
+	set   func(*model, bool)
+}
+
+// baseWideHelp is shared by the three tool toggles: they configure the SHARED
+// base image every future VM is cloned from, not just the VM this form is
+// creating. That is never allowed to be a surprise from a per-VM screen.
+func baseWideHelp(tool string) string {
+	return "Installs " + tool + " into the SHARED base image every VM is cloned from — " +
+		"not just this VM. Changing this re-converges the base; de-selecting a tool " +
+		"needs the \"Rebuild base image\" toggle below to actually remove it " +
+		"(Ansible cannot uninstall it from an existing base)."
+}
+
+// createToggles is create mode's toggle list: the base-image tool-set
+// (default on) and the rebuild intent (default off, wired to the same path
+// `sand create --rebuild` uses — see submitForm).
+func (m model) createToggles() []formToggle {
+	return []formToggle{
+		{
+			label: "Install DDEV",
+			help:  baseWideHelp("DDEV"),
+			get:   func(m *model) bool { return m.toolDDEV },
+			set:   func(m *model, v bool) { m.toolDDEV = v },
+		},
+		{
+			label: "Install Go",
+			help:  baseWideHelp("Go"),
+			get:   func(m *model) bool { return m.toolGo },
+			set:   func(m *model, v bool) { m.toolGo = v },
+		},
+		{
+			label: "Install Java",
+			help:  baseWideHelp("Java"),
+			get:   func(m *model) bool { return m.toolJava },
+			set:   func(m *model, v bool) { m.toolJava = v },
+		},
+		{
+			label: "Rebuild base image",
+			help: "Delete and rebuild the base image from scratch before creating. " +
+				"Needed to actually remove a de-selected tool — Ansible cannot " +
+				"uninstall it, and a rebuild starts clean and reinstalls only what's " +
+				"selected above.",
+			get: func(m *model) bool { return m.toolRebuild },
+			set: func(m *model, v bool) { m.toolRebuild = v },
+		},
+	}
+}
+
+// resetToggles is reset mode's toggle list: preserve Claude Code settings,
+// plus preserve the cloned project — the latter only when there is one
+// (projectToggleEnabled), matching the pre-generalization behavior exactly.
+func (m model) resetToggles() []formToggle {
+	t := []formToggle{
+		{
+			label: "Preserve Claude Code settings",
+			get:   func(m *model) bool { return m.preserveClaude },
+			set:   func(m *model, v bool) { m.preserveClaude = v },
+		},
+	}
+	if m.projectToggleEnabled {
+		t = append(t, formToggle{
+			label: m.projectToggleLabel,
+			get:   func(m *model) bool { return m.preserveProject },
+			set:   func(m *model, v bool) { m.preserveProject = v },
+		})
+	}
+	return t
+}
+
+// toggles returns the active toggle list for the current form mode.
+func (m model) toggles() []formToggle {
+	if m.resetMode {
+		return m.resetToggles()
+	}
+	return m.createToggles()
+}
+
+// focusNext / focusPrev move the cursor between fields in create mode,
+// wrapping around. Past the last text input they walk into the toggles (see
+// createToggles), then wrap back to the first input — mirroring
+// resetFocusNext/Prev below, which do the same for reset mode's toggles.
 func (m *model) focusNext() tea.Cmd {
-	m.inputs[m.focusIdx].Blur()
-	m.focusIdx = (m.focusIdx + 1) % len(m.inputs)
-	return m.inputs[m.focusIdx].Focus()
+	return m.formFocusNext(fName, fCloneToken)
 }
 
 func (m *model) focusPrev() tea.Cmd {
-	m.inputs[m.focusIdx].Blur()
-	m.focusIdx = (m.focusIdx - 1 + len(m.inputs)) % len(m.inputs)
-	return m.inputs[m.focusIdx].Focus()
+	return m.formFocusPrev(fName, fCloneToken)
 }
 
 // resetFocusNext advances focus in reset mode: through the editable inputs
-// (starting at fHostname), then into the two preserve toggles, wrapping back to
-// fHostname. The locked Name field is never focused, and the project toggle is
-// skipped when disabled (the VM cloned no repo).
+// (starting at fHostname), then into the toggles, wrapping back to fHostname.
+// The locked Name field is never focused, and toggles() already omits the
+// project toggle when disabled (the VM cloned no repo).
 func (m *model) resetFocusNext() tea.Cmd {
+	return m.formFocusNext(fHostname, fCloneToken)
+}
+
+// resetFocusPrev reverses resetFocusNext.
+func (m *model) resetFocusPrev() tea.Cmd {
+	return m.formFocusPrev(fHostname, fCloneToken)
+}
+
+// formFocusNext/Prev are the shared focus walk behind focusNext/Prev and
+// resetFocusNext/Prev: text inputs from firstInput to lastInput, then the
+// current mode's toggles (m.toggles(), which already excludes any hidden
+// ones), wrapping back to firstInput. Create mode passes fName as firstInput
+// (the Name field is editable there); reset mode passes fHostname (the Name
+// is locked and never focused).
+func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
+	n := len(m.toggles())
 	switch {
 	case m.toggleFocus == -1:
-		if m.focusIdx < fCloneToken {
+		if m.focusIdx < lastInput {
 			m.inputs[m.focusIdx].Blur()
 			m.focusIdx++
 			return m.inputs[m.focusIdx].Focus()
@@ -294,41 +400,36 @@ func (m *model) resetFocusNext() tea.Cmd {
 		m.inputs[m.focusIdx].Blur()
 		m.toggleFocus = 0
 		return nil
-	case m.toggleFocus == 0 && m.projectToggleEnabled:
-		m.toggleFocus = 1
+	case m.toggleFocus < n-1:
+		m.toggleFocus++
 		return nil
 	default: // last toggle → wrap around to the first editable input
 		m.toggleFocus = -1
-		m.focusIdx = fHostname
-		return m.inputs[fHostname].Focus()
+		m.focusIdx = firstInput
+		return m.inputs[firstInput].Focus()
 	}
 }
 
-// resetFocusPrev reverses resetFocusNext.
-func (m *model) resetFocusPrev() tea.Cmd {
+func (m *model) formFocusPrev(firstInput, lastInput int) tea.Cmd {
+	n := len(m.toggles())
 	switch {
-	case m.toggleFocus == 1:
-		m.toggleFocus = 0
+	case m.toggleFocus > 0:
+		m.toggleFocus--
 		return nil
 	case m.toggleFocus == 0:
 		// Back up from the first toggle to the last input.
 		m.toggleFocus = -1
-		m.focusIdx = fCloneToken
-		return m.inputs[fCloneToken].Focus()
+		m.focusIdx = lastInput
+		return m.inputs[lastInput].Focus()
 	default: // focus is in the inputs
-		if m.focusIdx > fHostname {
+		if m.focusIdx > firstInput {
 			m.inputs[m.focusIdx].Blur()
 			m.focusIdx--
 			return m.inputs[m.focusIdx].Focus()
 		}
-		// At the first editable input → wrap up to the last toggle (the project
-		// toggle when shown, else the Claude toggle).
+		// At the first editable input → wrap up to the last toggle.
 		m.inputs[m.focusIdx].Blur()
-		if m.projectToggleEnabled {
-			m.toggleFocus = 1
-		} else {
-			m.toggleFocus = 0
-		}
+		m.toggleFocus = n - 1
 		return nil
 	}
 }
@@ -368,6 +469,13 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.DockerProxyHost = m.field(fDockerProxyHost)
 	cfg.CloneURL = m.field(fCloneURL)
 	cfg.CloneToken = m.field(fCloneToken)
+	if !m.resetMode {
+		// Reset mode has no tool-set toggles (it reuses the VM's recorded
+		// config as-is); only create mode's toggles drive the tool-set.
+		cfg.WithDDEV = m.toolDDEV
+		cfg.WithGo = m.toolGo
+		cfg.WithJava = m.toolJava
+	}
 	return cfg, nil
 }
 
@@ -447,7 +555,15 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.formErr = nil
-	cmd := m.beginProvision("Creating "+cfg.Name, m.prov.CreateVM, cfg)
+	// toolRebuild carries the "Rebuild base image" toggle's intent through to
+	// the same code path `sand create --rebuild` uses: the rebuild happens
+	// under the base lock inside CreateVMWithOptions, not as a pre-lock delete
+	// here (see provision.CreateOptions.Rebuild).
+	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
+	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
+		return m.prov.CreateVMWithOptions(ctx, c, opts, out)
+	}
+	cmd := m.beginProvision("Creating "+cfg.Name, run, cfg)
 	return m, cmd
 }
 
@@ -524,12 +640,25 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.updateResetForm(msg)
 	}
 
+	// On a focused toggle, space/enter flips it rather than navigating, and the
+	// key must NOT reach the text inputs below — mirrors updateResetForm.
+	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
+		t := m.toggles()[m.toggleFocus]
+		t.set(&m, !t.get(&m))
+		return m, nil
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
 		return m, m.focusPrev()
 	// Down/Tab/enter all advance to the next field; enter no longer creates.
 	case key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.Tab):
 		return m, m.focusNext()
+	}
+
+	// Only forward edits while a text input is focused (toggles aren't inputs).
+	if m.toggleFocus != -1 {
+		return m, nil
 	}
 
 	cmds := make([]tea.Cmd, len(m.inputs))
@@ -545,12 +674,8 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// On a focused toggle, space/enter flips its bool rather than navigating.
 	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		switch {
-		case m.toggleFocus == 0:
-			m.preserveClaude = !m.preserveClaude
-		case m.projectToggleEnabled: // toggle 1 is disabled without a cloned project
-			m.preserveProject = !m.preserveProject
-		}
+		t := m.toggles()[m.toggleFocus]
+		t.set(&m, !t.get(&m))
 		return m, nil
 	}
 
@@ -616,23 +741,25 @@ func (m model) formView() string {
 			continue
 		}
 		ls := labelStyle
-		focused := i == m.focusIdx
-		if m.resetMode {
-			focused = m.toggleFocus == -1 && i == m.focusIdx
-		}
+		// A toggle being focused blurs every text input, in both modes now that
+		// create mode has toggles too.
+		focused := m.toggleFocus == -1 && i == m.focusIdx
 		if focused {
 			ls = focusedLabelStyle
 		}
 		b.WriteString(ls.Render(fieldLabels[i]+":") + " " + m.inputs[i].View() + "\n")
 	}
 
-	// The two preserve toggles and their compromise warning (reset mode only).
-	if m.resetMode {
+	// The mode's toggles (preserve* in reset mode, tool-set + rebuild in create
+	// mode) and reset mode's compromise warning.
+	toggles := m.toggles()
+	if len(toggles) > 0 {
 		b.WriteString("\n")
-		b.WriteString(toggleRow("Preserve Claude Code settings", m.preserveClaude, m.toggleFocus == 0) + "\n")
-		if m.projectToggleEnabled {
-			b.WriteString(toggleRow(m.projectToggleLabel, m.preserveProject, m.toggleFocus == 1) + "\n")
+		for i, t := range toggles {
+			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i) + "\n")
 		}
+	}
+	if m.resetMode {
 		if m.preserveClaude || m.preserveProject {
 			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies your Claude login and the .env token out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
 		}
@@ -640,12 +767,14 @@ func (m model) formView() string {
 	}
 
 	// Help for the focused field (where to get a GitHub token, what defaults
-	// apply, which fields are required). Skipped when a toggle is focused.
-	showInfo := m.focusIdx >= 0 && m.focusIdx < len(fieldInfo)
-	if m.resetMode && m.toggleFocus >= 0 {
-		showInfo = false
-	}
-	if showInfo {
+	// apply, which fields are required) or, when a toggle is focused, that
+	// toggle's own help (e.g. the tool toggles' base-wide-effect warning).
+	// Reset mode's toggles carry no help text, matching the pre-existing
+	// behavior of showing nothing while one of them is focused.
+	switch {
+	case m.toggleFocus >= 0 && m.toggleFocus < len(toggles) && toggles[m.toggleFocus].help != "":
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(toggles[m.toggleFocus].help) + "\n")
+	case m.toggleFocus == -1 && m.focusIdx >= 0 && m.focusIdx < len(fieldInfo):
 		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
 		// wrapped help still fits inside the content column.
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fieldInfo[m.focusIdx]) + "\n")

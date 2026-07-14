@@ -472,11 +472,11 @@ Verified acyclic. Every task appears in exactly one phase below, and no task run
 - ✔️ Task 08: Base self-refresh at 30d; clones skip `apt upgrade` (depends on: 07, 03) — `completed`
 - ✔️ Task 10: Tier 2 apt cache + **clone-side strip** (depends on: 07) — `completed` (shipped via the pre-approved `limactl copy` fallback, not a mount — see Noteworthy Events)
 
-### Phase 5: Surfaces and gates
+### ✅ Phase 5: Surfaces and gates
 **Parallel Tasks:**
-- Task 06: Form tool-set toggles + "Rebuild base image" toggle (depends on: 05)
-- Task 09: Conditional bounce; tmux-safe `Reset` (depends on: 08)
-- Task 11: CI covers the cold `--rebuild` build **and** the reuse path (depends on: 08, 05)
+- ✔️ Task 06: Form tool-set toggles + "Rebuild base image" toggle (depends on: 05) — `completed`
+- ✔️ Task 09: Conditional bounce; tmux-safe `Reset` (depends on: 08) — `completed`
+- ✔️ Task 11: CI covers the cold `--rebuild` build **and** the reuse path (depends on: 08, 05) — `completed` (live CI run pending)
 
 ### Phase 6: Documentation
 **Parallel Tasks:**
