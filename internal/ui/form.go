@@ -290,9 +290,8 @@ type formToggle struct {
 // creating. That is never allowed to be a surprise from a per-VM screen.
 func baseWideHelp(tool string) string {
 	return "Installs " + tool + " into the SHARED base image every VM is cloned from — " +
-		"not just this VM. Changing this re-converges the base; de-selecting a tool " +
-		"needs the \"Rebuild base image\" toggle below to actually remove it " +
-		"(Ansible cannot uninstall it from an existing base)."
+		"not just this VM. Changing this rebuilds the base; de-selecting a tool " +
+		"needs the \"Rebuild base image\" toggle below to actually remove it."
 }
 
 // createToggles is create mode's toggle list: the base-image tool-set
@@ -321,9 +320,7 @@ func (m model) createToggles() []formToggle {
 		{
 			label: "Rebuild base image",
 			help: "Delete and rebuild the base image from scratch before creating. " +
-				"Needed to actually remove a de-selected tool — Ansible cannot " +
-				"uninstall it, and a rebuild starts clean and reinstalls only what's " +
-				"selected above.",
+				"Needed to actually remove a de-selected tool.",
 			get: func(m *model) bool { return m.toolRebuild },
 			set: func(m *model, v bool) { m.toolRebuild = v },
 		},
