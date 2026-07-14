@@ -1,0 +1,77 @@
+# Documentation site. Two behaviours:
+#
+#   * pull_request — `mkdocs build --strict` so a broken link or nav
+#     reference fails CI instead of reaching `main`.
+#   * push to main / release tags — publish with `mike`, which commits and
+#     pushes the built site straight to the `gh-pages` branch. This is NOT
+#     the OIDC `actions/deploy-pages` flow: no `pages:` permission, no
+#     `id-token:`, no `environment:` block, just `contents: write` and a git
+#     identity for mike to commit as.
+#
+# Tags are `vX.Y.Z` (release-please's default `include-v-in-tag`, confirmed
+# against `git tag --list` and `release-please-config.json`), so release
+# pushes deploy that version and move the `latest` alias to it.
+#
+# Human prerequisite (one-time, NOT performed by this workflow): point
+# GitHub Pages at the `gh-pages` branch — Settings > Pages > Deploy from a
+# branch > gh-pages / root.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Strict docs build
+        run: uvx --with-requirements docs/requirements.txt mkdocs build --strict
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy main docs
+        if: github.ref == 'refs/heads/main'
+        run: uvx --with-requirements docs/requirements.txt mike deploy --push main
+
+      - name: Extract version from tag
+        id: version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy release docs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uvx --with-requirements docs/requirements.txt mike deploy --push --update-aliases "${{ steps.version.outputs.version }}" latest
+
+      - name: Set default version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uvx --with-requirements docs/requirements.txt mike set-default --push latest

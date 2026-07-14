@@ -2,7 +2,7 @@
 id: 4
 group: "docs-content"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-14
 model: "sonnet"
 effort: "medium"

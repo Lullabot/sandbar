@@ -230,9 +230,9 @@ graph TD
     007 --> 008
 ```
 
-### Phase 1: Scaffold the site
+### ✅ Phase 1: Scaffold the site
 **Parallel Tasks:**
-- Task 001: MkDocs + Material + mike scaffold, `mkdocs.yml` with the full nav tree, stub pages, `site/` gitignored — establishes the strict build that gates every later task.
+- ✔️ Task 001 (`completed`): MkDocs + Material + mike scaffold, `mkdocs.yml` with the full nav tree, stub pages, `site/` gitignored — establishes the strict build that gates every later task.
 
 ### Phase 2: Author the content and the publishing pipeline
 **Parallel Tasks:**
