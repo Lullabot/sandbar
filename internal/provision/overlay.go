@@ -20,6 +20,24 @@ base:
 - template:_images/debian-13
 `
 
+// overlayContainerd switches off Lima's own container stack. Lima defaults to
+// installing the nerdctl-full bundle and running rootless containerd for the
+// user, which is entirely redundant here: the playbook installs Docker, and
+// that is the container runtime these VMs actually use.
+//
+// It is not free. Measured on a clone of the base (qemu/x86_64, 8 vCPU), Lima's
+// containerd setup runs inside cloud-final on EVERY boot and costs ~19s of the
+// ~58s `limactl start` — cloud-final alone drops from 13.3s to 3.5s with this
+// off, and a clone's boot goes 58s -> 39s. It also plants ~575MB of nerdctl-full
+// in /usr/local/bin of the BASE image, which every clone then copies.
+//
+// Lima's boot script skips the whole stage when both are false; docker.service
+// is untouched (verified: docker info/ps still work on a base built this way).
+const overlayContainerd = `containerd:
+  system: false
+  user: false
+`
+
 // overlayProvision is the fixed dependency provision script. It installs just
 // enough (ansible-core, rsync, and task 3's apt prerequisites) for the
 // playbook to be run later over `limactl shell`; the heavy playbook itself is
@@ -89,6 +107,7 @@ func RenderBaseOverlay(cfg vm.CreateConfig, playbookDir string) ([]byte, error) 
 	fmt.Fprintf(&b, "cpus: %d\n", cfg.CPUs)
 	fmt.Fprintf(&b, "memory: %s\n", quoteYAML(cfg.Memory))
 	fmt.Fprintf(&b, "disk: %s\n", quoteYAML(vm.BaseDiskFloor))
+	b.WriteString(overlayContainerd)
 	b.WriteString("mounts:\n")
 	fmt.Fprintf(&b, "- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n", quoteYAML(playbookDir))
 	b.WriteString(overlayProvision)
