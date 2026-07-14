@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.4.0](https://github.com/Lullabot/sandbar/compare/v0.3.0...v0.4.0) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **shell:** S now lands you in tmux (prefix C-a), not a bare shell. Closing the terminal detaches instead of ending the session. There is no --no-tmux escape hatch, by decision.
+
+### Features
+
+* **lima:** add the guest tmux attach-command builder ([78a8eef](https://github.com/Lullabot/sandbar/commit/78a8eefb1c2658ce3c6efece7c8c196d613d3645))
+* **provision:** add per-phase timings and enable ansible task profiling ([6bd73dd](https://github.com/Lullabot/sandbar/commit/6bd73dd0a949c57cc34c53342bdf92347876c757))
+* **provision:** base tool-set, 30-day self-refresh, and a host apt cache ([b447afa](https://github.com/Lullabot/sandbar/commit/b447afa4e37cd5a5b270076ff1b27a32798bfe8f))
+* **provision:** bootstrap ansible-core and stamp the base by playbook content ([9e86b4f](https://github.com/Lullabot/sandbar/commit/9e86b4f196385eb974b022c76c634b530c3f873e))
+* **provision:** one apt transaction, and in-place base re-apply under the lock ([0ad221f](https://github.com/Lullabot/sandbar/commit/0ad221fd295cb25fa3d0546ce6da468e3ecba9ac))
+* **shell:** attach both entrypoints to the guest's persistent tmux session ([e09c365](https://github.com/Lullabot/sandbar/commit/e09c365e93c2e49693bb2bdd0122bb75ad520ebd))
+* **toolset:** default the tool-set to what the base was actually built with ([36fda44](https://github.com/Lullabot/sandbar/commit/36fda44b74ef53a7e90aab3f6cf1ccf252ce080b))
+* **toolset:** make Claude Code optional, like the other dev tooling ([67c7baf](https://github.com/Lullabot/sandbar/commit/67c7baf59e0635d71a41eab0a5acdf5d2d43bf99))
+* **ui,provision,ci:** tool-set toggles, conditional bounce, and a CI reuse path ([79998f5](https://github.com/Lullabot/sandbar/commit/79998f580ec7ad76c10b14c472d1e6745ca4ef53))
+* **ui:** enter does the obvious thing for the tile it is on ([c6370a8](https://github.com/Lullabot/sandbar/commit/c6370a872b176886eefc3c4a138f8fe761632375))
+* **ui:** frame the messages strip in a titled "Messages" box ([e2a5d84](https://github.com/Lullabot/sandbar/commit/e2a5d84617ff74155159a1dc3ca3180104162857))
+* **ui:** move the Messages box below the tiles ([8cb6f2c](https://github.com/Lullabot/sandbar/commit/8cb6f2c80ceabeec8040dfba8d136ffefb4b52e5))
+* **ui:** the Messages box shows up to 10 lines ([4897cd2](https://github.com/Lullabot/sandbar/commit/4897cd2d6ff545546975597224e1a140fb43c1e7))
+
+
+### Bug Fixes
+
+* **lima:** drop ssh debug chatter from copy output ([e5edf2e](https://github.com/Lullabot/sandbar/commit/e5edf2e46008bc419ca3481b307c0004eac4543a))
+* **provision,ui,ci:** nine defects from the high-effort review of this branch ([926c8d9](https://github.com/Lullabot/sandbar/commit/926c8d99767625792f185f6df9be5aa88ffc3f32))
+* **provision:** a cancelled create cleans up the VM it half-created ([184e33e](https://github.com/Lullabot/sandbar/commit/184e33ea0e40340bc0da58794fef7df2edc61ebf))
+* **provision:** install python3-passlib, or the user role can't hash a password ([75be96f](https://github.com/Lullabot/sandbar/commit/75be96f40fd4d3625044867c973d0b235d66806c))
+* **provision:** pass --no-install-recommends, or ansible-core drags the bundle back ([00e5e52](https://github.com/Lullabot/sandbar/commit/00e5e52da475a30ed5dd1222d4353af297b1920b))
+* **shell:** `sand shell` works while another VM is being created ([a45e00a](https://github.com/Lullabot/sandbar/commit/a45e00a49faa601f2d1c7031b6ed72a32b2167c1))
+* **ui:** a cancelled build whose VM was cleaned up leaves no tile ([4b7483f](https://github.com/Lullabot/sandbar/commit/4b7483f2a36cad1feab1910064adc46ab97fb3b3))
+* **ui:** line the Messages box up with the tiles ([9b1bf0f](https://github.com/Lullabot/sandbar/commit/9b1bf0f0b48678d5996f2820da2bc72219e629aa))
+* **ui:** stop printing every message twice on the board ([e30c5b8](https://github.com/Lullabot/sandbar/commit/e30c5b87b8472a5aa2d782fbf96e297817612bb7))
+* **ui:** the log box lost its right-hand border to a clip ([6efae08](https://github.com/Lullabot/sandbar/commit/6efae082fd3da4a0a3a302900e5f5897ac128cdb))
+
+
+### Performance Improvements
+
+* **base:** install with recommends off, and name the toolchain explicitly ([c44e192](https://github.com/Lullabot/sandbar/commit/c44e1920d6bea253e55e7214767bcc5879ec0eeb))
+* **overlay:** switch off Lima's containerd — ~19s per boot, ~575MB per base ([70b341a](https://github.com/Lullabot/sandbar/commit/70b341a8953a71a41f1165feb79a8db996207ff9))
+
 ## [0.3.0](https://github.com/Lullabot/sandbar/compare/v0.2.0...v0.3.0) (2026-07-13)
 
 
