@@ -35,6 +35,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -72,6 +74,16 @@ type SSHHost struct {
 	// ssh argv is proven without a real ssh binary or remote host (AGENTS.md: no
 	// test may require a real limactl — this extends that to ssh).
 	newCmd func(ctx context.Context, argv []string) *exec.Cmd
+
+	// userOnce/user cache the remote login user: it never changes for the process,
+	// so HostUser (called every board refresh) resolves it over ssh only once.
+	userOnce sync.Once
+	user     string
+
+	// statBSD remembers that the remote's `stat` is the BSD flavor (macOS), so
+	// after the first `stat -c` rejection every later Stat/DiskAllocBytes goes
+	// straight to the BSD `-f` form instead of paying a doomed GNU probe first.
+	statBSD atomic.Bool
 }
 
 // Compile-time proof the SSH host satisfies the whole seam and the copy hook.
@@ -291,23 +303,31 @@ const (
 	statFormatBSD = "%z|%m|%HT"
 )
 
+// statField runs `stat` for a format over ssh, trying the GNU `-c` form and
+// falling back to the BSD `-f` form on anything but a missing-path error — a
+// remote macOS host (Lima's primary platform) rejects `-c` with "illegal option",
+// which is NOT "absent", and mis-reading it as absent is what made cleanup skip a
+// half-written instance and the disk gauge render "?". Once the BSD form is needed
+// it is remembered (statBSD), so every later Stat/DiskAllocBytes on a BSD remote
+// goes straight to `-f` instead of paying a doomed GNU probe first.
+func (h *SSHHost) statField(path, gnuFmt, bsdFmt string) (out, errb []byte, err error) {
+	if h.statBSD.Load() {
+		return h.runRemote(context.Background(), nil, "stat", "-f", bsdFmt, path)
+	}
+	out, errb, err = h.runRemote(context.Background(), nil, "stat", "-c", gnuFmt, path)
+	if err != nil && !strings.Contains(string(errb), notExistMarker) {
+		if out, errb, err = h.runRemote(context.Background(), nil, "stat", "-f", bsdFmt, path); err == nil {
+			h.statBSD.Store(true)
+		}
+	}
+	return out, errb, err
+}
+
 // Stat stats path over `ssh host stat`. A missing path reports fs.ErrNotExist.
 func (h *SSHHost) Stat(path string) (fs.FileInfo, error) {
-	out, errb, err := h.runRemote(context.Background(), nil, "stat", "-c", statFormatGNU, path)
+	out, errb, err := h.statField(path, statFormatGNU, statFormatBSD)
 	if err != nil {
-		// A genuinely missing path fails the same way under either stat, so don't
-		// retry — report it absent. Any OTHER GNU failure (a BSD/macOS remote
-		// rejecting `-c` with "illegal option", which is NOT a missing-path error)
-		// gets the BSD form, so a remote macOS host is not mis-read as "absent" —
-		// which is what made cleanup skip a half-written instance and the disk gauge
-		// render "?".
-		if strings.Contains(string(errb), notExistMarker) {
-			return nil, asNotExist("stat", path, errb, err)
-		}
-		out, errb, err = h.runRemote(context.Background(), nil, "stat", "-f", statFormatBSD, path)
-		if err != nil {
-			return nil, asNotExist("stat", path, errb, err)
-		}
+		return nil, asNotExist("stat", path, errb, err)
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "|", 3)
 	if len(fields) != 3 {
@@ -375,12 +395,11 @@ func (h *SSHHost) RemoveAll(path string) error {
 // GNU (`-c`) and BSD (`-f`) stat; only the flag differs, so fall back to the BSD
 // flag for a macOS remote — otherwise the tile's disk gauge renders "?".
 func (h *SSHHost) DiskAllocBytes(path string) int64 {
-	out, _, err := h.runRemote(context.Background(), nil, "stat", "-c", "%b", path)
+	// %b is the allocated block count on both GNU (`-c`) and BSD (`-f`) stat;
+	// statField picks the working flavor (and caches it).
+	out, _, err := h.statField(path, "%b", "%b")
 	if err != nil {
-		out, _, err = h.runRemote(context.Background(), nil, "stat", "-f", "%b", path)
-		if err != nil {
-			return -1
-		}
+		return -1
 	}
 	blocks, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil {
@@ -433,11 +452,18 @@ func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, e
 // provisions a different account than the shell lands in — leaving the guest
 // login user without its ~/.tmux.conf, git identity, or secrets.
 func (h *SSHHost) HostUser() string {
-	out, _, err := h.runRemote(context.Background(), nil, "id", "-un")
-	if u := strings.TrimSpace(string(out)); err == nil && u != "" {
-		return u
-	}
-	return h.cfg.User
+	// Resolved once and cached: the remote login user is constant for the process,
+	// but HostUser is called on every board refresh (listCmd) — an ssh round trip
+	// each time otherwise.
+	h.userOnce.Do(func() {
+		out, _, err := h.runRemote(context.Background(), nil, "id", "-un")
+		if u := strings.TrimSpace(string(out)); err == nil && u != "" {
+			h.user = u
+		} else {
+			h.user = h.cfg.User
+		}
+	})
+	return h.user
 }
 
 // HostResources samples the remote host's CPU count, total memory (bytes) and
@@ -449,10 +475,9 @@ func (h *SSHHost) HostUser() string {
 // /proc/meminfo on Linux, sysctl on macOS; df -Pk for free KiB on both, falling
 // back to $HOME when the Lima store dir does not exist yet.
 func (h *SSHHost) HostResources() (cpus int, memBytes, diskFreeBytes int64) {
+	// RemoteLimaHome is never "" at runtime — NewSSHHost defaults it — so use it
+	// directly, as LimaHome and StagePlaybook do.
 	limaHome := h.cfg.RemoteLimaHome
-	if limaHome == "" {
-		limaHome = defaultRemoteLimaHome
-	}
 	script := `c=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)
 if [ -r /proc/meminfo ]; then m=$(awk '/^MemTotal:/{print $2*1024}' /proc/meminfo); else m=$(sysctl -n hw.memsize 2>/dev/null || echo 0); fi
 d=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $4*1024}')
@@ -621,12 +646,10 @@ func splitGuestEndpoint(s string) (instance, path string, isGuest bool) {
 // still precedes the instance name, because AttachArgv put it there and quoting
 // preserves order. The caller execs the result against its real TTY.
 func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
-	local := AttachArgv(name, guestHome, colorterm)
-	argv := h.sshBase(true)
-	for _, a := range local {
-		argv = append(argv, shellQuote(a))
-	}
-	return argv
+	// The `ssh -t <target> <shell-quoted local argv>` construction IS sshCommand
+	// with tty=true; reuse it rather than re-spelling the quoting loop the file's
+	// header calls load-bearing.
+	return h.sshCommand(true, AttachArgv(name, guestHome, colorterm)...)
 }
 
 // --- base-image lock over ssh ---------------------------------------------------
