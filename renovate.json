@@ -35,12 +35,29 @@
       ],
       "depNameTemplate": "mglaman/drupalorg-cli",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the Node.js major version used for the NodeSource apt repo in the base role",
+      "managerFilePatterns": ["/^roles/base/defaults/main\\.yml$/"],
+      "matchStrings": [
+        "base_nodejs_major_version:\\s*(?<currentValue>\\d+)"
+      ],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
     }
   ],
   "packageRules": [
     {
       "description": "Never automerge GitHub Actions updates; require manual review",
       "matchManagers": ["github-actions"],
+      "automerge": false
+    },
+    {
+      "description": "Node.js base image: only offer LTS (even-numbered) majors, and require manual review since these are major bumps",
+      "matchDatasources": ["node-version"],
+      "allowedVersions": "/^\\d*[02468]\\./",
       "automerge": false
     }
   ]
