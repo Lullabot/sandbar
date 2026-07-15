@@ -427,6 +427,11 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 	// is already over.
 	defer release()
 
+	// One-time rename of a base built by a pre-rename sand, under the lock and
+	// before the base is inspected, so ensureBaseStopped finds the migrated base
+	// already in place instead of rebuilding it.
+	p.migrateLegacyBase(ctx, cfg, out)
+
 	if err := p.ensureBaseStopped(ctx, cfg, opts, out, timer); err != nil {
 		return err
 	}
@@ -438,6 +443,77 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
 	return nil
+}
+
+// legacyBaseName is the base image's pre-rename name. A machine provisioned by an
+// older sand carries a Lima instance under it; migrateLegacyBase renames that
+// instance to the current default base so the built base is reused rather than
+// rebuilt. It mirrors the registry's own rewrite (registry.renameBase).
+const legacyBaseName = "claude-base"
+
+// migrateLegacyBase renames a pre-existing base Lima instance from legacyBaseName
+// to the base this create targets, so a user upgrading across the rename reuses the
+// base they already built instead of paying for a from-scratch rebuild (Debian
+// re-download + a full playbook run). It is one-time and entirely best-effort:
+//
+//   - It runs ONLY under the base lock, which its caller holds, because it clones
+//     and then DELETES a base image — precisely the mutation baselock.go says may
+//     never happen outside the lock.
+//   - It fires only when THIS create targets the current default base (a user who
+//     asked for a different --base is not affected by the default's rename) and a
+//     legacy instance actually exists on disk. That existence check is a host-side
+//     stat, not a limactl call, so the common path — no legacy base — adds nothing
+//     to the sequence every create runs.
+//   - Every failure is non-fatal and leaves the legacy base intact: it returns, and
+//     ensureBaseStopped then builds the new base from scratch — the exact behaviour
+//     that existed before this migration. Nothing the user built is lost.
+func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer) {
+	if cfg.BaseName == legacyBaseName || cfg.BaseName != vm.DefaultCreateConfig().BaseName {
+		return // not the default base's rename — nothing to migrate
+	}
+	// Cheap host-side gate: with no legacy instance dir there is nothing to rename,
+	// and this must cost zero limactl calls on the overwhelmingly common path.
+	if _, err := os.Stat(filepath.Join(limaHome(), legacyBaseName, "lima.yaml")); err != nil {
+		return
+	}
+	// Target already present (a prior create migrated or built it) — leave both
+	// alone and let ensureBaseStopped reconcile the target as usual.
+	if status, err := p.Lima.Status(cfg.BaseName); err == nil && status != "" {
+		return
+	}
+	oldStatus, err := p.Lima.Status(legacyBaseName)
+	if err != nil || oldStatus == "" {
+		return // limactl disagrees with the dir stat (mid-delete/corrupt) — do not touch it
+	}
+
+	step(out, "Renaming base image %q to %q (one-time; reuses the built base, no rebuild)…", legacyBaseName, cfg.BaseName)
+
+	// Clone is Lima's only copy primitive, and a consistent clone needs a stopped
+	// source — which a base normally already is, but make sure.
+	if oldStatus != "Stopped" {
+		if err := p.Lima.StopStreaming(ctx, legacyBaseName, out); err != nil {
+			step(out, "Note: could not stop %q to migrate it (%v); it will be rebuilt under the new name instead.", legacyBaseName, err)
+			return
+		}
+	}
+	if err := p.Lima.CloneStreaming(ctx, legacyBaseName, cfg.BaseName, out); err != nil {
+		// A half-written clone dir (disk, no lima.yaml) makes every later `limactl
+		// list` fatal, so clear it — the same guard buildBase takes on a failed create.
+		p.cleanupInstance(cfg.BaseName, out)
+		step(out, "Note: could not migrate the base image (%v); it will be rebuilt under the new name instead.", err)
+		return
+	}
+	// Carry the version stamp (with its BuiltAt) so the migrated base is seen as
+	// current, not re-applied on the spot. A miss here just costs one re-apply.
+	if err := os.Rename(baseVersionPath(legacyBaseName), baseVersionPath(cfg.BaseName)); err != nil && !os.IsNotExist(err) {
+		step(out, "Note: could not carry the base version stamp across the rename (%v); the base will be re-applied once.", err)
+	}
+	// Reclaim the old instance and its lock. Non-fatal: a lingering legacy base is
+	// wasted disk and an unmanaged tile, not a broken create.
+	if err := p.Lima.Delete(legacyBaseName, true); err != nil {
+		step(out, "Note: migrated the base but could not delete the old %q (%v); remove it with `limactl delete %s`.", legacyBaseName, err, legacyBaseName)
+	}
+	_ = os.Remove(baseLockPath(legacyBaseName))
 }
 
 // ensureBaseStopped makes sure the base image exists, is current, and is stopped —

@@ -28,7 +28,18 @@ type entry struct {
 
 // currentVersion is the schema version this binary writes. A file with no
 // version predates versioning and is read as version 1.
-const currentVersion = 1
+//
+// Version 2 renamed the default base image from claude-base to sandbar-base
+// (the project outgrew the agent that used to ship inside its base). A file
+// written by an older sand records the old name in every entry, so LoadFrom
+// rewrites those on read and stamps the file version 2 so the rewrite runs at
+// most once. See renameBase.
+const currentVersion = 2
+
+// legacyBaseName is the base image's pre-v2 name. Entries recorded under it are
+// rewritten to the current default base (vm.DefaultCreateConfig().BaseName) on
+// load — the same rename the provisioner applies to the Lima instance itself.
+const legacyBaseName = "claude-base"
 
 // fileSchema is the on-disk JSON shape: {"version": N, "vms": {"<name>": {...}}}.
 type fileSchema struct {
@@ -129,7 +140,41 @@ func LoadFrom(path string) (*Registry, error) {
 	if parsed.VMs != nil {
 		r.vms = parsed.VMs
 	}
+	// A pre-v2 file records the old base name in every entry it holds. Rewrite
+	// those to the current default base and persist once, so the TUI groups the
+	// clones under the base the provisioner will actually rename their source to,
+	// and a later recreate clones from the right instance. The save also stamps
+	// the file version 2 so this does not re-scan on every load. It is
+	// best-effort: a failed save just re-runs the (idempotent) rewrite next time.
+	if parsed.Version < currentVersion {
+		r.renameBase(legacyBaseName, vm.DefaultCreateConfig().BaseName)
+		_ = r.save()
+	}
 	return r, nil
+}
+
+// renameBase rewrites every entry whose base is from to to, in both the small
+// Base field and the embedded Config.BaseName the two are kept in step (Add
+// writes both from one cfg). It is the registry half of the base-image rename;
+// the provisioner renames the Lima instance itself under the base lock.
+func (r *Registry) renameBase(from, to string) {
+	if from == to {
+		return
+	}
+	for name, e := range r.vms {
+		changed := false
+		if e.Base == from {
+			e.Base = to
+			changed = true
+		}
+		if e.Config.BaseName == from {
+			e.Config.BaseName = to
+			changed = true
+		}
+		if changed {
+			r.vms[name] = e
+		}
+	}
 }
 
 // IsManaged reports whether name was created by sand.

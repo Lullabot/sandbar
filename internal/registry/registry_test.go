@@ -232,11 +232,60 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 1`) {
-		t.Fatalf("expected version 1 stamped in file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 2`) {
+		t.Fatalf("expected version 2 stamped in file:\n%s", raw)
 	}
 	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
 		t.Fatalf("old-vm entry with CPUs 4 not preserved after save:\n%s", raw)
+	}
+}
+
+// TestLoad_MigratesLegacyBaseName: a pre-v2 index recorded under the old
+// claude-base name must load with every entry rewritten to the current default
+// base (sandbar-base), in both the Base field and the embedded config, and the
+// file must be stamped version 2 so the rewrite runs at most once.
+func TestLoad_MigratesLegacyBaseName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	// A version-1 file (the last schema an old sand wrote) with two clones and a
+	// custom-base VM that must be left alone.
+	legacy := `{"version":1,"vms":{` +
+		`"claude":{"base":"claude-base","config":{"Name":"claude","BaseName":"claude-base","CPUs":4}},` +
+		`"web":{"base":"claude-base","config":{"Name":"web","BaseName":"claude-base"}},` +
+		`"custom":{"base":"other-base","config":{"Name":"custom","BaseName":"other-base"}}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	want := vm.DefaultCreateConfig().BaseName
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, name := range []string{"claude", "web"} {
+		if got := r.Base(name); got != want {
+			t.Errorf("Base(%q) = %q, want %q", name, got, want)
+		}
+		cfg, _ := r.Config(name)
+		if cfg.BaseName != want {
+			t.Errorf("Config(%q).BaseName = %q, want %q", name, cfg.BaseName, want)
+		}
+	}
+	// A VM cloned from a genuinely different base is not touched.
+	if got := r.Base("custom"); got != "other-base" {
+		t.Errorf("custom base rewritten: got %q, want other-base", got)
+	}
+
+	// The migration persisted: the file now carries the rewritten name and the
+	// bumped version, so a reload does no further work.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if containsStr(string(raw), "claude-base") {
+		t.Errorf("legacy base name still on disk after migration:\n%s", raw)
+	}
+	if !containsStr(string(raw), `"version": 2`) {
+		t.Errorf("expected version 2 stamped after migration:\n%s", raw)
 	}
 }
 
@@ -279,8 +328,8 @@ func TestSave_WritesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 1`) {
-		t.Fatalf("expected version 1 in saved file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 2`) {
+		t.Fatalf("expected version 2 in saved file:\n%s", raw)
 	}
 	if containsStr(string(raw), "SENTINEL_TOKEN_DO_NOT_PERSIST") {
 		t.Fatalf("clone token leaked into the index:\n%s", raw)

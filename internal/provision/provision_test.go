@@ -178,6 +178,164 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 	}
 }
 
+// seedLegacyBase writes the on-disk footprint of a base built by a pre-rename
+// sand — the Lima instance dir with a lima.yaml (what migrateLegacyBase stats to
+// decide whether there is anything to migrate) and its version stamp beside it —
+// into an isolated LIMA_HOME.
+func seedLegacyBase(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	dir := filepath.Join(home, legacyBaseName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir legacy instance: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lima.yaml"), []byte("images: []\n"), 0o644); err != nil {
+		t.Fatalf("write legacy lima.yaml: %v", err)
+	}
+	stamp := baseVersionPath(legacyBaseName)
+	if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
+		t.Fatalf("mkdir _sand: %v", err)
+	}
+	if err := os.WriteFile(stamp, []byte("v2:deadbeef:go+java\n2026-01-01T00:00:00Z\n"), 0o644); err != nil {
+		t.Fatalf("write legacy stamp: %v", err)
+	}
+}
+
+// indexOfCall returns the position of the first recorded call equal to want, or
+// -1 if it never happened.
+func indexOfCall(calls [][]string, want []string) int {
+	for i, c := range calls {
+		if reflect.DeepEqual(c, want) {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestMigrateLegacyBase renames a base built under the old name to the current
+// default: it clones the legacy instance to the new name, carries the version
+// stamp across, and deletes the old instance — in that order.
+func TestMigrateLegacyBase(t *testing.T) {
+	seedLegacyBase(t)
+	f := &fakeRunner{status: map[string][]byte{legacyBaseName: []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	p.migrateLegacyBase(context.Background(), testConfig(), io.Discard)
+
+	want := [][]string{
+		{"list", "sandbar-base", "--format", "{{.Status}}"}, // target already present?
+		{"list", "claude-base", "--format", "{{.Status}}"},  // legacy present?
+		{"clone", "claude-base", "sandbar-base"},            // rename: copy to the new name
+		{"delete", "claude-base", "-f"},                     // reclaim the old instance
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("migration call sequence mismatch:\n got %v\nwant %v", f.calls, want)
+	}
+	// The version stamp moved with it: the new base is stamped, the old is gone —
+	// so the migrated base reads as current and is not re-applied on the spot.
+	if _, err := os.Stat(baseVersionPath("sandbar-base")); err != nil {
+		t.Errorf("new base stamp missing after migration: %v", err)
+	}
+	if _, err := os.Stat(baseVersionPath(legacyBaseName)); !os.IsNotExist(err) {
+		t.Errorf("legacy stamp still present after migration (err=%v)", err)
+	}
+}
+
+// TestMigrateLegacyBase_NoLegacyInstance: with no legacy instance on disk the
+// migration makes ZERO limactl calls — the host-side stat gate keeps the common
+// path (a machine that never had a pre-rename base) free of any extra work on
+// every single create.
+func TestMigrateLegacyBase_NoLegacyInstance(t *testing.T) {
+	t.Setenv("LIMA_HOME", t.TempDir())
+	f := &fakeRunner{status: map[string][]byte{legacyBaseName: []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	p.migrateLegacyBase(context.Background(), testConfig(), io.Discard)
+
+	if len(f.calls) != 0 {
+		t.Fatalf("no legacy instance dir: expected no limactl calls, got %v", f.calls)
+	}
+}
+
+// TestMigrateLegacyBase_CustomBaseUntouched: a create that targets a base other
+// than the current default is not part of the default's rename and must not
+// migrate, even when a legacy instance happens to exist.
+func TestMigrateLegacyBase_CustomBaseUntouched(t *testing.T) {
+	seedLegacyBase(t)
+	f := &fakeRunner{status: map[string][]byte{legacyBaseName: []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+	cfg := testConfig()
+	cfg.BaseName = "my-own-base"
+
+	p.migrateLegacyBase(context.Background(), cfg, io.Discard)
+
+	if len(f.calls) != 0 {
+		t.Fatalf("custom base: expected no migration, got %v", f.calls)
+	}
+	if _, err := os.Stat(baseVersionPath(legacyBaseName)); err != nil {
+		t.Errorf("legacy stamp should be untouched for a custom base: %v", err)
+	}
+}
+
+// TestMigrateLegacyBase_TargetExistsWins: if the new base already exists (a prior
+// create migrated or built it) the legacy instance is left entirely alone — no
+// clone, no delete — so a stray old instance can never clobber a live base.
+func TestMigrateLegacyBase_TargetExistsWins(t *testing.T) {
+	seedLegacyBase(t)
+	f := &fakeRunner{status: map[string][]byte{
+		legacyBaseName: []byte("Stopped\n"),
+		"sandbar-base": []byte("Stopped\n"),
+	}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	p.migrateLegacyBase(context.Background(), testConfig(), io.Discard)
+
+	want := [][]string{{"list", "sandbar-base", "--format", "{{.Status}}"}}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("target-exists: expected only the target status check, got %v", f.calls)
+	}
+	if _, err := os.Stat(baseVersionPath(legacyBaseName)); err != nil {
+		t.Errorf("legacy stamp should be untouched when the target already exists: %v", err)
+	}
+}
+
+// TestCreateVM_MigratesLegacyBaseThenClones: a full create on a machine with a
+// pre-rename base renames it first (under the base lock) and then clones the
+// target from the correctly-named base — it never rebuilds the base from scratch.
+func TestCreateVM_MigratesLegacyBaseThenClones(t *testing.T) {
+	seedLegacyBase(t)
+	f := &fakeRunner{status: map[string][]byte{legacyBaseName: []byte("Stopped\n")}}
+	// Renaming the legacy base makes the new base exist and stopped, the way a real
+	// `limactl clone` would; without this the fake's static status would leave
+	// ensureBaseStopped thinking the target is absent and rebuild it.
+	f.hook = func(c []string) {
+		if len(c) == 3 && c[0] == "clone" && c[1] == legacyBaseName && c[2] == "sandbar-base" {
+			f.mu.Lock()
+			f.status["sandbar-base"] = []byte("Stopped\n")
+			f.mu.Unlock()
+		}
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	iMigrate := indexOfCall(f.calls, []string{"clone", legacyBaseName, "sandbar-base"})
+	iClone := indexOfCall(f.calls, []string{"clone", "sandbar-base", "claude"})
+	if iMigrate < 0 || iClone < 0 || iMigrate > iClone {
+		t.Fatalf("expected the legacy rename before the target clone; got %v", f.calls)
+	}
+	// The base is reused, never rebuilt: a from-scratch build starts it via
+	// `start --name <base> <overlay>`, which must not appear.
+	for _, c := range f.calls {
+		if c[0] == "start" && hasTok(c, "--name") {
+			t.Fatalf("base was rebuilt from scratch after migration: %v", f.calls)
+		}
+	}
+}
+
 // TestCreateVM_NoBounceWithoutRebootMarker is the conditional-bounce
 // acceptance criterion: a guest that does not report
 // /var/run/reboot-required must not be stopped and started after finalize —
