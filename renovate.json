@@ -13,6 +13,28 @@
         "image:\\s*[\"']?(?<depName>[^:\"'@\\s]+):(?<currentValue>[^@\"'\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the pinned GitLab CLI (glab) release in the dev-tools role",
+      "managerFilePatterns": ["/^roles/dev-tools/defaults/main\\.yml$/"],
+      "matchStrings": [
+        "devtools_glab_version:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "gitlab-org/cli",
+      "datasourceTemplate": "gitlab-releases",
+      "registryUrlTemplate": "https://gitlab.com",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the pinned Drupal.org CLI (drupalorg) PHAR release in the dev-tools role",
+      "managerFilePatterns": ["/^roles/dev-tools/defaults/main\\.yml$/"],
+      "matchStrings": [
+        "devtools_drupalorg_cli_version:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "mglaman/drupalorg-cli",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "packageRules": [
