@@ -435,9 +435,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 1 (completed): Generalize the Runner into a local/remote-capable host-access seam and relocate every `~/.lima` filesystem touch behind it (local impl only).
 
-### Phase 2: Foundation — the Provider interface
+### ✅ Phase 2: Foundation — the Provider interface
 **Parallel Tasks:**
-- Task 2: Define `provider.Provider` and the local Lima provider over the seam (depends on: 1).
+- ✔️ Task 2 (completed): Define `provider.Provider` and the local Lima provider over the seam (depends on: 1).
 
 ### Phase 3: Migration
 **Parallel Tasks:**
