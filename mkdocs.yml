@@ -60,6 +60,7 @@ nav:
     - Installation: getting-started/installation.md
     - Your First VM: getting-started/first-vm.md
     - How Provisioning Works: getting-started/how-it-works.md
+    - Available Tools: getting-started/available-tools.md
   - Using sand:
     - The Board (TUI): using-sand/tui.md
     - CLI Reference: using-sand/cli-reference.md
