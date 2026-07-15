@@ -73,10 +73,17 @@ import "regexp"
 // server first started, and COLORTERM is not in tmux's default update-environment
 // list — so an exported value is silently dropped for every attach after the one
 // that happened to start the server. `-e` sets the variable on the session directly
-// and survives an already-running server. Each attach uses its OWN client's
-// COLORTERM, so a truecolor terminal and a 256-color one attaching to the same VM
-// each get windows that match their real capability. Verified on a real VM (tmux 3.5a):
-// with a server already up, a plain export lands as unset; `-e` lands as truecolor.
+// and survives an already-running server. Verified on a real VM (tmux 3.5a): with a
+// server already up, a plain export lands as unset; `-e` lands as truecolor.
+//
+// What `-e` sets is the SESSION environment, which fixes the value each pane sees at
+// the moment it is created. So the COLORTERM that reaches the common case — Claude
+// Code running in `main` — is the one carried by whichever client first created
+// `main` (the else branch). A later client attaching over the grouped branch shares
+// main's ALREADY-RUNNING panes and cannot re-colour them; its own `-e` only reaches
+// NEW windows it opens inside its grouped session. Two clients of different colour
+// capability therefore do NOT each re-skin main's existing panes — the first client
+// wins those — they only diverge on windows opened after attaching.
 func guestAttachExpr(colortermEnv string) string {
 	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux new-session` + colortermEnv + ` -s main; fi`
 }
