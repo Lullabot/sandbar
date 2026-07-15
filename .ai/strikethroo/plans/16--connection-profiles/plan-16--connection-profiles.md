@@ -41,6 +41,9 @@ created: 2026-07-15
 | Is the default local profile permanent, or fully deletable like the others? | **Permanent.** It always exists and cannot be deleted, but it can be disabled/enabled and renamed. This guarantees a fallback location always exists. |
 | When creating a VM you pick a profile — how should that choice behave across sessions? | **Remember last used.** The create form defaults to the profile the user last created a VM with. |
 | Are backwards-compatibility shims required for the on-disk registry / managed-VM index? | No new BC shim is needed for VM ownership: the registry already carries a per-entry `Provider` + `RemoteTarget` scope (schema v2, on the refactor branch), and a profile reduces to exactly that scope. Profiles introduce a **new** config file, so there is no prior format to stay compatible with. |
+| _(Refinement)_ What happens when a user disables or deletes a profile that has a background job (build/provision/transfer) in flight on it? | **Block until idle.** Refuse the disable/delete with a message until the in-flight job finishes or is cancelled — reusing the existing jobs-gating pattern that already blocks Delete while a VM builds. No silent cancellation, no half-provisioned VM left behind. |
+| _(Refinement, auto-resolved from code)_ Is `provision.SetHostFiles` the only single-provider host-access global to fix? | **No.** There are **two** process-global host-access seams that both assume one provider per process: `provision.hostFiles` (base-image touches during create/reset/cleanup) and `ui.hostFiles` (per-tile disk/up-since sampling). Both must become fleet-aware; see Component 2/3. |
+| _(Refinement, auto-resolved from code)_ Can startup keep calling `Preflight()` synchronously per the current entrypoints? | **No.** `main.go` and `create.go` call `p.Preflight()` synchronously and exit on error; a remote preflight is an SSH round-trip. In a fleet this must become **per-profile and asynchronous** — a slow or failing remote preflight yields an error binding, never a blocked startup or fatal exit. |
 
 ## Executive Summary
 
@@ -209,22 +212,45 @@ profile whose provider **fails to construct** (bad config, preflight failure) is
 recorded as an **error** binding rather than aborting the whole fleet — one bad
 remote must never stop the local fleet or the other remotes from loading.
 
-A subtlety this component must resolve carefully: the remote provider currently
-calls `provision.SetHostFiles(host)` on construction, a **package-global** seam
-that assumed a single provider per process. With a fleet, the base-image
-provisioning host-access seam can no longer be a process-global keyed to "the one
-remote". The plan's approach is to bind host-access **per operation to the
-profile the operation targets** (create/reset always happen on exactly one chosen
-profile), so provisioning reads/writes base-image files on the correct host. This
-is the single most load-bearing internal change and the main reason the fleet
-cannot be a naive loop over `Resolve()`.
+**Two single-provider host-access globals must be retired.** The code has two
+package-global seams that each carry the comment "one sand process runs exactly
+one provider" (_see the auto-resolved clarification_), and a fleet violates that
+assumption in two different ways:
 
-The non-TUI entrypoints adapt to the fleet as follows: `sand create` gains a way
-to name the target profile (defaulting to Local) and acts on that one profile's
-provider/scope; `sand shell NAME` resolves which profile owns `NAME` (by scope in
-the registry, disambiguating if a name exists on more than one) and attaches
-through it. The CLI surface stays minimal — exactly what the profile model
-requires, nothing speculative.
+- `provision.hostFiles` (`internal/provision/hostaccess.go`) backs the base-image
+  touches — overlay read, version stamp, base lock, partial-instance cleanup —
+  during **create/reset/cleanup**. These operations target exactly one profile and
+  are user-serialized, so this seam can be bound to the operation's profile. The
+  preferred fix, though, is to retire the package-global in favour of an explicit
+  per-operation host-access argument (threaded from the chosen profile's provider)
+  so correctness does not depend on remembering to swap and restore a global; a
+  transitional per-operation swap is acceptable only if it is scoped and restored
+  around each provisioning call.
+- `ui.hostFiles` (`internal/ui/diskusage.go`) backs **per-tile** disk/up-since
+  sampling, which runs for VMs from **all** profiles during the *same* render.
+  A single global cannot be swapped per-operation here — it must be resolved
+  **per tile by the VM's owning profile** (each fleet sub-state carries its own
+  host-access seam, and the tile samples through its profile's seam). This is the
+  more load-bearing of the two and the main reason the fleet cannot be a naive
+  loop over `Resolve()`.
+
+**Preflight becomes per-profile and asynchronous.** Today `cmd/sand/main.go` and
+`cmd/sand/create.go` call `p.Preflight()` synchronously and exit on failure — for
+a remote provider that is a blocking SSH round-trip. In a fleet the TUI must
+launch **without** waiting on any remote preflight: each profile's preflight runs
+inside its per-profile connect/refresh `tea.Cmd`, and a failure or timeout marks
+that profile an **error binding** (surfaced as a status-bar banner, Component 5)
+rather than aborting startup. The local profile's preflight is effectively
+instant, so the board is interactive immediately.
+
+The non-TUI entrypoints adapt to the fleet as follows: `sand create` gains a
+`--profile <name>` flag (defaulting to the last-used profile, then Local) and acts
+on that one profile's provider/scope, preflighting only that profile; an unknown
+profile name is a clear error. `sand shell NAME` resolves which profile owns
+`NAME` from the registry scope; if `NAME` exists under more than one profile it
+errors and lists the candidates, and an explicit `--profile <name>` disambiguates.
+The CLI surface stays minimal — exactly what the profile model requires, nothing
+speculative.
 
 ### Component 3: Per-profile asynchronous aggregation in the TUI
 
@@ -247,10 +273,22 @@ parallel mechanism.
 The existing single `connecting` interstitial is generalized: rather than a
 full-screen block, an as-yet-unconnected or errored profile simply contributes no
 tiles and shows its state in the status bar (Component 5), so the board is usable
-the instant the *local* fleet lists. Reconciliation, heartbeats, and per-tile disk
-sampling — all currently keyed to one scope/host — become per-profile so a remote
-VM's stats are sampled on its own host and its registry entries are reconciled
-under its own scope.
+the instant the *local* fleet lists. The one case that still warrants a
+full-surface hint is when **every** enabled profile is still connecting or errored
+and there are no tiles yet — the board must show a "connecting to N profiles…"
+state rather than the bare "no VMs — press enter to create" invitation, which
+would misrepresent an in-flight fleet as an empty one (the same trap the
+`vmsLoaded` guard already avoids for the first local list).
+
+Reconciliation, heartbeats, and per-tile disk sampling — all currently keyed to
+one scope/host — become **per-profile**: each fleet sub-state carries its own
+host-access seam (Component 2), so a remote VM's disk/up-since is sampled on its
+own host, its heartbeat runs against its own provider, and its registry entries
+are reconciled only under its own scope. Reconcile must never prune a profile's
+entries from another profile's listing — the registry's `ReconcileScoped` already
+enforces this, so the fleet calls it once per profile with that profile's live
+list, and a profile that is disabled or errored is **not** reconciled at all
+(its entries stay dormant, not pruned — see the Decision Log).
 
 ### Component 4: Profile management and create-time selection UI
 
@@ -266,6 +304,19 @@ binding; it explicitly does **not** touch the remote server or the VMs there
 (those simply stop appearing once the profile is gone, and reappear if the profile
 is re-added). The Local profile is rendered as **permanent** (no delete verb) but
 still enable/disable-able and renameable.
+
+**Runtime fleet mutation.** Enabling, disabling, editing, or deleting a profile
+takes effect **live**, without restarting sand: the fleet builder is re-run so a
+newly-enabled profile spins up its provider binding and begins its async
+connect/refresh, while a disabled/deleted profile has its binding torn down
+(refresh/heartbeat cmds stopped, tiles removed). Because a disable/delete would
+otherwise strand work, it is **gated on that profile being idle** (_see the
+refinement clarification_): if a background job — a build/provision or a file
+transfer — is in flight on the profile, the action is refused with a message
+naming the blocking job, exactly as Delete is already gated while a VM builds.
+The user finishes or cancels the job, then retries. Editing a Remote SSH profile's
+connection fields is likewise treated as a tear-down-and-rebuild of that one
+binding and is gated the same way.
 
 The **create form** gains a **profile selector** as a first-class field,
 defaulting to the **last-used** profile (falling back to Local). The chosen
@@ -300,8 +351,12 @@ fleet is larger than the bar can fully show.
 <details>
 <summary>Technical Risks</summary>
 
-- **The process-global provisioning host-access seam (`provision.SetHostFiles`) assumes one provider.** A fleet with multiple remotes cannot point a single global at "the remote".
-    - **Mitigation**: Bind host-access to the profile a create/reset operation targets, resolved at operation time (each provisioning op acts on exactly one profile). Treat this as the highest-risk change and cover it with tests that provision against two different fake hosts in one process without cross-talk.
+- **Two process-global host-access seams assume one provider.** Both `provision.hostFiles` and `ui.hostFiles` are documented "one sand process runs exactly one provider" globals; a fleet breaks that in two different ways.
+    - **Mitigation**: Retire `provision.hostFiles` in favour of a per-operation host-access argument threaded from the targeted profile (create/reset act on exactly one profile). Resolve `ui.hostFiles` **per tile** by the VM's owning profile (each fleet sub-state carries its own seam) — a global swap is impossible here because tiles from all profiles render together. Cover both with tests that sample/provision against two different fake hosts in one process without cross-talk.
+- **Synchronous startup preflight would reintroduce the hang the plan forbids.** `main.go`/`create.go` block on `p.Preflight()` and exit on error; a remote preflight is an SSH round-trip.
+    - **Mitigation**: Run each profile's preflight inside its per-profile async connect/refresh cmd; a failure/timeout becomes an error binding (status-bar banner), never a blocked or aborted startup. The local profile stays effectively instant. Test with a fake provider whose preflight blocks — the board must still launch and stay interactive.
+- **Runtime fleet mutation can strand in-flight work or leak goroutines.** Disabling/deleting/editing a profile live must tear down refresh/heartbeat cmds and remove tiles cleanly.
+    - **Mitigation**: Gate disable/delete/edit on the profile being idle (block-until-idle, reusing the jobs-in-flight gate); tear down a binding by cancelling its cmds and dropping its sub-state. Test enable→refresh→disable cycles and a disable attempted while a job is in flight (must be refused).
 - **A slow or unreachable remote could still stall the UI if any refresh is awaited synchronously.** The board must stay live while a remote hangs.
     - **Mitigation**: Every profile's list/refresh/heartbeat/host-sample runs on its own `tea.Cmd` with the profile identity carried in the result message; the model never blocks on a remote, and the local fleet renders independently. Verify with a fake provider that blocks indefinitely for one profile while the board remains interactive.
 - **Header/tile layout could break with a variable number of status bands at narrow widths.** The layout budgets are currently sized for one host band and fixed tile lines.
@@ -387,14 +442,22 @@ exercising the real system, not just re-running unit tests:
    tiles.
 5. **Management lifecycle**: From the management screen, disable the remote
    profile and confirm its tiles vanish and its status band becomes a "disabled"
-   banner; re-enable and confirm they return. Delete the remote profile and
-   confirm it disappears from `profiles.yaml` while (against a `limae2e` host) the
-   VMs still exist on the remote server (re-add the profile and confirm they
-   reappear). Confirm the Local profile offers no delete verb.
-6. **Env-var removal**: Grep the codebase and docs for `SAND_PROVIDER` /
+   banner; re-enable and confirm they return **live** (no restart). Delete the
+   remote profile and confirm it disappears from `profiles.yaml` while (against a
+   `limae2e` host) the VMs still exist on the remote server (re-add the profile and
+   confirm they reappear). Confirm the Local profile offers no delete verb.
+6. **Block-until-idle gate**: Start a build on the remote profile, then attempt to
+   disable/delete that profile while the build is in flight; confirm the action is
+   **refused** with a message naming the blocking job, and succeeds once the job
+   finishes or is cancelled.
+7. **Per-profile tile sampling**: Confirm a remote VM's tile shows a real disk
+   gauge and up-since (sampled on the remote host), not "?", proving the per-tile
+   host-access seam resolves to the VM's owning profile rather than the local
+   filesystem.
+8. **Env-var removal**: Grep the codebase and docs for `SAND_PROVIDER` /
    `SAND_REMOTE_` and confirm no references remain outside historical
    plan/changelog text; confirm setting those env vars has no effect.
-7. **Regression gate**: Run `go test ./... -race` and the coverage check and
+9. **Regression gate**: Run `go test ./... -race` and the coverage check and
    confirm the suite passes at or above the 87% floor.
 
 ## Documentation
@@ -470,3 +533,45 @@ env-var surface is the one intentional break and is isolated to
   from `main`'s archived plan 15; this plan is id **16** and does not collide, but
   the branch's plan-15 slug collision with main is a pre-existing merge
   consideration for the branch owner.
+
+### Decision Log
+
+Decisions resolved during refinement (interactive answer or auto-resolved against
+the branch code), recorded so downstream task generation does not re-litigate them:
+
+- **Scope is keyed by connection target, not profile name.** A remote profile's
+  `registry.Scope` is derived from its `user@host:port` (as it is today), so
+  **renaming** a profile never orphans its VMs. Consequence: the **Local** profile
+  always maps to the single `registry.LocalScope`, so **only one Local profile may
+  exist** (the permanent default). Two enabled Remote SSH profiles pointing at the
+  **same** `user@host:port` would resolve to the same scope and show the same VMs;
+  profile creation/edit **validates target uniqueness** and rejects a duplicate
+  rather than silently double-listing.
+- **Deleting/disabling a profile leaves its registry entries dormant, not pruned.**
+  There is no live provider to reconcile against, and pruning would be wrong — the
+  VMs still exist on the server. Re-adding the profile restores the tiles. This is
+  the registry-side expression of "deleting a profile will not change the remote
+  server."
+- **CLI profile selection** uses a `--profile <name>` flag on `sand create`
+  (default: last-used, then Local) and on `sand shell` (only needed to
+  disambiguate a name owned by more than one profile). No interactive CLI picker
+  is added (YAGNI).
+- **Preflight is async and non-fatal per profile** (see Technical Risks); a
+  failing remote never blocks or aborts startup.
+- **Both host-access globals are retired/fleet-aware** (see Technical Risks); the
+  UI seam becomes per-tile, the provision seam becomes per-operation.
+- **Considered and deferred:** a first-run courtesy that detects leftover
+  `SAND_REMOTE_*` env vars and prints a one-line "env vars removed — create a
+  profile" hint. Left out to avoid resurrecting the env surface in code; the
+  removal is covered by docs and the changelog instead.
+
+### Refinement Change Log
+
+- 2026-07-15: Baseline review against the branch code. Added the block-until-idle
+  answer for profile disable/delete with in-flight jobs; corrected the
+  single-provider-global claim to cover **both** `provision.hostFiles` and
+  `ui.hostFiles` (UI seam now per-tile); made startup **preflight per-profile and
+  async**; specified live runtime fleet mutation and its idle gate; specified
+  `--profile` CLI flags and `sand shell` disambiguation; added the all-profiles-
+  connecting empty-board state; added a Decision Log; and added three Technical
+  Risks (dual globals, sync preflight, runtime mutation).
