@@ -10,24 +10,45 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// headlessProvisioner is the narrow provision.Provisioner surface runCreate
-// drives. An interface so doHeadlessCreate's bookkeeping can be unit-tested with
-// a stub that "succeeds" without a real limactl/ansible run.
+// headlessProvisioner is the narrow provisioning surface runCreate drives. An
+// interface so doHeadlessCreate's bookkeeping can be unit-tested with a stub
+// that "succeeds" without a real limactl/ansible run.
 //
-// It is the option-taking pair of methods, not the plain CreateVM/Recreate the
+// It is the option-taking pair of methods, not the plain create/recreate the
 // TUI uses, because --rebuild is an intent this layer must hand DOWN rather than
 // act on: the base image may only be destroyed under the base lock, which lives
 // inside the provisioner (internal/provision/baselock.go).
+//
+// Its method names (CreateVMWithOptions/RecreateWithOptions) predate the
+// provider refactor and are kept exactly as they were — a real
+// *provision.Provisioner already satisfies them natively (see the real-Lima
+// e2e tests in create_e2e_test.go, which hand one in directly) — so runCreate
+// bridges its provider.Provider through the small providerProvisioner adapter
+// below instead of renaming this seam.
 type headlessProvisioner interface {
 	CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error
 	RecreateWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error
+}
+
+// providerProvisioner adapts a provider.Provider's Create/Recreate methods to
+// the headlessProvisioner seam's (older, provisioner-native) method names, so
+// runCreate can hand doHeadlessCreate the same centrally-constructed provider
+// every other entrypoint uses without disturbing that seam's existing tests.
+type providerProvisioner struct{ p provider.Provider }
+
+func (a providerProvisioner) CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return a.p.Create(ctx, cfg, opts, out)
+}
+
+func (a providerProvisioner) RecreateWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return a.p.Recreate(ctx, cfg, opts, out)
 }
 
 // runCreate implements the headless `sand create` subcommand: it parses a
@@ -147,16 +168,13 @@ Flags:
 		return fmt.Errorf("sand create: %w", err)
 	}
 
-	cli := lima.New(lima.NewExecRunner())
-	if err := cli.Preflight(); err != nil {
-		return err
-	}
-
-	dir, err := provision.LocatePlaybook()
+	p, err := provider.NewDefault()
 	if err != nil {
 		return err
 	}
-	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
+	if err := p.Preflight(); err != nil {
+		return err
+	}
 
 	reg, loadErr := registry.Load()
 	if reg == nil {
@@ -169,7 +187,7 @@ Flags:
 	// Reconcile against the live instance list before acting, exactly like the
 	// TUI does on every list load — so a VM deleted outside sand isn't wrongly
 	// treated as managed (and gated recreate-able).
-	live, err := cli.List()
+	live, err := p.List()
 	if err != nil {
 		return fmt.Errorf("list existing instances: %w", err)
 	}
@@ -182,7 +200,7 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return doHeadlessCreate(ctx, reg, prov, cfg, *recreate, *rebuild, os.Stdout)
+	return doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, *recreate, *rebuild, os.Stdout)
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs

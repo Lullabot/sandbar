@@ -219,7 +219,7 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if v, ok := m.lookupVM(name); ok && v.Status == limaRunning {
 			m.logMsg("secrets saved for " + name + " — applying to the running VM…")
 			user, liveScopes := m.secretsFor(name)
-			return m, m.beginAction(applySecretsCmd(m.cli, name, user, liveScopes))
+			return m, m.beginAction(applySecretsCmd(m.p, name, user, liveScopes))
 		}
 		m.logMsg("secrets saved for " + name + " — they apply on next start")
 		return m, nil

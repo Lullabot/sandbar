@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/browse"
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -44,8 +43,8 @@ func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
 		title = "Upload — pick a host file or directory"
 	} else {
 		// Download: browse the GUEST for a source, starting at the project checkout.
-		lister = browse.NewGuestLister(m.cli, m.transferVM)
-		startDir = m.guestDefaultDir(v.Dir)
+		lister = browse.NewGuestLister(m.p, m.transferVM)
+		startDir = m.guestDefaultDir(v)
 		title = "Download — pick a guest file or directory"
 	}
 	m.browser = browse.NewBrowser(lister, title)
@@ -74,12 +73,12 @@ func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		def := m.hostWorkDir()
 		var destLister browse.DirLister = browse.NewLocalLister()
 		if m.transferUpload {
-			// The instance dir comes from the TRANSFER's VM (m.transferVM), looked up
-			// in the loaded fleet — not from m.detail, which is the VM screen's record
-			// and need not be this one now that the board fires transfers too.
+			// The instance record comes from the TRANSFER's VM (m.transferVM), looked
+			// up in the loaded fleet — not from m.detail, which is the VM screen's
+			// record and need not be this one now that the board fires transfers too.
 			target, _ := m.lookupVM(m.transferVM)
-			def = m.guestDefaultDir(target.Dir) // an upload lands in the guest
-			destLister = browse.NewGuestLister(m.cli, m.transferVM)
+			def = m.guestDefaultDir(target) // an upload lands in the guest
+			destLister = browse.NewGuestLister(m.p, m.transferVM)
 		}
 		var initCmd tea.Cmd
 		m.dest, initCmd = browse.NewDestInput("Destination dir: ", def, destLister)
@@ -127,9 +126,9 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	destDir := m.dest.Value()
 	var src, dst string
 	if m.transferUpload {
-		src, dst = m.transferSrc, lima.GuestPath(m.transferVM, destDir)
+		src, dst = m.transferSrc, m.p.GuestPath(m.transferVM, destDir)
 	} else {
-		src, dst = lima.GuestPath(m.transferVM, m.transferSrc), destDir
+		src, dst = m.p.GuestPath(m.transferVM, m.transferSrc), destDir
 	}
 
 	verb := "Downloading "
@@ -140,7 +139,7 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 
 	recursive := m.transferRecursive
 	run := func(ctx context.Context, out io.Writer) error {
-		return m.cli.Copy(ctx, out, recursive, src, dst)
+		return m.p.Copy(ctx, out, recursive, src, dst)
 	}
 	// The copy gets the VM's TRANSFER slot, never its provision slot. That is what
 	// keeps provisionDoneMsg from recording it in the managed registry (a copy is
@@ -198,17 +197,17 @@ func (m model) hostWorkDir() string {
 // project checkout (<home>/<host>/<org>/<repo>, derived from the recorded
 // CloneURL) when known, otherwise the guest home.
 //
-// The guest home is read from the instance's cloud-config.yaml, because Lima
-// places it at /home/<user>.guest — NOT /home/<user> — so it cannot be
-// reconstructed from the username. If that can't be read, fall back to the old
-// /home/<user> guess (ssh.config user, then recorded config, then host user).
-// dir is the VM's Lima instance directory, from the record the caller is acting
+// The guest home is read through the provider (for local Lima, its instance's
+// cloud-config.yaml — Lima places it at /home/<user>.guest, NOT /home/<user>,
+// so it cannot be reconstructed from the username). If that can't be read,
+// fall back to the old /home/<user> guess (the provider's guest user, then
+// recorded config, then host user). v is the VM record the caller is acting
 // on (see startTransfer).
-func (m model) guestDefaultDir(dir string) string {
+func (m model) guestDefaultDir(v vm.VM) string {
 	cfg, ok := m.reg.Config(m.transferVM)
-	home := lima.GuestHome(dir)
+	home := m.p.GuestHome(v)
 	if home == "" {
-		user := lima.GuestUser(dir)
+		user := m.p.GuestUser(v)
 		if user == "" && ok {
 			user = cfg.User
 		}

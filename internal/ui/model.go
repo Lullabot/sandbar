@@ -1,7 +1,8 @@
 // Package ui holds the Bubble Tea model, views, and commands for the sand
-// TUI. It is a thin interactive surface over the lima.Client (VM lifecycle),
-// provision.Provisioner (create/reset), registry.Registry (which VMs are ours),
-// and secrets.Store (per-VM host-side secrets) packages.
+// TUI. It is a thin interactive surface over the provider.Provider (VM
+// lifecycle, guest transport, and create/reset — the local Lima backend by
+// default), registry.Registry (which VMs are ours), and secrets.Store (per-VM
+// host-side secrets) packages.
 //
 // Screens divide by responsibility: the BOARD (board.go) is the home surface and
 // the only roster — a grid of tiles, one per managed clone, with a focus ring and
@@ -19,7 +20,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
-	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -91,8 +92,13 @@ const (
 // one registry every model copy shares. That is the whole reason the registry is
 // a pointer: a copied model must not fork the work it is watching.
 type model struct {
-	cli  *lima.Client
-	prov *provision.Provisioner
+	// p is the backend seam: the local Lima provider by default (identical to
+	// sand's historic direct use of the concrete lima client), or — once plan
+	// 15 task 4/5 lands provider selection — a remote-Lima-over-SSH provider
+	// satisfying the exact same interface. Every VM lifecycle call, guest
+	// exec/copy, and interactive attach argv is reached through it; no field
+	// on model holds a Lima-concrete type any more.
+	p    provider.Provider
 	reg  *registry.Registry
 	keys keyMap
 	help help.Model
@@ -279,8 +285,10 @@ type model struct {
 	secretsErr  error
 }
 
-// New wires the dependencies into a ready-to-run tea.Model.
-func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
+// New wires the dependencies into a ready-to-run tea.Model. p is the backend
+// (see provider.NewDefault for the constructor all three sand entrypoints
+// share).
+func New(p provider.Provider) tea.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
@@ -301,12 +309,11 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 	}
 
 	m := model{
-		cli:        cli,
-		prov:       prov,
+		p:          p,
 		reg:        reg,
 		sec:        sec,
 		jobs:       newJobRegistry(),
-		heartbeats: newHeartbeats(cli),
+		heartbeats: newHeartbeats(p),
 		keys:       newKeyMap(),
 		help:       help.New(),
 		view:       viewBoard,
@@ -342,7 +349,7 @@ func New(cli *lima.Client, prov *provision.Provisioner) tea.Model {
 
 // Init kicks off the first list load.
 func (m model) Init() tea.Cmd {
-	return listCmd(m.cli)
+	return listCmd(m.p)
 }
 
 // applySize recomputes the layout mode for a new terminal size and pushes its
@@ -601,7 +608,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.shouldTick() {
 			return m, nil
 		}
-		return m, listCmd(m.cli)
+		return m, listCmd(m.p)
 
 	case spinner.TickMsg:
 		// The spinner animates for any job in flight (on any VM, whether or not its
@@ -769,7 +776,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text += " (warning: " + msg.warn + ")"
 		}
 		m.logMsg(text)
-		return m, listCmd(m.cli) // refresh after every action
+		return m, listCmd(m.p) // refresh after every action
 
 	case provisionOutputMsg:
 		// The chunk is keyed by RUN — the VM and which of its runs — so N jobs can
@@ -800,7 +807,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A user-canceled run leaves partial state behind; don't record it as
 		// managed and don't surface its (kill-induced) error as a failure.
 		if job.Canceled {
-			return m, listCmd(m.cli)
+			return m, listCmd(m.p)
 		}
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
@@ -841,12 +848,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Dispatch the apply now (batched with the list refresh) so a user who
 			// creates a VM and immediately shells in finds GH_TOKEN already set.
 			user, scopes := m.secretsFor(cfg.Name)
-			applyCmd = applySecretsCmd(m.cli, cfg.Name, user, scopes)
+			applyCmd = applySecretsCmd(m.p, cfg.Name, user, scopes)
 		}
 		if applyCmd != nil {
-			return m, tea.Batch(listCmd(m.cli), applyCmd)
+			return m, tea.Batch(listCmd(m.p), applyCmd)
 		}
-		return m, listCmd(m.cli) // refresh the list the user returns to
+		return m, listCmd(m.p) // refresh the list the user returns to
 
 	case tea.KeyPressMsg:
 		// Any key is proof someone is still there, which is half of the idle gate (see

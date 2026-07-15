@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -72,9 +72,9 @@ type (
 // second for its spinner, so a three-VM fleet was issuing ~90 stat syscalls per
 // second on the Bubble Tea goroutine — and one stale mount would have stalled the
 // whole UI, which is precisely the hazard the comment above already forbids.
-func listCmd(cli *lima.Client) tea.Cmd {
+func listCmd(p provider.Provider) tea.Cmd {
 	return func() tea.Msg {
-		vms, err := cli.List()
+		vms, err := p.List()
 		if err == nil {
 			for i := range vms {
 				if n := diskUsedBytes(vms[i].Dir); n > 0 {
@@ -101,13 +101,13 @@ func listCmd(cli *lima.Client) tea.Cmd {
 // Note: a VM started outside sand (a bare `limactl start`) does not get
 // freshly applied secrets — it sources whatever secrets.env was last written
 // by a previous sand-initiated start (or none, if there never was one).
-func startCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func startCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		if err := cli.Start(name); err != nil {
+		if err := p.Start(name); err != nil {
 			return actionDoneMsg{action: "start", name: name, err: err}
 		}
 		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
+		if err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "start", name: name, warn: warn}
@@ -115,9 +115,9 @@ func startCmd(cli *lima.Client, name, user string, scopes map[string]map[string]
 }
 
 // stopCmd shuts a running VM down.
-func stopCmd(cli *lima.Client, name string) tea.Cmd {
+func stopCmd(p provider.Provider, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "stop", name: name, err: cli.Stop(name)}
+		return actionDoneMsg{action: "stop", name: name, err: p.Stop(name)}
 	}
 }
 
@@ -126,16 +126,16 @@ func stopCmd(cli *lima.Client, name string) tea.Cmd {
 // This is not redundant with startCmd: restartCmd drives cli.Stop/cli.Start
 // directly rather than re-dispatching startCmd, so it would otherwise skip
 // the apply step entirely.
-func restartCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func restartCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		if err := cli.Stop(name); err != nil {
+		if err := p.Stop(name); err != nil {
 			return actionDoneMsg{action: "restart", name: name, err: err}
 		}
-		if err := cli.Start(name); err != nil {
+		if err := p.Start(name); err != nil {
 			return actionDoneMsg{action: "restart", name: name, err: err}
 		}
 		warn := ""
-		if err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard); err != nil {
+		if err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "restart", name: name, warn: warn}
@@ -156,9 +156,9 @@ func restartCmd(cli *lima.Client, name, user string, scopes map[string]map[strin
 // because the VM itself already started/stopped successfully — this command's
 // entire job IS the apply, so its failure is reported as a real error
 // (actionDoneMsg.err), not swallowed into a warning next to a false "ok".
-func applySecretsCmd(cli *lima.Client, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func applySecretsCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		err := provision.ApplySecrets(context.Background(), cli, name, user, scopes, io.Discard)
+		err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard)
 		return actionDoneMsg{action: "apply secrets", name: name, err: err}
 	}
 }
@@ -176,27 +176,26 @@ func (m model) secretsFor(name string) (user string, scopes map[string]map[strin
 }
 
 // deleteCmd force-removes a VM.
-func deleteCmd(cli *lima.Client, name string) tea.Cmd {
+func deleteCmd(p provider.Provider, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "delete", name: name, err: cli.Delete(name, true)}
+		return actionDoneMsg{action: "delete", name: name, err: p.Delete(name, true)}
 	}
 }
 
 // stopAllCmd stops each named VM in turn, accumulating failures. Stopping is
-// sequential rather than concurrent: limactl stop is I/O-heavy, lima.Client
-// gives no concurrency guarantees, and a serial loop yields a deterministic
-// error report. VMs that stop successfully stay stopped even if a later one
-// fails.
+// sequential rather than concurrent: the provider gives no concurrency
+// guarantees, and a serial loop yields a deterministic error report. VMs that
+// stop successfully stay stopped even if a later one fails.
 //
 // name carries a count rather than a single VM name (there is no single VM
 // here): model.go's actionDoneMsg handler builds its status label as
 // `action + " " + name`, so passing a descriptive count keeps that label
 // readable ("stop all (3 VMs) ok") instead of leaving a trailing space.
-func stopAllCmd(cli *lima.Client, names []string) tea.Cmd {
+func stopAllCmd(p provider.Provider, names []string) tea.Cmd {
 	return func() tea.Msg {
 		var failed []string
 		for _, n := range names {
-			if err := cli.Stop(n); err != nil {
+			if err := p.Stop(n); err != nil {
 				failed = append(failed, n)
 			}
 		}
@@ -208,11 +207,10 @@ func stopAllCmd(cli *lima.Client, names []string) tea.Cmd {
 	}
 }
 
-// shellCmd opens a shell into name's persistent guest tmux session (built
-// from lima.AttachArgv — the one seam that knows tmux exists on the guest
-// side; this function constructs no guest tmux command of its own) rooted at
-// guestHome (lima.GuestHome), so no shell greets the user with `bash: cd: …
-// No such file or directory`.
+// shellCmd opens a shell into v's persistent guest tmux session, its argv
+// built by p.AttachArgv (the one seam that knows tmux exists on the guest
+// side; this function constructs no guest tmux command of its own), so no
+// shell greets the user with `bash: cd: … No such file or directory`.
 //
 // It branches on whether the TUI is ITSELF already running inside host tmux:
 //
@@ -229,17 +227,18 @@ func stopAllCmd(cli *lima.Client, names []string) tea.Cmd {
 //     essentially no time at all — defeating the entire point of the branch,
 //     which is to keep the live board and its in-flight job progress bars on
 //     screen next to the new shell. The new window re-enters through `sand
-//     shell <name>` rather than reaching into lima directly, so the fast path
-//     and a user typing the command by hand are the exact same code.
-func shellCmd(name, guestHome string) tea.Cmd {
+//     shell <name>` rather than reaching into the provider directly, so the
+//     fast path and a user typing the command by hand are the exact same
+//     code.
+func shellCmd(p provider.Provider, v vm.VM) tea.Cmd {
 	if hostInTmux() {
-		return hostTmuxWindowCmd(name)
+		return hostTmuxWindowCmd(v.Name)
 	}
 
-	argv := lima.AttachArgv(name, guestHome)
+	argv := p.AttachArgv(v)
 	c := exec.Command(argv[0], argv[1:]...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return actionDoneMsg{action: "shell", name: name, err: err}
+		return actionDoneMsg{action: "shell", name: v.Name, err: err}
 	})
 }
 

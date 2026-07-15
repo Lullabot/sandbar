@@ -50,6 +50,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,9 +61,21 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
+
+// e2eCreateVM adapts p.Create to provisionFunc's shape (the same shape
+// Provisioner.CreateVM has — a plain create with no extra options), so
+// beginProvision can drive the model's own provider exactly the way the
+// create form does, without this file reaching past the model for a raw
+// *provision.Provisioner.
+func e2eCreateVM(p provider.Provider) provisionFunc {
+	return func(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
+		return p.Create(ctx, cfg, provision.CreateOptions{}, out)
+	}
+}
 
 // e2eMinimalOverlay writes secretsE2EOverlay — the same ansible-free, disk-
 // floor overlay secrets_e2e_test.go (task 06) boots from — to a temp file and
@@ -467,7 +480,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	cfgB := baseCfg
 	cfgB.Name, cfgB.GitName, cfgB.GitEmail = nameB, "Sand E2E B", "sand-e2e-b@example.com"
 
-	m, ok := New(cli, prov).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
@@ -477,9 +490,9 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// Start both provisions — beginProvision is exactly what the create form
 	// calls. Both goroutines are running against real limactl the instant exec
 	// returns.
-	cmdA := l.m.beginProvision("Creating "+nameA, l.m.prov.CreateVM, cfgA)
+	cmdA := l.m.beginProvision("Creating "+nameA, e2eCreateVM(l.m.p), cfgA)
 	l.exec(cmdA)
-	cmdB := l.m.beginProvision("Creating "+nameB, l.m.prov.CreateVM, cfgB)
+	cmdB := l.m.beginProvision("Creating "+nameB, e2eCreateVM(l.m.p), cfgB)
 	l.exec(cmdB)
 
 	if !l.m.jobs.isRunning(nameA) || !l.m.jobs.isRunning(nameB) {
@@ -577,14 +590,14 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	// healthy, running guest" shape this test exists to catch.
 	cfg.CloneURL = "https://sand-e2e-does-not-exist.invalid/org/repo.git"
 
-	m, ok := New(cli, prov).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
 	m = resized(m, 100, 30)
 	l := newTeaLoop(t, m)
 
-	cmd := l.m.beginProvision("Creating "+name, l.m.prov.CreateVM, cfg)
+	cmd := l.m.beginProvision("Creating "+name, e2eCreateVM(l.m.p), cfg)
 	l.exec(cmd)
 
 	pumpTimeout(t, l, "the provision to finish (and fail)", 15*time.Minute, func(m model) bool {

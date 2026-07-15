@@ -9,35 +9,38 @@ import (
 	"syscall"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // limaRunning is the status string limactl reports for a running instance
 // (mirrors internal/ui's identically-named, unexported constant, and the same
-// "Running" contract lima.Client.Status returns).
+// "Running" contract the provider's Status returns).
 const limaRunning = "Running"
 
-// vmGetter is the narrow lima.Client surface shellAttachArgv needs: ONE instance
-// by name, resolving its status and its Dir together (Dir does not come back from
-// Status). An interface so the decision logic can be unit tested with a stub
-// instead of a real lima.Client, which would need a real limactl (AGENTS.md, hard
+// vmGetter is the narrow backend surface shellAttachArgv needs: looking up ONE
+// instance by name (resolving its status and Dir together — Dir does not come
+// back from Status) and building its attach argv. An interface, satisfied by
+// provider.Provider, so the decision logic can be unit tested with a stub
+// instead of a real provider, which would need a real limactl (AGENTS.md, hard
 // rule).
 //
 // Get, not List, and that is the fix for a real bug: `limactl list` with no name
 // fails outright while ANY instance is mid-clone (lima#5236), so scanning the full
 // listing to find one VM made `sand shell web` die instantly for the 40-60s a
 // create of some OTHER VM was cloning — and from a host tmux, the new window it
-// died in closed before the error could be read. See lima.Client.Get.
+// died in closed before the error could be read. See provider.Provider.Get.
 type vmGetter interface {
 	Get(name string) (vm.VM, error)
+	AttachArgv(v vm.VM) []string
 }
 
 // runShell implements the `sand shell <name>` subcommand: it resolves the named
 // VM's status and instance dir together, refuses cleanly when the VM is unknown
-// or not running, and otherwise execs the attach argv built by lima.AttachArgv —
-// the one place in sand that knows tmux exists, and which the TUI's `S` verb
-// builds on too, so the two entrypoints cannot drift. stdio is inherited because
-// a tmux client needs the real terminal.
+// or not running, and otherwise execs the attach argv built by the provider's
+// AttachArgv — the one place in sand that knows tmux exists, and which the
+// TUI's `S` verb builds on too, so the two entrypoints cannot drift. stdio is
+// inherited because a tmux client needs the real terminal.
 //
 // The TUI withholds `S` from a VM that is not running (commandreg.go's enabledFor
 // gate, which also hides the verb from the footer). A CLI has no footer to
@@ -78,20 +81,24 @@ or 'sand create' to make one).
 	}
 	name := fs.Arg(0)
 
-	cli := lima.New(lima.NewExecRunner())
-	if err := cli.Preflight(); err != nil {
+	p, err := provider.NewDefault()
+	if err != nil {
+		return err
+	}
+	if err := p.Preflight(); err != nil {
 		return err
 	}
 
-	argv, err := shellAttachArgv(cli, name)
+	argv, err := shellAttachArgv(p, name)
 	if err != nil {
 		return err
 	}
 
-	// The interactive attach deliberately bypasses cli.Runner (which captures
-	// output for the typed lifecycle calls above) because a tmux client needs the
-	// real terminal, not a pipe: hence a bare exec.Command with inherited stdio
-	// rather than anything that runs through lima.Runner.
+	// The interactive attach deliberately bypasses the provider's buffered exec
+	// path (which captures output for the typed lifecycle calls above) because
+	// a tmux client needs the real terminal, not a pipe: hence a bare
+	// exec.Command with inherited stdio rather than anything that runs through
+	// the provider's own Shell/ShellOut.
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil {
@@ -140,5 +147,5 @@ func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 		return nil, fmt.Errorf("sand shell: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 
-	return lima.AttachArgv(name, lima.GuestHome(found.Dir)), nil
+	return l.AttachArgv(found), nil
 }

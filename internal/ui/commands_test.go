@@ -9,10 +9,21 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+// testProvider wraps a fake-runner-backed lima.Client in the local Lima
+// provider (the same composition provider.NewDefault performs against a real
+// limactl), so commands.go's provider-typed functions can be exercised
+// against a fake without a real limactl — mirrors newTestModelWithCli in
+// model_test.go.
+func testProvider(cli *lima.Client) provider.Provider {
+	return provider.NewLocalLima(cli, &provision.Provisioner{Lima: cli})
+}
 
 // secretsFakeRunner is a lima.Runner whose Output (backs cli.Start/cli.Stop)
 // and Stream (backs cli.Shell, which provision.ApplySecrets uses) calls can
@@ -59,7 +70,7 @@ func TestStartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
+	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -97,7 +108,7 @@ func TestStartFailureSkipsApplySecrets(t *testing.T) {
 	fr := &secretsFakeRunner{failOutput: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
+	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -116,7 +127,7 @@ func TestRestartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := restartCmd(cli, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
+	msg := restartCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("restartCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -139,7 +150,7 @@ func TestSecretsWarnNotFailOnApplyFailure(t *testing.T) {
 	fr := &secretsFakeRunner{failStream: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(cli, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
+	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -334,6 +345,19 @@ func TestReconcileDropPrunesSecrets(t *testing.T) {
 	}
 }
 
+// fakeAttachProvider is a provider.Provider double that only ever needs to
+// answer AttachArgv: shellCmd's two tests below drive its suspend branch
+// (which calls AttachArgv to build the exec'd argv) and its host-tmux fast
+// path (which never touches the provider at all), so embedding a nil
+// provider.Provider and overriding just this one method is enough — any
+// other method call would panic, and neither test makes one.
+type fakeAttachProvider struct {
+	provider.Provider
+	argv []string
+}
+
+func (f fakeAttachProvider) AttachArgv(vm.VM) []string { return f.argv }
+
 // shellCmd's suspend branch (host $TMUX unset, the common case) must return
 // tea.ExecProcess's own message kind, not actionDoneMsg directly — calling
 // the tea.Cmd merely hands tea's runtime an execMsg to act on later; it does
@@ -342,7 +366,8 @@ func TestReconcileDropPrunesSecrets(t *testing.T) {
 func TestShellCmdSuspendsWhenHostTMUXUnset(t *testing.T) {
 	t.Setenv("TMUX", "")
 
-	msg := shellCmd("claude", "/home/claude.guest")()
+	p := fakeAttachProvider{argv: []string{"limactl", "shell", "claude"}}
+	msg := shellCmd(p, vm.VM{Name: "claude"})()
 
 	if _, ok := msg.(actionDoneMsg); ok {
 		t.Fatal("suspend branch must not resolve to actionDoneMsg directly — that is the fast path's shape, not tea.ExecProcess's")
@@ -373,7 +398,7 @@ func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
 	}
 	t.Cleanup(func() { runHostTmuxNewWindow = orig })
 
-	msg := shellCmd("claude", "/home/claude.guest")()
+	msg := shellCmd(fakeAttachProvider{}, vm.VM{Name: "claude"})()
 
 	done, ok := msg.(actionDoneMsg)
 	if !ok {

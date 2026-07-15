@@ -7,9 +7,23 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/secrets"
 )
+
+// guestRunner is the narrow backend capability the free provision helpers in
+// this file (and staging.go, gitcred.go) need: running a guest command with
+// its output handled one of three ways. It is satisfied structurally by both
+// *lima.Client (the provisioner's own core, which the provisioner passes
+// directly) and provider.Provider (which app-level consumers — e.g.
+// internal/ui's ApplySecrets call sites — hold instead of the concrete lima
+// type), so neither side needs to import the other's package. Deliberately
+// unexported: callers never name the type, they just pass a value wide
+// enough to satisfy it.
+type guestRunner interface {
+	Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
+	ShellStreamOut(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
+	ShellOut(ctx context.Context, name string, argv ...string) ([]byte, error)
+}
 
 // applySecretsScript writes the streamed env file into the guest with the same
 // in-guest hygiene as inGuestScript: the target file is created 0600 (via
@@ -145,7 +159,7 @@ cat > "$d/.env"
 // currently present in the map, so this reduces to: a scope's guest file
 // lags one apply behind its removal from the store. This limitation is
 // shared with task 04's forge-credential pruning.
-func ApplySecrets(ctx context.Context, cli *lima.Client, name, user string, scopes map[string]map[string]string, out io.Writer) error {
+func ApplySecrets(ctx context.Context, cli guestRunner, name, user string, scopes map[string]map[string]string, out io.Writer) error {
 	global := scopes[""]
 	if len(global) == 0 {
 		if err := cli.Shell(ctx, name, nil, out, "sudo", "-H", "-u", user, "bash", "-c", clearSecretsScript); err != nil {

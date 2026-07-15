@@ -11,11 +11,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // DirEntry is one directory member, normalized so the host and guest listers
@@ -56,23 +55,33 @@ func (localLister) List(_ context.Context, path string) ([]DirEntry, error) {
 	return out, nil
 }
 
+// GuestShell is the narrow backend capability guestLister needs: a single
+// merged-output guest command per listing. Any provider (the local Lima
+// provider, and eventually a remote one) that can run a command in a named
+// instance satisfies this without guestLister ever seeing the concrete
+// backend type — see provider.Provider.Shell, whose signature this mirrors.
+type GuestShell interface {
+	Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
+}
+
 // guestLister lists a guest directory with a single `find … -printf` over
-// `limactl shell`, parsing its tab-separated "<type>\t<size>\t<name>" output.
+// the backend's guest shell, parsing its tab-separated
+// "<type>\t<size>\t<name>" output.
 type guestLister struct {
-	cli *lima.Client
-	vm  string
+	sh GuestShell
+	vm string
 }
 
 // NewGuestLister returns a DirLister over the given VM's filesystem, backed by
-// lima.Client.Shell. find -printf is GNU findutils, present on the apt-based
+// sh.Shell. find -printf is GNU findutils, present on the apt-based
 // Debian/Ubuntu guests.
-func NewGuestLister(cli *lima.Client, vm string) DirLister { return guestLister{cli: cli, vm: vm} }
+func NewGuestLister(sh GuestShell, vm string) DirLister { return guestLister{sh: sh, vm: vm} }
 
 func (g guestLister) List(ctx context.Context, path string) ([]DirEntry, error) {
 	var buf bytes.Buffer
 	// find prints one line per entry: "<type>\t<size>\t<name>" (a single SSH
 	// round-trip). -mindepth/-maxdepth 1 restricts it to immediate children.
-	if err := g.cli.Shell(ctx, g.vm, nil, &buf,
+	if err := g.sh.Shell(ctx, g.vm, nil, &buf,
 		"find", path, "-mindepth", "1", "-maxdepth", "1",
 		"-printf", "%y\t%s\t%f\n"); err != nil {
 		return nil, fmt.Errorf("list guest %s:%s: %w (%s)", g.vm, path, err, strings.TrimSpace(buf.String()))
