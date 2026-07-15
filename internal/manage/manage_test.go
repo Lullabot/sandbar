@@ -24,7 +24,7 @@ func TestReconcile(t *testing.T) {
 
 	live := []vm.VM{{Name: "a"}, {Name: "c"}}
 
-	dropped, err := Reconcile(reg, live)
+	dropped, err := Reconcile(reg, live, registry.LocalScope)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestReconcile_NoneDropped(t *testing.T) {
 		t.Fatalf("seed registry: %v", err)
 	}
 
-	dropped, err := Reconcile(reg, []vm.VM{{Name: "claude"}})
+	dropped, err := Reconcile(reg, []vm.VM{{Name: "claude"}}, registry.LocalScope)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -60,6 +60,48 @@ func TestReconcile_NoneDropped(t *testing.T) {
 	}
 	if !reg.IsManaged("claude") {
 		t.Fatal("Reconcile dropped a VM still present in live")
+	}
+}
+
+// TestReconcile_DoesNotCrossProviders is the provider-scoping regression this
+// task adds: reconciling a LOCAL provider's live list must never prune (or
+// even consider) an entry a REMOTE provider owns, even though that entry's
+// name is absent from the local live list — a local `List` has no way to know
+// whether a remote instance is still there, and must not treat "absent from
+// MY list" as "gone" for a VM it doesn't own. Only Reconcile confining itself
+// to registry.LocalScope (via registry.ReconcileScoped) is what makes that
+// safe.
+func TestReconcile_DoesNotCrossProviders(t *testing.T) {
+	reg := registry.NewEmpty()
+	remoteScope := registry.Scope{Provider: "lima-remote", RemoteTarget: "dev@example.com:22"}
+
+	if err := RecordSuccess(reg, vm.CreateConfig{Name: "claude", BaseName: "claude-base"}, registry.LocalScope); err != nil {
+		t.Fatalf("seed local entry: %v", err)
+	}
+	if err := RecordSuccess(reg, vm.CreateConfig{Name: "web", BaseName: "claude-base"}, remoteScope); err != nil {
+		t.Fatalf("seed remote entry: %v", err)
+	}
+
+	// A local `limactl list` reports NOTHING at all (as if the local "claude"
+	// had been deleted outside sand, and as it always will for a remote-owned
+	// VM the local backend has never heard of). Reconciling it against
+	// registry.LocalScope must drop only the LOCAL entry.
+	dropped, err := Reconcile(reg, nil, registry.LocalScope)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !reflect.DeepEqual(dropped, []string{"claude"}) {
+		t.Fatalf("dropped = %v, want [claude] (the local entry only)", dropped)
+	}
+
+	// The remote-owned "web" must have survived untouched, even though it too
+	// was absent from the (local) live list handed to Reconcile.
+	base, ok := reg.BaseInScope("web", remoteScope)
+	if !ok || base != "claude-base" {
+		t.Fatalf("remote entry was pruned by a local-scoped reconcile: ok=%v base=%q", ok, base)
+	}
+	if reg.IsManaged("claude") {
+		t.Fatal("local entry should have been dropped")
 	}
 }
 
@@ -78,7 +120,7 @@ func TestRecordSuccess(t *testing.T) {
 		Disk:     "100GiB",
 	}
 
-	if err := RecordSuccess(reg, cfg); err != nil {
+	if err := RecordSuccess(reg, cfg, registry.LocalScope); err != nil {
 		t.Fatalf("RecordSuccess: %v", err)
 	}
 
@@ -102,7 +144,7 @@ func TestRecreateBase(t *testing.T) {
 	t.Run("unmanaged VM is refused", func(t *testing.T) {
 		reg := registry.NewEmpty()
 
-		base, ok := RecreateBase(reg, "not-managed")
+		base, ok := RecreateBase(reg, "not-managed", registry.LocalScope)
 		if ok {
 			t.Fatalf("RecreateBase(unmanaged) ok = true, want false (base=%q)", base)
 		}
@@ -118,7 +160,7 @@ func TestRecreateBase(t *testing.T) {
 			t.Fatalf("seed registry: %v", err)
 		}
 
-		base, ok := RecreateBase(reg, "claude")
+		base, ok := RecreateBase(reg, "claude", registry.LocalScope)
 		if !ok {
 			t.Fatal("RecreateBase(managed) ok = false, want true")
 		}
@@ -134,7 +176,7 @@ func TestRecreateBase(t *testing.T) {
 			t.Fatalf("seed registry: %v", err)
 		}
 
-		base, ok := RecreateBase(reg, "claude")
+		base, ok := RecreateBase(reg, "claude", registry.LocalScope)
 		if !ok {
 			t.Fatal("RecreateBase(managed, no base) ok = false, want true")
 		}

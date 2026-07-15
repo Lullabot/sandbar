@@ -82,7 +82,7 @@ func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	return teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov)), teatest.WithInitialTermSize(w, h))
+	return teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov), registry.LocalScope), teatest.WithInitialTermSize(w, h))
 }
 
 // pinHostCapacity overrides the header's host-capacity probes (header.go)
@@ -273,7 +273,7 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	runner := &buildingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	cli := lima.New(runner)
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir()}
-	tm := teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov)), teatest.WithInitialTermSize(100, 30))
+	tm := teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov), registry.LocalScope), teatest.WithInitialTermSize(100, 30))
 
 	// The managed index is empty here, so the canned VMs get no tile: the board
 	// opens on its empty-slot invitation.

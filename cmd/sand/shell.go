@@ -81,7 +81,11 @@ or 'sand create' to make one).
 	}
 	name := fs.Arg(0)
 
-	p, err := provider.NewDefault()
+	// scope is unused here: sand shell has no registry/managed-index
+	// bookkeeping of its own to confine to a provider (see provider.Resolve).
+	// It still goes through Resolve, not NewDefault, so the same opt-in
+	// selection environment governs all three entrypoints identically.
+	p, _, err := provider.Resolve()
 	if err != nil {
 		return err
 	}

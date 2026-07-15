@@ -183,12 +183,12 @@ var vmCommands = []vmCommand{
 			if !notBuilding(m, v) {
 				return false
 			}
-			_, ok := manage.RecreateBase(m.reg, v.Name)
+			_, ok := manage.RecreateBase(m.reg, v.Name, m.scope)
 			return ok
 		},
 		action: func(m *model, v vm.VM) tea.Cmd {
 			name := v.Name
-			base, ok := manage.RecreateBase(m.reg, name)
+			base, ok := manage.RecreateBase(m.reg, name, m.scope)
 			if !ok {
 				// Unreachable via normal dispatch — enabledFor above already excludes
 				// this VM. Guarded anyway so a direct call never opens a form with a

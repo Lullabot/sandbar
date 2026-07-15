@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/vm"
@@ -196,8 +197,9 @@ func TestMigrateLegacyIndex(t *testing.T) {
 }
 
 // TestLoad_UnversionedFileMigrates: a legacy index with no "version" key must
-// load with zero data loss, and the next save must stamp the current version
-// while keeping the existing entry intact.
+// load with zero data loss, be rewritten to schema version 2 with its entry
+// tagged as the local Lima provider ON LOAD (not merely on the next save), and
+// a subsequent save must keep carrying the version and the preserved entry.
 func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
@@ -223,12 +225,27 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 		t.Fatalf("old-vm config not preserved: %+v (ok=%v)", cfg, ok)
 	}
 
-	// Trigger a save and confirm the file now carries the version alongside
-	// the preserved entry.
-	if err := r.Add(vm.CreateConfig{Name: "new-vm", BaseName: "sandbar-base"}); err != nil {
+	// LoadFrom itself must have already rewritten the file: version 2, and
+	// old-vm tagged as the local Lima provider.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index after load: %v", err)
+	}
+	if !containsStr(string(raw), `"version": 2`) {
+		t.Fatalf("expected version 2 stamped in file immediately after LoadFrom:\n%s", raw)
+	}
+	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
+		t.Fatalf("old-vm entry with CPUs 4 not preserved after migration:\n%s", raw)
+	}
+	if !containsStr(string(raw), `"provider": "lima"`) {
+		t.Fatalf("expected old-vm tagged with provider \"lima\" after migration:\n%s", raw)
+	}
+
+	// A further save (Add) must keep carrying the version and both entries.
+	if err := r.Add(vm.CreateConfig{Name: "new-vm", BaseName: "claude-base"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	raw, err := os.ReadFile(path)
+	raw, err = os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
@@ -286,6 +303,65 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 	}
 	if !containsStr(string(raw), `"version": 2`) {
 		t.Errorf("expected version 2 stamped after migration:\n%s", raw)
+	}
+}
+
+// TestLoad_V1MigratesTwoEntriesToV2WithProviderTag is the load-bearing
+// migration proof this task adds (plan 15 task 4's TDD requirement (a)): a
+// pre-migration v1 file with TWO existing entries, loaded through the new
+// code, must come back on disk rewritten with BOTH entries tagged as the
+// local Lima provider and the schema version bumped to 2 — no data loss, and
+// the rewrite reuses save()'s existing atomic temp-file+rename path.
+func TestLoad_V1MigratesTwoEntriesToV2WithProviderTag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	v1 := `{"version":1,"vms":{
+		"claude":{"base":"claude-base","config":{"Name":"claude","BaseName":"claude-base","CPUs":8,"Memory":"32GiB"}},
+		"web":{"base":"claude-base","config":{"Name":"web","BaseName":"claude-base","CPUs":2,"Memory":"8GiB"}}
+	}}`
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatalf("seed v1 file: %v", err)
+	}
+
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v1 file: %v", err)
+	}
+
+	// Both entries survived the migration with their configs intact.
+	for _, tc := range []struct {
+		name string
+		cpus int
+	}{{"claude", 8}, {"web", 2}} {
+		if !r.IsManaged(tc.name) {
+			t.Fatalf("%q should be managed after migration", tc.name)
+		}
+		cfg, ok := r.Config(tc.name)
+		if !ok || cfg.CPUs != tc.cpus {
+			t.Fatalf("%q config not preserved: %+v (ok=%v, want CPUs=%d)", tc.name, cfg, ok, tc.cpus)
+		}
+		// v2 migration also renames the legacy base (claude-base) to the current
+		// default (sandbar-base), so BaseInScope reports the renamed base here.
+		base, managed := r.BaseInScope(tc.name, LocalScope)
+		if !managed || base != vm.DefaultCreateConfig().BaseName {
+			t.Fatalf("%q should be managed under LocalScope with the renamed base after migration: managed=%v base=%q", tc.name, managed, base)
+		}
+	}
+
+	// The on-disk file itself must be rewritten: version 2, both entries
+	// tagged "lima", nothing truncated or lost.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migrated index: %v", err)
+	}
+	got := string(raw)
+	if !containsStr(got, `"version": 2`) {
+		t.Fatalf("expected version bumped to 2 on disk after migration:\n%s", got)
+	}
+	if n := strings.Count(got, `"provider": "lima"`); n != 2 {
+		t.Fatalf(`expected both entries tagged "provider": "lima" (found %d), got:\n%s`, n, got)
+	}
+	if !containsStr(got, `"claude"`) || !containsStr(got, `"web"`) {
+		t.Fatalf("expected both claude and web entries preserved on disk:\n%s", got)
 	}
 }
 
