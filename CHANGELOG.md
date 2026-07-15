@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/Lullabot/sandbar/compare/v0.4.0...v0.4.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **tmux:** raise guest escape-time to 10ms for WAN transports ([70952fc](https://github.com/Lullabot/sandbar/commit/70952fc8650855f1128a25f28b1d367702debcbc))
+* **tui:** lift the dimmest greys to a readable contrast floor ([7d1c787](https://github.com/Lullabot/sandbar/commit/7d1c787eded45bf15c4904ea0c1001bbe54db99b))
+
 ## [0.4.0](https://github.com/Lullabot/sandbar/compare/v0.3.0...v0.4.0) (2026-07-14)
 
 
