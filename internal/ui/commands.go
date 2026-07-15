@@ -34,6 +34,10 @@ type (
 		// means "not sampled" and the header falls back to the local core count.
 		// For a remote provider these three are the REMOTE host's totals.
 		hostCPUs int
+		// hostUser is the limactl host's login user — the account Lima creates the
+		// guest for and `limactl shell` logs into, so the create form defaults a new
+		// VM's user to it. For a remote provider it is the REMOTE host's user.
+		hostUser string
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -107,7 +111,7 @@ func listCmd(p provider.Provider) tea.Cmd {
 		if disk == 0 {
 			disk = hostDiskFreeFn()
 		}
-		return vmsLoadedMsg{vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs}
+		return vmsLoadedMsg{vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: p.HostUser()}
 	}
 }
 

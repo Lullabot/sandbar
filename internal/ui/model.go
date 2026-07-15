@@ -110,6 +110,15 @@ type model struct {
 	// never pruned by, or mistaken for, a listing from this one, and vice versa.
 	scope registry.Scope
 
+	// connecting is true from startup until the FIRST remote list succeeds, and
+	// only for a remote provider (local Lima is instant). While it is set, View
+	// shows a "Connecting to <host>…" interstitial instead of the board — which
+	// would otherwise briefly render local-looking host stats before the SSH
+	// handshake lands. connectErr holds the last failed-connect error to show
+	// under it; both clear on the first successful list. ctrl+c / q still quit.
+	connecting bool
+	connectErr error
+
 	view   view
 	width  int
 	height int
@@ -167,6 +176,13 @@ type model struct {
 	// Zero means "not sampled" and the header falls back to this process's local
 	// core count; for a remote provider it is the REMOTE host's core count.
 	headerCPUs int
+
+	// hostUser is the limactl host's login user (listCmd sample) — the account
+	// Lima creates the guest for and `limactl shell` logs into, so the create
+	// form defaults a new VM's user to it. Empty until the first sample; the form
+	// then falls back to this machine's user. For a remote provider it is the
+	// REMOTE host's user (so the playbook provisions the user the shell lands in).
+	hostUser string
 
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
@@ -323,9 +339,13 @@ func New(p provider.Provider, scope registry.Scope) tea.Model {
 	}
 
 	m := model{
-		p:          p,
-		reg:        reg,
-		scope:      scope,
+		p:     p,
+		reg:   reg,
+		scope: scope,
+		// A remote scope carries its target ("user@host:port"); local Lima never
+		// does. Start on the connecting interstitial for remote so the board's
+		// local-looking startup data isn't shown before the SSH handshake lands.
+		connecting: scope.RemoteTarget != "",
 		sec:        sec,
 		jobs:       newJobRegistry(),
 		heartbeats: newHeartbeats(p),
@@ -639,6 +659,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case vmsLoadedMsg:
+		// First remote list back: a success dismisses the "Connecting…"
+		// interstitial and reveals the board; a failure keeps it up (the refresh
+		// loop retries every refreshInterval) and shows the error beneath it, so a
+		// wedged or misconfigured connection is visible rather than a frozen board.
+		if m.connecting {
+			if msg.err == nil {
+				m.connecting, m.connectErr = false, nil
+			} else {
+				m.connectErr = msg.err
+			}
+		}
 		// The host capacity is sampled by listCmd whether or not the LISTING succeeded,
 		// so adopt it before the error branches. It used to be adopted only on success —
 		// so during a clone window (lima#5236), which is exactly when a 20GiB base image
@@ -652,6 +683,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.hostCPUs > 0 {
 			m.headerCPUs = msg.hostCPUs
+		}
+		if msg.hostUser != "" {
+			m.hostUser = msg.hostUser
 		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or
@@ -893,6 +927,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+		if m.connecting {
+			// The board isn't shown yet — only quit is meaningful. ctrl+c was
+			// handled above; q quits too. Everything else is swallowed so a
+			// stray keypress can't open a form over the connecting screen.
+			if key.Matches(msg, m.keys.Quit) {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		switch m.view {
 		case viewBoard:
 			return m.updateBoard(msg)
@@ -1005,18 +1048,20 @@ func (m model) confirmView() string {
 // field, so it is set here instead of in cmd/sand/main.go.
 func (m model) View() tea.View {
 	var content string
-	switch m.view {
-	case viewForm:
+	switch {
+	case m.connecting:
+		content = m.connectingView()
+	case m.view == viewForm:
 		content = m.formView()
-	case viewProgress:
+	case m.view == viewProgress:
 		content = m.progressView()
-	case viewBrowse:
+	case m.view == viewBrowse:
 		content = m.browser.View()
-	case viewDest:
+	case m.view == viewDest:
 		content = m.destView()
-	case viewSecrets:
+	case m.view == viewSecrets:
 		content = m.secretsView()
-	case viewHelp:
+	case m.view == viewHelp:
 		content = m.helpView()
 	default:
 		content = m.boardView()

@@ -146,12 +146,31 @@ Flags:
 		}
 	}
 
-	// Lima creates a guest user matching the host username; default cfg.User to
-	// it when --user is omitted, exactly as the TUI form and the original bash
-	// provisioner do. Passing an empty user_name would otherwise override the
-	// user role's default and break the base phase's in-guest user creation.
+	// Resolve the backend BEFORE defaulting the user: Lima names the guest account
+	// after whoever runs limactl, so for a remote provider that is the REMOTE
+	// host's user, not this machine's. Defaulting cfg.User to the laptop's user
+	// (as this used to) made the playbook provision a user `limactl shell` never
+	// logs into — leaving the guest login user without its ~/.tmux.conf, git
+	// identity, or secrets. Preflight runs here too, so a missing/old limactl
+	// fails before any config work.
+	p, scope, err := provider.Resolve()
+	if err != nil {
+		return err
+	}
+	if err := p.Preflight(); err != nil {
+		return err
+	}
+
+	// Default the VM user to the provider's host user (the remote host for remote
+	// Lima, this machine for local), falling back to the local user if the host
+	// could not be queried. An empty user_name would override the user role's
+	// default and break the base phase's in-guest user creation.
 	if cfg.User == "" {
-		cfg.User = vm.HostUser()
+		if u := p.HostUser(); u != "" {
+			cfg.User = u
+		} else {
+			cfg.User = vm.HostUser()
+		}
 	}
 
 	// Git identity falls back to the host's git config when the flags are
@@ -166,14 +185,6 @@ Flags:
 
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("sand create: %w", err)
-	}
-
-	p, scope, err := provider.Resolve()
-	if err != nil {
-		return err
-	}
-	if err := p.Preflight(); err != nil {
-		return err
 	}
 
 	reg, loadErr := registry.Load()

@@ -631,6 +631,27 @@ func TestSSHLimaHome(t *testing.T) {
 // sentinel is ACQUIRED (and released on Unlock), and a holder that exits without
 // it (flock -n lost) is CONTENDED — (false,nil), the retry signal the base
 // serializer's poll loop needs.
+func TestSSHHostUser(t *testing.T) {
+	// The remote login user comes from `id -un` — the account Lima names the guest
+	// after, which a new VM's user must default to (not the laptop's user).
+	rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		if anyContains(argv, "id") {
+			return sh(ctx, "printf debian")
+		}
+		return exec.CommandContext(ctx, "true")
+	}}
+	if got := hostWith(testCfg, rec).HostUser(); got != "debian" {
+		t.Fatalf("HostUser = %q, want debian", got)
+	}
+	// Falls back to the configured SSH user when `id -un` cannot be run.
+	recFail := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		return sh(ctx, "exit 1")
+	}}
+	if got := hostWith(testCfg, recFail).HostUser(); got != testCfg.User {
+		t.Fatalf("HostUser fallback = %q, want %q", got, testCfg.User)
+	}
+}
+
 func TestSSHHostResources(t *testing.T) {
 	t.Run("parses cpus mem disk", func(t *testing.T) {
 		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {

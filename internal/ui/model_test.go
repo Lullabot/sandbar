@@ -10,6 +10,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -898,7 +899,7 @@ func TestBaseImageDetection(t *testing.T) {
 // fields (user, CPUs, memory, disk), but Name is intentionally left blank so it
 // does not silently default to "claude".
 func TestNewInputsSeedsDefaults(t *testing.T) {
-	in := newInputs(0, 0)
+	in := newInputs(0, 0, "")
 	for _, f := range []struct {
 		idx  int
 		name string
@@ -1336,5 +1337,46 @@ func TestSummarizeNamesTruncatesForNarrowWidth(t *testing.T) {
 		if !strings.Contains(full, n) {
 			t.Fatalf("summarizeNames with ample width should include %q, got %q", n, full)
 		}
+	}
+}
+
+// TestConnectingInterstitial: a remote provider opens on a "Connecting to <host>…"
+// screen (not the board with local-looking stats), swallows non-quit keys, shows
+// a failed-connect error, and dismisses on the first successful list.
+func TestConnectingInterstitial(t *testing.T) {
+	isolateHostState(t)
+	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "andrew@host:22"}
+	m, ok := New(&providerfake.Provider{}, remote).(model)
+	if !ok {
+		t.Fatal("New did not return a model")
+	}
+	if !m.connecting {
+		t.Fatal("a remote provider should start on the connecting interstitial")
+	}
+	if got := m.connectingView(); !strings.Contains(got, "andrew@host:22") {
+		t.Fatalf("connectingView should name the target, got:\n%s", got)
+	}
+	// A stray key (n = new VM) must NOT open a form while connecting.
+	after, _ := m.Update(runeKey('n'))
+	if am := after.(model); am.view != viewBoard || !am.connecting {
+		t.Fatalf("a keypress opened a screen while connecting: view=%v connecting=%v", am.view, am.connecting)
+	}
+	// A failed first list keeps the interstitial up and records the error.
+	failed, _ := after.(model).Update(vmsLoadedMsg{err: errors.New("ssh: connection refused")})
+	if fm := failed.(model); !fm.connecting || fm.connectErr == nil {
+		t.Fatal("a failed first connect should keep the interstitial and record the error")
+	}
+	// The first successful list dismisses it.
+	done, _ := failed.(model).Update(vmsLoadedMsg{})
+	if done.(model).connecting {
+		t.Fatal("the first successful list should dismiss the interstitial")
+	}
+}
+
+// TestLocalProviderNoInterstitial: local Lima connects instantly — no interstitial.
+func TestLocalProviderNoInterstitial(t *testing.T) {
+	isolateHostState(t)
+	if New(&providerfake.Provider{}, registry.LocalScope).(model).connecting {
+		t.Fatal("local Lima should not show the connecting interstitial")
 	}
 }
