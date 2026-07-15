@@ -56,7 +56,7 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 		Disk:     "100GiB",
 	}
 
-	err := doHeadlessCreate(context.Background(), reg, &stubProvisioner{}, cfg, false, false, io.Discard)
+	err := doHeadlessCreate(context.Background(), reg, &stubProvisioner{}, cfg, registry.LocalScope, false, false, io.Discard)
 	if err != nil {
 		t.Fatalf("doHeadlessCreate: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestHeadlessCreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prov := &stubProvisioner{}
-			if err := doHeadlessCreate(context.Background(), registry.NewEmpty(), prov, cfg, false, tc.rebuild, io.Discard); err != nil {
+			if err := doHeadlessCreate(context.Background(), registry.NewEmpty(), prov, cfg, registry.LocalScope, false, tc.rebuild, io.Discard); err != nil {
 				t.Fatalf("doHeadlessCreate: %v", err)
 			}
 			if prov.created != 1 {
@@ -120,7 +120,7 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 	}
 
 	prov := &stubProvisioner{}
-	if err := doHeadlessCreate(context.Background(), reg, prov, cfg, true, true, io.Discard); err != nil {
+	if err := doHeadlessCreate(context.Background(), reg, prov, cfg, registry.LocalScope, true, true, io.Discard); err != nil {
 		t.Fatalf("doHeadlessCreate(--recreate --rebuild): %v", err)
 	}
 	if prov.recreated != 1 || prov.created != 0 {
@@ -141,7 +141,7 @@ func TestHeadlessRecreateRefusedForUnmanagedVM(t *testing.T) {
 	reg := registry.NewEmpty() // no managed entry for cfg.Name
 
 	prov := &stubProvisioner{}
-	err := doHeadlessCreate(context.Background(), reg, prov, cfg, true, false, io.Discard)
+	err := doHeadlessCreate(context.Background(), reg, prov, cfg, registry.LocalScope, true, false, io.Discard)
 	if err == nil {
 		t.Fatal("doHeadlessCreate(--recreate, unmanaged VM): got nil error, want a recreate refusal")
 	}

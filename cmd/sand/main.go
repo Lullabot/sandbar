@@ -53,7 +53,13 @@ func main() {
 // runTUI launches the interactive Bubble Tea program: the original (and still
 // default) `sand` entrypoint.
 func runTUI() {
-	p, err := provider.NewDefault()
+	// scope is the registry.Scope the resolved provider owns (registry.LocalScope
+	// for the default, unconfigured local Lima) — see provider.Resolve. The TUI
+	// threads it through to its own manage.Reconcile/RecordSuccess bookkeeping
+	// (internal/ui/model.go) so it stays in lockstep with the headless `sand
+	// create` path (cmd/sand/create.go) on which entries belong to which
+	// provider.
+	p, scope, err := provider.Resolve()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -65,7 +71,7 @@ func runTUI() {
 
 	// Tell the TUI which build it is, so the header can say so.
 	ui.SetVersion(buildversion.String(version))
-	if _, err := tea.NewProgram(ui.New(p)).Run(); err != nil {
+	if _, err := tea.NewProgram(ui.New(p, scope)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

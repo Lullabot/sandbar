@@ -168,7 +168,7 @@ Flags:
 		return fmt.Errorf("sand create: %w", err)
 	}
 
-	p, err := provider.NewDefault()
+	p, scope, err := provider.Resolve()
 	if err != nil {
 		return err
 	}
@@ -186,12 +186,14 @@ Flags:
 
 	// Reconcile against the live instance list before acting, exactly like the
 	// TUI does on every list load — so a VM deleted outside sand isn't wrongly
-	// treated as managed (and gated recreate-able).
+	// treated as managed (and gated recreate-able). scope confines this to the
+	// resolved provider's own entries, so it can never prune (or be confused
+	// with) another provider's VMs — see provider.Resolve and registry.Scope.
 	live, err := p.List()
 	if err != nil {
 		return fmt.Errorf("list existing instances: %w", err)
 	}
-	if _, err := manage.Reconcile(reg, live); err != nil {
+	if _, err := manage.Reconcile(reg, live, scope); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: could not update managed index:", err)
 	}
 
@@ -200,7 +202,7 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, *recreate, *rebuild, os.Stdout)
+	return doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout)
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs
@@ -225,11 +227,11 @@ Flags:
 // it. The intent goes down to the provisioner instead, which destroys the base
 // inside ensureBaseStopped with the lock held and no clone in flight; this
 // function no longer has a lima client to delete anything with.
-func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, recreate, rebuild bool, out io.Writer) error {
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer) error {
 	opts := provision.CreateOptions{Rebuild: rebuild}
 
 	if recreate {
-		base, ok := manage.RecreateBase(reg, cfg.Name)
+		base, ok := manage.RecreateBase(reg, cfg.Name, scope)
 		if !ok {
 			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
@@ -243,7 +245,7 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 		}
 	}
 
-	if err := manage.RecordSuccess(reg, cfg); err != nil {
+	if err := manage.RecordSuccess(reg, cfg, scope); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
 	return nil
