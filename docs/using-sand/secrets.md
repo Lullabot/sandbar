@@ -47,7 +47,7 @@ line to start a new section for anything else, for example:
 ```
 GLOBAL_TOKEN=abc123
 
-[myproject]
+[github.com/my-organization]
 API_KEY=def456
 ```
 
