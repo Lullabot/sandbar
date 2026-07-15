@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage
           path: |
@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: mutation-report
           path: mutation.log
@@ -296,7 +296,10 @@ jobs:
   # for idempotence, and verifies concrete outcomes. Scoped to base + samba;
   # the other roles are documented as follow-up. Weekly + on demand, not per-PR.
   molecule:
-    name: molecule (${{ matrix.scenario }})
+    # No custom `name:` — GitHub derives `molecule (base)` / `molecule (samba)`
+    # from the matrix when the job runs, and shows a single clean `molecule`
+    # check when it is skipped on a PR. An explicit templated name would render
+    # the raw `${{ matrix.scenario }}` on skipped runs (matrix never expands).
     runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # Advisory: KNOWN idempotence failure on the samba scenario — roles/samba's
