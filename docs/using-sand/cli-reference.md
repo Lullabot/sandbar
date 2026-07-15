@@ -1,10 +1,5 @@
 # CLI Reference
 
-Every `sand` command and every flag, with its real default — verified against
-the built binary's `--help` output and the source it comes from
-(`cmd/sand/create.go`, `internal/vm/vm.go`, `internal/provision/vars.go`), not
-against any older README.
-
 There are four entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
@@ -61,10 +56,6 @@ not a prompt.
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
-
-No flag is omitted from that table — it is transcribed from every
-`fs.StringVar`/`fs.Bool`/`fs.String` call in `runCreate` (`cmd/sand/create.go`)
-and cross-checked against the `--help` output below.
 
 ### There is no `--ref` flag
 
