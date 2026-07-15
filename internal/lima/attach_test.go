@@ -41,6 +41,7 @@ func TestAttachArgv(t *testing.T) {
 		name      string
 		instance  string
 		guestHome string
+		colorterm string
 		wantHead  []string // everything up to (not including) the guest expression
 	}{
 		{
@@ -69,7 +70,7 @@ func TestAttachArgv(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			argv := AttachArgv(tc.instance, tc.guestHome)
+			argv := AttachArgv(tc.instance, tc.guestHome, tc.colorterm)
 			if len(argv) != len(tc.wantHead)+1 {
 				t.Fatalf("AttachArgv(%q, %q) = %q\nwant %d elements (%q + the guest expression), got %d",
 					tc.instance, tc.guestHome, argv, len(tc.wantHead)+1, tc.wantHead, len(argv))
@@ -100,7 +101,7 @@ func TestAttachArgv(t *testing.T) {
 // bash (`/bin/bash: --: invalid option`) instead of consuming it. Verified against a
 // real VM in task 01.
 func TestAttachArgvWorkdirPrecedesInstanceName(t *testing.T) {
-	argv := AttachArgv("claude", "/home/debian.guest")
+	argv := AttachArgv("claude", "/home/debian.guest", "")
 
 	flag := slices.Index(argv, "--workdir")
 	name := slices.Index(argv, "claude")
@@ -126,7 +127,7 @@ func TestAttachArgvWorkdirPrecedesInstanceName(t *testing.T) {
 // away", with no error message, no crash, and nothing in any log. Hence both
 // directions are asserted: present on the grouped session, ABSENT from main.
 func TestAttachArgvDestroyUnattachedOnGroupedSessionOnly(t *testing.T) {
-	argv := AttachArgv("claude", "/home/debian.guest")
+	argv := AttachArgv("claude", "/home/debian.guest", "")
 	expr, grouped, mainBranch := splitGuestExpr(t, argv)
 
 	const opt = "destroy-unattached"
@@ -169,7 +170,7 @@ func TestAttachArgvDestroyUnattachedOnGroupedSessionOnly(t *testing.T) {
 // chosen by the guest at attach time, not computed on the host, or two concurrent
 // `sand shell` invocations can pick the same name and the second one fails.
 func TestAttachArgvGroupedSessionNamedInTheGuest(t *testing.T) {
-	argv := AttachArgv("claude", "/home/debian.guest")
+	argv := AttachArgv("claude", "/home/debian.guest", "")
 	_, grouped, _ := splitGuestExpr(t, argv)
 
 	if !strings.Contains(grouped, "$$") {
@@ -179,8 +180,8 @@ func TestAttachArgvGroupedSessionNamedInTheGuest(t *testing.T) {
 
 	// Purity, and the proof there is no host-side counter, clock, or RNG in the name:
 	// the same inputs must always produce the identical argv.
-	a := AttachArgv("claude", "/home/debian.guest")
-	b := AttachArgv("claude", "/home/debian.guest")
+	a := AttachArgv("claude", "/home/debian.guest", "")
+	b := AttachArgv("claude", "/home/debian.guest", "")
 	if !slices.Equal(a, b) {
 		t.Errorf("AttachArgv is not pure — two calls with the same inputs differ:\n\t%q\n\t%q", a, b)
 	}
@@ -190,7 +191,7 @@ func TestAttachArgvGroupedSessionNamedInTheGuest(t *testing.T) {
 // IN THE GUEST. The host cannot see the guest's tmux server without a round trip
 // that would race anyway.
 func TestAttachArgvGuestBranchesOnMain(t *testing.T) {
-	argv := AttachArgv("claude", "/home/debian.guest")
+	argv := AttachArgv("claude", "/home/debian.guest", "")
 	expr, grouped, mainBranch := splitGuestExpr(t, argv)
 
 	if !strings.Contains(expr, "tmux has-session") {
@@ -210,5 +211,61 @@ func TestAttachArgvGuestBranchesOnMain(t *testing.T) {
 	if !strings.Contains(grouped, "new-session -t") {
 		t.Errorf("the grouped branch does not create a session grouped against `main` (`new-session -t`):\n\t%s\n"+
 			"Attaching to `main` directly would mirror the first client and clamp both to the smaller terminal.", grouped)
+	}
+}
+
+// TestAttachArgvColorterm pins the OTHER half of the truecolor handshake. The
+// guest sshd carries `AcceptEnv COLORTERM` (roles/base), but `limactl shell`
+// forwards no host environment, so the value has to be set on the guest tmux
+// session here or Claude Code's UI silently drops to 256-color. Four things
+// matter: a real value reaches BOTH new-session commands via `-e` (not a fragile
+// `export`, which tmux drops once a server is already running), an absent one is
+// NOT forwarded (so a non-truecolor terminal is reported honestly), a value that
+// could break out of the shell expression is refused rather than escaped, and the
+// tmux branch structure the other tests depend on is left intact.
+func TestAttachArgvColorterm(t *testing.T) {
+	// Forwarded: `-e COLORTERM=<v>` is spliced into BOTH new-session commands. It must
+	// be `-e` on the session, not an `export` before the expression — see
+	// guestAttachExpr: tmux hands a new pane the server's environment, so an exported
+	// value is dropped for every attach after the one that started the server.
+	expr, grouped, mainBranch := splitGuestExpr(t, AttachArgv("claude", "/home/debian.guest", "truecolor"))
+	if strings.Contains(expr, "export COLORTERM") {
+		t.Errorf("COLORTERM is set via a fragile `export` rather than `tmux new-session -e`:\n\t%s", expr)
+	}
+	if !strings.Contains(mainBranch, `tmux new-session -e COLORTERM=truecolor -s main`) {
+		t.Errorf("the `main` branch does not set COLORTERM via `-e`:\n\t%s", mainBranch)
+	}
+	if !strings.Contains(grouped, `tmux new-session -e COLORTERM=truecolor -t =main`) {
+		t.Errorf("the grouped branch does not set COLORTERM via `-e`:\n\t%s", grouped)
+	}
+
+	// Absent: no COLORTERM means no claim. The guest expression must be byte-for-byte
+	// what it was before this feature — a terminal that sets nothing (Terminal.app)
+	// is not to be told truecolor.
+	if argv := AttachArgv("claude", "/home/debian.guest", ""); strings.Contains(argv[len(argv)-1], "COLORTERM") {
+		t.Errorf("an empty COLORTERM was forwarded anyway:\n\t%s", argv[len(argv)-1])
+	}
+
+	// Refused: anything that is not a plain [A-Za-z0-9_-]+ token is dropped, not
+	// escaped. These would otherwise inject a second command into the guest shell.
+	for _, bad := range []string{
+		"truecolor; rm -rf ~",
+		"$(id)",
+		"`id`",
+		"a b",
+		"x\ny",
+		`x"y`,
+		"x'y",
+	} {
+		got := AttachArgv("claude", "/home/debian.guest", bad)
+		if e := got[len(got)-1]; strings.Contains(e, "COLORTERM") {
+			t.Errorf("a shell-unsafe COLORTERM %q was forwarded into the guest expression:\n\t%s", bad, e)
+		}
+	}
+
+	// Real-world values other than "truecolor" (e.g. 24bit) are still honored.
+	got := AttachArgv("claude", "/home/debian.guest", "24bit")
+	if e := got[len(got)-1]; !strings.Contains(e, "-e COLORTERM=24bit -s main") {
+		t.Errorf("a valid COLORTERM=24bit was not forwarded:\n\t%s", e)
 	}
 }

@@ -140,5 +140,5 @@ func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 		return nil, fmt.Errorf("sand shell: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 
-	return lima.AttachArgv(name, lima.GuestHome(found.Dir)), nil
+	return lima.AttachArgv(name, lima.GuestHome(found.Dir), os.Getenv("COLORTERM")), nil
 }

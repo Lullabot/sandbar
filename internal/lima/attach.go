@@ -1,5 +1,7 @@
 package lima
 
+import "regexp"
+
 // This file is the ONLY place in sand that knows tmux exists. Both entrypoints
 // into a guest shell — the TUI's `S` verb and `sand shell` — build their command
 // from AttachArgv and neither constructs a tmux command of its own, for the same
@@ -63,7 +65,28 @@ package lima
 // window-locked behaviour this whole design exists to avoid. The unguarded form
 // fails that microsecond-wide race loudly and retryably instead, which is the better
 // trade. Do not "fix" this by adding -A.
-const guestAttachExpr = `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux new-session -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux new-session -s main; fi`
+//
+// **colortermEnv (` -e COLORTERM=<value>`, or "") is spliced into BOTH new-session
+// commands** so the session — and any window later opened in it — carries the host
+// terminal's COLORTERM. It MUST be `-e`, not a plain `export COLORTERM=…;` before
+// the expression: tmux gives a new pane the SERVER's environment, captured when the
+// server first started, and COLORTERM is not in tmux's default update-environment
+// list — so an exported value is silently dropped for every attach after the one
+// that happened to start the server. `-e` sets the variable on the session directly
+// and survives an already-running server. Verified on a real VM (tmux 3.5a): with a
+// server already up, a plain export lands as unset; `-e` lands as truecolor.
+//
+// What `-e` sets is the SESSION environment, which fixes the value each pane sees at
+// the moment it is created. So the COLORTERM that reaches the common case — Claude
+// Code running in `main` — is the one carried by whichever client first created
+// `main` (the else branch). A later client attaching over the grouped branch shares
+// main's ALREADY-RUNNING panes and cannot re-colour them; its own `-e` only reaches
+// NEW windows it opens inside its grouped session. Two clients of different colour
+// capability therefore do NOT each re-skin main's existing panes — the first client
+// wins those — they only diverge on windows opened after attaching.
+func guestAttachExpr(colortermEnv string) string {
+	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux new-session` + colortermEnv + ` -s main; fi`
+}
 
 // AttachArgv returns the full argv that attaches a caller to instance name's
 // persistent guest tmux session (see guestAttachExpr for the tmux semantics).
@@ -71,6 +94,17 @@ const guestAttachExpr = `if tmux has-session -t =main 2>/dev/null; then s=sand-$
 // /home/<user>.guest, NOT /home/<user>, so it cannot be reconstructed from a
 // username and is always passed in; internal/ui.guestHome reads it from Lima's
 // generated cloud-config.yaml.
+//
+// colorterm is the host process's COLORTERM (callers pass os.Getenv("COLORTERM"))
+// and is set on the guest tmux session — via `tmux new-session -e` (see
+// guestAttachExpr) — so Claude Code's UI keeps its 24-bit color. This is the OTHER
+// half of a two-sided handshake: the guest sshd carries `AcceptEnv COLORTERM`
+// (roles/base), but `limactl shell` forwards NO host environment without
+// --preserve-env, so without this the variable never leaves the host and the guest
+// silently falls back to 256-color. Passing the value in (rather than reading the
+// environment here) keeps AttachArgv pure. An empty or shell-unsafe value is
+// dropped (see colortermFlag), so a terminal that sets no COLORTERM — Terminal.app,
+// say — is reported honestly as such rather than being told truecolor.
 //
 // It is pure: no globals, no I/O, no exec. That is what lets the command this
 // package builds be unit-tested without a real limactl, which AGENTS.md requires.
@@ -95,7 +129,7 @@ const guestAttachExpr = `if tmux has-session -t =main 2>/dev/null; then s=sand-$
 // omitted entirely rather than passed empty: `--workdir ""` would point limactl at
 // nowhere. The cost of omitting it is only the cosmetic `bash: cd: … No such file or
 // directory` this flag exists to suppress.
-func AttachArgv(name, guestHome string) []string {
+func AttachArgv(name, guestHome, colorterm string) []string {
 	// "limactl" is the same binary NewExecRunner shells out to; the interactive
 	// attach deliberately bypasses Runner (which captures output) because a tmux
 	// client needs the real terminal, not a pipe.
@@ -103,5 +137,26 @@ func AttachArgv(name, guestHome string) []string {
 	if guestHome != "" {
 		argv = append(argv, "--workdir", guestHome)
 	}
-	return append(argv, name, "bash", "-c", guestAttachExpr)
+	return append(argv, name, "bash", "-c", guestAttachExpr(colortermFlag(colorterm)))
+}
+
+// colortermValue is the full set of shell-safe COLORTERM strings. Every real
+// value a terminal sets — truecolor, 24bit, 1, gnome-terminal, rxvt — is letters,
+// digits, dash, or underscore; nothing here can carry a shell metacharacter.
+var colortermValue = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// colortermFlag returns the ` -e COLORTERM=<v>` fragment spliced into the guest's
+// `tmux new-session` commands, or "" when there is nothing safe to forward.
+//
+// The value is baked verbatim into a shell expression that limactl escapes as a
+// single argv element and the guest's `bash -c` then parses, so it MUST be shell
+// safe. Rather than quote-and-escape arbitrary host input, an unrecognised value
+// is dropped: a missing COLORTERM already means "no truecolor claim", so refusing
+// to forward a malformed one degrades to exactly the honest default. The leading
+// space keeps the flag a separate argv word to tmux from the `new-session` before it.
+func colortermFlag(colorterm string) string {
+	if !colortermValue.MatchString(colorterm) {
+		return ""
+	}
+	return " -e COLORTERM=" + colorterm
 }

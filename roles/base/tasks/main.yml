@@ -275,12 +275,20 @@
     install_recommends: false
   when: provision_phase | default('full') != 'finalize'
 
-# `limactl shell` (and ssh) forward COLORTERM from the host when present, but
-# Debian's sshd only accepts LANG/LC_* by default, so truecolor terminals
-# (iTerm2, WezTerm, kitty, Ghostty, …) get downgraded to 256-color inside the
-# VM. Accepting COLORTERM restores 24-bit color for Claude Code's UI. This
-# forwards the host's actual capability — terminals that don't set COLORTERM
-# (e.g. Terminal.app) are unaffected.
+# Let an SSH client forward COLORTERM so truecolor terminals (iTerm2, WezTerm,
+# kitty, Ghostty, …) keep 24-bit color instead of being downgraded to 256-color:
+# Debian's sshd accepts only LANG/LC_* by default, so a client's `SendEnv COLORTERM`
+# is otherwise dropped. This is the half that matters for someone reaching the VM
+# with a PLAIN `ssh` (with `SendEnv COLORTERM` in their client config) — it forwards
+# the host's actual capability, so a terminal that sets no COLORTERM (Terminal.app)
+# is unaffected.
+#
+# It is NOT what fixes `sand shell` / the TUI's `S` verb. `limactl shell` forwards
+# NO host environment without --preserve-env (verified: limactl 2.1.3 drops even
+# COLORTERM), so for sand's own attach path the value is set directly on the guest
+# tmux session via `tmux new-session -e COLORTERM=…` — see internal/lima.AttachArgv.
+# This AcceptEnv drop-in stays because it is the only lever for the plain-ssh path
+# and is harmless to the tmux path.
 - name: Accept COLORTERM over SSH for truecolor terminals
   ansible.builtin.copy:
     dest: /etc/ssh/sshd_config.d/10-colorterm.conf

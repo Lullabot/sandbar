@@ -236,7 +236,7 @@ func shellCmd(name, guestHome string) tea.Cmd {
 		return hostTmuxWindowCmd(name)
 	}
 
-	argv := lima.AttachArgv(name, guestHome)
+	argv := lima.AttachArgv(name, guestHome, os.Getenv("COLORTERM"))
 	c := exec.Command(argv[0], argv[1:]...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return actionDoneMsg{action: "shell", name: name, err: err}
