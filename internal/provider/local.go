@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"io"
+	"os"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -100,7 +101,7 @@ func (p *limaProvider) Copy(ctx context.Context, out io.Writer, recursive bool, 
 // so the caller passes only the vm.VM and never constructs the Lima-shaped
 // command. Reproduces exactly what the `S` verb and `sand shell` do today.
 func (p *limaProvider) AttachArgv(v vm.VM) []string {
-	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir))
+	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }
 
 func (p *limaProvider) GuestHome(v vm.VM) string { return lima.GuestHome(v.Dir) }

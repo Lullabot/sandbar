@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"os"
+
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -31,7 +33,7 @@ var _ Provider = (*remoteLimaProvider)(nil)
 // identical (host.AttachArgv reuses lima.AttachArgv). This is what gives `sand
 // shell` and the TUI `S` verb the remote form with no drift.
 func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
-	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir))
+	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"))
 }
 
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH

@@ -252,7 +252,7 @@ func TestSSHStreamReapsOrphan(t *testing.T) {
 // the instance name. Reversing/altering either is silently fatal (see attach.go).
 func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	h := NewSSHHost(SSHConfig{Host: "example.com", User: "dev"})
-	got := h.AttachArgv("web", "/home/debian.guest")
+	got := h.AttachArgv("web", "/home/debian.guest", "")
 
 	// ssh -t <target> prefix.
 	if len(got) < 3 || got[0] != "ssh" || got[1] != "-t" || got[2] != "dev@example.com" {
@@ -273,14 +273,14 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	// The guest expression survives BYTE-FOR-BYTE (only shell-quoted for the remote
 	// shell), and destroy-unattached still never touches `main`.
 	last := got[len(got)-1]
-	if !strings.Contains(last, guestAttachExpr) {
-		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr)
+	if !strings.Contains(last, guestAttachExpr("")) {
+		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr(""))
 	}
 
 	// The remote argv's tail (after the `ssh -t target` prefix) must be exactly the
 	// local attach argv, shell-quoted element by element — proof the ONLY change is
 	// the transport prefix, and nothing about the limactl/guest command drifted.
-	local := AttachArgv("web", "/home/debian.guest")
+	local := AttachArgv("web", "/home/debian.guest", "")
 	wantTail := make([]string, len(local))
 	for i, a := range local {
 		wantTail[i] = shellQuote(a)
@@ -294,7 +294,7 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 // the runner does, after the -t.
 func TestSSHAttachArgvThreadsPortIdentity(t *testing.T) {
 	h := NewSSHHost(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"})
-	got := h.AttachArgv("web", "")
+	got := h.AttachArgv("web", "", "")
 	wantPrefix := []string{"ssh", "-t", "-p", "2222", "-i", "/k", "u@h", "limactl", "shell", "web"}
 	if !slices.Equal(got[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("attach prefix = %v\nwant %v", got[:len(wantPrefix)], wantPrefix)
