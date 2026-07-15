@@ -472,8 +472,10 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 		return // not the default base's rename — nothing to migrate
 	}
 	// Cheap host-side gate: with no legacy instance dir there is nothing to rename,
-	// and this must cost zero limactl calls on the overwhelmingly common path.
-	if _, err := os.Stat(filepath.Join(limaHome(), legacyBaseName, "lima.yaml")); err != nil {
+	// and this must cost zero limactl calls on the overwhelmingly common path. The
+	// stat goes through the host-access seam (not os.Stat) so a remote-Lima
+	// provider checks — and renames — the base on the host that actually owns it.
+	if _, err := hostFiles.Stat(filepath.Join(hostFiles.LimaHome(), legacyBaseName, "lima.yaml")); err != nil {
 		return
 	}
 	// Target already present (a prior create migrated or built it) — leave both

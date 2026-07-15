@@ -131,27 +131,13 @@ func contentPlaybookVersion(dir, toolset string) (string, error) {
 	return PlaybookVersion(os.DirFS(dir), toolset)
 }
 
-// limaHome is the directory Lima keeps its instances in (LIMA_HOME, or ~/.lima).
-// Both Lima's own per-instance state and sand's state ABOUT an instance live
-// under it: the base's version stamp (baseVersionPath), its lock
-// (baseLockPath), and the instance file the base's playbook mount is read from
-// (basePlaybookMount).
-func limaHome() string {
-	if home := os.Getenv("LIMA_HOME"); home != "" {
-		return home
-	}
-	if h, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(h, ".lima")
-	}
-	return ""
-}
-
 // baseVersionPath is the host file recording which playbook version a base
-// image was built from. It sits under the Lima home so it lives beside the
-// base it describes, namespaced in a subdir to avoid colliding with Lima's own
-// state.
+// image was built from. It sits under the Lima home (hostFiles.LimaHome — both
+// Lima's own per-instance state and sand's state ABOUT an instance live under it)
+// so it lives beside the base it describes, namespaced in a _sand subdir to avoid
+// colliding with Lima's own state.
 func baseVersionPath(baseName string) string {
-	return filepath.Join(limaHome(), "_sand", baseName+".playbook-version")
+	return filepath.Join(hostFiles.LimaHome(), "_sand", baseName+".playbook-version")
 }
 
 // baseStamp is a base image's on-disk stamp: the content-hash version (task 4)
@@ -193,7 +179,7 @@ func parseBaseStamp(data []byte) (baseStamp, bool) {
 // (the version); a missing or unparseable BuiltAt (line 2) has no bearing on
 // this — readBaseBuiltAt is the seam for that.
 func readBaseVersion(baseName string) string {
-	b, err := os.ReadFile(baseVersionPath(baseName))
+	b, err := hostFiles.ReadFile(baseVersionPath(baseName))
 	if err != nil {
 		return ""
 	}
@@ -207,7 +193,7 @@ func readBaseVersion(baseName string) string {
 // caller (ensureBaseStopped's age check) reads ok=false as "cannot prove this
 // base is fresh" and refreshes it once rather than assuming it is new.
 func readBaseBuiltAt(baseName string) (time.Time, bool) {
-	b, err := os.ReadFile(baseVersionPath(baseName))
+	b, err := hostFiles.ReadFile(baseVersionPath(baseName))
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -235,12 +221,8 @@ func readBaseBuiltAt(baseName string) (time.Time, bool) {
 // A write failure is non-fatal to the build: a missing/stale stamp just forces
 // a rebuild or refresh on the next create.
 func writeBaseVersion(baseName, version string, builtAt time.Time) error {
-	path := baseVersionPath(baseName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	content := version + "\n" + builtAt.UTC().Format(time.RFC3339) + "\n"
-	return os.WriteFile(path, []byte(content), 0o644)
+	return hostFiles.WriteFile(baseVersionPath(baseName), []byte(content), 0o755, 0o644)
 }
 
 // shortVersion trims a stamp for human-readable log lines: full stamps are a

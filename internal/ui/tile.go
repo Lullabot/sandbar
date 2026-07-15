@@ -25,8 +25,9 @@ package ui
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -471,12 +472,12 @@ func lastUsed(dir string) (time.Time, bool) {
 	if dir == "" {
 		return time.Time{}, false
 	}
-	fi, err := os.Stat(filepath.Join(dir, "ha.stderr.log"))
+	fi, err := hostFiles.Stat(filepath.Join(dir, "ha.stderr.log"))
 	if err == nil {
 		return fi.ModTime(), true
 	}
-	if !os.IsNotExist(err) {
-		if fi2, err2 := os.Stat(filepath.Join(dir, "disk")); err2 == nil {
+	if !errors.Is(err, fs.ErrNotExist) {
+		if fi2, err2 := hostFiles.Stat(filepath.Join(dir, "disk")); err2 == nil {
 			return fi2.ModTime(), true
 		}
 	}
@@ -496,7 +497,7 @@ func upSince(dir string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	for _, name := range []string{"ha.pid", "qemu.pid"} {
-		if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+		if fi, err := hostFiles.Stat(filepath.Join(dir, name)); err == nil {
 			return fi.ModTime(), true
 		}
 	}
