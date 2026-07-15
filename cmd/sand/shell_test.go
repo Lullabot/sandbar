@@ -35,7 +35,7 @@ func (s stubVMLister) Get(name string) (vm.VM, error) {
 // lima.GuestHome) closely enough for shellAttachArgv's tests: they only need
 // a non-empty, limactl-shaped argv, never a real guest.
 func (s stubVMLister) AttachArgv(v vm.VM) []string {
-	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir))
+	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), "")
 }
 
 // TestShellAttachArgvNotRunning verifies task 3's central refusal: a VM that

@@ -520,8 +520,8 @@ func splitGuestEndpoint(s string) (instance, path string, isGuest bool) {
 // tmux client needs (ssh -t -> limactl shell -> guest bash -> tmux). --workdir
 // still precedes the instance name, because AttachArgv put it there and quoting
 // preserves order. The caller execs the result against its real TTY.
-func (h *SSHHost) AttachArgv(name, guestHome string) []string {
-	local := AttachArgv(name, guestHome)
+func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
+	local := AttachArgv(name, guestHome, colorterm)
 	argv := h.sshBase(true)
 	for _, a := range local {
 		argv = append(argv, shellQuote(a))
