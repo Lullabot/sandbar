@@ -200,9 +200,13 @@ func LoadFrom(path string) (*Registry, error) {
 				r.vms[name] = e
 			}
 		}
-		if err := r.save(); err != nil {
-			return r, fmt.Errorf("managed-VM index at %s: migrating to schema version %d: %w", path, currentVersion, err)
-		}
+		// Best-effort persist. The in-memory registry is already correctly
+		// stamped, so this write is only about durability — and it must NOT be
+		// fatal to a load. A read-only or full data dir would otherwise make
+		// EVERY `sand`/`sand create` invocation surface a migration error, where
+		// the old (pure-read) LoadFrom loaded the same file silently; the next
+		// successful mutating save() persists the version bump instead.
+		_ = r.save()
 	}
 	return r, nil
 }
@@ -237,6 +241,15 @@ func (r *Registry) IsManaged(name string) bool {
 	return ok
 }
 
+// IsManagedInScope reports whether name is a managed VM owned by scope. Unlike
+// IsManaged, it does not match an entry that belongs to a different provider —
+// so a remote provider never treats a same-named local entry as its own, which
+// is the whole point of Scope (a same-named VM must not cross providers).
+func (r *Registry) IsManagedInScope(name string, scope Scope) bool {
+	e, ok := r.vms[name]
+	return ok && scope.matches(e)
+}
+
 // Base returns the base image a managed VM was cloned from, or "" if unknown.
 func (r *Registry) Base(name string) string {
 	return r.vms[name].Base
@@ -262,6 +275,19 @@ func (r *Registry) IsBase(name string) bool {
 func (r *Registry) Config(name string) (vm.CreateConfig, bool) {
 	e, ok := r.vms[name]
 	return e.Config, ok
+}
+
+// ConfigInScope returns the stored create configuration for a managed VM owned
+// by scope (clone token stripped) and whether such an entry exists. It is the
+// scoped counterpart to Config: a remote provider must not read a same-named
+// local entry's recorded user/sizing (e.g. resolving the guest user secrets are
+// applied as), which would otherwise silently target the wrong account.
+func (r *Registry) ConfigInScope(name string, scope Scope) (vm.CreateConfig, bool) {
+	e, ok := r.vms[name]
+	if !ok || !scope.matches(e) {
+		return vm.CreateConfig{}, false
+	}
+	return e.Config, true
 }
 
 // Add records cfg as a managed VM keyed by cfg.Name and persists the change,

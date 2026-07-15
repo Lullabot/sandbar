@@ -169,7 +169,7 @@ func applySecretsCmd(p provider.Provider, name, user string, scopes map[string]m
 // detail.go).
 func (m model) secretsFor(name string) (user string, scopes map[string]map[string]string) {
 	user = vm.HostUser()
-	if cfg, ok := m.reg.Config(name); ok && cfg.User != "" {
+	if cfg, ok := m.reg.ConfigInScope(name, m.scope); ok && cfg.User != "" {
 		user = cfg.User
 	}
 	return user, m.sec.GetAll(name)

@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -578,6 +579,8 @@ func (l *sshLock) TryLock() (bool, error) {
 	argv := l.h.sshCommand(false, remote...)
 	cmd := l.h.newCmd(ctx, argv)
 	cmd.WaitDelay = waitDelay
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -607,10 +610,21 @@ func (l *sshLock) TryLock() (bool, error) {
 		}
 	}
 	if !acquired {
-		// Holder produced no sentinel: it exited because the lock was taken. Reap it.
+		// Holder produced no sentinel. Two reasons must be told apart: the lock was
+		// HELD (flock -n exits 1 → retry, the (false,nil) contract), or the remote
+		// has NO usable `flock` at all — a macOS or busybox Lima host, where the
+		// shell reports command-not-found (exit 127). The latter must surface as an
+		// ERROR so lockBase degrades to unserialized (baselock.go treats a TryLock
+		// error as "continue without the lock"); returning (false,nil) there would
+		// make the caller poll a lock nothing will ever hold, hanging the very first
+		// `sand create` against such a host — the exact opposite of OpenLock's
+		// documented promise to degrade rather than fail.
 		_ = stdin.Close()
 		cancel()
-		_ = cmd.Wait()
+		werr := cmd.Wait()
+		if remoteFlockUnavailable(werr, errb.String()) {
+			return false, fmt.Errorf("remote flock unavailable (%v): %s", werr, strings.TrimSpace(errb.String()))
+		}
 		return false, nil
 	}
 
@@ -622,6 +636,22 @@ func (l *sshLock) TryLock() (bool, error) {
 
 	l.cmd, l.stdin, l.cancel = cmd, stdin, cancel
 	return true, nil
+}
+
+// remoteFlockUnavailable reports whether a non-sentinel flock holder exit means
+// the remote host has no usable `flock` binary — command-not-found surfaces as a
+// "not found" diagnostic on stderr and an exit status of 127 — rather than the
+// lock merely being held (flock -n exits 1 with no such diagnostic). See
+// sshLock.TryLock: only the former must degrade to unserialized.
+func remoteFlockUnavailable(waitErr error, stderr string) bool {
+	if strings.Contains(stderr, "not found") {
+		return true
+	}
+	var ee *exec.ExitError
+	if errors.As(waitErr, &ee) && ee.ExitCode() == 127 {
+		return true
+	}
+	return false
 }
 
 // Unlock releases the held lock by closing the holder's stdin (its `cat` EOFs, the

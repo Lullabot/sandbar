@@ -204,7 +204,7 @@ func (m model) hostWorkDir() string {
 // recorded config, then host user). v is the VM record the caller is acting
 // on (see startTransfer).
 func (m model) guestDefaultDir(v vm.VM) string {
-	cfg, ok := m.reg.Config(m.transferVM)
+	cfg, ok := m.reg.ConfigInScope(m.transferVM, m.scope)
 	home := m.p.GuestHome(v)
 	if home == "" {
 		user := m.p.GuestUser(v)

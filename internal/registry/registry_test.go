@@ -420,3 +420,29 @@ func containsStr(haystack, needle string) bool {
 	}
 	return false
 }
+
+// TestScopedAccessorsDoNotCrossProviders pins the scope-isolation the UI relies
+// on: a LOCAL entry must never be reported managed (nor have its recorded config
+// returned) under a REMOTE scope. Without this, stop-all could stop an
+// out-of-scope remote VM and secrets could be applied as the wrong guest user
+// when a remote VM shares a name with a leftover local entry.
+func TestScopedAccessorsDoNotCrossProviders(t *testing.T) {
+	r := NewEmpty()
+	if err := r.Add(vm.CreateConfig{Name: "web", BaseName: "b", User: "localuser"}); err != nil {
+		t.Fatal(err)
+	}
+	remote := Scope{Provider: "lima-remote", RemoteTarget: "u@h:22"}
+
+	if !r.IsManagedInScope("web", LocalScope) {
+		t.Fatal("local entry should be managed under LocalScope")
+	}
+	if r.IsManagedInScope("web", remote) {
+		t.Fatal("a LOCAL entry must NOT be managed under a remote scope")
+	}
+	if _, ok := r.ConfigInScope("web", remote); ok {
+		t.Fatal("ConfigInScope must not return a local entry's config under a remote scope")
+	}
+	if cfg, ok := r.ConfigInScope("web", LocalScope); !ok || cfg.User != "localuser" {
+		t.Fatalf("ConfigInScope under LocalScope = (%+v, %v), want the local entry", cfg, ok)
+	}
+}

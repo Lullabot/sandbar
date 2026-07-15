@@ -126,8 +126,31 @@ func sandProfileEnabled() bool {
 // Provisioner drives the base-build / clone / finalize sequence through a
 // lima.Client, streaming playbook output to the caller-supplied writer.
 type Provisioner struct {
-	Lima        *lima.Client
+	Lima *lima.Client
+	// PlaybookDir is the host directory mounted into the guest at /mnt/playbook.
+	// It may be left empty at construction: playbookDir() locates it lazily (and
+	// caches it here) the first time a provisioning flow actually needs it. That
+	// laziness is deliberate — a transport-only entrypoint like `sand shell`
+	// constructs a Provisioner but never provisions, and must not pay for (or fail
+	// on) embedded-playbook extraction just to attach to a running VM.
 	PlaybookDir string
+}
+
+// playbookDir returns the host playbook directory, locating it on first use when
+// it was not supplied at construction. Resolving it here rather than at provider
+// construction keeps `sand shell` from triggering playbook extraction, and keeps
+// the "limactl preflight before playbook location" error ordering the CLI relies
+// on (a user without limactl gets the actionable install-Lima message, not a
+// playbook-extraction failure).
+func (p *Provisioner) playbookDir() (string, error) {
+	if p.PlaybookDir == "" {
+		dir, err := LocatePlaybook()
+		if err != nil {
+			return "", err
+		}
+		p.PlaybookDir = dir
+	}
+	return p.PlaybookDir, nil
 }
 
 // step writes a phase banner to the streamed output so the user sees which
@@ -171,7 +194,11 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 // running a per-phase timed sequence (createVM, Reset) can share one timer and
 // summary across the whole run instead of BuildBase starting its own.
 func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
-	overlay, err := RenderBaseOverlay(cfg, p.PlaybookDir)
+	dir, err := p.playbookDir()
+	if err != nil {
+		return fmt.Errorf("locate playbook: %w", err)
+	}
+	overlay, err := RenderBaseOverlay(cfg, dir)
 	if err != nil {
 		return fmt.Errorf("render base overlay: %w", err)
 	}
@@ -237,7 +264,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// can detect drift and rebuild instead of silently cloning stale content. A
 	// missing stamp (version unknown, or write failed) just forces a rebuild next
 	// time, so neither branch here is fatal to the build.
-	if v, err := playbookVersionFn(p.PlaybookDir, cfg.ToolsetKey()); err != nil {
+	if v, err := playbookVersionFn(dir, cfg.ToolsetKey()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
 	} else if err := writeBaseVersionFn(cfg.BaseName, v, time.Now()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
@@ -735,7 +762,12 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 // treated as NOT stale: better to reuse the base than to churn it on every create.
 func (p *Provisioner) baseStale(cfg vm.CreateConfig, out io.Writer) (version string, stale bool) {
 	baseName := cfg.BaseName
-	want, err := playbookVersionFn(p.PlaybookDir, cfg.ToolsetKey())
+	dir, err := p.playbookDir()
+	if err != nil {
+		step(out, "Note: could not locate the playbook (%v); reusing the existing base image %q.", err, baseName)
+		return "", false
+	}
+	want, err := playbookVersionFn(dir, cfg.ToolsetKey())
 	if err != nil {
 		step(out, "Note: could not determine the current playbook version (%v); reusing the existing base image %q.", err, baseName)
 		return "", false

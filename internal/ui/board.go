@@ -114,7 +114,7 @@ func (m model) lookupVM(name string) (vm.VM, bool) {
 func (m model) boardVMs() []vm.VM {
 	on := make(map[string]bool, len(m.vms))
 	for _, v := range m.vms {
-		if m.reg.IsManaged(v.Name) {
+		if m.reg.IsManagedInScope(v.Name, m.scope) {
 			on[v.Name] = true
 		}
 	}
@@ -419,7 +419,7 @@ func (m *model) ensureFocusVisible() {
 func (m model) stopAllTargets() []string {
 	var names []string
 	for _, v := range m.vms {
-		if v.Status != limaRunning || !m.reg.IsManaged(v.Name) || m.isBaseImage(v.Name) {
+		if v.Status != limaRunning || !m.reg.IsManagedInScope(v.Name, m.scope) || m.isBaseImage(v.Name) {
 			continue
 		}
 		if m.vmBuilding(v.Name) {
@@ -907,7 +907,7 @@ func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUn
 // uniform by construction and the managed/external badge unreachable — exactly
 // what tile.go predicts once the board filters to sand's own VMs.
 func (m model) traitsOf(v vm.VM) vmTraits {
-	base := m.reg.Base(v.Name)
+	base, managed := m.reg.BaseInScope(v.Name, m.scope)
 	if base == "" {
 		if cfg, ok := m.jobs.config(v.Name); ok {
 			base = cfg.BaseName
@@ -916,7 +916,7 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 	return vmTraits{
 		Arch:    v.Arch,
 		Base:    base,
-		Managed: m.reg.IsManaged(v.Name) || m.hasProvisionJob(v.Name),
+		Managed: managed || m.hasProvisionJob(v.Name),
 	}
 }
 
