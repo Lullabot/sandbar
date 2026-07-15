@@ -530,6 +530,23 @@ func TestSSHStat(t *testing.T) {
 	if _, err := hostWith(testCfg, recMissing).Stat("/x"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Stat(missing) err = %v, want fs.ErrNotExist", err)
 	}
+
+	// A macOS remote runs BSD stat, which rejects GNU's `-c` with "illegal
+	// option" (NOT a missing-path error); Stat must retry the BSD `-f` form and
+	// parse its "Directory" type text, not mis-report the path as absent.
+	recBSD := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		if hasToken(argv, "-c") {
+			return sh(ctx, `echo "stat: illegal option -- c" >&2; exit 1`)
+		}
+		return sh(ctx, "printf '8192|1700000000|Directory'")
+	}}
+	fiBSD, err := hostWith(testCfg, recBSD).Stat("/remote/.lima/web")
+	if err != nil {
+		t.Fatalf("Stat (BSD fallback): %v", err)
+	}
+	if !fiBSD.IsDir() || fiBSD.Size() != 8192 {
+		t.Fatalf("Stat BSD fallback = {dir=%v size=%d}, want {true 8192}", fiBSD.IsDir(), fiBSD.Size())
+	}
 }
 
 // TestSSHFileMutations covers WriteFile / MkdirAll / RemoveAll argv and the stdin
@@ -585,6 +602,17 @@ func TestSSHDiskAllocBytes(t *testing.T) {
 	}}
 	if got := hostWith(testCfg, recFail).DiskAllocBytes("/x"); got != -1 {
 		t.Fatalf("DiskAllocBytes(unmeasurable) = %d, want -1", got)
+	}
+
+	// A macOS remote (BSD stat) rejects `-c %b`; the probe must retry `-f %b`.
+	recBSD := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		if hasToken(argv, "-c") {
+			return sh(ctx, "exit 1")
+		}
+		return sh(ctx, "printf '20'") // 20 blocks * 512 = 10240
+	}}
+	if got := hostWith(testCfg, recBSD).DiskAllocBytes("/remote/.lima/web/disk"); got != 10240 {
+		t.Fatalf("DiskAllocBytes (BSD fallback) = %d, want 10240", got)
 	}
 }
 

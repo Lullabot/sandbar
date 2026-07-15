@@ -8,10 +8,18 @@ import (
 
 // hostFiles is the host-access seam the tile's per-VM sampling reads through —
 // the qcow2's allocated size (diskUsedBytes) and the boot / last-used mtimes
-// (upSince, lastUsed in tile.go). It defaults to the local filesystem, so
-// behaviour is unchanged; the seam exists so a remote-Lima provider (plan 15 task
-// 5) samples the instance files on the host where the VM actually runs.
+// (upSince, lastUsed in tile.go). It defaults to the local filesystem; a remote
+// provider redirects it via SetHostFiles so a remote VM's instance files are
+// sampled on the host where the VM actually runs rather than stat'd on the laptop.
 var hostFiles lima.HostFiles = lima.LocalFiles()
+
+// SetHostFiles points the tile-sampling seam at hf. cmd/sand/main.go calls it once
+// with the resolved provider's host-access seam (provision.HostFiles) so the disk
+// gauge and up-since / last-used read the REMOTE host under a remote provider —
+// otherwise they stat the remote instance dir on the local filesystem, find
+// nothing, and the disk gauge renders "?". A process-global swap for the same
+// reason provision.SetHostFiles is: one sand process runs exactly one provider.
+func SetHostFiles(hf lima.HostFiles) { hostFiles = hf }
 
 // diskUsedBytes returns the allocated on-disk size of the Lima instance's qcow2
 // image at <dir>/disk, or -1 when it can't be measured (empty dir, missing or
