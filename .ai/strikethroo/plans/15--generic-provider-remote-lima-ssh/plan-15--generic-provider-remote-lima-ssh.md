@@ -431,9 +431,9 @@ graph TD
 
 No circular dependencies.
 
-### Phase 1: Foundation — host-access seam
+### ✅ Phase 1: Foundation — host-access seam
 **Parallel Tasks:**
-- Task 1: Generalize the Runner into a local/remote-capable host-access seam and relocate every `~/.lima` filesystem touch behind it (local impl only).
+- ✔️ Task 1 (completed): Generalize the Runner into a local/remote-capable host-access seam and relocate every `~/.lima` filesystem touch behind it (local impl only).
 
 ### Phase 2: Foundation — the Provider interface
 **Parallel Tasks:**

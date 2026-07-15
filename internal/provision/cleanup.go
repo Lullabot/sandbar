@@ -2,7 +2,6 @@ package provision
 
 import (
 	"io"
-	"os"
 	"path/filepath"
 )
 
@@ -41,19 +40,19 @@ func (p *Provisioner) cleanupInstance(name string, out io.Writer) {
 	if dir == "" {
 		return
 	}
-	if _, err := os.Stat(dir); err != nil {
+	if _, err := hostFiles.Stat(dir); err != nil {
 		return // nothing was written; nothing to clean up
 	}
 
 	step(out, "Cleaning up the partially created VM %q…", name)
 
 	if err := p.Lima.Delete(name, true); err == nil {
-		if _, err := os.Stat(dir); err != nil {
+		if _, err := hostFiles.Stat(dir); err != nil {
 			return // limactl took it
 		}
 	}
 
-	if err := os.RemoveAll(dir); err != nil {
+	if err := hostFiles.RemoveAll(dir); err != nil {
 		step(out, "Could not remove %s: %v — remove it by hand, or `limactl list` will keep failing.", dir, err)
 		return
 	}
@@ -64,7 +63,7 @@ func (p *Provisioner) cleanupInstance(name string, out io.Writer) {
 // name is empty or the Lima home cannot be determined, which the caller reads as
 // "nothing to clean up".
 func instanceDir(name string) string {
-	home := limaHome()
+	home := hostFiles.LimaHome()
 	if name == "" || home == "" {
 		return ""
 	}

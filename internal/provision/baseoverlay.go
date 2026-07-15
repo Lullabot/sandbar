@@ -74,7 +74,7 @@ var baseOverlayFn = readBaseOverlay
 // cannot PROVE what the base would do, and the caller must then treat it as
 // unconvergeable (rebuild) rather than guess.
 func readBaseOverlay(baseName string) (baseOverlay, bool) {
-	b, err := os.ReadFile(filepath.Join(limaHome(), baseName, "lima.yaml"))
+	b, err := hostFiles.ReadFile(filepath.Join(hostFiles.LimaHome(), baseName, "lima.yaml"))
 	if err != nil {
 		return baseOverlay{}, false
 	}

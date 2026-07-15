@@ -2,12 +2,17 @@ package lima
 
 import (
 	"bufio"
-	"os"
+	"bytes"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// hostFiles is the host-access seam these guest-identity reads go through. It
+// defaults to the local filesystem; a remote-Lima provider (plan 15 task 5) reads
+// the same ssh.config / cloud-config.yaml off the host where the instance lives.
+var hostFiles HostFiles = LocalFiles()
 
 // The guest home is read from Lima's generated files rather than guessed, and it
 // lives here rather than in one caller because BOTH shell entrypoints need it:
@@ -32,7 +37,7 @@ func GuestHome(instanceDir string) string {
 	if instanceDir == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(instanceDir, "cloud-config.yaml"))
+	data, err := hostFiles.ReadFile(filepath.Join(instanceDir, "cloud-config.yaml"))
 	if err != nil {
 		return ""
 	}
@@ -76,12 +81,11 @@ func GuestUser(instanceDir string) string {
 	if instanceDir == "" {
 		return ""
 	}
-	f, err := os.Open(filepath.Join(instanceDir, "ssh.config"))
+	data, err := hostFiles.ReadFile(filepath.Join(instanceDir, "ssh.config"))
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
 		// ssh.config indents directives, e.g. "  User debian".
 		if fields := strings.Fields(sc.Text()); len(fields) == 2 && fields[0] == "User" {
