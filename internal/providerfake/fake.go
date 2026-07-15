@@ -54,6 +54,7 @@ type Provider struct {
 
 	PreflightFunc     func() error
 	HostResourcesFunc func() provider.HostResources
+	HostUserFunc      func() string
 }
 
 // Compile-time proof the fake satisfies the whole seam.
@@ -216,4 +217,11 @@ func (f *Provider) HostResources() provider.HostResources {
 		return f.HostResourcesFunc()
 	}
 	return provider.HostResources{}
+}
+
+func (f *Provider) HostUser() string {
+	if f.HostUserFunc != nil {
+		return f.HostUserFunc()
+	}
+	return ""
 }

@@ -41,6 +41,13 @@ func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
 func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }
 func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.host, v.Dir) }
 
+// HostUser returns the REMOTE host's login user (over ssh) — the user Lima
+// creates the guest account for and that `limactl shell` logs into, so a new VM's
+// user defaults to it and the playbook provisions the account the shell actually
+// lands in (git identity, ~/.tmux.conf, secrets). Defaulting to the laptop's user
+// instead left the guest login user unprovisioned. See Provider.HostUser.
+func (p *remoteLimaProvider) HostUser() string { return p.host.HostUser() }
+
 // HostResources samples the REMOTE host's CPU/memory/disk over ssh, so the board
 // header's denominators describe the machine the VMs actually run on rather than
 // the laptop driving them (the local provider returns zero and the UI samples the

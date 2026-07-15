@@ -126,7 +126,18 @@ type Provider interface {
 	// through unchanged.
 	GuestPath(name, path string) string
 
-	// --- Host capacity ---
+	// --- Host identity & capacity ---
+
+	// HostUser is the login user of the host limactl runs on — the user Lima
+	// creates a matching guest account for, and therefore the account `limactl
+	// shell` logs into. A new VM's user must DEFAULT to this so the playbook
+	// provisions (git identity, ~/.tmux.conf, secrets) the same user the shell
+	// lands in. For local Lima it is this machine's user; a remote provider
+	// returns the REMOTE host's user — NOT the laptop's, which would leave the
+	// guest login user unprovisioned (its ~/.tmux.conf missing, so tmux falls back
+	// to its default prefix). "" when it cannot be determined, so the caller falls
+	// back to the local default.
+	HostUser() string
 
 	// HostResources reports the limactl HOST's own capacity — CPU count, total
 	// memory, and free disk on the Lima store — for the board header's "how much of

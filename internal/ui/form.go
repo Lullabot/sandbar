@@ -181,12 +181,12 @@ func orDefault(v, def string) string {
 // hostCPUs / hostMem describe the host the VM will run on (the remote host for a
 // remote provider, 0 for local Lima or "not sampled yet"), so the CPU and memory
 // suggestions scale to that machine — see defaultCPUs / defaultMemory.
-func newInputs(hostCPUs int, hostMem int64) []textinput.Model {
+func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 	def := vm.DefaultCreateConfig()
 	seeds := []string{
 		"",                                  // fName      (required; no default — user must name it)
 		"",                                  // fHostname  (defaults to the instance name at submit)
-		hostUser(),                          // fUser      (host username, like Lima)
+		orDefault(user, hostUser()),         // fUser      (limactl host user; local fallback)
 		hostGit("user.name"),                // fGitName
 		hostGit("user.email"),               // fGitEmail
 		strconv.Itoa(defaultCPUs(hostCPUs)), // fCPUs      (half the host cores, floor 2)
@@ -214,7 +214,7 @@ func newInputs(hostCPUs int, hostMem int64) []textinput.Model {
 // openForm initialises the create form and focuses the first field, returning
 // the cursor-blink command.
 func (m *model) openForm() tea.Cmd {
-	m.inputs = newInputs(m.headerCPUs, m.headerMem)
+	m.inputs = newInputs(m.headerCPUs, m.headerMem, m.hostUser)
 	m.focusIdx = 0
 	m.formErr = nil
 	m.hostDiskFree = freeDiskBytes()
@@ -245,7 +245,7 @@ func (m *model) openForm() tea.Cmd {
 // starts on the first editable field (Hostname); the clone token is never stored,
 // so it is left blank to be re-supplied for a private repo.
 func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
-	m.inputs = newInputs(m.headerCPUs, m.headerMem)
+	m.inputs = newInputs(m.headerCPUs, m.headerMem, m.hostUser)
 	m.inputs[fName].SetValue(cfg.Name)
 	m.inputs[fHostname].SetValue(cfg.Hostname)
 	m.inputs[fUser].SetValue(cfg.User)

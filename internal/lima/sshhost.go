@@ -425,6 +425,21 @@ func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, e
 	return dst, nil
 }
 
+// HostUser returns the remote host's login user — `ssh host id -un` — which is
+// the user Lima creates the guest account for (Lima names the guest user after
+// whoever runs limactl) and therefore the account `limactl shell` logs into. It
+// falls back to the configured SSH user, then "" when neither can be determined.
+// A new VM's user must default to THIS, not the laptop's user, or the playbook
+// provisions a different account than the shell lands in — leaving the guest
+// login user without its ~/.tmux.conf, git identity, or secrets.
+func (h *SSHHost) HostUser() string {
+	out, _, err := h.runRemote(context.Background(), nil, "id", "-un")
+	if u := strings.TrimSpace(string(out)); err == nil && u != "" {
+		return u
+	}
+	return h.cfg.User
+}
+
 // HostResources samples the remote host's CPU count, total memory (bytes) and
 // free disk (bytes) in ONE ssh round trip, for the board header's denominators.
 // It is best-effort — any field the remote shell cannot produce comes back 0 —

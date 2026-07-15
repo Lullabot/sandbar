@@ -104,6 +104,10 @@ func (p *limaProvider) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }
 
+// HostUser returns this machine's user — for local Lima the limactl host IS this
+// machine, and Lima creates a guest account matching it (see Provider.HostUser).
+func (p *limaProvider) HostUser() string { return vm.HostUser() }
+
 // HostResources returns the zero value: local Lima runs on THIS machine, so the
 // board header keeps sampling the local host directly through its own platform
 // probes (internal/ui/hostres_*.go). Only a remote provider needs to override
