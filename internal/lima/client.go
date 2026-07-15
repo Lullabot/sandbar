@@ -312,17 +312,62 @@ func (c *Client) ShellOut(ctx context.Context, name string, argv ...string) ([]b
 // Determinism is worth more here than rsync's resumability — sand copies project
 // files between a laptop and a local VM, not archives over a wide-area link.
 func (c *Client) Copy(ctx context.Context, out io.Writer, recursive bool, src, dst string) error {
+	// When limactl runs on ANOTHER host (the SSH host-access implementation),
+	// `limactl copy`'s host endpoint is THAT host's filesystem, not ours, so a
+	// host<->guest transfer has to be staged across the hop (local <-> remote host
+	// <-> guest). A Runner whose limactl runs remotely takes over the whole copy —
+	// staging plus the far-side `limactl copy` — via remoteCopier; the local
+	// execRunner does not implement it and falls through to the direct single-stage
+	// copy below. Keeping the delegation HERE, rather than in each caller, is what
+	// lets aptcache.go, ui/transfer.go, and every other Copy caller inherit the
+	// two-stage topology in exactly one place — and the `--backend=scp` argv stays
+	// built once in copyLimactlArgv, shared by both transports.
+	if rc, ok := c.r.(remoteCopier); ok {
+		return rc.copyAcrossHop(ctx, out, recursive, src, dst)
+	}
+	return streamCopy(ctx, c.r, out, recursive, src, dst)
+}
+
+// remoteCopier is implemented by a Runner whose limactl runs on a different host,
+// so it must stage a host-local copy endpoint across the hop before invoking
+// `limactl copy` there. Client.Copy consults it (the local execRunner does not
+// implement it, so nothing changes for local Lima). The method is unexported so
+// only this package's SSH host-access implementation can satisfy it.
+type remoteCopier interface {
+	copyAcrossHop(ctx context.Context, out io.Writer, recursive bool, src, dst string) error
+}
+
+// copyLimactlArgv builds the `limactl copy` argv, with the load-bearing
+// --backend=scp pin (see Client.Copy's doc for why scp, not rsync/auto). It is
+// shared by the local single-stage copy and the SSH host-access two-stage copy so
+// the backend pin and the recursive flag are spelled ONCE and cannot drift between
+// the two transports.
+func copyLimactlArgv(recursive bool, src, dst string) []string {
 	args := []string{"copy", "-v", "--backend=scp"}
 	if recursive {
 		args = append(args, "-r")
 	}
-	args = append(args, src, dst)
-	if out == nil {
-		return c.runStream(ctx, out, args...)
+	return append(args, src, dst)
+}
+
+// streamCopy runs one `limactl copy` invocation through r, applying the
+// scpDebugFilter to out (-v also switches on ssh's debug1 chatter, which the
+// filter drops). It is the single place `limactl copy` is actually executed —
+// for both the local transport and the remote host end of the two-stage copy —
+// so the filter and error wrapping live in one spot too.
+func streamCopy(ctx context.Context, r Runner, out io.Writer, recursive bool, src, dst string) error {
+	args := copyLimactlArgv(recursive, src, dst)
+	wrap := func(err error) error {
+		if err != nil {
+			return fmt.Errorf("limactl %s: %w", strings.Join(args, " "), err)
+		}
+		return nil
 	}
-	// -v is here for progress, but it also switches on ssh's debug1 logging.
+	if out == nil {
+		return wrap(r.Stream(ctx, nil, nil, args...))
+	}
 	f := &scpDebugFilter{w: out}
-	err := c.runStream(ctx, f, args...)
+	err := wrap(r.Stream(ctx, nil, f, args...))
 	if ferr := f.Flush(); err == nil {
 		err = ferr
 	}

@@ -1,10 +1,11 @@
 package provider
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 )
 
@@ -88,21 +89,34 @@ func TestResolve_RemoteWithoutHostErrors(t *testing.T) {
 	}
 }
 
-// TestResolve_RemoteNotImplemented: with a host supplied, selecting the
-// remote provider must fail with ErrRemoteNotImplemented — the seam plan 15
-// task 5 fills in — rather than building anything or silently using local
-// Lima instead.
-func TestResolve_RemoteNotImplemented(t *testing.T) {
+// TestResolve_RemoteResolvesToWorkingProvider: with a host supplied, selecting
+// the remote provider now CONSTRUCTS the remote-Lima-over-SSH backend (plan 15
+// task 5) and pairs it with the remote registry.Scope its VMs are tagged with —
+// so a remote host's instances are owned by the right backend and never mix with
+// the local list. Constructing the provider does not connect (the SSH command
+// only runs when a method is invoked), so this needs no remote host.
+//
+// It restores provision's host-access seam afterwards because NewRemoteLima
+// points that process-global seam at the remote host (see provision.SetHostFiles):
+// the serial suite must not leak a remote seam into a later local test.
+func TestResolve_RemoteResolvesToWorkingProvider(t *testing.T) {
+	t.Cleanup(func() { provision.SetHostFiles(lima.LocalFiles()) })
 	clearSelectionEnv(t)
 	t.Setenv(SandProviderEnv, RemoteLimaProviderID)
 	t.Setenv(SandRemoteHostEnv, "example.com")
+	t.Setenv(SandRemoteUserEnv, "dev")
+	t.Setenv(SandRemotePortEnv, "2222")
 
-	p, _, err := Resolve()
-	if p != nil {
-		t.Fatalf("Resolve() should not return a Provider for the unimplemented remote path, got %v", p)
+	p, scope, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
 	}
-	if !errors.Is(err, ErrRemoteNotImplemented) {
-		t.Fatalf("Resolve() error = %v, want ErrRemoteNotImplemented", err)
+	if p == nil {
+		t.Fatal("Resolve() returned a nil Provider for the remote path")
+	}
+	want := registry.Scope{Provider: RemoteLimaProviderID, RemoteTarget: "dev@example.com:2222"}
+	if scope != want {
+		t.Fatalf("Resolve() scope = %+v, want %+v", scope, want)
 	}
 }
 
