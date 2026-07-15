@@ -49,9 +49,7 @@ package provision
 import (
 	"context"
 	"io"
-	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -72,12 +70,16 @@ const baseLockPoll = 250 * time.Millisecond
 // take. Refusing to create a VM because a lock file could not be written would turn a
 // concurrency guard into an outage.
 func lockBase(ctx context.Context, baseName string, out io.Writer) (release func(), err error) {
+	// The open+flock go through the host-access seam (hostFiles) so a remote-Lima
+	// provider serializes on the host that owns the base image, not on the laptop.
+	// The two failure notes stay distinct — directory vs file — because the tests
+	// (and a user diagnosing a wedged create) need to know which step gave way.
 	path := baseLockPath(baseName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := hostFiles.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		step(out, "Note: could not create the base-image lock directory (%v); continuing without it.", err)
 		return func() {}, nil
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	lf, err := hostFiles.OpenLock(path, 0o600)
 	if err != nil {
 		step(out, "Note: could not open the base-image lock (%v); continuing without it.", err)
 		return func() {}, nil
@@ -85,17 +87,17 @@ func lockBase(ctx context.Context, baseName string, out io.Writer) (release func
 
 	waited := false
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-				_ = f.Close()
-			}, nil
-		}
-		if err != syscall.EWOULDBLOCK {
-			_ = f.Close()
+		acquired, err := lf.TryLock()
+		if err != nil {
+			_ = lf.Close()
 			step(out, "Note: could not lock the base image (%v); continuing without it.", err)
 			return func() {}, nil
+		}
+		if acquired {
+			return func() {
+				_ = lf.Unlock()
+				_ = lf.Close()
+			}, nil
 		}
 
 		// Someone else is preparing the base. Say so ONCE — this is a wait of minutes,
@@ -107,7 +109,7 @@ func lockBase(ctx context.Context, baseName string, out io.Writer) (release func
 
 		select {
 		case <-ctx.Done():
-			_ = f.Close()
+			_ = lf.Close()
 			return nil, ctx.Err()
 		case <-time.After(baseLockPoll):
 		}
