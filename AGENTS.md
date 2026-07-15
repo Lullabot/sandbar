@@ -76,19 +76,51 @@ Conventions:
   box has KVM); they are **not** run by CI's `go test`.
 - Isolate on-disk state: tests set `XDG_DATA_HOME` to a temp dir so the managed
   index and secrets store never touch the developer's real files.
+- **No `t.Parallel()` — the suite is deliberately serial.** Tests pin
+  package-level function-var seams (`hostMemBytesFn`, `playbookVersionFn`,
+  `buildVersion`) and use `t.Setenv` heavily; running them in parallel would race
+  on that shared mutable state. Do not add `t.Parallel()` to a test that touches
+  those seams, and think twice before introducing parallelism at all.
+- **The concurrency tests are timing-based** (`buildDelay`, `time.Sleep` in
+  `internal/provision/provision_test.go`'s base-image race tests). They work
+  under `-race`, but if you touch the provisioning concurrency model, prefer
+  converting them to channel/barrier-based determinism rather than tuning sleeps
+  — a timing test that stops catching the race fails silently.
+- **Coverage floor.** New code should keep the `unit` job's coverage gate green
+  (`./internal/...` ≥ `COVERAGE_FLOOR`); when you add meaningful coverage, bump
+  the floor in the same PR so it ratchets up. When a failure arm can't be reached
+  without a production-code seam, flag it as a follow-up rather than contorting a
+  test around it.
 
 ## CI (`.github/workflows/test.yml`)
 
-Three jobs:
+Five jobs:
 
 - `lint` — Ansible syntax check.
-- `unit` — `go vet ./...` and `go test ./...` (fast, no VM).
+- `unit` — `go vet ./...` and `go test ./... -race -covermode=atomic` (fast, no
+  VM). It also enforces a **self-contained coverage gate**: coverage is measured
+  over `./internal/...` only (the `cmd/sand` main glue is excluded so it doesn't
+  distort the number) and the job fails if the total drops below the
+  `COVERAGE_FLOOR` env value committed in the workflow. The floor is a **manual
+  ratchet** — bump it by hand in a PR as coverage rises; never auto-committed
+  from CI, and no third-party coverage service. The run uploads `coverage.out` +
+  `coverage.html` as an artifact.
 - `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
-  QEMU+KVM on the hosted runner. (~6 min; it does not run the Go test suite —
-  that's the `unit` job.)
+  QEMU+KVM on the hosted runner. Also runs the `cmd/sand` `limae2e` tests
+  (headless create + `--recreate` gate) first, on max free disk. (It does not
+  run the fast Go suite — that's the `unit` job.)
+- `mutation` — **advisory** gremlins mutation testing over the core packages
+  (`provision`, `registry`, `vm`, `lima`; `ui` is out of the initial scope).
+  Non-blocking (`continue-on-error`).
+- `molecule` — converge/verify for the `base` and `samba` roles in a
+  systemd-capable Debian container. **Advisory** (`continue-on-error`) because
+  `roles/samba`'s `smbpasswd` task is unconditionally `changed_when: true`, so
+  its idempotence stage fails until the role itself is revisited (follow-up).
 
 **Triggers:** `push` only on `main`, plus `pull_request` and
-`workflow_dispatch`. A plain feature-branch push therefore runs **no** CI.
+`workflow_dispatch`. The heavy `mutation` and `molecule` jobs additionally run
+on a weekly `schedule` and are gated to `schedule`/`workflow_dispatch` only, so
+they never block a PR. A plain feature-branch push runs **no** CI.
 
 To validate a branch before a PR exists, dispatch it:
 

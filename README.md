@@ -516,6 +516,40 @@ finishes — no webhook configuration required.
 - **claude-code** — Claude Code CLI installation and configuration (only runs when `toolset_claude` is true, i.e. not `--with-claude=false`)
 - **project** — Optional initial repo clone + per-org `.env`/direnv setup (only runs when `project_clone_url` is set)
 
+## Testing
+
+```sh
+go test ./...                       # fast unit + integration suite (no VM needed)
+go test ./... -race                 # the same, with the race detector (what CI runs)
+go test -tags limae2e ./...         # real-VM e2e — needs a host with Lima + KVM
+```
+
+**Coverage.** CI's `unit` job measures coverage over `./internal/...` (the
+`cmd/sand` entrypoint glue is excluded) and fails if it drops below a floor
+committed in `.github/workflows/test.yml` (`COVERAGE_FLOOR`). It's a manual
+ratchet — no third-party service; the run uploads an HTML report as a build
+artifact. To reproduce the gate locally:
+
+```sh
+go test ./... -race -covermode=atomic -coverpkg=./internal/... -coverprofile=coverage.out
+go tool cover -func=coverage.out | tail -1     # the gated total
+go tool cover -html=coverage.out               # browse it
+```
+
+**Mutation testing** (advisory, core packages) runs weekly in CI and on demand.
+Locally:
+
+```sh
+go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.5.0
+gremlins unleash --config .gremlins.yaml ./internal/provision/...
+```
+
+**Ansible role tests.** `molecule/` holds converge/verify scenarios for the
+`base` and `samba` roles, run in a systemd-capable Debian container (weekly / on
+demand in CI). The other roles are a documented follow-up. Locally, with
+`molecule` + Docker installed: `molecule test -s base` (samba's idempotence
+stage has a known failure — see AGENTS.md).
+
 ## Releases and the Homebrew tap
 
 `sand` ships as a prebuilt binary via Homebrew (`brew install
