@@ -32,6 +32,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -154,7 +155,7 @@ func TestE2ESecretsSaveOnRunningVMReachesGuestWithoutRestart(t *testing.T) {
 	// save path's guest-apply gate reads (m.lookupVM); nothing else about the
 	// dispatch is faked.
 	prov := &provision.Provisioner{Lima: cli}
-	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}

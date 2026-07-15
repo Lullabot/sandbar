@@ -63,6 +63,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -480,7 +481,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	cfgB := baseCfg
 	cfgB.Name, cfgB.GitName, cfgB.GitEmail = nameB, "Sand E2E B", "sand-e2e-b@example.com"
 
-	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
@@ -590,7 +591,7 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	// healthy, running guest" shape this test exists to catch.
 	cfg.CloneURL = "https://sand-e2e-does-not-exist.invalid/org/repo.git"
 
-	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}

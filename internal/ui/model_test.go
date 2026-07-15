@@ -11,6 +11,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/spinner"
@@ -63,7 +64,7 @@ func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 	t.Helper()
 	isolateHostState(t)
 	prov := &provision.Provisioner{Lima: cli}
-	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}

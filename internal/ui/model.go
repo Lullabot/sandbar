@@ -103,6 +103,13 @@ type model struct {
 	keys keyMap
 	help help.Model
 
+	// scope is the registry.Scope that p owns (registry.LocalScope for the
+	// default local Lima provider) — see provider.Resolve. It confines every
+	// manage.Reconcile/RecordSuccess/RecreateBase call this model makes to p's
+	// own managed-VM entries, so a remote provider's VMs (plan 15 task 5) are
+	// never pruned by, or mistaken for, a listing from this one, and vice versa.
+	scope registry.Scope
+
 	view   view
 	width  int
 	height int
@@ -287,8 +294,11 @@ type model struct {
 
 // New wires the dependencies into a ready-to-run tea.Model. p is the backend
 // (see provider.NewDefault for the constructor all three sand entrypoints
-// share).
-func New(p provider.Provider) tea.Model {
+// share) and scope is the registry.Scope it owns (see provider.Resolve,
+// which every entrypoint resolves p and scope from together) — the model's
+// own managed-index bookkeeping (manage.Reconcile/RecordSuccess/RecreateBase)
+// stays confined to it.
+func New(p provider.Provider, scope registry.Scope) tea.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
@@ -311,6 +321,7 @@ func New(p provider.Provider) tea.Model {
 	m := model{
 		p:          p,
 		reg:        reg,
+		scope:      scope,
 		sec:        sec,
 		jobs:       newJobRegistry(),
 		heartbeats: newHeartbeats(p),
@@ -712,7 +723,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range protected {
 			live = append(live, vm.VM{Name: name})
 		}
-		dropped, err := manage.Reconcile(m.reg, live)
+		dropped, err := manage.Reconcile(m.reg, live, m.scope)
 		if err != nil {
 			m.logMsg("warning: could not update managed index: " + err.Error())
 		}
@@ -822,7 +833,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg, isProvision := m.jobs.config(msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
-			if err := manage.RecordSuccess(m.reg, cfg); err != nil {
+			if err := manage.RecordSuccess(m.reg, cfg, m.scope); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// The create form's token becomes the VM's GH_TOKEN secret, so it can

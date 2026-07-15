@@ -439,10 +439,10 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 2 (completed): Define `provider.Provider` and the local Lima provider over the seam (depends on: 1).
 
-### Phase 3: Migration
+### ✅ Phase 3: Migration
 **Parallel Tasks:**
 - ✔️ Task 3 (completed): Migrate all consumers from `*lima.Client` to `provider.Provider` and centralise construction (depends on: 2).
-- Task 4: Provider-aware registry with versioned migration + provider selection config (depends on: 2).
+- ✔️ Task 4 (completed): Provider-aware registry with versioned migration + provider selection config (depends on: 2).
 
 ### Phase 4: Remote provider
 **Parallel Tasks:**
