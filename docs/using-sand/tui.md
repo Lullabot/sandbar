@@ -99,17 +99,3 @@ temp directory and restores it into the freshly cloned VM, then deletes the
 temporary copy. The form warns that this moves your Claude Code login and
 project token off the VM: **do not preserve if you suspect the VM is
 compromised** — see [Security Model](../reference/security-model.md).
-
-## Keybinding sources
-
-The tables above are transcribed directly from the code, not copied from
-older docs (which disagree with each other and with the code on more than
-one binding):
-
-- Board-level bindings: `internal/ui/keys.go:39-70` (`newKeyMap`) and
-  `internal/ui/board.go:51-60` (`boardMove`, `ghostEnter`).
-- Per-tile verbs, their gating, and their "what it does" sentences: the
-  `vmCommands` registry in `internal/ui/commandreg.go:89-267`. In
-  particular, the download binding is `internal/ui/commandreg.go:230-243`
-  (key `g`), and delete is `internal/ui/commandreg.go:191-210` (key `d`) —
-  confirming that download is `g`, not `u`/`d` as older docs claimed.
