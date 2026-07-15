@@ -10,10 +10,6 @@
 - Lima itself. You don't need to install it separately — Homebrew pulls it
   in as a dependency of the `sand` formula, below.
 
-There is nothing else to install: no Ansible, no Go toolchain, and no clone
-of this repository. `sand` embeds its provisioning logic in the binary and
-runs it inside the guest VM.
-
 ## Install `sand`
 
 `sand` ships as a prebuilt Homebrew **formula** (not a cask — deliberately,
