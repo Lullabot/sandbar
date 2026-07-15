@@ -47,6 +47,39 @@
     groups: docker
     append: true
 
+# GitLab CLI (glab)
+- name: Resolve glab .deb architecture
+  ansible.builtin.set_fact:
+    devtools_glab_deb_arch: "{{ devtools_glab_deb_arch_map[ansible_architecture] | default('') }}"
+
+- name: Fail on unsupported architecture for glab
+  ansible.builtin.fail:
+    msg: "Unsupported architecture '{{ ansible_architecture }}' for the glab .deb package"
+  when: devtools_glab_deb_arch == ''
+
+- name: Download GitLab CLI (glab) .deb package
+  ansible.builtin.get_url:
+    url: "https://gitlab.com/gitlab-org/cli/-/releases/v{{ devtools_glab_version }}/downloads/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
+    dest: "/tmp/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
+    mode: "0644"
+
+- name: Install GitLab CLI (glab)
+  ansible.builtin.apt:
+    deb: "/tmp/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
+    state: present
+
+# Drupal.org CLI (drupalorg). Its PHP runtime (php-cli, php-curl) is named in
+# devtools_packages and installed by the single consolidated base-phase apt
+# transaction in roles/base/tasks/main.yml; this role only drops the PHAR on
+# PATH — a non-apt install, like uv above.
+- name: Install Drupal.org CLI (drupalorg)
+  ansible.builtin.get_url:
+    url: "https://github.com/mglaman/drupalorg-cli/releases/download/{{ devtools_drupalorg_cli_version }}/drupalorg.phar"
+    dest: /usr/local/bin/drupalorg
+    owner: root
+    group: root
+    mode: "0755"
+
 # uv
 - name: Install uv
   ansible.builtin.shell:

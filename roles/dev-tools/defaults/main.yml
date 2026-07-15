@@ -12,6 +12,11 @@ devtools_docker_packages:
 devtools_packages:
   - cloudflared
   - gh
+  # PHP runtime for the Drupal.org CLI (drupalorg) PHAR. php-curl is named
+  # explicitly because the drupalorg PHAR needs cURL and the consolidated
+  # transaction installs with recommends off (see roles/base/tasks/main.yml).
+  - php-cli
+  - php-curl
 
 # ddev is part of the configurable base tool-set (sand create --with-ddev);
 # folded into the single apt transaction in roles/base/tasks/main.yml only
@@ -23,3 +28,12 @@ devtools_docker_registry_proxy_enabled: false
 devtools_docker_registry_proxy_host: "docker-registry-proxy.example"
 devtools_docker_registry_proxy_port: 3128
 devtools_user_name: "{{ user_name }}"
+
+# GitLab CLI (glab) — pinned official .deb release asset
+devtools_glab_version: "1.108.0"
+devtools_glab_deb_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+
+# Drupal.org CLI (drupalorg) — pinned PHAR release
+devtools_drupalorg_cli_version: "0.10.3"
