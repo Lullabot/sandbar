@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/reference/security-model/">
+        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/remote-hosts/">
       
       
-        <link rel="prev" href="../../getting-started/available-tools/">
+        <link rel="prev" href="../files-and-shells/">
       
       
-        <link rel="next" href="../../using-sand/tui/">
+        <link rel="next" href="../../reference/files-and-state/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Security Model - sandbar</title>
+        <title>Remote Lima Hosts - sandbar</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#security-model" class="md-skip">
+        <a href="#remote-lima-hosts-over-ssh" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Security Model
+              Remote Lima Hosts
             
           </span>
         </div>
@@ -246,12 +246,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../../getting-started/" class="md-tabs__link">
           
   
@@ -268,11 +266,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../using-sand/tui/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../tui/" class="md-tabs__link">
           
   
   
@@ -292,7 +292,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../files-and-state/" class="md-tabs__link">
+        <a href="../../reference/files-and-state/" class="md-tabs__link">
           
   
   
@@ -400,29 +400,24 @@
       
   
   
-    
   
   
-  
     
     
     
     
       
-        
-        
-      
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   
@@ -440,7 +435,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -595,37 +590,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Security Model
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../reference/security-model/" class="md-nav__link">
         
   
   
@@ -641,48 +609,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#whats-true-about-a-sand-vm" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's true about a sand VM
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        A least-privilege token: reasonable agent access
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -699,24 +625,29 @@
       
   
   
+    
   
   
+  
     
     
     
     
-      
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -734,7 +665,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -752,7 +683,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../using-sand/tui/" class="md-nav__link">
+      <a href="../tui/" class="md-nav__link">
         
   
   
@@ -780,7 +711,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../using-sand/cli-reference/" class="md-nav__link">
+      <a href="../cli-reference/" class="md-nav__link">
         
   
   
@@ -808,7 +739,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../using-sand/secrets/" class="md-nav__link">
+      <a href="../secrets/" class="md-nav__link">
         
   
   
@@ -836,7 +767,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../using-sand/files-and-shells/" class="md-nav__link">
+      <a href="../files-and-shells/" class="md-nav__link">
         
   
   
@@ -861,10 +792,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../using-sand/remote-hosts/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote Lima Hosts
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -880,6 +838,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#selecting-a-remote-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a remote host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirements-on-the-remote-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Requirements on the remote host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future providers
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -949,7 +971,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../files-and-state/" class="md-nav__link">
+      <a href="../../reference/files-and-state/" class="md-nav__link">
         
   
   
@@ -977,7 +999,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../troubleshooting/" class="md-nav__link">
+      <a href="../../reference/troubleshooting/" class="md-nav__link">
         
   
   
@@ -1173,10 +1195,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-true-about-a-sand-vm" class="md-nav__link">
+  <a href="#selecting-a-remote-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's true about a sand VM
+        Selecting a remote host
       
     </span>
   </a>
@@ -1184,10 +1206,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
+  <a href="#requirements-on-the-remote-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        A least-privilege token: reasonable agent access
+        Requirements on the remote host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future providers
       
     </span>
   </a>
@@ -1214,128 +1258,60 @@
   
 
 
-<h1 id="security-model">Security Model</h1>
-<p>What isolation a <code>sand</code> VM provides, and what it doesn't.</p>
-<p>A <code>sand</code> VM is a <strong>disposable, single-purpose development environment</strong>. It
-is convenient to throw away and rebuild, not hardened against a hostile
-tenant or a determined attacker.</p>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p>Do not use <code>sand</code> to provision a machine that holds sensitive data, or
-one exposed to the public internet. It is designed for an isolated LAN
-or virtual network where the VM is treated as disposable — assume
-anything Claude Code does inside it could be adversarial, and plan to
-delete and rebuild the VM rather than trust it after the fact.</p>
-</div>
-<h2 id="whats-true-about-a-sand-vm">What's true about a <code>sand</code> VM</h2>
+<h1 id="remote-lima-hosts-over-ssh">Remote Lima hosts over SSH</h1>
+<p>By default <code>sand</code> manages VMs with a local <a href="https://lima-vm.io">Lima</a> — it runs
+<code>limactl</code> on the machine you launched <code>sand</code> from. It can instead drive <code>limactl</code>
+on a <strong>remote</strong> host over SSH, so the VMs live on a bigger box (a workstation, a
+home server) while you work from a laptop. The local workflow is unchanged; the
+remote target is opt-in.</p>
+<h2 id="selecting-a-remote-host">Selecting a remote host</h2>
+<p>Set the selection environment variables before running <code>sand</code> (headless or the
+TUI). Only <code>SAND_PROVIDER</code> and <code>SAND_REMOTE_HOST</code> are required; the rest have
+sensible defaults:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_PROVIDER</span><span class="o">=</span><span class="s2">&quot;lima-remote&quot;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_HOST</span><span class="o">=</span><span class="s2">&quot;192.168.1.100&quot;</span><span class="w">          </span><span class="c1"># hostname or IP</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_USER</span><span class="o">=</span><span class="s2">&quot;debian&quot;</span><span class="w">                 </span><span class="c1"># optional; the SSH login user</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_PORT</span><span class="o">=</span><span class="s2">&quot;22&quot;</span><span class="w">                      </span><span class="c1"># optional; defaults to 22</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_IDENTITY</span><span class="o">=</span><span class="s2">&quot;/path/to/ssh/key&quot;</span><span class="w">    </span><span class="c1"># optional; else SSH agent/config</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_LIMA_HOME</span><span class="o">=</span><span class="s2">&quot;/home/debian/.lima&quot;</span><span class="w"> </span><span class="c1"># optional; the remote LIMA_HOME</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>sand<span class="w"> </span>create<span class="w">      </span><span class="c1"># or &#39;sand&#39; for the TUI</span>
+</code></pre></div>
+<p>To return to local Lima, unset them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">unset</span><span class="w"> </span>SAND_PROVIDER<span class="w"> </span>SAND_REMOTE_HOST<span class="w"> </span>SAND_REMOTE_USER<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">      </span>SAND_REMOTE_PORT<span class="w"> </span>SAND_REMOTE_IDENTITY<span class="w"> </span>SAND_REMOTE_LIMA_HOME
+</code></pre></div>
+<h2 id="requirements-on-the-remote-host">Requirements on the remote host</h2>
 <ul>
-<li><strong>Passwordless sudo</strong> is enabled for the configured user (default:
-  <code>claude</code>). It is not intended to host multiple users or untrusted
-  workloads alongside the intended one.</li>
-<li><strong>The only guest mount is the playbook, and it is read-only.</strong> There is no
-  writable host mount — not even Lima's stock host-home share — so the VM
-  cannot modify anything on your machine, and <code>limactl delete &lt;name&gt;</code>
-  provably removes everything the VM produced. Move files in or out
-  deliberately with the TUI's Upload/Download actions instead.</li>
-<li><strong>Samba is forced off</strong> for Lima-provisioned VMs: there is no host-home
-  mount to share, so there is nothing for it to serve.</li>
-<li><strong><code>sand</code> does not provision a Claude Code credential.</strong> You log in inside
-  the VM yourself; no host-side Claude Code token is copied in. See
-  <a href="../../getting-started/first-vm/#logging-into-claude-code">Logging into Claude Code</a>.</li>
-<li><strong>Claude Code runs with permission prompts skipped.</strong> The provisioned
-  settings set <code>skipDangerousModePermissionPrompt: true</code> and alias <code>claude</code>
-  to <code>claude --dangerously-skip-permissions</code>, so Claude Code operates
-  without interactive approval prompts. This is deliberate, not an
-  oversight: it's appropriate specifically because the VM is ephemeral and
-  isolated, and can be torn down and reprovisioned at any time.</li>
-<li><strong>Remote control is on by default</strong> (<code>remoteControlAtStartup: true</code> in the
-  provisioned settings), so you can drive and monitor a session from the
-  Claude app once you've logged in inside the VM.</li>
-<li><strong>Credentials never touch argv.</strong> A <code>--clone-token</code> and every secret value
-  are streamed into the guest over stdin into tmpfs and removed via an exit
-  trap — never passed as a command-line argument — so they cannot appear in
-  a host or guest process listing.</li>
-<li><strong>Host-side secrets are stored unencrypted at <code>0600</code>.</strong> See
-  <a href="../files-and-state/">Files and State</a> for the path and what deleting it
-  costs. Treat that file as sensitive: anyone who can read your user
-  account's files can read every VM's secrets.</li>
-<li><strong>The TUI's reset "preserve" options are a deliberate, opt-in exception</strong>
-  to "nothing leaves the VM": when enabled, the selected data (your Claude
-  Code login, and/or a cloned project's checkout with its <code>.env</code>) is copied
-  to a private host temp dir, restored into the reset VM, then deleted. They
-  default off. Do not enable them if you suspect the VM you're resetting is
-  compromised.</li>
+<li><strong>Lima</strong> (<code>limactl</code> on <code>PATH</code>) — the remote host runs the exact same <code>limactl</code>
+  the local provider does; <code>sand</code> only changes <em>where</em> it runs.</li>
+<li><strong>A working hypervisor</strong> (QEMU/KVM, etc.), just like any Linux host running
+  Lima — see the <a href="https://lima-vm.io/docs/installation/">Lima installation docs</a>.</li>
+<li><strong>Passwordless SSH</strong> to the target (key-based auth). <code>sand</code> runs <code>limactl</code>
+  non-interactively over SSH, so the connection must not prompt.</li>
 </ul>
-<p>Together these mean: assume a <code>sand</code> VM can be fully compromised by whatever
-you run inside it, and rely on deletion — not defense — to recover. Nothing
-you do inside the VM is expected to reach your host filesystem except
-through the two deliberate exceptions above.</p>
-<h2 id="a-least-privilege-token-reasonable-agent-access">A least-privilege token: reasonable agent access</h2>
-<p><code>sand</code> can hand Claude Code a GitHub token at create time so it can clone,
-pull, push, and open pull requests from inside the VM (see
-<a href="../../using-sand/secrets/#github-tokens">GitHub tokens</a>). An autonomous agent
-uses whatever that token grants, so the token is itself a security boundary —
-and scoping it well is a concrete, real-world exercise in giving an agent
-<em>reasonable</em> access: enough to do the work, not enough to do damage that no
-human reviewed.</p>
-<p>GitHub's fine-grained personal access tokens fit this well: they're scoped to
-specific repositories, grant only the permissions you choose, and can't be
-created without an expiry. Create one at <strong>Settings → Developer settings →
-Personal access tokens → Fine-grained tokens</strong> with:</p>
-<table>
-<thead>
-<tr>
-<th>Permission</th>
-<th>Access</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Contents</td>
-<td>Read and write</td>
-<td>Push and pull code</td>
-</tr>
-<tr>
-<td>Pull requests</td>
-<td>Read</td>
-<td>Read PRs without letting an agent self-merge to <code>main</code></td>
-</tr>
-<tr>
-<td>Issues</td>
-<td>Read</td>
-<td>Read issues without write access</td>
-</tr>
-<tr>
-<td>Actions</td>
-<td>Read and write</td>
-<td>Inspect and trigger CI</td>
-</tr>
-<tr>
-<td>Workflows</td>
-<td>Read and write</td>
-<td>Update workflow files</td>
-</tr>
-<tr>
-<td>Metadata</td>
-<td>Read-only</td>
-<td>Always required (included automatically)</td>
-</tr>
-</tbody>
-</table>
-<p>Pull requests and Issues are deliberately read-only so an autonomous agent
-can't merge its own PRs or close issues without a human in the loop — widen
-them only if your workflow needs an agent to manage them directly.</p>
-<div class="admonition warning">
-<p class="admonition-title">Branch protection is required to keep agents off <code>main</code></p>
-<p>A <code>Contents: Read and write</code> token can <code>git push</code> to <strong>any</strong> branch,
-including <code>main</code>. The read-only <code>Pull requests</code> permission stops an agent
-from <em>merging</em> its own PR, but it does nothing to stop a direct push that
-bypasses review entirely. The token cannot enforce this — the repository
-must. Add a <strong>branch protection rule</strong> (or ruleset) on <code>main</code> and every
-other protected branch that <strong>requires a pull request before merging</strong>.
-Without it, nothing prevents an agent from pushing straight to <code>main</code>.</p>
-</div>
+<h2 id="how-it-behaves">How it behaves</h2>
+<p>With a remote target configured, <code>sand create</code>, the TUI, <code>sand shell</code>, and file
+copy behave the same as locally — the base image is built on the remote host
+once, each VM is a <code>limactl clone</code> of it, and finalize runs there too:</p>
+<ul>
+<li><strong>Interactive shells</strong> (<code>sand shell NAME</code> and <code>S</code> on a tile) wrap the guest
+  tmux attach with <code>ssh -t</code> automatically; detaching still leaves the session
+  running, exactly as with a local VM (see <a href="../files-and-shells/">Shells and Files</a>).</li>
+<li><strong>File transfer</strong> to and from a guest is staged through the remote host
+  transparently — the remote <code>limactl copy</code> cannot see your local filesystem, so
+  <code>sand</code> copies via the remote host and preserves where files land in the guest.</li>
+<li><strong>Isolation</strong>: VMs created on a remote host are tagged with that target in the
+  <a href="../../reference/files-and-state/">managed-VM index</a>, so they never mix with
+  your local VMs — a local <code>limactl list</code> and the remote list never show each
+  other's instances.</li>
+</ul>
+<p>The managed-VM index records only the target's <code>user@host:port</code>, never a private
+key or password.</p>
+<h2 id="future-providers">Future providers</h2>
+<p>The remote-Lima backend is one implementation of <code>sand</code>'s internal <code>Provider</code>
+seam. That seam is what will let non-Lima backends (Proxmox, DigitalOcean,
+Linode) be added later; none is available yet.</p>
 
 
 
