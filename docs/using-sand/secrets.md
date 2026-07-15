@@ -87,12 +87,10 @@ lands by default.
 ### Creating a fine-grained token
 
 Use a GitHub **fine-grained personal access token**, scoped to the
-repositories the VM should touch and set to expire. Choosing its permissions
-is a worked example of giving an agent *reasonable* access — enough to do the
-work, not enough to push to `main` unreviewed — so the recommended
-permission set, why Pull requests and Issues stay read-only, and why branch
-protection is required all live with the
-[least-privilege token example in the Security Model](../reference/security-model.md#a-least-privilege-token-reasonable-agent-access).
+repositories the VM should touch and set to expire. It's important to give
+the agent a token with minimal access, so if it goes off track it's limited
+in the damage it can do. See further details in the
+[Security Model](../reference/security-model.md#a-least-privilege-token-reasonable-agent-access).
 
 ### Supplying it and where it lands
 
