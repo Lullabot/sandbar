@@ -5,19 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
-	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// newRemote builds the remote provider and restores provision's process-global
-// host-access seam afterwards (NewRemoteLima points it at the remote host — see
-// provision.SetHostFiles), so the serial suite never leaks a remote seam into a
-// later local test.
+// newRemote builds the remote provider. NewRemoteLima's host-access handle
+// lives on the Provisioner it constructs (Provisioner.HostFiles), not a
+// process-global, so there is nothing here for the serial suite to leak
+// between tests and nothing to restore afterwards.
 func newRemote(t *testing.T) provider.Provider {
 	t.Helper()
-	t.Cleanup(func() { provision.SetHostFiles(lima.LocalFiles()) })
 	p, err := provider.NewRemoteLima(provider.TargetConfig{
 		Provider: provider.RemoteLimaProviderID,
 		Host:     "example.com",

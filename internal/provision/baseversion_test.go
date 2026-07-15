@@ -9,6 +9,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -285,7 +286,7 @@ func TestContentPlaybookVersion_DifferentToolsetDifferentStamp(t *testing.T) {
 func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
-	readBaseVersionFn = func(string) string { return "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" } // v1-style 40-hex git SHA
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" } // v1-style 40-hex git SHA
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -299,7 +300,7 @@ func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
-	readBaseVersionFn = func(string) string { return "" }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "" }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -313,7 +314,7 @@ func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 func TestBaseStale_MatchingV2StampNotStale(t *testing.T) {
 	origVer, origRead := playbookVersionFn, readBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v2:deadbeef:ddev+go+java", nil }
-	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go+java" }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:deadbeef:ddev+go+java" }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -333,7 +334,7 @@ func TestBaseStale_PassesConfigToolsetKey(t *testing.T) {
 		gotToolset = toolset
 		return "v2:deadbeef:" + toolset, nil
 	}
-	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go+java" }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:deadbeef:ddev+go+java" }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -356,7 +357,7 @@ func TestBaseStale_NewlySelectedToolIsStale(t *testing.T) {
 	playbookVersionFn = func(_ string, toolset string) (string, error) {
 		return "v2:deadbeef:" + toolset, nil
 	}
-	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev" } // no go, no java
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:deadbeef:ddev" } // no go, no java
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -383,7 +384,7 @@ func TestBaseStale_ReselectingAfterDeselectDoesNotPingPong(t *testing.T) {
 	playbookVersionFn = func(_ string, toolset string) (string, error) {
 		return "v2:deadbeef:" + toolset, nil
 	}
-	readBaseVersionFn = func(string) string { return stamp }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return stamp }
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
@@ -494,16 +495,16 @@ func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
 	before := time.Now()
-	if err := writeBaseVersion("sandbar-base", "v2:deadbeef:ddev+go+java", time.Now()); err != nil {
+	if err := writeBaseVersion(lima.LocalFiles(), "sandbar-base", "v2:deadbeef:ddev+go+java", time.Now()); err != nil {
 		t.Fatalf("writeBaseVersion: %v", err)
 	}
 	after := time.Now()
 
-	if got := readBaseVersion("sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
+	if got := readBaseVersion(lima.LocalFiles(), "sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
 		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
 	}
 
-	builtAt, ok := readBaseBuiltAt("sandbar-base")
+	builtAt, ok := readBaseBuiltAt(lima.LocalFiles(), "sandbar-base")
 	if !ok {
 		t.Fatal("readBaseBuiltAt: ok = false, want true for a stamp writeBaseVersion just wrote")
 	}
@@ -518,7 +519,7 @@ func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
 func TestReadBaseBuiltAt_MissingStampIsNotOk(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
-	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
+	if _, ok := readBaseBuiltAt(lima.LocalFiles(), "sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on a missing stamp returned ok=true, want false")
 	}
 }
@@ -532,10 +533,10 @@ func TestReadBaseBuiltAt_PreTimestampStampIsNotOk(t *testing.T) {
 	t.Setenv("LIMA_HOME", home)
 	writeRawStamp(t, home, "sandbar-base", "v2:deadbeef:ddev+go+java\n")
 
-	if got := readBaseVersion("sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
+	if got := readBaseVersion(lima.LocalFiles(), "sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
 		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
 	}
-	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
+	if _, ok := readBaseBuiltAt(lima.LocalFiles(), "sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on a pre-timestamp (version-only) stamp returned ok=true, want false")
 	}
 }
@@ -548,7 +549,7 @@ func TestReadBaseBuiltAt_UnparseableTimestampIsNotOk(t *testing.T) {
 	t.Setenv("LIMA_HOME", home)
 	writeRawStamp(t, home, "sandbar-base", "v2:deadbeef:ddev+go+java\nnot-a-timestamp\n")
 
-	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
+	if _, ok := readBaseBuiltAt(lima.LocalFiles(), "sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on an unparseable timestamp returned ok=true, want false")
 	}
 }
@@ -612,8 +613,8 @@ func TestBaseToolset_ReadsBackWhatTheBaseWasBuiltWith(t *testing.T) {
 	orig := readBaseVersionFn
 	defer func() { readBaseVersionFn = orig }()
 
-	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go" }
-	set, ok := BaseToolset("sandbar-base")
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:deadbeef:ddev+go" }
+	set, ok := BaseToolset(lima.LocalFiles(), "sandbar-base")
 	if !ok {
 		t.Fatal("a v2 stamp carries a tool-set; BaseToolset must report ok")
 	}
@@ -630,8 +631,8 @@ func TestBaseToolset_NoneIsAnAnswerNotAnAbsence(t *testing.T) {
 	orig := readBaseVersionFn
 	defer func() { readBaseVersionFn = orig }()
 
-	readBaseVersionFn = func(string) string { return "v2:deadbeef:none" }
-	set, ok := BaseToolset("sandbar-base")
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:deadbeef:none" }
+	set, ok := BaseToolset(lima.LocalFiles(), "sandbar-base")
 	if !ok {
 		t.Fatal(`a base stamped "none" was built with no tools; that must be reported as ok, or the caller falls back to all-on and re-installs them`)
 	}
@@ -647,8 +648,8 @@ func TestBaseToolset_NoToolsetInformation(t *testing.T) {
 	defer func() { readBaseVersionFn = orig }()
 
 	for _, stamp := range []string{"", "somegitsha", "v2:deadbeef"} {
-		readBaseVersionFn = func(string) string { return stamp }
-		if set, ok := BaseToolset("sandbar-base"); ok {
+		readBaseVersionFn = func(lima.HostFiles, string) string { return stamp }
+		if set, ok := BaseToolset(lima.LocalFiles(), "sandbar-base"); ok {
 			t.Errorf("BaseToolset(%q) = %v, ok=true; want ok=false (no tool-set information to adopt)", stamp, set)
 		}
 	}
@@ -670,11 +671,11 @@ func TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath(t *testing.T) {
 	const version = "v2:cafef00d:ddev+go"
 	builtAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 
-	if err := writeBaseVersion(baseName, version, builtAt); err != nil {
+	if err := writeBaseVersion(lima.LocalFiles(), baseName, version, builtAt); err != nil {
 		t.Fatalf("writeBaseVersion: %v", err)
 	}
 
-	wantPath := baseVersionPath(baseName)
+	wantPath := baseVersionPath(lima.LocalFiles(), baseName)
 	if !strings.HasPrefix(wantPath, limaHomeDir) {
 		t.Fatalf("baseVersionPath(%q) = %q, want it rooted under LIMA_HOME %q", baseName, wantPath, limaHomeDir)
 	}
@@ -682,7 +683,7 @@ func TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath(t *testing.T) {
 		t.Fatalf("writeBaseVersion did not write to the path baseVersionPath derives (%s): %v", wantPath, err)
 	}
 
-	if got := readBaseVersion(baseName); got != version {
+	if got := readBaseVersion(lima.LocalFiles(), baseName); got != version {
 		t.Errorf("readBaseVersion = %q, want %q", got, version)
 	}
 }

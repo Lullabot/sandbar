@@ -124,6 +124,22 @@ Flags:
 	}
 	cfg.CPUs = n
 
+	// Resolve the backend before anything that reads or defaults host-derived
+	// state: the existing base's tool-set stamp lives on whichever host limactl
+	// actually runs (provision.BaseToolset needs the resolved provider's
+	// host-access handle below), and Lima names the guest account after whoever
+	// runs limactl — for a remote provider that is the REMOTE host's user, not
+	// this machine's, so cfg.User must not be defaulted before this either.
+	// Preflight runs here too, so a missing/old limactl fails before any config
+	// work.
+	p, scope, err := provider.Resolve()
+	if err != nil {
+		return err
+	}
+	if err := p.Preflight(); err != nil {
+		return err
+	}
+
 	// A tool-set flag the user did NOT pass adopts what the existing base was
 	// actually built with, instead of DefaultCreateConfig's all-on default. The
 	// tool-set belongs to the SHARED base, so defaulting it to "everything" meant
@@ -136,29 +152,19 @@ Flags:
 	// base without it is a real request, not an accidental default. With no base
 	// yet, or one stamped by an older sand, there is nothing to adopt and the
 	// all-on default stands.
+	//
+	// provision.BaseToolset takes the resolved provider's host-access handle
+	// (p.HostFiles()) rather than reading a process-global: the base's stamp
+	// lives on whichever host limactl actually runs (the remote host for a
+	// remote provider), not necessarily this one.
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
-	if base, ok := provision.BaseToolset(cfg.BaseName); ok {
+	if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
 		for tool, selected := range cfg.ToolPtrs() {
 			if !explicit["with-"+tool] {
 				*selected = base[tool]
 			}
 		}
-	}
-
-	// Resolve the backend BEFORE defaulting the user: Lima names the guest account
-	// after whoever runs limactl, so for a remote provider that is the REMOTE
-	// host's user, not this machine's. Defaulting cfg.User to the laptop's user
-	// (as this used to) made the playbook provision a user `limactl shell` never
-	// logs into — leaving the guest login user without its ~/.tmux.conf, git
-	// identity, or secrets. Preflight runs here too, so a missing/old limactl
-	// fails before any config work.
-	p, scope, err := provider.Resolve()
-	if err != nil {
-		return err
-	}
-	if err := p.Preflight(); err != nil {
-		return err
 	}
 
 	// Default the VM user to the provider's host user (the remote host for remote

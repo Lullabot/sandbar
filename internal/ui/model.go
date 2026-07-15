@@ -774,7 +774,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// unrelated VM that later reuses the name. Best-effort: a failure here
 		// isn't worth displacing the reconcile status above.
 		for _, name := range dropped {
-			_ = m.sec.Remove(name)
+			// TODO(task 6): real scope — pass the VM's actual connection
+			// scope (m.scope) once secrets are threaded per-scope; for now
+			// every VM is treated as local.
+			_ = m.sec.Remove(name, registry.LocalScope)
 		}
 		// The board's tiles come straight off m.vms + the registry + the job
 		// registry, so there is nothing to rebuild — only the focus ring has to be
@@ -807,7 +810,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// longer have a guest to apply to; drop it from both indexes. Neither
 			// failure may silently shadow the other.
 			regErr := m.reg.Remove(msg.name)
-			secErr := m.sec.Remove(msg.name)
+			// TODO(task 6): real scope — pass the VM's actual connection
+			// scope (m.scope) once secrets are threaded per-scope; for now
+			// every VM is treated as local.
+			secErr := m.sec.Remove(msg.name, registry.LocalScope)
 			switch {
 			case regErr != nil && secErr != nil:
 				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
@@ -888,9 +894,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
 			// cannot corrupt the store ahead of Set validating it.
 			if cfg.CloneToken != "" {
-				pairs := m.sec.Get(cfg.Name)
+				// TODO(task 6): real scope — pass the VM's actual connection
+				// scope (m.scope) once secrets are threaded per-scope; for
+				// now every VM is treated as local.
+				pairs := m.sec.Get(cfg.Name, registry.LocalScope)
 				pairs["GH_TOKEN"] = cfg.CloneToken
-				if err := m.sec.Set(cfg.Name, pairs); err != nil {
+				if err := m.sec.Set(cfg.Name, registry.LocalScope, pairs); err != nil {
 					m.logMsg("VM ready, but the token could not be saved as a secret: " + err.Error())
 				}
 			}

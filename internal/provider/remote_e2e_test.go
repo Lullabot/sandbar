@@ -135,10 +135,9 @@ func skipUnlessRemoteE2EConfigured(t *testing.T) provider.TargetConfig {
 func TestE2ERemoteLima(t *testing.T) {
 	cfg := skipUnlessRemoteE2EConfigured(t)
 
-	// NewRemoteLima points provision's process-global host-access seam at the
-	// remote host (see provision.SetHostFiles's doc) — restore it so this test
-	// can never leak a remote seam into some other test sharing the process.
-	t.Cleanup(func() { provision.SetHostFiles(lima.LocalFiles()) })
+	// NewRemoteLima's host-access handle lives on the Provisioner it constructs
+	// (Provisioner.HostFiles), not a process-global, so there is nothing here to
+	// leak into another test sharing the process and nothing to restore.
 	remote, err := provider.NewRemoteLima(cfg)
 	if err != nil {
 		t.Fatalf("NewRemoteLima: %v", err)

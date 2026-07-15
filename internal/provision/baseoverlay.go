@@ -46,6 +46,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -73,8 +74,8 @@ var baseOverlayFn = readBaseOverlay
 // An unreadable or unparseable instance file is not an error to report: it means we
 // cannot PROVE what the base would do, and the caller must then treat it as
 // unconvergeable (rebuild) rather than guess.
-func readBaseOverlay(baseName string) (baseOverlay, bool) {
-	b, err := hostFiles.ReadFile(filepath.Join(hostFiles.LimaHome(), baseName, "lima.yaml"))
+func readBaseOverlay(hf lima.HostFiles, baseName string) (baseOverlay, bool) {
+	b, err := hf.ReadFile(filepath.Join(hf.LimaHome(), baseName, "lima.yaml"))
 	if err != nil {
 		return baseOverlay{}, false
 	}
@@ -128,7 +129,7 @@ func parseBaseOverlay(limaYAML []byte) (baseOverlay, bool) {
 // while being wrong the other way runs the wrong playbook, or runs the right one in
 // a guest that was never given what it needs.
 func (p *Provisioner) baseConvergeable(cfg vm.CreateConfig) (bool, string) {
-	have, ok := baseOverlayFn(cfg.BaseName)
+	have, ok := baseOverlayFn(p.hostFiles(), cfg.BaseName)
 	if !ok {
 		return false, "its Lima instance file cannot be read"
 	}

@@ -24,6 +24,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -154,6 +155,18 @@ type Provider interface {
 	// Preflight verifies the backend is usable before any lifecycle op (for Lima:
 	// limactl is installed and new enough to support `limactl clone`).
 	Preflight() error
+
+	// --- Host access ---
+
+	// HostFiles returns the host-access handle this provider's base-image
+	// operations (overlay read, version stamp, base lock, partial-instance
+	// cleanup — see internal/provision) read and write through: the local
+	// filesystem for local Lima, or a remote provider's SSHHost, pointing every
+	// one of those touches at the host where limactl actually runs. Callers that
+	// need to sample the SAME host outside the provisioner (e.g. the TUI's
+	// per-VM disk-usage tile sampling) pass this along explicitly rather than
+	// reaching for a process-global.
+	HostFiles() lima.HostFiles
 }
 
 // HostResources is the limactl host's own capacity, used only for the board

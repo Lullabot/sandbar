@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // TestLockBase_CtxCancelWhileWaitingReturnsPromptly drives the ctx.Done() arm
@@ -24,7 +26,7 @@ import (
 func TestLockBase_CtxCancelWhileWaitingReturnsPromptly(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
-	holderRelease, err := lockBase(context.Background(), "sandbar-base", &bytes.Buffer{})
+	holderRelease, err := lockBase(context.Background(), lima.LocalFiles(), "sandbar-base", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("lockBase (holder): %v", err)
 	}
@@ -34,7 +36,7 @@ func TestLockBase_CtxCancelWhileWaitingReturnsPromptly(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, cancel)
 
 	start := time.Now()
-	release, err := lockBase(ctx, "sandbar-base", &bytes.Buffer{})
+	release, err := lockBase(ctx, lima.LocalFiles(), "sandbar-base", &bytes.Buffer{})
 	elapsed := time.Since(start)
 
 	if err != context.Canceled {
@@ -70,7 +72,7 @@ func TestLockBase_MkdirAllFailure_DegradesToNoOpRelease(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	release, err := lockBase(context.Background(), "sandbar-base", &out)
+	release, err := lockBase(context.Background(), lima.LocalFiles(), "sandbar-base", &out)
 	if err != nil {
 		t.Fatalf("lockBase err = %v, want nil (a lock failure degrades, it does not fail the caller)", err)
 	}
@@ -97,13 +99,13 @@ func TestLockBase_OpenFileFailure_DegradesToNoOpRelease(t *testing.T) {
 	// Pre-create the lock file's own path AS A DIRECTORY (this also creates
 	// its parent "_sand" directory, so the MkdirAll arm above is not the one
 	// that fires here).
-	lockPath := baseLockPath("sandbar-base")
+	lockPath := baseLockPath(lima.LocalFiles(), "sandbar-base")
 	if err := os.MkdirAll(lockPath, 0o755); err != nil {
 		t.Fatalf("mkdir lock path as a directory: %v", err)
 	}
 
 	var out bytes.Buffer
-	release, err := lockBase(context.Background(), "sandbar-base", &out)
+	release, err := lockBase(context.Background(), lima.LocalFiles(), "sandbar-base", &out)
 	if err != nil {
 		t.Fatalf("lockBase err = %v, want nil (a lock failure degrades, it does not fail the caller)", err)
 	}

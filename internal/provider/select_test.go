@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 )
 
@@ -96,11 +94,11 @@ func TestResolve_RemoteWithoutHostErrors(t *testing.T) {
 // the local list. Constructing the provider does not connect (the SSH command
 // only runs when a method is invoked), so this needs no remote host.
 //
-// It restores provision's host-access seam afterwards because NewRemoteLima
-// points that process-global seam at the remote host (see provision.SetHostFiles):
-// the serial suite must not leak a remote seam into a later local test.
+// NewRemoteLima's host-access handle lives on the Provisioner it constructs
+// (Provisioner.HostFiles), not a process-global, so — unlike before this seam
+// was retired — there is nothing here for a later test in this suite to leak
+// into and nothing to restore.
 func TestResolve_RemoteResolvesToWorkingProvider(t *testing.T) {
-	t.Cleanup(func() { provision.SetHostFiles(lima.LocalFiles()) })
 	clearSelectionEnv(t)
 	t.Setenv(SandProviderEnv, RemoteLimaProviderID)
 	t.Setenv(SandRemoteHostEnv, "example.com")

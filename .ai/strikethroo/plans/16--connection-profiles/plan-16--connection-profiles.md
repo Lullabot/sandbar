@@ -767,11 +767,11 @@ graph TD
 
 Verified acyclic; no orphan or circular references.
 
-### Phase 1: Foundations (no dependencies)
+### ✅ Phase 1: Foundations (no dependencies)
 **Parallel Tasks:**
-- Task 001: Create the `internal/profiles` store package
-- Task 002: Add a connection-scope dimension to the secrets store (schema migration)
-- Task 003: Retire the `provision.hostFiles` process-global into a per-operation argument
+- ✔️ Task 001: Create the `internal/profiles` store package — `completed`
+- ✔️ Task 002: Add a connection-scope dimension to the secrets store (schema migration) — `completed`
+- ✔️ Task 003: Retire the `provision.hostFiles` process-global into a per-operation argument — `completed`
 
 ### Phase 2: Provider layer & identity prep
 **Parallel Tasks:**

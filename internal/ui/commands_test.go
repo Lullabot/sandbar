@@ -12,6 +12,7 @@ import (
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -188,7 +189,7 @@ func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 	next, cmd := m.Update(provisionDoneMsg{job: provisionKey("claude")})
 	m = next.(model)
 
-	if got := m.sec.Get("claude")["GH_TOKEN"]; got != "ghp_x" {
+	if got := m.sec.Get("claude", registry.LocalScope)["GH_TOKEN"]; got != "ghp_x" {
 		t.Fatalf(`sec.Get("claude")["GH_TOKEN"] = %q, want "ghp_x"`, got)
 	}
 	cfg, ok := m.reg.Config("claude")
@@ -207,7 +208,7 @@ func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 // the VM (e.g. from a prior edit) — merge semantics, not wholesale overwrite.
 func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.sec.Set("claude", map[string]string{"OTHER": "kept"}); err != nil {
+	if err := m.sec.Set("claude", registry.LocalScope, map[string]string{"OTHER": "kept"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
 	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
@@ -215,7 +216,7 @@ func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 	next, _ := m.Update(provisionDoneMsg{job: provisionKey("claude")})
 	m = next.(model)
 
-	got := m.sec.Get("claude")
+	got := m.sec.Get("claude", registry.LocalScope)
 	if got["OTHER"] != "kept" {
 		t.Fatalf("existing secret should survive a tokenless create, got %v", got)
 	}
@@ -227,17 +228,17 @@ func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 // (e) Deleting a VM prunes its secrets alongside the managed registry entry.
 func TestDeleteSecretsPruned(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.sec.Set("claude", map[string]string{"A": "1"}); err != nil {
+	if err := m.sec.Set("claude", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
-	if got := m.sec.Get("claude"); len(got) == 0 {
+	if got := m.sec.Get("claude", registry.LocalScope); len(got) == 0 {
 		t.Fatal("precondition: secrets should be seeded")
 	}
 
 	next, _ := m.Update(actionDoneMsg{action: "delete", name: "claude"})
 	m = next.(model)
 
-	if got := m.sec.Get("claude"); len(got) != 0 {
+	if got := m.sec.Get("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("a successful delete should prune secrets, sec.Get returned %v", got)
 	}
 }
@@ -262,7 +263,7 @@ func TestSecretsSaveOnRunningVMPushesToGuest(t *testing.T) {
 	if m.view != viewBoard {
 		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
-	if got := m.sec.Get("claude"); got["GH_TOKEN"] != "ghp_new" {
+	if got := m.sec.Get("claude", registry.LocalScope); got["GH_TOKEN"] != "ghp_new" {
 		t.Fatalf("the host store should still persist immediately, got %v", got)
 	}
 	if cmd == nil {
@@ -334,14 +335,14 @@ func TestReconcileDropPrunesSecrets(t *testing.T) {
 	if err := m.reg.Add(vm.CreateConfig{Name: "gone", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-	if err := m.sec.Set("gone", map[string]string{"A": "1"}); err != nil {
+	if err := m.sec.Set("gone", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
 
 	next, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "other", Status: "Running"}}})
 	m = next.(model)
 
-	if got := m.sec.Get("gone"); len(got) != 0 {
+	if got := m.sec.Get("gone", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("a VM dropped by Reconcile should have its secrets pruned, got %v", got)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/registry"
 )
 
 // TestRender_EscapesAdversarialValues is the security-critical test: every value
@@ -134,7 +136,7 @@ func TestSet_FilePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if err := s.Set("claude", map[string]string{"TOK": "s3cr3t"}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"TOK": "s3cr3t"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -175,7 +177,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if err := s.Set("claude", map[string]string{"A": "1", "B": "two"}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"A": "1", "B": "two"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 
@@ -183,7 +185,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	got := s2.Get("claude")
+	got := s2.Get("claude", registry.LocalScope)
 	want := map[string]string{"A": "1", "B": "two"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Get after reload = %v, want %v", got, want)
@@ -192,16 +194,16 @@ func TestRoundTrip(t *testing.T) {
 	// Get returns a copy: mutating it must not affect the store.
 	got["A"] = "mutated"
 	got["NEW"] = "x"
-	if again := s2.Get("claude"); again["A"] != "1" || len(again) != 2 {
+	if again := s2.Get("claude", registry.LocalScope); again["A"] != "1" || len(again) != 2 {
 		t.Fatalf("Get must return a defensive copy; store was mutated: %v", again)
 	}
 
-	if err := s2.Remove("claude"); err != nil {
+	if err := s2.Remove("claude", registry.LocalScope); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	s3, _ := LoadFrom(path)
-	if len(s3.Get("claude")) != 0 {
-		t.Fatalf("claude secrets should be gone after remove, got %v", s3.Get("claude"))
+	if len(s3.Get("claude", registry.LocalScope)) != 0 {
+		t.Fatalf("claude secrets should be gone after remove, got %v", s3.Get("claude", registry.LocalScope))
 	}
 }
 
@@ -213,15 +215,15 @@ func TestSet_RejectsInvalidKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if err := s.Set("claude", map[string]string{"OK": "1", "BAD KEY": "x"}); err == nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"OK": "1", "BAD KEY": "x"}); err == nil {
 		t.Fatal("Set must reject a map containing an invalid key")
 	}
 	// A rejected Set must not partially persist.
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("rejected Set must not write the store (stat err = %v)", statErr)
 	}
-	if len(s.Get("claude")) != 0 {
-		t.Fatalf("rejected Set must not mutate the in-memory store, got %v", s.Get("claude"))
+	if len(s.Get("claude", registry.LocalScope)) != 0 {
+		t.Fatalf("rejected Set must not mutate the in-memory store, got %v", s.Get("claude", registry.LocalScope))
 	}
 }
 
@@ -230,14 +232,14 @@ func TestSet_RejectsInvalidKey(t *testing.T) {
 func TestSet_EmptyRemovesEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sandbar", "secrets.json")
 	s, _ := LoadFrom(path)
-	if err := s.Set("claude", map[string]string{"A": "1"}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if err := s.Set("claude", map[string]string{}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{}); err != nil {
 		t.Fatalf("set empty: %v", err)
 	}
-	if len(s.Get("claude")) != 0 {
-		t.Fatalf("empty Set should clear the entry, got %v", s.Get("claude"))
+	if len(s.Get("claude", registry.LocalScope)) != 0 {
+		t.Fatalf("empty Set should clear the entry, got %v", s.Get("claude", registry.LocalScope))
 	}
 }
 
@@ -247,7 +249,7 @@ func TestSet_TouchesOnlySecretsJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "sandbar")
 	path := filepath.Join(dir, "secrets.json")
 	s, _ := LoadFrom(path)
-	if err := s.Set("claude", map[string]string{"A": "1"}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -272,7 +274,7 @@ func TestLoad_MissingFileIsEmptyNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
-	if len(s.Get("anything")) != 0 {
+	if len(s.Get("anything", registry.LocalScope)) != 0 {
 		t.Fatal("expected empty store")
 	}
 }
@@ -296,7 +298,7 @@ func TestLoad_FutureVersionRefused(t *testing.T) {
 	if s == nil {
 		t.Fatal("returned store must be non-nil")
 	}
-	if len(s.Get("x")) != 0 {
+	if len(s.Get("x", registry.LocalScope)) != 0 {
 		t.Fatal("nothing should be parsed out of a future-versioned file")
 	}
 }
@@ -313,11 +315,11 @@ func TestLoad_CorruptFileWarnsButReturnsUsableStore(t *testing.T) {
 	if err == nil {
 		t.Fatal("corrupt file should return an error")
 	}
-	if s == nil || len(s.Get("anything")) != 0 {
+	if s == nil || len(s.Get("anything", registry.LocalScope)) != 0 {
 		t.Fatal("should still return a usable empty store")
 	}
 	// The store must remain usable.
-	if err := s.Set("claude", map[string]string{"A": "1"}); err != nil {
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
 		t.Fatalf("store should be usable after a corrupt load: %v", err)
 	}
 	// The corrupt file must be preserved for recovery.
@@ -348,8 +350,9 @@ func TestValidScope(t *testing.T) {
 }
 
 // TestLoadFrom_V1Migration: an unversioned/v1 flat file loads such that the
-// VM's pairs live under the global scope "", and the next save stamps
-// version:2 on disk.
+// VM's pairs live under the global scope "" AND registry.LocalScope (no
+// connection scope existed when a v1 file could have been written), and the
+// next save stamps version:3 on disk.
 func TestLoadFrom_V1Migration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.json")
 	v1 := `{"version":1,"vms":{"x":{"A":"1"}}}`
@@ -360,29 +363,29 @@ func TestLoadFrom_V1Migration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load v1: %v", err)
 	}
-	if got := s.Get("x"); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+	if got := s.Get("x", registry.LocalScope); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
 		t.Fatalf("migrated global scope = %v, want {A:1}", got)
 	}
-	all := s.GetAll("x")
+	all := s.GetAll("x", registry.LocalScope)
 	if got := all[""]; !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
 		t.Fatalf("GetAll()[\"\"] = %v, want {A:1}", got)
 	}
 
-	// Force a save and confirm the on-disk shape is stamped version 2.
-	if err := s.Set("x", s.Get("x")); err != nil {
+	// Force a save and confirm the on-disk shape is stamped version 3.
+	if err := s.Set("x", registry.LocalScope, s.Get("x", registry.LocalScope)); err != nil {
 		t.Fatalf("re-save: %v", err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if !strings.Contains(string(raw), `"version": 2`) {
-		t.Fatalf("expected version 2 after re-save, got: %s", raw)
+	if !strings.Contains(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3 after re-save, got: %s", raw)
 	}
 }
 
 // TestLoadFrom_UnversionedMigration: a file with no "version" field at all
-// (Version == 0) is treated the same as v1.
+// (Version == 0) is treated the same as v1, lifted under registry.LocalScope.
 func TestLoadFrom_UnversionedMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.json")
 	unversioned := `{"vms":{"x":{"A":"1"}}}`
@@ -393,7 +396,7 @@ func TestLoadFrom_UnversionedMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load unversioned: %v", err)
 	}
-	if got := s.Get("x"); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
+	if got := s.Get("x", registry.LocalScope); !reflect.DeepEqual(got, map[string]string{"A": "1"}) {
 		t.Fatalf("migrated global scope = %v, want {A:1}", got)
 	}
 }
@@ -410,7 +413,7 @@ func TestGetAllSetAll_RoundTrip(t *testing.T) {
 		"":                {"EDITOR": "vim"},
 		"github.com/acme": {"GH_TOKEN": "ghp_x"},
 	}
-	if err := s.SetAll("claude", scopes); err != nil {
+	if err := s.SetAll("claude", registry.LocalScope, scopes); err != nil {
 		t.Fatalf("SetAll: %v", err)
 	}
 
@@ -418,7 +421,7 @@ func TestGetAllSetAll_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	got := s2.GetAll("claude")
+	got := s2.GetAll("claude", registry.LocalScope)
 	if !reflect.DeepEqual(got, scopes) {
 		t.Fatalf("GetAll after reload = %v, want %v", got, scopes)
 	}
@@ -426,7 +429,7 @@ func TestGetAllSetAll_RoundTrip(t *testing.T) {
 	// GetAll returns a deep copy: mutating it must not affect the store.
 	got[""]["EDITOR"] = "mutated"
 	got["NEW"] = map[string]string{"X": "1"}
-	again := s2.GetAll("claude")
+	again := s2.GetAll("claude", registry.LocalScope)
 	if again[""]["EDITOR"] != "vim" {
 		t.Fatalf("GetAll must return a defensive deep copy; store was mutated: %v", again)
 	}
@@ -434,13 +437,13 @@ func TestGetAllSetAll_RoundTrip(t *testing.T) {
 		t.Fatalf("GetAll must return a defensive deep copy; top-level map was mutated: %v", again)
 	}
 
-	// Raw on-disk shape check: version 2, nested scope maps.
+	// Raw on-disk shape check: version 3, nested scope maps.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read raw: %v", err)
 	}
-	if !strings.Contains(string(raw), `"version": 2`) {
-		t.Fatalf("expected version 2, got: %s", raw)
+	if !strings.Contains(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3, got: %s", raw)
 	}
 	if !strings.Contains(string(raw), `"github.com/acme"`) {
 		t.Fatalf("expected scoped key in raw JSON, got: %s", raw)
@@ -453,23 +456,23 @@ func TestGetAllSetAll_RoundTrip(t *testing.T) {
 func TestSetAll_EmptyOrAllEmptyDropsEntry(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.json")
 	s, _ := LoadFrom(path)
-	if err := s.SetAll("claude", map[string]map[string]string{"": {"A": "1"}}); err != nil {
+	if err := s.SetAll("claude", registry.LocalScope, map[string]map[string]string{"": {"A": "1"}}); err != nil {
 		t.Fatalf("seed SetAll: %v", err)
 	}
-	if err := s.SetAll("claude", map[string]map[string]string{}); err != nil {
+	if err := s.SetAll("claude", registry.LocalScope, map[string]map[string]string{}); err != nil {
 		t.Fatalf("SetAll empty: %v", err)
 	}
-	if got := s.GetAll("claude"); len(got) != 0 {
+	if got := s.GetAll("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("empty SetAll should clear the entry, got %v", got)
 	}
 
-	if err := s.SetAll("claude", map[string]map[string]string{"": {"A": "1"}}); err != nil {
+	if err := s.SetAll("claude", registry.LocalScope, map[string]map[string]string{"": {"A": "1"}}); err != nil {
 		t.Fatalf("re-seed SetAll: %v", err)
 	}
-	if err := s.SetAll("claude", map[string]map[string]string{"": {}, "scope": {}}); err != nil {
+	if err := s.SetAll("claude", registry.LocalScope, map[string]map[string]string{"": {}, "scope": {}}); err != nil {
 		t.Fatalf("SetAll all-empty scopes: %v", err)
 	}
-	if got := s.GetAll("claude"); len(got) != 0 {
+	if got := s.GetAll("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("all-empty-scope SetAll should clear the entry, got %v", got)
 	}
 }
@@ -480,13 +483,13 @@ func TestSetAll_EmptyOrAllEmptyDropsEntry(t *testing.T) {
 func TestSetAll_RejectsHostileScope(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.json")
 	s, _ := LoadFrom(path)
-	if err := s.SetAll("claude", map[string]map[string]string{"../etc": {"A": "1"}}); err == nil {
+	if err := s.SetAll("claude", registry.LocalScope, map[string]map[string]string{"../etc": {"A": "1"}}); err == nil {
 		t.Fatal("SetAll must reject a hostile scope")
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("rejected SetAll must not write the store (stat err = %v)", statErr)
 	}
-	if got := s.GetAll("claude"); len(got) != 0 {
+	if got := s.GetAll("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("rejected SetAll must not mutate the in-memory store, got %v", got)
 	}
 }
@@ -522,8 +525,8 @@ func TestSave_ChmodDirFailure_LeavesNoWorldReadableFile(t *testing.T) {
 	}
 	path := filepath.Join(link, "secrets.json")
 
-	s := &Store{path: path, vms: map[string]map[string]map[string]string{}}
-	err := s.Set("claude", map[string]string{"TOK": "s3cr3t"})
+	s := &Store{path: path, vms: map[registry.Scope]map[string]map[string]map[string]string{}}
+	err := s.Set("claude", registry.LocalScope, map[string]string{"TOK": "s3cr3t"})
 	if err == nil {
 		t.Fatal("Set must fail when the parent directory cannot be chmod'd")
 	}
@@ -573,8 +576,8 @@ func TestSave_RenameFailure_LeavesNoPartialFile(t *testing.T) {
 		t.Fatalf("seed directory at target path: %v", err)
 	}
 
-	s := &Store{path: path, vms: map[string]map[string]map[string]string{}}
-	err := s.Set("claude", map[string]string{"TOK": "s3cr3t"})
+	s := &Store{path: path, vms: map[registry.Scope]map[string]map[string]map[string]string{}}
+	err := s.Set("claude", registry.LocalScope, map[string]string{"TOK": "s3cr3t"})
 	if err == nil {
 		t.Fatal("Set must fail when os.Rename cannot replace an existing directory")
 	}
@@ -613,13 +616,120 @@ func TestSetAll_AllOrNothingOnInvalidKey(t *testing.T) {
 	scopes := map[string]map[string]string{
 		"github.com/acme": {"OK": "1", "BAD KEY": "x"},
 	}
-	if err := s.SetAll("claude", scopes); err == nil {
+	if err := s.SetAll("claude", registry.LocalScope, scopes); err == nil {
 		t.Fatal("SetAll must reject a map containing an invalid key")
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("rejected SetAll must not write the store (stat err = %v)", statErr)
 	}
-	if got := s.GetAll("claude"); len(got) != 0 {
+	if got := s.GetAll("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("rejected SetAll must not mutate the in-memory store, got %v", got)
+	}
+}
+
+// TestLoadFrom_V2FixtureMigratesToLocalScope is the risk-floor test for this
+// task's data migration: a REAL captured pre-migration (v2) file — with both
+// a global-scope secret and a directory-scoped one, across two VMs — must
+// load with every secret intact, entirely under registry.LocalScope. A v2
+// file predates connection scopes (no remote provider existed when it was
+// written), so anything it recorded could only ever have been local; a botched
+// read path here would silently lose a host's secrets on upgrade.
+func TestLoadFrom_V2FixtureMigratesToLocalScope(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "v2_fixture.json"))
+	if err != nil {
+		t.Fatalf("read v2 fixture: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("seed v2 fixture: %v", err)
+	}
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v2 fixture: %v", err)
+	}
+
+	if got, want := s.Get("web", registry.LocalScope), (map[string]string{"TOKEN": "abc123"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Get(web, LocalScope) = %v, want %v", got, want)
+	}
+	if got, want := s.Get("db", registry.LocalScope), (map[string]string{"DB_PASS": "hunter2"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Get(db, LocalScope) = %v, want %v", got, want)
+	}
+
+	all := s.GetAll("web", registry.LocalScope)
+	if got, want := all["github.com/acme"], (map[string]string{"GH_TOKEN": "ghp_xyz"}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("directory-scoped secret lost migrating v2->v3: GetAll(web, LocalScope)[\"github.com/acme\"] = %v, want %v", got, want)
+	}
+
+	// A v2 file predates connection scopes: its VMs must NOT be reachable
+	// under any OTHER connection scope, only under LocalScope.
+	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "user@host:22"}
+	if got := s.Get("web", remote); len(got) != 0 {
+		t.Fatalf("v2-migrated secrets leaked into a non-local connection scope: %v", got)
+	}
+
+	// The next save must stamp the file version 3.
+	if err := s.Set("web", registry.LocalScope, s.Get("web", registry.LocalScope)); err != nil {
+		t.Fatalf("re-save after migration: %v", err)
+	}
+	raw2, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back after re-save: %v", err)
+	}
+	if !strings.Contains(string(raw2), `"version": 3`) {
+		t.Fatalf("expected version 3 after re-save, got: %s", raw2)
+	}
+}
+
+// TestConnectionScope_IsolatesSameNamedVM is the v3 round-trip test: two VMs
+// that share a bare NAME ("web") but live under different connection scopes
+// (registry.Scope{Provider, RemoteTarget}) must hold entirely independent
+// secrets — this is the whole point of the migration (a `web` on local and a
+// `web` on a remote host must never share, or clobber, each other's secrets).
+func TestConnectionScope_IsolatesSameNamedVM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "user@example.com:22"}
+
+	if err := s.Set("web", registry.LocalScope, map[string]string{"TOKEN": "local-secret"}); err != nil {
+		t.Fatalf("set local-scoped web: %v", err)
+	}
+	if err := s.Set("web", remote, map[string]string{"TOKEN": "remote-secret"}); err != nil {
+		t.Fatalf("set remote-scoped web: %v", err)
+	}
+
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	if got := s2.Get("web", registry.LocalScope); got["TOKEN"] != "local-secret" {
+		t.Fatalf("local-scoped web.TOKEN = %v, want local-secret", got)
+	}
+	if got := s2.Get("web", remote); got["TOKEN"] != "remote-secret" {
+		t.Fatalf("remote-scoped web.TOKEN = %v, want remote-secret", got)
+	}
+
+	// Removing one connection scope's VM must not touch the other's.
+	if err := s2.Remove("web", remote); err != nil {
+		t.Fatalf("remove remote-scoped web: %v", err)
+	}
+	if got := s2.Get("web", registry.LocalScope); got["TOKEN"] != "local-secret" {
+		t.Fatalf("Remove under one connection scope affected another scope's same-named VM: %v", got)
+	}
+	if got := s2.Get("web", remote); len(got) != 0 {
+		t.Fatalf("expected remote-scoped web secrets gone after Remove, got %v", got)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw: %v", err)
+	}
+	if !strings.Contains(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3, got: %s", raw)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/spinner"
@@ -814,7 +815,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 
 	// Its GH_TOKEN is dropped from the store (the user cleared it, say). A file copy
 	// finishing must not put it back — the copy did not build anything.
-	if err := l.m.sec.Set("web", map[string]string{}); err != nil {
+	if err := l.m.sec.Set("web", registry.LocalScope, map[string]string{}); err != nil {
 		t.Fatalf("clear secrets: %v", err)
 	}
 
@@ -827,7 +828,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 	upload.done <- nil
 	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning("web") })
 
-	if got := l.m.sec.Get("web"); got["GH_TOKEN"] != "" {
+	if got := l.m.sec.Get("web", registry.LocalScope); got["GH_TOKEN"] != "" {
 		t.Fatalf("a finished copy re-seeded the build's clone token into the secrets store: %v", got)
 	}
 }
@@ -884,7 +885,7 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
-	if err := m.sec.Set("web", map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
+	if err := m.sec.Set("web", registry.LocalScope, map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
 		t.Fatalf("seed the VM's secrets: %v", err)
 	}
 
@@ -898,7 +899,7 @@ func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	// The reset has deleted the instance; the refresh tick lists Lima and web is gone.
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
 
-	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "ghp_precious" {
+	if got := l.m.sec.Get("web", registry.LocalScope)["GH_TOKEN"]; got != "ghp_precious" {
 		t.Fatalf("the reset's own delete must not erase the VM's secrets: GH_TOKEN = %q, want it intact", got)
 	}
 	if !l.m.reg.IsManaged("web") {
@@ -1136,7 +1137,7 @@ func countMessages(m model, want string) int {
 func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
-	if err := m.sec.Set("web", map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
+	if err := m.sec.Set("web", registry.LocalScope, map[string]string{"GH_TOKEN": "ghp_precious"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
 
@@ -1151,7 +1152,7 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	// The refresh lands: web is gone from Lima, because the reset deleted it.
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
 
-	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "ghp_precious" {
+	if got := l.m.sec.Get("web", registry.LocalScope)["GH_TOKEN"]; got != "ghp_precious" {
 		t.Fatalf("a FAILED reset must not erase the VM's secrets: GH_TOKEN = %q, want it intact", got)
 	}
 	if !l.m.reg.IsManaged("web") {
@@ -1164,7 +1165,7 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	// And `d` still clears everything deliberately.
 	l.m.focusName = "web"
 	l.send(actionDoneMsg{action: "delete", name: "web"})
-	if got := l.m.sec.Get("web")["GH_TOKEN"]; got != "" {
+	if got := l.m.sec.Get("web", registry.LocalScope)["GH_TOKEN"]; got != "" {
 		t.Fatalf("deleting the VM must take its secrets with it, got %q", got)
 	}
 }
