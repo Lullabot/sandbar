@@ -444,9 +444,9 @@ No circular dependencies.
 - ✔️ Task 3 (completed): Migrate all consumers from `*lima.Client` to `provider.Provider` and centralise construction (depends on: 2).
 - ✔️ Task 4 (completed): Provider-aware registry with versioned migration + provider selection config (depends on: 2).
 
-### Phase 4: Remote provider
+### ✅ Phase 4: Remote provider
 **Parallel Tasks:**
-- Task 5: Remote Lima over SSH provider — SSH host-access impl, nested-PTY attach, two-stage copy (depends on: 2, 3, 4).
+- ✔️ Task 5 (completed): Remote Lima over SSH provider — SSH host-access impl, nested-PTY attach, two-stage copy (depends on: 2, 3, 4).
 
 ### Phase 5: Verification & documentation
 **Parallel Tasks:**

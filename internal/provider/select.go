@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -111,13 +110,6 @@ func resolveTargetConfig() (TargetConfig, error) {
 	return cfg, nil
 }
 
-// ErrRemoteNotImplemented is returned by Resolve when SandProviderEnv selects
-// RemoteLimaProviderID: plan 15 task 5 supplies the implementation. Local
-// Lima — the default, unconfigured path — is fully working; this is the seam
-// task 5's remote provider construction hooks into, isolated to Resolve's
-// remote branch so no other caller needs to change when it lands.
-var ErrRemoteNotImplemented = errors.New("sand: the remote Lima-over-SSH provider is not implemented yet (plan 15 task 5); unset " + SandProviderEnv + " (or set it to \"" + registry.LocalProviderID + "\") to use local Lima")
-
 // Resolve reads sand's opt-in provider-selection environment and constructs
 // the selected backend along with the registry.Scope that owns its
 // managed-VM entries. This is the sibling to NewDefault that task 4 adds:
@@ -127,8 +119,10 @@ var ErrRemoteNotImplemented = errors.New("sand: the remote Lima-over-SSH provide
 // resolves to exactly what NewDefault returns, paired with registry.LocalScope.
 //
 // A remote selection (SandProviderEnv=RemoteLimaProviderID) validates that a
-// host was supplied — a clear config error beats a confusing silent
-// fallback to local — and then returns ErrRemoteNotImplemented.
+// host was supplied — a clear config error beats a confusing silent fallback to
+// local — and then constructs the remote-Lima-over-SSH provider (NewRemoteLima),
+// paired with the remote registry.Scope its created VMs are tagged with so a
+// remote host's instances never mix with the local list.
 func Resolve() (Provider, registry.Scope, error) {
 	cfg, err := resolveTargetConfig()
 	if err != nil {
@@ -145,7 +139,11 @@ func Resolve() (Provider, registry.Scope, error) {
 		if cfg.Host == "" {
 			return nil, registry.Scope{}, fmt.Errorf("%s=%s requires %s to be set", SandProviderEnv, cfg.Provider, SandRemoteHostEnv)
 		}
-		return nil, registry.Scope{}, ErrRemoteNotImplemented
+		p, err := NewRemoteLima(cfg)
+		if err != nil {
+			return nil, registry.Scope{}, err
+		}
+		return p, cfg.Scope(), nil
 	default:
 		return nil, registry.Scope{}, fmt.Errorf("%s=%q is not a known provider (want %q or %q)",
 			SandProviderEnv, cfg.Provider, registry.LocalProviderID, RemoteLimaProviderID)
