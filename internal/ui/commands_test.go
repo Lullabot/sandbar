@@ -10,6 +10,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -345,18 +346,12 @@ func TestReconcileDropPrunesSecrets(t *testing.T) {
 	}
 }
 
-// fakeAttachProvider is a provider.Provider double that only ever needs to
-// answer AttachArgv: shellCmd's two tests below drive its suspend branch
-// (which calls AttachArgv to build the exec'd argv) and its host-tmux fast
-// path (which never touches the provider at all), so embedding a nil
-// provider.Provider and overriding just this one method is enough — any
-// other method call would panic, and neither test makes one.
-type fakeAttachProvider struct {
-	provider.Provider
-	argv []string
-}
-
-func (f fakeAttachProvider) AttachArgv(vm.VM) []string { return f.argv }
+// shellCmd's two tests below drive its suspend branch (which calls
+// AttachArgv to build the exec'd argv) and its host-tmux fast path (which
+// never touches the provider at all), so a providerfake.Provider with only
+// AttachArgvFunc set is enough — the fake's zero-value default answers every
+// other method inertly instead of panicking, unlike the nil-embedded-Provider
+// trick this used to reach for.
 
 // shellCmd's suspend branch (host $TMUX unset, the common case) must return
 // tea.ExecProcess's own message kind, not actionDoneMsg directly — calling
@@ -366,7 +361,7 @@ func (f fakeAttachProvider) AttachArgv(vm.VM) []string { return f.argv }
 func TestShellCmdSuspendsWhenHostTMUXUnset(t *testing.T) {
 	t.Setenv("TMUX", "")
 
-	p := fakeAttachProvider{argv: []string{"limactl", "shell", "claude"}}
+	p := &providerfake.Provider{AttachArgvFunc: func(vm.VM) []string { return []string{"limactl", "shell", "claude"} }}
 	msg := shellCmd(p, vm.VM{Name: "claude"})()
 
 	if _, ok := msg.(actionDoneMsg); ok {
@@ -398,7 +393,7 @@ func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
 	}
 	t.Cleanup(func() { runHostTmuxNewWindow = orig })
 
-	msg := shellCmd(fakeAttachProvider{}, vm.VM{Name: "claude"})()
+	msg := shellCmd(&providerfake.Provider{}, vm.VM{Name: "claude"})()
 
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
