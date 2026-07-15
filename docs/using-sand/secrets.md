@@ -86,34 +86,13 @@ lands by default.
 
 ### Creating a fine-grained token
 
-GitHub's fine-grained personal access tokens are recommended over classic
-tokens: they're scoped to specific repositories, grant only the permissions
-you choose, and can't be created without an expiry. Create one at
-**Settings → Developer settings → Personal access tokens → Fine-grained
-tokens** with:
-
-| Permission | Access | Purpose |
-| --- | --- | --- |
-| Contents | Read and write | Push and pull code |
-| Pull requests | Read | Read PRs without letting an agent self-merge to `main` |
-| Issues | Read | Read issues without write access |
-| Actions | Read and write | Inspect and trigger CI |
-| Workflows | Read and write | Update workflow files |
-| Metadata | Read-only | Always required (included automatically) |
-
-Pull requests and Issues are deliberately read-only so an autonomous agent
-can't merge its own PRs or close issues without a human in the loop — widen
-them only if your workflow needs an agent to manage them directly.
-
-!!! warning "Branch protection is required to keep agents off `main`"
-
-    A `Contents: Read and write` token can `git push` to **any** branch,
-    including `main`. The read-only `Pull requests` permission stops an agent
-    from *merging* its own PR, but it does nothing to stop a direct push that
-    bypasses review entirely. The token cannot enforce this — the repository
-    must. Add a **branch protection rule** (or ruleset) on `main` and every
-    other protected branch that **requires a pull request before merging**.
-    Without it, nothing prevents an agent from pushing straight to `main`.
+Use a GitHub **fine-grained personal access token**, scoped to the
+repositories the VM should touch and set to expire. Choosing its permissions
+is a worked example of giving an agent *reasonable* access — enough to do the
+work, not enough to push to `main` unreviewed — so the recommended
+permission set, why Pull requests and Issues stay read-only, and why branch
+protection is required all live with the
+[least-privilege token example in the Security Model](../reference/security-model.md#a-least-privilege-token-reasonable-agent-access).
 
 ### Supplying it and where it lands
 
