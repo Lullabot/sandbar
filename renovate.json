@@ -4,6 +4,17 @@
   "minimumReleaseAge": "3 days",
   "internalChecksFilter": "strict",
   "automerge": true,
+  "customManagers": [
+    {
+      "description": "Track the molecule test container image; no built-in manager scans molecule.yml",
+      "customType": "regex",
+      "managerFilePatterns": ["/^molecule/.+/molecule\\.ya?ml$/"],
+      "matchStrings": [
+        "image:\\s*[\"']?(?<depName>[^:\"'@\\s]+):(?<currentValue>[^@\"'\\s]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "Never automerge GitHub Actions updates; require manual review",

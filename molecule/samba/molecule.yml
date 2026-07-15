@@ -6,7 +6,9 @@ driver:
   name: docker
 platforms:
   - name: samba-instance
-    image: "geerlingguy/docker-debian13-ansible:latest"
+    # Pinned by digest — see molecule/base/molecule.yml. Renovate updates both
+    # via the customManager in renovate.json.
+    image: "geerlingguy/docker-debian13-ansible:latest@sha256:9b433580e02f960ea57525e0bcfe13d7cb32188f9ebc1952f21b9dfa19d8bd47"
     command: /sbin/init
     privileged: true
     pre_build_image: true
