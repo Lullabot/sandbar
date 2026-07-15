@@ -13,14 +13,16 @@ var (
 			Background(lipgloss.Color("63")).
 			Padding(0, 1)
 
-	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
-	// The messages strip's frame (messages.go). Deliberately DIMMER (238) than the
-	// message text it holds (241): the box is furniture, and it must not out-shout
+	// The messages strip's frame (messages.go). Deliberately DIMMER (241) than the
+	// message text it holds (245): the box is furniture, and it must not out-shout
 	// the log inside it or compete with the tile borders below, which are what the
-	// eye should land on. The title is a shade brighter than the frame so it reads
-	// as a label rather than as part of the line.
-	frameStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
+	// eye should land on. The title is the same brightness as the text and a shade
+	// brighter than the frame so it reads as a label rather than as part of the line.
+	// Both greys sit a few rungs up the 256 ramp from where they started (238/241):
+	// on a near-black render background 238 fell below a readable contrast floor.
+	frameStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	frameTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
@@ -60,14 +62,14 @@ var (
 			PaddingLeft(1)
 
 	// Tile status colours (task 07, tile.go): the SAME ANSI-256 indices used
-	// above, not a second palette — 42 (okStyle's green) for running, 241
+	// above, not a second palette — 42 (okStyle's green) for running, 245
 	// (statusStyle's dim grey) for stopped, 214 (warnStyle's amber) for
 	// building, 203 (errStyle's red) for failed. Colour is never the only
 	// carrier of meaning: every tile also prints a glyph and the status word,
 	// which is what a status test can still tell apart after ansi.Strip.
 	tileTitleStyle    = lipgloss.NewStyle().Bold(true)
 	tileRunningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	tileStoppedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tileStoppedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	tileBuildingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	tileFailedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 
