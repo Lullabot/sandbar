@@ -26,3 +26,11 @@ var hostFiles lima.HostFiles = lima.LocalFiles()
 // calls this once, the default local path never does, and nothing switches
 // providers mid-process. Passing lima.LocalFiles() restores the default.
 func SetHostFiles(hf lima.HostFiles) { hostFiles = hf }
+
+// HostFiles returns the host-access seam this package currently uses — the remote
+// SSHHost after a remote provider's SetHostFiles, else the local filesystem. It
+// lets the TUI point its OWN per-VM tile sampling (disk usage, up-since / last-
+// used) at the same host, so a remote VM's instance files are read on the remote
+// host rather than stat'd on the laptop (where they do not exist, which rendered
+// the disk gauge as "?"). See cmd/sand/main.go.
+func HostFiles() lima.HostFiles { return hostFiles }

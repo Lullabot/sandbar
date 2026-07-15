@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/ui"
 	buildversion "github.com/lullabot/sandbar/internal/version"
 
@@ -68,6 +69,13 @@ func runTUI() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
+	// Point the TUI's per-VM tile sampling (disk usage, up-since / last-used) at
+	// the same host limactl runs on. For a remote provider that is the remote host
+	// (provider.Resolve has already had NewRemoteLima call provision.SetHostFiles);
+	// for local Lima it is the local filesystem, unchanged. Without this the disk
+	// gauge stats the remote instance dir on the laptop and renders "?".
+	ui.SetHostFiles(provision.HostFiles())
 
 	// Tell the TUI which build it is, so the header can say so.
 	ui.SetVersion(buildversion.String(version))

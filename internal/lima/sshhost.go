@@ -281,16 +281,33 @@ func (fi remoteFileInfo) ModTime() time.Time { return fi.modTime }
 func (fi remoteFileInfo) IsDir() bool        { return fi.isDir }
 func (fi remoteFileInfo) Sys() any           { return nil }
 
-// statFormat asks GNU stat for size|epoch-mtime|type on one line. `%s` is size in
-// bytes, `%Y` is mtime as a Unix epoch, `%F` is the human file type ("directory",
-// "regular file", …) — enough for every HostFiles caller.
-const statFormat = "%s|%Y|%F"
+// statFormatGNU / statFormatBSD ask for size|epoch-mtime|type on one line.
+// GNU coreutils stat (Linux) uses `-c` with %s (size) %Y (mtime) %F (type text
+// "directory"/"regular file"); BSD stat (macOS — Lima's primary host platform)
+// uses `-f` with %z (size) %m (mtime) %HT (type text "Directory"/"Regular File").
+// The two are mutually incompatible, so Stat tries GNU then falls back to BSD.
+const (
+	statFormatGNU = "%s|%Y|%F"
+	statFormatBSD = "%z|%m|%HT"
+)
 
 // Stat stats path over `ssh host stat`. A missing path reports fs.ErrNotExist.
 func (h *SSHHost) Stat(path string) (fs.FileInfo, error) {
-	out, errb, err := h.runRemote(context.Background(), nil, "stat", "-c", statFormat, path)
+	out, errb, err := h.runRemote(context.Background(), nil, "stat", "-c", statFormatGNU, path)
 	if err != nil {
-		return nil, asNotExist("stat", path, errb, err)
+		// A genuinely missing path fails the same way under either stat, so don't
+		// retry — report it absent. Any OTHER GNU failure (a BSD/macOS remote
+		// rejecting `-c` with "illegal option", which is NOT a missing-path error)
+		// gets the BSD form, so a remote macOS host is not mis-read as "absent" —
+		// which is what made cleanup skip a half-written instance and the disk gauge
+		// render "?".
+		if strings.Contains(string(errb), notExistMarker) {
+			return nil, asNotExist("stat", path, errb, err)
+		}
+		out, errb, err = h.runRemote(context.Background(), nil, "stat", "-f", statFormatBSD, path)
+		if err != nil {
+			return nil, asNotExist("stat", path, errb, err)
+		}
 	}
 	fields := strings.SplitN(strings.TrimSpace(string(out)), "|", 3)
 	if len(fields) != 3 {
@@ -298,7 +315,8 @@ func (h *SSHHost) Stat(path string) (fs.FileInfo, error) {
 	}
 	size, _ := strconv.ParseInt(fields[0], 10, 64)
 	epoch, _ := strconv.ParseInt(fields[1], 10, 64)
-	isDir := fields[2] == "directory"
+	// GNU %F prints "directory"; BSD %HT prints "Directory".
+	isDir := strings.Contains(strings.ToLower(fields[2]), "directory")
 	mode := fs.FileMode(0)
 	if isDir {
 		mode |= fs.ModeDir
@@ -353,11 +371,16 @@ func (h *SSHHost) RemoveAll(path string) error {
 
 // DiskAllocBytes returns the ALLOCATED on-disk size (512-byte blocks × 512) of the
 // remote file at path — a qcow2's sparse size — or -1 when it cannot be measured,
-// the same contract as the local probe. `stat -c %b` is the block count.
+// the same contract as the local probe. `%b` is the allocated block count on both
+// GNU (`-c`) and BSD (`-f`) stat; only the flag differs, so fall back to the BSD
+// flag for a macOS remote — otherwise the tile's disk gauge renders "?".
 func (h *SSHHost) DiskAllocBytes(path string) int64 {
 	out, _, err := h.runRemote(context.Background(), nil, "stat", "-c", "%b", path)
 	if err != nil {
-		return -1
+		out, _, err = h.runRemote(context.Background(), nil, "stat", "-f", "%b", path)
+		if err != nil {
+			return -1
+		}
 	}
 	blocks, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil {
