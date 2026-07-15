@@ -459,3 +459,29 @@ Apply `.ai/strikethroo/config/hooks/POST_PHASE.md` after each phase: confirm the
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-15
+
+### Results
+All 7 tasks across 5 phases were executed, verified, and committed (one commit per phase):
+
+- **Phase 1** — a host-access seam in `internal/lima` (`Host` = `Runner` + `HostFiles`, local impl `LocalFiles()`); every `~/.lima` filesystem touch (guest identity, base overlay/version/lock, cleanup, TUI disk/up-since sampling) routed behind it with byte-for-byte identical local behaviour.
+- **Phase 2** — the `internal/provider` package: a `Provider` interface over the full VM lifecycle + guest transport + attach, and a local Lima provider composing the lima core and the Provisioner.
+- **Phase 3** — every consumer (three `cmd/sand` entrypoints, `internal/ui`, `internal/browse`, the `provision` free functions) migrated off `*lima.Client` onto `provider.Provider`, with construction centralised in `provider.NewDefault()`/`Resolve()`; and a provider-aware registry (schema v2, per-VM provider + `user@host:port`, copy-before-replace migration) with provider-scoped `manage` reconcile.
+- **Phase 4** — the remote Lima over SSH provider: an SSH host-access implementation (`internal/lima/sshhost.go`) that runs `limactl` on a remote host and reads its instance files over ssh, composing the existing lima core with no duplicated argv logic; `ssh -t` interactive attach (guest tmux expression byte-for-byte intact); two-stage host↔remote↔guest file copy preserving the `--backend=scp` placement contract; `provider.Resolve()` wired to construct it from `SAND_REMOTE_*`.
+- **Phase 5** — a backend-agnostic `providerfake`, a `limae2e`-gated remote e2e that self-skips cleanly without a target, and documentation (AGENTS.md package layout + testing conventions; README/README-sand remote-Lima usage).
+
+Verification held at every phase: `go build`/`go vet` clean under both build tags, `gofmt` clean, `go test ./... -race` green, and coverage over `./internal/...` stayed at/above the inherited **87% floor** (final 87.8%). The local path was proven unregressed by the existing `teatest` goldens plus a real-VM `limae2e` **create + recreate** run (both PASS). The remote provider's SSH transport was validated **live** against `ssh localhost`: `List`/`Status` (command exec over ssh) and `GuestUser`/`AttachArgv` (instance-file reads over ssh) all worked end to end; the attach argv came back as the correct `ssh -t … limactl shell …` form.
+
+### Noteworthy Events
+- **Anchored on the testing branch first.** Per the work order, the worktree was fast-forwarded onto `worktree-refine-plan-08-tests` (tip `4be7a41`) before any code changed, inheriting the `-race` + 87%-coverage-floor CI gate, the `limae2e` e2e harness, and the plan-08 behaviour-locking tests. Those three commits touch only test/CI/docs (no production Go), so the anchor was purely additive guardrail.
+- **Phase 3 run serially, not in parallel.** Tasks 3 and 4 both edit `cmd/sand` construction and `internal/manage`; running them concurrently in one shared worktree would have clobbered files, so they were executed T3→T4 (T4's selection config also hooks into T3's central constructor). A deliberate correctness-over-nominal-parallelism deviation from the blueprint.
+- **Live remote validation was necessarily a loopback, transport-level proof.** The full remote e2e's local/remote **isolation** assertion requires a genuinely separate Lima home (a second host or a distinct local user); a same-user `ssh localhost` shares one `~/.lima`, and standing up a second system user was judged too intrusive to do unprompted. The SSH transport itself was still proven live (command exec + instance-file reads + attach argv over a real ssh connection) using an ephemeral, loopback-restricted key that was removed afterward — the host's `~/.ssh/authorized_keys` was restored exactly to its prior state.
+- No production dead code or BC shims were introduced (verified with `deadcode`; the only hits are test-only helpers and a pre-existing function).
+
+### Necessary follow-ups
+- **Full remote e2e against real infrastructure.** Run `TestE2ERemoteLima` (`internal/provider/`, `-tags limae2e`) against a genuinely separate SSH-reachable Lima host — or a dedicated second local user account — to exercise the live guest-exec, the two-stage copy round-trip into a running guest, the tmux-survives-detach corroboration, and the local/remote list-isolation assertion that a single-box same-user loopback cannot cover.
+- **Future providers.** The `Provider` interface is shaped so proxmox / DigitalOcean / Linode can be added as new implementations; none was built, stubbed, or configured here (deliberately, per the work order).
