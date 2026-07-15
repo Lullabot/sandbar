@@ -188,7 +188,7 @@ func e2eCloneAndStart(t *testing.T, cli *lima.Client, name string) {
 func e2eAttachArgv(t *testing.T, cli *lima.Client, name string) []string {
 	t.Helper()
 	dir := e2eInstanceDir(t, cli, name)
-	return lima.AttachArgv(name, lima.GuestHome(dir))
+	return lima.AttachArgv(name, lima.GuestHome(dir), os.Getenv("COLORTERM"))
 }
 
 // THE HEADLINE CLAIM: a process started in the attached session survives its
