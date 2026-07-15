@@ -2,7 +2,7 @@
 id: 2
 group: "foundation"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-15
 model: "opus"
 effort: "high"
