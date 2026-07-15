@@ -60,7 +60,7 @@ values:
 
 | Phase | What runs | When |
 |---|---|---|
-| `base` | Heavy, identity-free setup: `base`, (conditionally) `samba`, `dev-tools`, `claude-code` | Building the shared base image once, before any clone exists |
+| `base` | Heavy setup: `base`, (conditionally) `samba`, `dev-tools`, `claude-code` | Building the shared base image once, before any clone exists |
 | `finalize` | Light, per-VM identity: `base`, `user`, `project` | Against each `limactl clone` of the base image |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 

@@ -1,8 +1,7 @@
 # Available Tools
 
 Every sand VM is provisioned from the same base image, so a freshly cloned
-VM comes with the full toolchain below already installed and ready to work
-with.
+VM comes with the tools you normally use.
 
 ## Container & local dev
 

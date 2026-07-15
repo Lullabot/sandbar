@@ -31,7 +31,7 @@ list.
 ## What to expect the first time
 
 The very first VM you create builds a shared base image (`claude-base`),
-which does a full, identity-free install and takes a while. Every VM you
+which can take a while. Every VM you
 create after that clones the base image instead of reinstalling everything,
 so it's fast. See [How Provisioning Works](how-it-works.md) for why it's
 built this way.

@@ -6,7 +6,7 @@ once, not on every VM.
 ```mermaid
 graph TD
     A[sand create] --> B{claude-base exists?}
-    B -- no --> C[Build base image: heavy identity-free install]
+    B -- no --> C[Build base image: heavy install]
     C --> D[Stop base image]
     B -- yes --> D
     D --> E[limactl clone → grow disk]
@@ -16,11 +16,10 @@ graph TD
 
 ## The base image
 
-The first time you create a VM, `sand` runs a heavy, identity-free install
+The first time you create a VM, `sand` runs a heavy install
 into a stopped Lima instance named `claude-base`. This installs the dev
-tools, Claude Code, and everything else that every VM needs, none of which
-depends on who you are. The base image is built at a 20 GiB virtual-disk
-floor. See [Available Tools](available-tools.md) for the full toolchain.
+tools, Claude Code, and everything else that every VM needs. See
+[Available Tools](available-tools.md) for the full toolchain.
 
 Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — `sand` rebuilds it automatically if the
