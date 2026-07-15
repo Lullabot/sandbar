@@ -1234,7 +1234,7 @@
 <p><code>sand</code> splits provisioning into two passes so the expensive work happens
 once, not on every VM.</p>
 <pre class="mermaid"><code>graph TD
-    A[sand create] --&gt; B{claude-base exists?}
+    A[sand create] --&gt; B{sandbar-base exists?}
     B -- no --&gt; C[Build base image: heavy install]
     C --&gt; D[Stop base image]
     B -- yes --&gt; D
@@ -1243,14 +1243,14 @@ once, not on every VM.</p>
     F --&gt; G[Restart → ready]</code></pre>
 <h2 id="the-base-image">The base image</h2>
 <p>The first time you create a VM, <code>sand</code> runs a heavy install
-into a stopped Lima instance named <code>claude-base</code>. This installs the dev
+into a stopped Lima instance named <code>sandbar-base</code>. This installs the dev
 tools, Claude Code, and everything else that every VM needs. See
 <a href="../available-tools/">Available Tools</a> for the full toolchain.</p>
 <p>Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — <code>sand</code> rebuilds it automatically if the
 underlying provisioning logic has changed since it was built, or you can
 force a rebuild yourself with <code>sand create --rebuild</code> (or by deleting
-<code>claude-base</code> and creating a new VM).</p>
+<code>sandbar-base</code> and creating a new VM).</p>
 <h2 id="cloning">Cloning</h2>
 <p>Every VM after the first is a <code>limactl clone</code> of the stopped base image,
 grown to the disk size you asked for. Cloning a stopped VM is far cheaper

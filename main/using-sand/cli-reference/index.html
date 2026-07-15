@@ -1490,7 +1490,7 @@ not a prompt.</p>
 <tr>
 <td><code>--base-name</code></td>
 <td>string</td>
-<td><code>claude-base</code></td>
+<td><code>sandbar-base</code></td>
 <td>Base image instance name; clones are made from this shared, long-lived image.</td>
 </tr>
 <tr>
@@ -1606,7 +1606,7 @@ VM's persistent disk and never appears in a process listing.</p>
 <p>These sound similar and do different things to different objects:</p>
 <ul>
 <li><strong><code>--rebuild</code></strong> deletes and rebuilds the shared <strong>base image</strong> (<code>--base-name</code>,
-  default <code>claude-base</code>) before creating. Use it when the base itself needs to
+  default <code>sandbar-base</code>) before creating. Use it when the base itself needs to
   pick up a playbook or dependency change that a VM cloned from it right now
   is not going to get, or if the base image is corrupted. It is independent of
   <code>--recreate</code> and the two may be combined.</li>
@@ -1663,7 +1663,7 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>Flags:
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>  -base-name string
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        Base image instance name (default &quot;claude-base&quot;)
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        Base image instance name (default &quot;sandbar-base&quot;)
 <a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>  -clone-token string
 <a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>        Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)
 <a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>  -clone-url string

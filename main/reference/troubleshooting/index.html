@@ -1256,7 +1256,7 @@
 <p>Common problems with <code>sand</code> and how to resolve them.</p>
 <h2 id="a-stale-base-image">A stale base image</h2>
 <p><code>sand</code> builds the heavy install (packages, Docker, Node,
-Claude Code, …) once into a stopped base image (<code>claude-base</code> by default),
+Claude Code, …) once into a stopped base image (<code>sandbar-base</code> by default),
 then clones every VM from it. Each base is stamped with the playbook version
 it was built from, and <code>sand</code> rebuilds it automatically the next time you
 create a VM if the current playbook has moved on — so most staleness is
