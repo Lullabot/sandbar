@@ -5,6 +5,8 @@ tile per sand-managed VM. There is no table view and no per-VM detail
 screen — both were deliberately removed. Every verb fires straight from the
 tile under the focus ring.
 
+![The sand board: a running 'drupal-contrib' VM and a stopped 'lullabotdotcom' VM as tiles, with a Messages pane and keybinding footer.](../images/board.png)
+
 ## The header
 
 The header band shows a live readout of the **host**, not the VMs: CPU and
