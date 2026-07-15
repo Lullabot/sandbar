@@ -12,11 +12,14 @@ devtools_docker_packages:
 devtools_packages:
   - cloudflared
   - gh
-  # PHP runtime for the Drupal.org CLI (drupalorg) PHAR. php-curl is named
-  # explicitly because the drupalorg PHAR needs cURL and the consolidated
-  # transaction installs with recommends off (see roles/base/tasks/main.yml).
+  # PHP runtime for the Drupal.org CLI (drupalorg) PHAR. Each extension is
+  # named explicitly because the consolidated transaction installs with
+  # recommends off (see roles/base/tasks/main.yml). drupalorg's Box
+  # requirements checker mandates cURL (php-curl) plus the dom and simplexml
+  # extensions (php-xml) — without php-xml, `drupalorg` aborts at startup.
   - php-cli
   - php-curl
+  - php-xml
 
 # ddev is part of the configurable base tool-set (sand create --with-ddev);
 # folded into the single apt transaction in roles/base/tasks/main.yml only

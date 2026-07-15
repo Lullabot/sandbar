@@ -29,7 +29,7 @@ the clone source, so every provisioned VM inherits them for free.
 - [ ] `roles/dev-tools/tasks/main.yml` installs `glab` from GitLab's official
       signed `.deb` release asset, selecting the correct asset for the guest
       architecture and failing loudly on unsupported architectures.
-- [ ] `roles/dev-tools/tasks/main.yml` installs `php-cli` + `php-curl` and places
+- [ ] `roles/dev-tools/tasks/main.yml` installs the drupalorg PHP runtime (`php-cli`, `php-curl`, `php-xml`) and places
       the pinned `drupalorg.phar` at `/usr/local/bin/drupalorg`, executable and
       on `PATH`.
 - [ ] The new blocks are placed after the existing `gh` block; the `gh` install
@@ -51,7 +51,7 @@ Use your internal Todo tool to track these and keep on track.
   and `uv` blocks).
 - `glab`: no official GitLab apt repo exists — install the vendor's official
   `.deb` release asset via `apt`, version pinned in defaults.
-- `drupalorg`: PHAR requiring PHP 8.1+ with cURL; Debian trixie's `php-cli`
+- `drupalorg`: PHAR requiring PHP 8.1+ with the cURL, dom, and simplexml extensions (php-curl + php-xml); Debian trixie's `php-cli`
   metapackage provides PHP 8.4. `git` is already installed via `base_packages`.
 
 ## Input Dependencies

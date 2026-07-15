@@ -280,9 +280,9 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 001 (completed): Extend the `dev-tools` role to install `glab` (pinned official `.deb`, arch-mapped) and `drupalorg` (PHP runtime + pinned PHAR), plus any conditional docs update. (no dependencies)
 
-### Phase 2: Verify in a provisioned base image
+### ✅ Phase 2: Verify in a provisioned base image
 **Parallel Tasks:**
-- Task 002: Provision a base image / VM and confirm `glab`, `drupalorg`, `php`, and `gh` all work in-VM. (depends on: 001)
+- ✔️ Task 002 (completed): Provision a base image / VM and confirm `glab`, `drupalorg`, `php`, and `gh` all work in-VM. (depends on: 001)
 
 ### Post-phase Actions
 - Run `ansible-playbook --syntax-check site.yml`; commit each phase as a conventional commit.
