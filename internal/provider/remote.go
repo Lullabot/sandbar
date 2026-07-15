@@ -57,13 +57,12 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 		IdentityPath:   cfg.IdentityPath,
 		RemoteLimaHome: cfg.RemoteLimaHome,
 	})
-	dir, err := provision.LocatePlaybook()
-	if err != nil {
-		return nil, err
-	}
+	// PlaybookDir left empty — located lazily on first create/reset (see
+	// NewDefault and Provisioner.playbookDir); a remote `sand shell` must not
+	// trigger playbook extraction either.
 	provision.SetHostFiles(host)
 	core := lima.New(host)
-	prov := &provision.Provisioner{Lima: core, PlaybookDir: dir}
+	prov := &provision.Provisioner{Lima: core}
 	return &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, prov: prov},
 		host:         host,

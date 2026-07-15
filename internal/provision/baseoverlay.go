@@ -133,7 +133,11 @@ func (p *Provisioner) baseConvergeable(cfg vm.CreateConfig) (bool, string) {
 		return false, "its Lima instance file cannot be read"
 	}
 
-	wantYAML, err := RenderBaseOverlay(cfg, p.PlaybookDir)
+	dir, err := p.playbookDir()
+	if err != nil {
+		return false, fmt.Sprintf("the playbook could not be located (%v)", err)
+	}
+	wantYAML, err := RenderBaseOverlay(cfg, dir)
 	if err != nil {
 		return false, fmt.Sprintf("the current base overlay could not be rendered (%v)", err)
 	}

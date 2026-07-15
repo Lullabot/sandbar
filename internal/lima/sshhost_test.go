@@ -640,4 +640,20 @@ func TestSSHRemoteLock(t *testing.T) {
 			t.Fatalf("TryLock(contended) = (%v,%v), want (false,nil)", ok, err)
 		}
 	})
+	t.Run("no flock on remote is an error, not silent contention", func(t *testing.T) {
+		// A macOS/busybox Lima host ships no util-linux flock: the shell reports
+		// command-not-found and exits 127, with no sentinel. TryLock MUST surface
+		// that as an error so lockBase degrades to unserialized — returning
+		// (false,nil) here would hang the first `sand create` polling a lock that
+		// nothing will ever hold.
+		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+			return sh(ctx, "echo 'sh: flock: not found' >&2; exit 127")
+		}}
+		h := hostWith(testCfg, rec)
+		lf, _ := h.OpenLock("/remote/.lima/_sand/base.lock", 0o600)
+		ok, err := lf.TryLock()
+		if ok || err == nil {
+			t.Fatalf("TryLock(no flock) = (%v,%v), want (false, non-nil error)", ok, err)
+		}
+	})
 }

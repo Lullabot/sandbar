@@ -27,10 +27,10 @@ import (
 // changing shape again.
 func NewDefault() (Provider, error) {
 	core := lima.New(lima.NewExecRunner())
-	dir, err := provision.LocatePlaybook()
-	if err != nil {
-		return nil, err
-	}
-	prov := &provision.Provisioner{Lima: core, PlaybookDir: dir}
+	// PlaybookDir is left empty: the Provisioner locates the embedded playbook
+	// lazily, the first time a create/reset actually needs it. Locating it here
+	// would make `sand shell` — which constructs a provider but never provisions
+	// — pay for (and fail on) playbook extraction just to attach to a VM.
+	prov := &provision.Provisioner{Lima: core}
 	return NewLocalLima(core, prov), nil
 }

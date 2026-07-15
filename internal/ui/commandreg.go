@@ -200,7 +200,7 @@ var vmCommands = []vmCommand{
 			// token is not stored, so a VM that cloned a private repo will need it
 			// re-supplied. Fall back to a minimal config if no snapshot exists
 			// (e.g. a pre-snapshot index entry).
-			cfg, found := m.reg.Config(name)
+			cfg, found := m.reg.ConfigInScope(name, m.scope)
 			if !found || cfg.Name == "" {
 				cfg = vm.DefaultCreateConfig()
 				cfg.Name = name
