@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -139,6 +140,13 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 
 	recursive := m.transferRecursive
 	run := func(ctx context.Context, out io.Writer) error {
+		// Announce the copy so the job log always has content. `limactl copy`'s scp
+		// backend prints a live progress meter only to a TTY, and this runs over a
+		// captured pipe (and, for a remote provider, a second SSH hop) with no TTY —
+		// so there is no per-file progress to stream, and without this line the log
+		// would be blank but for the spinner. The endpoints tell the user exactly
+		// what is moving and where.
+		fmt.Fprintf(out, "Copying %s\n     to %s\n\n", src, dst)
 		return m.p.Copy(ctx, out, recursive, src, dst)
 	}
 	// The copy gets the VM's TRANSFER slot, never its provision slot. That is what
