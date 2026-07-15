@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -228,7 +229,7 @@ func (m *model) openForm() tea.Cmd {
 	// an older sand that recorded no tool-set), there is nothing to show but the
 	// default: everything on.
 	cfg := vm.DefaultCreateConfig()
-	if base, ok := provision.BaseToolset(cfg.BaseName); ok {
+	if base, ok := provision.BaseToolset(m.p.HostFiles(), cfg.BaseName); ok {
 		cfg.ApplyToolset(base)
 	}
 	m.toolClaude = cfg.WithClaude
@@ -293,7 +294,10 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 // scope (global or directory-scoped). The reset form uses it to decide whether
 // to hint — via the token field's placeholder — that a saved token exists.
 func (m model) hasStoredToken(name string) bool {
-	for _, pairs := range m.sec.GetAll(name) {
+	// TODO(task 6): real scope — pass the VM's actual connection scope
+	// (m.scope) once secrets are threaded per-scope; for now every VM is
+	// treated as local.
+	for _, pairs := range m.sec.GetAll(name, registry.LocalScope) {
 		if _, ok := pairs["GH_TOKEN"]; ok {
 			return true
 		}

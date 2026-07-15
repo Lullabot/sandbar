@@ -1244,7 +1244,7 @@ func TestStopAllConfirmShowsSpinner(t *testing.T) {
 // is confusing"). A VM with no saved token leaves the placeholder empty.
 func TestResetFormPlaceholdersSavedToken(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.sec.Set("has-token", map[string]string{"GH_TOKEN": "ghp_secret"}); err != nil {
+	if err := m.sec.Set("has-token", registry.LocalScope, map[string]string{"GH_TOKEN": "ghp_secret"}); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
 

@@ -3,6 +3,8 @@ package provision
 import (
 	"io"
 	"path/filepath"
+
+	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // cleanup.go removes an instance THIS RUN created when the run does not finish
@@ -36,23 +38,24 @@ import (
 // Client.Delete runs on context.Background (lima.Client.run), so this still works
 // on the path that brings us here most often: a context the user just cancelled.
 func (p *Provisioner) cleanupInstance(name string, out io.Writer) {
-	dir := instanceDir(name)
+	hf := p.hostFiles()
+	dir := instanceDir(hf, name)
 	if dir == "" {
 		return
 	}
-	if _, err := hostFiles.Stat(dir); err != nil {
+	if _, err := hf.Stat(dir); err != nil {
 		return // nothing was written; nothing to clean up
 	}
 
 	step(out, "Cleaning up the partially created VM %q…", name)
 
 	if err := p.Lima.Delete(name, true); err == nil {
-		if _, err := hostFiles.Stat(dir); err != nil {
+		if _, err := hf.Stat(dir); err != nil {
 			return // limactl took it
 		}
 	}
 
-	if err := hostFiles.RemoveAll(dir); err != nil {
+	if err := hf.RemoveAll(dir); err != nil {
 		step(out, "Could not remove %s: %v — remove it by hand, or `limactl list` will keep failing.", dir, err)
 		return
 	}
@@ -62,8 +65,8 @@ func (p *Provisioner) cleanupInstance(name string, out io.Writer) {
 // instanceDir is a Lima instance's own directory under the Lima home. "" when the
 // name is empty or the Lima home cannot be determined, which the caller reads as
 // "nothing to clean up".
-func instanceDir(name string) string {
-	home := hostFiles.LimaHome()
+func instanceDir(hf lima.HostFiles, name string) string {
+	home := hf.LimaHome()
 	if name == "" || home == "" {
 		return ""
 	}

@@ -193,7 +193,7 @@ func seedLegacyBase(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "lima.yaml"), []byte("images: []\n"), 0o644); err != nil {
 		t.Fatalf("write legacy lima.yaml: %v", err)
 	}
-	stamp := baseVersionPath(legacyBaseName)
+	stamp := baseVersionPath(lima.LocalFiles(), legacyBaseName)
 	if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
 		t.Fatalf("mkdir _sand: %v", err)
 	}
@@ -234,10 +234,10 @@ func TestMigrateLegacyBase(t *testing.T) {
 	}
 	// The version stamp moved with it: the new base is stamped, the old is gone —
 	// so the migrated base reads as current and is not re-applied on the spot.
-	if _, err := os.Stat(baseVersionPath("sandbar-base")); err != nil {
+	if _, err := os.Stat(baseVersionPath(lima.LocalFiles(), "sandbar-base")); err != nil {
 		t.Errorf("new base stamp missing after migration: %v", err)
 	}
-	if _, err := os.Stat(baseVersionPath(legacyBaseName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(baseVersionPath(lima.LocalFiles(), legacyBaseName)); !os.IsNotExist(err) {
 		t.Errorf("legacy stamp still present after migration (err=%v)", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestMigrateLegacyBase_CustomBaseUntouched(t *testing.T) {
 	if len(f.calls) != 0 {
 		t.Fatalf("custom base: expected no migration, got %v", f.calls)
 	}
-	if _, err := os.Stat(baseVersionPath(legacyBaseName)); err != nil {
+	if _, err := os.Stat(baseVersionPath(lima.LocalFiles(), legacyBaseName)); err != nil {
 		t.Errorf("legacy stamp should be untouched for a custom base: %v", err)
 	}
 }
@@ -295,7 +295,7 @@ func TestMigrateLegacyBase_TargetExistsWins(t *testing.T) {
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("target-exists: expected only the target status check, got %v", f.calls)
 	}
-	if _, err := os.Stat(baseVersionPath(legacyBaseName)); err != nil {
+	if _, err := os.Stat(baseVersionPath(lima.LocalFiles(), legacyBaseName)); err != nil {
 		t.Errorf("legacy stamp should be untouched when the target already exists: %v", err)
 	}
 }
@@ -553,8 +553,8 @@ func stubBaseVersion(t *testing.T, current string, currentErr error, stamped map
 	written := map[string]string{}
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return current, currentErr }
-	readBaseVersionFn = func(base string) string { return stamped[base] }
-	writeBaseVersionFn = func(base, v string, _ time.Time) error { written[base] = v; return nil }
+	readBaseVersionFn = func(_ lima.HostFiles, base string) string { return stamped[base] }
+	writeBaseVersionFn = func(_ lima.HostFiles, base, v string, _ time.Time) error { written[base] = v; return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -575,7 +575,7 @@ func stubBaseVersion(t *testing.T, current string, currentErr error, stamped map
 func stubFreshBuiltAt(t *testing.T) {
 	t.Helper()
 	orig := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now(), true }
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) { return time.Now(), true }
 	t.Cleanup(func() { readBaseBuiltAtFn = orig })
 }
 
@@ -605,7 +605,7 @@ func firstSecond(calls [][]string) []struct{ first, second string } {
 func stubBaseOverlay(t *testing.T, dir string, bootstrap string) {
 	t.Helper()
 	orig := baseOverlayFn
-	baseOverlayFn = func(string) (baseOverlay, bool) {
+	baseOverlayFn = func(lima.HostFiles, string) (baseOverlay, bool) {
 		if dir == "" {
 			return baseOverlay{}, false
 		}
@@ -932,7 +932,7 @@ func TestRebuildDeletesTheBaseOnlyWhileHoldingTheBaseLock(t *testing.T) {
 	stubConvergeableBase(t, "/playbook")
 
 	// Another create is preparing/cloning the base and holds its lock.
-	release, err := lockBase(context.Background(), "sandbar-base", io.Discard)
+	release, err := lockBase(context.Background(), lima.LocalFiles(), "sandbar-base", io.Discard)
 	if err != nil {
 		t.Fatalf("lockBase: %v", err)
 	}
@@ -1078,7 +1078,7 @@ func TestCreateVM_FreshBaseUnderAgeThresholdIsNotRefreshed(t *testing.T) {
 	stubBaseVersion(t, "samesha", nil, map[string]string{"sandbar-base": "samesha"})
 	stubConvergeableBase(t, "/playbook")
 	origBuiltAt := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-29 * 24 * time.Hour), true }
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) { return time.Now().Add(-29 * 24 * time.Hour), true }
 	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
@@ -1106,7 +1106,7 @@ func TestCreateVM_AgedBaseIsRefreshedInPlace(t *testing.T) {
 	written := stubBaseVersion(t, "samesha", nil, map[string]string{"sandbar-base": "samesha"}) // NOT stale
 	stubConvergeableBase(t, "/playbook")
 	origBuiltAt := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
 	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
@@ -1169,7 +1169,7 @@ func TestCreateVM_AgedUnconvergeableBaseRebuilds(t *testing.T) {
 	written := stubBaseVersion(t, "samesha", nil, map[string]string{"sandbar-base": "samesha"}) // NOT stale
 	stubBaseOverlay(t, "/some/other/worktree", currentBootstrap(t))                             // unconvergeable
 	origBuiltAt := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) { return time.Now().Add(-31 * 24 * time.Hour), true }
 	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
@@ -1220,8 +1220,8 @@ func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
 	// of them would touch the base at all is the age check.
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
-	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v1" }
+	writeBaseVersionFn = func(lima.HostFiles, string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -1231,7 +1231,7 @@ func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
 	var bmu sync.Mutex
 	builtAt := time.Now().Add(-31 * 24 * time.Hour)
 	origBuiltAt := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) {
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) {
 		bmu.Lock()
 		defer bmu.Unlock()
 		return builtAt, true
@@ -1240,7 +1240,7 @@ func TestConcurrentCreatesRefreshTheAgedBaseOnce(t *testing.T) {
 	// reapplyBase's stamp write is what a real refresh does to prove it happened;
 	// model it here by advancing builtAt to now, exactly as the real
 	// writeBaseVersion (RFC3339 "now") would.
-	writeBaseVersionFn = func(string, string, time.Time) error {
+	writeBaseVersionFn = func(lima.HostFiles, string, string, time.Time) error {
 		bmu.Lock()
 		builtAt = time.Now()
 		bmu.Unlock()
@@ -1968,8 +1968,8 @@ func TestConcurrentCreatesBuildTheBaseOnce(t *testing.T) {
 	// unrelated age-refresh check does not fire either.
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
-	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v1" }
+	writeBaseVersionFn = func(lima.HostFiles, string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -2028,12 +2028,12 @@ func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
 	stamped := "v1"
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v2", nil }
-	readBaseVersionFn = func(string) string {
+	readBaseVersionFn = func(lima.HostFiles, string) string {
 		vmu.Lock()
 		defer vmu.Unlock()
 		return stamped
 	}
-	writeBaseVersionFn = func(_, v string, _ time.Time) error {
+	writeBaseVersionFn = func(_ lima.HostFiles, _, v string, _ time.Time) error {
 		vmu.Lock()
 		stamped = v
 		vmu.Unlock()
@@ -2097,8 +2097,8 @@ func TestARebuildCannotDestroyTheBaseAnotherCreateIsCloning(t *testing.T) {
 	// age-refresh check does not fire and start/shell/stop it before the clone.
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v1", nil }
-	readBaseVersionFn = func(string) string { return "v1" }
-	writeBaseVersionFn = func(string, string, time.Time) error { return nil }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v1" }
+	writeBaseVersionFn = func(lima.HostFiles, string, string, time.Time) error { return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -2179,12 +2179,12 @@ func TestASecondCreateCannotDeleteTheBaseWhileTheFirstIsCloning(t *testing.T) {
 		defer vmu.Unlock()
 		return version, nil
 	}
-	readBaseVersionFn = func(string) string {
+	readBaseVersionFn = func(lima.HostFiles, string) string {
 		vmu.Lock()
 		defer vmu.Unlock()
 		return stamped
 	}
-	writeBaseVersionFn = func(_, v string, _ time.Time) error {
+	writeBaseVersionFn = func(_ lima.HostFiles, _, v string, _ time.Time) error {
 		vmu.Lock()
 		stamped = v
 		version = "v2" // the tree changes the moment the base is built
@@ -2231,8 +2231,8 @@ func TestReapplyBase_ContentOnlyReapplyPreservesTheAptClock(t *testing.T) {
 	var gotBuiltAt time.Time
 	origVer, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
 	playbookVersionFn = func(string, string) (string, error) { return "v2:newsha:ddev+go+java", nil }
-	readBaseVersionFn = func(string) string { return "v2:oldsha:ddev+go+java" } // stale CONTENT
-	writeBaseVersionFn = func(_, _ string, builtAt time.Time) error { gotBuiltAt = builtAt; return nil }
+	readBaseVersionFn = func(lima.HostFiles, string) string { return "v2:oldsha:ddev+go+java" } // stale CONTENT
+	writeBaseVersionFn = func(_ lima.HostFiles, _, _ string, builtAt time.Time) error { gotBuiltAt = builtAt; return nil }
 	t.Cleanup(func() {
 		playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVer, origRead, origWrite
 	})
@@ -2242,7 +2242,7 @@ func TestReapplyBase_ContentOnlyReapplyPreservesTheAptClock(t *testing.T) {
 	// nothing and must leave the clock alone.
 	tenDaysAgo := time.Now().Add(-10 * 24 * time.Hour)
 	origBuiltAt := readBaseBuiltAtFn
-	readBaseBuiltAtFn = func(string) (time.Time, bool) { return tenDaysAgo, true }
+	readBaseBuiltAtFn = func(lima.HostFiles, string) (time.Time, bool) { return tenDaysAgo, true }
 	t.Cleanup(func() { readBaseBuiltAtFn = origBuiltAt })
 	stubConvergeableBase(t, "/playbook")
 

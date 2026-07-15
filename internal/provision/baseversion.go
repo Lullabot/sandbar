@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // A base image bakes in a snapshot of the playbook (rsynced into /root/playbook
@@ -33,7 +35,12 @@ import (
 
 // playbookVersionFn, readBaseVersionFn, writeBaseVersionFn and
 // readBaseBuiltAtFn are indirected through package vars so tests can stub the
-// filesystem side effects.
+// filesystem side effects. readBaseVersionFn, writeBaseVersionFn and
+// readBaseBuiltAtFn take the host-access handle (lima.HostFiles) as their
+// first argument — the explicit per-operation seam that replaced this
+// package's old process-global (see hostaccess.go) — while playbookVersionFn
+// needs none: it reads the playbook checkout itself, never the base image's
+// host state.
 var (
 	playbookVersionFn  = contentPlaybookVersion
 	readBaseVersionFn  = readBaseVersion
@@ -132,12 +139,12 @@ func contentPlaybookVersion(dir, toolset string) (string, error) {
 }
 
 // baseVersionPath is the host file recording which playbook version a base
-// image was built from. It sits under the Lima home (hostFiles.LimaHome — both
-// Lima's own per-instance state and sand's state ABOUT an instance live under it)
-// so it lives beside the base it describes, namespaced in a _sand subdir to avoid
+// image was built from. It sits under the Lima home (hf.LimaHome — both Lima's
+// own per-instance state and sand's state ABOUT an instance live under it) so
+// it lives beside the base it describes, namespaced in a _sand subdir to avoid
 // colliding with Lima's own state.
-func baseVersionPath(baseName string) string {
-	return filepath.Join(hostFiles.LimaHome(), "_sand", baseName+".playbook-version")
+func baseVersionPath(hf lima.HostFiles, baseName string) string {
+	return filepath.Join(hf.LimaHome(), "_sand", baseName+".playbook-version")
 }
 
 // baseStamp is a base image's on-disk stamp: the content-hash version (task 4)
@@ -178,8 +185,8 @@ func parseBaseStamp(data []byte) (baseStamp, bool) {
 // which the caller treats as stale so it is rebuilt once. It reads only line 1
 // (the version); a missing or unparseable BuiltAt (line 2) has no bearing on
 // this — readBaseBuiltAt is the seam for that.
-func readBaseVersion(baseName string) string {
-	b, err := hostFiles.ReadFile(baseVersionPath(baseName))
+func readBaseVersion(hf lima.HostFiles, baseName string) string {
+	b, err := hf.ReadFile(baseVersionPath(hf, baseName))
 	if err != nil {
 		return ""
 	}
@@ -192,8 +199,8 @@ func readBaseVersion(baseName string) string {
 // timestamp (an older stamp written before this task, or a corrupt one). The
 // caller (ensureBaseStopped's age check) reads ok=false as "cannot prove this
 // base is fresh" and refreshes it once rather than assuming it is new.
-func readBaseBuiltAt(baseName string) (time.Time, bool) {
-	b, err := hostFiles.ReadFile(baseVersionPath(baseName))
+func readBaseBuiltAt(hf lima.HostFiles, baseName string) (time.Time, bool) {
+	b, err := hf.ReadFile(baseVersionPath(hf, baseName))
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -220,9 +227,9 @@ func readBaseBuiltAt(baseName string) (time.Time, bool) {
 //
 // A write failure is non-fatal to the build: a missing/stale stamp just forces
 // a rebuild or refresh on the next create.
-func writeBaseVersion(baseName, version string, builtAt time.Time) error {
+func writeBaseVersion(hf lima.HostFiles, baseName, version string, builtAt time.Time) error {
 	content := version + "\n" + builtAt.UTC().Format(time.RFC3339) + "\n"
-	return hostFiles.WriteFile(baseVersionPath(baseName), []byte(content), 0o755, 0o644)
+	return hf.WriteFile(baseVersionPath(hf, baseName), []byte(content), 0o755, 0o644)
 }
 
 // shortVersion trims a stamp for human-readable log lines: full stamps are a
@@ -321,8 +328,12 @@ func shrunkTools(haveStamp, want string) []string {
 // back to their own default (all on) in that case. A base built with NOTHING
 // selected stamps "none", which parses to an empty set with ok=TRUE — an empty
 // selection is a real answer and must not be confused with an absent one.
-func BaseToolset(baseName string) (map[string]bool, bool) {
-	suffix := toolsetFromStamp(readBaseVersionFn(baseName))
+//
+// hf is the resolved provider's host-access handle (see provider.Provider.
+// HostFiles) — the base's stamp lives on whichever host limactl actually runs
+// on, not necessarily this one.
+func BaseToolset(hf lima.HostFiles, baseName string) (map[string]bool, bool) {
+	suffix := toolsetFromStamp(readBaseVersionFn(hf, baseName))
 	if suffix == "" {
 		return nil, false
 	}

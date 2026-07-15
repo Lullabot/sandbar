@@ -11,6 +11,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -194,7 +195,10 @@ func (m model) secretsFor(name string) (user string, scopes map[string]map[strin
 	if cfg, ok := m.reg.ConfigInScope(name, m.scope); ok && cfg.User != "" {
 		user = cfg.User
 	}
-	return user, m.sec.GetAll(name)
+	// TODO(task 6): real scope — pass the VM's actual connection scope
+	// (m.scope) once secrets are threaded per-scope; for now every VM is
+	// treated as local.
+	return user, m.sec.GetAll(name, registry.LocalScope)
 }
 
 // deleteCmd force-removes a VM.

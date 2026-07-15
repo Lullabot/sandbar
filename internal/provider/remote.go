@@ -58,15 +58,13 @@ func (p *remoteLimaProvider) HostResources() HostResources {
 }
 
 // NewRemoteLima builds the remote-Lima-over-SSH provider for cfg. It wires ONE
-// SSHHost as both the lima core's Runner and the provisioner's host-access seam,
-// so limactl runs on the remote host and the base image / stamp / lock are read
-// and written there — the whole difference from local Lima is this one swap.
-//
-// It calls provision.SetHostFiles because the provisioner's base-image file
-// touches go through a package-global seam (see that setter's doc); a single sand
-// process runs exactly one provider, so pointing that seam at the remote host on
-// construction is correct and does not disturb the default local path, which
-// never calls it.
+// SSHHost as both the lima core's Runner and the provisioner's host-access
+// handle (Provisioner.HostFiles), so limactl runs on the remote host and the
+// base image / stamp / lock are read and written there — the whole difference
+// from local Lima is this one swap. Unlike the process-global this seam used
+// to be, that handle lives on THIS provisioner alone: a local and a remote
+// provider can coexist in the same process without one's base-image touches
+// leaking onto the other's host.
 func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	host := lima.NewSSHHost(lima.SSHConfig{
 		Host:           cfg.Host,
@@ -78,11 +76,10 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	// PlaybookDir left empty — located lazily on first create/reset (see
 	// NewDefault and Provisioner.playbookDir); a remote `sand shell` must not
 	// trigger playbook extraction either.
-	provision.SetHostFiles(host)
 	core := lima.New(host)
-	prov := &provision.Provisioner{Lima: core}
+	prov := &provision.Provisioner{Lima: core, HostFiles: host}
 	return &remoteLimaProvider{
-		limaProvider: &limaProvider{core: core, prov: prov},
+		limaProvider: &limaProvider{core: core, prov: prov, hostFiles: host},
 		host:         host,
 	}, nil
 }

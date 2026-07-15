@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -55,6 +56,7 @@ type Provider struct {
 	PreflightFunc     func() error
 	HostResourcesFunc func() provider.HostResources
 	HostUserFunc      func() string
+	HostFilesFunc     func() lima.HostFiles
 }
 
 // Compile-time proof the fake satisfies the whole seam.
@@ -224,4 +226,17 @@ func (f *Provider) HostUser() string {
 		return f.HostUserFunc()
 	}
 	return ""
+}
+
+// --- Host access ---
+
+// HostFiles defaults to the local filesystem — the same default a real
+// local-Lima provider carries — so a test that never sets HostFilesFunc still
+// gets a usable, non-nil handle rather than a nil-interface panic the moment a
+// consumer (e.g. provision.BaseToolset) calls a method on it.
+func (f *Provider) HostFiles() lima.HostFiles {
+	if f.HostFilesFunc != nil {
+		return f.HostFilesFunc()
+	}
+	return lima.LocalFiles()
 }

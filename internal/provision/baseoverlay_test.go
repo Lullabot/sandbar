@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -66,7 +67,7 @@ func writeInstanceYAML(t *testing.T, baseName, content string) {
 func TestReadBaseOverlayReadsTheInstanceFile(t *testing.T) {
 	writeInstanceYAML(t, "sandbar-base", limaInstanceYAML)
 
-	got, ok := readBaseOverlay("sandbar-base")
+	got, ok := readBaseOverlay(lima.LocalFiles(), "sandbar-base")
 	if !ok {
 		t.Fatal("readBaseOverlay could not read the base's instance file")
 	}
@@ -83,7 +84,7 @@ func TestReadBaseOverlayReadsTheInstanceFile(t *testing.T) {
 // converge" — never as "converge anyway".
 func TestReadBaseOverlayAbsentInstance(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
-	if o, ok := readBaseOverlay("sandbar-base"); ok {
+	if o, ok := readBaseOverlay(lima.LocalFiles(), "sandbar-base"); ok {
 		t.Fatalf("readBaseOverlay on an absent instance returned %+v, ok=true", o)
 	}
 }

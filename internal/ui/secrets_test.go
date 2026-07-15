@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -280,7 +281,7 @@ func TestSecretsEditorTypeInsertsAndSaves(t *testing.T) {
 	if m.view != viewBoard {
 		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
-	if got := m.sec.Get("claude"); got["FOO"] != "bar" {
+	if got := m.sec.Get("claude", registry.LocalScope); got["FOO"] != "bar" {
 		t.Fatalf("typed secret was not persisted, Store.Get = %v", got)
 	}
 }
@@ -301,7 +302,7 @@ func TestSecretsEditorTypeMultiScopeAndSaves(t *testing.T) {
 	if m.secretsErr != nil {
 		t.Fatalf("a valid multi-scope buffer should save cleanly, got error: %v", m.secretsErr)
 	}
-	scopes := m.sec.GetAll("claude")
+	scopes := m.sec.GetAll("claude", registry.LocalScope)
 	if scopes[""]["EDITOR"] != "vim" {
 		t.Fatalf("global scope not persisted, got %v", scopes[""])
 	}
@@ -374,7 +375,7 @@ func TestSecretsEditorEscDiscards(t *testing.T) {
 	if m.view != viewBoard {
 		t.Fatalf("esc should return to the board, got %v", m.view)
 	}
-	if got := m.sec.Get("claude"); len(got) != 0 {
+	if got := m.sec.Get("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("esc must not persist anything, Store.Get returned %v", got)
 	}
 }
@@ -393,7 +394,7 @@ func TestSecretsEditorSaveValidPersists(t *testing.T) {
 	if m.view != viewBoard {
 		t.Fatalf("a valid save should return to the board, got %v", m.view)
 	}
-	got := m.sec.Get("claude")
+	got := m.sec.Get("claude", registry.LocalScope)
 	if got["A"] != "1" || got["B"] != "2" {
 		t.Fatalf("Store.Get(%q) = %v, want {A:1 B:2}", "claude", got)
 	}
@@ -418,7 +419,7 @@ func TestSecretsEditorSaveInvalidStaysAndDoesNotPersist(t *testing.T) {
 	if m.secretsErr == nil {
 		t.Fatal("an invalid save should surface a parse error")
 	}
-	if got := m.sec.Get("claude"); len(got) != 0 {
+	if got := m.sec.Get("claude", registry.LocalScope); len(got) != 0 {
 		t.Fatalf("an invalid save must not persist anything, Store.Get returned %v", got)
 	}
 }

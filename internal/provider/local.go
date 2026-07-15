@@ -27,6 +27,11 @@ import (
 type limaProvider struct {
 	core *lima.Client
 	prov *provision.Provisioner
+	// hostFiles is this provider's host-access handle — lima.LocalFiles() here
+	// (local Lima IS the host limactl runs on); a remote provider embeds this
+	// struct and overrides it with its SSHHost at construction (see
+	// NewRemoteLima). See Provider.HostFiles.
+	hostFiles lima.HostFiles
 }
 
 // NewLocalLima builds the local Lima provider from an already-constructed lima
@@ -34,7 +39,7 @@ type limaProvider struct {
 // sand wires it today). It returns the Provider interface so callers depend on
 // the seam, not the concrete type.
 func NewLocalLima(core *lima.Client, prov *provision.Provisioner) Provider {
-	return &limaProvider{core: core, prov: prov}
+	return &limaProvider{core: core, prov: prov, hostFiles: lima.LocalFiles()}
 }
 
 // var _ Provider = (*limaProvider)(nil) is the compile-time proof that the local
@@ -123,3 +128,9 @@ func (p *limaProvider) GuestPath(name, path string) string { return lima.GuestPa
 // --- Preflight ---
 
 func (p *limaProvider) Preflight() error { return p.core.Preflight() }
+
+// --- Host access ---
+
+// HostFiles returns the local filesystem: local Lima IS the host limactl runs
+// on. See Provider.HostFiles.
+func (p *limaProvider) HostFiles() lima.HostFiles { return p.hostFiles }

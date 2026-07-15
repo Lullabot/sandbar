@@ -12,11 +12,23 @@
 // ~/<scope>/ on the guest. The scope is therefore a second injection surface
 // beyond the KEY and is validated at this storage boundary.
 //
-// The on-disk shape mirrors the registry package:
-// {"version":2,"vms":{"<name>":{"<scope>":{"KEY":"VALUE"}}}}. Load is tolerant
-// of a missing or corrupt file, transparently migrates a v1 (or unversioned)
-// flat file by promoting its pairs to the global scope, and refuses a file
-// from a newer sand. It always returns a usable, non-nil store.
+// Orthogonal to that directory scope, every VM is ALSO keyed by a CONNECTION
+// scope (registry.Scope{Provider, RemoteTarget}) identifying which host the VM
+// lives on. The connection scope wraps the whole per-VM entry (directory
+// scopes and all) so a `web` on the local Lima provider and a same-named `web`
+// on a remote host never share, or clobber, each other's secrets. Do not
+// confuse the two: ValidScope/the directory scope namespaces PATHS within one
+// VM; the connection scope namespaces WHICH VM (by host).
+//
+// The on-disk shape (version 3) mirrors the registry package's own
+// Provider/RemoteTarget fields for readability:
+// {"version":3,"scopes":[{"provider":"lima","vms":{"<name>":{"<dirscope>":{"KEY":"VALUE"}}}}]}.
+// Load is tolerant of a missing or corrupt file, transparently migrates an
+// older file — v1 (or unversioned) flat pairs, or v2's bare name->dirscope
+// keying — by lifting every VM under registry.LocalScope (no connection scope
+// existed before this format, so anything they recorded could only ever have
+// been local), and refuses a file from a newer sand. It always returns a
+// usable, non-nil store.
 package secrets
 
 import (
@@ -29,25 +41,44 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/lullabot/sandbar/internal/registry"
 )
 
 // schemaVersion is the on-disk format this build writes and understands. A file
 // stamped with a higher version is refused rather than misparsed (a newer sand
 // may have added fields this build would silently drop on the next save).
-const schemaVersion = 2
+//
+// Version 3 added the connection-scope dimension (see the package doc):
+// every VM's entry is now nested inside a scope group keyed by
+// Provider/RemoteTarget instead of living directly under "vms".
+const schemaVersion = 3
 
-// fileSchema is the on-disk JSON shape:
-// {"version":2,"vms":{"<name>":{"<scope>":{"KEY":"VALUE"}}}}.
+// fileSchema is the on-disk JSON shape for version 3:
+// {"version":3,"scopes":[{"provider":"...","remote_target":"...","vms":{"<name>":{"<dirscope>":{"KEY":"VALUE"}}}}]}.
+// A list (rather than a map keyed by some serialized scope string) keeps the
+// connection scope's fields — Provider and RemoteTarget — individually
+// readable, mirroring how the registry package records them on entry.
 type fileSchema struct {
-	Version int                                     `json:"version"`
-	VMs     map[string]map[string]map[string]string `json:"vms"`
+	Version int          `json:"version"`
+	Scopes  []scopeGroup `json:"scopes"`
+}
+
+// scopeGroup is one connection scope's VMs in the v3 on-disk shape. Provider
+// and RemoteTarget together are exactly registry.Scope; RemoteTarget is
+// omitted when empty (the local provider), matching the registry package's own
+// per-entry fields.
+type scopeGroup struct {
+	Provider     string                                  `json:"provider"`
+	RemoteTarget string                                  `json:"remote_target,omitempty"`
+	VMs          map[string]map[string]map[string]string `json:"vms"`
 }
 
 // versionProbe decodes only the "version" field so LoadFrom can pick the
-// correct concrete type (v1File vs fileSchema) BEFORE attempting a full
-// decode. v1 and v2 both nest a map under "vms", but at different depths (a
-// string value vs a further map), so decoding v1 bytes directly into
-// fileSchema would fail; the version must be known first.
+// correct concrete type (v1File vs fileSchemaV2 vs fileSchema) BEFORE
+// attempting a full decode. Each version nests its "vms" map at a different
+// shape, so decoding older bytes directly into the current fileSchema would
+// fail; the version must be known first.
 type versionProbe struct {
 	Version int `json:"version"`
 }
@@ -58,6 +89,55 @@ type versionProbe struct {
 type v1File struct {
 	Version int                          `json:"version"`
 	VMs     map[string]map[string]string `json:"vms"`
+}
+
+// fileSchemaV2 is the pre-connection-scope on-disk shape:
+// {"version":2,"vms":{"<name>":{"<dirscope>":{"KEY":"VALUE"}}}}. Every VM it
+// records predates connection scopes and is lifted under registry.LocalScope
+// on load — see LoadFrom.
+type fileSchemaV2 struct {
+	Version int                                     `json:"version"`
+	VMs     map[string]map[string]map[string]string `json:"vms"`
+}
+
+// toScopeGroups converts the in-memory connection-scope-keyed map into the
+// v3 on-disk slice shape, sorted by (Provider, RemoteTarget) so two saves of
+// identical content produce byte-identical files. A connection scope with no
+// VMs left (SetAll/Remove already prune these from the in-memory map, but this
+// guards the invariant at the boundary too) is omitted rather than persisted
+// as an empty group.
+func toScopeGroups(vms map[registry.Scope]map[string]map[string]map[string]string) []scopeGroup {
+	groups := make([]scopeGroup, 0, len(vms))
+	for connScope, byName := range vms {
+		if len(byName) == 0 {
+			continue
+		}
+		groups = append(groups, scopeGroup{
+			Provider:     connScope.Provider,
+			RemoteTarget: connScope.RemoteTarget,
+			VMs:          byName,
+		})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].Provider != groups[j].Provider {
+			return groups[i].Provider < groups[j].Provider
+		}
+		return groups[i].RemoteTarget < groups[j].RemoteTarget
+	})
+	return groups
+}
+
+// fromScopeGroups is the inverse of toScopeGroups, used when decoding a v3
+// file: each group's Provider/RemoteTarget becomes the registry.Scope key.
+func fromScopeGroups(groups []scopeGroup) map[registry.Scope]map[string]map[string]map[string]string {
+	out := make(map[registry.Scope]map[string]map[string]map[string]string, len(groups))
+	for _, g := range groups {
+		if len(g.VMs) == 0 {
+			continue
+		}
+		out[registry.Scope{Provider: g.Provider, RemoteTarget: g.RemoteTarget}] = g.VMs
+	}
+	return out
 }
 
 // keyRE is the exact grammar for a shell-safe environment variable name. Keys are
@@ -106,17 +186,20 @@ func ValidScope(scope string) bool {
 // An empty path disables persistence (used in tests). It holds no mutex, so it
 // is copy-safe to embed by value in the TUI model — callers hold a *Store and the
 // TUI passes that pointer through its by-value Update. Data is always held in
-// memory as v2 (name -> scope -> KEY -> VALUE), regardless of the on-disk
-// version it was loaded from.
+// memory as v3 (connScope -> name -> dirScope -> KEY -> VALUE), regardless of
+// the on-disk version it was loaded from: the outer registry.Scope key is the
+// CONNECTION scope (which host the VM lives on); the innermost string key
+// remains the pre-existing directory scope (ValidScope) — the two are
+// orthogonal, see the package doc.
 type Store struct {
 	path string
-	vms  map[string]map[string]map[string]string
+	vms  map[registry.Scope]map[string]map[string]map[string]string
 }
 
 // NewEmpty returns an in-memory store with no backing file. save() is a no-op for
 // it, so it never touches disk.
 func NewEmpty() *Store {
-	return &Store{vms: map[string]map[string]map[string]string{}}
+	return &Store{vms: map[registry.Scope]map[string]map[string]map[string]string{}}
 }
 
 // defaultPath mirrors the registry's XDG derivation but for the secrets file:
@@ -143,11 +226,13 @@ func Load() (*Store, error) {
 // "<path>.corrupt" — so a later save cannot silently clobber recoverable data —
 // and the error is returned for the caller to surface. A file stamped with a
 // version newer than this build understands is refused with an "upgrade sand"
-// error. A v1 (or unversioned) file is transparently migrated: each VM's flat
-// KEY=VALUE map is promoted to the global scope (""); the next save stamps the
-// file as version 2. In every case the returned store is non-nil and usable.
+// error. A v1 (or unversioned) file, or a v2 file, is transparently migrated:
+// no connection scope existed before version 3, so every VM either format
+// recorded is lifted under registry.LocalScope with its secrets (and, for v2,
+// its directory scopes) intact; the next save stamps the file as version 3. In
+// every case the returned store is non-nil and usable.
 func LoadFrom(path string) (*Store, error) {
-	s := &Store{path: path, vms: map[string]map[string]map[string]string{}}
+	s := &Store{path: path, vms: map[registry.Scope]map[string]map[string]map[string]string{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -171,71 +256,96 @@ func LoadFrom(path string) (*Store, error) {
 
 	if probe.Version <= 1 {
 		// v1 (or unversioned) shape: vms[name] = map[string]string. Decode
-		// into the concrete v1 type — NOT the v2 struct, since a string
-		// value where v2 expects a nested map would fail to unmarshal.
+		// into the concrete v1 type — NOT the v2/v3 structs, since a string
+		// value where those expect a nested map would fail to unmarshal.
 		var v1 v1File
 		if err := json.Unmarshal(data, &v1); err != nil {
 			_ = os.Rename(path, path+".corrupt")
 			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 		}
+		byName := make(map[string]map[string]map[string]string, len(v1.VMs))
 		for name, pairs := range v1.VMs {
 			cp := make(map[string]string, len(pairs))
 			for k, v := range pairs {
 				cp[k] = v
 			}
-			s.vms[name] = map[string]map[string]string{"": cp}
+			byName[name] = map[string]map[string]string{"": cp}
+		}
+		if len(byName) > 0 {
+			s.vms[registry.LocalScope] = byName
 		}
 		return s, nil
 	}
 
-	// probe.Version == 2 (the only remaining case, since >2 and <=1 are
-	// handled above): decode the full v2 shape.
+	if probe.Version == 2 {
+		// Pre-connection-scope shape: vms[name][dirscope] = KEY->VALUE, with
+		// no notion of which host a VM lives on. Every VM it records predates
+		// connection scopes and so could only ever have been local — lift the
+		// whole map under registry.LocalScope, secrets and directory scopes
+		// intact.
+		var parsed fileSchemaV2
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			_ = os.Rename(path, path+".corrupt")
+			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		}
+		if len(parsed.VMs) > 0 {
+			s.vms[registry.LocalScope] = parsed.VMs
+		}
+		return s, nil
+	}
+
+	// probe.Version == 3 (the only remaining case, since >3, <=1, and ==2 are
+	// handled above): decode the full v3 shape directly.
 	var parsed fileSchema
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		_ = os.Rename(path, path+".corrupt")
 		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
-	if parsed.VMs != nil {
-		s.vms = parsed.VMs
+	if parsed.Scopes != nil {
+		s.vms = fromScopeGroups(parsed.Scopes)
 	}
 	return s, nil
 }
 
-// Get returns a defensive copy of the global-scope (scope "") KEY=VALUE pairs
-// stored for vm, or an empty (non-nil) map if none. It is a convenience
-// wrapper over GetAll for callers that only care about the global scope. The
-// copy prevents a caller from mutating the store's backing map behind its
-// back.
-func (s *Store) Get(vm string) map[string]string {
-	out := make(map[string]string, len(s.vms[vm][""]))
-	for k, v := range s.vms[vm][""] {
+// Get returns a defensive copy of the global-scope (directory scope "")
+// KEY=VALUE pairs stored for vm under connScope — the registry.Scope
+// identifying which host vm lives on (registry.LocalScope for the local Lima
+// provider) — or an empty (non-nil) map if none. It is a convenience wrapper
+// over GetAll for callers that only care about the global scope. The copy
+// prevents a caller from mutating the store's backing map behind its back.
+func (s *Store) Get(vm string, connScope registry.Scope) map[string]string {
+	out := make(map[string]string, len(s.vms[connScope][vm][""]))
+	for k, v := range s.vms[connScope][vm][""] {
 		out[k] = v
 	}
 	return out
 }
 
-// Set replaces vm's global-scope (scope "") pairs with a copy of pairs and
-// persists the change, leaving any other scope for vm untouched. It is a
+// Set replaces vm's global-scope (directory scope "") pairs, under connScope,
+// with a copy of pairs and persists the change, leaving any other directory
+// scope for vm (and any other connection scope entirely) untouched. It is a
 // convenience wrapper over SetAll. Every key is validated first (ValidKey); a
 // single invalid key rejects the whole call without mutating the store or
 // touching disk, so an injectable key can never be persisted. An empty pairs
-// map drops the global scope (and, if no other scope remains, vm's entry)
-// rather than persisting an empty object.
-func (s *Store) Set(vm string, pairs map[string]string) error {
-	scopes := s.GetAll(vm)
+// map drops the global scope (and, if no other directory scope remains, vm's
+// entry under connScope) rather than persisting an empty object.
+func (s *Store) Set(vm string, connScope registry.Scope, pairs map[string]string) error {
+	scopes := s.GetAll(vm, connScope)
 	if len(pairs) == 0 {
 		delete(scopes, "")
 	} else {
 		scopes[""] = pairs
 	}
-	return s.SetAll(vm, scopes)
+	return s.SetAll(vm, connScope, scopes)
 }
 
-// GetAll returns a defensive deep copy of vm's scope -> KEY -> VALUE map, or
-// an empty (non-nil) map if vm has no entry. Mutating the returned map (at
-// any depth) does not affect the store.
-func (s *Store) GetAll(vm string) map[string]map[string]string {
-	src := s.vms[vm]
+// GetAll returns a defensive deep copy of vm's directory-scope -> KEY -> VALUE
+// map under connScope, or an empty (non-nil) map if vm has no entry there.
+// Mutating the returned map (at any depth) does not affect the store. A
+// same-named vm under a DIFFERENT connScope is never visible here — that
+// isolation is the whole point of the connection scope.
+func (s *Store) GetAll(vm string, connScope registry.Scope) map[string]map[string]string {
+	src := s.vms[connScope][vm]
 	out := make(map[string]map[string]string, len(src))
 	for scope, pairs := range src {
 		cp := make(map[string]string, len(pairs))
@@ -247,14 +357,15 @@ func (s *Store) GetAll(vm string) map[string]map[string]string {
 	return out
 }
 
-// SetAll replaces vm's scopes with a deep copy of scopes and persists the
-// change. Every scope is validated (ValidScope) and every key within every
-// scope is validated (ValidKey) BEFORE any mutation, so the whole call is
-// rejected on the first invalid scope or key without touching the in-memory
-// store or disk (all-or-nothing, mirroring PR 27's Set). An empty scopes map,
-// or one whose scopes are all empty, drops vm's entry entirely rather than
-// persisting an empty object tree.
-func (s *Store) SetAll(vm string, scopes map[string]map[string]string) error {
+// SetAll replaces vm's directory scopes, under connScope, with a deep copy of
+// scopes and persists the change. Every directory scope is validated
+// (ValidScope) and every key within every scope is validated (ValidKey)
+// BEFORE any mutation, so the whole call is rejected on the first invalid
+// scope or key without touching the in-memory store or disk (all-or-nothing,
+// mirroring PR 27's Set). An empty scopes map, or one whose scopes are all
+// empty, drops vm's entry under connScope entirely (pruning connScope itself
+// once it holds no VMs) rather than persisting an empty object tree.
+func (s *Store) SetAll(vm string, connScope registry.Scope, scopes map[string]map[string]string) error {
 	for scope, pairs := range scopes {
 		if !ValidScope(scope) {
 			return fmt.Errorf("invalid secret scope %q: must be a safe home-relative directory path", scope)
@@ -278,20 +389,40 @@ func (s *Store) SetAll(vm string, scopes map[string]map[string]string) error {
 		cp[scope] = inner
 	}
 
+	byName := s.vms[connScope]
 	if len(cp) == 0 {
-		if _, ok := s.vms[vm]; !ok {
+		if byName == nil {
 			return s.save()
 		}
-		delete(s.vms, vm)
+		if _, ok := byName[vm]; !ok {
+			return s.save()
+		}
+		delete(byName, vm)
+		if len(byName) == 0 {
+			delete(s.vms, connScope)
+		}
 		return s.save()
 	}
-	s.vms[vm] = cp
+	if byName == nil {
+		byName = map[string]map[string]map[string]string{}
+		s.vms[connScope] = byName
+	}
+	byName[vm] = cp
 	return s.save()
 }
 
-// Remove drops vm's entry (all scopes) and persists the change.
-func (s *Store) Remove(vm string) error {
-	delete(s.vms, vm)
+// Remove drops vm's entry (all directory scopes) under connScope and persists
+// the change, leaving any same-named vm under a DIFFERENT connScope untouched.
+// The connScope entry itself is pruned once it holds no more VMs, so an empty
+// connection scope never lingers on disk.
+func (s *Store) Remove(vm string, connScope registry.Scope) error {
+	byName := s.vms[connScope]
+	if byName != nil {
+		delete(byName, vm)
+		if len(byName) == 0 {
+			delete(s.vms, connScope)
+		}
+	}
 	return s.save()
 }
 
@@ -349,7 +480,7 @@ func (s *Store) save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(fileSchema{Version: schemaVersion, VMs: s.vms}, "", "  ")
+	data, err := json.MarshalIndent(fileSchema{Version: schemaVersion, Scopes: toScopeGroups(s.vms)}, "", "  ")
 	if err != nil {
 		return err
 	}

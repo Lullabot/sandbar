@@ -134,6 +134,15 @@ type Provisioner struct {
 	// constructs a Provisioner but never provisions, and must not pay for (or fail
 	// on) embedded-playbook extraction just to attach to a running VM.
 	PlaybookDir string
+	// HostFiles is the host-access handle every base-image touch this
+	// Provisioner performs (overlay read, version stamp, base lock,
+	// partial-instance cleanup) reads and writes through. Left nil, it defaults
+	// to the local filesystem (see hostFiles() in hostaccess.go), so a caller
+	// that never sets it — every existing local-Lima construction — behaves
+	// exactly as before. A remote-Lima provider sets this to its SSHHost so
+	// those touches land on the host where limactl actually runs, not on this
+	// one (see provider.NewRemoteLima).
+	HostFiles lima.HostFiles
 }
 
 // playbookDir returns the host playbook directory, locating it on first use when
@@ -194,6 +203,7 @@ func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io
 // running a per-phase timed sequence (createVM, Reset) can share one timer and
 // summary across the whole run instead of BuildBase starting its own.
 func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
+	hf := p.hostFiles()
 	dir, err := p.playbookDir()
 	if err != nil {
 		return fmt.Errorf("locate playbook: %w", err)
@@ -203,7 +213,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// for remote Lima that is the remote machine, not this laptop, so a local
 	// playbook path would mount an empty/absent directory. StagePlaybook is a
 	// no-op for local Lima and a copy to the remote host for remote Lima.
-	mountDir, err := hostFiles.StagePlaybook(ctx, dir)
+	mountDir, err := hf.StagePlaybook(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("stage playbook: %w", err)
 	}
@@ -217,11 +227,11 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// cannot open ("open /tmp/sand-base-*.yaml: no such file or directory"). The
 	// seam writes it beside the base's other sand state under _sand/ (local or
 	// remote), and it is removed once the instance has been created from it.
-	overlayPath := filepath.Join(hostFiles.LimaHome(), "_sand", "sand-base-"+cfg.BaseName+".yaml")
-	if err := hostFiles.WriteFile(overlayPath, overlay, 0o700, 0o600); err != nil {
+	overlayPath := filepath.Join(hf.LimaHome(), "_sand", "sand-base-"+cfg.BaseName+".yaml")
+	if err := hf.WriteFile(overlayPath, overlay, 0o700, 0o600); err != nil {
 		return fmt.Errorf("write base overlay: %w", err)
 	}
-	defer func() { _ = hostFiles.RemoveAll(overlayPath) }()
+	defer func() { _ = hf.RemoveAll(overlayPath) }()
 
 	step(out, "Building base image %q — downloads Debian and boots once; the first run takes several minutes…", cfg.BaseName)
 	if err := timer.time("base image creation", func() error {
@@ -269,7 +279,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// time, so neither branch here is fatal to the build.
 	if v, err := playbookVersionFn(dir, cfg.ToolsetKey()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
-	} else if err := writeBaseVersionFn(cfg.BaseName, v, time.Now()); err != nil {
+	} else if err := writeBaseVersionFn(hf, cfg.BaseName, v, time.Now()); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will rebuild on the next create.", err)
 	}
 	return nil
@@ -448,7 +458,7 @@ func (p *Provisioner) hasLiveTmux(ctx context.Context, name string) bool {
 // nobody should have to reason about while a VM's disk is being deleted underneath
 // them.
 func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
-	release, err := lockBase(ctx, cfg.BaseName, out)
+	release, err := lockBase(ctx, p.hostFiles(), cfg.BaseName, out)
 	if err != nil {
 		return err // only a cancelled context gets here
 	}
@@ -501,11 +511,12 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 	if cfg.BaseName == legacyBaseName || cfg.BaseName != vm.DefaultCreateConfig().BaseName {
 		return // not the default base's rename — nothing to migrate
 	}
+	hf := p.hostFiles()
 	// Cheap host-side gate: with no legacy instance dir there is nothing to rename,
 	// and this must cost zero limactl calls on the overwhelmingly common path. The
 	// stat goes through the host-access seam (not os.Stat) so a remote-Lima
 	// provider checks — and renames — the base on the host that actually owns it.
-	if _, err := hostFiles.Stat(filepath.Join(hostFiles.LimaHome(), legacyBaseName, "lima.yaml")); err != nil {
+	if _, err := hf.Stat(filepath.Join(hf.LimaHome(), legacyBaseName, "lima.yaml")); err != nil {
 		return
 	}
 	// Target already present (a prior create migrated or built it) — leave both
@@ -541,11 +552,11 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 	// base actually lives (the remote host for remote Lima, where os.Rename would
 	// silently no-op on a non-existent local path). A miss here just costs one
 	// re-apply.
-	if data, rerr := hostFiles.ReadFile(baseVersionPath(legacyBaseName)); rerr == nil {
-		if werr := hostFiles.WriteFile(baseVersionPath(cfg.BaseName), data, 0o700, 0o600); werr != nil {
+	if data, rerr := hf.ReadFile(baseVersionPath(hf, legacyBaseName)); rerr == nil {
+		if werr := hf.WriteFile(baseVersionPath(hf, cfg.BaseName), data, 0o700, 0o600); werr != nil {
 			step(out, "Note: could not carry the base version stamp across the rename (%v); the base will be re-applied once.", werr)
 		} else {
-			_ = hostFiles.RemoveAll(baseVersionPath(legacyBaseName))
+			_ = hf.RemoveAll(baseVersionPath(hf, legacyBaseName))
 		}
 	}
 	// Reclaim the old instance and its lock. Non-fatal: a lingering legacy base is
@@ -553,7 +564,7 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 	if err := p.Lima.Delete(legacyBaseName, true); err != nil {
 		step(out, "Note: migrated the base but could not delete the old %q (%v); remove it with `limactl delete %s`.", legacyBaseName, err, legacyBaseName)
 	}
-	_ = hostFiles.RemoveAll(baseLockPath(legacyBaseName))
+	_ = hf.RemoveAll(baseLockPath(hf, legacyBaseName))
 }
 
 // ensureBaseStopped makes sure the base image exists, is current, and is stopped —
@@ -598,7 +609,7 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 		// whether or not anything else about the base is stale. Warning only on the
 		// converge branch would mean the plain `--with-go=false` case, where nothing
 		// else changed and nothing is re-applied, said nothing at all.
-		if lost := shrunkTools(readBaseVersionFn(cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
+		if lost := shrunkTools(readBaseVersionFn(p.hostFiles(), cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
 			step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sand create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
 		}
 		if want, stale := p.baseStale(cfg, out); stale {
@@ -742,11 +753,11 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 	// no VM would ever get a security update. Only the aptUpgrade run resets it.
 	builtAt := time.Now()
 	if !aptUpgrade {
-		if prior, ok := readBaseBuiltAtFn(cfg.BaseName); ok {
+		if prior, ok := readBaseBuiltAtFn(p.hostFiles(), cfg.BaseName); ok {
 			builtAt = prior
 		}
 	}
-	if err := writeBaseVersionFn(cfg.BaseName, version, builtAt); err != nil {
+	if err := writeBaseVersionFn(p.hostFiles(), cfg.BaseName, version, builtAt); err != nil {
 		step(out, "Note: could not record the base image's playbook version (%v); it will be re-applied again on the next create.", err)
 	}
 
@@ -783,7 +794,7 @@ func (p *Provisioner) baseStale(cfg vm.CreateConfig, out io.Writer) (version str
 		step(out, "Note: could not determine the current playbook version (%v); reusing the existing base image %q.", err, baseName)
 		return "", false
 	}
-	have := readBaseVersionFn(baseName)
+	have := readBaseVersionFn(p.hostFiles(), baseName)
 
 	// Compare against what the base will actually CONTAIN once converged — the
 	// current playbook hash plus the union of its existing and requested tools —
@@ -824,7 +835,7 @@ const baseMaxAge = 30 * 24 * time.Hour
 // timestamp and this reads normally from then on.
 func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool {
 	baseName := cfg.BaseName
-	builtAt, ok := readBaseBuiltAtFn(baseName)
+	builtAt, ok := readBaseBuiltAtFn(p.hostFiles(), baseName)
 	if !ok {
 		step(out, "Base image %q has no recorded build time; refreshing it once now (other creates will queue behind this)…", baseName)
 		return true
