@@ -1,0 +1,36 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Stat the deployed smb.conf
+      ansible.builtin.stat:
+        path: /etc/samba/smb.conf
+      register: _smb_conf_stat
+
+    - name: Read smb.conf
+      ansible.builtin.slurp:
+        src: /etc/samba/smb.conf
+      register: _smb_conf
+      when: _smb_conf_stat.stat.exists
+
+    # Three stable, role-specific outcomes from roles/samba/tasks/main.yml:
+    # smb.conf is deployed from smb.conf.j2 with its [homes] share intact,
+    # and "Enable and start smbd" landed (unit enabled + actually running,
+    # which only happens because this scenario's image runs real systemd).
+    - name: Assert the samba share is configured and smbd is enabled/active
+      ansible.builtin.assert:
+        that:
+          - _smb_conf_stat.stat.exists
+          - "'[homes]' in (_smb_conf.content | b64decode)"
+          - "'server role = standalone server' in (_smb_conf.content | b64decode)"
+          - "'smbd.service' in ansible_facts.services"
+          - ansible_facts.services['smbd.service'].status == 'enabled'
+          - ansible_facts.services['smbd.service'].state == 'running'
+        fail_msg: >-
+          samba role did not land a working [homes] share and/or smbd is
+          not enabled and running.
+        success_msg: "samba share configuration and smbd status verified."

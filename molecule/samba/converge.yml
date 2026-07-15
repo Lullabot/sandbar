@@ -1,0 +1,23 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    # roles/samba's "Set Samba password for {{ samba_user }}" task shells out
+    # to `smbpasswd -s -a {{ samba_user }}`, which requires samba_user (from
+    # samba's own defaults, samba_user: "{{ user_name }}") to already be a
+    # real system user, plus a user_password to feed it. In production both
+    # come from the user role (which creates the account and sets
+    # user_password via set_fact) running earlier in site.yml's single play.
+    # This scenario converges `samba` alone, so a local, test-only user
+    # stands in for it below instead of pulling in the user role.
+    user_name: molecule_smb
+    user_password: "MoleculeTestPassw0rd!" # test fixture only, never provisioned for real use
+  pre_tasks:
+    - name: Create the system user smbpasswd will register as a Samba user
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        shell: /bin/bash
+        create_home: true
+  roles:
+    - role: samba

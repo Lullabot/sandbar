@@ -1,0 +1,17 @@
+---
+# roles/base/tasks/main.yml edits /etc/locale.gen and runs `locale-gen`
+# BEFORE the role's own consolidated apt install (which is where the
+# `locales` package normally arrives, via base_packages). On the real
+# target (a Lima-provisioned Debian VM per site.yml) that ordering is fine
+# because the base image already carries `locales`; a bare test container
+# may not. Install it here, in molecule's own prepare stage, rather than
+# reordering the production role's task list.
+- name: Prepare
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure the locales package is present before the base role runs
+      ansible.builtin.apt:
+        name: locales
+        state: present
+        update_cache: true

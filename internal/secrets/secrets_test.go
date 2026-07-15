@@ -491,6 +491,119 @@ func TestSetAll_RejectsHostileScope(t *testing.T) {
 	}
 }
 
+// TestSave_ChmodDirFailure_LeavesNoWorldReadableFile drives the
+// os.Chmod(dir, 0o700) failure arm at secrets.go:348. The store's parent
+// "directory" is actually a symlink pointing at /proc, an existing directory
+// this (unprivileged) test process does not own: os.MkdirAll succeeds
+// trivially (the stat sees an existing directory and returns immediately
+// without touching it), but the subsequent os.Chmod follows the symlink and
+// fails with EPERM, since only the owner (or a privileged process) may chmod
+// a file. That lets us force the chmod arm via pure filesystem state -- no
+// production-code seam -- without ever risking a mutation to /proc, since
+// chmod is atomic: it either succeeds or leaves the target untouched.
+func TestSave_ChmodDirFailure_LeavesNoWorldReadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission arms need a non-root euid")
+	}
+
+	before, statErr := os.Stat("/proc")
+	if statErr != nil {
+		t.Fatalf("stat /proc before: %v", statErr)
+	}
+	origMode := before.Mode().Perm()
+	if origMode == 0o700 {
+		t.Skip("/proc is already mode 0700 in this environment; the sanity check below can't distinguish success from a no-op")
+	}
+
+	base := t.TempDir()
+	link := filepath.Join(base, "sandbar")
+	if err := os.Symlink("/proc", link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	path := filepath.Join(link, "secrets.json")
+
+	s := &Store{path: path, vms: map[string]map[string]map[string]string{}}
+	err := s.Set("claude", map[string]string{"TOK": "s3cr3t"})
+	if err == nil {
+		t.Fatal("Set must fail when the parent directory cannot be chmod'd")
+	}
+
+	// No secrets.json (partial or otherwise) must have leaked into /proc.
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("save must not leave a file behind after a chmod failure (stat err = %v)", statErr)
+	}
+
+	// Sanity: /proc itself must be untouched by the failed chmod attempt --
+	// the chmod call must have failed outright (EPERM), not partially
+	// applied.
+	after, statErr := os.Stat("/proc")
+	if statErr != nil {
+		t.Fatalf("stat /proc after: %v", statErr)
+	}
+	if got := after.Mode().Perm(); got != origMode {
+		t.Fatalf("failed chmod must not have altered /proc's mode: was %04o, now %04o", origMode, got)
+	}
+}
+
+// TestSave_RenameFailure_LeavesNoPartialFile drives the os.Rename(tmpName,
+// s.path) failure arm at secrets.go:378 via a path collision: a directory
+// pre-exists at the exact path save() would rename the temp file onto, so
+// os.CreateTemp/Write/Sync/Close all succeed but the final os.Rename fails
+// (the kernel refuses to rename a regular file onto an existing directory).
+// save() must return that error, clean up its temp file, and leave the
+// pre-existing directory at s.path untouched -- never a half-written temp
+// file promoted over it, and no stray temp file left behind either.
+//
+// FOLLOW-UP: the sibling failure arms in this same block -- os.CreateTemp,
+// tmp.Write, tmp.Sync, and tmp.Close (secrets.go:359-377) -- could not be
+// forced from pure filesystem state as an unprivileged user (they need e.g.
+// ENOSPC/EDQUOTA injection, which requires a quota-limited or size-limited
+// filesystem mount that isn't available without elevated setup). Reaching
+// them deterministically would need a production-code seam (an injectable
+// io.Writer/Syncer or a filesystem abstraction) and is out of scope for this
+// test-only task.
+func TestSave_RenameFailure_LeavesNoPartialFile(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "sandbar")
+	path := filepath.Join(dir, "secrets.json")
+
+	// Place a directory exactly where save() expects to rename its temp
+	// file onto.
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatalf("seed directory at target path: %v", err)
+	}
+
+	s := &Store{path: path, vms: map[string]map[string]map[string]string{}}
+	err := s.Set("claude", map[string]string{"TOK": "s3cr3t"})
+	if err == nil {
+		t.Fatal("Set must fail when os.Rename cannot replace an existing directory")
+	}
+
+	// The pre-existing directory must survive untouched -- never replaced by
+	// a partial (or complete) file.
+	fi, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatalf("target path must still exist: %v", statErr)
+	}
+	if !fi.IsDir() {
+		t.Fatalf("target path must still be a directory, not a file (got mode %v)", fi.Mode())
+	}
+
+	// No leftover temp file (or anything else) beside the original
+	// directory entry: the failed save must have cleaned up after itself.
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(ents) != 1 || ents[0].Name() != "secrets.json" || !ents[0].IsDir() {
+		names := make([]string, len(ents))
+		for i, e := range ents {
+			names[i] = e.Name()
+		}
+		t.Fatalf("expected only the original secrets.json directory left in %s, got %v", dir, names)
+	}
+}
+
 // TestSetAll_AllOrNothingOnInvalidKey: a valid scope paired with an invalid
 // key anywhere in the call rejects the whole SetAll, mirroring Set's
 // all-or-nothing behavior.

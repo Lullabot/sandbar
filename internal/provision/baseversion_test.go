@@ -653,3 +653,36 @@ func TestBaseToolset_NoToolsetInformation(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath drives the REAL
+// writeBaseVersion and readBaseVersion — not the readBaseVersionFn/
+// writeBaseVersionFn stub vars other tests in this file swap out — so the
+// actual path derivation in baseVersionPath (LIMA_HOME/_sand/<base>.playbook-
+// version) is exercised end to end, not bypassed. Sibling tests
+// (TestWriteBaseVersion_RoundTripsVersionAndBuiltAt and friends) already cover
+// the BuiltAt round trip through the real functions; this one is the one that
+// pins the on-disk LOCATION the stamp must land at.
+func TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath(t *testing.T) {
+	limaHomeDir := t.TempDir()
+	t.Setenv("LIMA_HOME", limaHomeDir)
+
+	const baseName = "claude-base"
+	const version = "v2:cafef00d:ddev+go"
+	builtAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+
+	if err := writeBaseVersion(baseName, version, builtAt); err != nil {
+		t.Fatalf("writeBaseVersion: %v", err)
+	}
+
+	wantPath := baseVersionPath(baseName)
+	if !strings.HasPrefix(wantPath, limaHomeDir) {
+		t.Fatalf("baseVersionPath(%q) = %q, want it rooted under LIMA_HOME %q", baseName, wantPath, limaHomeDir)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("writeBaseVersion did not write to the path baseVersionPath derives (%s): %v", wantPath, err)
+	}
+
+	if got := readBaseVersion(baseName); got != version {
+		t.Errorf("readBaseVersion = %q, want %q", got, version)
+	}
+}
