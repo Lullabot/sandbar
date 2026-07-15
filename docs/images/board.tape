@@ -7,10 +7,11 @@
 #
 #     vhs board.tape
 #
-# The committed board.png was generated headlessly from the TUI test fixture
-# (charmbracelet/freeze), with a seeded heartbeat so the running VM's cpu/mem
-# gauges show representative values; a capture from your own machine shows the
-# real ones.
+# The committed board.png is generated deterministically by a committed harness
+# (TestGenerateHomeBoardShot in internal/ui/boardshot_test.go) rendered with
+# charmbracelet/freeze — see "Regenerating the home-page screenshot" in
+# docs/contributing/development.md. This tape is the LIVE alternative: a capture
+# from your own machine shows your real VMs and host stats.
 
 Output board.png
 

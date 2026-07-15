@@ -112,16 +112,30 @@ same SHA) once a PR is opened against the branch.
 
 ## Regenerating the home-page screenshot
 
-The board image on the site's home page lives at `docs/images/board.png`. The
-committed copy was rendered headlessly from the TUI's wide-board test fixture
-with [`freeze`](https://github.com/charmbracelet/freeze), so its CPU and memory
-bars read `—` — there is no live VM behind a fixture. To reshoot it with real
-values from your own machine, run the [VHS](https://github.com/charmbracelet/vhs)
-tape next to the image:
+The board image on the site's home page lives at `docs/images/board.png`. It is
+rendered deterministically from a committed generator, so it can be re-shot
+whenever the TUI's colours or layout change — no live VM required.
+
+The generator is `TestGenerateHomeBoardShot` in `internal/ui/boardshot_test.go`.
+It hand-seeds a fixed fleet (the `drupal-contrib` / `lullabotdotcom` board you
+see on the home page — filled gauges, `up 3h42m`, a Messages log, version
+`0.5.0`) and writes the board's **coloured** render to the file named in
+`BOARD_SHOT_OUT`. It skips when that variable is unset, so a normal `go test`
+never runs it. Turn that render into the PNG with
+[`freeze`](https://github.com/charmbracelet/freeze) (JetBrains Mono ships inside
+the freeze module, so no font install is needed):
 
 ```
-cd docs/images && vhs board.tape
+BOARD_SHOT_OUT=/tmp/board.ansi go test ./internal/ui/ -run TestGenerateHomeBoardShot -count=1
+freeze /tmp/board.ansi -o docs/images/board.png \
+  --font.file "$(go env GOMODCACHE)"/github.com/charmbracelet/freeze@*/font/JetBrainsMono-Regular.ttf \
+  --font.family "JetBrains Mono" --font.size 20 --line-height 1.6 \
+  --background "#0d1117" --padding 24 --window --border.radius 8
 ```
 
-That drives a real `sand` session, so keep a VM or two around first, or the
-board will be empty.
+To change what the board shows, edit the seeded values in the generator — that
+keeps the image reproducible instead of hand-captured. If you would rather shoot
+a *live* board with your own VMs and real host stats, the
+[VHS](https://github.com/charmbracelet/vhs) tape next to the image still works
+(`cd docs/images && vhs board.tape`); it drives a real `sand` session, so keep a
+VM or two around first.
