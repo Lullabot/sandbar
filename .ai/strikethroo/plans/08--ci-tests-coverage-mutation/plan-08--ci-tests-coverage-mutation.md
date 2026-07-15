@@ -300,9 +300,9 @@ graph TD
 - ✔️ Task 7: CI — scheduled gremlins mutation job (advisory, core packages) *(completed)*
 - ✔️ Task 8: CI — scheduled molecule converge/verify for `base` + `samba` *(completed — samba idempotence known-issue flagged as follow-up)*
 
-### Phase 2: Finalize (after the coverage-raising tasks)
+### ✅ Phase 2: Finalize (after the coverage-raising tasks)
 **Parallel Tasks:**
-- Task 9: Bump the coverage floor + document testing conventions (depends on: 1, 2, 3, 4, 5)
+- ✔️ Task 9: Bump the coverage floor + document testing conventions (depends on: 1, 2, 3, 4, 5) *(completed — floor set to 87 under the measured 87.9%; README + AGENTS.md updated)*
 
 ### Post-phase Actions
 - After Phase 1: run `go test ./... -race -covermode=atomic -coverpkg=./internal/...` and confirm green under the initial floor; confirm no production `.go` files changed (`git diff --name-only` shows only `*_test.go`, workflow, molecule/gremlins config, docs).
@@ -311,3 +311,32 @@ graph TD
 ### Execution Summary
 - Total Phases: 2
 - Total Tasks: 9
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-15
+
+### Results
+All 9 tasks completed across 2 phases, entirely test/CI/docs — **no production Go was modified** (verified: `git diff origin/main` touches only `*_test.go`, the workflow, `.gremlins.yaml`, `molecule/`, README/AGENTS.md, and plan docs).
+
+- **Gated `./internal/...` coverage 86.6% → 87.9%**; full suite passes under `-race`.
+- Tier-1: `internal/manage` 0% → **100%** (incl. the unmanaged-VM `--recreate` refusal gate); `cmd/sand` refusal test (error + no-provision); `secrets.save` 48% → **59%**.
+- Tier-2: `lockBase` 64% → **88%**; real base-version write/read round-trip; `transfer` `updateBrowse` 0% → **90%**, `updateDest` 25% → **63%**.
+- E2E: `cmd/sand` `limae2e` create + `--recreate` round-trip (compiles, skips without `LIMA_E2E`).
+- CI: `unit` now runs `-race` + a self-contained coverage gate (floor 87, artifact uploaded) — **gate proven to bite** (passes at 87, fails at 99); advisory weekly `mutation` (gremlins, core packages) and `molecule` (base+samba, systemd images) jobs; `cmd/sand` e2e folded into `lima-e2e`.
+- Docs: README testing section; AGENTS.md CI (5 jobs) + the two style cautions + coverage-floor convention.
+
+### Noteworthy Events
+- **Execution base re-baselined mid-flight.** The evaluation/plan were built against the user's local checkout (0.3.0); origin/main — the PR base — was a release ahead at 0.4.0, which had already implemented the `--rebuild`/`--recreate` pass-down and removed the `--rebuild` base-delete branch. The plan was re-baselined to 0.4.0 (obsolete item dropped, anchors refreshed) before task generation.
+- **Two failure arms flagged as follow-ups, not fixed** (honoring the no-app-code constraint): `secrets.save`'s temp-file `Write/Sync/Close` arms (need ENOSPC/quota injection or an injectable writer seam) and `lockBase`'s non-`EWOULDBLOCK` flock arm (kernel `flock` only returns success/EWOULDBLOCK on local filesystems; needs NFS/CIFS or a syscall seam).
+- **`molecule` job made advisory** (`continue-on-error`): `roles/samba`'s `smbpasswd` task is unconditionally `changed_when: true`, so its idempotence stage fails — a production-role property out of scope for this test/CI-only work.
+- **Deliberate deviation from the plan's docs item:** the plan listed recording the "test/CI-only, no-app-code" rule in AGENTS.md, but that was a constraint specific to *this* behavior-locking effort, not a durable repo rule (future work may legitimately edit app code). Recorded the durable conventions (coverage floor, style cautions, `limae2e` tag) instead; the transient constraint lives in the plan/PR, not AGENTS.md.
+- One test agent used a shared-worktree `git stash` to measure before/after coverage; final state verified intact. Noted so future dispatches forbid `git stash` in a shared worktree.
+- `gremlins`/`molecule`/Docker were unavailable in the execution environment, so those jobs were verified by YAML parse + `ansible-playbook --syntax-check` and will first execute live via the scheduled/`workflow_dispatch` CI runs.
+
+### Necessary follow-ups
+1. Cover the flagged `secrets.save` temp-write arms and the `lockBase` non-`EWOULDBLOCK` arm if/when a test seam is added during the refactor.
+2. Make `roles/samba`'s `smbpasswd` task idempotent, then drop `continue-on-error` from the `molecule` job.
+3. Extend `molecule` scenarios to the deferred roles (`dev-tools`, `claude-code`, `project`, `user`).
+4. Once the scheduled `mutation` job establishes a baseline score, consider raising the gremlins thresholds from advisory.
