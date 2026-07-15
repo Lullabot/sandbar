@@ -44,7 +44,9 @@ created: 2026-07-15
 | _(Refinement)_ What happens when a user disables or deletes a profile that has a background job (build/provision/transfer) in flight on it? | **Block until idle.** Refuse the disable/delete with a message until the in-flight job finishes or is cancelled — reusing the existing jobs-gating pattern that already blocks Delete while a VM builds. No silent cancellation, no half-provisioned VM left behind. |
 | _(Refinement, auto-resolved from code)_ Is `provision.SetHostFiles` the only single-provider host-access global to fix? | **No.** There are **two** process-global host-access seams that both assume one provider per process: `provision.hostFiles` (base-image touches during create/reset/cleanup) and `ui.hostFiles` (per-tile disk/up-since sampling). Both must become fleet-aware; see Component 2/3. |
 | _(Refinement, auto-resolved from code)_ Can startup keep calling `Preflight()` synchronously per the current entrypoints? | **No.** `main.go` and `create.go` call `p.Preflight()` synchronously and exit on error; a remote preflight is an SSH round-trip. In a fleet this must become **per-profile and asynchronous** — a slow or failing remote preflight yields an error binding, never a blocked startup or fatal exit. |
-| _(Refinement, rebase on merged main)_ Across profiles, VM names can collide; how should VM identity work in the TUI's per-VM stores? | **Scope-qualified identity.** A VM is identified by `(scope, name)`, not bare `name`, so `web` can exist both locally and on a remote. The secrets store, heartbeat registry, jobs registry, and the board's focus ring all become scope-aware, and the secrets store gains a scope dimension (a schema migration). This matches the registry's deliberate same-name-across-scope support and prevents reconcile from deleting the wrong VM's secrets. |
+| _(Refinement, rebase on merged main)_ Across profiles, VM names can collide; how should VM identity work in the TUI's per-VM stores? | **Scope-qualified identity.** A VM is identified by `(scope, name)`, not bare `name`, so `web` can exist both locally and on a remote. The secrets store, heartbeat registry, jobs registry, and the board's focus ring all become scope-aware, and the secrets store gains a connection-scope dimension (a schema migration). This matches the registry's deliberate same-name-across-scope support and prevents reconcile from deleting the wrong VM's secrets. |
+| _(Refinement)_ When an enabled Remote SSH profile is unreachable and its binding is in the runtime **error** state, how does it recover? | **Auto-retry with backoff.** The errored profile keeps re-attempting its connect/list on the board's async refresh loop but backs off (e.g. 5s → 30s → 60s, capped) so an unroutable host is not hit every 5s; on success it resets to the normal cadence and its tiles appear with no user action. A manual enable/disable toggle (or edit) forces an immediate retry. Self-healing is preferred over making the user re-toggle after a transient blip. |
+| _(Refinement)_ `--profile <name>` and the "last-used profile" default reference a profile, but profiles (including Local) are renameable — how do these references survive a rename? | **Stable internal ID + name.** Each profile carries an immutable `id` generated at creation; the persisted **last-used** pointer is stored by `id` so a rename never resets the create-form default. The user-facing `--profile <name>` flag and the management UI address profiles by their current display **name** (renaming a profile changes what a script must pass, exactly like renaming any resource). The permanent Local profile also has a fixed reserved `id`. |
 
 ## Executive Summary
 
@@ -174,10 +176,15 @@ flowchart TD
 replaces the environment variables — the single source of truth for every
 location Sandbar can run VMs on.
 
-A new package models a **Profile**: a stable identity/name, a **type** (Local or
-Remote SSH), an **enabled** flag, and — for Remote SSH — the connection fields
-that today live in `provider.TargetConfig` (host, user, port, identity *path*,
-remote LIMA_HOME). It persists to `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml`
+A new package models a **Profile**: an immutable **`id`** (generated at creation,
+never changes), a renameable display **name**, a **type** (Local or Remote SSH),
+an **enabled** flag, and — for Remote SSH — the connection fields that today live
+in `provider.TargetConfig` (host, user, port, identity *path*, remote LIMA_HOME).
+The `id`/`name` split (_see the refinement clarification_) is what lets the
+**last-used** pointer survive a rename: it is stored by `id`, while the
+user-facing `--profile <name>` flag and the management UI address profiles by
+their current display name. The permanent Local profile has a fixed reserved
+`id`. It persists to `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml`
 via `yaml.v3`, mirroring the registry's XDG convention and atomic-write
 discipline (temp file + rename, corrupt-file quarantine). On first run with no
 file (or after env-var removal), the store **seeds a default Local profile** so an
@@ -187,8 +194,8 @@ The store is the home for the lifecycle states the work order calls out:
 **enabled/disabled** is a persisted flag the user toggles without losing the
 config; **error** is a *runtime* state (the profile is enabled but its provider
 failed to build or its host is unreachable) that is derived at fleet-build/refresh
-time, not persisted. The store also records the **last-used profile** for the
-create form's default. The file is deliberately hand-editable and free of
+time, not persisted. The store also records the **last-used profile** (by its
+immutable `id`) for the create form's default. The file is deliberately hand-editable and free of
 secrets so it is safe to copy between a laptop and a desktop (the multi-client
 requirement) and to keep under version control.
 
@@ -208,7 +215,11 @@ many backends at once without any backend leaking into another.
 reads the profiles store and constructs a `{profile, provider, scope}` binding for
 each **enabled** profile. A Local profile builds the local Lima provider
 (`NewDefault`) with `registry.LocalScope`; a Remote SSH profile builds
-`NewRemoteLima` with the remote scope derived from its `user@host:port`. A
+`NewRemoteLima` with the remote scope derived from its target. (The scope is the
+registry's `Scope{Provider, RemoteTarget}` pair, where `RemoteTarget` is the
+`user@host:port` string produced by `provider.TargetConfig.Scope()` — the profile
+converts to a `TargetConfig` and reuses that existing derivation rather than
+formatting a scope key itself.) A
 profile whose provider **fails to construct** (bad config, preflight failure) is
 recorded as an **error** binding rather than aborting the whole fleet — one bad
 remote must never stop the local fleet or the other remotes from loading.
@@ -250,8 +261,11 @@ on that one profile's provider/scope, preflighting only that profile; an unknown
 profile name is a clear error. `sand shell NAME` resolves which profile owns
 `NAME` from the registry scope; if `NAME` exists under more than one profile it
 errors and lists the candidates, and an explicit `--profile <name>` disambiguates.
-The CLI surface stays minimal — exactly what the profile model requires, nothing
-speculative.
+Both `create` and `shell` (which likewise calls `p.Preflight()` synchronously
+today) still preflight synchronously — but only the **single** profile they act
+on, which is the intended behavior for a one-shot CLI command; it is the *TUI's*
+fleet preflight that must go async. The CLI surface stays minimal — exactly what
+the profile model requires, nothing speculative.
 
 ### Component 3: Per-profile asynchronous aggregation in the TUI
 
@@ -270,6 +284,17 @@ merges its tiles in as it lands. A message carries the **profile identity**
 alongside its result so the model routes each async result to the right
 sub-state; the existing `vmsLoadedMsg` shape is extended, not replaced by a
 parallel mechanism.
+
+An **errored profile self-heals** (_see the refinement clarification_): its
+per-profile refresh keeps re-attempting the connect/list so a remote that comes
+back reachable recovers with no user action, but a failed remote **backs off**
+(e.g. 5s → 30s → 60s, capped) rather than being re-hit on every `refreshInterval`
+tick — one dead remote must not generate a connection storm or drag the loop.
+On a successful list the profile's cadence resets to the normal
+`refreshInterval`; a manual enable/disable toggle or edit (Component 4) forces an
+immediate retry. The backoff is per-profile state on the fleet sub-state, so a
+healthy local/remote keeps refreshing at the normal cadence while a sick remote
+slows its own retries.
 
 The existing single `connecting` interstitial is generalized: rather than a
 full-screen block, an as-yet-unconnected or errored profile simply contributes no
@@ -316,15 +341,19 @@ refinement clarification_): if a background job — a build/provision or a file
 transfer — is in flight on the profile, the action is refused with a message
 naming the blocking job, exactly as Delete is already gated while a VM builds.
 The user finishes or cancels the job, then retries. Editing a Remote SSH profile's
-connection fields is likewise treated as a tear-down-and-rebuild of that one
-binding and is gated the same way.
+**connection fields** is likewise treated as a tear-down-and-rebuild of that one
+binding and is gated the same way. A pure **rename** (or any metadata-only edit
+that leaves the scope binding — the `user@host:port` target — unchanged) is *not*
+gated and needs no rebuild: the immutable `id` and the derived scope are
+untouched, so tiles, jobs, and the last-used pointer all follow the profile across
+the rename.
 
 The **create form** gains a **profile selector** as a first-class field,
 defaulting to the **last-used** profile (falling back to Local). The chosen
 profile determines which provider provisions the VM and which scope tags it in the
 registry; host-scaled defaults (cpu/memory/user, already host-aware from plan 15)
-are sampled from the *selected* profile's host. Selecting the last-used profile is
-persisted through the profiles store (Component 1).
+are sampled from the *selected* profile's host. The last-used choice is persisted
+(by profile `id`) through the profiles store (Component 1).
 
 ### Component 5: Tile provenance and the growing status bar
 
@@ -356,9 +385,9 @@ VM's secrets.
 
 The refactor branch made the *registry* scope-aware, but the TUI's other per-VM
 stores predate the fleet and still key by bare name: the **secrets store**
-(`internal/secrets`, `vms[name]`), the **heartbeat registry**
-(`internal/ui/heartbeat.go`, `beats map[string]*heartbeat`), the **jobs
-registry** (`internal/ui/jobs.go`, `jobKey{name, kind}`), and the board's
+(`internal/secrets`, `vms map[name]…`), the **heartbeat registry**
+(`internal/ui/heartbeat.go`, `heartbeatRegistry.beats map[string]*heartbeat`), the
+**jobs registry** (`internal/ui/jobs.go`, `jobKey{vm, kind}`), and the board's
 **focus ring** (`model.focusName`). With two profiles enabled, a VM named `web`
 on local and a `web` on a remote would share a heartbeat, share a job slot,
 share a focus target, and — worst — share a secrets entry. The registry
@@ -369,20 +398,33 @@ scope-awareness the branch started, not to forbid the reuse.
 The **highest-severity** consequence is in reconciliation. Today the
 `vmsLoadedMsg` handler runs `manage.Reconcile(reg, live, scope)` and then
 **permanently deletes** each dropped VM's host secrets by bare name
-(`model.go`'s "a dropped VM's HOST SECRETS ARE DELETED" path). Per-profile in a
-fleet, dropping a local `web` would delete the secrets for a remote `web` that is
-alive and well. Every reconcile-and-prune must therefore be scope-qualified: a
-profile's reconcile considers only its own scope's entries (already true of
-`ReconcileScoped`) and prunes only that scope's per-VM state.
+(`model.go`'s "a dropped VM's HOST SECRETS ARE DELETED" reconcile path). Per-profile
+in a fleet, dropping a local `web` would delete the secrets for a remote `web` that
+is alive and well. There are **two** prune-by-bare-name sites that must both become
+scope-qualified: this reconcile path, and the **explicit-delete** path (the delete
+action that removes the registry entry and its secrets when the user deletes a VM).
+Every reconcile-and-prune must therefore be scope-qualified: a profile's reconcile
+considers only its own scope's entries (already true of `ReconcileScoped`) and
+prunes only that scope's per-VM state, and the explicit delete prunes only the
+targeted VM's `(scope, name)` state.
 
 Concretely: the heartbeat, jobs, and focus keys become composite `(scope, name)`
-(or an equivalent stable per-VM handle), and the **secrets store gains a scope
-dimension**, which is a schema migration (bump its on-disk version, and read
-older files as local-scoped — every VM that exists in a pre-fleet secrets file
-could only have been local, exactly mirroring how the registry's v2 migration
-stamped old entries local). Non-managed considerations do not arise because the
-board's roster is managed clones only, and only sand-created clones ever carry
-secrets/jobs/heartbeats.
+(or an equivalent stable per-VM handle), and the **secrets store gains a
+connection-scope dimension**, which is a schema migration (bump its on-disk
+version — currently `schemaVersion = 2` — and read older files as local-scoped:
+every VM that exists in a pre-fleet secrets file could only have been local,
+exactly mirroring how the registry's v2 migration stamped old entries local).
+
+**Naming caution for task generation:** the secrets store *already* uses the word
+"scope" for an unrelated concept — a home-relative **directory scope**
+(`secrets.ValidScope`) that namespaces secret paths *within* a VM. The dimension
+added here is the **connection scope** (the registry's `Scope{Provider,
+RemoteTarget}`, identifying *which host* a VM lives on). These are orthogonal: a
+single VM keyed by `(connectionScope, name)` still has its existing directory
+scopes inside it. Do not collapse or conflate the two.
+
+Non-managed considerations do not arise because the board's roster is managed
+clones only, and only sand-created clones ever carry secrets/jobs/heartbeats.
 
 ## Risk Considerations and Mitigation Strategies
 
@@ -397,10 +439,12 @@ secrets/jobs/heartbeats.
     - **Mitigation**: Gate disable/delete/edit on the profile being idle (block-until-idle, reusing the jobs-in-flight gate); tear down a binding by cancelling its cmds and dropping its sub-state. Test enable→refresh→disable cycles and a disable attempted while a job is in flight (must be refused).
 - **[HIGH — data loss] Bare-name per-VM keys collide across profiles; reconcile could delete the wrong VM's secrets.** Secrets, heartbeats, jobs, and the focus ring key by name; the registry deliberately allows the same name in two scopes, and reconcile permanently deletes a dropped VM's secrets by name.
     - **Mitigation**: Make identity `(scope, name)` across all per-VM stores (Component 6) and scope-qualify every reconcile-and-prune, so dropping a local `web` never touches a remote `web`'s state. Add a regression test that enables two profiles with a same-named VM, deletes it on one, and asserts the other's secrets/heartbeat survive intact.
-- **Secrets-store schema migration risk.** Adding a scope dimension to the on-disk secrets store changes its format; a botched migration loses host secrets.
-    - **Mitigation**: Bump the store's schema version and read pre-migration files as local-scoped (every VM in them could only have been local), mirroring the registry's v2 migration; write the new version on first save. Cover with a load-old-file → read-back round-trip test.
+- **Secrets-store schema migration risk.** Adding a connection-scope dimension to the on-disk secrets store changes its format; a botched migration loses host secrets. Compounded by a **naming collision**: the store already uses "scope" for an unrelated home-relative *directory* scope (`ValidScope`), so an implementer could wire the new dimension into the wrong field.
+    - **Mitigation**: Bump the store's schema version (currently `2`) and read pre-migration files as local connection-scoped (every VM in them could only have been local), mirroring the registry's v2 migration; write the new version on first save. Keep the new **connection scope** strictly separate from the existing **directory scope** in both code and naming. Cover with a load-old-file → read-back round-trip test.
 - **A slow or unreachable remote could still stall the UI if any refresh is awaited synchronously.** The board must stay live while a remote hangs.
     - **Mitigation**: Every profile's list/refresh/heartbeat/host-sample runs on its own `tea.Cmd` with the profile identity carried in the result message; the model never blocks on a remote, and the local fleet renders independently. Verify with a fake provider that blocks indefinitely for one profile while the board remains interactive.
+- **An errored remote retried every 5s could become a connection storm** (repeated SSH handshakes/timeouts against a dead host), wasting resources and cluttering the loop.
+    - **Mitigation**: Give each errored profile its own **backoff** (5s → 30s → 60s, capped) held on the fleet sub-state; reset to normal cadence on a successful list, and force an immediate retry on manual enable/disable/edit. Test that a persistently-failing profile's retry interval grows and that a healthy profile's cadence is unaffected.
 - **Header/tile layout could break with a variable number of status bands at narrow widths.** The layout budgets are currently sized for one host band and fixed tile lines.
     - **Mitigation**: Define explicit degradation rules (compact/truncate bands, fixed per-tile label budget) and lock them with golden tests at 80×24 and wide, with one, two, and several profiles.
 - **VM name collisions across profiles** (the same VM name existing on local and a remote) could route an action to the wrong backend.
@@ -439,7 +483,9 @@ secrets/jobs/heartbeats.
    are **absent** from the board while the rest of the board stays live.
 3. A remote profile whose host is slow or unreachable **never blocks** the UI: the
    local tiles render and remain interactive while that profile resolves or fails
-   in the background.
+   in the background. An errored profile **self-heals** — it keeps retrying (with
+   backoff) and its tiles appear automatically once the host is reachable, with no
+   user action.
 4. The create form offers a **profile selector** defaulting to the **last-used**
    profile; creating a VM on a chosen profile provisions it on that profile's host
    and records it under that profile's scope, so it appears only under that
@@ -476,11 +522,14 @@ exercising the real system, not just re-running unit tests:
    teatest run), launch the TUI, and confirm tiles from **both** appear, each
    labelled with its profile, and that the status bar shows **two** host-stats
    bands. Screenshot the board.
-3. **Unreachable-remote resilience**: Add a Remote SSH profile whose host is
-   unroutable, launch the TUI, and confirm (a) the local tiles render immediately
-   and stay interactive (arrow keys, search) while the remote resolves, (b) the
-   remote contributes **no** tiles, and (c) a status-bar banner names the profile
-   and its connection error. Capture the board mid-connect.
+3. **Unreachable-remote resilience & self-heal**: Add a Remote SSH profile whose
+   host is unroutable, launch the TUI, and confirm (a) the local tiles render
+   immediately and stay interactive (arrow keys, search) while the remote
+   resolves, (b) the remote contributes **no** tiles, and (c) a status-bar banner
+   names the profile and its connection error. Capture the board mid-connect. Then
+   (via a fake provider that fails N times then succeeds) confirm the errored
+   profile's retry interval **backs off** while failing and that its tiles appear
+   **automatically** once it succeeds, with no manual toggle.
 4. **Create-on-profile**: In the create form, confirm the profile selector is
    present and defaults to the last-used profile; create a small VM on a chosen
    profile, then query `managed-vms.json` and confirm the new entry carries that
@@ -492,6 +541,10 @@ exercising the real system, not just re-running unit tests:
    remote profile and confirm it disappears from `profiles.yaml` while (against a
    `limae2e` host) the VMs still exist on the remote server (re-add the profile and
    confirm they reappear). Confirm the Local profile offers no delete verb.
+   Finally, set a profile as last-used (create a VM on it), then **rename** that
+   profile, reopen the create form, and confirm it **still** defaults to that
+   profile (last-used tracked the profile across the rename via its immutable
+   `id`, not its name).
 6. **Block-until-idle gate**: Start a build on the remote profile, then attempt to
    disable/delete that profile while the build is in flight; confirm the action is
    **refused** with a message naming the blocking job, and succeeds once the job
@@ -618,6 +671,26 @@ the branch code), recorded so downstream task generation does not re-litigate th
   failing remote never blocks or aborts startup.
 - **Both host-access globals are retired/fleet-aware** (see Technical Risks); the
   UI seam becomes per-tile, the provision seam becomes per-operation.
+- **Errored profiles self-heal with backoff.** An enabled-but-unreachable profile
+  keeps retrying on its own async refresh but backs off (5s → 30s → 60s, capped)
+  instead of being hammered every `refreshInterval`; success resets the cadence,
+  and a manual enable/disable/edit forces an immediate retry. Rejected
+  alternatives: (a) re-attempt every 5s — risks a connection storm against a dead
+  host; (b) stop retrying until the user re-toggles — makes a transient network
+  blip require manual intervention.
+- **Profiles carry an immutable `id` distinct from their renameable name.** The
+  persisted last-used pointer is stored by `id` (survives a rename); the
+  `--profile <name>` flag and management UI use the current display name. The
+  permanent Local profile has a fixed reserved `id`. A pure rename is metadata-only
+  and not idle-gated (it changes neither the `id` nor the target-derived scope).
+  Rejected alternative: name *is* the identity — simpler, but a rename would reset
+  the create-form default and silently break any `--profile old-name` reference
+  held elsewhere.
+- **The secrets store's new "connection scope" is distinct from its existing
+  "directory scope."** The store already namespaces secret *paths* within a VM by a
+  home-relative directory scope (`ValidScope`); Component 6 adds an orthogonal
+  connection scope (`registry.Scope`) keying *which host* a VM lives on. The two
+  must not be conflated in the migration.
 - **VM identity is `(scope, name)`, not bare name** (Component 6). This preserves
   the registry's deliberate same-name-across-scope support and is the reason the
   secrets store is migrated. The rejected alternative — enforcing globally-unique
@@ -647,3 +720,83 @@ the branch code), recorded so downstream task generation does not re-litigate th
   Technical Risks (HIGH data-loss on secrets, migration risk); success criterion
   9 and self-validation step 8; Documentation + Integration Strategy updates for
   the secrets schema; and refreshed the numbering note for the post-merge archive.
+- 2026-07-15: Third pass — full code re-verification of every plan claim (all
+  confirmed TRUE) plus two resolved clarifications. Added **errored-profile
+  self-heal with backoff** (Component 3, a new Technical Risk, criterion 3,
+  self-validation step 3, Decision Log). Added an **immutable profile `id` vs
+  renameable name** model so last-used survives renames and a pure rename is not
+  idle-gated (Components 1 & 4, Decision Log, self-validation step 5). Folded in
+  code-precision corrections: the secrets store's pre-existing **directory scope
+  (`ValidScope`) vs the new connection scope** naming collision (Component 6,
+  migration risk, Decision Log); scope is the registry's `{Provider, RemoteTarget}`
+  pair (Component 2); **both** bare-name prune sites — reconcile *and* explicit
+  delete — must be scope-qualified (Component 6); corrected store field names
+  (`jobKey{vm,kind}`, `heartbeatRegistry.beats`); and noted `shell.go` also
+  preflights synchronously but, like `create`, only its single acted-on profile.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[T1: profiles store pkg] --> T4[T4: fleet builder + env removal]
+    T1 --> T5[T5: CLI --profile selection]
+    T1 --> T8[T8: profile mgmt screen + live mutation]
+    T1 --> T9[T9: create-form profile selector]
+    T2[T2: secrets connection-scope migration] --> T6[T6: scope-qualified in-memory identity]
+    T3[T3: retire provision.hostFiles global] --> T9
+    T4 --> T5
+    T4 --> T7[T7: TUI fleet model + async aggregation]
+    T6 --> T7
+    T7 --> T8
+    T7 --> T9
+    T7 --> T10[T10: tile provenance + status bar]
+    T5 --> T11[T11: documentation updates]
+    T8 --> T11
+    T9 --> T11
+    T10 --> T11
+    T7 --> T12[T12: integration + regression tests]
+    T8 --> T12
+    T9 --> T12
+    T10 --> T12
+```
+
+Verified acyclic; no orphan or circular references.
+
+### Phase 1: Foundations (no dependencies)
+**Parallel Tasks:**
+- Task 001: Create the `internal/profiles` store package
+- Task 002: Add a connection-scope dimension to the secrets store (schema migration)
+- Task 003: Retire the `provision.hostFiles` process-global into a per-operation argument
+
+### Phase 2: Provider layer & identity prep
+**Parallel Tasks:**
+- Task 004: Replace `provider.Resolve` with a profile-driven fleet builder; remove env vars (depends on: 001)
+- Task 006: Scope-qualify the TUI's in-memory per-VM stores and both prune sites (depends on: 002)
+
+### Phase 3: Fleet spine
+**Parallel Tasks:**
+- Task 005: Add `--profile` selection to `sand create`/`sand shell` (depends on: 001, 004)
+- Task 007: Promote the TUI model to an async per-profile fleet (depends on: 004, 006)
+
+### Phase 4: Profile UI surfaces
+**Parallel Tasks:**
+- Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007)
+- Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007)
+- Task 010: Tile profile labels and a per-profile status bar with error banners (depends on: 007)
+
+### Phase 5: Docs & regression gate
+**Parallel Tasks:**
+- Task 011: Update all documentation for Connection Profiles and the env-var removal (depends on: 005, 008, 009, 010)
+- Task 012: Fleet-wide integration & regression tests and coverage-floor gate (depends on: 007, 008, 009, 010)
+
+### Post-phase Actions
+- After each phase run `go build ./...` and `go test ./... -race`; a phase is not complete until the tree compiles and the suite is green (per `POST_PHASE.md`).
+
+### Execution Summary
+- Total Phases: 5
+- Total Tasks: 12
