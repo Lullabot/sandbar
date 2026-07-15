@@ -163,6 +163,10 @@ type model struct {
 	// is a one-shot sample taken when that form opens.
 	headerMem      int64
 	headerDiskFree int64
+	// headerCPUs is the limactl host's core count from the same listCmd sample.
+	// Zero means "not sampled" and the header falls back to this process's local
+	// core count; for a remote provider it is the REMOTE host's core count.
+	headerCPUs int
 
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
@@ -645,6 +649,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.hostDiskFree > 0 {
 			m.headerDiskFree = msg.hostDiskFree
+		}
+		if msg.hostCPUs > 0 {
+			m.headerCPUs = msg.hostCPUs
 		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or

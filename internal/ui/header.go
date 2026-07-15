@@ -164,8 +164,14 @@ func (m model) hostCapacityText() string {
 	// firing. Zero simply means unknown, and the clause is dropped.
 	hostMem, hostDisk := m.headerMem, m.headerDiskFree
 
+	// A remote provider samples the REMOTE host's core count into headerCPUs
+	// (listCmd); the local provider leaves it 0 and we read this machine's count.
+	hostCPUs := m.headerCPUs
+	if hostCPUs == 0 {
+		hostCPUs = hostCPUsFn()
+	}
 	var parts []string
-	if hostCPUs := hostCPUsFn(); hostCPUs > 0 {
+	if hostCPUs > 0 {
 		if haveCPU {
 			// A share of the WHOLE HOST: 100% is every core of this machine pinned. The
 			// busy-vCPU total is divided by the host's core count rather than shown raw,

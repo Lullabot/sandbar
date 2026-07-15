@@ -30,6 +30,10 @@ type (
 		// header falls back to probing directly (see hostCapacityText).
 		hostMem      int64
 		hostDiskFree int64
+		// hostCPUs is the limactl host's core count, sampled the same way. Zero
+		// means "not sampled" and the header falls back to the local core count.
+		// For a remote provider these three are the REMOTE host's totals.
+		hostCPUs int
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -89,7 +93,21 @@ func listCmd(p provider.Provider) tea.Cmd {
 				}
 			}
 		}
-		return vmsLoadedMsg{vms: vms, err: err, hostMem: hostMemBytesFn(), hostDiskFree: hostDiskFreeFn()}
+		// Host capacity for the header's denominators. A remote provider reports the
+		// REMOTE host's totals (over ssh); the local provider returns the zero value,
+		// so each field falls back to sampling THIS machine directly — the unchanged
+		// local behaviour. Sampled here, off the Update goroutine, because the remote
+		// case is a blocking ssh round trip.
+		res := p.HostResources()
+		mem := res.MemBytes
+		if mem == 0 {
+			mem = hostMemBytesFn()
+		}
+		disk := res.DiskFreeBytes
+		if disk == 0 {
+			disk = hostDiskFreeFn()
+		}
+		return vmsLoadedMsg{vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs}
 	}
 }
 

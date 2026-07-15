@@ -104,6 +104,12 @@ func (p *limaProvider) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }
 
+// HostResources returns the zero value: local Lima runs on THIS machine, so the
+// board header keeps sampling the local host directly through its own platform
+// probes (internal/ui/hostres_*.go). Only a remote provider needs to override
+// this to report a different host's capacity. See Provider.HostResources.
+func (p *limaProvider) HostResources() HostResources { return HostResources{} }
+
 func (p *limaProvider) GuestHome(v vm.VM) string { return lima.GuestHome(v.Dir) }
 
 func (p *limaProvider) GuestUser(v vm.VM) string { return lima.GuestUser(v.Dir) }

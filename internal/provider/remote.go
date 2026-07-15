@@ -41,6 +41,15 @@ func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
 func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }
 func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.host, v.Dir) }
 
+// HostResources samples the REMOTE host's CPU/memory/disk over ssh, so the board
+// header's denominators describe the machine the VMs actually run on rather than
+// the laptop driving them (the local provider returns zero and the UI samples the
+// laptop itself). Best-effort: any field the probe cannot read stays 0.
+func (p *remoteLimaProvider) HostResources() HostResources {
+	cpus, mem, disk := p.host.HostResources()
+	return HostResources{CPUs: cpus, MemBytes: mem, DiskFreeBytes: disk}
+}
+
 // NewRemoteLima builds the remote-Lima-over-SSH provider for cfg. It wires ONE
 // SSHHost as both the lima core's Runner and the provisioner's host-access seam,
 // so limactl runs on the remote host and the base image / stamp / lock are read
