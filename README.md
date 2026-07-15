@@ -138,6 +138,40 @@ After cloning, `sand` starts the VM and finalizes it; a restart happens only
 when the guest itself reports a pending reboot (e.g. a kernel/libc update) —
 most creates boot straight through with no bounce.
 
+### Using a remote Lima host over SSH
+
+To use a remote machine as your target instead of creating VMs locally, set the
+remote-host selection environment variables before running `sand`:
+
+```bash
+export SAND_PROVIDER="lima-remote"
+export SAND_REMOTE_HOST="192.168.1.100"  # or hostname
+export SAND_REMOTE_USER="debian"         # optional; defaults to the remote provider's default
+export SAND_REMOTE_PORT="22"             # optional; defaults to 22
+export SAND_REMOTE_IDENTITY="/path/to/ssh/key"  # optional; defaults to SSH agent/config
+export SAND_REMOTE_LIMA_HOME="/home/debian/.lima"  # optional; defaults to ~/.lima on remote
+
+sand create  # or 'sand' for the TUI
+```
+
+The remote host must have:
+- **Lima** (`limactl` CLI) installed and on `PATH`
+- **A working hypervisor** (QEMU/KVM, VirtualBox, etc.), just like a local Linux
+  host running Lima — see the [Lima installation docs](https://lima-vm.io/docs/installation/).
+- **SSH access** (key-based is recommended; password auth is supported).
+
+With these variables set, `sand create` and the TUI behave identically to the
+local workflow: they provision the heavy base image on the remote host once, clone
+it for each VM, and run the light finalize pass. VMs on remote hosts are tagged
+in the managed-VM index so they never mix with local VMs, and interactive attach
+(`sand shell` / `S` in the TUI) wraps the session with SSH automatically.
+
+To return to local Lima, unset the variables:
+
+```bash
+unset SAND_PROVIDER SAND_REMOTE_HOST SAND_REMOTE_USER SAND_REMOTE_PORT SAND_REMOTE_IDENTITY SAND_REMOTE_LIMA_HOME
+```
+
 **Per-VM disk sizing.** `sand` sizes each VM individually rather than
 inheriting the base's size. It builds the base at a small virtual-disk floor
 (`20GiB`) and grows every clone to its requested size (`cpus` and `memory` are

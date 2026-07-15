@@ -83,6 +83,40 @@ go build ./cmd/sand
 ./sand
 ```
 
+## Using a remote Lima host over SSH
+
+To provision VMs on a remote machine instead of locally, set the provider
+selection environment variables:
+
+```bash
+export SAND_PROVIDER="lima-remote"
+export SAND_REMOTE_HOST="192.168.1.100"  # or hostname
+export SAND_REMOTE_USER="debian"         # optional; defaults to the remote provider's default
+export SAND_REMOTE_PORT="22"             # optional; defaults to 22
+export SAND_REMOTE_IDENTITY="/path/to/ssh/key"  # optional; defaults to SSH agent/config
+export SAND_REMOTE_LIMA_HOME="/home/debian/.lima"  # optional; defaults to ~/.lima on remote
+
+sand create  # or 'sand' for the TUI
+```
+
+The remote host must have:
+- **Lima** (`limactl` CLI) installed and on `PATH`
+- **A working hypervisor** (QEMU/KVM, VirtualBox, etc.), just like any local
+  Linux host running Lima — see the [Lima installation docs](https://lima-vm.io/docs/installation/).
+- **SSH access** (key-based is recommended; password auth is supported).
+
+With these variables set, the TUI and `sand create` work identically to the
+local workflow: they build and cache the base image on the remote host, clone
+it for each VM, and finalize each clone. Remote and local VMs are kept
+separate in the managed-VM index. Interactive attach (`sand shell` / `S` in
+the TUI) automatically wraps the session with SSH.
+
+To return to local Lima, unset these variables:
+
+```bash
+unset SAND_PROVIDER SAND_REMOTE_HOST SAND_REMOTE_USER SAND_REMOTE_PORT SAND_REMOTE_IDENTITY SAND_REMOTE_LIMA_HOME
+```
+
 ## Profiling a provisioning run
 
 Set `SAND_PROFILE=1` (any value other than empty or `0`) in the host

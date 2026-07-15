@@ -15,20 +15,41 @@ two halves that share one repo:
 
 ### Go package layout (`internal/`)
 
+- `provider` — the backend-agnostic seam (`Provider` interface) that owns the
+  whole VM lifecycle (discovery, power, provisioning), guest transport, and
+  interactive attach. Two implementations: local Lima (`NewLocalLima`) and
+  remote-Lima-over-SSH (`NewRemoteLima`, plan 15 task 5). Centralised
+  construction via `NewDefault()` (zero-config local) and `Resolve()`
+  (provider selection via `SAND_*` env vars), so the three entrypoints
+  (TUI, headless `sand create`, `sand shell`) cannot drift. The `lima`
+  package now exports a host-access seam (`Host` = `Runner` + `HostFiles`,
+  local vs SSH) that the two providers differ on; the local provider is
+  behaviourally identical to sand's previous direct use of `*lima.Client`.
 - `lima` — typed wrapper over the `limactl` CLI. All subprocess execution goes
-  through a `Runner` interface so code is testable without a real binary.
+  through the `Host` interface (a union of `Runner` and `HostFiles` seams),
+  and `Runner` is the gateway for subprocess execution — both implement it
+  (`ExecRunner` for local, `SSHHost` for remote-Lima-over-SSH), so code is
+  testable without a real binary. When provisioning, the provisioner itself
+  depends on `*lima.Client` and the `Host` seam, never on `Provider`.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
+  Depends on `*lima.Client` and the `Host` seam (for base-image file access),
+  not directly on `Provider`.
+- `registry` — managed-VM index, now provider-tagged (schema v2, auto-migrated
+  on read). Each entry's `Scope` is derived from which provider created it
+  (`LocalScope` for local Lima, a remote identity like `user@host:port` for
+  remote), so a remote host's VMs never mix with the local list.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/…).
-- `secrets`, `registry`, `manage`, `browse`, `vm` — host-side secrets store,
-  managed-VM index, shared registry bookkeeping, file browser, domain types.
+- `secrets`, `manage`, `browse`, `vm` — host-side secrets store, shared registry
+  bookkeeping, file browser, domain types.
 
 Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
 (`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
-keep them from drifting — the create/TUI paths go through the same
-`provision`/`registry` seams by design, and both shell entrypoints (the TUI's `S`
-verb and `sand shell`) construct their guest-attach command exclusively via
-`lima.AttachArgv`, the one place in sand that knows tmux exists.
+keep them from drifting — the create/TUI paths construct their provider via
+`provider.Resolve()` (centralised, wrapping `provider.NewDefault()` with optional
+selection), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
+construct their guest-attach command exclusively via `provider.AttachArgv()`,
+the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
 
 ## Build, run, format
 
@@ -51,12 +72,22 @@ go test -tags limae2e ./...                    # real-VM e2e (needs limactl + KV
 
 Conventions:
 
-- **No test may require a real `limactl`.** Use a fake `lima.Runner` (see the
-  `fakeRunner`/`listFakeRunner` types in the `*_test.go` files) that returns
-  canned output. `New`/model construction takes a `*lima.Client` built over the
-  fake.
-- **And no test may write to the developer's host state.** A fake `Runner` stops
-  a test from *running* `limactl`; it does nothing about the files the code
+- **Consumers of `provider.Provider` should fake the interface itself** using
+  `internal/providerfake.Provider` — one test double struct with a function
+  field per interface method, so a test drives the exact behaviour it cares
+  about and never panics on a forgotten mock. See the package doc for the
+  defaulting contract (unset fields return sensible zero values). The TUI,
+  browse, and entrypoint tests (`internal/ui`, `internal/browse`, `cmd/sand`)
+  all depend on `provider.Provider`, so this is the primary test seam.
+- **For tests that genuinely need limactl-shaped provisioner plumbing
+  underneath**, the local provider still offers runner-level fakes: use a fake
+  `lima.Runner` (see the `fakeRunner`/`listFakeRunner` types in the `*_test.go`
+  files) that returns canned output, and build a `*lima.Client` over it for
+  deeper testing. This is heavier but necessary when a test must drive the
+  base-image machinery or other lima-core logic, not just the provider
+  interface.
+- **No test may write to the developer's host state.** A fake `Runner` stops a
+  test from *running* `limactl`; it does nothing about the files the code
   around it writes. Isolate the environment too — `isolateHostState(t)` in
   `internal/ui` sets **both** `XDG_DATA_HOME` (managed-VM index, secrets store)
   and `LIMA_HOME` (the base image's playbook-version stamp). `LIMA_HOME` is not
