@@ -57,21 +57,37 @@
     msg: "Unsupported architecture '{{ ansible_architecture }}' for the glab .deb package"
   when: devtools_glab_deb_arch == ''
 
+# force: true re-fetches every run and overwrites whatever is already at the
+# dest, so a stale or truncated file from an interrupted run (or one pre-seeded
+# at this predictable /tmp path) can never be handed to apt — get_url still only
+# reports "changed" when the bytes actually differ, so this stays idempotent.
 - name: Download GitLab CLI (glab) .deb package
   ansible.builtin.get_url:
     url: "https://gitlab.com/gitlab-org/cli/-/releases/v{{ devtools_glab_version }}/downloads/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
     dest: "/tmp/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
     mode: "0644"
+    force: true
+  register: devtools_glab_deb
 
 - name: Install GitLab CLI (glab)
   ansible.builtin.apt:
-    deb: "/tmp/glab_{{ devtools_glab_version }}_linux_{{ devtools_glab_deb_arch }}.deb"
+    deb: "{{ devtools_glab_deb.dest }}"
     state: present
 
-# Drupal.org CLI (drupalorg). Its PHP runtime (php-cli, php-curl) is named in
-# devtools_packages and installed by the single consolidated base-phase apt
-# transaction in roles/base/tasks/main.yml; this role only drops the PHAR on
-# PATH — a non-apt install, like uv above.
+# dev-tools runs in the base phase, so anything left in /tmp is baked into the
+# clone-source image and every version bump would orphan another ~10 MB .deb.
+- name: Remove the downloaded glab .deb package
+  ansible.builtin.file:
+    path: "{{ devtools_glab_deb.dest }}"
+    state: absent
+
+# Drupal.org CLI (drupalorg). Its PHP runtime (php-cli, php-curl, php-xml) is
+# named in devtools_packages and installed by the single consolidated base-phase
+# apt transaction in roles/base/tasks/main.yml; this role only drops the PHAR on
+# PATH — a non-apt install, like uv above. force: true so a version bump actually
+# replaces the existing binary (the dest carries no version in its name, and
+# get_url defaults to force: false = "skip if dest exists"); it still reports
+# "changed" only when the bytes differ, so re-runs stay idempotent.
 - name: Install Drupal.org CLI (drupalorg)
   ansible.builtin.get_url:
     url: "https://github.com/mglaman/drupalorg-cli/releases/download/{{ devtools_drupalorg_cli_version }}/drupalorg.phar"
@@ -79,6 +95,7 @@
     owner: root
     group: root
     mode: "0755"
+    force: true
 
 # uv
 - name: Install uv
