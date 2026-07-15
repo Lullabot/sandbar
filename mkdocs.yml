@@ -61,14 +61,14 @@ nav:
     - Your First VM: getting-started/first-vm.md
     - How Provisioning Works: getting-started/how-it-works.md
     - Available Tools: getting-started/available-tools.md
+    - Security Model: reference/security-model.md
   - Using sand:
     - The Board (TUI): using-sand/tui.md
     - CLI Reference: using-sand/cli-reference.md
     - Secrets: using-sand/secrets.md
-    - Files and Shells: using-sand/files-and-shells.md
+    - Shells and Files: using-sand/files-and-shells.md
   - Reference:
     - Files and State: reference/files-and-state.md
-    - Security Model: reference/security-model.md
     - Troubleshooting: reference/troubleshooting.md
   - Contributing:
     - Development: contributing/development.md
