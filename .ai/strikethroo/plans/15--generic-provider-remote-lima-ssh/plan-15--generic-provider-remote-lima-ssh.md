@@ -448,10 +448,10 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 5 (completed): Remote Lima over SSH provider — SSH host-access impl, nested-PTY attach, two-stage copy (depends on: 2, 3, 4).
 
-### Phase 5: Verification & documentation
+### ✅ Phase 5: Verification & documentation
 **Parallel Tasks:**
-- Task 6: Remote-provider E2E, backend-agnostic fakes, and the `-race`/87%-coverage gate (depends on: 3, 5).
-- Task 7: Document the Provider model and remote-Lima usage in AGENTS.md/READMEs (depends on: 5).
+- ✔️ Task 6 (completed): Remote-provider E2E, backend-agnostic fakes, and the `-race`/87%-coverage gate (depends on: 3, 5).
+- ✔️ Task 7 (completed): Document the Provider model and remote-Lima usage in AGENTS.md/READMEs (depends on: 5).
 
 ### Post-phase Actions
 Apply `.ai/strikethroo/config/hooks/POST_PHASE.md` after each phase: confirm the build/vet/race/coverage gates above with real command output before advancing. Do not accept a task's self-report as proof.
