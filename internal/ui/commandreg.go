@@ -21,7 +21,6 @@ package ui
 import (
 	"fmt"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -144,7 +143,7 @@ var vmCommands = []vmCommand{
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
-			return m.beginAction(startCmd(m.cli, v.Name, user, scopes))
+			return m.beginAction(startCmd(m.p, v.Name, user, scopes))
 		},
 	},
 	{
@@ -153,7 +152,7 @@ var vmCommands = []vmCommand{
 		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
-			return m.beginAction(stopCmd(m.cli, v.Name))
+			return m.beginAction(stopCmd(m.p, v.Name))
 		},
 	},
 	{
@@ -163,7 +162,7 @@ var vmCommands = []vmCommand{
 		action: func(m *model, v vm.VM) tea.Cmd {
 			m.logMsg("restarting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.Name)
-			return m.beginAction(restartCmd(m.cli, v.Name, user, scopes))
+			return m.beginAction(restartCmd(m.p, v.Name, user, scopes))
 		},
 	},
 	{
@@ -236,7 +235,7 @@ var vmCommands = []vmCommand{
 			} else {
 				m.logMsg("attaching to " + v.Name + " — C-a d detaches; the TUI resumes when you detach or exit")
 			}
-			return shellCmd(v.Name, lima.GuestHome(v.Dir))
+			return shellCmd(m.p, v)
 		},
 	},
 	{
@@ -253,7 +252,7 @@ var vmCommands = []vmCommand{
 			// in model.go).
 			m.confirm = &confirmState{
 				prompt:  fmt.Sprintf("Delete %q?", name),
-				run:     deleteCmd(m.cli, name),
+				run:     deleteCmd(m.p, name),
 				working: "deleting " + name + "…",
 			}
 			return nil

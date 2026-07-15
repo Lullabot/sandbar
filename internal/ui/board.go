@@ -613,7 +613,7 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirm = &confirmState{
 			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
-			run:     stopAllCmd(m.cli, targets),
+			run:     stopAllCmd(m.p, targets),
 			working: fmt.Sprintf("stopping %d sand VMs…", len(targets)),
 		}
 		return m, nil

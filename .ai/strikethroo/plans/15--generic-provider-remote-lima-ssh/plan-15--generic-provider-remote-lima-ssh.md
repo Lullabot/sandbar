@@ -441,7 +441,7 @@ No circular dependencies.
 
 ### Phase 3: Migration
 **Parallel Tasks:**
-- Task 3: Migrate all consumers from `*lima.Client` to `provider.Provider` and centralise construction (depends on: 2).
+- ✔️ Task 3 (completed): Migrate all consumers from `*lima.Client` to `provider.Provider` and centralise construction (depends on: 2).
 - Task 4: Provider-aware registry with versioned migration + provider selection config (depends on: 2).
 
 ### Phase 4: Remote provider

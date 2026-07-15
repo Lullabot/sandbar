@@ -36,7 +36,9 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -55,7 +57,7 @@ func TestGenerateHomeBoardShot(t *testing.T) {
 	// The lima runner is never consulted: the board is hand-built below, not driven.
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	m := New(cli, prov).(model)
+	m := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
 
 	const gib = int64(1) << 30
 	now := time.Now()

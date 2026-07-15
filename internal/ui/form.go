@@ -591,7 +591,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
-		return m.prov.CreateVMWithOptions(ctx, c, opts, out)
+		return m.p.Create(ctx, c, opts, out)
 	}
 	cmd := m.beginProvision("Creating "+cfg.Name, run, cfg)
 	return m, cmd
@@ -641,7 +641,7 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	m.formErr = nil
 	opts := provision.ResetOptions{PreserveClaude: m.preserveClaude, PreserveProject: m.preserveProject && m.projectToggleEnabled}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
-		return m.prov.Reset(ctx, c, opts, out)
+		return m.p.Reset(ctx, c, opts, out)
 	}
 	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
 	// its VM legitimately vanishes from `limactl list` mid-run. The registry has to

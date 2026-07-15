@@ -7,8 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/ui"
 	buildversion "github.com/lullabot/sandbar/internal/version"
 
@@ -54,23 +53,19 @@ func main() {
 // runTUI launches the interactive Bubble Tea program: the original (and still
 // default) `sand` entrypoint.
 func runTUI() {
-	cli := lima.New(lima.NewExecRunner())
-	if err := cli.Preflight(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	dir, err := provision.LocatePlaybook()
+	p, err := provider.NewDefault()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
-	prov := &provision.Provisioner{Lima: cli, PlaybookDir: dir}
+	if err := p.Preflight(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// Tell the TUI which build it is, so the header can say so.
 	ui.SetVersion(buildversion.String(version))
-	if _, err := tea.NewProgram(ui.New(cli, prov)).Run(); err != nil {
+	if _, err := tea.NewProgram(ui.New(p)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

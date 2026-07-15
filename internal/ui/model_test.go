@@ -9,6 +9,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -54,12 +55,15 @@ func isolateHostState(t *testing.T) {
 // newTestModelWithCli is newTestModel's parametrized form, for tests that need
 // to observe or control the lima.Client's underlying calls (e.g. a
 // secretsFakeRunner asserting exactly what ApplySecrets sent toward the
-// guest) rather than the no-op fakeRunner.
+// guest) rather than the no-op fakeRunner. It wraps cli in the local Lima
+// provider (task 2's provider.NewLocalLima) — the same composition
+// provider.NewDefault performs for a real limactl — so the model is built
+// exactly the way every real entrypoint builds it, just over a fake runner.
 func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 	t.Helper()
 	isolateHostState(t)
 	prov := &provision.Provisioner{Lima: cli}
-	m, ok := New(cli, prov).(model)
+	m, ok := New(provider.NewLocalLima(cli, prov)).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}
@@ -1299,8 +1303,9 @@ func (stopAllFakeRunner) StreamOut(context.Context, io.Reader, io.Writer, ...str
 // stays stopped even though a later one fails).
 func TestStopAllCmdReportsPartialFailureByName(t *testing.T) {
 	cli := lima.New(stopAllFakeRunner{failNames: map[string]bool{"bad": true}})
+	p := provider.NewLocalLima(cli, &provision.Provisioner{Lima: cli})
 
-	msg := stopAllCmd(cli, []string{"good", "bad"})()
+	msg := stopAllCmd(p, []string{"good", "bad"})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("stopAllCmd's tea.Cmd returned %T, want actionDoneMsg", msg)

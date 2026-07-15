@@ -18,7 +18,7 @@ type stubVMLister struct {
 	err error
 }
 
-// Get mirrors lima.Client.Get: the named instance, or ErrNoSuchInstance.
+// Get mirrors the provider's Get: the named instance, or ErrNoSuchInstance.
 func (s stubVMLister) Get(name string) (vm.VM, error) {
 	if s.err != nil {
 		return vm.VM{}, s.err
@@ -29,6 +29,13 @@ func (s stubVMLister) Get(name string) (vm.VM, error) {
 		}
 	}
 	return vm.VM{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+}
+
+// AttachArgv mirrors the local provider's own AttachArgv (lima.AttachArgv +
+// lima.GuestHome) closely enough for shellAttachArgv's tests: they only need
+// a non-empty, limactl-shaped argv, never a real guest.
+func (s stubVMLister) AttachArgv(v vm.VM) []string {
+	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir))
 }
 
 // TestShellAttachArgvNotRunning verifies task 3's central refusal: a VM that
