@@ -603,6 +603,29 @@ func TestSSHLimaHome(t *testing.T) {
 // sentinel is ACQUIRED (and released on Unlock), and a holder that exits without
 // it (flock -n lost) is CONTENDED — (false,nil), the retry signal the base
 // serializer's poll loop needs.
+func TestSSHHostResources(t *testing.T) {
+	t.Run("parses cpus mem disk", func(t *testing.T) {
+		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+			// The one probe script echoes "cpus mem disk" (bytes).
+			return sh(ctx, "printf '%s' '8 16777216000 500000000000'")
+		}}
+		h := hostWith(testCfg, rec)
+		cpus, mem, disk := h.HostResources()
+		if cpus != 8 || mem != 16777216000 || disk != 500000000000 {
+			t.Fatalf("HostResources = (%d, %d, %d), want (8, 16777216000, 500000000000)", cpus, mem, disk)
+		}
+	})
+	t.Run("degrades to zeros on failure", func(t *testing.T) {
+		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+			return sh(ctx, "exit 1") // probe failed — header must just drop the clause
+		}}
+		h := hostWith(testCfg, rec)
+		if c, m, d := h.HostResources(); c != 0 || m != 0 || d != 0 {
+			t.Fatalf("HostResources on failure = (%d,%d,%d), want all zero", c, m, d)
+		}
+	})
+}
+
 func TestSSHStagePlaybook(t *testing.T) {
 	const abs = "/home/dev/.lima/_sand"
 	rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {

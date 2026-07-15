@@ -126,9 +126,31 @@ type Provider interface {
 	// through unchanged.
 	GuestPath(name, path string) string
 
+	// --- Host capacity ---
+
+	// HostResources reports the limactl HOST's own capacity — CPU count, total
+	// memory, and free disk on the Lima store — for the board header's "how much of
+	// my machine are the sandboxes eating" denominators. For local Lima that host is
+	// this machine, and the provider returns the ZERO value so the UI keeps sampling
+	// it directly (the platform probes live in the ui package); a remote provider
+	// samples the REMOTE host over ssh, since that is where the VMs actually run.
+	// Any field the backend cannot determine is left 0 ("unknown") and the header
+	// drops that clause.
+	HostResources() HostResources
+
 	// --- Preflight ---
 
 	// Preflight verifies the backend is usable before any lifecycle op (for Lima:
 	// limactl is installed and new enough to support `limactl clone`).
 	Preflight() error
+}
+
+// HostResources is the limactl host's own capacity, used only for the board
+// header's denominators (see Provider.HostResources). A zero field means
+// "unknown" — the header drops the corresponding clause rather than showing a
+// fabricated total.
+type HostResources struct {
+	CPUs          int
+	MemBytes      int64
+	DiskFreeBytes int64
 }

@@ -52,7 +52,8 @@ type Provider struct {
 	GuestUserFunc  func(v vm.VM) string
 	GuestPathFunc  func(name, path string) string
 
-	PreflightFunc func() error
+	PreflightFunc     func() error
+	HostResourcesFunc func() provider.HostResources
 }
 
 // Compile-time proof the fake satisfies the whole seam.
@@ -208,4 +209,11 @@ func (f *Provider) Preflight() error {
 		return f.PreflightFunc()
 	}
 	return nil
+}
+
+func (f *Provider) HostResources() provider.HostResources {
+	if f.HostResourcesFunc != nil {
+		return f.HostResourcesFunc()
+	}
+	return provider.HostResources{}
 }

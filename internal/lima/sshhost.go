@@ -402,6 +402,38 @@ func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, e
 	return dst, nil
 }
 
+// HostResources samples the remote host's CPU count, total memory (bytes) and
+// free disk (bytes) in ONE ssh round trip, for the board header's denominators.
+// It is best-effort — any field the remote shell cannot produce comes back 0 —
+// because a wrong or missing host total must never break the header or a refresh.
+//
+// The script is portable across the two platforms Lima runs on: nproc /
+// /proc/meminfo on Linux, sysctl on macOS; df -Pk for free KiB on both, falling
+// back to $HOME when the Lima store dir does not exist yet.
+func (h *SSHHost) HostResources() (cpus int, memBytes, diskFreeBytes int64) {
+	limaHome := h.cfg.RemoteLimaHome
+	if limaHome == "" {
+		limaHome = defaultRemoteLimaHome
+	}
+	script := `c=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)
+if [ -r /proc/meminfo ]; then m=$(awk '/^MemTotal:/{print $2*1024}' /proc/meminfo); else m=$(sysctl -n hw.memsize 2>/dev/null || echo 0); fi
+d=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $4*1024}')
+[ -z "$d" ] && d=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4*1024}')
+echo "${c:-0} ${m:-0} ${d:-0}"`
+	out, _, err := h.runRemote(context.Background(), nil, "sh", "-c", script)
+	if err != nil {
+		return 0, 0, 0
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 3 {
+		return 0, 0, 0
+	}
+	cpus, _ = strconv.Atoi(fields[0])
+	memBytes, _ = strconv.ParseInt(fields[1], 10, 64)
+	diskFreeBytes, _ = strconv.ParseInt(fields[2], 10, 64)
+	return cpus, memBytes, diskFreeBytes
+}
+
 // --- copy across the hop --------------------------------------------------------
 
 // copyAcrossHop resolves a copy whose limactl runs on the remote host into the
