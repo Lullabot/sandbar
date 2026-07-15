@@ -33,11 +33,22 @@ var hostFiles HostFiles = LocalFiles()
 // entry matching the ssh.config login user is preferred, otherwise the first
 // user carrying a homedir. Returns "" when it can't be determined so the caller
 // can fall back.
-func GuestHome(instanceDir string) string {
+//
+// It reads through the package-default local host-access seam. A remote-Lima
+// provider (plan 15 task 5) whose instance files live on another host reads the
+// same cloud-config.yaml over SSH via GuestHomeVia, passing its own HostFiles —
+// so the guest home is resolved from wherever the instance actually lives.
+func GuestHome(instanceDir string) string { return GuestHomeVia(hostFiles, instanceDir) }
+
+// GuestHomeVia is GuestHome reading through an explicit HostFiles rather than the
+// package default. It is the seam the remote-Lima provider uses to resolve the
+// guest home off the REMOTE host (where the instance files live) without mutating
+// the package-global seam that local callers share.
+func GuestHomeVia(hf HostFiles, instanceDir string) string {
 	if instanceDir == "" {
 		return ""
 	}
-	data, err := hostFiles.ReadFile(filepath.Join(instanceDir, "cloud-config.yaml"))
+	data, err := hf.ReadFile(filepath.Join(instanceDir, "cloud-config.yaml"))
 	if err != nil {
 		return ""
 	}
@@ -47,7 +58,7 @@ func GuestHome(instanceDir string) string {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return ""
 	}
-	want := GuestUser(instanceDir) // prefer the entry for the ssh login user
+	want := GuestUserVia(hf, instanceDir) // prefer the entry for the ssh login user
 	first := ""
 	for i := range doc.Users {
 		// The users list can hold a bare "default" string alongside mappings; skip
@@ -77,11 +88,16 @@ func GuestHome(instanceDir string) string {
 // the account limactl authenticates as for shell/copy, which Lima may name
 // differently from the host user. Returns "" when it can't be determined, so the
 // caller can fall back.
-func GuestUser(instanceDir string) string {
+func GuestUser(instanceDir string) string { return GuestUserVia(hostFiles, instanceDir) }
+
+// GuestUserVia is GuestUser reading through an explicit HostFiles rather than the
+// package default — the seam the remote-Lima provider uses to read the login user
+// off the REMOTE host's ssh.config.
+func GuestUserVia(hf HostFiles, instanceDir string) string {
 	if instanceDir == "" {
 		return ""
 	}
-	data, err := hostFiles.ReadFile(filepath.Join(instanceDir, "ssh.config"))
+	data, err := hf.ReadFile(filepath.Join(instanceDir, "ssh.config"))
 	if err != nil {
 		return ""
 	}
