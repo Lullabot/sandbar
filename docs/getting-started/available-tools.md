@@ -7,6 +7,7 @@ VM comes with the tools you normally use.
 
 - [Docker CE](https://docs.docker.com/engine/) (with Buildx and Compose)
 - [ddev](https://ddev.com/)
+- [The Drupal.org CLI (`drupalorg`)](https://github.com/mglaman/drupalorg-cli)
 - [cloudflared](https://github.com/cloudflare/cloudflared)
 - [mkcert](https://github.com/FiloSottile/mkcert)
 
@@ -22,6 +23,7 @@ VM comes with the tools you normally use.
 - The Claude Code CLI
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git
   credential helper for HTTPS authentication
+- The [GitLab CLI (`glab`)](https://gitlab.com/gitlab-org/cli)
 
 ## Shell & utilities
 

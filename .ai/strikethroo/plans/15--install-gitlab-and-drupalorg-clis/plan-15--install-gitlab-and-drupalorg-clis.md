@@ -290,3 +290,64 @@ No circular dependencies.
 ### Execution Summary
 - Total Phases: 2
 - Total Tasks: 2
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-15
+
+### Results
+The `dev-tools` Ansible role now bakes two additional CLIs into the base image
+alongside `gh`:
+
+- **glab** (GitLab CLI) `1.108.0` — installed from GitLab's official signed
+  `.deb` release asset (pinned), with `ansible_architecture` mapped to the
+  Debian arch in the asset name (amd64/arm64). Installed via `apt: deb:` (a
+  local `.deb`, so no apt-cache refresh — stays clear of the base phase's single
+  `apt update` optimization).
+- **drupalorg** (Drupal.org CLI, `mglaman/drupalorg-cli`) `0.10.3` — the pinned
+  PHAR dropped on `PATH` at `/usr/local/bin/drupalorg`, with its PHP runtime
+  (`php-cli`, `php-curl`, `php-xml`) named in `devtools_packages` so PHP flows
+  into the single consolidated base-phase apt transaction rather than a second
+  apt update/install.
+
+Files changed: `roles/dev-tools/tasks/main.yml`, `roles/dev-tools/defaults/main.yml`,
+`README.md` (dev-tools role tool list).
+
+### Verification evidence
+Verified end-to-end in a throwaway Lima clone of the Debian trixie base image
+(`claude-base` → `st15-verify`, deleted afterward; the user's `claude-base` and
+running `iowamp` were never touched):
+
+| Command | Result |
+| --- | --- |
+| `glab --version` | `glab 1.108.0 (5de20850)` — exit 0 |
+| `drupalorg --version` | `Drupal.org CLI 0.10.3` — exit 0 |
+| `drupalorg list` | commands listed — exit 0 |
+| `php --version` | `PHP 8.4.23 (cli)` — exit 0 |
+| `gh --version` | `gh version 2.96.0` — exit 0 (no regression) |
+
+Plus: `ansible-playbook --syntax-check site.yml` (exit 0); the resolved base
+package list contains `['php-cli', 'php-curl', 'php-xml']`; `go build ./...` and
+`go test ./internal/provision/` (including the ansible-rendered
+`TestBaseToolsetPackages` tests) pass.
+
+### Noteworthy Events
+- **Repo had moved ahead of the initial reading.** The worktree branched from
+  origin/main at release 0.4.0, in which `gh`'s apt keyring/repo registration
+  had been refactored out of `dev-tools` into a single consolidated apt
+  transaction in `roles/base/tasks/main.yml`. The implementation was adapted to
+  that current structure: the two glab/drupalorg install *actions* live in
+  `dev-tools/tasks`, while the plain-Debian PHP packages are named in
+  `devtools_packages` (dev-tools defaults) so they join the one consolidated
+  install — matching the repo's deliberate one-`apt update`/one-install design.
+- **Real verification caught a genuine bug.** With only `php-cli` + `php-curl`,
+  `drupalorg` aborted at startup — its Box requirements checker mandates the
+  `dom` and `simplexml` extensions (the latter for its `dg/rss-php` dependency).
+  Added `php-xml`, after which the CLI runs. A syntax-check-only verification
+  would have shipped a non-functional `drupalorg`.
+
+### Necessary follow-ups
+- None required. Optional: the pinned versions (glab `1.108.0`, drupalorg
+  `0.10.3`) are one-line bumps in `roles/dev-tools/defaults/main.yml` when future
+  releases warrant.
