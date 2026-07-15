@@ -44,6 +44,7 @@ created: 2026-07-15
 | _(Refinement)_ What happens when a user disables or deletes a profile that has a background job (build/provision/transfer) in flight on it? | **Block until idle.** Refuse the disable/delete with a message until the in-flight job finishes or is cancelled — reusing the existing jobs-gating pattern that already blocks Delete while a VM builds. No silent cancellation, no half-provisioned VM left behind. |
 | _(Refinement, auto-resolved from code)_ Is `provision.SetHostFiles` the only single-provider host-access global to fix? | **No.** There are **two** process-global host-access seams that both assume one provider per process: `provision.hostFiles` (base-image touches during create/reset/cleanup) and `ui.hostFiles` (per-tile disk/up-since sampling). Both must become fleet-aware; see Component 2/3. |
 | _(Refinement, auto-resolved from code)_ Can startup keep calling `Preflight()` synchronously per the current entrypoints? | **No.** `main.go` and `create.go` call `p.Preflight()` synchronously and exit on error; a remote preflight is an SSH round-trip. In a fleet this must become **per-profile and asynchronous** — a slow or failing remote preflight yields an error binding, never a blocked startup or fatal exit. |
+| _(Refinement, rebase on merged main)_ Across profiles, VM names can collide; how should VM identity work in the TUI's per-VM stores? | **Scope-qualified identity.** A VM is identified by `(scope, name)`, not bare `name`, so `web` can exist both locally and on a remote. The secrets store, heartbeat registry, jobs registry, and the board's focus ring all become scope-aware, and the secrets store gains a scope dimension (a schema migration). This matches the registry's deliberate same-name-across-scope support and prevents reconcile from deleting the wrong VM's secrets. |
 
 ## Executive Summary
 
@@ -346,6 +347,43 @@ without breaking the board layout at the narrowest supported terminal (80
 columns), degrading gracefully (e.g. compacting or truncating bands) when the
 fleet is larger than the bar can fully show.
 
+### Component 6: Scope-qualified VM identity across the fleet
+
+**Objective**: Make a VM's identity `(scope, name)` rather than a bare name
+everywhere the TUI keys per-VM state, so the same name can exist in two locations
+without collision — and, critically, so reconciliation never deletes the wrong
+VM's secrets.
+
+The refactor branch made the *registry* scope-aware, but the TUI's other per-VM
+stores predate the fleet and still key by bare name: the **secrets store**
+(`internal/secrets`, `vms[name]`), the **heartbeat registry**
+(`internal/ui/heartbeat.go`, `beats map[string]*heartbeat`), the **jobs
+registry** (`internal/ui/jobs.go`, `jobKey{name, kind}`), and the board's
+**focus ring** (`model.focusName`). With two profiles enabled, a VM named `web`
+on local and a `web` on a remote would share a heartbeat, share a job slot,
+share a focus target, and — worst — share a secrets entry. The registry
+deliberately allows this name reuse (its own comment: "two providers can
+legitimately reuse the same VM name"), so the fix is to complete the
+scope-awareness the branch started, not to forbid the reuse.
+
+The **highest-severity** consequence is in reconciliation. Today the
+`vmsLoadedMsg` handler runs `manage.Reconcile(reg, live, scope)` and then
+**permanently deletes** each dropped VM's host secrets by bare name
+(`model.go`'s "a dropped VM's HOST SECRETS ARE DELETED" path). Per-profile in a
+fleet, dropping a local `web` would delete the secrets for a remote `web` that is
+alive and well. Every reconcile-and-prune must therefore be scope-qualified: a
+profile's reconcile considers only its own scope's entries (already true of
+`ReconcileScoped`) and prunes only that scope's per-VM state.
+
+Concretely: the heartbeat, jobs, and focus keys become composite `(scope, name)`
+(or an equivalent stable per-VM handle), and the **secrets store gains a scope
+dimension**, which is a schema migration (bump its on-disk version, and read
+older files as local-scoped — every VM that exists in a pre-fleet secrets file
+could only have been local, exactly mirroring how the registry's v2 migration
+stamped old entries local). Non-managed considerations do not arise because the
+board's roster is managed clones only, and only sand-created clones ever carry
+secrets/jobs/heartbeats.
+
 ## Risk Considerations and Mitigation Strategies
 
 <details>
@@ -357,6 +395,10 @@ fleet is larger than the bar can fully show.
     - **Mitigation**: Run each profile's preflight inside its per-profile async connect/refresh cmd; a failure/timeout becomes an error binding (status-bar banner), never a blocked or aborted startup. The local profile stays effectively instant. Test with a fake provider whose preflight blocks — the board must still launch and stay interactive.
 - **Runtime fleet mutation can strand in-flight work or leak goroutines.** Disabling/deleting/editing a profile live must tear down refresh/heartbeat cmds and remove tiles cleanly.
     - **Mitigation**: Gate disable/delete/edit on the profile being idle (block-until-idle, reusing the jobs-in-flight gate); tear down a binding by cancelling its cmds and dropping its sub-state. Test enable→refresh→disable cycles and a disable attempted while a job is in flight (must be refused).
+- **[HIGH — data loss] Bare-name per-VM keys collide across profiles; reconcile could delete the wrong VM's secrets.** Secrets, heartbeats, jobs, and the focus ring key by name; the registry deliberately allows the same name in two scopes, and reconcile permanently deletes a dropped VM's secrets by name.
+    - **Mitigation**: Make identity `(scope, name)` across all per-VM stores (Component 6) and scope-qualify every reconcile-and-prune, so dropping a local `web` never touches a remote `web`'s state. Add a regression test that enables two profiles with a same-named VM, deletes it on one, and asserts the other's secrets/heartbeat survive intact.
+- **Secrets-store schema migration risk.** Adding a scope dimension to the on-disk secrets store changes its format; a botched migration loses host secrets.
+    - **Mitigation**: Bump the store's schema version and read pre-migration files as local-scoped (every VM in them could only have been local), mirroring the registry's v2 migration; write the new version on first save. Cover with a load-old-file → read-back round-trip test.
 - **A slow or unreachable remote could still stall the UI if any refresh is awaited synchronously.** The board must stay live while a remote hangs.
     - **Mitigation**: Every profile's list/refresh/heartbeat/host-sample runs on its own `tea.Cmd` with the profile identity carried in the result message; the model never blocks on a remote, and the local fleet renders independently. Verify with a fake provider that blocks indefinitely for one profile while the board remains interactive.
 - **Header/tile layout could break with a variable number of status bands at narrow widths.** The layout budgets are currently sized for one host band and fixed tile lines.
@@ -412,9 +454,13 @@ fleet is larger than the bar can fully show.
    be copied to a second machine so a laptop and a desktop drive the same profile.
 8. Unconfigured (no `profiles.yaml`) sand seeds a single Local profile and behaves
    **identically** to today's local-only experience.
-9. All new code is covered by tests; the suite passes with `-race` and the project
-   stays at or above its **87% coverage floor**, with **no unit test requiring a
-   real limactl or ssh target**.
+9. A VM name may exist under **more than one profile** at once (e.g. `web` local
+   and `web` remote); each has independent secrets, heartbeat, jobs, and focus,
+   and deleting one **never** touches the other's state. A pre-fleet secrets file
+   loads intact as local-scoped.
+10. All new code is covered by tests; the suite passes with `-race` and the project
+    stays at or above its **87% coverage floor**, with **no unit test requiring a
+    real limactl or ssh target**.
 
 ## Self Validation
 
@@ -454,11 +500,17 @@ exercising the real system, not just re-running unit tests:
    gauge and up-since (sampled on the remote host), not "?", proving the per-tile
    host-access seam resolves to the VM's owning profile rather than the local
    filesystem.
-8. **Env-var removal**: Grep the codebase and docs for `SAND_PROVIDER` /
+8. **Same-name coexistence & secrets isolation**: Enable two profiles, create a
+   VM with the **same name** on each, set distinct secrets on both, and confirm
+   both tiles render (each labelled by profile) with independent secrets and
+   heartbeats. Delete the VM on one profile and confirm the other profile's VM,
+   its secrets, and its heartbeat are **untouched**. Separately, load a pre-fleet
+   secrets file and confirm it reads back intact as local-scoped.
+9. **Env-var removal**: Grep the codebase and docs for `SAND_PROVIDER` /
    `SAND_REMOTE_` and confirm no references remain outside historical
    plan/changelog text; confirm setting those env vars has no effect.
-9. **Regression gate**: Run `go test ./... -race` and the coverage check and
-   confirm the suite passes at or above the 87% floor.
+10. **Regression gate**: Run `go test ./... -race` and the coverage check and
+    confirm the suite passes at or above the 87% floor.
 
 ## Documentation
 
@@ -476,7 +528,10 @@ exercising the real system, not just re-running unit tests:
 - **Update `docs/using-sand/cli-reference.md`** for any `sand create` profile
   selection and `sand shell` cross-profile behavior.
 - **Update `docs/reference/files-and-state.md`** to document the new
-  `profiles.yaml` config file alongside the managed-VM index and secrets store.
+  `profiles.yaml` config file alongside the managed-VM index and secrets store,
+  and note the secrets store's new scope dimension (schema bump).
+- **Update `docs/using-sand/secrets.md`** if same-name-across-profiles changes how
+  secrets are addressed or displayed per VM.
 - **Update `README.md`** and **`AGENTS.md`** to describe the fleet/profiles model,
   the removal of the env-var surface, and the per-operation host-access binding
   that replaces the process-global `provision.SetHostFiles` assumption.
@@ -509,13 +564,15 @@ exercising the real system, not just re-running unit tests:
 
 ## Integration Strategy
 
-This work extends the `worktree-lima-transport-refactor` branch and should be
-built on top of it (or on `main` after that branch merges). It changes no registry
-schema — a profile reduces to the existing `registry.Scope` — so managed-VM
-indexes written by the refactor branch are read unchanged. The only new persisted
-artifact is `profiles.yaml`, which is created on demand (seeded with a Local
-profile) so existing installs upgrade with zero manual steps. The removal of the
-env-var surface is the one intentional break and is isolated to
+The `worktree-lima-transport-refactor` branch has now **merged to `main`**
+(its Provider seam, scope-aware registry, and `SSHHost` transport are on `main`),
+so this work builds directly on `main`. It changes no **registry** schema — a
+profile reduces to the existing `registry.Scope`, so managed-VM indexes are read
+unchanged — but it **does** migrate the **secrets** store to add a scope
+dimension (Component 6); pre-migration secrets files load as local-scoped, so
+existing installs upgrade with zero manual steps. The only new persisted artifact
+is `profiles.yaml`, created on demand (seeded with a Local profile). The removal
+of the env-var surface is the one intentional break, isolated to
 `internal/provider/select.go`, its tests, and the docs.
 
 ## Notes
@@ -528,11 +585,12 @@ env-var surface is the one intentional break and is isolated to
   hand-edited, committed, and shared between clients. Any future field must remain
   a reference (path/handle), never key material — the same contract
   `provider.TargetConfig` and `registry.Scope` already keep.
-- **Numbering note:** the `worktree-lima-transport-refactor` branch archives its
-  own plan under id 15 (`15--generic-provider-remote-lima-ssh`), which differs
-  from `main`'s archived plan 15; this plan is id **16** and does not collide, but
-  the branch's plan-15 slug collision with main is a pre-existing merge
-  consideration for the branch owner.
+- **Numbering note:** after the merge, `main`'s archive now holds **three** id-15
+  plan directories (`15--documentation-site-and-stale-doc-cleanup`,
+  `15--generic-provider-remote-lima-ssh`, `15--install-gitlab-and-drupalorg-clis`)
+  — a pre-existing id collision carried in by the merge, independent of this work.
+  This plan is id **16**, verified to be the only `id: 16` in the tree (no
+  collision), and lives in `plans/16--connection-profiles/`.
 
 ### Decision Log
 
@@ -560,6 +618,11 @@ the branch code), recorded so downstream task generation does not re-litigate th
   failing remote never blocks or aborts startup.
 - **Both host-access globals are retired/fleet-aware** (see Technical Risks); the
   UI seam becomes per-tile, the provision seam becomes per-operation.
+- **VM identity is `(scope, name)`, not bare name** (Component 6). This preserves
+  the registry's deliberate same-name-across-scope support and is the reason the
+  secrets store is migrated. The rejected alternative — enforcing globally-unique
+  VM names across profiles — was simpler but contradicts that design and forbids a
+  VM named the same in two locations.
 - **Considered and deferred:** a first-run courtesy that detects leftover
   `SAND_REMOTE_*` env vars and prints a one-line "env vars removed — create a
   profile" hint. Left out to avoid resurrecting the env surface in code; the
@@ -575,3 +638,12 @@ the branch code), recorded so downstream task generation does not re-litigate th
   `--profile` CLI flags and `sand shell` disambiguation; added the all-profiles-
   connecting empty-board state; added a Decision Log; and added three Technical
   Risks (dual globals, sync preflight, runtime mutation).
+- 2026-07-15: Re-run after rebasing onto merged `main` (the transport refactor is
+  now on `main`; code verified unchanged — both host-file globals and the sync
+  preflight confirmed present). New finding: the TUI's per-VM stores (secrets,
+  heartbeats, jobs, focus) key by **bare name** and collide across profiles, with
+  reconcile able to delete the wrong VM's secrets. Added **Component 6:
+  scope-qualified VM identity** and the secrets-store schema migration; two new
+  Technical Risks (HIGH data-loss on secrets, migration risk); success criterion
+  9 and self-validation step 8; Documentation + Integration Strategy updates for
+  the secrets schema; and refreshed the numbering note for the post-merge archive.
