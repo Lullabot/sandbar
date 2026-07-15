@@ -109,3 +109,19 @@ same SHA) once a PR is opened against the branch.
   favours explanatory comments on the *why*, not the *what*.
 - When you change TUI rendering, update the affected golden snapshots
   (`-update`) and confirm the text diff is the change you intended.
+
+## Regenerating the home-page screenshot
+
+The board image on the site's home page lives at `docs/images/board.png`. The
+committed copy was rendered headlessly from the TUI's wide-board test fixture
+with [`freeze`](https://github.com/charmbracelet/freeze), so its CPU and memory
+bars read `—` — there is no live VM behind a fixture. To reshoot it with real
+values from your own machine, run the [VHS](https://github.com/charmbracelet/vhs)
+tape next to the image:
+
+```
+cd docs/images && vhs board.tape
+```
+
+That drives a real `sand` session, so keep a VM or two around first, or the
+board will be empty.
