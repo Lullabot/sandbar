@@ -83,9 +83,16 @@ func hostGit(key string) string { return vm.HostGitConfig(key) }
 func hostUser() string { return vm.HostUser() }
 
 // defaultCPUs mirrors the original bash provisioner's default_cpus(): half the
-// host's logical CPUs, with a floor of 2.
-func defaultCPUs() int {
-	if n := runtime.NumCPU() / 2; n >= 2 {
+// host's logical CPUs, with a floor of 2. hostCPUs is the core count of the host
+// the VM will actually run on — the REMOTE host for a remote provider (sampled
+// via Provider.HostResources) — so the suggestion scales to that machine, not the
+// laptop driving it. A non-positive hostCPUs (unknown, or local Lima) falls back
+// to THIS machine's count.
+func defaultCPUs(hostCPUs int) int {
+	if hostCPUs <= 0 {
+		hostCPUs = runtime.NumCPU()
+	}
+	if n := hostCPUs / 2; n >= 2 {
 		return n
 	}
 	return 2
@@ -96,10 +103,15 @@ func defaultCPUs() int {
 const memCapBytes = 8 << 30
 
 // defaultMemory is the blank-field RAM default: 8GiB capped at half the host's
-// RAM so a small host isn't over-committed (a 16GiB+ host still gets 8GiB). It
-// falls back to the full cap when host RAM can't be probed.
-func defaultMemory() string {
-	return cappedMemoryGiB(hostMemBytes(), memCapBytes)
+// RAM so a small host isn't over-committed (a 16GiB+ host still gets 8GiB).
+// hostMem is the total RAM of the host the VM will run on — the REMOTE host for a
+// remote provider — so the cap reflects that machine. A non-positive hostMem
+// (unknown, or local Lima) falls back to probing THIS machine.
+func defaultMemory(hostMem int64) string {
+	if hostMem <= 0 {
+		hostMem = hostMemBytes()
+	}
+	return cappedMemoryGiB(hostMem, memCapBytes)
 }
 
 // cappedMemoryGiB returns min(capBytes, half of total) rounded to the nearest
@@ -166,20 +178,23 @@ func orDefault(v, def string) string {
 
 // newInputs builds the form's text inputs, seeded from DefaultCreateConfig and
 // the host git identity. The clone token is masked.
-func newInputs() []textinput.Model {
+// hostCPUs / hostMem describe the host the VM will run on (the remote host for a
+// remote provider, 0 for local Lima or "not sampled yet"), so the CPU and memory
+// suggestions scale to that machine — see defaultCPUs / defaultMemory.
+func newInputs(hostCPUs int, hostMem int64) []textinput.Model {
 	def := vm.DefaultCreateConfig()
 	seeds := []string{
-		"",                          // fName      (required; no default — user must name it)
-		"",                          // fHostname  (defaults to the instance name at submit)
-		hostUser(),                  // fUser      (host username, like Lima)
-		hostGit("user.name"),        // fGitName
-		hostGit("user.email"),       // fGitEmail
-		strconv.Itoa(defaultCPUs()), // fCPUs      (half the host cores, floor 2)
-		defaultMemory(),             // fMemory    (8GiB, capped at half host RAM)
-		def.Disk,                    // fDisk
-		"",                          // fDockerProxyHost
-		"",                          // fCloneURL
-		"",                          // fCloneToken
+		"",                                  // fName      (required; no default — user must name it)
+		"",                                  // fHostname  (defaults to the instance name at submit)
+		hostUser(),                          // fUser      (host username, like Lima)
+		hostGit("user.name"),                // fGitName
+		hostGit("user.email"),               // fGitEmail
+		strconv.Itoa(defaultCPUs(hostCPUs)), // fCPUs      (half the host cores, floor 2)
+		defaultMemory(hostMem),              // fMemory    (8GiB, capped at half host RAM)
+		def.Disk,                            // fDisk
+		"",                                  // fDockerProxyHost
+		"",                                  // fCloneURL
+		"",                                  // fCloneToken
 	}
 
 	inputs := make([]textinput.Model, len(fieldLabels))
@@ -199,7 +214,7 @@ func newInputs() []textinput.Model {
 // openForm initialises the create form and focuses the first field, returning
 // the cursor-blink command.
 func (m *model) openForm() tea.Cmd {
-	m.inputs = newInputs()
+	m.inputs = newInputs(m.headerCPUs, m.headerMem)
 	m.focusIdx = 0
 	m.formErr = nil
 	m.hostDiskFree = freeDiskBytes()
@@ -230,7 +245,7 @@ func (m *model) openForm() tea.Cmd {
 // starts on the first editable field (Hostname); the clone token is never stored,
 // so it is left blank to be re-supplied for a private repo.
 func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
-	m.inputs = newInputs()
+	m.inputs = newInputs(m.headerCPUs, m.headerMem)
 	m.inputs[fName].SetValue(cfg.Name)
 	m.inputs[fHostname].SetValue(cfg.Hostname)
 	m.inputs[fUser].SetValue(cfg.User)
@@ -471,7 +486,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.GitEmail = m.field(fGitEmail)
 
 	if cpuStr := m.field(fCPUs); cpuStr == "" {
-		cfg.CPUs = defaultCPUs()
+		cfg.CPUs = defaultCPUs(m.headerCPUs)
 	} else {
 		cpus, err := vm.ParseCPUs(cpuStr)
 		if err != nil {
@@ -480,7 +495,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.CPUs = cpus
 	}
 
-	cfg.Memory = orDefault(m.field(fMemory), defaultMemory())
+	cfg.Memory = orDefault(m.field(fMemory), defaultMemory(m.headerMem))
 	cfg.Disk = orDefault(m.field(fDisk), cfg.Disk)
 	if lang := strings.TrimSpace(os.Getenv("LANG")); lang != "" {
 		cfg.Locale = lang // matches the script's LOCALE="${LANG:-en_US.UTF-8}"

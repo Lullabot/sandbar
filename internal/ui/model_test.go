@@ -898,7 +898,7 @@ func TestBaseImageDetection(t *testing.T) {
 // fields (user, CPUs, memory, disk), but Name is intentionally left blank so it
 // does not silently default to "claude".
 func TestNewInputsSeedsDefaults(t *testing.T) {
-	in := newInputs()
+	in := newInputs(0, 0)
 	for _, f := range []struct {
 		idx  int
 		name string
@@ -944,8 +944,8 @@ func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	if cfg.User == "" {
 		t.Errorf("User should default to the host user, got empty")
 	}
-	if cfg.Memory != defaultMemory() {
-		t.Errorf("Memory = %q, want the host-capped default %q", cfg.Memory, defaultMemory())
+	if cfg.Memory != defaultMemory(m.headerMem) {
+		t.Errorf("Memory = %q, want the host-capped default %q", cfg.Memory, defaultMemory(m.headerMem))
 	}
 	if cfg.Disk != "100GiB" {
 		t.Errorf("Disk = %q, want %q", cfg.Disk, "100GiB")
