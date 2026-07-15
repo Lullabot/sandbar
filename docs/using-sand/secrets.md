@@ -105,6 +105,16 @@ Pull requests and Issues are deliberately read-only so an autonomous agent
 can't merge its own PRs or close issues without a human in the loop — widen
 them only if your workflow needs an agent to manage them directly.
 
+!!! warning "Branch protection is required to keep agents off `main`"
+
+    A `Contents: Read and write` token can `git push` to **any** branch,
+    including `main`. The read-only `Pull requests` permission stops an agent
+    from *merging* its own PR, but it does nothing to stop a direct push that
+    bypasses review entirely. The token cannot enforce this — the repository
+    must. Add a **branch protection rule** (or ruleset) on `main` and every
+    other protected branch that **requires a pull request before merging**.
+    Without it, nothing prevents an agent from pushing straight to `main`.
+
 ### Supplying it and where it lands
 
 Provide the token at VM-create time — the TUI create form's `GitHub token`
