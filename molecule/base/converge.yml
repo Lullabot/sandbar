@@ -1,0 +1,23 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    # roles/base/tasks/main.yml folds devtools_docker_packages,
+    # devtools_packages, and devtools_ddev_packages (all owned by the
+    # dev-tools role's defaults) into its single apt transaction. In
+    # production this works because site.yml lists every role in one play,
+    # so Ansible merges all of their role defaults play-wide before any task
+    # runs. This scenario converges `base` alone, so those three lists are
+    # supplied directly instead of pulling in the dev-tools role.
+    devtools_docker_packages: []
+    devtools_packages: []
+    devtools_ddev_packages: []
+    # Keep the scenario to the base role's own foundational work: skip the
+    # optional toolchains (golang, JDK, ddev) this role can fold in. They
+    # add ~700MB and external repos unrelated to what verify.yml checks.
+    toolset_go: false
+    toolset_java: false
+    toolset_ddev: false
+  roles:
+    - role: base

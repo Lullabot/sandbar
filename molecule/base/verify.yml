@@ -1,0 +1,36 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Re-gather host facts (hostname reflects the role's change)
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+
+    - name: Read /etc/hosts
+      ansible.builtin.slurp:
+        src: /etc/hosts
+      register: _etc_hosts
+
+    - name: Read /etc/default/locale
+      ansible.builtin.slurp:
+        src: /etc/default/locale
+      register: _etc_default_locale
+
+    # Three stable, role-specific outcomes from roles/base/tasks/main.yml:
+    # "Set hostname", "Deploy /etc/hosts" (templates hosts.j2), and "Set
+    # default locale". These are picked because they're plain fact/file
+    # checks independent of the role's heavier, network-dependent apt/repo
+    # work (which this scenario intentionally doesn't assert on).
+    - name: Assert the base role's foundational setup landed
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.hostname == "claude"
+          - "'127.0.1.1 claude.lan claude' in (_etc_hosts.content | b64decode)"
+          - "'LANG=en_CA.UTF-8' in (_etc_default_locale.content | b64decode)"
+        fail_msg: >-
+          base role's foundational setup (hostname, /etc/hosts,
+          /etc/default/locale) did not land as expected.
+        success_msg: "base role foundational setup verified."
