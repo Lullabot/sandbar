@@ -50,6 +50,38 @@ func TestCopyDropsSSHDebugLinesButKeepsProgress(t *testing.T) {
 	}
 }
 
+// A SFTP-mode scp (the OpenSSH default, e.g. on a macOS remote) prints a
+// connection banner under -v — the "Executing: program … command sftp" line the
+// user saw, the version line, the host-key notice, and a byte summary — none of
+// which is the transfer progress -v was asked for. All of it must be filtered.
+func TestCopyDropsSFTPModeBannerLines(t *testing.T) {
+	var out bytes.Buffer
+	c := New(&chunkRunner{chunks: []string{
+		"Executing: program /usr/bin/ssh host 127.0.0.1, user debian, command sftp\n",
+		"OpenSSH_9.6p1, LibreSSL 3.3.6\n",
+		"Warning: Permanently added '[127.0.0.1]:52' (ED25519) to the list of known hosts.\n",
+		"Authenticated to 127.0.0.1 ([127.0.0.1]:52) using \"publickey\".\n",
+		"project.tar                     100% 5120KB   4.2MB/s   00:01\n",
+		"Transferred: sent 5242880, received 4096 bytes, in 1.2 seconds\n",
+		"Bytes per second: sent 4369066.7, received 3413.3\n",
+	}})
+	if err := c.Copy(context.Background(), &out, false, "/host/project.tar", "web:/tmp"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	got := out.String()
+	for _, noise := range []string{
+		"Executing: program", "OpenSSH_", "Permanently added",
+		"Authenticated to", "Transferred:", "Bytes per second:",
+	} {
+		if strings.Contains(got, noise) {
+			t.Errorf("scp -v banner line %q leaked into the stream:\n%s", noise, got)
+		}
+	}
+	if !strings.Contains(got, "project.tar") {
+		t.Errorf("the progress line was dropped along with the banner:\n%s", got)
+	}
+}
+
 // The pipe hands over arbitrary chunks, not lines, so a debug line can be split
 // across two writes. Filtering per-chunk would leak the tail of every split one.
 func TestSCPDebugFilterHandlesLinesSplitAcrossChunks(t *testing.T) {
