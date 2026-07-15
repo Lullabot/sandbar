@@ -372,6 +372,36 @@ func (h *SSHHost) DiskAllocBytes(path string) int64 {
 // stamp and its lock, under _sand/) live beneath it — now on the remote host.
 func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
 
+// StagePlaybook copies the local playbook fileset to a stable path under the
+// remote LimaHome and returns that path so `limactl start` on the remote host can
+// bind-mount it as /mnt/playbook. See lima.HostFiles.StagePlaybook.
+//
+// The returned path is ABSOLUTE: a Lima mount `location` is resolved on the remote
+// host and a relative one would be ambiguous, but RemoteLimaHome may be relative
+// to $HOME (its Lima default is the relative ".lima"), so the _sand directory is
+// created and its absolute path resolved in one round trip before the copy.
+//
+// The staged copy is refreshed each build (the prior one is removed first) and
+// deliberately NOT cleaned up afterward: the base overlay's mount points at it and
+// a clone's finalize re-mounts it, so it must outlive the build that created it —
+// the remote analogue of the local checkout the mount points at for local Lima.
+func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, error) {
+	sandDir := strings.TrimSuffix(h.cfg.RemoteLimaHome, "/") + "/_sand"
+	// One round trip: create _sand, drop any prior staged playbook (scp into an
+	// existing dir would nest the source under it), and echo _sand's ABSOLUTE path.
+	q := shellQuote(sandDir)
+	out, errb, err := h.runRemote(ctx, nil, "sh", "-c",
+		fmt.Sprintf("mkdir -p %s && rm -rf %s/playbook && cd %s && pwd", q, q, q))
+	if err != nil {
+		return "", fmt.Errorf("prepare remote playbook dir: %w: %s", err, strings.TrimSpace(string(errb)))
+	}
+	dst := strings.TrimSpace(string(out)) + "/playbook"
+	if err := h.scp(ctx, nil, true, localDir, h.target()+":"+dst); err != nil {
+		return "", fmt.Errorf("stage playbook to remote host: %w", err)
+	}
+	return dst, nil
+}
+
 // --- copy across the hop --------------------------------------------------------
 
 // copyAcrossHop resolves a copy whose limactl runs on the remote host into the

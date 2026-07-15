@@ -15,6 +15,7 @@ package lima
 // that goes through the seam works remotely without knowing it moved.
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,6 +64,17 @@ type HostFiles interface {
 	// per-instance state and sand's state ABOUT an instance (the base version
 	// stamp and its lock, under _sand/) live beneath it.
 	LimaHome() string
+	// StagePlaybook makes the playbook directory localDir available on the host
+	// where limactl runs and returns the path to mount as /mnt/playbook. For local
+	// Lima that host IS this machine, so it returns localDir unchanged. For remote
+	// Lima the playbook lives on the laptop but limactl (and its bind mount) run on
+	// the remote host, so the implementation copies the fileset to a stable path
+	// under the remote LimaHome and returns THAT path — otherwise `limactl start`
+	// would mount a directory that does not exist on the remote host. The staged
+	// copy is left in place (refreshed each build): the base overlay's mount points
+	// at it, and a clone's finalize still bind-mounts it, so it must outlive the
+	// build that created it, exactly as the local checkout/extracted dir does.
+	StagePlaybook(ctx context.Context, localDir string) (mountPath string, err error)
 	// OpenLock opens or creates the advisory lock file at path (which the caller
 	// has already ensured a parent directory for) with perm, returning a LockFile
 	// the base-image serializer flocks. See internal/provision/baselock.go.
@@ -115,6 +127,12 @@ func (localFiles) LimaHome() string {
 		return filepath.Join(h, ".lima")
 	}
 	return ""
+}
+
+// StagePlaybook is a no-op for local Lima: limactl runs on this machine, so it
+// bind-mounts localDir directly — nothing to copy anywhere.
+func (localFiles) StagePlaybook(_ context.Context, localDir string) (string, error) {
+	return localDir, nil
 }
 
 func (localFiles) OpenLock(path string, perm fs.FileMode) (LockFile, error) {

@@ -603,6 +603,33 @@ func TestSSHLimaHome(t *testing.T) {
 // sentinel is ACQUIRED (and released on Unlock), and a holder that exits without
 // it (flock -n lost) is CONTENDED — (false,nil), the retry signal the base
 // serializer's poll loop needs.
+func TestSSHStagePlaybook(t *testing.T) {
+	const abs = "/home/dev/.lima/_sand"
+	rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		if anyContains(argv, "pwd") {
+			return sh(ctx, "printf %s "+abs) // resolve _sand to its absolute path
+		}
+		return exec.CommandContext(ctx, "true") // scp succeeds
+	}}
+	h := hostWith(testCfg, rec)
+
+	dst, err := h.StagePlaybook(context.Background(), "/local/playbook")
+	if err != nil {
+		t.Fatalf("StagePlaybook: %v", err)
+	}
+	// The mount location must be ABSOLUTE (a relative RemoteLimaHome would make an
+	// ambiguous Lima mount `location`), and under the remote _sand dir.
+	if want := abs + "/playbook"; dst != want {
+		t.Fatalf("StagePlaybook returned %q, want the absolute staged path %q", dst, want)
+	}
+	// The local playbook is scp'd RECURSIVELY to that remote path so `limactl
+	// start` on the remote host can bind-mount it as /mnt/playbook.
+	scpCall := findCall(t, rec.calls, "scp")
+	if !hasToken(scpCall, "-r") || !hasToken(scpCall, "/local/playbook") || !hasToken(scpCall, h.target()+":"+dst) {
+		t.Fatalf("stage scp = %v, want it to scp -r /local/playbook to %s", scpCall, h.target()+":"+dst)
+	}
+}
+
 func TestSSHRemoteLock(t *testing.T) {
 	t.Run("acquired then released", func(t *testing.T) {
 		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {

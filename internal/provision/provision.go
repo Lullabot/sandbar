@@ -198,31 +198,34 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	if err != nil {
 		return fmt.Errorf("locate playbook: %w", err)
 	}
-	overlay, err := RenderBaseOverlay(cfg, dir)
+	// Make the playbook available ON THE HOST WHERE LIMACTL RUNS and mount THAT
+	// path. `limactl start` bind-mounts the overlay's `location` on its own host —
+	// for remote Lima that is the remote machine, not this laptop, so a local
+	// playbook path would mount an empty/absent directory. StagePlaybook is a
+	// no-op for local Lima and a copy to the remote host for remote Lima.
+	mountDir, err := hostFiles.StagePlaybook(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("stage playbook: %w", err)
+	}
+	overlay, err := RenderBaseOverlay(cfg, mountDir)
 	if err != nil {
 		return fmt.Errorf("render base overlay: %w", err)
 	}
 
-	f, err := os.CreateTemp("", "sand-base-*.yaml")
-	if err != nil {
-		return fmt.Errorf("create overlay temp file: %w", err)
+	// Write the overlay where limactl will READ it — on its host, not this one.
+	// os.CreateTemp would put it in this laptop's /tmp, which a remote limactl
+	// cannot open ("open /tmp/sand-base-*.yaml: no such file or directory"). The
+	// seam writes it beside the base's other sand state under _sand/ (local or
+	// remote), and it is removed once the instance has been created from it.
+	overlayPath := filepath.Join(hostFiles.LimaHome(), "_sand", "sand-base-"+cfg.BaseName+".yaml")
+	if err := hostFiles.WriteFile(overlayPath, overlay, 0o700, 0o600); err != nil {
+		return fmt.Errorf("write base overlay: %w", err)
 	}
-	defer os.Remove(f.Name())
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		return fmt.Errorf("chmod overlay temp file: %w", err)
-	}
-	if _, err := f.Write(overlay); err != nil {
-		f.Close()
-		return fmt.Errorf("write overlay temp file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close overlay temp file: %w", err)
-	}
+	defer func() { _ = hostFiles.RemoveAll(overlayPath) }()
 
 	step(out, "Building base image %q — downloads Debian and boots once; the first run takes several minutes…", cfg.BaseName)
 	if err := timer.time("base image creation", func() error {
-		return p.Lima.CreateStreaming(ctx, cfg.BaseName, f.Name(), out)
+		return p.Lima.CreateStreaming(ctx, cfg.BaseName, overlayPath, out)
 	}); err != nil {
 		// buildBase only ever runs when the base is ABSENT or is being rebuilt from
 		// scratch (the caller force-deleted it first), so the instance here is one
@@ -533,16 +536,24 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 		return
 	}
 	// Carry the version stamp (with its BuiltAt) so the migrated base is seen as
-	// current, not re-applied on the spot. A miss here just costs one re-apply.
-	if err := os.Rename(baseVersionPath(legacyBaseName), baseVersionPath(cfg.BaseName)); err != nil && !os.IsNotExist(err) {
-		step(out, "Note: could not carry the base version stamp across the rename (%v); the base will be re-applied once.", err)
+	// current, not re-applied on the spot. Read+write+remove through the
+	// host-access seam rather than os.Rename so it operates on the host where the
+	// base actually lives (the remote host for remote Lima, where os.Rename would
+	// silently no-op on a non-existent local path). A miss here just costs one
+	// re-apply.
+	if data, rerr := hostFiles.ReadFile(baseVersionPath(legacyBaseName)); rerr == nil {
+		if werr := hostFiles.WriteFile(baseVersionPath(cfg.BaseName), data, 0o700, 0o600); werr != nil {
+			step(out, "Note: could not carry the base version stamp across the rename (%v); the base will be re-applied once.", werr)
+		} else {
+			_ = hostFiles.RemoveAll(baseVersionPath(legacyBaseName))
+		}
 	}
 	// Reclaim the old instance and its lock. Non-fatal: a lingering legacy base is
 	// wasted disk and an unmanaged tile, not a broken create.
 	if err := p.Lima.Delete(legacyBaseName, true); err != nil {
 		step(out, "Note: migrated the base but could not delete the old %q (%v); remove it with `limactl delete %s`.", legacyBaseName, err, legacyBaseName)
 	}
-	_ = os.Remove(baseLockPath(legacyBaseName))
+	_ = hostFiles.RemoveAll(baseLockPath(legacyBaseName))
 }
 
 // ensureBaseStopped makes sure the base image exists, is current, and is stopped —
