@@ -58,12 +58,12 @@ jobs:
       # GITHUB_TOKEN deliberately do NOT trigger other workflows, so a
       # GITHUB_TOKEN-opened PR would never run the test workflow. The token is
       # minted per-run and expires in ~1h. Reuses the org's release-please App.
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         id: app-token
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
@@ -78,25 +78,25 @@ jobs:
       # The release commit is already on `main` at this point, but check out the
       # tag explicitly: GoReleaser derives the version from the git state, and
       # `main` may have moved on since release-please tagged it.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
       # Mint a short-lived (~1h) token scoped to the tap repo so GoReleaser's
       # `brews:` publisher can push the formula there. Replaces a long-lived PAT:
       # the dedicated App is installed only on homebrew-sandbar with
       # contents:write, so this workflow's cross-repo reach is exactly that.
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         id: tap-token
         with:
           app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: homebrew-sandbar
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: '~> v2'
           args: release --clean
