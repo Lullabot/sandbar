@@ -3,11 +3,18 @@ package ui
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/vm"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // copyArgsRunner records the argv of the `limactl copy` it is asked to stream, so
@@ -93,5 +100,116 @@ func TestTransferDestIsTheUsersDirectoryVerbatim(t *testing.T) {
 					src, dst, tc.wantSrc, tc.wantDst, args)
 			}
 		})
+	}
+}
+
+// updateBrowse's upload-destination branch must derive the target VM (and thus
+// the guest destination lister/default dir) from m.transferVM — the transfer's
+// own VM — not from whichever tile happens to be under the board's focus ring.
+// This is the wrong-VM bug documented at transfer.go:27-33: it used to read
+// m.detail (the VM screen's own record), which was harmless only while the VM
+// screen was the sole place a verb could fire from. The focus ring here sits on
+// a DIFFERENT vm than the transfer targets, so a regression back to reading focus
+// instead of m.transferVM would seed the destination from the wrong VM's config.
+func TestBrowseSelectionTargetsTransferVMNotFocus(t *testing.T) {
+	m := newTestModel(t)
+	if err := m.reg.Add(vm.CreateConfig{
+		Name: "focus-vm", BaseName: "claude-base", CloneURL: "https://github.com/org/focus-repo",
+	}); err != nil {
+		t.Fatalf("seed focus-vm: %v", err)
+	}
+	if err := m.reg.Add(vm.CreateConfig{
+		Name: "xfer-vm", BaseName: "claude-base", CloneURL: "https://github.com/org/xfer-repo",
+	}); err != nil {
+		t.Fatalf("seed xfer-vm: %v", err)
+	}
+	m = putOnBoard(t, m, vm.VM{Name: "focus-vm", Status: "Running"})
+	m = putOnBoard(t, m, vm.VM{Name: "xfer-vm", Status: "Running"})
+	m.focusName = "focus-vm" // the ring is on a DIFFERENT VM than the transfer targets
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	// Mirror startTransfer's upload setup directly (as TestTransferDestIsTheUsersDirectoryVerbatim
+	// does), so the browser lists a temp dir we control instead of the real cwd.
+	m.transferVM = "xfer-vm"
+	m.transferUpload = true
+	m.browser = browse.NewBrowser(browse.NewLocalLister(), "Upload")
+	m.browser.SetSize(80, 20)
+	m.view = viewBrowse
+
+	l := newTeaLoop(t, m)
+	l.exec(m.browser.Open(tmp))
+	l.pump("the temp dir to load", func(mm model) bool {
+		return strings.Contains(ansi.Strip(mm.browser.View()), "notes.txt")
+	})
+
+	after, _ := l.m.Update(ctrlKey('s')) // browse.selectKey: choose the highlighted entry
+	m = after.(model)
+
+	if m.view != viewDest {
+		t.Fatalf("selecting an entry should advance to the destination prompt, view=%v", m.view)
+	}
+	wantDef := "/home/" + vm.HostUser() + "/github.com/org/xfer-repo"
+	if got := m.dest.Value(); got != wantDef {
+		t.Fatalf("dest default = %q, want %q (derived from transferVM %q, not focused VM %q)",
+			got, wantDef, m.transferVM, "focus-vm")
+	}
+}
+
+// updateDest's Esc arm must clear the browser's pending selection
+// (browser.ClearSelection, transfer.go:101) before returning to the browser.
+// Without that clear, updateBrowse's `if p, isDir, ok := m.browser.Selected(); ok`
+// check (transfer.go:68) would immediately see the stale selection on the very
+// next keystroke and bounce the user straight back to the destination prompt,
+// making Esc un-escapable.
+func TestDestEscClearsBrowserSelection(t *testing.T) {
+	m := newTestModel(t)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running"})
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	m.transferVM = "claude"
+	m.transferUpload = false
+	m.browser = browse.NewBrowser(browse.NewLocalLister(), "Download")
+	m.browser.SetSize(80, 20)
+	m.view = viewBrowse
+
+	l := newTeaLoop(t, m)
+	l.exec(m.browser.Open(tmp))
+	l.pump("the temp dir to load", func(mm model) bool {
+		return strings.Contains(ansi.Strip(mm.browser.View()), "notes.txt")
+	})
+
+	selected, _ := l.m.Update(ctrlKey('s')) // pick the highlighted entry
+	m = selected.(model)
+	if m.view != viewDest {
+		t.Fatalf("precondition: selecting an entry should reach the destination prompt, view=%v", m.view)
+	}
+	if _, _, ok := m.browser.Selected(); !ok {
+		t.Fatalf("precondition: the browser should hold a pending selection")
+	}
+
+	after, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = after.(model)
+
+	if m.view != viewBrowse {
+		t.Fatalf("esc from the destination prompt should return to the browser, view=%v", m.view)
+	}
+	if _, _, ok := m.browser.Selected(); ok {
+		t.Fatal("esc should clear the browser's pending selection")
+	}
+
+	// The regression this guards: without ClearSelection, the next keystroke sees
+	// the still-pending selection and bounces straight back into viewDest.
+	bounced, _ := m.Update(runeKey('j'))
+	m = bounced.(model)
+	if m.view != viewBrowse {
+		t.Fatalf("a keystroke after esc must not bounce back to the destination prompt, view=%v", m.view)
 	}
 }

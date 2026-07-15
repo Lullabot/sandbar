@@ -1,0 +1,19 @@
+# gremlins mutation-testing config — see the `mutation` job in
+# .github/workflows/test.yml. This is an ADVISORY signal: the job is
+# continue-on-error and both thresholds are 0 so gremlins never fails the run.
+# It reports a mutation score and surviving mutants for the logic-heavy core
+# packages (provision, registry, vm, lima); the packages are selected by path
+# on the command line, not here. The ui view layer is deliberately out of the
+# initial core scope.
+#
+# Run locally against one package with:
+#   go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.5.0
+#   gremlins unleash --config .gremlins.yaml ./internal/provision/...
+unleash:
+  dry-run: false
+  # Advisory only — never gate on the score. Raise these later, per package,
+  # once a baseline mutation score is known.
+  threshold-efficacy: 0
+  threshold-mcover: 0
+  # Drop the slowest mutant operators later if runtime is a problem; the weekly
+  # cadence keeps this off the PR critical path.

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/provision"
@@ -13,21 +14,26 @@ import (
 // stubProvisioner is a headlessProvisioner double: CreateVM/Recreate both
 // "succeed" without touching lima, recording the options they were handed so a
 // test can assert what intent doHeadlessCreate passed DOWN to the provisioner
-// (rather than acting on itself).
+// (rather than acting on itself). called is set by either method, so a test
+// gating on a refusal (e.g. --recreate on an unmanaged VM) can assert the
+// provisioner was never reached at all.
 type stubProvisioner struct {
 	created   int
 	recreated int
+	called    bool
 	opts      provision.CreateOptions
 }
 
 func (s *stubProvisioner) CreateVMWithOptions(_ context.Context, _ vm.CreateConfig, opts provision.CreateOptions, _ io.Writer) error {
 	s.created++
+	s.called = true
 	s.opts = opts
 	return nil
 }
 
 func (s *stubProvisioner) RecreateWithOptions(_ context.Context, _ vm.CreateConfig, opts provision.CreateOptions, _ io.Writer) error {
 	s.recreated++
+	s.called = true
 	s.opts = opts
 	return nil
 }
@@ -122,5 +128,27 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 	}
 	if !prov.opts.Rebuild {
 		t.Fatal("--recreate --rebuild did not pass the rebuild intent to the provisioner")
+	}
+}
+
+// TestHeadlessRecreateRefusedForUnmanagedVM is the CLI half of the recreate
+// gate in internal/manage: recreate clones from a Claude base image and would
+// replace ANY instance it is pointed at, so --recreate must be refused for a
+// VM sand did not create — and refused BEFORE the provisioner is ever
+// touched, not just reported as an error after a clone already ran.
+func TestHeadlessRecreateRefusedForUnmanagedVM(t *testing.T) {
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	reg := registry.NewEmpty() // no managed entry for cfg.Name
+
+	prov := &stubProvisioner{}
+	err := doHeadlessCreate(context.Background(), reg, prov, cfg, true, false, io.Discard)
+	if err == nil {
+		t.Fatal("doHeadlessCreate(--recreate, unmanaged VM): got nil error, want a recreate refusal")
+	}
+	if !strings.Contains(err.Error(), "recreate refused") {
+		t.Fatalf("doHeadlessCreate(--recreate, unmanaged VM) error = %q, want it to contain %q", err.Error(), "recreate refused")
+	}
+	if prov.called {
+		t.Fatal("doHeadlessCreate(--recreate, unmanaged VM) invoked the provisioner despite the refusal")
 	}
 }

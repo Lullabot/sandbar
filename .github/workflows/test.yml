@@ -19,6 +19,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Heavy, advisory jobs (mutation, molecule) run weekly, not per-PR, so the
+  # fast unit gate is the only thing that blocks merges. See the `if:` guards
+  # on the `mutation` and `molecule` jobs below.
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 permissions:
   contents: read
@@ -55,12 +60,38 @@ jobs:
       # the TUI. These need no VM (the lima client is faked), so they run here
       # rather than in the slow lima-e2e job. The `limae2e`-tagged tests that
       # boot real VMs stay gated and run only in lima-e2e below.
-      - name: Go tests
-        run: go test ./...
+      #
+      # -race: the last two release cycles were race fixes; the suite is
+      # -race-clean and CI must enforce it. -covermode=atomic is required under
+      # -race. Coverage is measured over ./internal/... only (the cmd/sand main
+      # glue is excluded so it doesn't distort the number) and gated against a
+      # repo-committed floor — self-contained, no third-party coverage service.
+      # Bump COVERAGE_FLOOR by hand in a PR as coverage rises.
+      - name: Go tests (race) + coverage gate
+        env:
+          COVERAGE_FLOOR: "87"
+        run: |
+          go test ./... -race -covermode=atomic \
+            -coverpkg=./internal/... -coverprofile=coverage.out
+          go tool cover -html=coverage.out -o coverage.html
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')
+          awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN {
+            if (t+0 < f+0) { printf "::error::coverage %.1f%% is below the floor %s%%\n", t, f; exit 1 }
+            printf "coverage %.1f%% >= floor %s%%\n", t, f
+          }'
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.html
 
   lima-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60 # +15 for the cmd/sand limae2e create/recreate tests
     steps:
       - uses: actions/checkout@v7
 
@@ -91,6 +122,15 @@ jobs:
 
       - name: Build sand from the checkout
         run: go build -o sand ./cmd/sand
+
+      # The cmd/sand limae2e tests build their own minimal base
+      # (sand-cmde2e-base, all tool flags off) and tear it and their tiny
+      # clones down in TestMain/Cleanup, so they run FIRST — on maximum free
+      # disk — and reclaim everything before the heavy claude-ci provision
+      # below. They assert the headless create records a managed VM and that
+      # the --recreate managed-gate holds against a real registry.
+      - name: cmd/sand end-to-end (headless create + --recreate gate)
+        run: LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sand/
 
       # Run the actual entrypoint, non-interactively, forcing a true
       # from-scratch base build with --rebuild. Base reuse/re-apply is the
@@ -211,3 +251,80 @@ jobs:
         run: |
           tail -n 200 cold.log || true
           tail -n 200 warm.log || true
+
+  # Mutation testing measures how good the tests are, not just which lines they
+  # touch. It recompiles and reruns the suite per mutant, so it is slow — it
+  # runs weekly (schedule) and on demand (workflow_dispatch), never per-PR, and
+  # is advisory (non-blocking). Scoped to the logic-heavy core packages; the ui
+  # view layer is excluded (mutating it against goldens yields mostly
+  # equivalent/timeout mutants for little signal).
+  mutation:
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true # advisory: never blocks a merge
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.5.0
+
+      - name: Run gremlins (core packages, advisory)
+        run: |
+          : > mutation.log
+          for pkg in provision registry vm lima; do
+            echo "=== gremlins: internal/$pkg ===" | tee -a mutation.log
+            # --config carries advisory thresholds (0 = never fail); the job is
+            # continue-on-error anyway. Scope by path so ui and other packages
+            # are excluded from the initial core set.
+            gremlins unleash --config .gremlins.yaml "./internal/$pkg/..." 2>&1 | tee -a mutation.log || true
+          done
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation.log
+
+  # Ansible role behaviour, not just YAML validity: molecule converges each role
+  # in a systemd-capable Debian container (so services actually start), re-runs
+  # for idempotence, and verifies concrete outcomes. Scoped to base + samba;
+  # the other roles are documented as follow-up. Weekly + on demand, not per-PR.
+  molecule:
+    name: molecule (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Advisory: KNOWN idempotence failure on the samba scenario — roles/samba's
+    # "Set Samba password" task is unconditionally changed_when: true (smbpasswd
+    # has no idempotent check), so `molecule test -s samba` reports one changed
+    # task on the idempotence re-run. Fixing that means editing the production
+    # role, which is out of scope for this test/CI-only work — tracked as a
+    # follow-up. continue-on-error keeps the scheduled run informative (read the
+    # logs) rather than permanently red on a known production-role property.
+    continue-on-error: true
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [base, samba]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install molecule + Docker driver
+        run: pip install "molecule>=6" "molecule-plugins[docker]" ansible-core
+
+      - name: molecule test (${{ matrix.scenario }})
+        run: molecule test -s ${{ matrix.scenario }}
+        env:
+          PY_COLORS: "1"
+          ANSIBLE_FORCE_COLOR: "1"
