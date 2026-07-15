@@ -163,8 +163,8 @@ func TestAnsibleParserAcrossReadBoundaries(t *testing.T) {
 // playbook runs a single create streams down one pipe.
 func TestAnsibleParserGrammar(t *testing.T) {
 	var p ansibleParser
-	p.feed("==> Cloning \"web\" from base image \"claude-base\"…\n")
-	if p.progress.Step != `Cloning "web" from base image "claude-base"…` {
+	p.feed("==> Cloning \"web\" from base image \"sandbar-base\"…\n")
+	if p.progress.Step != `Cloning "web" from base image "sandbar-base"…` {
 		t.Fatalf("Step = %q", p.progress.Step)
 	}
 	if p.progress.Index != 0 {

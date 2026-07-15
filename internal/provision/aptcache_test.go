@@ -32,7 +32,7 @@ func TestSeedAptCache_NoOpWhenNothingCached(t *testing.T) {
 	f := &fakeRunner{}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.seedAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.seedAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("seedAptCache: %v", err)
 	}
 	if len(f.calls) != 0 {
@@ -66,19 +66,19 @@ func TestSeedAptCache_PushesWhenCachePresent(t *testing.T) {
 	f := &fakeRunner{}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.seedAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.seedAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("seedAptCache: %v", err)
 	}
 	if len(f.calls) != 2 {
 		t.Fatalf("seedAptCache made %d limactl calls, want 2 (push, then sudo move): %v", len(f.calls), f.calls)
 	}
-	wantPush := []string{"copy", "-v", "--backend=scp", "-r", archivesDir, "claude-base:/tmp/"}
+	wantPush := []string{"copy", "-v", "--backend=scp", "-r", archivesDir, "sandbar-base:/tmp/"}
 	if got := f.calls[0]; !reflect.DeepEqual(got, wantPush) {
 		t.Fatalf("seedAptCache push argv = %v, want %v", got, wantPush)
 	}
 	move := f.calls[1]
-	if len(move) < 3 || move[0] != "shell" || move[1] != "claude-base" || move[2] != "sudo" {
-		t.Fatalf("seedAptCache move argv = %v, want a `shell claude-base sudo ...` call", move)
+	if len(move) < 3 || move[0] != "shell" || move[1] != "sandbar-base" || move[2] != "sudo" {
+		t.Fatalf("seedAptCache move argv = %v, want a `shell sandbar-base sudo ...` call", move)
 	}
 }
 
@@ -101,7 +101,7 @@ func TestSeedAptCache_CopyFailureIsSwallowed(t *testing.T) {
 	f := &fakeRunner{err: os.ErrPermission}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.seedAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.seedAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("seedAptCache must swallow a Copy failure, got error: %v", err)
 	}
 	if len(f.calls) != 1 {
@@ -123,17 +123,17 @@ func TestHarvestAptCache_AlwaysPulls(t *testing.T) {
 	f := &fakeRunner{}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.harvestAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.harvestAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("harvestAptCache: %v", err)
 	}
 	if len(f.calls) != 2 {
 		t.Fatalf("harvestAptCache made %d limactl calls, want 2 (clear lock/partial, then copy): %v", len(f.calls), f.calls)
 	}
 	clear := f.calls[0]
-	if len(clear) < 3 || clear[0] != "shell" || clear[1] != "claude-base" || clear[2] != "sudo" {
-		t.Fatalf("harvestAptCache clear argv = %v, want a `shell claude-base sudo ...` call", clear)
+	if len(clear) < 3 || clear[0] != "shell" || clear[1] != "sandbar-base" || clear[2] != "sudo" {
+		t.Fatalf("harvestAptCache clear argv = %v, want a `shell sandbar-base sudo ...` call", clear)
 	}
-	wantCopy := []string{"copy", "-v", "--backend=scp", "-r", "claude-base:/var/cache/apt/archives", host}
+	wantCopy := []string{"copy", "-v", "--backend=scp", "-r", "sandbar-base:/var/cache/apt/archives", host}
 	if got := f.calls[1]; !reflect.DeepEqual(got, wantCopy) {
 		t.Fatalf("harvestAptCache copy argv = %v, want %v", got, wantCopy)
 	}
@@ -151,7 +151,7 @@ func TestHarvestAptCache_CopyFailureIsSwallowed(t *testing.T) {
 	f := &fakeRunner{err: os.ErrPermission}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.harvestAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.harvestAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("harvestAptCache must swallow a Copy failure, got error: %v", err)
 	}
 }
@@ -169,7 +169,7 @@ func TestSeedAndHarvestAptCache_RoundTripLeafName(t *testing.T) {
 	f := &fakeRunner{}
 	p := &Provisioner{Lima: lima.New(f)}
 
-	if err := p.harvestAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p.harvestAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("harvestAptCache: %v", err)
 	}
 	// calls[0] is the sudo lock/partial clear; calls[1] is the copy, whose last
@@ -187,7 +187,7 @@ func TestSeedAndHarvestAptCache_RoundTripLeafName(t *testing.T) {
 
 	f2 := &fakeRunner{}
 	p2 := &Provisioner{Lima: lima.New(f2)}
-	if err := p2.seedAptCache(context.Background(), "claude-base", io.Discard); err != nil {
+	if err := p2.seedAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("seedAptCache: %v", err)
 	}
 	if len(f2.calls) != 2 {

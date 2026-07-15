@@ -63,7 +63,7 @@ func TestListParsesFixture(t *testing.T) {
 		CPUs   int
 	}{
 		{Name: "claude", Status: "Running", CPUs: 4},
-		{Name: "claude-base", Status: "Stopped", CPUs: 2},
+		{Name: "sandbar-base", Status: "Stopped", CPUs: 2},
 	}
 	for i, w := range want {
 		if vms[i].Name != w.Name || vms[i].Status != w.Status || vms[i].CPUs != w.CPUs {

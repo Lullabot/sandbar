@@ -169,7 +169,7 @@ func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 	m := newTestModel(t)
 	seedJob(t, &m, "claude", vm.CreateConfig{
 		Name:       "claude",
-		BaseName:   "claude-base",
+		BaseName:   "sandbar-base",
 		CloneToken: "ghp_x",
 	})
 
@@ -198,7 +198,7 @@ func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 	if err := m.sec.Set("claude", map[string]string{"OTHER": "kept"}); err != nil {
 		t.Fatalf("seed secrets: %v", err)
 	}
-	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 
 	next, _ := m.Update(provisionDoneMsg{job: provisionKey("claude")})
 	m = next.(model)
@@ -319,7 +319,7 @@ func TestSecretsSaveOnStoppedVMDoesNotTouchGuest(t *testing.T) {
 // place both the TUI and the headless path agree on reconciliation.
 func TestReconcileDropPrunesSecrets(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.reg.Add(vm.CreateConfig{Name: "gone", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "gone", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	if err := m.sec.Set("gone", map[string]string{"A": "1"}); err != nil {

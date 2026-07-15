@@ -28,12 +28,12 @@ import (
 func TestBoardRendersAtEverySizeInTheSweep(t *testing.T) {
 	pinHostCapacity(t, 16<<30, 100<<30)
 	base := newTestModel(t)
-	if err := base.reg.Add(vm.CreateConfig{Name: "web", BaseName: "claude-base"}); err != nil {
+	if err := base.reg.Add(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := base.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "web", Status: "Running"},
-		{Name: "claude-base", Status: "Stopped"}, // hidden: a base image
+		{Name: "sandbar-base", Status: "Stopped"}, // hidden: a base image
 	}})
 	base = loaded.(model)
 

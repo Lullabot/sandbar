@@ -80,8 +80,8 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.Name != "claude" {
 		t.Errorf("Name = %q, want %q", c.Name, "claude")
 	}
-	if c.BaseName != "claude-base" {
-		t.Errorf("BaseName = %q, want %q", c.BaseName, "claude-base")
+	if c.BaseName != "sandbar-base" {
+		t.Errorf("BaseName = %q, want %q", c.BaseName, "sandbar-base")
 	}
 	if c.Memory != "8GiB" {
 		t.Errorf("Memory = %q, want %q", c.Memory, "8GiB")

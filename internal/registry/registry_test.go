@@ -22,7 +22,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("empty registry should not report claude as managed")
 	}
 
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}
 	if err := r.Add(cfg); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -35,8 +35,8 @@ func TestRoundTrip(t *testing.T) {
 	if !r2.IsManaged("claude") {
 		t.Fatal("claude should be managed after reload")
 	}
-	if got := r2.Base("claude"); got != "claude-base" {
-		t.Fatalf("base = %q, want claude-base", got)
+	if got := r2.Base("claude"); got != "sandbar-base" {
+		t.Fatalf("base = %q, want sandbar-base", got)
 	}
 	got, ok := r2.Config("claude")
 	if !ok || got.CPUs != 8 || got.Memory != "32GiB" || got.Hostname != "dev" {
@@ -56,7 +56,7 @@ func TestRoundTrip(t *testing.T) {
 func TestTokenNeverPersisted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	r, _ := LoadFrom(path)
-	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CloneToken: "ghp_secret"}); err != nil {
+	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", CloneToken: "ghp_secret"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	data, err := os.ReadFile(path)
@@ -78,8 +78,8 @@ func TestTokenNeverPersisted(t *testing.T) {
 // TestReconcilePrunesAbsent: entries for VMs no longer present must be dropped.
 func TestReconcilePrunesAbsent(t *testing.T) {
 	r := NewEmpty()
-	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
-	_ = r.Add(vm.CreateConfig{Name: "gone", BaseName: "claude-base"})
+	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
+	_ = r.Add(vm.CreateConfig{Name: "gone", BaseName: "sandbar-base"})
 
 	dropped, err := r.Reconcile(map[string]bool{"claude": true})
 	if err != nil {
@@ -102,15 +102,15 @@ func TestReconcilePrunesAbsent(t *testing.T) {
 
 func TestIsBase(t *testing.T) {
 	r := NewEmpty()
-	if r.IsBase("claude-base") {
+	if r.IsBase("sandbar-base") {
 		t.Error("empty registry: no base images recorded yet")
 	}
 	if r.IsBase("") {
 		t.Error("empty name is never a base image")
 	}
 
-	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
-	if !r.IsBase("claude-base") {
+	_ = r.Add(vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
+	if !r.IsBase("sandbar-base") {
 		t.Error("a recorded clone source should be a base image")
 	}
 	if r.IsBase("claude") {
@@ -163,7 +163,7 @@ func TestMigrateLegacyIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed load: %v", err)
 	}
-	if err := seed.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}); err != nil {
+	if err := seed.Add(vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", CPUs: 8, Memory: "32GiB", Hostname: "dev"}); err != nil {
 		t.Fatalf("seed add: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestMigrateLegacyIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrated index: %v", err)
 	}
-	if !moved.IsManaged("claude") || moved.Base("claude") != "claude-base" {
+	if !moved.IsManaged("claude") || moved.Base("claude") != "sandbar-base" {
 		t.Fatalf("migrated index missing the VM: managed=%v base=%q", moved.IsManaged("claude"), moved.Base("claude"))
 	}
 
@@ -206,7 +206,7 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	path := filepath.Join(sandbarDir, "managed-vms.json")
-	legacy := `{"vms":{"old-vm":{"base":"claude-base","config":{"Name":"old-vm","BaseName":"claude-base","CPUs":4}}}}`
+	legacy := `{"vms":{"old-vm":{"base":"sandbar-base","config":{"Name":"old-vm","BaseName":"sandbar-base","CPUs":4}}}}`
 	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
 		t.Fatalf("seed legacy file: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 
 	// Trigger a save and confirm the file now carries the version alongside
 	// the preserved entry.
-	if err := r.Add(vm.CreateConfig{Name: "new-vm", BaseName: "claude-base"}); err != nil {
+	if err := r.Add(vm.CreateConfig{Name: "new-vm", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -244,7 +244,7 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 // understand must be refused, not misparsed.
 func TestLoad_FutureVersionRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
-	future := `{"version":99,"vms":{"x":{"base":"claude-base","config":{"Name":"x","BaseName":"claude-base"}}}}`
+	future := `{"version":99,"vms":{"x":{"base":"sandbar-base","config":{"Name":"x","BaseName":"sandbar-base"}}}}`
 	if err := os.WriteFile(path, []byte(future), 0o600); err != nil {
 		t.Fatalf("seed future file: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestSave_WritesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "claude-base", CloneToken: "SENTINEL_TOKEN_DO_NOT_PERSIST"}); err != nil {
+	if err := r.Add(vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", CloneToken: "SENTINEL_TOKEN_DO_NOT_PERSIST"}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	raw, err := os.ReadFile(path)

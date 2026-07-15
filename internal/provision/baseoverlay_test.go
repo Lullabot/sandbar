@@ -10,7 +10,7 @@ import (
 )
 
 // limaInstanceYAML is a lima 2.1.3 instance file, copied from a real base image
-// this repository built (~/.lima/claude-base/lima.yaml). It is the ground truth
+// this repository built (~/.lima/sandbar-base/lima.yaml). It is the ground truth
 // readBaseOverlay has to read: Lima keeps the overlay it was handed — comments,
 // mount block, provision script and all — so what is below is exactly what
 // RenderBaseOverlay emitted on the day that base was created, and exactly what
@@ -64,9 +64,9 @@ func writeInstanceYAML(t *testing.T, baseName, content string) {
 // where the playbook lives or what the bootstrap installs — is what Lima applies
 // when the base is started for a re-apply.
 func TestReadBaseOverlayReadsTheInstanceFile(t *testing.T) {
-	writeInstanceYAML(t, "claude-base", limaInstanceYAML)
+	writeInstanceYAML(t, "sandbar-base", limaInstanceYAML)
 
-	got, ok := readBaseOverlay("claude-base")
+	got, ok := readBaseOverlay("sandbar-base")
 	if !ok {
 		t.Fatal("readBaseOverlay could not read the base's instance file")
 	}
@@ -83,7 +83,7 @@ func TestReadBaseOverlayReadsTheInstanceFile(t *testing.T) {
 // converge" — never as "converge anyway".
 func TestReadBaseOverlayAbsentInstance(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
-	if o, ok := readBaseOverlay("claude-base"); ok {
+	if o, ok := readBaseOverlay("sandbar-base"); ok {
 		t.Fatalf("readBaseOverlay on an absent instance returned %+v, ok=true", o)
 	}
 }
@@ -154,7 +154,7 @@ func TestBaseConvergeable(t *testing.T) {
 			if tc.instance == "" {
 				t.Setenv("LIMA_HOME", t.TempDir())
 			} else {
-				writeInstanceYAML(t, "claude-base", tc.instance)
+				writeInstanceYAML(t, "sandbar-base", tc.instance)
 			}
 			p := &Provisioner{PlaybookDir: dir}
 			got, why := p.baseConvergeable(vm.DefaultCreateConfig())

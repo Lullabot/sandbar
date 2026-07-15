@@ -62,7 +62,7 @@ func TestProgressLogBoxFitsTheTerminal(t *testing.T) {
 		l := newTeaLoop(t, m)
 
 		job := newFakeJob()
-		l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+		l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 		job.write(l, provisionKey("web"), "TASK [base : Install every base-phase package in a single transaction]\n")
 
 		// Open the run's log — the view under test (what `l`, and now enter, show).

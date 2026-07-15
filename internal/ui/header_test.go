@@ -101,18 +101,18 @@ func TestHiddenVMsGetNoTileAndAreNoLongerCounted(t *testing.T) {
 	pinHostForHeader(t)
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "web", Status: "Running"},              // managed clone: gets a tile
-		{Name: "claude-base", Status: "Stopped"},      // base image: hidden
+		{Name: "sandbar-base", Status: "Stopped"},     // base image: hidden
 		{Name: "someone-elses-vm", Status: "Running"}, // unrelated VM: hidden
 	}})
 	m = loaded.(model)
 
 	view := ansi.Strip(m.boardView())
-	if strings.Contains(view, "claude-base") || strings.Contains(view, "someone-elses-vm") {
+	if strings.Contains(view, "sandbar-base") || strings.Contains(view, "someone-elses-vm") {
 		t.Fatalf("hidden VMs must get no tile, got:\n%s", view)
 	}
 	if strings.Contains(view, "hidden") {

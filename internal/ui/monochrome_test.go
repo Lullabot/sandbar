@@ -19,12 +19,12 @@ import (
 func TestBoardSurfacesAreMonochromeSafe(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "web", Status: "Running"},
-		{Name: "claude-base", Status: "Stopped"}, // no tile: the board is managed-clones-only
+		{Name: "sandbar-base", Status: "Stopped"}, // no tile: the board is managed-clones-only
 	}})
 	m = loaded.(model)
 	seedSample(&m, "web", guestSample{CPUPct: 25, HasCPU: true, MemUsed: 2 << 30, MemTotal: 8 << 30})
