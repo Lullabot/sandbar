@@ -46,7 +46,7 @@ import (
 )
 
 // cmdE2EBaseName is the one real base image these tests clone from. Prefixed
-// distinctly from both the host's real `claude-base` and internal/ui's own
+// distinctly from both the host's real `sandbar-base` and internal/ui's own
 // "sand-e2e-shared-base" (a different Go test binary; only the Lima instance
 // name needs to stay unique) so a run of this suite can never collide with —
 // or be mistaken for — either.

@@ -24,7 +24,7 @@ var errAnsibleBoom = errors.New("ansible: task failed")
 func loadManaged(t *testing.T, m model, vms ...vm.VM) model {
 	t.Helper()
 	for _, v := range vms {
-		if err := m.reg.Add(vm.CreateConfig{Name: v.Name, BaseName: "claude-base"}); err != nil {
+		if err := m.reg.Add(vm.CreateConfig{Name: v.Name, BaseName: "sandbar-base"}); err != nil {
 			t.Fatalf("seed registry with %s: %v", v.Name, err)
 		}
 	}
@@ -258,13 +258,13 @@ func TestVerbAfterARefreshReachesTheVMUnderTheRing(t *testing.T) {
 func TestBoardShowsManagedClonesOnly(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "web", Status: "Running"},
-		{Name: "web-stray", Status: "Running"},   // someone else's VM
-		{Name: "claude-base", Status: "Stopped"}, // the base image every clone comes from
+		{Name: "web-stray", Status: "Running"},    // someone else's VM
+		{Name: "sandbar-base", Status: "Stopped"}, // the base image every clone comes from
 	}})
 	m = loaded.(model)
 
@@ -275,7 +275,7 @@ func TestBoardShowsManagedClonesOnly(t *testing.T) {
 	if strings.Contains(view, "web-stray") {
 		t.Fatalf("an unmanaged VM must get no tile, got:\n%s", view)
 	}
-	if strings.Contains(view, "claude-base") {
+	if strings.Contains(view, "sandbar-base") {
 		t.Fatalf("a base image must get no tile, got:\n%s", view)
 	}
 
@@ -297,7 +297,7 @@ func TestBoardShowsManagedClonesOnly(t *testing.T) {
 func TestBuildingVMGetsATileBeforeLimaKnowsIt(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
+	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 
 	// A refresh that knows nothing about newvm (it does not exist yet).
@@ -333,7 +333,7 @@ func TestABuildInFlightDoesNotSproutBadgesOnEveryTile(t *testing.T) {
 	}
 
 	// A create starts. Its VM exists nowhere yet — not in Lima, not in the index.
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
+	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 	after := ansi.Strip(m.gridView())
 
@@ -363,7 +363,7 @@ func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 	m = resized(m, 120, 40)
 	m = loadManaged(t, m, vm.VM{Name: "api", Status: "Running", Arch: "x86_64"})
 
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
+	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded build should finish")
@@ -399,7 +399,7 @@ func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 func TestFailedBuildKeepsItsTile(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
+	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded job should finish")
@@ -741,7 +741,7 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
 
 	// Back to the board, where the tile for the in-flight build sits under the ring.
@@ -952,7 +952,7 @@ func TestQuitIsOfferedOnTheBoardAndNowhereElse(t *testing.T) {
 	p := m
 	job := newFakeJob()
 	l := newTeaLoop(t, p)
-	l.exec(l.m.beginProvision("Creating web2", job.run, vm.CreateConfig{Name: "web2", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web2", job.run, vm.CreateConfig{Name: "web2", BaseName: "sandbar-base"}))
 	job.done <- nil
 	l.pump("web2 to finish", func(m model) bool { return !m.jobs.isRunning("web2") })
 	l.exec(l.m.showJobLog("web2"))
@@ -994,7 +994,7 @@ func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
 		t.Fatal("q on an idle board should quit")
 	}
 
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "claude-base"})
+	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 
 	quit, cmd := press(t, m, runeKey('q'))

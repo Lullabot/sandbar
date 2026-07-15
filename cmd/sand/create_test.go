@@ -48,7 +48,7 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 	reg := registry.NewEmpty()
 	cfg := vm.CreateConfig{
 		Name:     "claude",
-		BaseName: "claude-base",
+		BaseName: "sandbar-base",
 		GitName:  "Ada Lovelace",
 		GitEmail: "ada@example.com",
 		CPUs:     4,
@@ -85,7 +85,7 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 // longer even has a lima client to do it with, and the intent must arrive at the
 // provisioner instead.
 func TestHeadlessCreatePassesRebuildDownToTheProvisioner(t *testing.T) {
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
 
 	for _, tc := range []struct {
 		name    string
@@ -113,7 +113,7 @@ func TestHeadlessCreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 // are independent (one targets the clone, the other the base) and may be combined,
 // so the recreate path has to carry the rebuild intent down too.
 func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
 	reg := registry.NewEmpty()
 	if err := reg.Add(cfg); err != nil { // recreate is gated on the VM being sand-managed
 		t.Fatalf("seed registry: %v", err)
@@ -137,7 +137,7 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 // VM sand did not create — and refused BEFORE the provisioner is ever
 // touched, not just reported as an error after a clone already ran.
 func TestHeadlessRecreateRefusedForUnmanagedVM(t *testing.T) {
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
 	reg := registry.NewEmpty() // no managed entry for cfg.Name
 
 	prov := &stubProvisioner{}

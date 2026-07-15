@@ -263,12 +263,12 @@ func TestFleetUniformityShowsDifferingArch(t *testing.T) {
 
 // Same rule, same both-directions test, for the base-image field.
 func TestFleetUniformityBaseImageBothDirections(t *testing.T) {
-	uniform := computeFleetUniformity([]vmTraits{{Base: "claude-base"}, {Base: "claude-base"}})
+	uniform := computeFleetUniformity([]vmTraits{{Base: "sandbar-base"}, {Base: "sandbar-base"}})
 	if uniform.ShowBase {
 		t.Fatalf("a fleet cloned from one base should not show the base badge")
 	}
 
-	varied := computeFleetUniformity([]vmTraits{{Base: "claude-base"}, {Base: "custom-base"}})
+	varied := computeFleetUniformity([]vmTraits{{Base: "sandbar-base"}, {Base: "custom-base"}})
 	if !varied.ShowBase {
 		t.Fatalf("a fleet with two base images should show the base badge")
 	}
@@ -284,7 +284,7 @@ func TestFleetUniformityBaseImageBothDirections(t *testing.T) {
 
 	in2 := baseTileInput()
 	in2.VM = vm.VM{Name: "web", Status: "Running"}
-	in2.Traits = vmTraits{Base: "claude-base"}
+	in2.Traits = vmTraits{Base: "sandbar-base"}
 	in2.Uniform = uniform
 	got2 := strings.ToLower(ansi.Strip(renderTile(in2)))
 	if strings.Contains(got2, "base") {

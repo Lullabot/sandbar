@@ -120,7 +120,7 @@ func seedManagedIndex(t *testing.T, names ...string) {
 		t.Fatalf("load registry: %v", err)
 	}
 	for _, name := range names {
-		if err := reg.Add(vm.CreateConfig{Name: name, BaseName: "claude-base"}); err != nil {
+		if err := reg.Add(vm.CreateConfig{Name: name, BaseName: "sandbar-base"}); err != nil {
 			t.Fatalf("seed %s as managed: %v", name, err)
 		}
 	}

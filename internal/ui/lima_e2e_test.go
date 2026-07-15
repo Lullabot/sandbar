@@ -100,7 +100,7 @@ func pumpTimeout(t *testing.T, l *teaLoop, what string, timeout time.Duration, w
 
 // sharedBaseName is the one real base image tests 4 and 5 clone from. Prefixed
 // like every VM this file creates so it can never collide with — or be
-// mistaken for — the host's own real `claude-base`.
+// mistaken for — the host's own real `sandbar-base`.
 const sharedBaseName = "sand-e2e-shared-base"
 
 // sharedBase holds the shared base built once for the whole e2e binary run —

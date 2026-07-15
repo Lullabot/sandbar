@@ -41,7 +41,7 @@ not a prompt.
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--name` | string | `claude` | Lima instance name. |
-| `--base-name` | string | `claude-base` | Base image instance name; clones are made from this shared, long-lived image. |
+| `--base-name` | string | `sandbar-base` | Base image instance name; clones are made from this shared, long-lived image. |
 | `--hostname` | string | same as `--name` | VM hostname. Empty means `EffectiveHostname()` falls back to `--name`. |
 | `--user` | string | the **host username** (`id -un`, then `$USER`, then `claude`) | Primary VM user. Lima creates a guest user matching the host username, so this mirrors that — it is never sent empty, since an empty `user_name` would override the Ansible user role's own default and break in-guest user creation. |
 | `--git-name` | string | host `git config user.name` | git `user.name` written into the VM. See [git identity](#-git-name-git-email-fall-back-to-host-git-config) below. |
@@ -92,7 +92,7 @@ VM's persistent disk and never appears in a process listing.
 These sound similar and do different things to different objects:
 
 - **`--rebuild`** deletes and rebuilds the shared **base image** (`--base-name`,
-  default `claude-base`) before creating. Use it when the base itself needs to
+  default `sandbar-base`) before creating. Use it when the base itself needs to
   pick up a playbook or dependency change that a VM cloned from it right now
   is not going to get, or if the base image is corrupted. It is independent of
   `--recreate` and the two may be combined.
@@ -159,7 +159,7 @@ Examples:
 
 Flags:
   -base-name string
-    	Base image instance name (default "claude-base")
+    	Base image instance name (default "sandbar-base")
   -clone-token string
     	Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)
   -clone-url string

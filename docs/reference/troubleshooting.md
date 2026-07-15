@@ -5,7 +5,7 @@ Common problems with `sand` and how to resolve them.
 ## A stale base image
 
 `sand` builds the heavy install (packages, Docker, Node,
-Claude Code, …) once into a stopped base image (`claude-base` by default),
+Claude Code, …) once into a stopped base image (`sandbar-base` by default),
 then clones every VM from it. Each base is stamped with the playbook version
 it was built from, and `sand` rebuilds it automatically the next time you
 create a VM if the current playbook has moved on — so most staleness is

@@ -76,7 +76,7 @@ type CreateConfig struct {
 func DefaultCreateConfig() CreateConfig {
 	return CreateConfig{
 		Name:       "claude",
-		BaseName:   "claude-base",
+		BaseName:   "sandbar-base",
 		Memory:     "8GiB",
 		Disk:       "100GiB",
 		Domain:     "lan",

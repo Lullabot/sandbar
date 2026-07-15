@@ -1,2 +1,2 @@
 {"name":"claude","status":"Running","dir":"/home/andrew/.lima/claude","vmType":"qemu","arch":"aarch64","cpus":4,"memory":8589934592,"disk":107374182400,"sshLocalPort":60022,"hostAgentPID":12345}
-{"name":"claude-base","status":"Stopped","dir":"/home/andrew/.lima/claude-base","vmType":"qemu","arch":"aarch64","cpus":2,"memory":4294967296,"disk":107374182400,"sshLocalPort":0,"hostAgentPID":0}
+{"name":"sandbar-base","status":"Stopped","dir":"/home/andrew/.lima/sandbar-base","vmType":"qemu","arch":"aarch64","cpus":2,"memory":4294967296,"disk":107374182400,"sshLocalPort":0,"hostAgentPID":0}

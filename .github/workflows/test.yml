@@ -195,7 +195,7 @@ jobs:
             node --version
           '
 
-      # Free the clone's disk before the second create — the BASE (claude-base)
+      # Free the clone's disk before the second create — the BASE (sandbar-base)
       # is a separate `limactl clone` source and is untouched by deleting a
       # clone taken from it. This is what keeps a second qcow2 within budget:
       # base + one clone at a time, same footprint as before this task, rather
@@ -212,7 +212,7 @@ jobs:
         run: |
           echo '# ci - force a re-apply for the lima-e2e warm-path assertion' >> roles/base/tasks/main.yml
 
-      # Second create: same base name (fixed as "claude-base" — see
+      # Second create: same base name (fixed as "sandbar-base" — see
       # vm.DefaultCreateConfig), no --rebuild. The base already exists, so this
       # must take the in-place re-apply branch of ensureBaseStopped, not the
       # cold-build branch.

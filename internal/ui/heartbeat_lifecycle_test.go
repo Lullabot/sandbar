@@ -200,7 +200,7 @@ func heartbeatModel(t *testing.T, sh *fakeShell, managed ...string) model {
 	t.Helper()
 	m := newTestModel(t)
 	for _, name := range managed {
-		if err := m.reg.Add(vm.CreateConfig{Name: name, BaseName: "claude-base"}); err != nil {
+		if err := m.reg.Add(vm.CreateConfig{Name: name, BaseName: "sandbar-base"}); err != nil {
 			t.Fatalf("seed %s as managed: %v", name, err)
 		}
 	}

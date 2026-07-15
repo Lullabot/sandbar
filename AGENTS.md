@@ -81,7 +81,7 @@ Conventions:
   and `LIMA_HOME` (the base image's playbook-version stamp). `LIMA_HOME` is not
   hypothetical: the TUI tests build a real `provision.Provisioner` over a fake
   runner, so driving a create walked `ensureBaseStopped` → `writeBaseVersion` and
-  stamped the developer's real `claude-base` as freshly built from a playbook it
+  stamped the developer's real `sandbar-base` as freshly built from a playbook it
   had never seen — which makes `baseStale` skip the rebuild the user needs and
   clone from a stale image, silently.
 - **TUI integration tests** use `charmbracelet/x/exp/teatest`

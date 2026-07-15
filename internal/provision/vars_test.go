@@ -13,7 +13,7 @@ import (
 func fullConfig() vm.CreateConfig {
 	return vm.CreateConfig{
 		Name:       "claude",
-		BaseName:   "claude-base",
+		BaseName:   "sandbar-base",
 		User:       "andrew",
 		GitName:    "Andrew Berry",
 		GitEmail:   "andrew@example.com",
@@ -42,7 +42,7 @@ func parseVars(t *testing.T, data []byte) map[string]any {
 
 func TestBuildExtraVars_BasePhase(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -52,8 +52,8 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 	if m["user_name"] != "andrew" {
 		t.Errorf("user_name = %v, want andrew", m["user_name"])
 	}
-	if m["base_hostname"] != "claude-base" {
-		t.Errorf("base_hostname = %v, want claude-base", m["base_hostname"])
+	if m["base_hostname"] != "sandbar-base" {
+		t.Errorf("base_hostname = %v, want sandbar-base", m["base_hostname"])
 	}
 	if m["provision_phase"] != "base" {
 		t.Errorf("provision_phase = %v, want base", m["provision_phase"])
@@ -101,7 +101,7 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithJava = false
-	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithClaude = false
-	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 // cold base build never gets a second apt pass (task 3's "one apt pass" property).
 func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "claude-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
 // on.
 func TestBuildExtraVars_AptUpgradeEmittedOnRefresh(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "claude-base", true)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", true)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}

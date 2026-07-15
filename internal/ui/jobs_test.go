@@ -183,9 +183,9 @@ func TestTwoJobsInFlight(t *testing.T) {
 	alpha, beta := newFakeJob(), newFakeJob()
 
 	// Start both provisions. beginProvision is what the create form calls.
-	cmdA := l.m.beginProvision("Creating alpha", alpha.run, vm.CreateConfig{Name: "alpha", BaseName: "claude-base"})
+	cmdA := l.m.beginProvision("Creating alpha", alpha.run, vm.CreateConfig{Name: "alpha", BaseName: "sandbar-base"})
 	l.exec(cmdA)
-	cmdB := l.m.beginProvision("Creating beta", beta.run, vm.CreateConfig{Name: "beta", BaseName: "claude-base"})
+	cmdB := l.m.beginProvision("Creating beta", beta.run, vm.CreateConfig{Name: "beta", BaseName: "sandbar-base"})
 	l.exec(cmdB)
 
 	if !l.m.jobs.isRunning("alpha") || !l.m.jobs.isRunning("beta") {
@@ -309,7 +309,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	fail := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", fail.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", fail.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	fail.write(l, provisionKey("web"), "TASK [dev-tools : Install Docker]\nfatal: [localhost]: FAILED!\n")
 
 	fail.done <- errors.New("provisioning (base) failed for \"web\"")
@@ -400,7 +400,7 @@ func TestCreateJobNotReapedBeforeItsVMAppears(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "==> Building base image\n")
 
 	// Several refreshes in which the VM being built does not exist yet.
@@ -423,7 +423,7 @@ func TestResetJobSurvivesItsOwnDelete(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "==> Deleting web\n")
 
 	// Present, then gone (the reset just deleted it), then back (the re-clone).
@@ -487,7 +487,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
 
 	// esc backs out of the progress screen WITHOUT cancelling the build.
@@ -610,7 +610,7 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	build := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED! => the play exploded\n")
 	build.done <- errAnsibleBoom
 	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
@@ -718,7 +718,7 @@ func TestASecondCreateDoesNotSwapTheRunningBuildsConfig(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	build := newFakeJob()
-	real := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, Memory: "4GiB", CloneURL: "https://github.com/acme/real"}
+	real := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, Memory: "4GiB", CloneURL: "https://github.com/acme/real"}
 	l.exec(l.m.beginProvision("Creating web", build.run, real))
 	build.write(l, provisionKey("web"), "==> Cloning web from base image\n")
 
@@ -752,7 +752,7 @@ func TestASecondCreateDoesNotSwapTheRunningBuildsConfig(t *testing.T) {
 // is the only place the user can still fix it.
 func TestCreateFormRefusesANameWithARunInFlight(t *testing.T) {
 	m := newTestModel(t)
-	building := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, Memory: "4GiB"}
+	building := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, Memory: "4GiB"}
 	seedJob(t, &m, "web", building)
 	m.view = viewBoard
 
@@ -803,7 +803,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 
 	// web was built by sand, with a clone token, and the build has finished.
 	build := newFakeJob()
-	cfg := vm.CreateConfig{Name: "web", BaseName: "claude-base", CPUs: 2, CloneToken: "ghp_secret"}
+	cfg := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, CloneToken: "ghp_secret"}
 	l.exec(l.m.beginProvision("Creating web", build.run, cfg))
 	build.done <- nil
 	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
@@ -843,7 +843,7 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	build := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\n")
 	build.done <- nil
 	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
@@ -890,7 +890,7 @@ func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 
 	l := newTeaLoop(t, m)
 	job := newFakeJob()
-	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	if !l.m.jobs.isRunning("web") {
 		t.Fatal("precondition: the reset should be in flight")
 	}
@@ -928,7 +928,7 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	// Lima reports the provisioning guest as Running — this is the whole trap.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running", CPUs: 2}}})
 	l.m.focusName = "web"
@@ -983,7 +983,7 @@ func TestAVMDeletedOutsideSandLosesItsTile(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.done <- nil
 	l.pump("the build to succeed", func(m model) bool { return !m.jobs.isRunning("web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
@@ -1014,7 +1014,7 @@ func TestAFailedBuildKeepsItsTileWithNoLimaRecord(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.done <- errAnsibleBoom
 	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
@@ -1142,7 +1142,7 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 
 	l := newTeaLoop(t, m)
 	job := newFakeJob()
-	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 
 	// The reset deletes the instance, then FAILS before cloning it back.
 	job.done <- errAnsibleBoom
@@ -1180,7 +1180,7 @@ func TestCanceledBuildWhoseVMIsGoneLeavesNoTile(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
 	if !l.m.jobs.isRunning("web") {
 		t.Fatal("precondition: web must be mid-build")
@@ -1209,7 +1209,7 @@ func TestCanceledBuildWhoseVMSurvivesKeepsItsTile(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	job := newFakeJob()
-	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
 
 	l.m.jobs.cancelJob(provisionKey("web"))

@@ -37,7 +37,7 @@ func newTestModel(t *testing.T) model {
 // the base image's playbook-version stamp, and that one is not hypothetical: the TUI
 // tests build a REAL provision.Provisioner over a fake lima.Runner, so driving a
 // create walks ensureBaseStopped → writeBaseVersion, which wrote the CURRENT git
-// version into the real ~/.lima/_sand/claude-base.playbook-version — stamping the
+// version into the real ~/.lima/_sand/sandbar-base.playbook-version — stamping the
 // developer's base image as freshly built from a playbook it had never seen, without
 // building anything at all. A stamp is only as good as the rebuild it records, and a
 // false one is worse than none: baseStale then reports the base as current and sand
@@ -77,7 +77,7 @@ func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 func putOnBoard(t *testing.T, m model, v vm.VM) model {
 	t.Helper()
 	if !m.reg.IsManaged(v.Name) {
-		if err := m.reg.Add(vm.CreateConfig{Name: v.Name, BaseName: "claude-base"}); err != nil {
+		if err := m.reg.Add(vm.CreateConfig{Name: v.Name, BaseName: "sandbar-base"}); err != nil {
 			t.Fatalf("seed %s as managed: %v", v.Name, err)
 		}
 	}
@@ -227,7 +227,7 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	build := newFakeJob()
-	l.exec(l.m.beginProvision("Creating orphan", build.run, vm.CreateConfig{Name: "orphan", BaseName: "claude-base"}))
+	l.exec(l.m.beginProvision("Creating orphan", build.run, vm.CreateConfig{Name: "orphan", BaseName: "sandbar-base"}))
 	build.done <- errAnsibleBoom
 	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("orphan") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "orphan", Status: "Running", CPUs: 2}}})
@@ -263,7 +263,7 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 func resetConfig() vm.CreateConfig {
 	return vm.CreateConfig{
 		Name:     "claude",
-		BaseName: "claude-base",
+		BaseName: "sandbar-base",
 		Hostname: "claude-host",
 		User:     "ada",
 		GitName:  "Ada Lovelace",
@@ -1025,7 +1025,7 @@ func isQuitCmd(cmd tea.Cmd) bool {
 // line exceeds the viewport width.
 func TestLongOutputLineWraps(t *testing.T) {
 	m := newTestModel(t)
-	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 
 	// The viewport's width/height come from classify's layout budget (see
 	// layout.go); height leaves room for the wrapped lines so GotoBottom keeps
@@ -1064,7 +1064,7 @@ func TestCtrlCQuitsWhenIdle(t *testing.T) {
 // screen is SHOWING; the per-job isolation is covered by TestTwoJobsInFlight.
 func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	m := newTestModel(t)
-	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 	called := make(chan struct{})
 	m.jobs.mu.Lock()
 	m.jobs.jobs[provisionKey("claude")].cancel = func() { close(called) }
@@ -1094,7 +1094,7 @@ func TestCtrlCCancelsRunningProvision(t *testing.T) {
 // it leaves the build running); ctrl+c is how you cancel.
 func TestQDoesNotQuitDuringProvision(t *testing.T) {
 	m := newTestModel(t)
-	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "claude-base"})
+	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 
 	if _, cmd := m.Update(runeKey('q')); isQuitCmd(cmd) {
 		t.Fatal("q during a build must not quit; esc backgrounds it and ctrl+c cancels")
@@ -1105,7 +1105,7 @@ func TestQDoesNotQuitDuringProvision(t *testing.T) {
 // the VM as managed nor surface the (kill-induced) error as a failure.
 func TestCanceledRunIsNotRecordedManaged(t *testing.T) {
 	m := newTestModel(t)
-	seedJob(t, &m, "myvm", vm.CreateConfig{Name: "myvm", BaseName: "claude-base"})
+	seedJob(t, &m, "myvm", vm.CreateConfig{Name: "myvm", BaseName: "sandbar-base"})
 	if !m.jobs.cancelJob(provisionKey("myvm")) {
 		t.Fatal("precondition: the running job should be cancellable")
 	}
@@ -1176,17 +1176,17 @@ func TestDetailActionsDispatchLifecycleCommands(t *testing.T) {
 // or a (possibly running, mid-build) base image.
 func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-	if err := m.reg.Add(vm.CreateConfig{Name: "managed-stopped", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-stopped", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
 		{Name: "managed-running", Status: "Running"},
 		{Name: "managed-stopped", Status: "Stopped"},
 		{Name: "unmanaged-running", Status: "Running"},
-		{Name: "claude-base", Status: "Running"}, // the default base image name
+		{Name: "sandbar-base", Status: "Running"}, // the default base image name
 	}})
 	m = loaded.(model)
 
@@ -1201,7 +1201,7 @@ func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
 // (the PR feedback: "There's no progress spinner when running stop all").
 func TestStopAllConfirmShowsSpinner(t *testing.T) {
 	m := newTestModel(t)
-	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "claude-base"}); err != nil {
+	if err := m.reg.Add(vm.CreateConfig{Name: "managed-running", BaseName: "sandbar-base"}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
 	loaded, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{
@@ -1242,13 +1242,13 @@ func TestResetFormPlaceholdersSavedToken(t *testing.T) {
 		t.Fatalf("seed secret: %v", err)
 	}
 
-	m.openResetForm("has-token", vm.CreateConfig{Name: "has-token", BaseName: "claude-base"})
+	m.openResetForm("has-token", vm.CreateConfig{Name: "has-token", BaseName: "sandbar-base"})
 	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "***") {
 		t.Fatalf("token placeholder for a VM with a saved token = %q, want it to signal a saved token", ph)
 	}
 
 	m2 := newTestModel(t)
-	m2.openResetForm("no-token", vm.CreateConfig{Name: "no-token", BaseName: "claude-base"})
+	m2.openResetForm("no-token", vm.CreateConfig{Name: "no-token", BaseName: "sandbar-base"})
 	if ph := m2.inputs[fCloneToken].Placeholder; ph != "" {
 		t.Fatalf("token placeholder for a VM with no saved token = %q, want empty", ph)
 	}

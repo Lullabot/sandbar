@@ -5,7 +5,7 @@ once, not on every VM.
 
 ```mermaid
 graph TD
-    A[sand create] --> B{claude-base exists?}
+    A[sand create] --> B{sandbar-base exists?}
     B -- no --> C[Build base image: heavy install]
     C --> D[Stop base image]
     B -- yes --> D
@@ -17,7 +17,7 @@ graph TD
 ## The base image
 
 The first time you create a VM, `sand` runs a heavy install
-into a stopped Lima instance named `claude-base`. This installs the dev
+into a stopped Lima instance named `sandbar-base`. This installs the dev
 tools, Claude Code, and everything else that every VM needs. See
 [Available Tools](available-tools.md) for the full toolchain.
 
@@ -25,7 +25,7 @@ Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — `sand` rebuilds it automatically if the
 underlying provisioning logic has changed since it was built, or you can
 force a rebuild yourself with `sand create --rebuild` (or by deleting
-`claude-base` and creating a new VM).
+`sandbar-base` and creating a new VM).
 
 ## Cloning
 

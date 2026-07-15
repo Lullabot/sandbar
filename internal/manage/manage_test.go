@@ -16,7 +16,7 @@ import (
 func TestReconcile(t *testing.T) {
 	reg := registry.NewEmpty()
 	for _, name := range []string{"a", "b", "c"} {
-		cfg := vm.CreateConfig{Name: name, BaseName: "claude-base"}
+		cfg := vm.CreateConfig{Name: name, BaseName: "sandbar-base"}
 		if err := reg.Add(cfg); err != nil {
 			t.Fatalf("seed registry with %q: %v", name, err)
 		}
@@ -46,7 +46,7 @@ func TestReconcile(t *testing.T) {
 // exactly leaves it untouched and reports no drops.
 func TestReconcile_NoneDropped(t *testing.T) {
 	reg := registry.NewEmpty()
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base"}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"}
 	if err := reg.Add(cfg); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRecordSuccess(t *testing.T) {
 	reg := registry.NewEmpty()
 	cfg := vm.CreateConfig{
 		Name:     "claude",
-		BaseName: "claude-base",
+		BaseName: "sandbar-base",
 		GitName:  "Ada Lovelace",
 		GitEmail: "ada@example.com",
 		CPUs:     4,

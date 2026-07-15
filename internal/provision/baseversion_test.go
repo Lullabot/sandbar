@@ -289,7 +289,7 @@ func TestBaseStale_OldFormatGitStampIsStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); !stale {
+	if _, stale := p.baseStale(allToolsConfig("sandbar-base"), io.Discard); !stale {
 		t.Fatal("a v1-style (bare git-hash) stamp must be treated as stale")
 	}
 }
@@ -303,7 +303,7 @@ func TestBaseStale_EmptyStampIsStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); !stale {
+	if _, stale := p.baseStale(allToolsConfig("sandbar-base"), io.Discard); !stale {
 		t.Fatal("an empty stamp must be treated as stale")
 	}
 }
@@ -317,7 +317,7 @@ func TestBaseStale_MatchingV2StampNotStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	if _, stale := p.baseStale(allToolsConfig("claude-base"), io.Discard); stale {
+	if _, stale := p.baseStale(allToolsConfig("sandbar-base"), io.Discard); stale {
 		t.Fatal("a matching v2 stamp must not be treated as stale")
 	}
 }
@@ -337,7 +337,7 @@ func TestBaseStale_PassesConfigToolsetKey(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	cfg := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: false}
+	cfg := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: true, WithJava: false}
 	if _, stale := p.baseStale(cfg, io.Discard); stale {
 		t.Fatal("de-selecting a tool must NOT make the base stale: the base still CONTAINS it " +
 			"(a converge-in-place cannot uninstall), so re-applying changes nothing. Calling it " +
@@ -360,7 +360,7 @@ func TestBaseStale_NewlySelectedToolIsStale(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	cfg := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: false}
+	cfg := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: true, WithJava: false}
 	want, stale := p.baseStale(cfg, io.Discard)
 	if !stale {
 		t.Fatal("selecting a tool the base does not carry must be stale, or it never gets installed")
@@ -387,8 +387,8 @@ func TestBaseStale_ReselectingAfterDeselectDoesNotPingPong(t *testing.T) {
 	t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVer, origRead })
 
 	p := &Provisioner{PlaybookDir: "/playbook"}
-	noGo := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: false, WithJava: true}
-	all := vm.CreateConfig{BaseName: "claude-base", WithDDEV: true, WithGo: true, WithJava: true}
+	noGo := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: false, WithJava: true}
+	all := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: true, WithJava: true}
 
 	// `sand create --with-go=false`: go stays installed, nothing to converge.
 	if _, stale := p.baseStale(noGo, io.Discard); stale {
@@ -494,16 +494,16 @@ func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
 	before := time.Now()
-	if err := writeBaseVersion("claude-base", "v2:deadbeef:ddev+go+java", time.Now()); err != nil {
+	if err := writeBaseVersion("sandbar-base", "v2:deadbeef:ddev+go+java", time.Now()); err != nil {
 		t.Fatalf("writeBaseVersion: %v", err)
 	}
 	after := time.Now()
 
-	if got := readBaseVersion("claude-base"); got != "v2:deadbeef:ddev+go+java" {
+	if got := readBaseVersion("sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
 		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
 	}
 
-	builtAt, ok := readBaseBuiltAt("claude-base")
+	builtAt, ok := readBaseBuiltAt("sandbar-base")
 	if !ok {
 		t.Fatal("readBaseBuiltAt: ok = false, want true for a stamp writeBaseVersion just wrote")
 	}
@@ -518,7 +518,7 @@ func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
 func TestReadBaseBuiltAt_MissingStampIsNotOk(t *testing.T) {
 	t.Setenv("LIMA_HOME", t.TempDir())
 
-	if _, ok := readBaseBuiltAt("claude-base"); ok {
+	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on a missing stamp returned ok=true, want false")
 	}
 }
@@ -530,12 +530,12 @@ func TestReadBaseBuiltAt_MissingStampIsNotOk(t *testing.T) {
 func TestReadBaseBuiltAt_PreTimestampStampIsNotOk(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LIMA_HOME", home)
-	writeRawStamp(t, home, "claude-base", "v2:deadbeef:ddev+go+java\n")
+	writeRawStamp(t, home, "sandbar-base", "v2:deadbeef:ddev+go+java\n")
 
-	if got := readBaseVersion("claude-base"); got != "v2:deadbeef:ddev+go+java" {
+	if got := readBaseVersion("sandbar-base"); got != "v2:deadbeef:ddev+go+java" {
 		t.Errorf("readBaseVersion = %q, want v2:deadbeef:ddev+go+java", got)
 	}
-	if _, ok := readBaseBuiltAt("claude-base"); ok {
+	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on a pre-timestamp (version-only) stamp returned ok=true, want false")
 	}
 }
@@ -546,9 +546,9 @@ func TestReadBaseBuiltAt_PreTimestampStampIsNotOk(t *testing.T) {
 func TestReadBaseBuiltAt_UnparseableTimestampIsNotOk(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LIMA_HOME", home)
-	writeRawStamp(t, home, "claude-base", "v2:deadbeef:ddev+go+java\nnot-a-timestamp\n")
+	writeRawStamp(t, home, "sandbar-base", "v2:deadbeef:ddev+go+java\nnot-a-timestamp\n")
 
-	if _, ok := readBaseBuiltAt("claude-base"); ok {
+	if _, ok := readBaseBuiltAt("sandbar-base"); ok {
 		t.Fatal("readBaseBuiltAt on an unparseable timestamp returned ok=true, want false")
 	}
 }
@@ -613,7 +613,7 @@ func TestBaseToolset_ReadsBackWhatTheBaseWasBuiltWith(t *testing.T) {
 	defer func() { readBaseVersionFn = orig }()
 
 	readBaseVersionFn = func(string) string { return "v2:deadbeef:ddev+go" }
-	set, ok := BaseToolset("claude-base")
+	set, ok := BaseToolset("sandbar-base")
 	if !ok {
 		t.Fatal("a v2 stamp carries a tool-set; BaseToolset must report ok")
 	}
@@ -631,7 +631,7 @@ func TestBaseToolset_NoneIsAnAnswerNotAnAbsence(t *testing.T) {
 	defer func() { readBaseVersionFn = orig }()
 
 	readBaseVersionFn = func(string) string { return "v2:deadbeef:none" }
-	set, ok := BaseToolset("claude-base")
+	set, ok := BaseToolset("sandbar-base")
 	if !ok {
 		t.Fatal(`a base stamped "none" was built with no tools; that must be reported as ok, or the caller falls back to all-on and re-installs them`)
 	}
@@ -648,7 +648,7 @@ func TestBaseToolset_NoToolsetInformation(t *testing.T) {
 
 	for _, stamp := range []string{"", "somegitsha", "v2:deadbeef"} {
 		readBaseVersionFn = func(string) string { return stamp }
-		if set, ok := BaseToolset("claude-base"); ok {
+		if set, ok := BaseToolset("sandbar-base"); ok {
 			t.Errorf("BaseToolset(%q) = %v, ok=true; want ok=false (no tool-set information to adopt)", stamp, set)
 		}
 	}
@@ -666,7 +666,7 @@ func TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath(t *testing.T) {
 	limaHomeDir := t.TempDir()
 	t.Setenv("LIMA_HOME", limaHomeDir)
 
-	const baseName = "claude-base"
+	const baseName = "sandbar-base"
 	const version = "v2:cafef00d:ddev+go"
 	builtAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 
