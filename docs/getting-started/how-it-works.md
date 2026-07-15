@@ -4,7 +4,7 @@
 once, not on every VM.
 
 ```mermaid
-graph LR
+graph TD
     A[sand create] --> B{claude-base exists?}
     B -- no --> C[Build base image: heavy identity-free install]
     C --> D[Stop base image]
@@ -20,16 +20,7 @@ The first time you create a VM, `sand` runs a heavy, identity-free install
 into a stopped Lima instance named `claude-base`. This installs the dev
 tools, Claude Code, and everything else that every VM needs, none of which
 depends on who you are. The base image is built at a 20 GiB virtual-disk
-floor.
-
-**What's installed:** Docker CE, ddev, cloudflared, the [GitHub CLI
-(`gh`)](https://cli.github.com/) — configured as the git credential helper
-for HTTPS authentication — Node.js, Go, Python 3, `uv`, `mkcert`, a headless
-JDK, and the Claude Code CLI, plus common CLI utilities (`jq`, `htop`,
-`tmux`, `direnv`, and more). tmux, git, and bashrc configuration are
-deployed for the VM's user, and systemd linger is enabled so a detached
-tmux session (and anything running inside it, including a Claude Code
-session) keeps running after you disconnect.
+floor. See [Available Tools](available-tools.md) for the full toolchain.
 
 Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — `sand` rebuilds it automatically if the
