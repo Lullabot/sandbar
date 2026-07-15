@@ -420,3 +420,30 @@ func TestCreateFormWithNoBaseKeepsTheAllOnDefault(t *testing.T) {
 			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
 	}
 }
+
+// TestDefaultsScaleToHostResources pins that the CPU/memory suggestions scale to
+// the host the VM will run on (the REMOTE host for a remote provider, passed in
+// via the model's sampled headerCPUs/headerMem), not the local machine.
+func TestDefaultsScaleToHostResources(t *testing.T) {
+	// A big remote host: half the cores, memory still capped at 8GiB.
+	if got := defaultCPUs(64); got != 32 {
+		t.Errorf("defaultCPUs(64) = %d, want 32 (half)", got)
+	}
+	if got := defaultMemory(256 << 30); got != "8GiB" {
+		t.Errorf("defaultMemory(256GiB) = %q, want 8GiB (cap)", got)
+	}
+	// A small remote host: floor of 2 vCPUs, half the RAM.
+	if got := defaultCPUs(4); got != 2 {
+		t.Errorf("defaultCPUs(4) = %d, want 2 (floor)", got)
+	}
+	if got := defaultMemory(6 << 30); got != "3GiB" {
+		t.Errorf("defaultMemory(6GiB) = %q, want 3GiB (half)", got)
+	}
+	// Unknown/local (0) falls back to sampling THIS machine — non-degenerate.
+	if got := defaultCPUs(0); got < 2 {
+		t.Errorf("defaultCPUs(0) should fall back to the local count, got %d", got)
+	}
+	if got := defaultMemory(0); got == "" {
+		t.Error("defaultMemory(0) should fall back to the local probe, got empty")
+	}
+}
