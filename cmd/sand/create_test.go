@@ -137,7 +137,7 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 // VM sand did not create — and refused BEFORE the provisioner is ever
 // touched, not just reported as an error after a clone already ran.
 func TestHeadlessRecreateRefusedForUnmanagedVM(t *testing.T) {
-	cfg := vm.CreateConfig{Name: "claude", BaseName: "claude-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}
 	reg := registry.NewEmpty() // no managed entry for cfg.Name
 
 	prov := &stubProvisioner{}

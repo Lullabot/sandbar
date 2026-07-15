@@ -666,7 +666,7 @@ func TestWriteReadBaseVersion_RealRoundTripLandsAtDerivedPath(t *testing.T) {
 	limaHomeDir := t.TempDir()
 	t.Setenv("LIMA_HOME", limaHomeDir)
 
-	const baseName = "claude-base"
+	const baseName = "sandbar-base"
 	const version = "v2:cafef00d:ddev+go"
 	builtAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 

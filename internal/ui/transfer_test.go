@@ -114,12 +114,12 @@ func TestTransferDestIsTheUsersDirectoryVerbatim(t *testing.T) {
 func TestBrowseSelectionTargetsTransferVMNotFocus(t *testing.T) {
 	m := newTestModel(t)
 	if err := m.reg.Add(vm.CreateConfig{
-		Name: "focus-vm", BaseName: "claude-base", CloneURL: "https://github.com/org/focus-repo",
+		Name: "focus-vm", BaseName: "sandbar-base", CloneURL: "https://github.com/org/focus-repo",
 	}); err != nil {
 		t.Fatalf("seed focus-vm: %v", err)
 	}
 	if err := m.reg.Add(vm.CreateConfig{
-		Name: "xfer-vm", BaseName: "claude-base", CloneURL: "https://github.com/org/xfer-repo",
+		Name: "xfer-vm", BaseName: "sandbar-base", CloneURL: "https://github.com/org/xfer-repo",
 	}); err != nil {
 		t.Fatalf("seed xfer-vm: %v", err)
 	}

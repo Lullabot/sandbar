@@ -30,7 +30,7 @@ list.
 
 ## What to expect the first time
 
-The very first VM you create builds a shared base image (`claude-base`),
+The very first VM you create builds a shared base image (`sandbar-base`),
 which can take a while. Every VM you
 create after that clones the base image instead of reinstalling everything,
 so it's fast. See [How Provisioning Works](how-it-works.md) for why it's
