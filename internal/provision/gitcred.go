@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // forgeWiring describes how one recognized token env-var KEY wires into git's
@@ -243,7 +241,7 @@ mv "$tmp" "$gc"
 // current set. Called by ApplySecrets after the plain scoped env-var delivery
 // (task 03), which is unaffected — a recognized token is still delivered as a
 // plain env var in addition to this wiring.
-func applyGitCredEntries(ctx context.Context, cli *lima.Client, name, user string, entries []gitCredEntry, out io.Writer) error {
+func applyGitCredEntries(ctx context.Context, cli guestRunner, name, user string, entries []gitCredEntry, out io.Writer) error {
 	for _, e := range entries {
 		body := renderGitCredentialLine(e)
 		if err := cli.Shell(ctx, name, strings.NewReader(body), out, "sudo", "-H", "-u", user, "bash", "-c", gitCredWriteScript(e.slug)); err != nil {

@@ -8,8 +8,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-
-	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // schemeRe matches a leading URL scheme (e.g. "https://"), mirroring the strip
@@ -64,7 +62,7 @@ func CheckoutRelDir(cloneURL string) (string, bool) {
 // guestHome resolves the guest user's home directory by reading the passwd entry
 // over `limactl shell` (`getent passwd <user>` => user:x:uid:gid:gecos:home:shell).
 // The home is field index 5; fewer than 7 fields means an unexpected line.
-func guestHome(ctx context.Context, cli *lima.Client, name, user string) (string, error) {
+func guestHome(ctx context.Context, cli guestRunner, name, user string) (string, error) {
 	// ShellOut (stdout only), not Shell (merged stdout+stderr): getent output is
 	// parsed by splitting on ':', and limactl's cd-to-host-cwd warning on stderr
 	// is full of colons — merging it in would corrupt the parse and yield a
@@ -109,7 +107,7 @@ func removeStageDir(dir string) { _ = os.RemoveAll(dir) }
 // such file or directory" warning on stderr whenever that host path is absent
 // in the guest. Merging that warning into the archive corrupts the gzip, and
 // the later StageIn `tar -xzf` then aborts with exit status 2.
-func StageOut(ctx context.Context, cli *lima.Client, name, home string, guestPaths []string, hostArchive string) error {
+func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
 		return fmt.Errorf("create archive %s: %w", hostArchive, err)
@@ -127,7 +125,7 @@ func StageOut(ctx context.Context, cli *lima.Client, name, home string, guestPat
 // restored top-level paths to the user. Extraction runs as root (so the files
 // land root-owned and must be chowned back); the extract MUST complete before
 // the chown, since chown targets the just-written paths.
-func StageIn(ctx context.Context, cli *lima.Client, name, home, user string, topPaths []string, hostArchive string) error {
+func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topPaths []string, hostArchive string) error {
 	file, err := os.Open(hostArchive)
 	if err != nil {
 		return fmt.Errorf("open archive %s: %w", hostArchive, err)

@@ -359,10 +359,11 @@ func (w *sampleWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// guestShell is the one thing the heartbeat needs from lima.Client. Naming it here
-// (rather than taking a *lima.Client) is what lets the lifecycle tests drive a
-// stream they control — one that blocks, or dies, or ignores its context — without
-// a VM, a limactl, or a subprocess.
+// guestShell is the one thing the heartbeat needs from the backend (today,
+// provider.Provider). Naming it here — rather than taking the whole provider
+// interface — is what lets the lifecycle tests drive a stream they control —
+// one that blocks, or dies, or ignores its context — without a VM, a limactl,
+// or a subprocess.
 type guestShell interface {
 	ShellStreamOut(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
 }
