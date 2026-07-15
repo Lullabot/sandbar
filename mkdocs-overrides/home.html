@@ -1,0 +1,69 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+  {{ super() }}
+  <style>
+    .md-header { position: initial }
+    .md-main__inner { margin: 0 }
+    .md-content { display: none }
+    @media screen and (min-width: 60em) {
+      .md-sidebar--secondary { display: none }
+    }
+    @media screen and (min-width: 76.25em) {
+      .md-sidebar--primary { display: none }
+    }
+  </style>
+
+  <section class="mdx-container">
+    <div class="md-grid md-typeset">
+      <div class="mdx-hero">
+        <div class="mdx-hero__content">
+          <h1>sandbar</h1>
+          <p>Disposable Claude Code development VMs on Lima — spin one up in
+             seconds, point Claude Code at a repository, and throw it away
+             when you're done.</p>
+          <a href="{{ 'getting-started/' | url }}" class="md-button md-button--primary">
+            Get Started
+          </a>
+          <a href="https://github.com/lullabot/sandbar" class="md-button">
+            View on GitHub
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="mdx-features">
+    <div class="md-grid md-typeset">
+      <ul class="mdx-features__list">
+        <li class="mdx-features__item">
+          <a class="mdx-features__link" href="{{ 'getting-started/installation/' | url }}">
+            <h2 class="mdx-features__title">One Binary, No Ansible</h2>
+            <p>Install with Homebrew and go. The provisioning playbook ships inside the binary — there's nothing else to set up.</p>
+          </a>
+        </li>
+        <li class="mdx-features__item">
+          <a class="mdx-features__link" href="{{ 'getting-started/how-it-works/' | url }}">
+            <h2 class="mdx-features__title">Fast, Disposable VMs</h2>
+            <p>A shared base image is built once, then each VM is a near-instant clone you can tear down without a trace.</p>
+          </a>
+        </li>
+        <li class="mdx-features__item">
+          <a class="mdx-features__link" href="{{ 'using-sand/tui/' | url }}">
+            <h2 class="mdx-features__title">A Board for Every VM</h2>
+            <p>Start, stop, reset, shell into, and watch your VMs from a terminal UI — or drive it all headlessly from the CLI.</p>
+          </a>
+        </li>
+        <li class="mdx-features__item">
+          <a class="mdx-features__link" href="{{ 'using-sand/secrets/' | url }}">
+            <h2 class="mdx-features__title">Scoped Secrets</h2>
+            <p>Inject tokens and environment into a VM, globally or per-repository, without baking them into the base image.</p>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+{% endblock %}
+
+{% block content %}{% endblock %}
+{% block footer %}{{ super() }}{% endblock %}

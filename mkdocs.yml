@@ -7,14 +7,19 @@ site_dir: site
 
 theme:
   name: material
+  custom_dir: mkdocs-overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -22,6 +27,12 @@ theme:
     - navigation.tabs
     - navigation.top
     - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/palette-sync.js
 
 markdown_extensions:
   - admonition
