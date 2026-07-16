@@ -648,6 +648,10 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.openHelp()
 		return m, nil
 
+	case key.Matches(msg, m.keys.Profiles):
+		m.openProfiles()
+		return m, nil
+
 	case key.Matches(msg, m.keys.Search):
 		m.searching = true
 		return m, nil

@@ -13,6 +13,7 @@ type keyMap struct {
 	New        key.Binding
 	Search     key.Binding
 	StopAll    key.Binding
+	Profiles   key.Binding
 	Back       key.Binding
 	Quit       key.Binding
 	Help       key.Binding
@@ -42,8 +43,16 @@ func newKeyMap() keyMap {
 		// clones and nothing else, unconditionally (see board.go). 'f' is gone with
 		// it — a filter you can turn off is a filter that can show a base image, and
 		// a base image is not a workspace.
-		Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		StopAll:  key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
+		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		StopAll: key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
+		// Profiles opens the connection-profiles management screen (task 8,
+		// profilesview.go) from the board. Deliberately NOT added to
+		// boardHelp's footer bindings: every existing board golden pins that
+		// footer's exact text, and this task adds a new screen without
+		// altering the board's own rendered output. It is still reachable
+		// (this binding fires from updateBoard) and documented on the `?`
+		// screen (help.go's boardKeys) — just not advertised in the footer.
+		Profiles: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "profiles")),
 		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
 		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "keys")),

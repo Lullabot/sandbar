@@ -179,11 +179,23 @@ func (m model) memberByScope(sc registry.Scope) (fleetMember, bool) {
 // routes to the ACTIVE member: this is the seam that lets a hand-built model in
 // a test drive its single member with a bare `vmsLoadedMsg{...}` exactly as it
 // did when there was only one provider. Production always tags the scope.
+//
+// Any OTHER unmatched, NON-zero scope is deliberately NOT routed to the active
+// member — it is reported not-found instead. Before task 8 this branch was
+// unreachable in production: the fleet's member count never changed after New,
+// so a genuinely-tagged scope always matched some member. Task 8's live
+// profile management changes that — DELETING a profile drops its member
+// outright — so an in-flight refresh/connect cmd that was already running
+// against that scope can still deliver its result afterward, for a scope no
+// member owns any more. Falling back to "active" here would silently splice
+// one profile's stale list/error onto whatever member happens to be active
+// right now; dropping it (the message handlers already guard ok=false) is the
+// only safe thing to do with a result nobody can use any more.
 func (m model) routeIndex(sc registry.Scope) (int, bool) {
 	if i, ok := m.memberIndex(sc); ok {
 		return i, true
 	}
-	if len(m.members) == 0 {
+	if sc != (registry.Scope{}) || len(m.members) == 0 {
 		return 0, false
 	}
 	return m.activeIndex(), true
