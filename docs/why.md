@@ -149,7 +149,8 @@ your working directory read-write by default. That writable mount is
 the convenient choice, because the agent edits the same files already
 open in your editor, and it's the exact channel sandbar removes.
 
-Everything else sits further off on one axis or another:
+Everything else (as of July 2026) sits further off on one axis or
+another:
 
 | Tool(s) | Isolation | Local / Cloud | Gap vs sandbar |
 |---|---|---|---|
