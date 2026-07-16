@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/remote-hosts/">
+        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/connection-profiles/">
       
       
         <link rel="prev" href="../files-and-shells/">
@@ -27,7 +27,7 @@
     
     
       
-        <title>Remote Lima Hosts - sandbar</title>
+        <title>Connection Profiles - sandbar</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#remote-lima-hosts-over-ssh" class="md-skip">
+        <a href="#connection-profiles" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Remote Lima Hosts
+              Connection Profiles
             
           </span>
         </div>
@@ -830,7 +830,7 @@
   <span class="md-ellipsis">
     
   
-    Remote Lima Hosts
+    Connection Profiles
   
 
     
@@ -848,7 +848,7 @@
   <span class="md-ellipsis">
     
   
-    Remote Lima Hosts
+    Connection Profiles
   
 
     
@@ -874,10 +874,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#selecting-a-remote-host" class="md-nav__link">
+  <a href="#what-a-profile-is" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Selecting a remote host
+        What a profile is
       
     </span>
   </a>
@@ -885,10 +885,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#requirements-on-the-remote-host" class="md-nav__link">
+  <a href="#profilesyaml" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Requirements on the remote host
+        profiles.yaml
       
     </span>
   </a>
@@ -896,10 +896,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-behaves" class="md-nav__link">
+  <a href="#managing-profiles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How it behaves
+        Managing profiles
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managing profiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-the-tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the TUI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#all-enabled-profiles-are-active-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All enabled profiles are active at once
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirements-on-a-remote-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Requirements on a remote host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-remote-profile-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a remote profile behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables-removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment variables removed
       
     </span>
   </a>
@@ -1241,10 +1313,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#selecting-a-remote-host" class="md-nav__link">
+  <a href="#what-a-profile-is" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Selecting a remote host
+        What a profile is
       
     </span>
   </a>
@@ -1252,10 +1324,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#requirements-on-the-remote-host" class="md-nav__link">
+  <a href="#profilesyaml" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Requirements on the remote host
+        profiles.yaml
       
     </span>
   </a>
@@ -1263,10 +1335,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-it-behaves" class="md-nav__link">
+  <a href="#managing-profiles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How it behaves
+        Managing profiles
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managing profiles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-the-tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the TUI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#all-enabled-profiles-are-active-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All enabled profiles are active at once
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#requirements-on-a-remote-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Requirements on a remote host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-remote-profile-behaves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a remote profile behaves
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables-removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment variables removed
       
     </span>
   </a>
@@ -1304,56 +1448,181 @@
   
 
 
-<h1 id="remote-lima-hosts-over-ssh">Remote Lima hosts over SSH</h1>
+<h1 id="connection-profiles">Connection Profiles</h1>
 <p>By default <code>sand</code> manages VMs with a local <a href="https://lima-vm.io">Lima</a> — it runs
-<code>limactl</code> on the machine you launched <code>sand</code> from. It can instead drive <code>limactl</code>
-on a <strong>remote</strong> host over SSH, so the VMs live on a bigger box (a workstation, a
-home server) while you work from a laptop. The local workflow is unchanged; the
-remote target is opt-in.</p>
-<h2 id="selecting-a-remote-host">Selecting a remote host</h2>
-<p>Set the selection environment variables before running <code>sand</code> (headless or the
-TUI). Only <code>SAND_PROVIDER</code> and <code>SAND_REMOTE_HOST</code> are required; the rest have
-sensible defaults:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_PROVIDER</span><span class="o">=</span><span class="s2">&quot;lima-remote&quot;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_HOST</span><span class="o">=</span><span class="s2">&quot;192.168.1.100&quot;</span><span class="w">          </span><span class="c1"># hostname or IP</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_USER</span><span class="o">=</span><span class="s2">&quot;debian&quot;</span><span class="w">                 </span><span class="c1"># optional; the SSH login user</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_PORT</span><span class="o">=</span><span class="s2">&quot;22&quot;</span><span class="w">                      </span><span class="c1"># optional; defaults to 22</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_IDENTITY</span><span class="o">=</span><span class="s2">&quot;/path/to/ssh/key&quot;</span><span class="w">    </span><span class="c1"># optional; else SSH agent/config</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SAND_REMOTE_LIMA_HOME</span><span class="o">=</span><span class="s2">&quot;/home/debian/.lima&quot;</span><span class="w"> </span><span class="c1"># optional; the remote LIMA_HOME</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>sand<span class="w"> </span>create<span class="w">      </span><span class="c1"># or &#39;sand&#39; for the TUI</span>
-</code></pre></div>
-<p>To return to local Lima, unset them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">unset</span><span class="w"> </span>SAND_PROVIDER<span class="w"> </span>SAND_REMOTE_HOST<span class="w"> </span>SAND_REMOTE_USER<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">      </span>SAND_REMOTE_PORT<span class="w"> </span>SAND_REMOTE_IDENTITY<span class="w"> </span>SAND_REMOTE_LIMA_HOME
-</code></pre></div>
-<h2 id="requirements-on-the-remote-host">Requirements on the remote host</h2>
+<code>limactl</code> on the machine you launched <code>sand</code> from. It can also drive <code>limactl</code>
+on one or more <strong>remote</strong> hosts over SSH, so VMs live on a bigger box (a
+workstation, a home server) while you work from a laptop.</p>
+<p>Every location <code>sand</code> knows about — local or remote — is a <strong>Connection
+Profile</strong>. Profiles are the only configuration surface for this: there is no
+environment variable to set and no per-invocation flag needed to pick a
+backend (older <code>sand</code> builds used <code>SAND_PROVIDER</code> / <code>SAND_REMOTE_*</code>
+environment variables for this; those are <strong>removed</strong> — see
+<a href="#environment-variables-removed">Environment variables removed</a> below).</p>
+<h2 id="what-a-profile-is">What a profile is</h2>
+<p>A profile has:</p>
 <ul>
-<li><strong>Lima</strong> (<code>limactl</code> on <code>PATH</code>) — the remote host runs the exact same <code>limactl</code>
-  the local provider does; <code>sand</code> only changes <em>where</em> it runs.</li>
+<li>A <strong>name</strong> — a short, renameable label you pick (<code>work</code>, <code>home-server</code>,
+  <code>local</code>). Names don't need to be unique, though the TUI won't stop you from
+  picking a name that collides with another profile's — it's a display label,
+  not an identifier.</li>
+<li>A <strong>type</strong> — <code>local</code> or <code>remote-ssh</code>.</li>
+<li><strong>Connection details</strong> — for <code>remote-ssh</code> only: host, SSH user, port, an
+  optional path to a private key file, and an optional remote <code>LIMA_HOME</code>.</li>
+<li>An <strong>enabled</strong> flag.</li>
+</ul>
+<p>There is always exactly one <strong>Local</strong> profile — permanent, created
+automatically the first time <code>sand</code> runs, and not deletable (though you can
+rename it). Every other profile is <code>remote-ssh</code>, and you can create, edit,
+enable, disable, or delete as many of those as you like.</p>
+<h2 id="profilesyaml"><code>profiles.yaml</code></h2>
+<p>Profiles are persisted at:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml
+</code></pre></div>
+<p>This file is <strong>secret-free</strong> — it holds a host/user/port/key-path, never a
+password or key material — so it's safe to check into a dotfiles repo or copy
+between machines: the same <code>profiles.yaml</code> on your laptop and your desktop
+gives both clients the same set of named locations. It's also plain,
+hand-editable YAML, shaped like this:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">last_used</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">a1b2c3d4e5f6a7b8</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">profiles</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">a1b2c3d4e5f6a7b8</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">work</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">remote-ssh</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">192.168.1.100</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">debian</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">22</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="nt">identity_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/me/.ssh/id_work</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="nt">lima_home</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/debian/.lima</span>
+</code></pre></div>
+<p><code>id</code> is assigned once at creation and never changes, even across a rename —
+it's how <code>sand</code> tracks "the last profile you used" and which managed VMs
+belong to which profile without losing track when you rename one. <code>name</code> is
+the label you see and address the profile by from the CLI (<code>--profile</code>) and
+in the TUI.</p>
+<p>Two enabled <code>remote-ssh</code> profiles may not point at the same
+<code>user@host:port</code> — <code>sand</code> refuses to save that, so the same physical target
+is never double-counted as two separate fleet members. There can also only
+ever be one <code>local</code> profile.</p>
+<h2 id="managing-profiles">Managing profiles</h2>
+<h3 id="in-the-tui">In the TUI</h3>
+<p>Press <code>p</code> from the board to open the profile management screen: a list of
+every profile, its type, and its enabled/disabled state.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>↑</code> <code>↓</code></td>
+<td>Move between profiles</td>
+</tr>
+<tr>
+<td><code>enter</code></td>
+<td>Edit the selected profile (or create a new one from the ghost row)</td>
+</tr>
+<tr>
+<td><code>t</code></td>
+<td>Toggle enabled/disabled</td>
+</tr>
+<tr>
+<td><code>d</code></td>
+<td>Delete (not offered for Local)</td>
+</tr>
+</tbody>
+</table>
+<p>Every change here is <strong>live</strong> — there is no restart, and no separate "apply"
+step:</p>
+<ul>
+<li><strong>Enabling</strong> a profile immediately builds its connection and starts
+  listing its VMs; its tiles appear on the board as soon as that finishes.</li>
+<li><strong>Disabling</strong> a profile tears its connection down and shows a banner in the
+  header instead of its tiles, but leaves its managed-VM records and secrets
+  exactly as they were — re-enable it later and everything comes back.</li>
+<li><strong>Deleting</strong> a non-Local profile removes it from <code>profiles.yaml</code> and drops
+  its tiles from the board. It <strong>never touches the remote host</strong> — no VM is
+  stopped or deleted, no SSH command is run against it. Deleting a profile
+  only forgets that <code>sand</code> should manage that connection; if you want to
+  re-adopt the same host later, create a new profile pointing at it.</li>
+<li><strong>Renaming</strong> a profile (a pure name edit, connection unchanged) doesn't
+  rebuild anything — its VMs, jobs, and last-used pointer all follow the
+  rename by ID.</li>
+</ul>
+<p>Editing a profile's connection fields (host/user/port/key/Lima home), or
+disabling/deleting it, is only offered while that profile is <strong>idle</strong> — no
+build or other job currently running against it — the same guard that
+protects a single VM from a destructive action mid-build, generalized to the
+whole profile.</p>
+<p>The VM <strong>create form</strong> also has a profile selector, so you choose which
+enabled profile a new VM is created on right from the form, without leaving
+the TUI.</p>
+<h3 id="from-the-cli">From the CLI</h3>
+<p><code>sand create --profile &lt;name&gt;</code> picks which profile a headless create acts
+on. <code>sand shell NAME --profile &lt;name&gt;</code> disambiguates when a VM named <code>NAME</code>
+exists on more than one enabled profile. See the
+<a href="../cli-reference/">CLI Reference</a> for the full flag semantics and resolution
+order.</p>
+<h2 id="all-enabled-profiles-are-active-at-once">All enabled profiles are active at once</h2>
+<p>Unlike the old environment-variable selection, which chose exactly one
+backend per process, <strong>every enabled profile is live simultaneously</strong> in the
+TUI: the board shows tiles from your local Lima and every enabled remote
+host side by side, each tile labeled with the profile it runs on (see
+<a href="../tui/">The TUI</a>). A disabled or errored profile shows a banner instead of
+tiles, naming the profile and the reason.</p>
+<p>Because VMs are tracked per-profile, the <strong>same VM name can exist under two
+different profiles</strong> without conflict — <code>claude</code> on your <code>local</code> profile and
+<code>claude</code> on your <code>work</code> profile are two independent VMs that happen to share
+a display name. <code>sand shell claude</code> is ambiguous in that case and asks you to
+disambiguate with <code>--profile</code>.</p>
+<h2 id="requirements-on-a-remote-host">Requirements on a remote host</h2>
+<ul>
+<li><strong>Lima</strong> (<code>limactl</code> on <code>PATH</code>) — the remote host runs the exact same
+  <code>limactl</code> the local provider does; <code>sand</code> only changes <em>where</em> it runs.</li>
 <li><strong>A working hypervisor</strong> (QEMU/KVM, etc.), just like any Linux host running
   Lima — see the <a href="https://lima-vm.io/docs/installation/">Lima installation docs</a>.</li>
 <li><strong>Passwordless SSH</strong> to the target (key-based auth). <code>sand</code> runs <code>limactl</code>
   non-interactively over SSH, so the connection must not prompt.</li>
 </ul>
-<h2 id="how-it-behaves">How it behaves</h2>
-<p>With a remote target configured, <code>sand create</code>, the TUI, <code>sand shell</code>, and file
-copy behave the same as locally — the base image is built on the remote host
-once, each VM is a <code>limactl clone</code> of it, and finalize runs there too:</p>
+<h2 id="how-a-remote-profile-behaves">How a remote profile behaves</h2>
+<p>With a <code>remote-ssh</code> profile enabled, <code>sand create --profile</code>, the TUI, <code>sand
+shell</code>, and file copy behave the same as locally — the base image is built on
+that host once, each VM is a <code>limactl clone</code> of it, and finalize runs there
+too:</p>
 <ul>
 <li><strong>Interactive shells</strong> (<code>sand shell NAME</code> and <code>S</code> on a tile) wrap the guest
   tmux attach with <code>ssh -t</code> automatically; detaching still leaves the session
-  running, exactly as with a local VM (see <a href="../files-and-shells/">Shells and Files</a>).</li>
+  running, exactly as with a local VM (see <a href="../files-and-shells/">Files and Shells</a>).</li>
 <li><strong>File transfer</strong> to and from a guest is staged through the remote host
   transparently — the remote <code>limactl copy</code> cannot see your local filesystem, so
   <code>sand</code> copies via the remote host and preserves where files land in the guest.</li>
-<li><strong>Isolation</strong>: VMs created on a remote host are tagged with that target in the
-  <a href="../../reference/files-and-state/">managed-VM index</a>, so they never mix with
-  your local VMs — a local <code>limactl list</code> and the remote list never show each
-  other's instances.</li>
+<li><strong>Isolation</strong>: VMs created on a profile are tagged with that profile's
+  connection in the <a href="../../reference/files-and-state/">managed-VM index</a>, so
+  they never mix with VMs from another profile — a local <code>limactl list</code> and a
+  remote profile's list never show each other's instances.</li>
 </ul>
-<p>The managed-VM index records only the target's <code>user@host:port</code>, never a private
-key or password.</p>
+<p>The managed-VM index records only a profile's <code>user@host:port</code>, never a
+private key or password.</p>
+<h2 id="environment-variables-removed">Environment variables removed</h2>
+<p>Earlier (unreleased) builds of <code>sand</code> selected a single remote target for the
+whole process via <code>SAND_PROVIDER</code>, <code>SAND_REMOTE_HOST</code>, <code>SAND_REMOTE_USER</code>,
+<code>SAND_REMOTE_PORT</code>, <code>SAND_REMOTE_IDENTITY</code>, and <code>SAND_REMOTE_LIMA_HOME</code>
+environment variables. That surface has been <strong>removed entirely</strong> and
+replaced by Connection Profiles: set these variables and <code>sand</code> will simply
+ignore them. If you were using them, create an equivalent <code>remote-ssh</code>
+profile instead (in the TUI's <code>p</code> screen, or by hand-editing
+<code>profiles.yaml</code>) — see <a href="#profilesyaml"><code>profiles.yaml</code></a> above for the field
+mapping (<code>SAND_REMOTE_HOST</code> → <code>host</code>, <code>SAND_REMOTE_USER</code> → <code>user</code>,
+<code>SAND_REMOTE_PORT</code> → <code>port</code>, <code>SAND_REMOTE_IDENTITY</code> → <code>identity_path</code>,
+<code>SAND_REMOTE_LIMA_HOME</code> → <code>lima_home</code>).</p>
 <h2 id="future-providers">Future providers</h2>
 <p>The remote-Lima backend is one implementation of <code>sand</code>'s internal <code>Provider</code>
 seam. That seam is what will let non-Lima backends (Proxmox, DigitalOcean,

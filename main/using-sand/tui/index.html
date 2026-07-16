@@ -823,6 +823,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#connection-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#resetting-a-vm" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -933,14 +944,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../remote-hosts/" class="md-nav__link">
+      <a href="../connection-profiles/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Remote Lima Hosts
+    Connection Profiles
   
 
     
@@ -1330,6 +1341,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#connection-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connection profiles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#resetting-a-vm" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1367,15 +1389,27 @@ screen — both were deliberately removed. Every verb fires straight from the
 tile under the focus ring.</p>
 <p><img alt="The sand board: a running 'drupal-contrib' VM and a stopped 'lullabotdotcom' VM as tiles, with a Messages pane and keybinding footer." src="../../images/board.png" /></p>
 <h2 id="the-header">The header</h2>
-<p>The header band shows a live readout of the <strong>host</strong>, not the VMs: CPU and
-memory currently in use (fed by a guest heartbeat), free disk on the volume
-that holds your VMs, and the build's version. It does not count base images
-or unmanaged VMs — the board only ever shows sand-managed clones, and the
-header doesn't either. Manage a base image with <code>limactl</code> directly.</p>
+<p>The header shows a live readout of the <strong>host(s)</strong> you're connected to, not
+the VMs: one band per active <a href="../connection-profiles/">Connection Profile</a>,
+each with CPU and memory currently in use (fed by a guest heartbeat), free
+disk on the volume that holds that profile's VMs, and the build's version.
+With only the permanent Local profile enabled — sand's out-of-the-box
+default — there's a single band and the header looks exactly like it always
+has. Enable a remote profile and a second band appears for it; a profile
+that's <strong>disabled</strong> or <strong>errored</strong> (unreachable, misconfigured) shows a
+banner instead, naming the profile and the reason its tiles are absent. The
+header does not count base images or unmanaged VMs — the board only ever
+shows sand-managed clones, and the header doesn't either. Manage a base
+image with <code>limactl</code> directly.</p>
 <h2 id="the-tile-board">The tile board</h2>
 <p>Tiles are sorted alphabetically by name and stay there — a VM changing
 status never reorders the board. An empty slot on the board is a "ghost
 tile" inviting you to press <code>enter</code> to create a VM.</p>
+<p>With more than one <a href="../connection-profiles/">Connection Profile</a> enabled, a
+tile's title row also carries a small <code>[profile]</code> label naming which
+profile that VM runs on — useful since the same VM name can exist under two
+different profiles at once. The label is omitted while only the Local
+profile is enabled, so a single-profile setup's tiles look unchanged.</p>
 <p>Builds stream their output into a progress pane, but <strong>they keep running in
 the background if you navigate away</strong>. Leaving the progress screen does not
 cancel a build in progress; the job keeps going in the registry, and you can
@@ -1403,6 +1437,10 @@ failed while you weren't looking.</p>
 <tr>
 <td><code>n</code></td>
 <td>Create a new VM</td>
+</tr>
+<tr>
+<td><code>p</code></td>
+<td>Open the <a href="../connection-profiles/">Connection Profiles</a> management screen</td>
 </tr>
 <tr>
 <td><code>/</code></td>
@@ -1493,6 +1531,16 @@ changes meaning under your fingers. Download deliberately does <strong>not</stro
 <code>d</code>; it's bound to <code>g</code> instead.</p>
 <p>For the full set of <code>sand</code> subcommands and flags (including <code>sand shell</code>),
 see the <a href="../cli-reference/">CLI Reference</a>.</p>
+<h2 id="connection-profiles">Connection profiles</h2>
+<p><code>p</code> opens the profile management screen — a list of every
+<a href="../connection-profiles/">Connection Profile</a> <code>sand</code> knows about (Local plus
+any remote hosts you've added), with keys to create, edit, enable/disable,
+and delete them. Every change there is live: enabling a profile builds its
+connection and starts showing its tiles immediately, with no restart.</p>
+<p>The create form (<code>n</code>, or <code>enter</code> on a ghost tile) also has a profile
+selector when more than one profile is enabled, so you pick which profile a
+new VM is created on without leaving the TUI. See
+<a href="../connection-profiles/">Connection Profiles</a> for the full model.</p>
 <h2 id="resetting-a-vm">Resetting a VM</h2>
 <p>Pressing <code>R</code> on a managed tile opens the create form again, titled <em>Reset
 VM</em>, pre-filled with that VM's recorded settings. <code>Name</code> is locked; every

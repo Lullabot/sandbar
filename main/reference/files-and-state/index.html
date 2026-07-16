@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lullabot.github.io/sandbar/main/reference/files-and-state/">
       
       
-        <link rel="prev" href="../../using-sand/remote-hosts/">
+        <link rel="prev" href="../../using-sand/connection-profiles/">
       
       
         <link rel="next" href="../troubleshooting/">
@@ -809,14 +809,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../using-sand/remote-hosts/" class="md-nav__link">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Remote Lima Hosts
+    Connection Profiles
   
 
     
@@ -966,6 +966,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Host paths">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-different-scope-dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two different "scope" dimensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1238,6 +1255,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Host paths">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#two-different-scope-dimensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two different "scope" dimensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1297,8 +1331,13 @@ out; every other page links here instead of restating them.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml</code></td>
+<td>The <a href="../../using-sand/connection-profiles/">Connection Profiles</a> config: every location <code>sand</code> can run VMs on (the permanent Local profile, plus any <code>remote-ssh</code> profiles you've added), each profile's host/user/port/key-path/Lima-home, and which profile was last used. <strong>Secret-free</strong> — no password or key material, only a path to a key file — and hand-editable YAML.</td>
+<td>Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — <code>sand</code> reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again.</td>
+</tr>
+<tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json</code></td>
-<td>The secret-free index of every <code>sand</code>-managed VM: which VMs <code>sand</code> created, the base image each was cloned from, and each VM's create configuration (the settings that pre-fill the form when you <code>Reset</code>).</td>
+<td>The secret-free index of every <code>sand</code>-managed VM: which VMs <code>sand</code> created, the base image each was cloned from, and each VM's create configuration (the settings that pre-fill the form when you <code>Reset</code>). Since schema version 3, each entry is keyed by <strong>(connection scope, name)</strong> rather than by bare name, so the same VM name can exist under two different connection profiles without colliding.</td>
 <td>Yes, but you lose the pre-filled reset config and <code>sand</code>'s record of which VMs it manages — a VM's actual disk is untouched, and Lima will still list it, but <code>sand</code> will no longer treat it as managed.</td>
 </tr>
 <tr>
@@ -1313,7 +1352,23 @@ out; every other page links here instead of restating them.</p>
 </tr>
 </tbody>
 </table>
-<p>Sources: <code>internal/registry/registry.go:53</code> and <code>internal/registry/registry.go:62</code> (<code>managed-vms.json</code> default path), <code>internal/registry/registry.go:172</code> (the config saved into that index is the create config, stripped of the clone token), <code>internal/secrets/secrets.go:124</code> and <code>internal/secrets/secrets.go:133</code> (<code>secrets.json</code> default path), <code>internal/secrets/secrets.go:342</code>-<code>internal/secrets/secrets.go:350</code> (directory forced to <code>0700</code>) and <code>internal/secrets/secrets.go:357</code>-<code>internal/secrets/secrets.go:359</code> (file created at <code>0600</code>), <code>internal/provision/baseversion.go:62</code>-<code>internal/provision/baseversion.go:68</code> (<code>LIMA_HOME</code> fallback to <code>~/.lima</code>).</p>
+<p>Sources: <code>internal/profiles/store.go</code> (<code>profiles.yaml</code> default path, schema, and CRUD), <code>internal/registry/registry.go:53</code> and <code>internal/registry/registry.go:62</code> (<code>managed-vms.json</code> default path), <code>internal/registry/registry.go:172</code> (the config saved into that index is the create config, stripped of the clone token), <code>internal/registry/registry.go:107</code>-<code>internal/registry/registry.go:129</code> (the v3 <code>(scope, name)</code>-keyed array shape), <code>internal/secrets/secrets.go:124</code> and <code>internal/secrets/secrets.go:133</code> (<code>secrets.json</code> default path), <code>internal/secrets/secrets.go:342</code>-<code>internal/secrets/secrets.go:350</code> (directory forced to <code>0700</code>) and <code>internal/secrets/secrets.go:357</code>-<code>internal/secrets/secrets.go:359</code> (file created at <code>0600</code>), <code>internal/provision/baseversion.go:62</code>-<code>internal/provision/baseversion.go:68</code> (<code>LIMA_HOME</code> fallback to <code>~/.lima</code>).</p>
+<h3 id="two-different-scope-dimensions">Two different "scope" dimensions</h3>
+<p>Two unrelated things are both called a "scope" in this file store, and it's
+easy to conflate them:</p>
+<ul>
+<li>The <strong>connection scope</strong> (<code>registry.Scope</code>: which <a href="../../using-sand/connection-profiles/">Connection
+  Profile</a> — local, or a specific
+  <code>user@host:port</code> — a VM lives on) is what schema version 3 added to both
+  <code>managed-vms.json</code> and <code>secrets.json</code>. It's what lets the same VM <em>name</em>
+  exist independently on two different profiles.</li>
+<li>The secrets store's pre-existing <strong>directory scope</strong> (<code>global</code>, or a
+  path like <code>foo/bar</code>) is unrelated and unchanged by this — it's <em>within
+  one VM</em>, picking which guest directory a secret's <code>.env</code> lands in. See
+  <a href="../../using-sand/secrets/#scopes-global-vs-per-directory">Secrets</a>.</li>
+</ul>
+<p>A single secret is addressed by the combination of both: connection scope →
+VM name → directory scope → key.</p>
 <h2 id="legacy-data-directory-migration">Legacy data-directory migration</h2>
 <p>If you installed an older version of this tool under its previous name,
 <code>claude-code-ansible</code>, its VM index lived at
