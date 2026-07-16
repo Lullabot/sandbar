@@ -773,10 +773,10 @@ Verified acyclic; no orphan or circular references.
 - ✔️ Task 002: Add a connection-scope dimension to the secrets store (schema migration) — `completed`
 - ✔️ Task 003: Retire the `provision.hostFiles` process-global into a per-operation argument — `completed`
 
-### Phase 2: Provider layer & identity prep
+### ✅ Phase 2: Provider layer & identity prep
 **Parallel Tasks:**
-- Task 004: Replace `provider.Resolve` with a profile-driven fleet builder; remove env vars (depends on: 001)
-- Task 006: Scope-qualify the TUI's in-memory per-VM stores and both prune sites (depends on: 002)
+- ✔️ Task 004: Replace `provider.Resolve` with a profile-driven fleet builder; remove env vars (depends on: 001) — `completed`
+- ✔️ Task 006: Scope-qualify the TUI's in-memory per-VM stores and both prune sites (depends on: 002) — `completed`
 
 ### Phase 3: Fleet spine
 **Parallel Tasks:**

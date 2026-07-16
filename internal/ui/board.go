@@ -72,10 +72,17 @@ const ghostTileText = "press enter to add a VM"
 // cannot produce and will not accept in an instance name, so it can never collide
 // with a real VM: focusedVM() looks it up among the VMs, fails to find it, and
 // every per-VM verb correctly declines to fire on an empty slot. Ask
-// focusIsGhost, never `focusName == ""` — an empty focusName means the ring is on
-// NOTHING, which is a different state and still reachable (a filtered board with
-// no matches has no ghost either).
+// focusIsGhost, never `focusVM.Name == ""` — a zero-value focusVM means the ring
+// is on NOTHING, which is a different state and still reachable (a filtered
+// board with no matches has no ghost either).
 const ghostFocusName = "\x00new"
+
+// ghostFocusVM is the focus ring's ghost-cell handle: ghostFocusName paired with
+// this model's own scope. focusIsGhost only ever compares the Name half — the
+// sentinel byte makes it unique regardless of scope — but every assignment site
+// constructs the full vmHandle anyway, so the ring's field never silently
+// reverts to a bare name.
+func (m model) ghostFocusVM() vmHandle { return vmHandle{Scope: m.scope, Name: ghostFocusName} }
 
 // isBaseImage reports whether name is a sand base image: a clone source for a
 // managed VM, or the default base name even before any clone exists. Base images
@@ -118,7 +125,7 @@ func (m model) boardVMs() []vm.VM {
 			on[v.Name] = true
 		}
 	}
-	for _, name := range m.jobs.names() {
+	for _, name := range m.jobs.names(m.scope) {
 		if m.hasProvisionJob(name) {
 			on[name] = true
 		}
@@ -167,7 +174,7 @@ func vmIndex(vms []vm.VM, name string) int {
 // zero-value VM.
 func (m model) focusedVM() (vm.VM, bool) {
 	vms := m.visibleVMs()
-	i := vmIndex(vms, m.focusName)
+	i := vmIndex(vms, m.focusVM.Name)
 	if i < 0 {
 		return vm.VM{}, false
 	}
@@ -197,9 +204,9 @@ func (m *model) syncBoard() {
 		// the real tiles arrived, so sand would open with the empty slot selected and
 		// enter would create a VM rather than open the first one.
 		if m.showsGhost() && m.vmsLoaded {
-			m.focusName = ghostFocusName
+			m.focusVM = m.ghostFocusVM()
 		} else {
-			m.focusName = ""
+			m.focusVM = vmHandle{}
 		}
 		m.scrollRow = 0
 		return
@@ -208,17 +215,19 @@ func (m *model) syncBoard() {
 		m.ensureFocusVisible()
 		return
 	}
-	if vmIndex(vms, m.focusName) < 0 {
-		m.focusName = focusNeighbour(vms, m.focusName)
+	if vmIndex(vms, m.focusVM.Name) < 0 {
+		m.focusVM = vmHandle{Scope: m.scope, Name: focusNeighbour(vms, m.focusVM.Name)}
 	}
 	m.ensureFocusVisible()
 }
 
 // focusIsGhost reports whether the ring is on the empty slot. It insists the ghost
 // is actually being SHOWN, so a stale sentinel left behind by a filter (which
-// hides the ghost) can never be mistaken for a live selection.
+// hides the ghost) can never be mistaken for a live selection. Only the Name half
+// of the handle is checked: the sentinel byte makes it unique on its own, and the
+// ghost is not a real per-scope VM.
 func (m model) focusIsGhost() bool {
-	return m.focusName == ghostFocusName && m.showsGhost()
+	return m.focusVM.Name == ghostFocusName && m.showsGhost()
 }
 
 // focusIndex is the ring's slot in the GRID — the cells gridView actually lays
@@ -229,7 +238,7 @@ func (m model) focusIndex() int {
 	if m.focusIsGhost() {
 		return len(m.visibleVMs())
 	}
-	return vmIndex(m.visibleVMs(), m.focusName)
+	return vmIndex(m.visibleVMs(), m.focusVM.Name)
 }
 
 // focusCellName is focusIndex's inverse: the focus name for a grid slot.
@@ -302,7 +311,7 @@ func (m *model) moveFocus(dx, dy int) {
 	if i < 0 {
 		// The ring is on nothing (a board that just gained its first cell): the first
 		// arrow key adopts the first one rather than doing nothing.
-		m.focusName = m.focusCellName(0)
+		m.focusVM = vmHandle{Scope: m.scope, Name: m.focusCellName(0)}
 		m.ensureFocusVisible()
 		return
 	}
@@ -330,7 +339,7 @@ func (m *model) moveFocus(dx, dy int) {
 	if target == i {
 		return
 	}
-	m.focusName = m.focusCellName(target)
+	m.focusVM = vmHandle{Scope: m.scope, Name: m.focusCellName(target)}
 	m.ensureFocusVisible()
 }
 
@@ -437,8 +446,8 @@ func (m model) stopAllTargets() []string {
 // and quitting abandons everything on it.
 func (m model) busyVMs() []string {
 	var names []string
-	for _, name := range m.jobs.names() {
-		if m.jobs.isRunning(name) {
+	for _, name := range m.jobs.names(m.scope) {
+		if m.jobs.isRunning(m.scope, name) {
 			names = append(names, name)
 		}
 	}
@@ -874,7 +883,7 @@ func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUn
 	// The tile reads the VM's BUILD — never "whatever run this VM happens to have".
 	// A file copy against a running VM is not a build and must not be able to become
 	// one by occupying the same slot (jobs.go).
-	job, hasJob := m.jobs.snapshot(provisionKey(v.Name))
+	job, hasJob := m.jobs.snapshot(provisionKey(m.scope, v.Name))
 	sample, hasSample := m.sampleOf(v.Name)
 	return renderTile(tileInput{
 		VM:        v,
@@ -884,7 +893,7 @@ func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUn
 		HasSample: hasSample,
 		Traits:    traits[i],
 		Uniform:   uniform,
-		Focused:   v.Name == m.focusName,
+		Focused:   v.Name == m.focusVM.Name,
 		Width:     m.layout.TileWidth,
 		Spinner:   frame,
 		Now:       now,
@@ -909,7 +918,7 @@ func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUn
 func (m model) traitsOf(v vm.VM) vmTraits {
 	base, managed := m.reg.BaseInScope(v.Name, m.scope)
 	if base == "" {
-		if cfg, ok := m.jobs.config(v.Name); ok {
+		if cfg, ok := m.jobs.config(m.scope, v.Name); ok {
 			base = cfg.BaseName
 		}
 	}
@@ -949,7 +958,7 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 // playbook leaves a booted, half-provisioned VM that is absolutely worth showing —
 // it exists, it is not managed, and `d` is how it gets cleared.
 func (m model) hasProvisionJob(name string) bool {
-	s, ok := m.jobs.snapshot(provisionKey(name))
+	s, ok := m.jobs.snapshot(provisionKey(m.scope, name))
 	if !ok || s.State == jobSucceeded {
 		return false
 	}

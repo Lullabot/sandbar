@@ -51,13 +51,13 @@ type vmCommand struct {
 // vmBuilding reports whether name is mid-build. Nil-safe: a model with no job
 // registry has nothing building.
 func (m model) vmBuilding(name string) bool {
-	return m.jobs.Building(name)
+	return m.jobs.Building(m.scope, name)
 }
 
 // vmHasRetainedRun reports whether name has a run whose log can be reopened.
 // Nil-safe, for the same reason.
 func (m model) vmHasRetainedRun(name string) bool {
-	return m.jobs.HasRetainedRun(name)
+	return m.jobs.HasRetainedRun(m.scope, name)
 }
 
 // alwaysEnabled is the enabledFor for vmCommands that genuinely have nothing

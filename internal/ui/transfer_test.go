@@ -125,7 +125,7 @@ func TestBrowseSelectionTargetsTransferVMNotFocus(t *testing.T) {
 	}
 	m = putOnBoard(t, m, vm.VM{Name: "focus-vm", Status: "Running"})
 	m = putOnBoard(t, m, vm.VM{Name: "xfer-vm", Status: "Running"})
-	m.focusName = "focus-vm" // the ring is on a DIFFERENT VM than the transfer targets
+	m.focusVM.Name = "focus-vm" // the ring is on a DIFFERENT VM than the transfer targets
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "notes.txt"), []byte("x"), 0o644); err != nil {

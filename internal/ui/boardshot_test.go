@@ -85,11 +85,11 @@ func TestGenerateHomeBoardShot(t *testing.T) {
 		},
 	}
 	m.vmsLoaded = true
-	m.focusName = "drupal-contrib" // the focused (blue-bordered) tile
+	m.focusVM.Name = "drupal-contrib" // the focused (blue-bordered) tile
 
 	// A live guest heartbeat for the running VM: cpu 34%, mem 3.4 GiB of 8 GiB.
 	// latest() only reads seen+last, so a bare struct is a complete reading here.
-	m.heartbeats.beats["drupal-contrib"] = &heartbeat{
+	m.heartbeats.beats[vmHandle{Scope: m.scope, Name: "drupal-contrib"}] = &heartbeat{
 		seen: true,
 		last: guestSample{
 			CPUPct:   34,

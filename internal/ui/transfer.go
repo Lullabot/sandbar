@@ -155,7 +155,7 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	// runs — and what stops it from evicting a retained failed build, whose red
 	// tile and Ansible log are the only record the user has of why that VM is
 	// broken. Both runs can be in flight at once; each has its own log.
-	key := transferKey(m.transferVM)
+	key := transferKey(m.scope, m.transferVM)
 	cmd, started := m.beginStream(key, title, run)
 	// A transfer opens its log, unlike a build. A build has a tile to render its
 	// progress onto and a board worth staying on; a transfer has no tile bar of its

@@ -132,7 +132,7 @@ Flags:
 	// this machine's, so cfg.User must not be defaulted before this either.
 	// Preflight runs here too, so a missing/old limactl fails before any config
 	// work.
-	p, scope, err := provider.Resolve()
+	p, scope, err := resolveSingle()
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ Flags:
 	// TUI does on every list load — so a VM deleted outside sand isn't wrongly
 	// treated as managed (and gated recreate-able). scope confines this to the
 	// resolved provider's own entries, so it can never prune (or be confused
-	// with) another provider's VMs — see provider.Resolve and registry.Scope.
+	// with) another provider's VMs — see resolveSingle and registry.Scope.
 	live, err := p.List()
 	if err != nil {
 		return fmt.Errorf("list existing instances: %w", err)

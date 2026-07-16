@@ -319,7 +319,7 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	if !fm.vmHasRetainedRun("newvm") {
 		t.Fatal("the build should have been retained as newvm's run")
 	}
-	s, _ := fm.jobs.snapshot(provisionKey("newvm"))
+	s, _ := fm.jobs.snapshot(provisionKey(registry.LocalScope, "newvm"))
 	if !strings.Contains(s.Output, "Install Docker") {
 		t.Fatalf("the job's log should hold the output streamed while the user was elsewhere, got:\n%s", s.Output)
 	}

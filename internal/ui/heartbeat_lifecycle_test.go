@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -280,7 +281,7 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 
 	// Stopped: nothing.
 	l.send(vmsLoadedMsg{vms: vms("web", "Stopped")})
-	if n := len(l.m.heartbeats.names()); n != 0 {
+	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
 		t.Fatalf("a stopped VM has %d heartbeats, want 0", n)
 	}
 
@@ -295,7 +296,7 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: vms("web", "Stopped")})
 	sh.await(t, "close:web")
 
-	if n := len(l.m.heartbeats.names()); n != 0 {
+	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
 		t.Fatalf("a VM that left Running still has %d heartbeats", n)
 	}
 	if s, ok := l.m.sampleOf("web"); ok {
@@ -332,7 +333,7 @@ func TestHeartbeatNeverOpensForAnUnmanagedVM(t *testing.T) {
 	// directly on the registry and the fake shell's open counts.
 	l.send(vmsLoadedMsg{vms: vms("web", "Running", "stray", "Running")})
 
-	if n := len(l.m.heartbeats.names()); n != 0 {
+	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
 		t.Fatalf("%d heartbeats open for a fleet with no managed VM at all — every one would be for a VM with no tile", n)
 	}
 	if got := sh.opened("web"); got != 0 {
@@ -360,7 +361,7 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 		t.Fatalf("expected the create form, got view %v", l.m.view)
 	}
 	sh.await(t, "close:web")
-	if n := len(l.m.heartbeats.names()); n != 0 {
+	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
 		t.Fatalf("%d heartbeats still open behind another screen", n)
 	}
 	if _, ok := l.m.sampleOf("web"); ok {
@@ -437,7 +438,7 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 	sh.die(t, "web", errors.New("exit status 255"))
 	sh.await(t, "close:web")
 
-	l.pump("the heartbeat to end", func(m model) bool { return len(m.heartbeats.names()) == 0 })
+	l.pump("the heartbeat to end", func(m model) bool { return len(m.heartbeats.names(m.scope)) == 0 })
 
 	// NO STUCK GAUGE. The reading goes the moment the stream does, without waiting
 	// for a list refresh to come round and notice.
@@ -456,7 +457,7 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 
 	// Once the cooldown lapses it does try again: this is a pause, not a blacklist.
 	l.m.heartbeats.mu.Lock()
-	l.m.heartbeats.cooldown["web"] = time.Now().Add(-time.Second)
+	l.m.heartbeats.cooldown[vmHandle{Scope: l.m.scope, Name: "web"}] = time.Now().Add(-time.Second)
 	l.m.heartbeats.mu.Unlock()
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")
@@ -478,7 +479,7 @@ func TestHeartbeatsLeaveNoGoroutinesBehind(t *testing.T) {
 	// heartbeatReadCmd does.
 	var readers sync.WaitGroup
 	for _, name := range []string{"a", "b", "c"} {
-		epoch, ch, ok := r.start(name)
+		epoch, ch, ok := r.start(registry.LocalScope, name)
 		if !ok {
 			t.Fatalf("%s: start failed", name)
 		}
@@ -493,7 +494,7 @@ func TestHeartbeatsLeaveNoGoroutinesBehind(t *testing.T) {
 				if !open {
 					return
 				}
-				if next := r.fold(name, epoch, s); next == nil {
+				if next := r.fold(registry.LocalScope, name, epoch, s); next == nil {
 					return
 				}
 			}
@@ -506,7 +507,7 @@ func TestHeartbeatsLeaveNoGoroutinesBehind(t *testing.T) {
 	// The reader folds the sample on its own goroutine, so wait for it rather than
 	// racing it.
 	waitFor(t, "a's cpu reading", func() bool {
-		s, ok := r.latest("a")
+		s, ok := r.latest(registry.LocalScope, "a")
 		return ok && s.HasCPU
 	})
 
@@ -519,10 +520,10 @@ func TestHeartbeatsLeaveNoGoroutinesBehind(t *testing.T) {
 	readers.Wait()
 
 	// Every reading is gone with its heartbeat...
-	if n := len(r.names()); n != 0 {
+	if n := len(r.names(registry.LocalScope)); n != 0 {
 		t.Fatalf("%d heartbeats survived stopAll", n)
 	}
-	if _, ok := r.latest("a"); ok {
+	if _, ok := r.latest(registry.LocalScope, "a"); ok {
 		t.Fatal("a stopped heartbeat must leave no reading behind")
 	}
 	// ...and so is every goroutine.
@@ -569,15 +570,15 @@ func TestStaleSampleIsDroppedAndItsReadLoopEnds(t *testing.T) {
 	sh := newFakeShell()
 	r := newHeartbeats(sh)
 
-	old, _, ok := r.start("web")
+	old, _, ok := r.start(registry.LocalScope, "web")
 	if !ok {
 		t.Fatal("start")
 	}
 	sh.await(t, "open:web")
-	r.stop("web") // the user left the board
+	r.stop(registry.LocalScope, "web") // the user left the board
 	sh.await(t, "close:web")
 
-	fresh, _, ok := r.start("web") // and came straight back
+	fresh, _, ok := r.start(registry.LocalScope, "web") // and came straight back
 	if !ok {
 		t.Fatal("restart")
 	}
@@ -586,16 +587,16 @@ func TestStaleSampleIsDroppedAndItsReadLoopEnds(t *testing.T) {
 		t.Fatal("a new connection must get a new epoch, or a stale sample cannot be told from a live one")
 	}
 
-	if next := r.fold("web", old, guestSample{MemTotal: 99, MemUsed: 99}); next != nil {
+	if next := r.fold(registry.LocalScope, "web", old, guestSample{MemTotal: 99, MemUsed: 99}); next != nil {
 		t.Fatal("a stale sample's read loop must end, not attach itself to the live connection")
 	}
-	if s, ok := r.latest("web"); ok {
+	if s, ok := r.latest(registry.LocalScope, "web"); ok {
 		t.Fatalf("a dead connection's sample was recorded against the live one: %+v", s)
 	}
-	if next := r.fold("web", fresh, guestSample{MemTotal: 1, MemUsed: 1}); next == nil {
+	if next := r.fold(registry.LocalScope, "web", fresh, guestSample{MemTotal: 1, MemUsed: 1}); next == nil {
 		t.Fatal("the live connection must keep reading")
 	}
-	if _, ok := r.latest("web"); !ok {
+	if _, ok := r.latest(registry.LocalScope, "web"); !ok {
 		t.Fatal("the live connection's sample should be recorded")
 	}
 

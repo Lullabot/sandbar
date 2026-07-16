@@ -11,25 +11,28 @@
 // limactl/ssh target without the tag; plain `go test ./...` never runs this
 // file).
 //
-// On top of the tag, this test has an opt-in gate of its own: SAND_REMOTE_E2E=1
+// On top of the tag, this test has an opt-in gate of its own: LIMA_REMOTE_E2E=1
 // AND a reachable SSH target, because — unlike the other limae2e tests, which
 // only need a local KVM — this one needs a SECOND, separately reachable Lima
 // host, and passwordless SSH to it is not something a checkout can assume is
 // configured. With no target configured it SKIPS CLEANLY, the same way the
 // limae2e-tagged tests skip without KVM when LIMA_E2E is unset. The target is
-// configured through the SAME env vars provider.Resolve() reads
-// (SAND_REMOTE_HOST/USER/PORT/IDENTITY/LIMA_HOME) plus SAND_REMOTE_E2E=1, so
-// pointing this test at a target is the same act as pointing `sand` itself
-// there.
+// configured through this test's OWN env vars (LIMA_REMOTE_E2E_HOST/USER/
+// PORT/IDENTITY/LIMA_HOME) plus LIMA_REMOTE_E2E=1 — this test builds a
+// provider.TargetConfig directly. `sand` itself no longer has an env-var
+// selection surface at all (plan 16 task 4 retired it in favor of
+// internal/profiles's persisted connection profiles), so this test's env vars
+// are private to this suite and were never something pointing `sand` itself
+// anywhere.
 //
 // Run (the target host needs limactl + KVM; a loopback simulation — pointing
-// SAND_REMOTE_HOST at "localhost" — only exercises the local/remote isolation
-// assertion meaningfully when SAND_REMOTE_USER names a DIFFERENT local account
-// than the one running the test, since that is what gives the "remote" side its
-// own $HOME and therefore its own default ~/.lima, genuinely separate from the
-// caller's):
+// LIMA_REMOTE_E2E_HOST at "localhost" — only exercises the local/remote
+// isolation assertion meaningfully when LIMA_REMOTE_E2E_USER names a
+// DIFFERENT local account than the one running the test, since that is what
+// gives the "remote" side its own $HOME and therefore its own default
+// ~/.lima, genuinely separate from the caller's):
 //
-//	SAND_REMOTE_E2E=1 SAND_REMOTE_HOST=localhost SAND_REMOTE_USER=sand-remote-e2e \
+//	LIMA_REMOTE_E2E=1 LIMA_REMOTE_E2E_HOST=localhost LIMA_REMOTE_E2E_USER=sand-remote-e2e \
 //	  go test -tags limae2e -timeout 30m -run TestE2ERemoteLima ./internal/provider/
 package provider_test
 
@@ -52,22 +55,38 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// remoteE2ETargetConfig reads the exact SAND_REMOTE_* surface provider.Resolve
-// itself reads (select.go), so configuring this test IS configuring `sand` for
-// real use against the same target — no parallel, drifting env-var surface.
+// This test's own, private env-var surface for naming a live SSH target —
+// `sand` itself has no env-var selection surface at all any more (plan 16
+// task 4 retired it in favor of internal/profiles's persisted connection
+// profiles), so this suite's configuration cannot be confused with the
+// product's.
+const (
+	remoteE2EHostEnv     = "LIMA_REMOTE_E2E_HOST"
+	remoteE2EUserEnv     = "LIMA_REMOTE_E2E_USER"
+	remoteE2EPortEnv     = "LIMA_REMOTE_E2E_PORT"
+	remoteE2EIdentityEnv = "LIMA_REMOTE_E2E_IDENTITY"
+	remoteE2ELimaHomeEnv = "LIMA_REMOTE_E2E_LIMA_HOME"
+)
+
+// remoteE2ETargetConfig builds the provider.TargetConfig this test drives
+// NewRemoteLima with, from this suite's own env vars (see above) — the same
+// secret-free shape (internal/provider/select.go) a RemoteSSH connection
+// profile is converted into for real use, so this test exercises the real
+// provider construction path even though it is not going through
+// internal/profiles or BuildFleet itself.
 func remoteE2ETargetConfig(t *testing.T) provider.TargetConfig {
 	t.Helper()
 	cfg := provider.TargetConfig{
 		Provider:       provider.RemoteLimaProviderID,
-		Host:           os.Getenv(provider.SandRemoteHostEnv),
-		User:           os.Getenv(provider.SandRemoteUserEnv),
-		IdentityPath:   os.Getenv(provider.SandRemoteIdentityEnv),
-		RemoteLimaHome: os.Getenv(provider.SandRemoteLimaHomeEnv),
+		Host:           os.Getenv(remoteE2EHostEnv),
+		User:           os.Getenv(remoteE2EUserEnv),
+		IdentityPath:   os.Getenv(remoteE2EIdentityEnv),
+		RemoteLimaHome: os.Getenv(remoteE2ELimaHomeEnv),
 	}
-	if portStr := os.Getenv(provider.SandRemotePortEnv); portStr != "" {
+	if portStr := os.Getenv(remoteE2EPortEnv); portStr != "" {
 		port, err := strconv.Atoi(portStr)
 		if err != nil {
-			t.Fatalf("%s=%q is not a valid port: %v", provider.SandRemotePortEnv, portStr, err)
+			t.Fatalf("%s=%q is not a valid port: %v", remoteE2EPortEnv, portStr, err)
 		}
 		cfg.Port = port
 	}
@@ -93,12 +112,12 @@ func sshTarget(cfg provider.TargetConfig) string {
 // auth noise.
 func skipUnlessRemoteE2EConfigured(t *testing.T) provider.TargetConfig {
 	t.Helper()
-	if os.Getenv("SAND_REMOTE_E2E") == "" {
-		t.Skip("set SAND_REMOTE_E2E=1 (plus SAND_REMOTE_HOST, and -tags limae2e) to run the remote-Lima e2e test")
+	if os.Getenv("LIMA_REMOTE_E2E") == "" {
+		t.Skip("set LIMA_REMOTE_E2E=1 (plus LIMA_REMOTE_E2E_HOST, and -tags limae2e) to run the remote-Lima e2e test")
 	}
 	cfg := remoteE2ETargetConfig(t)
 	if cfg.Host == "" {
-		t.Skipf("set %s (and SAND_REMOTE_E2E=1) to point the remote e2e test at an SSH target", provider.SandRemoteHostEnv)
+		t.Skipf("set %s (and LIMA_REMOTE_E2E=1) to point the remote e2e test at an SSH target", remoteE2EHostEnv)
 	}
 
 	port := cfg.Port
