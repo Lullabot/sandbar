@@ -47,6 +47,18 @@ type (
 		// guest for and `limactl shell` logs into, so the create form defaults a new
 		// VM's user to it. For a remote provider it is the REMOTE host's user.
 		hostUser string
+
+		// hostMemAvail is the host's AVAILABLE memory (/proc/meminfo's
+		// MemAvailable, read through the member's own HostFiles — see
+		// hostwarn.go's hostMemAvailBytes), and hostDiskTotal is the TOTAL size
+		// of the volume hostDiskFree is measured against. Both are new: the
+		// low-capacity-warning feature needs a free% for each resource, and
+		// hostMem/hostDiskFree alone are only one half of that. Zero means "not
+		// sampled" (no /proc/meminfo on this host, local or remote — a macOS
+		// box has none) exactly like their siblings above, and a warning check
+		// must never compute a percentage from one.
+		hostMemAvail  int64
+		hostDiskTotal int64
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -101,6 +113,17 @@ type (
 // errored member's self-heal retry) so a wedged handshake surfaces as an error
 // binding rather than a blocked list; a member already connected skips it.
 func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, preflight bool) tea.Cmd {
+	// Captured HERE — synchronously, on the caller's own goroutine — rather
+	// than read again inside the closure below, which runs on its OWN
+	// goroutine once Bubble Tea (or a test's teaLoop) executes the returned
+	// tea.Cmd. These four are test-only seams (header.go) that pinHostCapacity
+	// swaps between tests; reading the package var lazily from that spawned
+	// goroutine raced against a LATER test's swap whenever an earlier test's
+	// goroutine outlived it (teaLoop, jobs_test.go, does not join every
+	// goroutine it starts) — caught by `go test -race`. Capturing local copies
+	// here closes it: the spawned goroutine below touches only these locals,
+	// never the mutable package vars.
+	memFn, diskFreeFn, diskTotalFn, memAvailFn := hostMemBytesFn, hostDiskFreeFn, hostDiskTotalFn, hostMemAvailFn
 	return func() tea.Msg {
 		if prov == nil {
 			// An error binding: nothing to list. Surfaced as an errored member.
@@ -134,13 +157,29 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 		res := prov.HostResources()
 		mem := res.MemBytes
 		if mem == 0 {
-			mem = hostMemBytesFn()
+			mem = memFn()
 		}
 		disk := res.DiskFreeBytes
 		if disk == 0 {
-			disk = hostDiskFreeFn()
+			disk = diskFreeFn()
 		}
-		return vmsLoadedMsg{scope: sc, vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser()}
+		diskTotal := res.DiskTotalBytes
+		if diskTotal == 0 {
+			diskTotal = diskTotalFn()
+		}
+		// The host's available memory, for the low-capacity-warning feature's
+		// free% (hostwarn.go). Sampled through THIS member's own HostFiles —
+		// local or the (now-multiplexed, so cheap) ssh seam — exactly like the
+		// per-VM disk/up-since/last-used sampling above, rather than through
+		// Provider.HostResources: it must resolve identically for either kind
+		// of member, and !ok (no /proc/meminfo at all) leaves it 0, "not
+		// sampled" — never a guessed number.
+		memAvail, _ := memAvailFn(hf)
+		return vmsLoadedMsg{
+			scope: sc, vms: vms, err: err,
+			hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser(),
+			hostMemAvail: memAvail, hostDiskTotal: diskTotal,
+		}
 	}
 }
 

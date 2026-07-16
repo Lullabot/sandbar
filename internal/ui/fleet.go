@@ -85,6 +85,16 @@ type hostSample struct {
 	diskFree int64
 	cpus     int
 	user     string
+
+	// memAvail is the host's available memory (/proc/meminfo's MemAvailable,
+	// via hostMemAvailBytes — hostwarn.go), and diskTotal is the total size of
+	// the volume diskFree is measured against (hostDiskTotalBytes locally,
+	// lima.SSHHost.HostResources over ssh). Both are new denominators/readings
+	// the low-capacity-warning feature needs beside mem/diskFree, sampled the
+	// same way and subject to the same "zero means not sampled" rule — a
+	// warning check must never compute a percentage from an absent one.
+	memAvail  int64
+	diskTotal int64
 }
 
 // fleetMember is one enabled profile's live sub-state. Everything a tile, the
@@ -127,6 +137,16 @@ type fleetMember struct {
 	// guard, so tickRefresh cannot stack duplicate ticks for one member while
 	// still arming the others.
 	arming bool
+
+	// warnedHostMem/warnedHostDisk latch a host-capacity warning already
+	// logged for THIS member (hostwarn.go's checkHostMemWarn/checkHostDiskWarn),
+	// so the refresh loop — which re-evaluates every refreshInterval — does not
+	// re-log the same warning every tick while the host sits below the 5%-free
+	// line. Cleared the moment the member recovers to >=5% free, so a LATER
+	// re-crossing warns again rather than staying silent forever after the
+	// first time.
+	warnedHostMem  bool
+	warnedHostDisk bool
 
 	// everListed is set the first time this member's list SUCCEEDS (model.go's
 	// vmsLoadedMsg handler), and is NEVER cleared afterward — not by a later

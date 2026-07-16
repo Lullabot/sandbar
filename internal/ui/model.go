@@ -834,6 +834,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.hostUser != "" {
 			mem.host.user = msg.hostUser
 		}
+		if msg.hostMemAvail > 0 {
+			mem.host.memAvail = msg.hostMemAvail
+		}
+		if msg.hostDiskTotal > 0 {
+			mem.host.diskTotal = msg.hostDiskTotal
+		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or
 			// deleted is not a failure — it is lima-vm/lima#5236, and it is the normal
@@ -916,6 +922,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// everListed latches on the FIRST success and never clears — see its
 		// doc comment (fleet.go) and boardReady.
 		mem.everListed = true
+
+		// Rules 1+2 of the low-capacity-warning feature: a CONNECTED member (which
+		// this now is) whose host memory or disk has crossed below 5% free gets
+		// ONE warning in the session's Messages log, edge-triggered so this
+		// running on every refresh cannot spam it — see hostwarn.go.
+		m.checkHostCapacityWarn(mem)
 
 		// ORDER MATTERS, and it is enforced by the data, not by this comment.
 		//

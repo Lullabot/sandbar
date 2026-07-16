@@ -425,3 +425,43 @@ func TestHostTmuxShellCommandQuotesArguments(t *testing.T) {
 		t.Fatalf("hostTmuxShellCommand = %q, want it to hold the window open on failure", got)
 	}
 }
+
+// refreshCmd must now sample TWO extra numbers the low-capacity-warning
+// feature needs beside the existing hostMem/hostDiskFree: the host's
+// available memory (via the member's HostFiles, hostMemAvailBytes) and the
+// disk's TOTAL size (via the provider's HostResources, or the local fallback
+// when the provider reports zero — mirroring hostMem/hostDiskFree's own
+// fallback pattern).
+func TestRefreshCmdSamplesMemAvailAndDiskTotal(t *testing.T) {
+	prov := &providerfake.Provider{
+		ListFunc: func() ([]vm.VM, error) { return nil, nil },
+		HostResourcesFunc: func() provider.HostResources {
+			return provider.HostResources{MemBytes: 32 << 30, DiskFreeBytes: 100 << 30, DiskTotalBytes: 500 << 30}
+		},
+	}
+	hf := fakeMeminfoFiles{HostFiles: lima.LocalFiles(), data: []byte(sampleMeminfo)}
+
+	msg := refreshCmd(registry.LocalScope, prov, hf, false)().(vmsLoadedMsg)
+	if msg.hostDiskTotal != 500<<30 {
+		t.Fatalf("hostDiskTotal = %d, want %d (from the provider's HostResources)", msg.hostDiskTotal, 500<<30)
+	}
+	if want := int64(8000000 * 1024); msg.hostMemAvail != want {
+		t.Fatalf("hostMemAvail = %d, want %d (parsed from the fake /proc/meminfo)", msg.hostMemAvail, want)
+	}
+}
+
+// A remote provider that cannot determine memAvail (no /proc/meminfo, e.g. a
+// macOS remote host) must leave hostMemAvail at 0 — never a guessed number —
+// and a local provider reporting DiskTotalBytes==0 must fall back to the
+// local probe, exactly as hostDiskFree already does.
+func TestRefreshCmdNoMemAvailReadingLeavesFieldZero(t *testing.T) {
+	prov := &providerfake.Provider{
+		ListFunc: func() ([]vm.VM, error) { return nil, nil },
+	}
+	hf := fakeMeminfoFiles{HostFiles: lima.LocalFiles(), err: fmt.Errorf("no /proc on this host")}
+
+	msg := refreshCmd(registry.LocalScope, prov, hf, false)().(vmsLoadedMsg)
+	if msg.hostMemAvail != 0 {
+		t.Fatalf("hostMemAvail = %d, want 0 when the host has no /proc/meminfo", msg.hostMemAvail)
+	}
+}

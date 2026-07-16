@@ -53,8 +53,8 @@ func (p *remoteLimaProvider) HostUser() string { return p.host.HostUser() }
 // the laptop driving them (the local provider returns zero and the UI samples the
 // laptop itself). Best-effort: any field the probe cannot read stays 0.
 func (p *remoteLimaProvider) HostResources() HostResources {
-	cpus, mem, disk := p.host.HostResources()
-	return HostResources{CPUs: cpus, MemBytes: mem, DiskFreeBytes: disk}
+	cpus, mem, disk, diskTotal := p.host.HostResources()
+	return HostResources{CPUs: cpus, MemBytes: mem, DiskFreeBytes: disk, DiskTotalBytes: diskTotal}
 }
 
 // NewRemoteLima builds the remote-Lima-over-SSH provider for cfg. It wires ONE

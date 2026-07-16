@@ -169,12 +169,17 @@ type Provider interface {
 	HostFiles() lima.HostFiles
 }
 
-// HostResources is the limactl host's own capacity, used only for the board
-// header's denominators (see Provider.HostResources). A zero field means
-// "unknown" — the header drops the corresponding clause rather than showing a
-// fabricated total.
+// HostResources is the limactl host's own capacity, used for the board
+// header's denominators AND (DiskTotalBytes) the low-capacity warning feature's
+// free% arithmetic (see Provider.HostResources). A zero field means "unknown"
+// — the header drops the corresponding clause, and a warning check that needs
+// it refuses to compute a percentage rather than guessing one.
 type HostResources struct {
 	CPUs          int
 	MemBytes      int64
 	DiskFreeBytes int64
+	// DiskTotalBytes is the total size (not free) of the volume backing
+	// DiskFreeBytes — the denominator a "less than 5% disk free" warning needs
+	// alongside the free reading that already existed for the header.
+	DiskTotalBytes int64
 }

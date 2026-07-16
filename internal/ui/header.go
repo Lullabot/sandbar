@@ -244,6 +244,22 @@ var (
 	hostMemBytesFn = hostMemBytes
 	hostDiskFreeFn = freeDiskBytes
 	hostCPUsFn     = runtime.NumCPU
+
+	// hostDiskTotalFn is hostDiskFreeFn's total-side companion (totalDiskBytes,
+	// form.go) — the local fallback refreshCmd (commands.go) uses when the
+	// member's provider reports DiskTotalBytes==0 (local Lima always does; the
+	// UI samples this machine directly). Needed for the host-disk
+	// low-capacity warning (hostwarn.go), which cannot compute a free%
+	// without a denominator.
+	hostDiskTotalFn = totalDiskBytes
+
+	// hostMemAvailFn indirects hostMemAvailBytes (hostwarn.go) through a
+	// package-level function variable, exactly like the three above — so a
+	// teatest golden that boots the REAL refreshCmd (which calls it through a
+	// member's real HostFiles) is not at the mercy of the actual test
+	// machine's real /proc/meminfo, which is exactly as unportable a number as
+	// the ones already pinned (see pinHostCapacity, teatest_test.go).
+	hostMemAvailFn = hostMemAvailBytes
 )
 
 // humanizeInt is humanizeBytes (format.go) for an already-summed int64, so

@@ -50,6 +50,12 @@ const (
 	tileContentRows = 6
 )
 
+// lowFreeThreshold is the "less than 5% free" line every low-capacity warning
+// in this package draws from — host memory/disk (hostwarn.go) and a single
+// VM's mem/disk gauge (below) — stated ONCE so the header's host warnings and
+// a tile's own badges can never quietly disagree about what "low" means.
+const lowFreeThreshold = 0.05
+
 // tileInput bundles a single VM's rendering material: task 03's tile-width
 // budget, task 04's job snapshot, task 05's heartbeat sample, and this VM's
 // resolved place in the exception-only-field rule below. Now is threaded
@@ -132,9 +138,14 @@ func renderTile(in tileInput) string {
 				lines[2] = tileGaugeNoReading(cpuLabel(in.VM), width)
 			}
 			if in.HasSample && in.Sample.HasMem() {
-				lines[3] = tileGaugeLine("mem", memFraction(in.Sample),
-					humanizeBytes(strconv.FormatUint(in.Sample.MemUsed, 10))+"/"+
-						humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10)), width)
+				frac := memFraction(in.Sample)
+				value := humanizeBytes(strconv.FormatUint(in.Sample.MemUsed, 10)) + "/" +
+					humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10))
+				if 1-frac < lowFreeThreshold {
+					lines[3] = tileWarnGaugeLine("mem", frac, value, width)
+				} else {
+					lines[3] = tileGaugeLine("mem", frac, value, width)
+				}
 			} else {
 				lines[3] = tileGaugeNoReading("mem", width)
 			}
@@ -373,12 +384,49 @@ func tileGaugeLine(label string, frac float64, value string, width int) string {
 // alignment the tile depends on is exactly what drifts when two copies of it
 // disagree about the label width or the separator.
 func tileGaugeRow(label, value string, width int, bar func(barWidth int) string) string {
+	return tileGaugeRowStyled(tileChromeStyle, label, value, width, bar)
+}
+
+// tileGaugeRowStyled is tileGaugeRow parametrized by the row's style — the
+// chrome grey every gauge used before, or warnStyle for a row a low-capacity
+// warning (tileWarnGaugeLine, below) has flagged.
+//
+// barWidth is computed from ansi.StringWidth(labelCol), NOT len(labelCol):
+// fmt's %-*s pads label to tileGaugeLabelWidth RUNES/columns, but a label
+// carrying a multi-byte rune (the warning marker "⚠") has a byte length wider
+// than its column count once padded, and len() would (wrongly) starve the bar
+// by that difference — a real bug this fix closes (see
+// TestTileGaugeRowUsesDisplayWidthNotByteLength), invisible until this file's
+// only labels were pure ASCII, where the two measures always agreed.
+func tileGaugeRowStyled(style lipgloss.Style, label, value string, width int, bar func(barWidth int) string) string {
 	labelCol := fmt.Sprintf("%-*s", tileGaugeLabelWidth, label)
-	barWidth := width - len(labelCol) - 1 - ansi.StringWidth(value)
+	barWidth := width - ansi.StringWidth(labelCol) - 1 - ansi.StringWidth(value)
 	if barWidth < 3 {
 		barWidth = 3
 	}
-	return tileChromeStyle.Render(labelCol + bar(barWidth) + " " + value)
+	return style.Render(labelCol + bar(barWidth) + " " + value)
+}
+
+// tileWarnGaugeLine renders a gauge row exactly like tileGaugeLine, but flags
+// a resource below lowFreeThreshold free (rules 3+4 of the low-capacity-
+// warning feature): a "⚠ " marker prefixed to the label, and the WHOLE row in
+// warnStyle (the repo's one existing warning colour — styles.go already uses
+// it for the building tile's amber, so this reuses the single palette rather
+// than introducing a second, competing "warning yellow") instead of the
+// ordinary chrome grey — so a tile almost out of memory or disk is impossible
+// to miss scanning the board.
+//
+// The marker is the single-cell U+26A0 WARNING SIGN ("⚠"), deliberately NOT
+// its two-cell emoji-presentation variant ("⚠️", U+26A0 U+FE0F): ansi.
+// StringWidth reports the plain form as 1 column and the VS16 form as 2 (spot-
+// checked directly against this build's ansi package), and a caller that
+// assumed 1 for the emoji variant would silently misalign this row's bar
+// against its siblings — tileGaugeRowStyled's own fix for exactly that class
+// of bug is what makes this row-align safe.
+func tileWarnGaugeLine(label string, frac float64, value string, width int) string {
+	return tileGaugeRowStyled(warnStyle, "⚠ "+label, value, width, func(barWidth int) string {
+		return tileGaugeBar(frac, barWidth)
+	})
 }
 
 // tileGaugeNoReading renders a gauge row for a metric that is REAL but currently
@@ -439,11 +487,18 @@ func tileDiskLine(v vm.VM, width int) string {
 	}
 	usedN, uerr := strconv.ParseInt(v.DiskUsed, 10, 64)
 	totalN, terr := strconv.ParseInt(v.Disk, 10, 64)
-	frac := 0.0
 	if uerr == nil && terr == nil && totalN > 0 {
-		frac = float64(usedN) / float64(totalN)
+		frac := float64(usedN) / float64(totalN)
+		value := humanizeBytes(v.DiskUsed) + "/" + total
+		if 1-frac < lowFreeThreshold {
+			return tileWarnGaugeLine("disk", frac, value, width)
+		}
+		return tileGaugeLine("disk", frac, value, width)
 	}
-	return tileGaugeLine("disk", frac, humanizeBytes(v.DiskUsed)+"/"+total, width)
+	// totalN unmeasurable (uerr/terr set, or Disk<=0): no honest free% to
+	// compute, so — like DiskUsed=="" above — this never warns; it just
+	// draws the same fallback disk row it always has.
+	return tileGaugeLine("disk", 0, humanizeBytes(v.DiskUsed)+"/"+total, width)
 }
 
 // tileProgressBarLine is a building tile's gauge: the same bar renderer,
