@@ -1,7 +1,7 @@
 ---
 id: 12
 group: "tests"
-dependencies: [7, 8, 9, 10]
+dependencies: [7, 8, 9, 10, 13]
 status: "pending"
 created: 2026-07-15
 model: "sonnet"

@@ -74,6 +74,13 @@ type tileInput struct {
 	Focused bool
 	Width   int // layoutMode.TileWidth
 
+	// ProfileLabel is task 10's tile provenance: the name of the profile this
+	// VM runs through (its owning member's profile.Name). It folds into the
+	// title row (line 0) rather than growing the tile's fixed six-line budget
+	// — see tileTitleLine. Empty renders no label at all (never a bracket
+	// pair around nothing).
+	ProfileLabel string
+
 	// Spinner is the current animation frame for a Building tile's glyph. ""
 	// falls back to a static glyph — what every test not driving a real
 	// spinner gets, and a safe default if the board omits one entirely.
@@ -88,7 +95,7 @@ func renderTile(in tileInput) string {
 	status := deriveStatus(in.VM, in.Job, in.HasJob)
 
 	lines := make([]string, tileContentRows)
-	lines[0] = tileTitleStyle.Render(in.VM.Name)
+	lines[0] = tileTitleLine(in.VM.Name, in.ProfileLabel, width)
 	lines[1] = tileStatusLine(status, in.Spinner, in.Traits, in.Uniform)
 
 	if status == statusBuilding {
@@ -150,6 +157,38 @@ func renderTile(in tileInput) string {
 		style = tileFocusedFrameStyle
 	}
 	return style.Render(strings.Join(lines, "\n"))
+}
+
+// tileTitleLine folds task 10's profile-provenance label into the title row
+// (line 0) instead of growing the tile's fixed six-line budget: the VM's name
+// stays LEFT exactly as before this task (that is the identity a reader scans
+// for first), and the profile label rides the same row, right-aligned,
+// whenever there is room next to it. The label shrinks (truncates, then
+// disappears entirely) before the name ever would — the name is the tile's
+// identity, provenance is secondary — so a long VM name on a narrow tile
+// degrades exactly as it always has, just without a label crowding it.
+func tileTitleLine(name, profile string, width int) string {
+	title := tileTitleStyle.Render(name)
+	if profile == "" {
+		return title
+	}
+	nameW := ansi.StringWidth(name)
+	label := "[" + profile + "]"
+	gap := width - nameW - ansi.StringWidth(label)
+	if gap < 1 {
+		// Not enough room for the label as given — try shrinking IT (never the
+		// name) to whatever fits after one gap column and the brackets.
+		avail := width - nameW - 1 - 2
+		if avail < 1 {
+			return title // no room at all: drop the label rather than crowd the name
+		}
+		label = "[" + ansi.Truncate(profile, avail, "…") + "]"
+		gap = width - nameW - ansi.StringWidth(label)
+		if gap < 1 {
+			return title
+		}
+	}
+	return title + strings.Repeat(" ", gap) + tileChromeStyle.Render(label)
 }
 
 // tileInnerWidth is the text budget inside the border and padding.

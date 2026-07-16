@@ -197,9 +197,10 @@ func TestMigrateLegacyIndex(t *testing.T) {
 }
 
 // TestLoad_UnversionedFileMigrates: a legacy index with no "version" key must
-// load with zero data loss, be rewritten to schema version 2 with its entry
-// tagged as the local Lima provider ON LOAD (not merely on the next save), and
-// a subsequent save must keep carrying the version and the preserved entry.
+// load with zero data loss, be rewritten to the current schema (version 3,
+// the (scope,name)-keyed array) with its entry tagged as the local Lima
+// provider ON LOAD (not merely on the next save), and a subsequent save must
+// keep carrying the version and the preserved entry.
 func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
@@ -225,14 +226,14 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 		t.Fatalf("old-vm config not preserved: %+v (ok=%v)", cfg, ok)
 	}
 
-	// LoadFrom itself must have already rewritten the file: version 2, and
+	// LoadFrom itself must have already rewritten the file: version 3, and
 	// old-vm tagged as the local Lima provider.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read index after load: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 2`) {
-		t.Fatalf("expected version 2 stamped in file immediately after LoadFrom:\n%s", raw)
+	if !containsStr(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3 stamped in file immediately after LoadFrom:\n%s", raw)
 	}
 	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
 		t.Fatalf("old-vm entry with CPUs 4 not preserved after migration:\n%s", raw)
@@ -249,8 +250,8 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 2`) {
-		t.Fatalf("expected version 2 stamped in file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3 stamped in file:\n%s", raw)
 	}
 	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
 		t.Fatalf("old-vm entry with CPUs 4 not preserved after save:\n%s", raw)
@@ -260,7 +261,8 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 // TestLoad_MigratesLegacyBaseName: a pre-v2 index recorded under the old
 // claude-base name must load with every entry rewritten to the current default
 // base (sandbar-base), in both the Base field and the embedded config, and the
-// file must be stamped version 2 so the rewrite runs at most once.
+// file must be stamped the current schema version so the rewrite runs at most
+// once.
 func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	// A version-1 file (the last schema an old sand wrote) with two clones and a
@@ -301,8 +303,8 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 	if containsStr(string(raw), "claude-base") {
 		t.Errorf("legacy base name still on disk after migration:\n%s", raw)
 	}
-	if !containsStr(string(raw), `"version": 2`) {
-		t.Errorf("expected version 2 stamped after migration:\n%s", raw)
+	if !containsStr(string(raw), `"version": 3`) {
+		t.Errorf("expected version 3 stamped after migration:\n%s", raw)
 	}
 }
 
@@ -310,8 +312,10 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 // migration proof this task adds (plan 15 task 4's TDD requirement (a)): a
 // pre-migration v1 file with TWO existing entries, loaded through the new
 // code, must come back on disk rewritten with BOTH entries tagged as the
-// local Lima provider and the schema version bumped to 2 — no data loss, and
-// the rewrite reuses save()'s existing atomic temp-file+rename path.
+// local Lima provider and the schema version bumped to the current version
+// (3, which folds the v1->v2 provider/base-rename step and the v2->v3
+// (scope,name) re-keying into one load) — no data loss, and the rewrite
+// reuses save()'s existing atomic temp-file+rename path.
 func TestLoad_V1MigratesTwoEntriesToV2WithProviderTag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	v1 := `{"version":1,"vms":{
@@ -347,15 +351,15 @@ func TestLoad_V1MigratesTwoEntriesToV2WithProviderTag(t *testing.T) {
 		}
 	}
 
-	// The on-disk file itself must be rewritten: version 2, both entries
+	// The on-disk file itself must be rewritten: version 3, both entries
 	// tagged "lima", nothing truncated or lost.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migrated index: %v", err)
 	}
 	got := string(raw)
-	if !containsStr(got, `"version": 2`) {
-		t.Fatalf("expected version bumped to 2 on disk after migration:\n%s", got)
+	if !containsStr(got, `"version": 3`) {
+		t.Fatalf("expected version bumped to 3 on disk after migration:\n%s", got)
 	}
 	if n := strings.Count(got, `"provider": "lima"`); n != 2 {
 		t.Fatalf(`expected both entries tagged "provider": "lima" (found %d), got:\n%s`, n, got)
@@ -404,11 +408,117 @@ func TestSave_WritesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 2`) {
-		t.Fatalf("expected version 2 in saved file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3 in saved file:\n%s", raw)
 	}
 	if containsStr(string(raw), "SENTINEL_TOKEN_DO_NOT_PERSIST") {
 		t.Fatalf("clone token leaked into the index:\n%s", raw)
+	}
+}
+
+// TestScopedSameNameCoexistsAcrossScopes is the load-bearing proof for this
+// task: a VM named "web" under LocalScope and a VM ALSO named "web" under a
+// remote scope must coexist as independent entries — AddScoped under one
+// scope must never overwrite the other — survive a reload from disk (proving
+// the on-disk shape actually holds both), and a delete under one scope
+// (RemoveScoped) must leave the other scope's same-named entry untouched.
+func TestScopedSameNameCoexistsAcrossScopes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	remote := Scope{Provider: "lima-ssh", RemoteTarget: "user@host:22"}
+
+	if err := r.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2}, LocalScope); err != nil {
+		t.Fatalf("add local: %v", err)
+	}
+	if err := r.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 8}, remote); err != nil {
+		t.Fatalf("add remote: %v", err)
+	}
+
+	localCfg, ok := r.ConfigInScope("web", LocalScope)
+	if !ok || localCfg.CPUs != 2 {
+		t.Fatalf("local web config = %+v (ok=%v), want CPUs=2", localCfg, ok)
+	}
+	remoteCfg, ok := r.ConfigInScope("web", remote)
+	if !ok || remoteCfg.CPUs != 8 {
+		t.Fatalf("remote web config = %+v (ok=%v), want CPUs=8", remoteCfg, ok)
+	}
+
+	// Reload from disk: the on-disk shape must actually hold BOTH same-named
+	// entries (a flat {name: entry} object could not).
+	r2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !r2.IsManagedInScope("web", LocalScope) {
+		t.Fatal("local web should survive a reload")
+	}
+	if !r2.IsManagedInScope("web", remote) {
+		t.Fatal("remote web should survive a reload")
+	}
+	if got, ok := r2.ConfigInScope("web", LocalScope); !ok || got.CPUs != 2 {
+		t.Fatalf("reloaded local web config = %+v (ok=%v), want CPUs=2", got, ok)
+	}
+	if got, ok := r2.ConfigInScope("web", remote); !ok || got.CPUs != 8 {
+		t.Fatalf("reloaded remote web config = %+v (ok=%v), want CPUs=8", got, ok)
+	}
+
+	// Delete under LocalScope only: the remote same-named entry must survive.
+	if err := r2.RemoveScoped(LocalScope, "web"); err != nil {
+		t.Fatalf("removescoped: %v", err)
+	}
+	if r2.IsManagedInScope("web", LocalScope) {
+		t.Fatal("local web should be gone after RemoveScoped(LocalScope, ...)")
+	}
+	if !r2.IsManagedInScope("web", remote) {
+		t.Fatal("remote web must survive a LocalScope-only RemoveScoped")
+	}
+}
+
+// TestLoad_V2FixtureMigratesToV3Array captures a v2 (object-keyed) fixture —
+// the on-disk shape every sand wrote before this task — and proves it loads
+// back intact as LocalScope with its config preserved, then gets rewritten on
+// disk as a v3 JSON ARRAY (not the old flat object, which cannot hold two
+// same-named entries) stamped with the new currentVersion.
+func TestLoad_V2FixtureMigratesToV3Array(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	v2 := `{"version":2,"vms":{
+		"claude":{"base":"sandbar-base","config":{"Name":"claude","BaseName":"sandbar-base","CPUs":8,"Memory":"32GiB"},"provider":"lima"},
+		"web":{"base":"sandbar-base","config":{"Name":"web","BaseName":"sandbar-base","CPUs":2,"Memory":"8GiB"},"provider":"lima"}
+	}}`
+	if err := os.WriteFile(path, []byte(v2), 0o600); err != nil {
+		t.Fatalf("seed v2 file: %v", err)
+	}
+
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v2 file: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		cpus int
+	}{{"claude", 8}, {"web", 2}} {
+		if !r.IsManagedInScope(tc.name, LocalScope) {
+			t.Fatalf("%q should be managed under LocalScope after v2->v3 migration", tc.name)
+		}
+		cfg, ok := r.ConfigInScope(tc.name, LocalScope)
+		if !ok || cfg.CPUs != tc.cpus {
+			t.Fatalf("%q config not preserved: %+v (ok=%v, want CPUs=%d)", tc.name, cfg, ok, tc.cpus)
+		}
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migrated file: %v", err)
+	}
+	got := string(raw)
+	if !containsStr(got, `"version": 3`) {
+		t.Fatalf("expected version 3 stamped after v2->v3 migration:\n%s", got)
+	}
+	if !containsStr(got, `"vms": [`) {
+		t.Fatalf("expected v3 array shape for vms (not the old flat object):\n%s", got)
 	}
 }
 

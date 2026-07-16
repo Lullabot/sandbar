@@ -13,6 +13,41 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// tileTitleLine (task 10): the profile label rides the title row instead of
+// growing the tile's fixed six-line budget. The name stays exactly where it
+// was, and the label appears only when there is genuine room for it.
+func TestTileTitleLineFoldsProfileLabelInWithoutGrowingTheRow(t *testing.T) {
+	got := tileTitleLine("claude", "local", 40)
+	if !strings.HasPrefix(ansi.Strip(got), "claude") {
+		t.Fatalf("tileTitleLine = %q, want the VM name to stay first", got)
+	}
+	if !strings.Contains(got, "[local]") {
+		t.Fatalf("tileTitleLine = %q, want the profile label in brackets", got)
+	}
+	if w := ansi.StringWidth(got); w != 40 {
+		t.Fatalf("tileTitleLine width = %d, want exactly the budget (40): a single line, never two", w)
+	}
+}
+
+// An empty profile label (a caller that has none to report) must render
+// exactly the bare title — no stray bracket pair around nothing.
+func TestTileTitleLineEmptyLabelRendersBareTitle(t *testing.T) {
+	got := tileTitleLine("claude", "", 40)
+	if strings.Contains(ansi.Strip(got), "[") {
+		t.Fatalf("tileTitleLine with an empty label = %q, want no brackets at all", got)
+	}
+}
+
+// The VM's NAME is the tile's identity and must never be truncated to make
+// room for the label — the label shrinks and then disappears first.
+func TestTileTitleLineNeverTruncatesTheNameForTheLabel(t *testing.T) {
+	longName := "a-very-long-sandbox-name-indeed"
+	got := tileTitleLine(longName, "a-very-long-remote-profile-name", 36)
+	if !strings.Contains(ansi.Strip(got), longName) {
+		t.Fatalf("tileTitleLine = %q, want the full VM name %q kept intact", got, longName)
+	}
+}
+
 // baseTileInput returns a minimal, deterministic tileInput a test can tweak.
 func baseTileInput() tileInput {
 	return tileInput{
