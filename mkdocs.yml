@@ -67,6 +67,7 @@ nav:
     - CLI Reference: using-sand/cli-reference.md
     - Secrets: using-sand/secrets.md
     - Shells and Files: using-sand/files-and-shells.md
+    - Web Servers and Ports: using-sand/web-servers.md
     - Connection Profiles: using-sand/connection-profiles.md
   - Reference:
     - Files and State: reference/files-and-state.md

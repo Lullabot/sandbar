@@ -160,6 +160,10 @@ too:
 - **File transfer** to and from a guest is staged through the remote host
   transparently — the remote `limactl copy` cannot see your local filesystem, so
   `sand` copies via the remote host and preserves where files land in the guest.
+- **Web servers** running in a remote VM's guest are *not* reachable from
+  your machine: their ports forward to the remote host's loopback, not
+  yours. See [Web Servers and Ports](web-servers.md) for the cloudflared
+  and SSH-forwarding options.
 - **Isolation**: VMs created on a profile are tagged with that profile's
   connection in the [managed-VM index](../reference/files-and-state.md), so
   they never mix with VMs from another profile — a local `limactl list` and a
