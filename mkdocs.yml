@@ -71,6 +71,7 @@ nav:
   - Reference:
     - Files and State: reference/files-and-state.md
     - Troubleshooting: reference/troubleshooting.md
+  - Why Sandbar: why.md
   - Contributing:
     - Development: contributing/development.md
     - The Embedded Playbook: contributing/ansible-playbook.md
