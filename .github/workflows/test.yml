@@ -368,11 +368,16 @@ jobs:
         run: |
           echo "=== snapshot of ~sand-remote-e2e/.lima (latest 15s copy) ==="
           sudo find /tmp/lima-snap -maxdepth 2 -type f | head -50 || true
-          for f in /tmp/lima-snap/*/serial*.log /tmp/lima-snap/*/ha.std*.log; do
-            [ -f "$f" ] || continue
-            echo "===== tail -n 120 $f ====="
-            sudo tail -n 120 "$f" || true
-          done
+          # The snapshot preserves sand-remote-e2e's ownership and 0700 dirs
+          # (rsync -a), so the GLOB itself needs root — an unprivileged glob
+          # fails to expand and this loop silently prints nothing, which is
+          # exactly what happened the first time this step ran.
+          sudo bash -c '
+            for f in /tmp/lima-snap/*/serial*.log /tmp/lima-snap/*/ha.std*.log; do
+              [ -f "$f" ] || continue
+              echo "===== tail -n 120 $f ====="
+              tail -n 120 "$f" || true
+            done'
 
   # Mutation testing measures how good the tests are, not just which lines they
   # touch. It recompiles and reruns the suite per mutant, so it is slow — it
