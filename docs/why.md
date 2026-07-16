@@ -75,6 +75,26 @@ With Sandbar, the recommended workflow is:
 5. If you need to test on your workstation, pull down the branch into a
    checkout on your IDE, but only after you've reviewed the code.
 
+```mermaid
+graph TD
+    subgraph vm [Inside the disposable VM]
+        A[Create an instance and clone the project<br>with minimal permissions and API keys]
+        B[Work with your agent]
+        C[Agent pushes a branch and<br>opens a draft pull request]
+    end
+    subgraph gh [On GitHub]
+        D[Review the code in the draft PR]
+    end
+    subgraph ws [On your workstation]
+        E[Pull the reviewed branch<br>into your IDE to test]
+    end
+    A --> B
+    B --> C
+    C --> D
+    D -- needs changes --> B
+    D -- approved --> E
+```
+
 ## What else is in the box
 
 The hard boundary keeps things secure and repeatable. But without
