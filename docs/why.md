@@ -217,8 +217,8 @@ quadrantChart
 
 The tools that get the VM boundary right still mount your files into
 it, and the tools that restrict the environment do it in the cloud or
-as an SDK rather than a local dev VM. Sandbar is the point where local,
-full-VM, sealed, and disposable meet.
+as an SDK that likely doesn't work with your build tools. Sandbar is
+the point where local, full-VM, sealed, and disposable meet.
 
 ## Where it's going
 
