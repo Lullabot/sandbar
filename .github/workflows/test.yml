@@ -301,9 +301,23 @@ jobs:
             "$HOME/.ssh/remote_e2e.pub" /home/sand-remote-e2e/.ssh/authorized_keys
           sudo systemctl start ssh
           ssh-keyscan -H localhost >> "$HOME/.ssh/known_hosts"
+          # The GitHub runner image writes XDG_CONFIG_HOME=/home/runner/.config
+          # into /etc/environment, and pam_env injects /etc/environment into
+          # EVERY new session — including this loopback ssh login as the second
+          # user. The remote limactl then resolves its autostart unit under
+          # /home/runner (another user's home) and dies with EACCES. Strip the
+          # XDG_* lines: only new PAM sessions read the file, so the runner
+          # user's already-running processes keep their env untouched.
+          sudo sed -i '/^XDG_/d' /etc/environment
           # The transport runs `ssh … limactl …` on the remote's default
-          # non-interactive PATH — prove that resolves before the long test.
+          # non-interactive PATH — prove that resolves (and that the XDG leak
+          # is really gone) before the long test.
           ssh -i "$HOME/.ssh/remote_e2e" sand-remote-e2e@localhost limactl --version
+          leaked=$(ssh -i "$HOME/.ssh/remote_e2e" sand-remote-e2e@localhost 'printenv XDG_CONFIG_HOME || true')
+          if [ -n "$leaked" ]; then
+            echo "::error::XDG_CONFIG_HOME still leaks into the remote session: $leaked"
+            exit 1
+          fi
 
       # The remote user downloads its own Debian image into its own
       # ~/.cache/lima; seed it from the runner user's restored cache so a warm
