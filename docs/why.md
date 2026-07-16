@@ -84,6 +84,7 @@ graph TD
     end
     subgraph gh [On GitHub]
         D[Review the code in the draft PR]
+        F[Merge when ready]
     end
     subgraph ws [On your workstation]
         E[Pull the reviewed branch<br>into your IDE to test]
@@ -92,7 +93,9 @@ graph TD
     B --> C
     C --> D
     D -- needs changes --> B
-    D -- approved --> E
+    D -- approved --> F
+    D -. only if you need<br>to test locally .-> E
+    E -.-> F
 ```
 
 ## What else is in the box
