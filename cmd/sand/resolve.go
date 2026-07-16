@@ -67,20 +67,34 @@ func resolveProfileName(store *profiles.Store, name string) (profiles.Profile, e
 // that may turn out to be unreachable — that failure surfaces later, from
 // Preflight.
 func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, error) {
-	if p.Type == profiles.TypeRemoteSSH {
+	switch p.Type {
+	case profiles.TypeRemoteSSH:
+		// A hand-edited profile with an empty host is only reachable here via
+		// LoadFrom, which does not validate (see profiles.LoadFrom/validate's
+		// doc comments) — surface a clear error rather than letting NewRemoteLima
+		// construct something that later fails with a cryptic `ssh user@`
+		// (finding 9); mirrors provider.BuildFleet's buildBinding.
+		if p.Host == "" {
+			return nil, registry.Scope{}, fmt.Errorf("profile %q has no host", p.Name)
+		}
 		cfg := targetConfigFor(p)
 		prov, err := provider.NewRemoteLima(cfg)
 		if err != nil {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
 		}
 		return prov, cfg.Scope(), nil
+	case profiles.TypeLocal:
+		prov, err := provider.NewDefault()
+		if err != nil {
+			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
+		}
+		return prov, registry.LocalScope, nil
+	default:
+		// An unrecognised Type (e.g. a hand-edited "remote_ssh" typo) must be a
+		// hard error, not silently treated as local (finding 3) — mirrors
+		// provider.BuildFleet's buildBinding.
+		return nil, registry.Scope{}, fmt.Errorf("profile %q: unknown profile type %q", p.Name, p.Type)
 	}
-
-	prov, err := provider.NewDefault()
-	if err != nil {
-		return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
-	}
-	return prov, registry.LocalScope, nil
 }
 
 // scopeForProfile derives the registry.Scope a profile's managed-VM entries

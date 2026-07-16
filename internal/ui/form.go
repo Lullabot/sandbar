@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -229,7 +230,9 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 }
 
 // openForm initialises the create form and focuses the first field, returning
-// the cursor-blink command.
+// the cursor-blink command batched with the async tool-set read (see
+// kickFormToolsetLoad) — the form must render and accept keys THE INSTANT it
+// opens, never stall behind either one.
 func (m *model) openForm() tea.Cmd {
 	// A NEW VM targets the profile selector's default pick — last-used, else
 	// Local (task 9's create-time half; setDefaultFormProfile). Its host sample
@@ -242,29 +245,66 @@ func (m *model) openForm() tea.Cmd {
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
 	m.toggleFocus = -1  // openResetForm already did this; create mode now has toggles too
-	// The tool toggles show what the SHARED base actually contains, read back
-	// from its version stamp — not a fresh all-on default. Otherwise a user who
-	// built a base with no tools was shown four ticked boxes on the next create
-	// and had to un-tick them every time, and forgetting once silently converged
-	// the whole tool-set back onto the base. With no base yet (or one stamped by
-	// an older sand that recorded no tool-set), there is nothing to show but the
-	// default: everything on.
+	// The tool toggles START at the all-on default and are corrected
+	// asynchronously (kickFormToolsetLoad) once the shared base's recorded
+	// tool-set stamp comes back, via toolsetLoadedMsg (model.go). Reading it
+	// HERE, synchronously, used to be a blocking ssh round trip whenever the
+	// form's target profile is remote — the whole TUI froze behind a slow or
+	// dead host (finding 4 in the plan-16 code review). One frame showing the
+	// default before the real stamp lands is a fair price for a form that never
+	// blocks the keyboard.
 	cfg := vm.DefaultCreateConfig()
-	// The active member can, in a degenerate fleet, be an error binding with no
-	// provider; guard the seam so opening the form never nil-panics. The toggles
-	// then fall back to the all-on default (nothing to read a base tool-set from).
-	if p := m.formProvider(); p != nil {
-		if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
-			cfg.ApplyToolset(base)
-		}
-	}
 	m.toolClaude = cfg.WithClaude
 	m.toolDDEV = cfg.WithDDEV
 	m.toolGo = cfg.WithGo
 	m.toolJava = cfg.WithJava
 	m.toolRebuild = false
 	m.view = viewForm
-	return m.inputs[0].Focus()
+	return tea.Batch(m.inputs[0].Focus(), m.kickFormToolsetLoad())
+}
+
+// toolsetLoadedMsg carries the SHARED base image's recorded tool-set, read
+// off the Update goroutine by formToolsetCmd because the read goes through
+// the form's TARGET member's HostFiles — a blocking ssh round trip for a
+// remote profile (provision.BaseToolset ultimately calls HostFiles.ReadFile).
+// scope is the formScope the read was kicked FOR, so a result that arrives
+// after the user has closed the form, switched to reset mode, or cycled the
+// profile selector on to a different target can be told apart from one still
+// relevant — and ignored (see the handler in model.go's dispatch).
+type toolsetLoadedMsg struct {
+	scope   registry.Scope
+	toolset map[string]bool
+	ok      bool
+}
+
+// formToolsetCmd reads the shared base image's recorded tool-set stamp
+// through hf (via provision.BaseToolset) OFF the Update goroutine. hf and
+// baseName are captured by VALUE, exactly like every other tea.Cmd closure in
+// this file (submitForm's run closure, refreshCmd's provider/hostFiles) — the
+// closure must never read the mutable model, which the Update goroutine can
+// go on mutating while this runs.
+func formToolsetCmd(scope registry.Scope, hf lima.HostFiles, baseName string) tea.Cmd {
+	return func() tea.Msg {
+		base, ok := provision.BaseToolset(hf, baseName)
+		return toolsetLoadedMsg{scope: scope, toolset: base, ok: ok}
+	}
+}
+
+// kickFormToolsetLoad fires the async read of the shared base image's
+// recorded tool-set stamp for the form's CURRENT target (m.formScope) — see
+// formToolsetCmd. Called from openForm (the initially-selected profile) and
+// again from cycleFormProfile every time the user picks a different one, so
+// the toggles always converge on the newly-selected profile's own base,
+// never a stale read left over from whichever profile was selected before.
+// The active member can, in a degenerate fleet, be an error binding with no
+// provider; there is then nothing to read, and the toggles simply keep
+// whatever they already show (the all-on default, from openForm).
+func (m *model) kickFormToolsetLoad() tea.Cmd {
+	p := m.formProvider()
+	if p == nil {
+		return nil
+	}
+	return formToolsetCmd(m.formScope, p.HostFiles(), vm.DefaultCreateConfig().BaseName)
 }
 
 // openResetForm initialises the create form in reset mode, pre-filled from the
@@ -413,11 +453,20 @@ func (m *model) setDefaultFormProfile() {
 // field the user has since typed over loses that edit; the selector is meant
 // to be picked before fine-tuning these, exactly as openForm itself seeds them
 // fresh every time the form opens.
-func (m *model) cycleFormProfile(delta int) {
+//
+// It also RE-KICKS the async tool-set read (kickFormToolsetLoad) for the
+// newly selected profile — a stale in-flight read for whichever profile was
+// selected before is ignored by scope once it lands (toolsetLoadedMsg's
+// handler in model.go), so switching profiles can never let an old read
+// clobber the new selection's toggles. The toggles themselves are left
+// exactly as they were until that read comes back — one frame showing the
+// PREVIOUS profile's tool-set is a fair price for never blocking on a remote
+// read here, which is the same trade openForm itself makes.
+func (m *model) cycleFormProfile(delta int) tea.Cmd {
 	list := m.formProfiles()
 	n := len(list)
 	if n == 0 {
-		return
+		return nil
 	}
 	m.formProfileIdx = ((m.formProfileIdx+delta)%n + n) % n
 	m.retargetFormScope(list[m.formProfileIdx])
@@ -425,6 +474,7 @@ func (m *model) cycleFormProfile(delta int) {
 	m.inputs[fCPUs].SetValue(strconv.Itoa(defaultCPUs(hs.cpus)))
 	m.inputs[fMemory].SetValue(defaultMemory(hs.mem))
 	m.inputs[fUser].SetValue(orDefault(hs.user, hostUser()))
+	return m.kickFormToolsetLoad()
 }
 
 // formToggle is one checkbox in the form: a label, its per-field help, and
@@ -857,11 +907,9 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.toggleFocus == -1 && m.focusIdx == fProfileSelector {
 		switch msg.Code {
 		case tea.KeyLeft:
-			m.cycleFormProfile(-1)
-			return m, nil
+			return m, m.cycleFormProfile(-1)
 		case tea.KeyRight:
-			m.cycleFormProfile(1)
-			return m, nil
+			return m, m.cycleFormProfile(1)
 		}
 	}
 

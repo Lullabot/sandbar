@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"fmt"
+
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/registry"
 )
@@ -62,25 +64,35 @@ func BuildFleet(store *profiles.Store) Fleet {
 	return fleet
 }
 
-// buildBinding constructs the single Binding for one enabled profile.
+// buildBinding constructs the single Binding for one enabled profile. A
+// profile's Type must be recognised (TypeLocal or TypeRemoteSSH) and, for
+// TypeRemoteSSH, must carry a non-empty Host — LoadFrom deliberately loads a
+// hand-edited profile that fails either check rather than locking out the
+// rest of the file (see profiles.LoadFrom/validate), so those two error
+// conditions surface HERE, as a clear per-profile error binding, rather than
+// being silently treated as local (finding 3) or reaching NewRemoteLima only
+// to fail later with a cryptic `ssh user@` error (finding 9).
 func buildBinding(p profiles.Profile) Binding {
-	if p.Type == profiles.TypeRemoteSSH {
+	switch p.Type {
+	case profiles.TypeRemoteSSH:
+		if p.Host == "" {
+			return Binding{Profile: p, Err: fmt.Errorf("profile %q has no host", p.Name)}
+		}
 		cfg := targetConfigFor(p)
 		prov, err := newRemoteLima(cfg)
 		if err != nil {
 			return Binding{Profile: p, Err: err}
 		}
 		return Binding{Profile: p, Prov: prov, Scope: cfg.Scope()}
+	case profiles.TypeLocal:
+		prov, err := newDefault()
+		if err != nil {
+			return Binding{Profile: p, Err: err}
+		}
+		return Binding{Profile: p, Prov: prov, Scope: registry.LocalScope}
+	default:
+		return Binding{Profile: p, Err: fmt.Errorf("profile %q: unknown profile type %q", p.Name, p.Type)}
 	}
-
-	// profiles.TypeLocal (and any future/unrecognised type) defaults to the
-	// local backend — mirroring TargetConfig.Scope's own local-by-default
-	// rule for an empty/unknown Provider string.
-	prov, err := newDefault()
-	if err != nil {
-		return Binding{Profile: p, Err: err}
-	}
-	return Binding{Profile: p, Prov: prov, Scope: registry.LocalScope}
 }
 
 // targetConfigFor converts a RemoteSSH profile into the secret-free

@@ -432,19 +432,55 @@ func newHeartbeatsResolver(resolve shellFor) *heartbeatRegistry {
 	}
 }
 
+// setShell REBUILDS the registry's scope->shell resolver. Called at every
+// fleet mutation — a profile enabled, created, connection-edited, or deleted
+// after startup (profilesview.go's rebuildMember/disableProfile/
+// deleteProfile) — so a member added (or removed) after New() ran is
+// immediately resolvable to a heartbeat.
+//
+// WITHOUT this, the resolver stayed the snapshot fleetShellResolver captured
+// once in New(): a profile enabled later could never open a heartbeat for its
+// VMs, which carried em-dash cpu/mem gauges forever, because start()'s
+// resolve(scope) call kept consulting a fleet frozen at startup.
+//
+// Guarded by the same mutex start() reads shell under (see the note there):
+// every call site of setShell is an ordinary model method invoked from the
+// Update goroutine, never a tea.Cmd closure or goroutine, so this never
+// races today — but taking the lock here too makes that a property of the
+// code, not an unstated assumption.
+func (r *heartbeatRegistry) setShell(resolve shellFor) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.shell = resolve
+	r.mu.Unlock()
+}
+
 // start opens a heartbeat for (scope, name) and spawns its sampler. It reports
 // false — and starts nothing — when one is already open, when the VM is in
 // its post-failure cooldown, or when there is no shell to open (a hand-built
 // model). Keyed on the full vmHandle so a VM under one scope never collides
 // with a same-named VM under another.
 func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-chan guestSample, bool) {
-	if r == nil || r.shell == nil {
+	if r == nil {
+		return 0, nil, false
+	}
+	// r.shell is read under the lock — see setShell's doc comment: start is
+	// reached only from syncHeartbeats on the Update goroutine today, and every
+	// setShell call site is too, so this never races in practice, but the lock
+	// makes that a property of the code rather than an unstated assumption a
+	// future caller could quietly violate.
+	r.mu.Lock()
+	resolve := r.shell
+	r.mu.Unlock()
+	if resolve == nil {
 		return 0, nil, false
 	}
 	// Resolve the backend for THIS VM's scope up front: no owning provider
 	// (an error binding, or an unknown scope) means there is no guest to open a
 	// shell into, exactly like a nil single-provider shell.
-	shell := r.shell(scope)
+	shell := resolve(scope)
 	if shell == nil {
 		return 0, nil, false
 	}

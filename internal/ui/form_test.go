@@ -354,6 +354,36 @@ func TestResetReplaysTheRecordedToolset(t *testing.T) {
 	}
 }
 
+// deliverToolsetLoad runs cmd (openForm/cycleFormProfile's returned command,
+// a tea.Batch of the input focus blink plus kickFormToolsetLoad's async
+// tool-set read — see finding 4 in the plan-16 code review) and feeds the
+// toolsetLoadedMsg it produces into *m, exactly as the real Update loop would
+// once the read comes back. Tests that assert on the form's tool toggles
+// need this now that reading the base's tool-set stamp is no longer
+// synchronous inside openForm (it would otherwise be a blocking ssh round
+// trip for a remote profile) — mirrors board_test.go's actionDone, which
+// unwraps the same tea.Batch shape for a dispatched action.
+func deliverToolsetLoad(t *testing.T, m *model, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	cmds := []tea.Cmd{func() tea.Msg { return msg }}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		cmds = batch
+	}
+	for _, c := range cmds {
+		if c == nil {
+			continue
+		}
+		if tm, ok := c().(toolsetLoadedMsg); ok {
+			next, _ := m.Update(tm)
+			*m = next.(model)
+		}
+	}
+}
+
 // writeBaseStamp plants a base-image version stamp in the isolated LIMA_HOME,
 // standing in for a base that was actually built with that tool-set.
 func writeBaseStamp(t *testing.T, baseName, toolset string) {
@@ -378,7 +408,8 @@ func TestCreateFormSeedsTogglesFromTheBuiltBase(t *testing.T) {
 	m := newTestModel(t)
 	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "none")
 
-	m.openForm()
+	cmd := m.openForm()
+	deliverToolsetLoad(t, &m, cmd)
 
 	if m.toolClaude || m.toolDDEV || m.toolGo || m.toolJava {
 		t.Errorf("form opened with claude=%v ddev=%v go=%v java=%v against a base built with NO tools; every toggle must start off",
@@ -401,7 +432,8 @@ func TestCreateFormSeedsTogglesFromAPartialToolset(t *testing.T) {
 	m := newTestModel(t)
 	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "ddev+java")
 
-	m.openForm()
+	cmd := m.openForm()
+	deliverToolsetLoad(t, &m, cmd)
 
 	if m.toolClaude || m.toolGo {
 		t.Errorf("claude=%v go=%v, want both off: the base does not have them", m.toolClaude, m.toolGo)

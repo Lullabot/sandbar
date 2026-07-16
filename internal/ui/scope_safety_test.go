@@ -21,6 +21,9 @@ package ui
 import (
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -320,5 +323,82 @@ func TestExplicitDeletePrunesTheModelsOwnScopeNotAHardcodedOne(t *testing.T) {
 	}
 	if got := sec.Get("shared-name", registry.LocalScope); got["GH_TOKEN"] != "unrelated-local-profile" {
 		t.Fatalf("an unrelated LocalScope profile's secret must survive, got %+v — a hardcoded registry.LocalScope prune would have deleted it", got)
+	}
+}
+
+// TestActionDoneMsgWithOrphanedScopePrunesItsOwnScopeNotTheActiveOne pins
+// finding 1 from the plan-16 code review: actionDoneMsg's delete branch used
+// to fall back to the ACTIVE member's scope whenever msg.scope no longer
+// matched any CURRENT member — which happens whenever the profile that owned
+// the action was deleted (or connection-edited, which rebuilds its member)
+// while the action was still in flight. Lifecycle actions are NOT jobs, so
+// the idle gate never blocks this. That fallback then ran the destructive
+// prune (RemoveScoped + secrets.Remove) under the WRONG (active/local) scope
+// — deleting the LOCAL "web"'s registry entry and host secrets when the
+// REMOTE "web" was the one actually deleted, and leaving the real (remote)
+// entry dangling forever.
+//
+// The fix: only a ZERO-VALUE scope (a hand-built test message, which never
+// tags one) falls back to the active member; a genuinely-tagged scope that no
+// longer matches any member is used AS-IS for pruning — mirroring routeIndex's
+// own hardening for vmsLoadedMsg (fleet.go).
+func TestActionDoneMsgWithOrphanedScopePrunesItsOwnScopeNotTheActiveOne(t *testing.T) {
+	isolateHostState(t)
+	fleet := provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: profiles.Profile{ID: "remote", Type: profiles.TypeRemoteSSH, Enabled: true}, Prov: &providerfake.Provider{}, Scope: foreignScope},
+	}
+	m := New(fleet).(model)
+	m = resized(m, 100, 30)
+
+	sec := secrets.NewEmpty()
+	if err := sec.Set("web", registry.LocalScope, map[string]string{"GH_TOKEN": "local-token"}); err != nil {
+		t.Fatalf("seed local secret: %v", err)
+	}
+	if err := sec.Set("web", foreignScope, map[string]string{"GH_TOKEN": "remote-token"}); err != nil {
+		t.Fatalf("seed remote secret: %v", err)
+	}
+	m.sec = sec
+
+	if err := m.reg.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, registry.LocalScope); err != nil {
+		t.Fatalf("seed local managed entry: %v", err)
+	}
+	if err := m.reg.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, foreignScope); err != nil {
+		t.Fatalf("seed remote managed entry: %v", err)
+	}
+
+	// The remote member is gone by the time the action's result arrives — the
+	// profile was deleted (or connection-edited and rebuilt) while the delete
+	// it kicked off was still in flight. m.active still points at the LOCAL
+	// member (index 0), which the buggy fallback would have reached for.
+	idx, ok := m.memberIndex(foreignScope)
+	if !ok {
+		t.Fatal("precondition: the remote member should exist before it is removed")
+	}
+	m.members = append(m.members[:idx], m.members[idx+1:]...)
+	if _, ok := m.memberIndex(foreignScope); ok {
+		t.Fatal("precondition: the remote member should be gone")
+	}
+
+	next, _ := m.Update(actionDoneMsg{action: "delete", name: "web", scope: foreignScope})
+	m = next.(model)
+
+	// THE FIX: the REMOTE (foreign) scope is the one pruned — the VM that was
+	// actually deleted — even though its member is gone.
+	if m.reg.IsManagedInScope("web", foreignScope) {
+		t.Fatal("the remote scope's registry entry should have been pruned")
+	}
+	if got := sec.Get("web", foreignScope); got["GH_TOKEN"] != "" {
+		t.Fatalf("the remote scope's secret should have been pruned, got %+v", got)
+	}
+
+	// THE GUARD: the LOCAL VM's registry entry and secrets — completely
+	// unrelated to this action — must survive untouched. The bug pruned
+	// exactly these, by falling back to the active (local) scope.
+	if !m.reg.IsManagedInScope("web", registry.LocalScope) {
+		t.Fatal("the LOCAL web's registry entry must survive — it was wrongly pruned by the active-scope fallback")
+	}
+	if got := sec.Get("web", registry.LocalScope); got["GH_TOKEN"] != "local-token" {
+		t.Fatalf("the LOCAL web's secret must survive, got %+v — it was wrongly pruned by the active-scope fallback", got)
 	}
 }

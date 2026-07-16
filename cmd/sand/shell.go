@@ -207,6 +207,61 @@ func reorderShellFlags(args []string) []string {
 	return append(flagArgs, positional...)
 }
 
+// listForProfile constructs profile p's provider and returns its List() —
+// used only by resolveShellProvider's unmanaged-VM fallback (see
+// probeUnmanagedOwners). A package-level var, following fleet.go's
+// newDefault/newRemoteLima seam pattern, so a test can stub it without a
+// real limactl/SSH backend.
+var listForProfile = func(p profiles.Profile) ([]vm.VM, error) {
+	prov, _, err := providerForProfile(p)
+	if err != nil {
+		return nil, err
+	}
+	return prov.List()
+}
+
+// probeUnmanagedOwners is resolveShellProvider's fallback for when the
+// managed-VM registry reports ZERO owners for name: before this task, `sand
+// shell NAME` attached to ANY VM the (single) configured backend listed,
+// managed or not (the base image `sand-base`, a hand-made limactl VM, ...).
+// Now that ownership with more than one enabled profile is resolved from the
+// registry, an UNMANAGED vm has no registry entry under any profile and used
+// to hard-fail with "no such VM" even though it plainly exists somewhere.
+// So, when the registry comes up empty, ask each enabled profile's provider
+// directly whether it knows a VM by this name — local first (the common
+// case), then the rest in the store's own order. A profile whose provider
+// fails to construct, or whose List() errors (e.g. an unreachable remote),
+// is treated as "not there": this is best-effort probing, and one bad
+// profile must never turn into a hard failure when another profile actually
+// has the VM, or when the honest answer is a clean "no such VM".
+func probeUnmanagedOwners(enabled []profiles.Profile, name string) []profiles.Profile {
+	ordered := make([]profiles.Profile, 0, len(enabled))
+	var remotes []profiles.Profile
+	for _, p := range enabled {
+		if p.Type == profiles.TypeLocal {
+			ordered = append(ordered, p)
+		} else {
+			remotes = append(remotes, p)
+		}
+	}
+	ordered = append(ordered, remotes...)
+
+	var hits []profiles.Profile
+	for _, p := range ordered {
+		vms, err := listForProfile(p)
+		if err != nil {
+			continue
+		}
+		for _, v := range vms {
+			if v.Name == name {
+				hits = append(hits, p)
+				break
+			}
+		}
+	}
+	return hits
+}
+
 // resolveShellProvider resolves which connection profile NAME lives on and
 // constructs its provider. An explicit profile name is used directly (a hard
 // error if it does not name an enabled profile). With no explicit profile:
@@ -214,9 +269,12 @@ func reorderShellFlags(args []string) []string {
 // shell`'s original behaviour of attaching to any VM the one configured
 // backend knows about, managed or not); with more than one enabled profile,
 // ownership is resolved from the registry's managed-VM index — the only
-// place sand records which profile's scope a VM belongs to. Zero owners is
-// "no such VM"; more than one requires --profile to disambiguate, and lists
-// the candidates by name.
+// place sand records which profile's scope a VM belongs to. If the registry
+// reports zero owners, probeUnmanagedOwners is tried before giving up (an
+// UNMANAGED vm, e.g. the base image or a hand-made instance, has no registry
+// entry under any profile — see its doc comment). Zero owners (registry AND
+// probe) is "no such VM"; more than one requires --profile to disambiguate,
+// and lists the candidates by name.
 func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, profileFlag string) (provider.Provider, error) {
 	if profileFlag != "" {
 		p, ok := store.GetByName(profileFlag)
@@ -252,6 +310,11 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 			if reg.IsManagedInScope(name, scopeForProfile(p)) {
 				owners = append(owners, p)
 			}
+		}
+		if len(owners) == 0 {
+			// The registry hit short-circuits above; only fall back to the
+			// (network-round-tripping) List probe when it found nothing.
+			owners = probeUnmanagedOwners(enabled, name)
 		}
 		switch len(owners) {
 		case 0:

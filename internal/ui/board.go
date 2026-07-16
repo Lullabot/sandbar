@@ -189,15 +189,32 @@ func (m model) visibleVMs() []boardVM {
 	return out
 }
 
-// vmIndex is the slot the ring's name occupies in vms, or -1. The ring is
-// matched by NAME (not the full handle): the tile it resolves to carries the
-// scope every action needs, and same-named cross-scope collisions are the rare
-// case task 10's provenance labels disambiguate — the safety that matters (a
-// delete keying the wrong scope) is preserved because focusedVM hands back a
-// scoped boardVM.
-func vmIndex(vms []boardVM, name string) int {
+// focusMatches reports whether v is the VM the focus handle h identifies.
+//
+// A GENUINE handle (both fields set — every real assignment site sets both;
+// see ghostFocusVM, focusCellHandle, focusNeighbour, progress.go's post-create
+// focus) must match the FULL (scope, name) pair: with a local "web" and a
+// remote "web" both on the board, matching by name alone could never tell
+// them apart — the ring would appear to have landed on the second one, but
+// every reader (focusedVM, the tile renderer) would keep resolving to
+// whichever one happens to sort first, and BOTH tiles would render focused.
+//
+// A ZERO-VALUE h.Scope matches by NAME ALONE — the pre-fleet behaviour every
+// test that pokes `m.focusVM.Name` directly (rather than building a full
+// vmHandle) still relies on, and it is safe precisely because a zero Scope
+// never occurs in production once a real VM is on the board.
+func focusMatches(v boardVM, h vmHandle) bool {
+	if v.Name != h.Name {
+		return false
+	}
+	return h.Scope == (registry.Scope{}) || v.scope == h.Scope
+}
+
+// vmIndex is the slot the focus handle occupies in vms, or -1. See
+// focusMatches for the matching rule.
+func vmIndex(vms []boardVM, h vmHandle) int {
 	for i, v := range vms {
-		if v.Name == name {
+		if focusMatches(v, h) {
 			return i
 		}
 	}
@@ -210,7 +227,7 @@ func vmIndex(vms []boardVM, name string) int {
 // rather than acting on a zero-value VM.
 func (m model) focusedVM() (boardVM, bool) {
 	vms := m.visibleVMs()
-	i := vmIndex(vms, m.focusVM.Name)
+	i := vmIndex(vms, m.focusVM)
 	if i < 0 {
 		return boardVM{}, false
 	}
@@ -252,7 +269,7 @@ func (m *model) syncBoard() {
 		m.ensureFocusVisible()
 		return
 	}
-	if vmIndex(vms, m.focusVM.Name) < 0 {
+	if vmIndex(vms, m.focusVM) < 0 {
 		m.focusVM = focusNeighbour(vms, m.focusVM.Name)
 	}
 	m.ensureFocusVisible()
@@ -275,7 +292,7 @@ func (m model) focusIndex() int {
 	if m.focusIsGhost() {
 		return len(m.visibleVMs())
 	}
-	return vmIndex(m.visibleVMs(), m.focusVM.Name)
+	return vmIndex(m.visibleVMs(), m.focusVM)
 }
 
 // focusCellHandle is focusIndex's inverse: the focus handle (scope + name) for a
@@ -983,7 +1000,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		HasSample:    hasSample,
 		Traits:       traits[i],
 		Uniform:      uniform,
-		Focused:      v.Name == m.focusVM.Name,
+		Focused:      focusMatches(v, m.focusVM),
 		Width:        m.layout.TileWidth,
 		Spinner:      frame,
 		Now:          now,
