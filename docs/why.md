@@ -1,29 +1,37 @@
 # Why Sandbar
 
-AI coding agents become vastly more useful when you stop approving their every
-move. Claude Code with `--dangerously-skip-permissions`, and the
-equivalent on other agents, edits files, runs commands, and pushes
-branches without pausing to ask.
+AI coding agents become vastly more useful when you stop approving
+their every move. Claude Code with `--dangerously-skip-permissions`,
+and the equivalent on other agents, edits files, runs commands, and
+pushes branches without pausing to ask.
 
-The flag means what it says: an agent
-running that way can do whatever the machine it runs on can do,
-including reading your SSH keys, editing files, or affecting unrelated projects. And worst case, a compromised agent (or a simple bad dependency) leaves your work at risk and a cleanup job ahead.
+The flag means what it says: an agent running that way can do whatever
+the machine it runs on can do, including reading your SSH keys, editing
+files, or affecting unrelated projects. And worst case, a compromised
+agent (or a simple bad dependency) leaves your work at risk and a
+cleanup job ahead.
 
-Every practical answer to this trades away something. A container (like Docker, Podman, etc)
-shares your host kernel (on Linux) and almost always bind-mounts your repo, so the
-agent's reach extends back onto your disk. To work safely, you have to review and approve each command. A cloud sandbox moves
-the risk off your machine, but usually limits what you can do. For example, Claude Code on the Web is _almost_ a solution, except it doesn't support running containers or nested virtual machines.
-Rolling your own VM gives you the right boundar, but hands you all the
-work maintaining it and possibly entire new skills to learn.
+Every practical answer to this trades away something. A container (like
+Docker, Podman, etc) shares your host kernel (on Linux) and almost
+always bind-mounts your repo, so the agent's reach extends back onto
+your disk. To work safely, you have to review and approve each command.
+A cloud sandbox moves the risk off your machine, but usually limits
+what you can do. For example, Claude Code on the Web is _almost_ a
+solution, except it doesn't support running containers or nested
+virtual machines. Rolling your own VM gives you the right boundary, but
+hands you all the work maintaining it and possibly entire new skills to
+learn.
 
 We wanted the autonomy of skip-permissions with a boundary the agent
-genuinely cannot cross, while being easy to use even if you're not a devops expert.
+genuinely cannot cross, while being easy to use even if you're not a
+devops expert.
 
 We hope Sandbar is the answer!
 
 ## Our Core Philosophies
 
 **1. sandbar VM has no writable path back to your machine.**
+
 **2. We work in a post-IDE world.**
 
 Each VM is a full guest, not a container sharing your kernel. Its only
@@ -43,23 +51,35 @@ to reset the VM from a clean base image, or `d` to delete it. You get
 the autonomy because the blast radius is one disposable VM and stops
 there.
 
-You might be asking: what risk is there really if a compromised or off-track agent writes bad code?
+You might be asking: what risk is there really if a compromised or
+off-track agent writes bad code?
 
-If you open a fresh project in an IDE like IDEA or VS Code, you'll notice it asking you if you trust the project. Unless you approve, a whole slew of useful IDE features are disabled. That's because those features read files in the checkout and execute them. They could be package managers like npm, build scripts like webpack or Make, or other tools based on the ecosystem the project is working in. An agent could even write a hook in `.git/hooks` that instantly pivots out to the rest of your workstation on the next `git` command.
+If you open a fresh project in an IDE like IDEA or VS Code, you'll
+notice it asking you if you trust the project. Unless you approve, a
+whole slew of useful IDE features are disabled. That's because those
+features read files in the checkout and execute them. They could be
+package managers like npm, build scripts like webpack or Make, or other
+tools based on the ecosystem the project is working in. An agent could
+even write a hook in `.git/hooks` that instantly pivots out to the rest
+of your workstation on the next `git` command.
 
 ### Recommended Workflow
 
 With Sandbar, the recommended workflow is:
 
-1. Create an instance and check out your project in to it with the minimum of permissions and API keys it needs.
+1. Create an instance and check out your project in to it with the
+   minimum of permissions and API keys it needs.
 2. Do work with your agent.
 3. Have it push a branch, and open the pull request as a draft.
 4. Review the code there and iterate.
-5. If you need to test on your workstation, pull down the branch into a checkout on your IDE, but only after you've reviewed the code.
+5. If you need to test on your workstation, pull down the branch into a
+   checkout on your IDE, but only after you've reviewed the code.
 
 ## What else is in the box
 
-The hard boundary keeps things secure and repeatable. But without helpful tooling, it's also a pain. Here's what we've added to Sandbar to make it easier (and faster!) to use.
+The hard boundary keeps things secure and repeatable. But without
+helpful tooling, it's also a pain. Here's what we've added to Sandbar
+to make it easier (and faster!) to use.
 
 - **Setup happens once.** One base image carries the full toolchain
   (Docker, ddev, Node, Go, Python, a JDK, `gh`, tmux, direnv). Every VM
@@ -82,7 +102,9 @@ The hard boundary keeps things secure and repeatable. But without helpful toolin
   pull requests and issues but cannot merge or close them, paired with
   branch protection, so an unattended agent can open a PR yet cannot
   push straight to your default branch.
-- **Notifications come for free.** For supported agents, we enable Remote Control or similar features so you are alerted when agent is waiting for you.
+- **Notifications come for free.** For supported agents, we enable
+  Remote Control or similar features so you are alerted when the agent
+  is waiting for you.
 
 ## How it compares
 
@@ -99,10 +121,10 @@ base-template-then-clone provisioning model.
 
 Both make the opposite call on the decision above. clawk live-mounts
 your repo over virtio-fs, and its own README notes that an agent can
-therefore commit bad code that could run on your host. agent-vm mounts your
-working directory read-write by default. That writable mount is the
-convenient choice, because the agent edits the same files already open
-in your editor, and it's the exact channel sandbar removes.
+therefore commit bad code that could run on your host. agent-vm mounts
+your working directory read-write by default. That writable mount is
+the convenient choice, because the agent edits the same files already
+open in your editor, and it's the exact channel sandbar removes.
 
 Everything else sits further off on one axis or another:
 
@@ -117,11 +139,10 @@ Everything else sits further off on one axis or another:
 | [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), bubblewrap, Seatbelt | OS process confinement | Local | Per-process host confinement, policy-dependent, no provisioned environment |
 | [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | General-purpose remote dev, not agent-disposable |
 
-The tools that get the VM
-boundary right still mount your files into it, and the tools that restrict
-the environment do it in the cloud or as an SDK rather than a local dev
-VM. Sandbar is the point where local, full-VM, sealed, and disposable
-meet.
+The tools that get the VM boundary right still mount your files into
+it, and the tools that restrict the environment do it in the cloud or
+as an SDK rather than a local dev VM. Sandbar is the point where local,
+full-VM, sealed, and disposable meet.
 
 ## Where it's going
 
@@ -129,5 +150,5 @@ Lima and Claude Code are the first supported backend and agent, not the
 definition of the tool. The provisioning model is built to add more of
 both: other agents behind the same disposable-VM workflow, and other
 backends behind the same commands, with Proxmox and similar targets
-planned so a Sandbar VM can land on a Mac Mini or a server, and not only a
-laptop.
+planned so a Sandbar VM can land on a Mac Mini or a server, and not
+only a laptop.
