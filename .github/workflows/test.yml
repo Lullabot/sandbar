@@ -326,6 +326,20 @@ jobs:
           ssh -i "$HOME/.ssh/remote_e2e" sand-remote-e2e@localhost \
             'test -r /dev/kvm -a -w /dev/kvm && echo "kvm OK"' \
             || { echo "::error::sand-remote-e2e cannot open /dev/kvm — QEMU would fall back to TCG"; exit 1; }
+          # Pre-create Lima's guest-ssh keypair with tight permissions. Left to
+          # limactl inside this non-interactive session, ~/.lima/_config/user
+          # came out group/world-readable — the hostagent's ssh then IGNORES it
+          # ("UNPROTECTED PRIVATE KEY FILE"), guest publickey auth can never
+          # succeed, and the boot "times out" ten minutes later with no hint.
+          # ssh-keygen always chmods the private key to 600, and Lima adopts an
+          # existing _config/user instead of regenerating it.
+          sudo -u sand-remote-e2e -H bash -c '
+            umask 077
+            mkdir -p ~/.lima/_config
+            [ -f ~/.lima/_config/user ] || ssh-keygen -q -t ed25519 -N "" -f ~/.lima/_config/user
+            chmod 600 ~/.lima/_config/user'
+          perms=$(sudo stat -c %a /home/sand-remote-e2e/.lima/_config/user)
+          [ "$perms" = "600" ] || { echo "::error::Lima user key has mode $perms, want 600"; exit 1; }
 
       # The remote user downloads its own Debian image into its own
       # ~/.cache/lima; seed it from the runner user's restored cache so a warm
