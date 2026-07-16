@@ -55,9 +55,9 @@ extra:
 
 nav:
   - Home: index.md
+  - Why Sandbar: why.md
   - Getting Started:
     - About sand: getting-started/index.md
-    - Why sandbar: why.md
     - Installation: getting-started/installation.md
     - Your First VM: getting-started/first-vm.md
     - How Provisioning Works: getting-started/how-it-works.md
