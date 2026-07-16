@@ -9,17 +9,30 @@ tile under the focus ring.
 
 ## The header
 
-The header band shows a live readout of the **host**, not the VMs: CPU and
-memory currently in use (fed by a guest heartbeat), free disk on the volume
-that holds your VMs, and the build's version. It does not count base images
-or unmanaged VMs — the board only ever shows sand-managed clones, and the
-header doesn't either. Manage a base image with `limactl` directly.
+The header shows a live readout of the **host(s)** you're connected to, not
+the VMs: one band per active [Connection Profile](connection-profiles.md),
+each with CPU and memory currently in use (fed by a guest heartbeat), free
+disk on the volume that holds that profile's VMs, and the build's version.
+With only the permanent Local profile enabled — sand's out-of-the-box
+default — there's a single band and the header looks exactly like it always
+has. Enable a remote profile and a second band appears for it; a profile
+that's **disabled** or **errored** (unreachable, misconfigured) shows a
+banner instead, naming the profile and the reason its tiles are absent. The
+header does not count base images or unmanaged VMs — the board only ever
+shows sand-managed clones, and the header doesn't either. Manage a base
+image with `limactl` directly.
 
 ## The tile board
 
 Tiles are sorted alphabetically by name and stay there — a VM changing
 status never reorders the board. An empty slot on the board is a "ghost
 tile" inviting you to press `enter` to create a VM.
+
+With more than one [Connection Profile](connection-profiles.md) enabled, a
+tile's title row also carries a small `[profile]` label naming which
+profile that VM runs on — useful since the same VM name can exist under two
+different profiles at once. The label is omitted while only the Local
+profile is enabled, so a single-profile setup's tiles look unchanged.
 
 Builds stream their output into a progress pane, but **they keep running in
 the background if you navigate away**. Leaving the progress screen does not
@@ -38,6 +51,7 @@ These act on the board itself, regardless of which tile is focused.
 | `↑` `↓` `←` `→` | Move the focus ring between tiles |
 | `enter` (on the ghost tile) | Create a new VM |
 | `n` | Create a new VM |
+| `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
 | `/` | Search / filter tiles by name |
 | `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. An unmanaged Lima instance or a base image is never touched, even if it's running, so an instance you use for unrelated work is safe. |
 | `?` | Show the keys screen |
@@ -69,6 +83,19 @@ changes meaning under your fingers. Download deliberately does **not** use
 
 For the full set of `sand` subcommands and flags (including `sand shell`),
 see the [CLI Reference](cli-reference.md).
+
+## Connection profiles
+
+`p` opens the profile management screen — a list of every
+[Connection Profile](connection-profiles.md) `sand` knows about (Local plus
+any remote hosts you've added), with keys to create, edit, enable/disable,
+and delete them. Every change there is live: enabling a profile builds its
+connection and starts showing its tiles immediately, with no restart.
+
+The create form (`n`, or `enter` on a ghost tile) also has a profile
+selector when more than one profile is enabled, so you pick which profile a
+new VM is created on without leaving the TUI. See
+[Connection Profiles](connection-profiles.md) for the full model.
 
 ## Resetting a VM
 

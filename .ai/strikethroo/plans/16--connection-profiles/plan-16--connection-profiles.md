@@ -792,12 +792,12 @@ Verified acyclic; no orphan or circular references.
 - ✔️ Task 007: Promote the TUI model to an async per-profile fleet (depends on: 004, 006) — `completed`
 - ✔️ Task 005: Add `--profile` selection to `sand create`/`sand shell` (depends on: 001, 004) — `completed`
 
-### Phase 4: Profile UI surfaces + registry keying (run sequentially — all touch `internal/ui`)
+### ✅ Phase 4: Profile UI surfaces + registry keying (run sequentially — all touch `internal/ui`)
 **Tasks (sequential order: 010 → 013 → 008 → 009):**
-- Task 010: Tile profile labels and a per-profile status bar with error banners (depends on: 007)
-- Task 013: Re-key the registry by (scope, name) with an on-disk migration (depends on: 007) — _added mid-execution; see Noteworthy Events / Decision Log_
-- Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007)
-- Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007, 013)
+- ✔️ Task 010: Tile profile labels and a per-profile status bar with error banners (depends on: 007) — `completed`
+- ✔️ Task 013: Re-key the registry by (scope, name) with an on-disk migration (depends on: 007) — `completed` — _added mid-execution; see Noteworthy Events / Decision Log_
+- ✔️ Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007) — `completed`
+- ✔️ Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007, 013) — `completed`
 
 ### Phase 5: Docs & regression gate
 **Parallel Tasks:**

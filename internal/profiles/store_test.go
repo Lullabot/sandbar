@@ -250,6 +250,193 @@ func TestDuplicateTargetRejected(t *testing.T) {
 	}
 }
 
+func TestRemoveDeletesRemoteProfileAndPersists(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	added, err := s.Add(Profile{Name: "r1", Type: TypeRemoteSSH, Enabled: true, Host: "h1", User: "u1", Port: 22})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	if err := s.Remove(added.ID); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if _, ok := s.Get(added.ID); ok {
+		t.Error("removed profile should no longer be present")
+	}
+	if list := s.List(); len(list) != 1 || list[0].ID != LocalProfileID {
+		t.Fatalf("List() after remove = %+v, want just the permanent Local profile", list)
+	}
+
+	// Reload to confirm the removal persisted.
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload error = %v", err)
+	}
+	if _, ok := s2.Get(added.ID); ok {
+		t.Error("reloaded store should not have the removed profile")
+	}
+}
+
+func TestRemoveLocalProfileRefused(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if err := s.Remove(LocalProfileID); err == nil {
+		t.Fatal("Remove(LocalProfileID): want error, got nil")
+	}
+	if list := s.List(); len(list) != 1 {
+		t.Fatalf("the local profile must still be present, got %+v", list)
+	}
+}
+
+func TestRemoveUnknownIDErrors(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if err := s.Remove("nonexistent"); err == nil {
+		t.Fatal("Remove() with an unknown id: want error, got nil")
+	}
+}
+
+func TestUpdatePersistsFieldChangesAndRoundTrips(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	added, err := s.Add(Profile{Name: "prod", Type: TypeRemoteSSH, Enabled: true, Host: "h1", User: "u1", Port: 22})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	updated := added
+	updated.Host = "h2"
+	updated.Port = 2222
+	updated.User = "u2"
+	got, err := s.Update(updated)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got.Host != "h2" || got.Port != 2222 || got.User != "u2" {
+		t.Errorf("Update() returned = %+v, want the updated fields", got)
+	}
+
+	// Reload to confirm the update persisted (the save round trip).
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload error = %v", err)
+	}
+	p2, ok := s2.Get(added.ID)
+	if !ok || p2.Host != "h2" || p2.Port != 2222 || p2.User != "u2" {
+		t.Errorf("reloaded profile after Update() = %+v, ok=%v", p2, ok)
+	}
+}
+
+func TestUpdateUnknownIDErrors(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if _, err := s.Update(Profile{ID: "nonexistent", Name: "x", Type: TypeRemoteSSH}); err == nil {
+		t.Fatal("Update() with an unknown id: want error, got nil")
+	}
+}
+
+func TestUpdateTypeImmutableRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	added, err := s.Add(Profile{Name: "prod", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u", Port: 22})
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	changed := added
+	changed.Type = TypeLocal
+	if _, err := s.Update(changed); err == nil {
+		t.Fatal("Update() changing Type: want error, got nil")
+	}
+
+	// The profile must be unchanged after the rejected update.
+	p, ok := s.Get(added.ID)
+	if !ok || p.Type != TypeRemoteSSH {
+		t.Errorf("profile after rejected type change = %+v, ok=%v, want Type unchanged", p, ok)
+	}
+}
+
+// TestSaveMkdirFailureReturnsError drives save()'s MkdirAll error branch
+// directly: a store loaded normally, then repointed (s.path — same package,
+// so the unexported field is reachable) at a path whose parent directory
+// component is actually a REGULAR FILE, which can never be mkdir'd into. Any
+// mutation that calls save() must surface that failure rather than silently
+// swallowing it.
+func TestSaveMkdirFailureReturnsError(t *testing.T) {
+	s, err := LoadFrom(testPath(t))
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	base := t.TempDir()
+	blocker := filepath.Join(base, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed blocking file: %v", err)
+	}
+	s.path = filepath.Join(blocker, "sub", "profiles.yaml")
+
+	if _, err := s.Add(Profile{Name: "r1", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u", Port: 22}); err == nil {
+		t.Fatal("Add() should surface save()'s MkdirAll failure, got nil error")
+	}
+}
+
+// TestSaveRenameFailureReturnsError drives save()'s os.Rename error branch:
+// once the target path is a DIRECTORY rather than a regular file, renaming
+// the freshly written temp file over it is never allowed, so a mutation
+// must surface that failure too.
+func TestSaveRenameFailureReturnsError(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path) // seeds and persists the Local profile at path
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove seeded file: %v", err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("replace it with a directory: %v", err)
+	}
+
+	if _, err := s.Add(Profile{Name: "r1", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u", Port: 22}); err == nil {
+		t.Fatal("Add() should surface save()'s Rename failure when the target path is a directory, got nil error")
+	}
+}
+
+func TestDefaultPathFallsBackToHomeConfigWithoutXDG(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	got := defaultPath()
+	want := filepath.Join(home, ".config", "sandbar", "profiles.yaml")
+	if got != want {
+		t.Errorf("defaultPath() = %q, want %q", got, want)
+	}
+}
+
 func TestSecondLocalRejected(t *testing.T) {
 	path := testPath(t)
 	s, err := LoadFrom(path)

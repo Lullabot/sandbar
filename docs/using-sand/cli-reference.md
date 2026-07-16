@@ -56,6 +56,7 @@ not a prompt.
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
+| `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 
 ### There is no `--ref` flag
 
@@ -137,6 +138,9 @@ sand create --name myproj --clone-url https://github.com/org/repo.git \
 # Non-default resources, explicit identity.
 sand create --name big --cpus 8 --memory 16GiB --disk 200GiB \
   --git-name "Jane Dev" --git-email jane@example.com
+
+# Create on a specific connection profile (see Connection Profiles).
+sand create --profile work
 ```
 
 ### Verified `--help` output
@@ -156,6 +160,7 @@ binary, so there is no ref to pin).
 Examples:
   sand create                                                   # host git identity
   sand create --git-name "Your Name" --git-email you@example.com
+  sand create --profile work                                    # create on the "work" connection profile
 
 Flags:
   -base-name string
@@ -184,6 +189,8 @@ Flags:
     	RAM, e.g. 8GiB (default "8GiB")
   -name string
     	Lima instance name (default "claude")
+  -profile string
+    	Connection profile to create on (default: the last-used profile, else "local")
   -rebuild
     	Delete and rebuild the base image first, then create
   -recreate
@@ -202,7 +209,7 @@ Attach a shell to `NAME`'s persistent tmux session in the guest. This is the
 same attach path the TUI's `S` key uses, so the two entrypoints never drift.
 
 ```
-Usage: sand shell NAME
+Usage: sand shell NAME [--profile <name>]
 
 Attach a shell to NAME's persistent tmux session in the guest.
 
@@ -219,11 +226,32 @@ own current one, so two terminals can look at two different windows of the
 same VM.
 
 The named VM must already exist and be running (see 'sand' to list instances,
-or 'sand create' to make one).
+or 'sand create' to make one). If NAME is managed under more than one
+connection profile, --profile picks which one to attach to.
 ```
 
-`NAME` is required (exactly one positional argument); `sand shell` refuses a
-VM that does not exist or is not running.
+`NAME` is required (exactly one positional argument); `--profile` may appear
+before or after `NAME`. `sand shell` refuses a VM that does not exist or is
+not running.
+
+### Cross-profile resolution
+
+Because the same VM name can exist under more than one
+[Connection Profile](connection-profiles.md), `sand shell NAME` resolves
+which one you mean like this:
+
+1. **`--profile <name>`** given explicitly — used directly. An unknown or
+   disabled profile name is a hard error.
+2. With no `--profile`: if only one connection profile is enabled, `sand
+   shell` uses it directly (this is also what a single-profile setup — the
+   out-of-the-box default — always does, so nothing changes if you never
+   create a second profile).
+3. With more than one enabled profile: `sand shell` looks up which enabled
+   profile's registry actually owns a VM named `NAME`. Zero owners is "no
+   such VM"; exactly one owner is used automatically; more than one owner
+   (the same name exists on two profiles) is an error asking you to pass
+   `--profile` to disambiguate, and lists the profile names it's ambiguous
+   between.
 
 ## `sand version` / `sand --version`
 
