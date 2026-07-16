@@ -109,12 +109,35 @@ jobs:
         uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1
 
       # Cache the downloaded Debian cloud image across runs so repeat builds
-      # don't re-download it. Keyed on the Lima version from the setup step.
+      # don't re-download it. Keyed on the Lima version from the setup step;
+      # restore-keys lets a Lima version bump reuse the previous cache (the
+      # Debian image choice is not tied to the Lima version) instead of
+      # re-downloading the image cold.
       - name: Cache Lima image downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/lima
           key: lima-${{ steps.lima.outputs.version }}
+          restore-keys: |
+            lima-
+
+      # Persist sand's host-side apt-archives cache across runs. buildBase
+      # seeds the guest's /var/cache/apt/archives from this directory before
+      # the base playbook runs and harvests it back afterwards (see
+      # internal/provision/aptcache.go), so with a restored cache the cold
+      # `--rebuild` build below — and the minimal base the cmd/sand limae2e
+      # tests build — is CPU-bound (unpack/configure) instead of re-downloading
+      # every .deb from Debian/NodeSource/Docker/etc. on each run. Keyed on the
+      # playbook content so a playbook change saves the freshly harvested set;
+      # restore-keys makes any older cache a useful partial hit (apt fetches
+      # only what is missing or has a newer version upstream).
+      - name: Cache apt packages fetched during base builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/sand/apt-cache
+          key: sand-apt-${{ hashFiles('site.yml', 'roles/**', 'group_vars/**') }}
+          restore-keys: |
+            sand-apt-
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
