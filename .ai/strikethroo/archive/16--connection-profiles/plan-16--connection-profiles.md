@@ -799,10 +799,10 @@ Verified acyclic; no orphan or circular references.
 - ✔️ Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007) — `completed`
 - ✔️ Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007, 013) — `completed`
 
-### Phase 5: Docs & regression gate
+### ✅ Phase 5: Docs & regression gate (parallel — disjoint files)
 **Parallel Tasks:**
-- Task 011: Update all documentation for Connection Profiles and the env-var removal (depends on: 005, 008, 009, 010)
-- Task 012: Fleet-wide integration & regression tests and coverage-floor gate (depends on: 007, 008, 009, 010, 013)
+- ✔️ Task 011: Update all documentation for Connection Profiles and the env-var removal (depends on: 005, 008, 009, 010) — `completed`
+- ✔️ Task 012: Fleet-wide integration & regression tests and coverage-floor gate (depends on: 007, 008, 009, 010, 013) — `completed`
 
 ### Post-phase Actions
 - After each phase run `go build ./...` and `go test ./... -race`; a phase is not complete until the tree compiles and the suite is green (per `POST_PHASE.md`).
@@ -810,3 +810,38 @@ Verified acyclic; no orphan or circular references.
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 12
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-15
+
+### Results
+
+Connection Profiles shipped across 5 phases / 13 tasks. A single `sand` now
+manages VMs across multiple locations at once:
+
+- **`internal/profiles`** — new secret-free profile store (`~/.config/sandbar/profiles.yaml`, YAML, atomic write, corrupt quarantine, seed-one-Local, last-used-by-id, single-Local + duplicate-target validation, immutable id / renameable name).
+- **Fleet** — `provider.BuildFleet` constructs one `{profile, provider, scope}` binding per enabled profile; `provider.Resolve` and the `SAND_PROVIDER`/`SAND_REMOTE_*` env surface are removed (E2E-only vars renamed `LIMA_REMOTE_E2E*`).
+- **Async fleet TUI** — the model is a fleet of per-profile sub-states; per-member async list/preflight (startup never blocks on a remote), errored-member self-heal with backoff (5s→30s→60s), the `ui.hostFiles` global retired to a per-tile seam, per-member reconcile/heartbeats, and a "Connecting to N profiles…" empty state.
+- **Profile UI** — a management screen (`p`: create/edit/enable/disable/delete, live fleet mutation, jobs-registry idle gate, rename ungated) and a create-form profile selector defaulting to last-used.
+- **Provenance** — per-tile `[profile]` labels; the status bar grows one host-stats band per connected profile with banner rows for disabled/errored and 80-col degradation.
+- **Scope-qualified identity** — every per-VM store keyed by `(scope, name)`: secrets (schema v2→v3), the registry index (schema v2→v3, JSON array — added mid-execution, see below), and the in-memory heartbeat/jobs/focus stores; both prune sites (reconcile + explicit delete) scope-qualified so a same-named VM on another profile is never touched.
+- **Docs** — `remote-hosts.md` → `connection-profiles.md` (+ nav), tui/cli/files-and-state/secrets/README/AGENTS/CHANGELOG updated; env-var removal documented.
+
+Final gate (the exact CI command): `go build`/`go vet`/`gofmt` clean, `go test ./... -race` green, coverage **87.4% ≥ 87% floor**. Real-binary check: with the removed env vars set, `sand shell` ignored them, stayed local, and seeded a single-Local `profiles.yaml` (zero-config parity + env-var removal confirmed end-to-end).
+
+### Noteworthy Events
+
+- **[Significant] Registry keying gap found mid-execution → Task 13 added.** The plan (and its refinement) assumed the registry needed "no schema change" because entries already carry a `Scope`. During Phase 3 the registry index was found to be `vms map[string]entry` keyed by **bare name** — scope-aware only *defensively*; it could not hold a local `web` and a remote `web` at once (the second `AddScoped` overwrote the first). This blocked success criterion 9 (same-name coexistence) and the task-2/task-6 scope work would have been incoherent without it. **Decision (user-approved): add the registry migration** — re-key by `(scope, name)`, JSON-array v3 on-disk, v1→v2→v3 migration lifting each legacy entry under its own recorded scope. The plan's Background and Integration Strategy were corrected in place. (The alternative, descoping criterion 9 per YAGNI, was offered and declined.)
+- **Two clarifications resolved during refinement, carried into execution:** errored profiles **self-heal with backoff** (not manual re-enable), and profiles carry an **immutable id** distinct from the renameable name so `--profile`/last-used survive a rename.
+- **Coverage dipped to 84.6% after the feature landed** (new management-view/profiles code out-ran its per-task tests) and was backfilled to **87.4%** in task 12, chiefly by driving the management screen through real key sequences.
+- **Two on-disk migrations** (secrets v3, registry v3), both reading pre-migration files as local-scoped — existing installs upgrade with zero manual steps.
+- No phase required a rollback; every phase passed `go test ./... -race` before commit. Phases 3–4 were run **sequentially** (not parallel) because their tasks share `cmd/sand/main.go` / the `internal/ui` package and would have clobbered each other.
+
+### Necessary follow-ups
+
+- **Real-remote (`limae2e`) validation is still pending.** Self-validation steps needing a live SSH+Lima host (two-profile aggregation on a real remote, per-tile remote disk sampling, delete-leaves-remote-server-intact) were validated at the teatest/fake-provider level (the plan's accepted substitute) but not against a real remote. Run the `limae2e`-tagged suite against an SSH-reachable Lima host before release.
+- **Minor duplication:** `internal/ui/profilesview.go`'s `buildProfileProvider` duplicates `cmd/sand/resolve.go`'s `providerForProfile` (deliberate, per the repo's import-cycle-avoidance precedent). Consider extracting a shared constructor if a third caller appears.
+- **`mkdocs build` not run** (mkdocs not installed in the execution environment); internal links were checked by hand. Verify the docs site builds in CI.
+- The `p` (Profiles) keybinding is intentionally omitted from the board footer help (to keep board goldens stable) and documented only on the `?` screen; consider surfacing it in the footer in a follow-up that regenerates those goldens.
