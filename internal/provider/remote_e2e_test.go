@@ -204,8 +204,12 @@ func TestE2ERemoteLima(t *testing.T) {
 	if err := reg.AddScoped(vmCfg, scope); err != nil {
 		t.Fatalf("AddScoped: %v", err)
 	}
-	if !reg.IsManaged(name) {
-		t.Fatalf("%s not recorded managed after AddScoped", name)
+	// IsManagedInScope, not the bare IsManaged: since the registry was re-keyed
+	// by (scope, name), the unscoped conveniences are LOCAL-scope shorthands, and
+	// a remote-scoped entry is deliberately invisible to them — the same
+	// isolation the LocalScope assertion below pins from the other side.
+	if !reg.IsManagedInScope(name, scope) {
+		t.Fatalf("%s not recorded managed under its remote scope after AddScoped", name)
 	}
 	if base, managed := reg.BaseInScope(name, scope); !managed || base != baseName {
 		t.Fatalf("BaseInScope(%s, remote scope) = (%q, %v), want (%q, true)", name, base, managed, baseName)
