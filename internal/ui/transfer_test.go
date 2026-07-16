@@ -11,6 +11,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -82,6 +83,7 @@ func TestTransferDestIsTheUsersDirectoryVerbatim(t *testing.T) {
 			m := newTestModelWithCli(t, lima.New(rec))
 			m.view = viewDest
 			m.transferVM = "web"
+			m.transferScope = registry.LocalScope
 			m.transferSrc = tc.srcPath
 			m.transferUpload = tc.upload
 			m.transferRecursive = tc.recursive
@@ -135,6 +137,7 @@ func TestBrowseSelectionTargetsTransferVMNotFocus(t *testing.T) {
 	// Mirror startTransfer's upload setup directly (as TestTransferDestIsTheUsersDirectoryVerbatim
 	// does), so the browser lists a temp dir we control instead of the real cwd.
 	m.transferVM = "xfer-vm"
+	m.transferScope = registry.LocalScope
 	m.transferUpload = true
 	m.browser = browse.NewBrowser(browse.NewLocalLister(), "Upload")
 	m.browser.SetSize(80, 20)
@@ -175,6 +178,8 @@ func TestDestEscClearsBrowserSelection(t *testing.T) {
 	}
 
 	m.transferVM = "claude"
+
+	m.transferScope = registry.LocalScope
 	m.transferUpload = false
 	m.browser = browse.NewBrowser(browse.NewLocalLister(), "Download")
 	m.browser.SetSize(80, 20)

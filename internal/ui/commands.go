@@ -9,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,10 +21,17 @@ import (
 // Message types flowing through Update. Every blocking lima/provision call is
 // wrapped in a tea.Cmd that returns one of these — Update itself never blocks.
 type (
-	// vmsLoadedMsg carries the result of a List refresh.
+	// vmsLoadedMsg carries the result of one FLEET MEMBER's List refresh. scope
+	// is the identity of the member the result belongs to, so Update routes it
+	// to the right sub-state — a fleet lists every member on its own tea.Cmd,
+	// and a bare (untagged) result would be ambiguous the moment more than one
+	// profile is live. A zero-value scope routes to the active member (see
+	// model.routeIndex), which is what lets a test drive its single member with
+	// a bare vmsLoadedMsg{...}.
 	vmsLoadedMsg struct {
-		vms []vm.VM
-		err error
+		scope registry.Scope
+		vms   []vm.VM
+		err   error
 		// The host's own capacity, sampled in the same command for the same reason as
 		// the per-VM stats: hostMemBytes reads /proc/meminfo and hostDiskFree statfs's
 		// the Lima volume, and the header called BOTH on every render. Zero means "not
@@ -41,12 +50,17 @@ type (
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
-	// warn carries a non-fatal problem (currently: a failed ApplySecrets) that
-	// must NOT be treated as a failure — err staying nil is what tells the
-	// handler in model.go the action itself succeeded.
+	// scope is the owning member's scope, so the handler prunes (on delete) and
+	// refreshes the RIGHT profile — a delete fired on a remote VM must never
+	// prune the active/local scope's same-named state. A zero-value scope falls
+	// back to the active member (tests). warn carries a non-fatal problem
+	// (currently: a failed ApplySecrets) that must NOT be treated as a failure —
+	// err staying nil is what tells the handler in model.go the action itself
+	// succeeded.
 	actionDoneMsg struct {
 		action string
 		name   string
+		scope  registry.Scope
 		err    error
 		warn   string
 	}
@@ -68,31 +82,46 @@ type (
 	}
 )
 
-// listCmd loads the VM list off the Update goroutine, and measures each VM's
-// real disk consumption here in the command — a blocking per-VM stat that must
-// NOT run in Update, so an unresponsive mount (stale NFS, sleeping USB, autofs)
-// can't stall the Bubble Tea event loop. A non-positive result leaves DiskUsed
-// empty so the cell renders blank.
+// refreshCmd lists ONE fleet member off the Update goroutine, tagging the
+// result with that member's scope so Update routes it to the right sub-state.
+// Each member gets its own refreshCmd, so a slow or unreachable remote never
+// blocks another member's list (or the UI) — the whole point of the async
+// fleet.
 //
-// The tile's up/last-used times are sampled here for THE SAME REASON, and they were
-// not: the tile computed them inside View, so every frame ran up to three os.Stat
-// calls per tile against the Lima instance dir. A building board re-renders ~10x a
-// second for its spinner, so a three-VM fleet was issuing ~90 stat syscalls per
-// second on the Bubble Tea goroutine — and one stale mount would have stalled the
-// whole UI, which is precisely the hazard the comment above already forbids.
-func listCmd(p provider.Provider) tea.Cmd {
+// It measures each VM's real disk consumption AND its up/last-used times here in
+// the command, through THIS MEMBER's host-access seam (hf) — a blocking per-host
+// stat that must NOT run in Update, so an unresponsive mount (stale NFS, a
+// wedged SSH host) can't stall the Bubble Tea event loop, and so a remote VM's
+// files are stat'd on the REMOTE host while a local VM's are stat'd locally, in
+// the same refresh. This is what retired the ui.hostFiles process-global: the
+// seam is the member's, resolved per VM by its owning profile. A non-positive
+// disk result leaves DiskUsed empty so the cell renders blank.
+//
+// When preflight is true it runs the backend's Preflight FIRST (startup, and an
+// errored member's self-heal retry) so a wedged handshake surfaces as an error
+// binding rather than a blocked list; a member already connected skips it.
+func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, preflight bool) tea.Cmd {
 	return func() tea.Msg {
-		vms, err := p.List()
+		if prov == nil {
+			// An error binding: nothing to list. Surfaced as an errored member.
+			return vmsLoadedMsg{scope: sc, err: errNoProvider}
+		}
+		if preflight {
+			if err := prov.Preflight(); err != nil {
+				return vmsLoadedMsg{scope: sc, err: err}
+			}
+		}
+		vms, err := prov.List()
 		if err == nil {
 			for i := range vms {
-				if n := diskUsedBytes(vms[i].Dir); n > 0 {
+				if n := diskUsedBytes(hf, vms[i].Dir); n > 0 {
 					vms[i].DiskUsed = strconv.FormatInt(n, 10)
 				}
 				if vms[i].Status == limaRunning {
-					if t, ok := upSince(vms[i].Dir); ok {
+					if t, ok := upSince(hf, vms[i].Dir); ok {
 						vms[i].UpSince = t
 					}
-				} else if t, ok := lastUsed(vms[i].Dir); ok {
+				} else if t, ok := lastUsed(hf, vms[i].Dir); ok {
 					vms[i].LastUsed = t
 				}
 			}
@@ -102,7 +131,7 @@ func listCmd(p provider.Provider) tea.Cmd {
 		// so each field falls back to sampling THIS machine directly — the unchanged
 		// local behaviour. Sampled here, off the Update goroutine, because the remote
 		// case is a blocking ssh round trip.
-		res := p.HostResources()
+		res := prov.HostResources()
 		mem := res.MemBytes
 		if mem == 0 {
 			mem = hostMemBytesFn()
@@ -111,9 +140,14 @@ func listCmd(p provider.Provider) tea.Cmd {
 		if disk == 0 {
 			disk = hostDiskFreeFn()
 		}
-		return vmsLoadedMsg{vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: p.HostUser()}
+		return vmsLoadedMsg{scope: sc, vms: vms, err: err, hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser()}
 	}
 }
+
+// errNoProvider is what an error binding's member reports as its list error: its
+// provider failed to construct, so there is nothing to list. It is surfaced as
+// the member's lastErr (task 10's status bar) rather than crashing the fleet.
+var errNoProvider = fmt.Errorf("connection profile could not be constructed")
 
 // startCmd boots a stopped VM and then writes its host-stored secrets into
 // the guest. A secrets failure is reported as a warning, not a failure: a VM
@@ -123,23 +157,23 @@ func listCmd(p provider.Provider) tea.Cmd {
 // Note: a VM started outside sand (a bare `limactl start`) does not get
 // freshly applied secrets — it sources whatever secrets.env was last written
 // by a previous sand-initiated start (or none, if there never was one).
-func startCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func startCmd(p provider.Provider, scope registry.Scope, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if err := p.Start(name); err != nil {
-			return actionDoneMsg{action: "start", name: name, err: err}
+			return actionDoneMsg{action: "start", name: name, scope: scope, err: err}
 		}
 		warn := ""
 		if err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
-		return actionDoneMsg{action: "start", name: name, warn: warn}
+		return actionDoneMsg{action: "start", name: name, scope: scope, warn: warn}
 	}
 }
 
 // stopCmd shuts a running VM down.
-func stopCmd(p provider.Provider, name string) tea.Cmd {
+func stopCmd(p provider.Provider, scope registry.Scope, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "stop", name: name, err: p.Stop(name)}
+		return actionDoneMsg{action: "stop", name: name, scope: scope, err: p.Stop(name)}
 	}
 }
 
@@ -148,19 +182,19 @@ func stopCmd(p provider.Provider, name string) tea.Cmd {
 // This is not redundant with startCmd: restartCmd drives cli.Stop/cli.Start
 // directly rather than re-dispatching startCmd, so it would otherwise skip
 // the apply step entirely.
-func restartCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func restartCmd(p provider.Provider, scope registry.Scope, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		if err := p.Stop(name); err != nil {
-			return actionDoneMsg{action: "restart", name: name, err: err}
+			return actionDoneMsg{action: "restart", name: name, scope: scope, err: err}
 		}
 		if err := p.Start(name); err != nil {
-			return actionDoneMsg{action: "restart", name: name, err: err}
+			return actionDoneMsg{action: "restart", name: name, scope: scope, err: err}
 		}
 		warn := ""
 		if err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard); err != nil {
 			warn = "secrets not applied: " + err.Error()
 		}
-		return actionDoneMsg{action: "restart", name: name, warn: warn}
+		return actionDoneMsg{action: "restart", name: name, scope: scope, warn: warn}
 	}
 }
 
@@ -178,29 +212,31 @@ func restartCmd(p provider.Provider, name, user string, scopes map[string]map[st
 // because the VM itself already started/stopped successfully — this command's
 // entire job IS the apply, so its failure is reported as a real error
 // (actionDoneMsg.err), not swallowed into a warning next to a false "ok".
-func applySecretsCmd(p provider.Provider, name, user string, scopes map[string]map[string]string) tea.Cmd {
+func applySecretsCmd(p provider.Provider, scope registry.Scope, name, user string, scopes map[string]map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		err := provision.ApplySecrets(context.Background(), p, name, user, scopes, io.Discard)
-		return actionDoneMsg{action: "apply secrets", name: name, err: err}
+		return actionDoneMsg{action: "apply secrets", name: name, scope: scope, err: err}
 	}
 }
 
 // secretsFor returns the guest user and the VM's full scope map (global plus
-// any directory-scoped secrets), defaulting the user to the host username
-// when the VM has no recorded config (mirroring openResetForm's fallback in
-// detail.go).
-func (m model) secretsFor(name string) (user string, scopes map[string]map[string]string) {
+// any directory-scoped secrets) FOR THE GIVEN SCOPE, defaulting the user to the
+// host username when the VM has no recorded config (mirroring openResetForm's
+// fallback in detail.go). scope is the owning member's — a fleet may hold a
+// same-named VM under two profiles, each with its own recorded config and
+// secrets, so the caller passes the scope of the VM it is acting on.
+func (m model) secretsFor(scope registry.Scope, name string) (user string, scopes map[string]map[string]string) {
 	user = vm.HostUser()
-	if cfg, ok := m.reg.ConfigInScope(name, m.scope); ok && cfg.User != "" {
+	if cfg, ok := m.reg.ConfigInScope(name, scope); ok && cfg.User != "" {
 		user = cfg.User
 	}
-	return user, m.sec.GetAll(name, m.scope)
+	return user, m.sec.GetAll(name, scope)
 }
 
 // deleteCmd force-removes a VM.
-func deleteCmd(p provider.Provider, name string) tea.Cmd {
+func deleteCmd(p provider.Provider, scope registry.Scope, name string) tea.Cmd {
 	return func() tea.Msg {
-		return actionDoneMsg{action: "delete", name: name, err: p.Delete(name, true)}
+		return actionDoneMsg{action: "delete", name: name, scope: scope, err: p.Delete(name, true)}
 	}
 }
 
@@ -213,7 +249,7 @@ func deleteCmd(p provider.Provider, name string) tea.Cmd {
 // here): model.go's actionDoneMsg handler builds its status label as
 // `action + " " + name`, so passing a descriptive count keeps that label
 // readable ("stop all (3 VMs) ok") instead of leaving a trailing space.
-func stopAllCmd(p provider.Provider, names []string) tea.Cmd {
+func stopAllCmd(p provider.Provider, scope registry.Scope, names []string) tea.Cmd {
 	return func() tea.Msg {
 		var failed []string
 		for _, n := range names {
@@ -225,7 +261,7 @@ func stopAllCmd(p provider.Provider, names []string) tea.Cmd {
 		if len(failed) > 0 {
 			err = fmt.Errorf("could not stop: %s", strings.Join(failed, ", "))
 		}
-		return actionDoneMsg{action: "stop all", name: fmt.Sprintf("(%d VMs)", len(names)), err: err}
+		return actionDoneMsg{action: "stop all", name: fmt.Sprintf("(%d VMs)", len(names)), scope: scope, err: err}
 	}
 }
 
@@ -252,15 +288,15 @@ func stopAllCmd(p provider.Provider, names []string) tea.Cmd {
 //     shell <name>` rather than reaching into the provider directly, so the
 //     fast path and a user typing the command by hand are the exact same
 //     code.
-func shellCmd(p provider.Provider, v vm.VM) tea.Cmd {
+func shellCmd(p provider.Provider, scope registry.Scope, v vm.VM) tea.Cmd {
 	if hostInTmux() {
-		return hostTmuxWindowCmd(v.Name)
+		return hostTmuxWindowCmd(scope, v.Name)
 	}
 
 	argv := p.AttachArgv(v)
 	c := exec.Command(argv[0], argv[1:]...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return actionDoneMsg{action: "shell", name: v.Name, err: err}
+		return actionDoneMsg{action: "shell", name: v.Name, scope: scope, err: err}
 	})
 }
 
@@ -285,14 +321,14 @@ var runHostTmuxNewWindow = func(shellCommand string) error {
 // suspending) tea.Cmd that opens name's shell in a new HOST tmux window. See
 // shellCmd's doc comment for why this must never be wrapped in
 // tea.ExecProcess.
-func hostTmuxWindowCmd(name string) tea.Cmd {
+func hostTmuxWindowCmd(scope registry.Scope, name string) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
 			self = "sand" // last resort: PATH lookup: os.Executable rarely fails
 		}
 		err = runHostTmuxNewWindow(hostTmuxShellCommand(self, name))
-		return actionDoneMsg{action: "shell", name: name, err: err}
+		return actionDoneMsg{action: "shell", name: name, scope: scope, err: err}
 	}
 }
 

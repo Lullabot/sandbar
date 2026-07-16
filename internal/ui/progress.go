@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -131,17 +132,22 @@ func (m *model) beginReset(title string, run provisionFunc, cfg vm.CreateConfig)
 // its cpus, its clone URL, its GitHub token — to whatever run was already in
 // flight under that name.
 func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, recreates bool) tea.Cmd {
-	if key, busy := m.jobs.runningKey(m.scope, cfg.Name); busy {
+	// A create/reset targets the form's member (m.formScope): the active member
+	// for a new VM, the reset target's own member for a reset. All of this build's
+	// keys — the running-check, the provision job, the focus ring — resolve
+	// through it, so a build can never land on the wrong profile.
+	sc := m.formScope
+	if key, busy := m.jobs.runningKey(sc, cfg.Name); busy {
 		m.logMsg(cfg.Name + " already has a run in flight — wait for it to finish, or cancel it from its log")
 		return m.showJob(key)
 	}
-	cmd, started := m.beginStream(provisionKey(m.scope, cfg.Name), title, func(ctx context.Context, out io.Writer) error {
+	cmd, started := m.beginStream(provisionKey(sc, cfg.Name), title, func(ctx context.Context, out io.Writer) error {
 		return run(ctx, cfg, out)
 	})
 	if !started {
 		return cmd
 	}
-	m.jobs.markProvision(m.scope, cfg.Name, cfg, recreates)
+	m.jobs.markProvision(sc, cfg.Name, cfg, recreates)
 	// The signature moment: submitting the create form drops the user back on the
 	// BOARD, where a new tile is already showing a building badge and a filling
 	// progress bar, and where they can arrow away and start a second VM. Landing on
@@ -153,7 +159,7 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 	// this is not the board moving focus, it is the user creating the thing they are
 	// now looking at. Without it a create started from the empty slot leaves the ring
 	// on the empty slot, and `l` would not open the log of the build they just began.
-	m.focusVM = vmHandle{Scope: m.scope, Name: cfg.Name}
+	m.focusVM = vmHandle{Scope: sc, Name: cfg.Name}
 	m.view = viewBoard
 	return cmd
 }
@@ -163,8 +169,8 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 // anyway, so a failed provision can be interrogated instead of merely announced.
 // logKey decides WHICH run a VM holding two of them shows; a failed build wins,
 // because that is the tile the user is pressing `l` on.
-func (m *model) showJobLog(name string) tea.Cmd {
-	key, ok := m.jobs.logKey(m.scope, name)
+func (m *model) showJobLog(scope registry.Scope, name string) tea.Cmd {
+	key, ok := m.jobs.logKey(scope, name)
 	if !ok {
 		return nil
 	}

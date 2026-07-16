@@ -386,6 +386,13 @@ type heartbeat struct {
 	seen bool
 }
 
+// shellFor resolves the guestShell that reaches a VM's guest, by the scope of
+// the profile that owns it. A fleet holds VMs across profiles, and a heartbeat
+// must open through the OWNING member's provider — a remote VM's shell into the
+// remote host, a local VM's into local Lima — so the registry resolves the shell
+// per (scope, name) rather than holding one for the whole fleet.
+type shellFor func(registry.Scope) guestShell
+
 // heartbeatRegistry owns every live heartbeat. A nil *heartbeatRegistry is safe to
 // call every method on and reports "no heartbeats", so a model built by hand needs
 // none.
@@ -399,18 +406,27 @@ type heartbeatRegistry struct {
 
 	nextEpoch uint64
 
-	// shell is the seam onto lima.Client; interval and retry are settable so the
-	// lifecycle tests need not sleep for real seconds.
-	shell    guestShell
+	// shell resolves the backend seam for a heartbeat's scope (fleet.go's
+	// per-member provider); interval and retry are settable so the lifecycle
+	// tests need not sleep for real seconds.
+	shell    shellFor
 	interval time.Duration
 	retry    time.Duration
 }
 
+// newHeartbeats builds a registry whose heartbeats all open through the SAME
+// shell, regardless of scope — the single-provider case and every test that
+// passes one concrete shell (a nil shell means start opens nothing).
+// newHeartbeatsResolver is the fleet form that dispatches per scope.
 func newHeartbeats(shell guestShell) *heartbeatRegistry {
+	return newHeartbeatsResolver(func(registry.Scope) guestShell { return shell })
+}
+
+func newHeartbeatsResolver(resolve shellFor) *heartbeatRegistry {
 	return &heartbeatRegistry{
 		beats:    make(map[vmHandle]*heartbeat),
 		cooldown: make(map[vmHandle]time.Time),
-		shell:    shell,
+		shell:    resolve,
 		interval: heartbeatInterval,
 		retry:    heartbeatRetry,
 	}
@@ -423,6 +439,13 @@ func newHeartbeats(shell guestShell) *heartbeatRegistry {
 // with a same-named VM under another.
 func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-chan guestSample, bool) {
 	if r == nil || r.shell == nil {
+		return 0, nil, false
+	}
+	// Resolve the backend for THIS VM's scope up front: no owning provider
+	// (an error binding, or an unknown scope) means there is no guest to open a
+	// shell into, exactly like a nil single-provider shell.
+	shell := r.shell(scope)
+	if shell == nil {
 		return 0, nil, false
 	}
 	key := vmHandle{Scope: scope, Name: name}
@@ -444,7 +467,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
 	r.beats[key] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch}
-	shell, interval := r.shell, r.interval
+	interval := r.interval
 	r.mu.Unlock()
 
 	go func() {
@@ -611,10 +634,13 @@ func (r *heartbeatRegistry) forget(scope registry.Scope, keep map[string]bool) {
 }
 
 // heartbeatSampleMsg carries one reading — or, with ok false, the end of that VM's
-// stream — back into Update. It is VM-keyed (a heartbeat, unlike a job, is one per
-// VM by definition), and epoch-keyed too, so a reading from a connection that has
-// since been replaced cannot be recorded against its successor.
+// stream — back into Update. It is keyed by the full (scope, vm) handle so a
+// reading routes to the OWNING member's heartbeat (a fleet may hold two
+// same-named VMs under different profiles), and epoch-keyed too, so a reading
+// from a connection that has since been replaced cannot be recorded against its
+// successor.
 type heartbeatSampleMsg struct {
+	scope  registry.Scope
 	vm     string
 	epoch  uint64
 	sample guestSample
@@ -625,13 +651,13 @@ type heartbeatSampleMsg struct {
 // blocking receive happens on a tea.Cmd's goroutine, never in Update, and Update
 // re-issues it for the next one. The receive is what ends this goroutine when the
 // sampler closes the channel — which is why the sampler closes it on EVERY path.
-func heartbeatReadCmd(name string, epoch uint64, ch <-chan guestSample) tea.Cmd {
+func heartbeatReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan guestSample) tea.Cmd {
 	if ch == nil {
 		return nil
 	}
 	return func() tea.Msg {
 		s, ok := <-ch
-		return heartbeatSampleMsg{vm: name, epoch: epoch, sample: s, ok: ok}
+		return heartbeatSampleMsg{scope: scope, vm: name, epoch: epoch, sample: s, ok: ok}
 	}
 }
 
@@ -705,39 +731,44 @@ func (m model) syncHeartbeats() tea.Cmd {
 		return nil
 	}
 
-	roster := present(m.boardVMs())
-	want := make(map[string]bool, len(m.vms))
-	for _, v := range m.vms {
-		if v.Status == limaRunning && roster[v.Name] {
-			want[v.Name] = true
-		}
-	}
-
-	// Close what should no longer be open: a VM that left Running, or was deleted.
-	// Scoped to m.scope, so this model's roster reconciliation can never stop a
-	// heartbeat belonging to some other profile's same-named VM.
-	for _, name := range m.heartbeats.names(m.scope) {
-		if !want[name] {
-			m.heartbeats.stop(m.scope, name)
-		}
-	}
-	// And open what should be. start is a no-op for a VM that already has one, so
-	// this is idempotent — which it must be, being called on every message.
+	// The board roster is the union across the fleet; each VM carries the scope of
+	// the member that owns it. A heartbeat is opened for a VM that LIMA says is
+	// Running AND that has a tile — reconciled PER MEMBER against that member's
+	// scope, so this model can never stop (or open) a heartbeat belonging to
+	// another profile's same-named VM. See the scope-safety note on the registry.
+	board := m.boardVMs()
 	var cmds []tea.Cmd
-	for _, v := range m.vms {
-		if !want[v.Name] {
-			continue
+	for i := range m.members {
+		sc := m.members[i].scope
+		want := map[string]bool{}
+		for _, bv := range board {
+			if bv.scope == sc && bv.Status == limaRunning {
+				want[bv.Name] = true
+			}
 		}
-		if epoch, ch, ok := m.heartbeats.start(m.scope, v.Name); ok {
-			cmds = append(cmds, heartbeatReadCmd(v.Name, epoch, ch))
+		// Close what should no longer be open in this scope (a VM that left
+		// Running, or was deleted).
+		for _, name := range m.heartbeats.names(sc) {
+			if !want[name] {
+				m.heartbeats.stop(sc, name)
+			}
 		}
+		// And open what should be. start is a no-op for a VM that already has one
+		// (or whose member has no provider), so this is idempotent — which it must
+		// be, being called on every message.
+		for name := range want {
+			if epoch, ch, ok := m.heartbeats.start(sc, name); ok {
+				cmds = append(cmds, heartbeatReadCmd(sc, name, epoch, ch))
+			}
+		}
+		m.heartbeats.forget(sc, want)
 	}
-	m.heartbeats.forget(m.scope, want)
 	return tea.Batch(cmds...)
 }
 
-// sampleOf is the tile renderer's accessor (task 07): the live reading for a VM, or
-// false if there is none to show.
-func (m model) sampleOf(name string) (guestSample, bool) {
-	return m.heartbeats.latest(m.scope, name)
+// sampleOf is the tile/header renderer's accessor (task 07): the live reading for
+// a VM in scope, or false if there is none to show. The caller passes the owning
+// member's scope so two same-named VMs read from their own guests.
+func (m model) sampleOf(scope registry.Scope, name string) (guestSample, bool) {
+	return m.heartbeats.latest(scope, name)
 }

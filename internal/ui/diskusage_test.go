@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // diskUsedBytes reports the allocated on-disk size of <dir>/disk, or -1 when it
@@ -15,7 +17,7 @@ func TestDiskUsedBytes(t *testing.T) {
 	dir := t.TempDir()
 
 	// No `disk` file in the dir → unmeasurable → -1 (so the cell renders blank).
-	if got := diskUsedBytes(dir); got != -1 {
+	if got := diskUsedBytes(lima.LocalFiles(), dir); got != -1 {
 		t.Fatalf("missing disk file: got %d, want -1", got)
 	}
 
@@ -25,13 +27,13 @@ func TestDiskUsedBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-		if got := diskUsedBytes(dir); got <= 0 {
+		if got := diskUsedBytes(lima.LocalFiles(), dir); got <= 0 {
 			t.Fatalf("present disk file: got %d, want > 0", got)
 		}
 	}
 
 	// An empty dir argument is always unmeasurable → -1.
-	if got := diskUsedBytes(""); got != -1 {
+	if got := diskUsedBytes(lima.LocalFiles(), ""); got != -1 {
 		t.Fatalf("empty dir arg: got %d, want -1", got)
 	}
 }

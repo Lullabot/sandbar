@@ -146,9 +146,9 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	if m.jobs == nil {
 		m.jobs = newJobRegistry()
 	}
-	key := provisionKey(m.scope, name)
+	key := provisionKey(registry.LocalScope, name)
 	if cfg.Name == "" {
-		key = transferKey(m.scope, name)
+		key = transferKey(registry.LocalScope, name)
 	}
 	if !m.jobs.begin(&job{
 		key:    key,
@@ -158,7 +158,7 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	}) {
 		t.Fatalf("seedJob: %s already has a run of this kind in flight", name)
 	}
-	m.jobs.markProvision(m.scope, name, cfg, false)
+	m.jobs.markProvision(registry.LocalScope, name, cfg, false)
 	m.progressJob = key
 	m.view = viewProgress
 }
@@ -281,7 +281,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 	if l.m.reg.IsManaged("alpha") {
 		t.Fatal("a cancelled provision must not be recorded as managed")
 	}
-	if got := l.m.statusOf(vm.VM{Name: "alpha", Status: "Running"}); got != statusRunning {
+	if got := l.m.statusOf(registry.LocalScope, vm.VM{Name: "alpha", Status: "Running"}); got != statusRunning {
 		t.Fatalf("a cancelled job's VM should fall back to Lima's status, got %v", got)
 	}
 
@@ -317,7 +317,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 	l.pump("web to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	v := vm.VM{Name: "web", Status: "Running"} // Lima still calls the half-built VM Running
-	if got := l.m.statusOf(v); got != statusFailed {
+	if got := l.m.statusOf(registry.LocalScope, v); got != statusFailed {
 		t.Fatalf("a failed provision must derive Failed, got %v", got)
 	}
 
@@ -334,11 +334,11 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 	if !strings.Contains(s.Output, "FAILED!") {
 		t.Fatalf("the retained job should still carry its log, got %q", s.Output)
 	}
-	if got := l.m.statusOf(v); got != statusFailed {
+	if got := l.m.statusOf(registry.LocalScope, v); got != statusFailed {
 		t.Fatalf("Failed must stay sticky across a refresh, got %v", got)
 	}
 	// And the user can read WHY: the retained run's log is reopenable.
-	if !l.m.vmHasRetainedRun("web") {
+	if !l.m.vmHasRetainedRun(registry.LocalScope, "web") {
 		t.Fatal("a failed VM must offer its retained log — a red tile with no diagnostic is an alarm with no explanation")
 	}
 
@@ -557,7 +557,7 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 	}
 	// The build is visible WHERE THE USER IS: the tile says Building, so the log
 	// they were not dumped into is not the only sign the VM is coming up.
-	if got := l.m.statusOf(vm.VM{Name: "web", Status: "Stopped"}); got != statusBuilding {
+	if got := l.m.statusOf(registry.LocalScope, vm.VM{Name: "web", Status: "Stopped"}); got != statusBuilding {
 		t.Fatalf("the new VM's tile should read Building, got %v", got)
 	}
 	// And the board is live: a second VM can be started without touching the first.
@@ -618,8 +618,8 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	// Lima reports the half-built VM as Running; it always does.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
-	web, _ := l.m.lookupVM("web")
-	if got := l.m.statusOf(web); got != statusFailed {
+	web, _ := l.m.lookupVM(registry.LocalScope, "web")
+	if got := l.m.statusOf(registry.LocalScope, web); got != statusFailed {
 		t.Fatalf("precondition: a failed build's tile must read Failed, got %v", got)
 	}
 
@@ -643,11 +643,11 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 		t.Fatalf("the progress screen should show the running transfer, got %+v (ok=%v)", s, ok)
 	}
 	// … and the failed build is untouched underneath it.
-	if got := l.m.statusOf(web); got != statusFailed {
+	if got := l.m.statusOf(registry.LocalScope, web); got != statusFailed {
 		t.Fatalf("a file copy must not flip a failed build's tile back to green: statusOf(web) = %v, want Failed", got)
 	}
 	// The reopen-log verb still reaches the Ansible failure — the only record of WHY.
-	l.m.showJobLog("web")
+	l.m.showJobLog(registry.LocalScope, "web")
 	s, ok := l.m.shownJob()
 	if !ok || !strings.Contains(s.Output, "the play exploded") {
 		t.Fatalf("`l` must still reopen the failed build's log, got (ok=%v):\n%s", ok, s.Output)
@@ -658,7 +658,7 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	// And the tile STILL says Failed once the copy is done: only the user acting on
 	// the VM (a reset, a delete) clears that.
-	if got := l.m.statusOf(web); got != statusFailed {
+	if got := l.m.statusOf(registry.LocalScope, web); got != statusFailed {
 		t.Fatalf("after the copy finished, statusOf(web) = %v, want Failed", got)
 	}
 }
@@ -695,11 +695,11 @@ func TestARefusedCreateDoesNotPromoteAnInFlightTransfer(t *testing.T) {
 	wrong := vm.CreateConfig{Name: "web", BaseName: "other-base", CPUs: 8, CloneToken: "ghp_secret"}
 	l.exec(l.m.beginProvision("Creating web", mustNotRun(t), wrong))
 
-	web, _ := l.m.lookupVM("web")
-	if got := l.m.statusOf(web); got != statusRunning {
+	web, _ := l.m.lookupVM(registry.LocalScope, "web")
+	if got := l.m.statusOf(registry.LocalScope, web); got != statusRunning {
 		t.Fatalf("a file copy must never render as a build: statusOf(web) = %v, want Running", got)
 	}
-	if l.m.vmBuilding("web") {
+	if l.m.vmBuilding(registry.LocalScope, "web") {
 		t.Fatal("a copy in flight must not gate Delete the way a build does")
 	}
 	if cfg, _ := l.m.jobs.config(registry.LocalScope, "web"); cfg.Name != "" {
@@ -858,7 +858,7 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	l.m.view = viewBoard
-	l.m.showJobLog("web")
+	l.m.showJobLog(registry.LocalScope, "web")
 	s, ok := l.m.shownJob()
 	if !ok || !strings.Contains(s.Output, "copied notes.txt") {
 		t.Fatalf("`l` should reopen the most recent run once the build has succeeded, got (ok=%v):\n%s", ok, s.Output)
@@ -934,8 +934,8 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running", CPUs: 2}}})
 	l.m.focusVM.Name = "web"
 
-	web, _ := l.m.lookupVM("web")
-	if got := l.m.statusOf(web); got != statusBuilding {
+	web, _ := l.m.lookupVM(registry.LocalScope, "web")
+	if got := l.m.statusOf(registry.LocalScope, web); got != statusBuilding {
 		t.Fatalf("precondition: the tile must read Building, got %v", got)
 	}
 	if web.Status != limaRunning {
@@ -1062,7 +1062,7 @@ func TestAListRacingACloneKeepsTheBoardAndIsSaidOnce(t *testing.T) {
 	// says so again rather than staying quiet forever.
 	next, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "api", Status: "Running"}, {Name: "db", Status: "Stopped"}}})
 	m = next.(model)
-	if m.listRaceTicks != 0 {
+	if m.members[0].listRace != 0 {
 		t.Fatal("a successful list must clear the paused state")
 	}
 	next, _ = m.Update(raced)

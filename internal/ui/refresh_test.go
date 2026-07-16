@@ -19,26 +19,26 @@ func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tickRefresh should start the loop while shouldTick holds")
 	}
-	if !m.refreshing {
-		t.Fatal("tickRefresh should mark a loop in flight")
+	if !m.members[0].arming {
+		t.Fatal("tickRefresh should mark the member's loop in flight")
 	}
 
 	// A second call while one is already running must not stack a duplicate
-	// loop.
+	// loop for that member.
 	if again := m.tickRefresh(); again != nil {
-		t.Fatal("a second tickRefresh while one is already running must not start a duplicate loop")
+		t.Fatal("a second tickRefresh while the member is already arming must not start a duplicate loop")
 	}
 
 	// The board is no longer the active screen: the gate closes. tickRefresh
-	// must decline to re-arm AND clear the running flag, so coming back to
-	// the board can start a fresh loop rather than being stuck behind a stale
-	// "already running" flag.
+	// must decline to re-arm AND clear the per-member arming flag, so coming back
+	// to the board can start a fresh loop rather than being stuck behind a stale
+	// "already arming" flag.
 	m.view = viewForm
 	if cmd := m.tickRefresh(); cmd != nil {
 		t.Fatal("tickRefresh must not re-arm once the board is not the active screen")
 	}
-	if m.refreshing {
-		t.Fatal("tickRefresh should clear the running flag once the gate closes")
+	if m.members[0].arming {
+		t.Fatal("tickRefresh should clear the arming flag once the gate closes")
 	}
 }
 

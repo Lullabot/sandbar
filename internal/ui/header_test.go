@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/x/ansi"
@@ -17,7 +18,7 @@ func seedSample(m *model, name string, s guestSample) {
 	if m.heartbeats.beats == nil {
 		m.heartbeats.beats = map[vmHandle]*heartbeat{}
 	}
-	m.heartbeats.beats[vmHandle{Scope: m.scope, Name: name}] = &heartbeat{
+	m.heartbeats.beats[vmHandle{Scope: registry.LocalScope, Name: name}] = &heartbeat{
 		cancel: func() {},
 		ch:     make(chan guestSample, 1),
 		last:   s,

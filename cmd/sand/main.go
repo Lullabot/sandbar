@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/ui"
 	buildversion "github.com/lullabot/sandbar/internal/version"
 
@@ -50,34 +52,32 @@ func main() {
 }
 
 // runTUI launches the interactive Bubble Tea program: the original (and still
-// default) `sand` entrypoint.
+// default) `sand` entrypoint. Unlike the single-provider `sand create`/`sand
+// shell` paths (which resolve ONE profile — see resolveSingle), the TUI builds
+// the WHOLE fleet: one sub-state per enabled connection profile, aggregated into
+// one board. Each member preflights and lists ASYNCHRONOUSLY inside the model
+// (see ui.New / Init), so — unlike the old path — startup never blocks on a
+// remote profile's handshake, and a slow or unreachable remote surfaces as an
+// error profile rather than a frozen program. The per-VM tile sampling reads
+// through each member's OWN host-access seam (retiring the old ui.SetHostFiles
+// process-global), so a remote VM's files are stat'd on the remote host.
 func runTUI() {
-	// scope is the registry.Scope the resolved provider owns (registry.LocalScope
-	// for the default, unconfigured local Lima) — see resolveSingle. The TUI
-	// threads it through to its own manage.Reconcile/RecordSuccess bookkeeping
-	// (internal/ui/model.go) so it stays in lockstep with the headless `sand
-	// create` path (cmd/sand/create.go) on which entries belong to which
-	// provider.
-	p, scope, err := resolveSingle()
+	// profiles.Load quarantines a corrupt file and reseeds a usable (Local-only)
+	// store rather than failing outright, so a load error is reported but not
+	// fatal — the store it returns alongside the error is still safe to build from.
+	store, err := profiles.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+	}
+	fleet := provider.BuildFleet(store)
+	if len(fleet) == 0 {
+		fmt.Fprintln(os.Stderr, "no enabled connection profiles — enable at least one (the local profile is enabled by default)")
 		os.Exit(1)
 	}
-	if err := p.Preflight(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	// Point the TUI's per-VM tile sampling (disk usage, up-since / last-used) at
-	// the same host limactl runs on. For a remote provider that is the remote host
-	// (p.HostFiles() — see provider.Provider.HostFiles); for local Lima it is the
-	// local filesystem, unchanged. Without this the disk gauge stats the remote
-	// instance dir on the laptop and renders "?".
-	ui.SetHostFiles(p.HostFiles())
 
 	// Tell the TUI which build it is, so the header can say so.
 	ui.SetVersion(buildversion.String(version))
-	if _, err := tea.NewProgram(ui.New(p, scope)).Run(); err != nil {
+	if _, err := tea.NewProgram(ui.New(fleet)).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

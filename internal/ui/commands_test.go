@@ -72,7 +72,7 @@ func TestStartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
+	msg := startCmd(testProvider(cli), registry.LocalScope, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -110,7 +110,7 @@ func TestStartFailureSkipsApplySecrets(t *testing.T) {
 	fr := &secretsFakeRunner{failOutput: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
+	msg := startCmd(testProvider(cli), registry.LocalScope, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -129,7 +129,7 @@ func TestRestartAppliesSecretsAfterSuccessfulStart(t *testing.T) {
 	fr := &secretsFakeRunner{}
 	cli := lima.New(fr)
 
-	msg := restartCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
+	msg := restartCmd(testProvider(cli), registry.LocalScope, "claude", "ada", map[string]map[string]string{"": {"GH_TOKEN": "ghp_x"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("restartCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -152,7 +152,7 @@ func TestSecretsWarnNotFailOnApplyFailure(t *testing.T) {
 	fr := &secretsFakeRunner{failStream: true}
 	cli := lima.New(fr)
 
-	msg := startCmd(testProvider(cli), "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
+	msg := startCmd(testProvider(cli), registry.LocalScope, "claude", "ada", map[string]map[string]string{"": {"A": "1"}})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("startCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -254,7 +254,7 @@ func TestSecretsSaveOnRunningVMPushesToGuest(t *testing.T) {
 	cli := lima.New(fr)
 	m := newTestModelWithCli(t, cli)
 	m = resized(m, 100, 30)
-	m.vms = []vm.VM{{Name: "claude", Status: "Running"}}
+	m.members[0].vms = []vm.VM{{Name: "claude", Status: "Running"}}
 	m = openSecretsViaKey(t, m, "claude", "Running")
 	m = typeInto(m, "GH_TOKEN=ghp_new")
 
@@ -310,7 +310,7 @@ func TestSecretsSaveOnStoppedVMDoesNotTouchGuest(t *testing.T) {
 	cli := lima.New(fr)
 	m := newTestModelWithCli(t, cli)
 	m = resized(m, 100, 30)
-	m.vms = []vm.VM{{Name: "claude", Status: "Stopped"}}
+	m.members[0].vms = []vm.VM{{Name: "claude", Status: "Stopped"}}
 	m = openSecretsViaKey(t, m, "claude", "Stopped")
 	m = typeInto(m, "GH_TOKEN=ghp_new")
 
@@ -363,7 +363,7 @@ func TestShellCmdSuspendsWhenHostTMUXUnset(t *testing.T) {
 	t.Setenv("TMUX", "")
 
 	p := &providerfake.Provider{AttachArgvFunc: func(vm.VM) []string { return []string{"limactl", "shell", "claude"} }}
-	msg := shellCmd(p, vm.VM{Name: "claude"})()
+	msg := shellCmd(p, registry.LocalScope, vm.VM{Name: "claude"})()
 
 	if _, ok := msg.(actionDoneMsg); ok {
 		t.Fatal("suspend branch must not resolve to actionDoneMsg directly — that is the fast path's shape, not tea.ExecProcess's")
@@ -394,7 +394,7 @@ func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
 	}
 	t.Cleanup(func() { runHostTmuxNewWindow = orig })
 
-	msg := shellCmd(&providerfake.Provider{}, vm.VM{Name: "claude"})()
+	msg := shellCmd(&providerfake.Provider{}, registry.LocalScope, vm.VM{Name: "claude"})()
 
 	done, ok := msg.(actionDoneMsg)
 	if !ok {

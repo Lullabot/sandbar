@@ -1,15 +1,16 @@
 package ui
 
-// connecting.go renders the startup interstitial shown while the FIRST list from
-// a REMOTE provider is in flight — the SSH handshake to the Lima host, which,
-// unlike local Lima, is not instant. Without it the board renders immediately
-// with host stats sampled from THIS machine (the header falls back to a local
-// probe until the first remote sample lands), which reads as "connected, showing
-// the remote" when it is neither. The interstitial holds that back until the
-// first successful list and, because a remote connect can hang or be
-// misconfigured, keeps ctrl+c / q live so the user can always get out — see the
-// connecting field and its handling in model.go (View, the vmsLoadedMsg handler,
-// and the KeyPressMsg guard).
+// connecting.go renders the board's "the fleet hasn't connected yet" hint. It
+// replaces the old full-screen "Connecting to <host>…" interstitial: a fleet no
+// longer blocks the whole board on one profile's handshake — each member
+// connects, lists and renders on its own, so a slow remote never hides a healthy
+// local's tiles. The only case left worth a special hint is the one the old
+// vmsLoaded guard also protects against: EVERY enabled member is still
+// connecting or errored AND there are no tiles at all, so the board is empty
+// because nothing has landed — not because the user has no VMs. Showing the
+// bare "press enter to add a VM" ghost there would misrepresent an in-flight
+// fleet as an empty one. Once ANY member connects (boardReady), the ghost/roster
+// takes over; task 10's status bar surfaces per-profile connection state.
 
 import (
 	"fmt"
@@ -17,19 +18,31 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// connectingView centres "Connecting to <target>…" (plus the last connect error,
-// if any, and the quit hint) in the terminal. m.width/m.height are seeded to a
-// sane default in New and updated on every WindowSizeMsg, so this centres
-// correctly even before the first real resize.
-func (m model) connectingView() string {
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Connecting to %s…", m.scope.RemoteTarget)),
+// fleetConnectingBanner is the hint shown in the grid area while the whole fleet
+// is still connecting/errored with nothing to show. It names how many profiles
+// are being reached, and — for the common single-profile case — the reason
+// there is nothing yet, without the create invitation that would be a lie about
+// why the board is empty.
+func (m model) fleetConnectingBanner() string {
+	n := m.enabledMemberCount()
+	noun := "profiles"
+	if n == 1 {
+		noun = "profile"
 	}
-	if m.connectErr != nil {
-		lines = append(lines, "", errStyle.Render(m.connectErr.Error()))
-	}
-	lines = append(lines, "", statusStyle.Render("ctrl+c to quit"))
+	body := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Connecting to %d %s…", n, noun))
 
-	body := lipgloss.JoinVertical(lipgloss.Center, lines...)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
+	// Surface the first member's error, if any, so a misconfigured or unreachable
+	// profile is visible rather than a board that just sits blank forever.
+	var errLine string
+	for i := range m.members {
+		if m.members[i].state == connErrored && m.members[i].lastErr != nil {
+			errLine = m.members[i].lastErr.Error()
+			break
+		}
+	}
+	lines := []string{body}
+	if errLine != "" {
+		lines = append(lines, "", errStyle.Render(errLine))
+	}
+	return lipgloss.JoinVertical(lipgloss.Center, lines...)
 }

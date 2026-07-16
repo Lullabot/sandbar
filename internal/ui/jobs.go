@@ -728,7 +728,7 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 // tile renderer and the board call. It looks up the VM's BUILD, never "whatever
 // run it happens to have": a copy in flight is not a build, and must not be able
 // to become one by standing in the same slot.
-func (m model) statusOf(v vm.VM) derivedStatus {
-	job, ok := m.jobs.snapshot(provisionKey(m.scope, v.Name))
+func (m model) statusOf(scope registry.Scope, v vm.VM) derivedStatus {
+	job, ok := m.jobs.snapshot(provisionKey(scope, v.Name))
 	return deriveStatus(v, job, ok)
 }
