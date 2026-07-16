@@ -190,3 +190,45 @@ func TestFleetBoardStaysInteractiveWhileAMemberBlocks(t *testing.T) {
 	tm.Quit()
 	tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
 }
+
+// TestGhostSurvivesPersistentListErrorsAfterFirstSuccess pins finding 10 from
+// the plan-16 code review: boardReady's doc says "has any list ever
+// succeeded", but it used to check members' CURRENT state (connConnected)
+// only — so a sole member that connects with zero VMs (the create-ghost
+// shows, boardReady flips true) and LATER starts failing persistently would
+// flip right back to connErrored, and boardReady would un-ring that bell:
+// the empty board fell back to the "connecting to 1 profile…" hint and Enter
+// stopped creating a VM, even though the fleet had already proven — once —
+// that it has no VMs.
+func TestGhostSurvivesPersistentListErrorsAfterFirstSuccess(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+
+	// First list succeeds with zero VMs: the ghost shows.
+	loaded, _ := m.Update(vmsLoadedMsg{vms: nil})
+	m = loaded.(model)
+	if !m.showsGhost() {
+		t.Fatal("precondition: a successful empty list should show the create-ghost")
+	}
+	if !m.focusIsGhost() {
+		t.Fatal("precondition: the ring should be on the ghost")
+	}
+
+	// The SAME member now starts failing persistently.
+	failed, _ := m.Update(vmsLoadedMsg{err: errAnsibleBoom})
+	m = failed.(model)
+	if m.members[0].state != connErrored {
+		t.Fatalf("precondition: the member should be errored now, got %v", m.members[0].state)
+	}
+
+	// THE FIX: the ghost (and Enter-to-create) must remain — the member
+	// proved, once, that it has no VMs, and a later error must not un-prove
+	// that.
+	if !m.showsGhost() {
+		t.Fatal("the create-ghost must survive a later persistent list error, once the fleet has proven empty")
+	}
+	entered, _ := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if entered.view != viewForm {
+		t.Fatalf("enter on the ghost must still create a VM after a later list error, got view %v", entered.view)
+	}
+}

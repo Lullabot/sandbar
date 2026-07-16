@@ -213,6 +213,11 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 	} else {
 		m.members = append(m.members, mem)
 	}
+	// The heartbeat resolver's snapshot must reflect the fleet as it stands
+	// NOW: a profile enabled (or connection-edited) after New() ran would
+	// otherwise never resolve to a shell, and its VMs would carry em-dash
+	// gauges forever (see heartbeatRegistry.setShell).
+	m.heartbeats.setShell(fleetShellResolver(m.members))
 	if mem.prov == nil {
 		return nil
 	}
@@ -268,6 +273,9 @@ func (m *model) disableProfile(id string) {
 		m.members[i].state = connDisabled
 		m.members[i].lastErr = nil
 	}
+	// The disabled member's provider is now nil; the resolver must reflect
+	// that too, exactly like every other fleet mutation (see setShell).
+	m.heartbeats.setShell(fleetShellResolver(m.members))
 	m.applySize(m.width, m.height)
 }
 
@@ -310,6 +318,10 @@ func (m *model) deleteProfile(id string) {
 			m.active = 0
 		}
 	}
+	// The removed member must not linger in the resolver's snapshot either
+	// (see setShell) — though it is moot in practice here, since the member
+	// (and every heartbeat under its scope) is already gone by this point.
+	m.heartbeats.setShell(fleetShellResolver(m.members))
 	m.applySize(m.width, m.height)
 }
 

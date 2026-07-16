@@ -127,6 +127,16 @@ type fleetMember struct {
 	// guard, so tickRefresh cannot stack duplicate ticks for one member while
 	// still arming the others.
 	arming bool
+
+	// everListed is set the first time this member's list SUCCEEDS (model.go's
+	// vmsLoadedMsg handler), and is NEVER cleared afterward — not by a later
+	// error, not by disable. boardReady asks this in ADDITION to the member's
+	// CURRENT state, because "has this member ever proven it has no VMs" is a
+	// one-way door: a sole member that connects with zero VMs shows the
+	// create-ghost, and a LATER persistent list failure on that same member
+	// must not un-ring that bell and flip the board back to "connecting…" —
+	// which would also stop Enter from creating a VM. See boardReady.
+	everListed bool
 }
 
 // boardVM is one roster entry: a VM plus the scope of the member that owns it.
@@ -251,9 +261,18 @@ func (m model) formProvider() provider.Provider { return m.provFor(m.formScope) 
 // flag: before it holds, syncBoard must not park the ring on the empty-slot
 // ghost and the grid shows the connecting hint (see gridView), because the
 // board is empty because nothing is loaded, not because the user has no VMs.
+//
+// Checked TWO ways, deliberately. state == connConnected is the fast, common
+// case (and is what every test that pokes a member's state directly without
+// going through the vmsLoadedMsg handler still relies on). everListed is the
+// one-way door: it catches the member that connected, proved itself empty,
+// and has SINCE gone connErrored — a currently-connected check alone would
+// flip the board back to the "connecting…" hint (and stop Enter from
+// creating a VM) the moment a sole member's list starts failing, even though
+// the fleet already proved it has no VMs.
 func (m model) boardReady() bool {
 	for i := range m.members {
-		if m.members[i].state == connConnected {
+		if m.members[i].state == connConnected || m.members[i].everListed {
 			return true
 		}
 	}

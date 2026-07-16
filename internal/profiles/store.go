@@ -53,10 +53,18 @@ func Load() (*Store, error) {
 
 // LoadFrom reads the store from an explicit path. A missing or empty file
 // seeds a single enabled Local profile and persists it immediately, so an
-// unconfigured sand behaves as today. A corrupt file is moved aside to
-// "<path>.corrupt" (so a later save cannot silently clobber recoverable
-// data), the error is returned, and the returned store is still seeded and
-// usable — a mangled file never bricks startup.
+// unconfigured sand behaves as today. A corrupt (unparseable) file is moved
+// aside to "<path>.corrupt" (so a later save cannot silently clobber
+// recoverable data), the error is returned, and the returned store is still
+// seeded and usable — a mangled file never bricks startup.
+//
+// A non-ENOENT READ error (e.g. a permission error) is different: the file
+// may be perfectly intact, just unreadable right now, so it is neither
+// persisted over nor quarantined — doing either could destroy recoverable
+// data. The returned store is still seeded with a usable, in-memory-only
+// Local profile (never written to path) alongside the error, so a read
+// failure degrades to "local-only, with a warning" rather than locking the
+// user out of even purely-local VMs.
 func LoadFrom(path string) (*Store, error) {
 	s := &Store{path: path, profiles: map[string]Profile{}}
 
@@ -65,7 +73,8 @@ func LoadFrom(path string) (*Store, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return s, s.seedLocal()
 		}
-		return s, err
+		s.seedLocalInMemory()
+		return s, fmt.Errorf("profiles file at %s could not be read: %w", path, err)
 	}
 	if len(data) == 0 {
 		return s, s.seedLocal()
@@ -83,6 +92,14 @@ func LoadFrom(path string) (*Store, error) {
 	}
 
 	for _, p := range parsed.Profiles {
+		if p.Type == TypeRemoteSSH && p.Port <= 0 {
+			// Canonicalize a hand-edited profile's missing/zero port to the SSH
+			// default (finding 8): resolveTargetConfig's retired defaultRemotePort
+			// was always 22, so a scope/remoteTarget derived here must agree with
+			// one derived from an explicit `port: 22` — never diverge as
+			// "host:0" vs "host:22".
+			p.Port = 22
+		}
 		s.profiles[p.ID] = p
 		s.order = append(s.order, p.ID)
 	}
@@ -94,9 +111,11 @@ func LoadFrom(path string) (*Store, error) {
 	return s, nil
 }
 
-// seedLocal populates the store with a single enabled Local profile and
-// persists it.
-func (s *Store) seedLocal() error {
+// seedLocalInMemory populates the store with a single enabled Local profile
+// WITHOUT persisting it — used when the backing file could not be read at
+// all (LoadFrom's non-ENOENT branch), where writing anything to path risks
+// clobbering a file that may be intact but merely unreadable right now.
+func (s *Store) seedLocalInMemory() {
 	p := Profile{
 		ID:      LocalProfileID,
 		Name:    DefaultLocalName,
@@ -105,6 +124,12 @@ func (s *Store) seedLocal() error {
 	}
 	s.profiles = map[string]Profile{p.ID: p}
 	s.order = []string{p.ID}
+}
+
+// seedLocal populates the store with a single enabled Local profile and
+// persists it.
+func (s *Store) seedLocal() error {
+	s.seedLocalInMemory()
 	return s.save()
 }
 
@@ -154,6 +179,9 @@ func generateID() (string, error) {
 // for a RemoteSSH profile), validates the resulting set, persists it, and
 // returns the stored profile (with its assigned ID).
 func (s *Store) Add(p Profile) (Profile, error) {
+	if p.Type == TypeRemoteSSH && p.Port <= 0 {
+		p.Port = 22 // finding 8: canonicalize before validate() so the scope key is stable
+	}
 	if p.Type == TypeLocal {
 		if _, exists := s.profiles[LocalProfileID]; exists {
 			return Profile{}, errors.New("only one Local profile may exist")
@@ -185,6 +213,9 @@ func (s *Store) Add(p Profile) (Profile, error) {
 // change), validates the resulting set, and persists it. Name may change
 // freely; last-used tracking is by ID, so a rename does not lose it.
 func (s *Store) Update(p Profile) (Profile, error) {
+	if p.Type == TypeRemoteSSH && p.Port <= 0 {
+		p.Port = 22 // finding 8: canonicalize before validate() so the scope key is stable
+	}
 	existing, ok := s.profiles[p.ID]
 	if !ok {
 		return Profile{}, fmt.Errorf("no profile with id %q", p.ID)
@@ -278,17 +309,34 @@ func (s *Store) cloneProfiles() map[string]Profile {
 }
 
 // validate checks the invariants that must hold across the whole profile
-// set: at most one Local profile, and no two enabled RemoteSSH profiles
-// resolving to the same "user@host:port" target.
+// set: every profile has a recognised Type (finding 3 — an unrecognised
+// Type, e.g. a hand-edited "remote_ssh" typo, must be a hard error here
+// rather than silently falling through to LOCAL behaviour elsewhere), a
+// RemoteSSH profile has a non-empty Host (finding 9 — an empty host produces
+// a cryptic `ssh user@` failure far from here otherwise), at most one Local
+// profile, and no two enabled RemoteSSH profiles resolving to the same
+// "user@host:port" target.
+//
+// LoadFrom deliberately does NOT call validate — a bad hand-edited entry
+// must not lock the user out of the rest of the file; it is the store's
+// write path (Add/Update, here) and the provider layer (BuildFleet,
+// providerForProfile) that must catch and surface it.
 func validate(profiles map[string]Profile) error {
 	var localCount int
 	seenTargets := map[string]string{} // target -> profile ID
 	for _, p := range profiles {
-		if p.Type == TypeLocal {
+		switch p.Type {
+		case TypeLocal:
 			localCount++
 			if localCount > 1 {
 				return errors.New("only one Local profile may exist")
 			}
+		case TypeRemoteSSH:
+			if p.Host == "" {
+				return fmt.Errorf("profile %q: remote-ssh profile requires a host", p.ID)
+			}
+		default:
+			return fmt.Errorf("profile %q: unknown profile type %q", p.ID, p.Type)
 		}
 		if p.Type == TypeRemoteSSH && p.Enabled {
 			t := p.remoteTarget()

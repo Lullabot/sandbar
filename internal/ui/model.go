@@ -884,6 +884,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mem.lastErr = nil
 		mem.backoff = 0
 		mem.vms = msg.vms // DiskUsed / UpSince / LastUsed sampled in refreshCmd, off the Update goroutine
+		// everListed latches on the FIRST success and never clears — see its
+		// doc comment (fleet.go) and boardReady.
+		mem.everListed = true
 
 		// ORDER MATTERS, and it is enforced by the data, not by this comment.
 		//
@@ -941,10 +944,22 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner
 		// The action carries the OWNING member's scope, so a delete prunes — and the
-		// follow-up refresh re-lists — the right profile. A zero-value scope (a
-		// hand-built test action) falls back to the active member.
+		// follow-up refresh re-lists — the right profile. Only a ZERO-VALUE scope (a
+		// hand-built test action, which never tags one) falls back to the active
+		// member — mirroring routeIndex's own hardening (fleet.go) for vmsLoadedMsg.
+		//
+		// A genuinely-tagged scope that no longer matches any CURRENT member (the
+		// profile was deleted, or connection-edited and rebuilt, while this action —
+		// a lifecycle action, not a job, so the idle gate never blocked it — was
+		// still in flight) must be used AS-IS for every prune below, never
+		// substituted for the active member's scope: falling back here would prune
+		// (RemoveScoped / secrets.Remove) whatever profile happens to be active right
+		// now, which is a different VM's registry entry and host secrets than the one
+		// this action actually acted on. refreshMemberCmd already reports "nothing to
+		// refresh" for such an orphaned scope via routeIndex, so no extra guard is
+		// needed there.
 		sc := msg.scope
-		if _, ok := m.memberIndex(sc); !ok {
+		if sc == (registry.Scope{}) {
 			sc = m.activeScope()
 		}
 		label := msg.action + " " + msg.name
@@ -1087,6 +1102,29 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(refresh, applyCmd)
 		}
 		return m, refresh
+
+	case toolsetLoadedMsg:
+		// The read was kicked (openForm/cycleFormProfile, form.go) for the scope
+		// the form was targeting AT THE TIME — never the Update goroutine, since
+		// resolving it reads a remote profile's HostFiles over SSH (see
+		// formToolsetCmd). By the time it comes back the user may have closed the
+		// form, switched to reset mode (which has no tool toggles of its own), or
+		// cycled the selector on to a DIFFERENT profile — any of which makes this
+		// result stale. Applying it anyway would clobber the CURRENTLY selected
+		// profile's toggles with a read that belongs to a profile the user has
+		// since left.
+		if m.view != viewForm || m.resetMode || m.formScope != msg.scope {
+			return m, nil
+		}
+		if msg.ok {
+			cfg := vm.DefaultCreateConfig()
+			cfg.ApplyToolset(msg.toolset)
+			m.toolClaude = cfg.WithClaude
+			m.toolDDEV = cfg.WithDDEV
+			m.toolGo = cfg.WithGo
+			m.toolJava = cfg.WithJava
+		}
+		return m, nil
 
 	case tea.KeyPressMsg:
 		// Any key is proof someone is still there, which is half of the idle gate (see

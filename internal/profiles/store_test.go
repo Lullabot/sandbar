@@ -1,8 +1,11 @@
 package profiles
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -447,5 +450,228 @@ func TestSecondLocalRejected(t *testing.T) {
 	_, err = s.Add(Profile{Name: "local2", Type: TypeLocal, Enabled: true})
 	if err == nil {
 		t.Fatal("Add() with a second Local profile: want error, got nil")
+	}
+}
+
+// TestLoadFromReadErrorSeedsUsableLocalStore is finding 6's regression test:
+// a read failure that is NOT "file does not exist" (e.g. a permission error)
+// must not degrade to an empty, unseeded store — that locks the user out of
+// even purely-local VMs (runTUI's "no enabled connection profiles" exit,
+// `sand create` failing). Using a directory at path (rather than chmod,
+// which behaves inconsistently when tests run as root) forces os.ReadFile to
+// fail with something other than fs.ErrNotExist, portably. The fix must
+// return the store seeded with a usable, ENABLED Local profile alongside the
+// error — and must NOT persist over or quarantine the unreadable path, since
+// (unlike a corrupt file) there is no evidence its content is actually bad.
+func TestLoadFromReadErrorSeedsUsableLocalStore(t *testing.T) {
+	path := testPath(t)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("Mkdir(%s) error = %v", path, err)
+	}
+
+	s, err := LoadFrom(path)
+	if err == nil {
+		t.Fatal("LoadFrom() on an unreadable path: want error, got nil")
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("LoadFrom() error = %v, want a read error distinct from fs.ErrNotExist", err)
+	}
+
+	list := s.List()
+	if len(list) != 1 || list[0].ID != LocalProfileID || !list[0].Enabled {
+		t.Fatalf("LoadFrom() on read error returned store %+v, want a single enabled seeded Local profile", list)
+	}
+
+	// Must not have quarantined the path (it may be intact, just unreadable).
+	if _, statErr := os.Stat(path + ".corrupt"); !os.IsNotExist(statErr) {
+		t.Errorf("LoadFrom() must not quarantine an unreadable (not known-corrupt) path")
+	}
+	// Must not have persisted over the unreadable path either — it is still
+	// the directory we created, not a freshly-written seeded file.
+	fi, statErr := os.Stat(path)
+	if statErr != nil {
+		t.Fatalf("Stat(%s) error = %v", path, statErr)
+	}
+	if !fi.IsDir() {
+		t.Error("LoadFrom() must not persist a seeded store over an unreadable path")
+	}
+}
+
+// TestAddUnknownTypeRejected is part of finding 3's regression coverage: the
+// store must refuse to persist a profile whose Type is neither "local" nor
+// "remote-ssh" — a hand-edited typo like "remote_ssh" must be caught here,
+// not silently treated as local.
+func TestAddUnknownTypeRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	_, err = s.Add(Profile{Name: "weird", Type: Type("remote_ssh"), Enabled: true, Host: "h", User: "u", Port: 22})
+	if err == nil {
+		t.Fatal("Add() with an unknown Type: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "remote_ssh") {
+		t.Errorf("Add() unknown-type error = %q, want it to name the bad type %q", err.Error(), "remote_ssh")
+	}
+}
+
+// TestUpdateUnknownTypeRejected mirrors TestAddUnknownTypeRejected for
+// Update: a profile that reached the store with an unrecognised Type via
+// LoadFrom (which must not lock out the rest of the file — see
+// TestLoadFromToleratesUnknownTypeEntry below) must still be rejected by
+// validate() when the user tries to Update it (e.g. editing it in the TUI)
+// without fixing the Type.
+func TestUpdateUnknownTypeRejected(t *testing.T) {
+	path := testPath(t)
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: weird1
+    name: weird
+    type: remote_ssh
+    enabled: true
+    host: example.com
+    user: dev
+    port: 22
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	p, ok := s.Get("weird1")
+	if !ok {
+		t.Fatal("LoadFrom() dropped the unknown-type profile")
+	}
+
+	p.Host = "example2.com" // an edit that leaves the bad Type untouched
+	if _, err := s.Update(p); err == nil {
+		t.Fatal("Update() of a profile with an unknown Type: want error, got nil")
+	}
+}
+
+// TestLoadFromToleratesUnknownTypeEntry confirms the other half of finding
+// 3: LoadFrom itself must NOT hard-fail the whole file just because one
+// entry has an unrecognised Type — a bad entry must not lock the user out of
+// the other (good) profiles in the file. The unknown-type entry loads as-is;
+// it is fleet-build (provider.BuildFleet) and the store's write path
+// (Add/Update) that must surface/reject it, not LoadFrom.
+func TestLoadFromToleratesUnknownTypeEntry(t *testing.T) {
+	path := testPath(t)
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: weird1
+    name: weird
+    type: remote_ssh
+    enabled: true
+    host: example.com
+    user: dev
+    port: 22
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() on a file with an unknown-type entry: want no error, got %v", err)
+	}
+	if _, ok := s.Get("local"); !ok {
+		t.Error("LoadFrom() must still load the good Local profile alongside the bad entry")
+	}
+	if _, ok := s.Get("weird1"); !ok {
+		t.Error("LoadFrom() must still load the unknown-type entry itself (not silently drop it)")
+	}
+}
+
+// TestAddRemoteSSHEmptyHostRejected is finding 9's regression test: the store
+// must refuse an empty Host on a RemoteSSH profile rather than letting it
+// through to fail later with a cryptic `ssh user@` error.
+func TestAddRemoteSSHEmptyHostRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	_, err = s.Add(Profile{Name: "bad", Type: TypeRemoteSSH, Enabled: true, Host: "", User: "u", Port: 22})
+	if err == nil {
+		t.Fatal("Add() with an empty Host: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "host") {
+		t.Errorf("Add() empty-host error = %q, want it to mention the missing host", err.Error())
+	}
+}
+
+// TestLoadFromCanonicalizesPortForRemoteSSH is finding 8's regression test: a
+// hand-edited profile with no `port:` must load with Port canonicalized to
+// 22 (RemoteSSH's implicit SSH default, matching the retired
+// resolveTargetConfig's defaultRemotePort), so its scope/remoteTarget agree
+// with a profile that spells the port out explicitly — never "host:0".
+func TestLoadFromCanonicalizesPortForRemoteSSH(t *testing.T) {
+	path := testPath(t)
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: noport
+    name: noport
+    type: remote-ssh
+    enabled: true
+    host: example.com
+    user: dev
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	p, ok := s.Get("noport")
+	if !ok {
+		t.Fatal("LoadFrom() dropped the noport profile")
+	}
+	if p.Port != 22 {
+		t.Fatalf("noport profile Port = %d, want canonicalized 22", p.Port)
+	}
+
+	explicit := Profile{Host: "example.com", User: "dev", Port: 22}
+	if p.remoteTarget() != explicit.remoteTarget() {
+		t.Fatalf("remoteTarget() = %q, want it to equal the explicit-port profile's %q", p.remoteTarget(), explicit.remoteTarget())
+	}
+}
+
+// TestDuplicateTargetCatchesMissingPortVsExplicit22 confirms finding 8's
+// canonicalization actually closes the validation gap: a profile whose port
+// is left unset must collide with an existing enabled profile on the SAME
+// host:22, rather than looking like a distinct "host:0" target.
+func TestDuplicateTargetCatchesMissingPortVsExplicit22(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	if _, err := s.Add(Profile{Name: "a", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u", Port: 22}); err != nil {
+		t.Fatalf("first Add() error = %v", err)
+	}
+
+	_, err = s.Add(Profile{Name: "b", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u"}) // Port omitted
+	if err == nil {
+		t.Fatal("Add() with host-without-port colliding with an existing host:22: want error, got nil")
 	}
 }

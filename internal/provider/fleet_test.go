@@ -2,6 +2,8 @@ package provider
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,6 +168,125 @@ func TestBuildFleet_BadRemoteBecomesErrorBinding(t *testing.T) {
 	}
 	if !sawLocal || !sawErr {
 		t.Fatalf("fleet should contain one healthy local binding and one error binding, got %+v", fleet)
+	}
+}
+
+// TestBuildFleet_UnknownTypeBecomesErrorBinding is finding 3's regression
+// test: a hand-edited profiles.yaml with a typo'd Type (e.g. "remote_ssh"
+// instead of "remote-ssh") must NOT be silently treated as LOCAL — that
+// would build a VM on the local machine for a profile the user believes is
+// remote, and would create a duplicate LocalScope member in the TUI. LoadFrom
+// must not lock the good entries out (profiles.TestLoadFromToleratesUnknownTypeEntry
+// covers that), so the unknown-type entry reaches BuildFleet as-is; BuildFleet
+// must turn it into a clear error binding instead.
+func TestBuildFleet_UnknownTypeBecomesErrorBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: weird1
+    name: weird
+    type: remote_ssh
+    enabled: true
+    host: example.com
+    user: dev
+    port: 22
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	store, err := profiles.LoadFrom(path)
+	if err != nil {
+		t.Fatalf("profiles.LoadFrom: %v", err)
+	}
+
+	fleet := BuildFleet(store)
+	if len(fleet) != 2 {
+		t.Fatalf("BuildFleet() = %d bindings, want 2 (local + error binding for the bad type)", len(fleet))
+	}
+
+	var sawLocal, sawErr bool
+	for _, b := range fleet {
+		switch b.Profile.ID {
+		case "local":
+			sawLocal = true
+			if b.Err != nil {
+				t.Fatalf("local binding Err = %v, want nil — an unrelated bad entry must not poison it", b.Err)
+			}
+			if b.Prov == nil {
+				t.Fatal("local binding Prov is nil")
+			}
+		case "weird1":
+			sawErr = true
+			if b.Err == nil {
+				t.Fatal("unknown-type binding Err = nil, want a clear error")
+			}
+			if b.Prov != nil {
+				t.Fatalf("unknown-type binding Prov = %v, want nil", b.Prov)
+			}
+			if !strings.Contains(b.Err.Error(), "remote_ssh") {
+				t.Errorf("unknown-type binding Err = %q, want it to name the bad type %q", b.Err.Error(), "remote_ssh")
+			}
+		}
+	}
+	if !sawLocal || !sawErr {
+		t.Fatalf("fleet should contain one healthy local binding and one unknown-type error binding, got %+v", fleet)
+	}
+}
+
+// TestBuildFleet_EmptyHostBecomesErrorBinding is finding 9's regression test:
+// a RemoteSSH profile with an empty Host (only reachable via a hand-edited
+// file, since the store's validate() now refuses it on Add/Update) must
+// become a clear error binding rather than an obscure `ssh user@` failure
+// deep inside NewRemoteLima/Preflight.
+func TestBuildFleet_EmptyHostBecomesErrorBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: nohost
+    name: nohost
+    type: remote-ssh
+    enabled: true
+    user: dev
+    port: 22
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	store, err := profiles.LoadFrom(path)
+	if err != nil {
+		t.Fatalf("profiles.LoadFrom: %v", err)
+	}
+
+	fleet := BuildFleet(store)
+	if len(fleet) != 2 {
+		t.Fatalf("BuildFleet() = %d bindings, want 2 (local + error binding for the missing host)", len(fleet))
+	}
+
+	var sawErr bool
+	for _, b := range fleet {
+		if b.Profile.ID == "nohost" {
+			sawErr = true
+			if b.Err == nil {
+				t.Fatal("empty-host binding Err = nil, want a clear error")
+			}
+			if b.Prov != nil {
+				t.Fatalf("empty-host binding Prov = %v, want nil", b.Prov)
+			}
+			if !strings.Contains(b.Err.Error(), "host") {
+				t.Errorf("empty-host binding Err = %q, want it to mention the missing host", b.Err.Error())
+			}
+		}
+	}
+	if !sawErr {
+		t.Fatalf("fleet should contain an error binding for the empty-host profile, got %+v", fleet)
 	}
 }
 

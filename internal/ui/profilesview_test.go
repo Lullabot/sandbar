@@ -104,6 +104,62 @@ func TestProfileEnableRefreshDisableCycle(t *testing.T) {
 	}
 }
 
+// TestHeartbeatResolverReflectsLiveEnabledProfile pins finding 5 from the
+// plan-16 code review: the heartbeat registry's scope->shell resolver used to
+// be a SNAPSHOT of m.members captured once in New() (fleetShellResolver). A
+// profile enabled — or created — AFTER startup could never be resolved to a
+// shell, because start()'s resolve(scope) call kept consulting that frozen
+// snapshot: its VMs would carry em-dash cpu/mem gauges forever, with no way
+// to recover short of restarting sand. The fix rebuilds the resolver at every
+// fleet mutation (rebuildMember, called from here by the create-form's submit
+// path exactly like TestProfileEnableRefreshDisableCycle above).
+//
+// This checks the resolver directly (m.heartbeats.shell, a pure in-memory
+// lookup) rather than going through start(), which would spawn a background
+// goroutine attempting a REAL ssh round trip against the newly-created
+// profile's REAL RemoteLima provider (buildProfileProvider never touches the
+// network at construction, but ShellStreamOut does) — exactly the kind of
+// live backend call this test suite otherwise avoids. Resolving is pure and
+// synchronous, so it exercises precisely the bug/fix with no network
+// involved.
+func TestHeartbeatResolverReflectsLiveEnabledProfile(t *testing.T) {
+	isolateHostState(t)
+	m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)
+	m = resized(m, 100, 30)
+
+	// Baseline: the resolver New() built already knows the Local member's
+	// scope.
+	if m.heartbeats.shell(registry.LocalScope) == nil {
+		t.Fatal("precondition: the resolver should know the Local member's scope from New()")
+	}
+
+	// Live-add a second, enabled profile through the REAL create-form submit
+	// path (submitProfileForm -> rebuildMember) — the same path
+	// TestProfileEnableRefreshDisableCycle drives above.
+	m.openProfiles()
+	m.openProfileCreateForm()
+	m.profileInputs[pfName].SetValue("build-host")
+	m.profileInputs[pfHost].SetValue("example.com")
+	m.profileInputs[pfUser].SetValue("dev")
+	m.profileInputs[pfPort].SetValue("2222")
+	next, cmd := m.submitProfileForm()
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("creating an enabled profile should kick its connect/list cmd")
+	}
+	if len(m.members) != 2 {
+		t.Fatalf("want 2 members after creating a profile, got %d", len(m.members))
+	}
+	newScope := m.members[1].scope
+
+	// THE FIX: a profile enabled after New() must be resolvable by the
+	// heartbeat registry — the resolver must reflect the CURRENT fleet, not a
+	// snapshot frozen at startup.
+	if m.heartbeats.shell(newScope) == nil {
+		t.Fatal("a profile enabled after New() should be resolvable by the heartbeat registry")
+	}
+}
+
 // TestProfileDisableRefusedWhileJobInFlight proves the idle gate: a
 // disable/delete is refused, naming the blocking job, while a build or file
 // transfer is running anywhere under that profile's scope — the

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // newTestStore returns an in-memory-backed profiles.Store (a real temp file,
@@ -150,8 +152,11 @@ func TestResolveShellProviderAmbiguous(t *testing.T) {
 }
 
 // TestResolveShellProviderUnknownName verifies that with more than one
-// enabled profile and no owner found in the registry, resolveShellProvider
-// reports a clean "no such VM" error rather than guessing a profile.
+// enabled profile and no owner found in the registry NOR in the finding-7
+// unmanaged-VM probe fallback, resolveShellProvider reports a clean "no such
+// VM" error rather than guessing a profile. listForProfile is stubbed to a
+// no-op (never hits a real backend — see probeUnmanagedOwners' tests for the
+// fallback's own behaviour) so this stays a pure unit test.
 func TestResolveShellProviderUnknownName(t *testing.T) {
 	store := newTestStore(t)
 	if _, err := store.Add(profiles.Profile{
@@ -162,12 +167,171 @@ func TestResolveShellProviderUnknownName(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
+	orig := listForProfile
+	t.Cleanup(func() { listForProfile = orig })
+	listForProfile = func(profiles.Profile) ([]vm.VM, error) { return nil, nil }
+
 	_, err := resolveShellProvider(store, fakeOwnership{}, "ghost", "")
 	if err == nil {
 		t.Fatal("resolveShellProvider: want error for a name owned by no profile, got nil")
 	}
 	if !strings.Contains(err.Error(), `"ghost"`) {
 		t.Errorf("resolveShellProvider error = %q, want it to name the missing VM", err.Error())
+	}
+}
+
+// TestProviderForProfileUnknownTypeErrors is finding 3's regression test for
+// the CLI's own conversion path (mirroring provider.BuildFleet's buildBinding):
+// a profile with an unrecognised Type (e.g. a hand-edited "remote_ssh" typo)
+// must be a hard error here too, not silently constructed as the local
+// backend.
+func TestProviderForProfileUnknownTypeErrors(t *testing.T) {
+	p := profiles.Profile{
+		ID: "weird1", Name: "weird", Type: profiles.Type("remote_ssh"), Enabled: true,
+		Host: "example.com", User: "dev", Port: 22,
+	}
+
+	_, _, err := providerForProfile(p)
+	if err == nil {
+		t.Fatal("providerForProfile: want error for an unknown profile type, got nil")
+	}
+	if !strings.Contains(err.Error(), "remote_ssh") {
+		t.Errorf("providerForProfile error = %q, want it to name the bad type %q", err.Error(), "remote_ssh")
+	}
+}
+
+// TestProviderForProfileEmptyHostErrors is finding 9's regression test for
+// the CLI's conversion path: a RemoteSSH profile with an empty Host must be
+// a clear error here, not an obscure `ssh user@` failure later.
+func TestProviderForProfileEmptyHostErrors(t *testing.T) {
+	p := profiles.Profile{
+		ID: "nohost", Name: "nohost", Type: profiles.TypeRemoteSSH, Enabled: true,
+		Host: "", User: "dev", Port: 22,
+	}
+
+	_, _, err := providerForProfile(p)
+	if err == nil {
+		t.Fatal("providerForProfile: want error for an empty host, got nil")
+	}
+	if !strings.Contains(err.Error(), "host") {
+		t.Errorf("providerForProfile error = %q, want it to mention the missing host", err.Error())
+	}
+}
+
+// TestResolveShellProviderFallsBackToUnmanagedProbeWhenRegistryEmpty is
+// finding 7's regression test: before this task, `sand shell NAME` attached
+// to ANY VM the (single) configured backend listed, managed or not (e.g. the
+// base image `sand-base`, or a hand-made limactl VM). With more than one
+// enabled profile, the registry alone now decides ownership, so an
+// UNMANAGED VM yields zero registry owners and used to hard-fail with "no
+// such VM" even though it plainly exists on one of the profiles. The fix:
+// when the registry comes up empty (and no --profile was given), probe each
+// enabled profile's provider List() for the name — exactly one hit must
+// resolve, with local probed before remotes (stubbed here via the
+// listForProfile seam, since a real List() would need limactl/SSH).
+func TestResolveShellProviderFallsBackToUnmanagedProbeWhenRegistryEmpty(t *testing.T) {
+	store := newTestStore(t)
+	work, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := listForProfile
+	t.Cleanup(func() { listForProfile = orig })
+	var probedOrder []string
+	listForProfile = func(p profiles.Profile) ([]vm.VM, error) {
+		probedOrder = append(probedOrder, p.ID)
+		if p.ID == work.ID {
+			return []vm.VM{{Name: "sand-base"}}, nil
+		}
+		return nil, nil // local: knows nothing about it via the registry-free probe
+	}
+
+	// Registry reports zero owners for "sand-base" (it is unmanaged).
+	prov, err := resolveShellProvider(store, fakeOwnership{}, "sand-base", "")
+	if err != nil {
+		t.Fatalf("resolveShellProvider: unexpected error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("resolveShellProvider: want a non-nil provider from the unmanaged-probe fallback")
+	}
+	if len(probedOrder) < 2 || probedOrder[0] != profiles.LocalProfileID {
+		t.Errorf("probe order = %v, want local probed before the remote profile", probedOrder)
+	}
+}
+
+// TestResolveShellProviderUnmanagedProbeAmbiguous verifies the fallback's
+// multi-hit branch behaves exactly like the registry's own ambiguous case:
+// more than one profile's List() reporting the name requires --profile.
+func TestResolveShellProviderUnmanagedProbeAmbiguous(t *testing.T) {
+	store := newTestStore(t)
+	if _, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := listForProfile
+	t.Cleanup(func() { listForProfile = orig })
+	listForProfile = func(p profiles.Profile) ([]vm.VM, error) {
+		return []vm.VM{{Name: "shared"}}, nil // every profile reports it
+	}
+
+	_, err := resolveShellProvider(store, fakeOwnership{}, "shared", "")
+	if err == nil {
+		t.Fatal("resolveShellProvider: want an ambiguous-name error from the fallback probe, got nil")
+	}
+	if !strings.Contains(err.Error(), "more than one") {
+		t.Errorf("resolveShellProvider fallback ambiguous error = %q, want it to mention %q", err.Error(), "more than one")
+	}
+}
+
+// TestResolveShellProviderUnmanagedProbeToleratesListErrors verifies the
+// fallback's best-effort contract: a List() failure on one profile (e.g. an
+// unreachable remote) must be treated as "not there", never abort the whole
+// command — only when every profile comes up empty (or erroring) does the
+// original "no such VM" error apply.
+func TestResolveShellProviderUnmanagedProbeToleratesListErrors(t *testing.T) {
+	store := newTestStore(t)
+	work, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := listForProfile
+	t.Cleanup(func() { listForProfile = orig })
+	listForProfile = func(p profiles.Profile) ([]vm.VM, error) {
+		if p.ID == profiles.LocalProfileID {
+			return nil, errors.New("boom: local unreachable somehow")
+		}
+		if p.ID == work.ID {
+			return []vm.VM{{Name: "only-on-work"}}, nil
+		}
+		return nil, nil
+	}
+
+	prov, err := resolveShellProvider(store, fakeOwnership{}, "only-on-work", "")
+	if err != nil {
+		t.Fatalf("resolveShellProvider: want the List error on one profile to be tolerated, got: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("resolveShellProvider: want a non-nil provider")
+	}
+
+	// When NO profile has it, still a clean "no such VM" — not an aborted command.
+	_, err = resolveShellProvider(store, fakeOwnership{}, "truly-nowhere", "")
+	if err == nil || !strings.Contains(err.Error(), `"truly-nowhere"`) {
+		t.Fatalf("resolveShellProvider(nowhere) error = %v, want a clean \"no such VM\" naming it", err)
 	}
 }
 

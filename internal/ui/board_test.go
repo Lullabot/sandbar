@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -1113,5 +1116,81 @@ func TestEnterIsAdvertisedWithTheVerbItRuns(t *testing.T) {
 	m.focusVM.Name = ghostFocusName
 	if !strings.Contains(boardVerbs(m), "enter new VM") {
 		t.Fatalf("the ghost must advertise enter as the create verb:\n%s", boardVerbs(m))
+	}
+}
+
+// TestFocusRingDisambiguatesSameNameAcrossScopes pins finding 2 from the
+// plan-16 code review: the focus ring used to resolve by BARE NAME
+// (vmIndex/focusIndex/focusedVM/renderCell), so with a local "web" and a
+// remote "web" on the board at once, the ring could never land on the second
+// one — focusedVM() kept resolving to whichever one sorted first, BOTH tiles
+// rendered focused, and a destructive verb always targeted the first-sorted
+// scope's VM regardless of which one the user actually navigated to.
+func TestFocusRingDisambiguatesSameNameAcrossScopes(t *testing.T) {
+	isolateHostState(t)
+	fleet := provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: profiles.Profile{ID: "remote", Type: profiles.TypeRemoteSSH, Enabled: true}, Prov: &providerfake.Provider{}, Scope: foreignScope},
+	}
+	m := New(fleet).(model)
+	m = resized(m, 80, 24)
+	if m.layout.Columns != 1 {
+		t.Fatalf("precondition: 80x24 should give a single tile column, got %d", m.layout.Columns)
+	}
+
+	if err := m.reg.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, registry.LocalScope); err != nil {
+		t.Fatalf("seed local web: %v", err)
+	}
+	if err := m.reg.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, foreignScope); err != nil {
+		t.Fatalf("seed remote web: %v", err)
+	}
+	// Load the FOREIGN scope first, while it is the board's only tile — the
+	// ring latches onto it (both scope and name) before the local "web" ever
+	// appears, so the initial focus is deterministic rather than an artifact
+	// of load order.
+	next, _ := m.Update(vmsLoadedMsg{scope: foreignScope, vms: []vm.VM{{Name: "web", Status: "Running"}}})
+	m = next.(model)
+	next, _ = m.Update(vmsLoadedMsg{scope: registry.LocalScope, vms: []vm.VM{{Name: "web", Status: "Running"}}})
+	m = next.(model)
+
+	vms := m.visibleVMs()
+	if len(vms) != 2 || vms[0].Name != "web" || vms[1].Name != "web" {
+		t.Fatalf("expected two same-named tiles, got %+v", vms)
+	}
+
+	first, ok := m.focusedVM()
+	if !ok || first.scope != foreignScope {
+		t.Fatalf("expected the ring to start on the foreign scope's web (loaded first), got ok=%v scope=%v", ok, first.scope)
+	}
+
+	// Move the ring up: registry.Scope sorts "lima" (LocalScope's Provider)
+	// before "lima-remote" (foreignScope's), so once both tiles are on the
+	// board the local one sits in the row ABOVE the foreign one the ring is
+	// still pinned to — the only other cell at one column.
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+
+	second, ok := m.focusedVM()
+	if !ok || second.scope != registry.LocalScope {
+		t.Fatalf("moving focus up should land on the LOCAL scope's web, got ok=%v scope=%v", ok, second.scope)
+	}
+
+	// THE FIX: exactly ONE tile renders focused — the ring landing on the
+	// second same-named VM must not leave the first one ALSO painted focused.
+	focusedCount := 0
+	for _, v := range vms {
+		if focusMatches(v, m.focusVM) {
+			focusedCount++
+		}
+	}
+	if focusedCount != 1 {
+		t.Fatalf("exactly one tile should render focused, got %d for focusVM=%+v", focusedCount, m.focusVM)
+	}
+
+	// And the delete verb's target — focusedVM(), exactly what updateBoard
+	// hands to every vmCommands action — is the FOCUSED scope's VM, not the
+	// first-sorted one.
+	target, ok := m.focusedVM()
+	if !ok || target.scope != registry.LocalScope {
+		t.Fatalf("the delete verb's target must be the focused (local) scope's VM, got ok=%v scope=%v", ok, target.scope)
 	}
 }
