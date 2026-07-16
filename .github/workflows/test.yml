@@ -252,6 +252,82 @@ jobs:
           tail -n 200 cold.log || true
           tail -n 200 warm.log || true
 
+  # Remote-Lima-over-SSH, end to end, on a single runner: the "remote" is this
+  # same machine reached over REAL ssh as a SECOND local user (sand-remote-e2e).
+  # That second account owns its own $HOME and therefore its own ~/.lima — the
+  # separation internal/provider/remote_e2e_test.go's doc calls out as what
+  # makes a loopback target meaningful (the local/remote isolation assertions
+  # compare two genuinely different Lima homes). This exercises the SSHHost
+  # transport for real — ssh argv + quoting, remote limactl on the
+  # non-interactive PATH, HostFiles over ssh, remote base build — without
+  # needing a second machine.
+  remote-lima-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # Same disk pressure as lima-e2e: the remote user builds its own base
+      # image under ~sand-remote-e2e/.lima.
+      - name: Free up runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/powershell /usr/share/swift || true
+          df -h /
+
+      - name: Set up Lima (installs QEMU, configures KVM + SSH)
+        id: lima
+        uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1
+
+      - name: Cache Lima image downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/lima
+          key: lima-${{ steps.lima.outputs.version }}
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Create the loopback "remote" user with passwordless ssh
+        run: |
+          sudo useradd -m -s /bin/bash sand-remote-e2e
+          # QEMU under the second user needs /dev/kvm; lima-actions grants it
+          # via the kvm group.
+          sudo usermod -aG kvm sand-remote-e2e
+          ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/remote_e2e"
+          sudo install -d -m 700 -o sand-remote-e2e -g sand-remote-e2e /home/sand-remote-e2e/.ssh
+          sudo install -m 600 -o sand-remote-e2e -g sand-remote-e2e \
+            "$HOME/.ssh/remote_e2e.pub" /home/sand-remote-e2e/.ssh/authorized_keys
+          sudo systemctl start ssh
+          ssh-keyscan -H localhost >> "$HOME/.ssh/known_hosts"
+          # The transport runs `ssh … limactl …` on the remote's default
+          # non-interactive PATH — prove that resolves before the long test.
+          ssh -i "$HOME/.ssh/remote_e2e" sand-remote-e2e@localhost limactl --version
+
+      # The remote user downloads its own Debian image into its own
+      # ~/.cache/lima; seed it from the runner user's restored cache so a warm
+      # cache saves the download on both sides.
+      - name: Share the cached image download with the remote user
+        run: |
+          if [ -d "$HOME/.cache/lima" ]; then
+            sudo mkdir -p /home/sand-remote-e2e/.cache
+            sudo cp -a "$HOME/.cache/lima" /home/sand-remote-e2e/.cache/lima
+            sudo chown -R sand-remote-e2e:sand-remote-e2e /home/sand-remote-e2e/.cache
+          fi
+
+      # The suite skips cleanly unless LIMA_REMOTE_E2E=1 and a reachable
+      # target are configured — here they are, so it runs for real: create on
+      # the remote, managed/remote-scope claim, attach argv, copy round-trip,
+      # list/stop/delete, and the local-vs-remote isolation assertions.
+      - name: Remote-Lima E2E over loopback ssh
+        run: |
+          LIMA_REMOTE_E2E=1 \
+          LIMA_REMOTE_E2E_HOST=localhost \
+          LIMA_REMOTE_E2E_USER=sand-remote-e2e \
+          LIMA_REMOTE_E2E_IDENTITY="$HOME/.ssh/remote_e2e" \
+            go test -tags limae2e -timeout 45m -run TestE2ERemoteLima -v ./internal/provider/
+
   # Mutation testing measures how good the tests are, not just which lines they
   # touch. It recompiles and reruns the suite per mutant, so it is slow — it
   # runs weekly (schedule) and on demand (workflow_dispatch), never per-PR, and
