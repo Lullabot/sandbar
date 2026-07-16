@@ -50,11 +50,15 @@ const (
 	tileContentRows = 6
 )
 
-// lowFreeThreshold is the "less than 5% free" line every low-capacity warning
+// lowFreeThreshold is the "less than 10% free" line every low-capacity warning
 // in this package draws from — host memory/disk (hostwarn.go) and a single
 // VM's mem/disk gauge (below) — stated ONCE so the header's host warnings and
 // a tile's own badges can never quietly disagree about what "low" means.
-const lowFreeThreshold = 0.05
+// Comparisons use the USED fraction against the complementary bound
+// (`frac > 1-lowFreeThreshold`), never `1-frac < lowFreeThreshold`: the
+// subtraction turns an exactly-at-threshold reading into "below" in binary
+// floating point (1-0.9 = 0.0999…8 < 0.10), and the boundary must not warn.
+const lowFreeThreshold = 0.10
 
 // tileInput bundles a single VM's rendering material: task 03's tile-width
 // budget, task 04's job snapshot, task 05's heartbeat sample, and this VM's
@@ -141,7 +145,7 @@ func renderTile(in tileInput) string {
 				frac := memFraction(in.Sample)
 				value := humanizeBytes(strconv.FormatUint(in.Sample.MemUsed, 10)) + "/" +
 					humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10))
-				if 1-frac < lowFreeThreshold {
+				if frac > 1-lowFreeThreshold {
 					lines[3] = tileWarnGaugeLine("mem", frac, value, width)
 				} else {
 					lines[3] = tileGaugeLine("mem", frac, value, width)
@@ -490,7 +494,7 @@ func tileDiskLine(v vm.VM, width int) string {
 	if uerr == nil && terr == nil && totalN > 0 {
 		frac := float64(usedN) / float64(totalN)
 		value := humanizeBytes(v.DiskUsed) + "/" + total
-		if 1-frac < lowFreeThreshold {
+		if frac > 1-lowFreeThreshold {
 			return tileWarnGaugeLine("disk", frac, value, width)
 		}
 		return tileGaugeLine("disk", frac, value, width)

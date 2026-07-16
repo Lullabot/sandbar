@@ -53,7 +53,7 @@ func (m *model) checkHostCapacityWarn(mem *fleetMember) {
 
 // checkHostMemWarn edge-triggers rule 1: a warning logged once when mem.host's
 // available memory crosses below lowFreeThreshold, latched on
-// mem.warnedHostMem (fleet.go) until the member recovers to >=5% free, at
+// mem.warnedHostMem (fleet.go) until the member recovers to at least lowFreeThreshold free, at
 // which point the latch clears and a later re-crossing warns again.
 func (m *model) checkHostMemWarn(mem *fleetMember) {
 	if mem.host.mem <= 0 || mem.host.memAvail <= 0 {
@@ -62,8 +62,8 @@ func (m *model) checkHostMemWarn(mem *fleetMember) {
 	if float64(mem.host.memAvail)/float64(mem.host.mem) < lowFreeThreshold {
 		if !mem.warnedHostMem {
 			mem.warnedHostMem = true
-			m.logMsg(fmt.Sprintf("warning: %s memory low — %s free of %s (<5%%)",
-				mem.profile.Name, humanizeInt(mem.host.memAvail), humanizeInt(mem.host.mem)))
+			m.logMsg(fmt.Sprintf("warning: %s memory low — %s free of %s (<%.0f%%)",
+				mem.profile.Name, humanizeInt(mem.host.memAvail), humanizeInt(mem.host.mem), lowFreeThreshold*100))
 		}
 		return
 	}
@@ -80,8 +80,8 @@ func (m *model) checkHostDiskWarn(mem *fleetMember) {
 	if float64(mem.host.diskFree)/float64(mem.host.diskTotal) < lowFreeThreshold {
 		if !mem.warnedHostDisk {
 			mem.warnedHostDisk = true
-			m.logMsg(fmt.Sprintf("warning: %s disk low — %s free of %s (<5%%)",
-				mem.profile.Name, humanizeInt(mem.host.diskFree), humanizeInt(mem.host.diskTotal)))
+			m.logMsg(fmt.Sprintf("warning: %s disk low — %s free of %s (<%.0f%%)",
+				mem.profile.Name, humanizeInt(mem.host.diskFree), humanizeInt(mem.host.diskTotal), lowFreeThreshold*100))
 		}
 		return
 	}

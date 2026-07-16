@@ -141,8 +141,8 @@ type fleetMember struct {
 	// warnedHostMem/warnedHostDisk latch a host-capacity warning already
 	// logged for THIS member (hostwarn.go's checkHostMemWarn/checkHostDiskWarn),
 	// so the refresh loop — which re-evaluates every refreshInterval — does not
-	// re-log the same warning every tick while the host sits below the 5%-free
-	// line. Cleared the moment the member recovers to >=5% free, so a LATER
+	// re-log the same warning every tick while the host sits below the lowFreeThreshold-free
+	// line. Cleared the moment the member recovers past lowFreeThreshold, so a LATER
 	// re-crossing warns again rather than staying silent forever after the
 	// first time.
 	warnedHostMem  bool
