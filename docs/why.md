@@ -168,6 +168,14 @@ another:
 | [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | General-purpose remote dev, not agent-disposable |
 
 ```mermaid
+---
+config:
+  quadrantChart:
+    chartWidth: 760
+    chartHeight: 640
+    pointRadius: 4
+    pointLabelFontSize: 10
+---
 quadrantChart
     title Where the field sits
     x-axis Cloud --> Local
@@ -176,17 +184,35 @@ quadrantChart
     quadrant-2 Sealed but remote
     quadrant-3 General-purpose cloud dev
     quadrant-4 Local but host-exposed
-    Sandbar: [0.92, 0.93]
-    clawk: [0.88, 0.42]
-    agent-vm: [0.8, 0.34]
-    Worktree tools: [0.72, 0.12]
-    Dev containers: [0.68, 0.26]
-    claude-code-sandbox: [0.62, 0.55]
-    sandbox-runtime: [0.78, 0.5]
-    Self-host microVMs: [0.45, 0.8]
-    Cloud sandboxes: [0.12, 0.85]
-    CC on the Web: [0.18, 0.68]
-    Coder and Codespaces: [0.22, 0.45]
+    Sandbar: [0.90, 0.94]
+    E2B: [0.06, 0.94]
+    Modal: [0.17, 0.90]
+    Daytona: [0.28, 0.94]
+    Runloop: [0.06, 0.84]
+    Vercel: [0.17, 0.80]
+    Cloudflare: [0.28, 0.84]
+    Blaxel: [0.06, 0.74]
+    Claude Code Web: [0.19, 0.70]
+    qbox: [0.38, 0.88]
+    Arrakis: [0.38, 0.77]
+    microsandbox: [0.46, 0.83]
+    SmolVM: [0.52, 0.75]
+    Codespaces: [0.13, 0.42]
+    Coder: [0.26, 0.46]
+    Gitpod/Ona: [0.19, 0.34]
+    claude-code-sandbox: [0.58, 0.48]
+    sandbox-runtime: [0.64, 0.42]
+    bubblewrap: [0.75, 0.40]
+    Seatbelt: [0.86, 0.44]
+    container-use: [0.62, 0.28]
+    ClaudeBox: [0.73, 0.26]
+    Devcontainer: [0.85, 0.22]
+    Vibe Kanban: [0.66, 0.10]
+    Conductor: [0.78, 0.08]
+    Crystal: [0.90, 0.12]
+    Sculptor: [0.72, 0.17]
+    clawk: [0.92, 0.36]
+    agent-vm: [0.82, 0.32]
 ```
 
 The tools that get the VM boundary right still mount your files into
