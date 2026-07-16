@@ -27,18 +27,31 @@ func newRemote(t *testing.T) provider.Provider {
 }
 
 // TestRemoteProviderAttachArgv proves the remote provider produces the ssh-wrapped
-// attach argv (`ssh -t dev@example.com limactl shell <name> bash -c <expr>`) so
-// `sand shell` and the TUI `S` verb get the remote form with zero drift. With an
-// empty Dir the guest home cannot be read (no remote round trip), so --workdir is
-// omitted, exactly mirroring the local provider's documented fallback. The guest
-// tmux expression is preserved byte-for-byte.
+// attach argv (`ssh -t [mux flags] dev@example.com limactl shell <name> bash -c
+// <expr>`) so `sand shell` and the TUI `S` verb get the remote form with zero
+// drift. With an empty Dir the guest home cannot be read (no remote round trip),
+// so --workdir is omitted, exactly mirroring the local provider's documented
+// fallback. The guest tmux expression is preserved byte-for-byte.
+//
+// The target is located by value rather than by a fixed index: NewSSHHost may
+// thread OpenSSH connection-multiplexing flags (-o ControlMaster=... etc, see
+// internal/lima/sshhost.go) in between `-t` and the target, and this
+// black-box test has no access to SSHHost's unexported controlDir to predict
+// whether it did.
 func TestRemoteProviderAttachArgv(t *testing.T) {
 	p := newRemote(t)
 	got := p.AttachArgv(vm.VM{Name: "web"})
 
-	wantHead := []string{"ssh", "-t", "dev@example.com", "limactl", "shell", "web", "bash", "-c"}
-	if !slices.Equal(got[:len(wantHead)], wantHead) {
-		t.Fatalf("remote AttachArgv head = %v\nwant %v", got[:len(wantHead)], wantHead)
+	if len(got) < 2 || got[0] != "ssh" || got[1] != "-t" {
+		t.Fatalf("remote AttachArgv must start `ssh -t …`, got %v", got)
+	}
+	idx := slices.Index(got, "dev@example.com")
+	if idx < 0 {
+		t.Fatalf("remote AttachArgv missing the ssh target dev@example.com: %v", got)
+	}
+	wantTail := []string{"limactl", "shell", "web", "bash", "-c"}
+	if idx+1+len(wantTail) > len(got) || !slices.Equal(got[idx+1:idx+1+len(wantTail)], wantTail) {
+		t.Fatalf("remote AttachArgv after the target = %v\nwant %v", got[idx+1:], wantTail)
 	}
 	if !strings.Contains(got[len(got)-1], "tmux") {
 		t.Fatalf("last argv element should be the guest tmux expression, got %q", got[len(got)-1])

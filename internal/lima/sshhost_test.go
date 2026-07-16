@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -66,6 +68,95 @@ func anyContains(argv []string, sub string) bool {
 
 var testCfg = SSHConfig{Host: "example.com", User: "dev"}
 
+// muxFlags returns the ssh/scp connection-multiplexing flags a pinned test
+// should expect from h — the exact three -o tokens sshBase/scpCommand thread
+// in when h.controlDir was resolved at construction, or nil when it was not
+// (the graceful-degradation path). Reading h.controlDir directly (this file is
+// in package lima) means no pinned test hardcodes a real cache-dir path; each
+// only pins ssh's own argv SHAPE around whatever NewSSHHost actually resolved.
+func muxFlags(h *SSHHost) []string {
+	if h.controlDir == "" {
+		return nil
+	}
+	return []string{
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=" + filepath.Join(h.controlDir, "%C"),
+		"-o", "ControlPersist=600",
+	}
+}
+
+// sshArgv builds the expected `ssh <preTarget...> <mux-flags> <target>
+// <tail...>` argv for h, factoring the multiplexing-flag splice (always
+// immediately before the target) so no pinned test hand-repeats it.
+func sshArgv(h *SSHHost, preTarget []string, target string, tail ...string) []string {
+	argv := []string{"ssh"}
+	argv = append(argv, preTarget...)
+	argv = append(argv, muxFlags(h)...)
+	argv = append(argv, target)
+	argv = append(argv, tail...)
+	return argv
+}
+
+// TestSSHControlDirAndMuxFlags proves NewSSHHost resolves a per-user control
+// dir (0o700) for OpenSSH connection multiplexing, and that both sshBase and
+// scpCommand thread ControlMaster=auto / ControlPath=<dir>/%C /
+// ControlPersist=600 in before the target — the fix for a user with an
+// SSH-agent prompt (1Password etc.) being re-prompted on every 5s board
+// refresh, per-VM file read, heartbeat restart, and the final batched refresh
+// at quit: every one of those commands now shares one already-authenticated
+// master connection instead of paying a fresh handshake.
+func TestSSHControlDirAndMuxFlags(t *testing.T) {
+	h := NewSSHHost(testCfg)
+	if h.controlDir == "" {
+		t.Fatalf("NewSSHHost left controlDir empty in a normal environment")
+	}
+	info, err := os.Stat(h.controlDir)
+	if err != nil {
+		t.Fatalf("controlDir was not created: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("controlDir perm = %o, want 0700", perm)
+	}
+
+	wantControlPath := "ControlPath=" + filepath.Join(h.controlDir, "%C")
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"sshBase", h.sshBase(false)},
+		{"scpCommand", h.scpCommand(false, "/local", "remote:/path")},
+	} {
+		argv := tc.argv
+		for _, val := range []string{"ControlMaster=auto", wantControlPath, "ControlPersist=600"} {
+			idx := slices.Index(argv, val)
+			if idx <= 0 || argv[idx-1] != "-o" {
+				t.Fatalf("%s = %v: want %q preceded by its own -o", tc.name, argv, val)
+			}
+		}
+	}
+}
+
+// TestSSHNoControlDirOmitsMuxFlags proves the graceful-degradation path: when
+// controlDir could not be resolved (simulated here by constructing the struct
+// directly, standing in for os.UserCacheDir/MkdirAll failing in NewSSHHost),
+// sshBase/scpCommand argv is EXACTLY the pre-multiplexing shape — connection
+// multiplexing is a pure optimization and must NEVER become a hard
+// requirement for reaching the remote host.
+func TestSSHNoControlDirOmitsMuxFlags(t *testing.T) {
+	h := &SSHHost{cfg: testCfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
+		return exec.CommandContext(ctx, argv[0], argv[1:]...)
+	}}
+	// controlDir left at its zero value "" — the failure path.
+	want := []string{"ssh", "dev@example.com"}
+	if got := h.sshBase(false); !slices.Equal(got, want) {
+		t.Fatalf("sshBase with empty controlDir = %v, want %v", got, want)
+	}
+	wantScp := []string{"scp", "/local", "remote:/path"}
+	if got := h.scpCommand(false, "/local", "remote:/path"); !slices.Equal(got, wantScp) {
+		t.Fatalf("scpCommand with empty controlDir = %v, want %v", got, wantScp)
+	}
+}
+
 // TestSSHRunnerArgv pins the exact ssh argv the runner builds for representative
 // limactl operations: List, a Shell exec, and a stdout-only exec. This is the
 // core proof that the remote runner drives the SAME limactl the local one does,
@@ -75,25 +166,27 @@ func TestSSHRunnerArgv(t *testing.T) {
 	cases := []struct {
 		name string
 		call func(*Client)
-		want []string
+		tail []string
 	}{
 		{"list", func(c *Client) { _, _ = c.List() },
-			[]string{"ssh", "dev@example.com", "limactl", "list", "--format", "json"}},
+			[]string{"limactl", "list", "--format", "json"}},
 		{"shell-exec", func(c *Client) { _ = c.Shell(context.Background(), "web", nil, io.Discard, "ls", "-la") },
-			[]string{"ssh", "dev@example.com", "limactl", "shell", "web", "ls", "-la"}},
+			[]string{"limactl", "shell", "web", "ls", "-la"}},
 		{"shell-stream-out", func(c *Client) { _ = c.ShellStreamOut(context.Background(), "web", nil, io.Discard, "tar", "-c") },
-			[]string{"ssh", "dev@example.com", "limactl", "shell", "web", "tar", "-c"}},
+			[]string{"limactl", "shell", "web", "tar", "-c"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &recordingExec{}
-			c := New(hostWith(testCfg, rec))
+			h := hostWith(testCfg, rec)
+			c := New(h)
 			tc.call(c)
 			if len(rec.calls) != 1 {
 				t.Fatalf("got %d calls, want 1: %v", len(rec.calls), rec.calls)
 			}
-			if got := rec.calls[0]; !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("argv = %v\nwant %v", got, tc.want)
+			want := sshArgv(h, nil, "dev@example.com", tc.tail...)
+			if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("argv = %v\nwant %v", got, want)
 			}
 		})
 	}
@@ -105,9 +198,10 @@ func TestSSHRunnerArgv(t *testing.T) {
 func TestSSHPortAndIdentityThreading(t *testing.T) {
 	t.Run("port and identity set", func(t *testing.T) {
 		rec := &recordingExec{}
-		c := New(hostWith(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}, rec))
+		h := hostWith(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}, rec)
+		c := New(h)
 		_, _ = c.List()
-		want := []string{"ssh", "-p", "2222", "-i", "/k", "u@h", "limactl", "list", "--format", "json"}
+		want := sshArgv(h, []string{"-p", "2222", "-i", "/k"}, "u@h", "limactl", "list", "--format", "json")
 		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("argv = %v\nwant %v", got, want)
 		}
@@ -122,9 +216,10 @@ func TestSSHPortAndIdentityThreading(t *testing.T) {
 	})
 	t.Run("no user omits user@", func(t *testing.T) {
 		rec := &recordingExec{}
-		c := New(hostWith(SSHConfig{Host: "h"}, rec))
+		h := hostWith(SSHConfig{Host: "h"}, rec)
+		c := New(h)
 		_, _ = c.List()
-		want := []string{"ssh", "h", "limactl", "list", "--format", "json"}
+		want := sshArgv(h, nil, "h", "limactl", "list", "--format", "json")
 		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("argv = %v\nwant %v", got, want)
 		}
@@ -254,9 +349,10 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	h := NewSSHHost(SSHConfig{Host: "example.com", User: "dev"})
 	got := h.AttachArgv("web", "/home/debian.guest", "")
 
-	// ssh -t <target> prefix.
-	if len(got) < 3 || got[0] != "ssh" || got[1] != "-t" || got[2] != "dev@example.com" {
-		t.Fatalf("remote attach must start `ssh -t dev@example.com …`, got %v", got)
+	// ssh -t <mux flags> <target> prefix.
+	prefix := sshArgv(h, []string{"-t"}, "dev@example.com")
+	if len(got) < len(prefix) || !slices.Equal(got[:len(prefix)], prefix) {
+		t.Fatalf("remote attach must start `%v`, got %v", prefix, got)
 	}
 
 	// --workdir must PRECEDE the instance name (limactl forwards a trailing
@@ -277,15 +373,16 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr(""))
 	}
 
-	// The remote argv's tail (after the `ssh -t target` prefix) must be exactly the
-	// local attach argv, shell-quoted element by element — proof the ONLY change is
-	// the transport prefix, and nothing about the limactl/guest command drifted.
+	// The remote argv's tail (after the `ssh -t <mux flags> target` prefix) must
+	// be exactly the local attach argv, shell-quoted element by element — proof
+	// the ONLY change is the transport prefix, and nothing about the
+	// limactl/guest command drifted.
 	local := AttachArgv("web", "/home/debian.guest", "")
 	wantTail := make([]string, len(local))
 	for i, a := range local {
 		wantTail[i] = shellQuote(a)
 	}
-	if tail := got[3:]; !slices.Equal(tail, wantTail) {
+	if tail := got[len(prefix):]; !slices.Equal(tail, wantTail) {
 		t.Fatalf("remote attach tail = %v\nwant the local attach argv quoted: %v", tail, wantTail)
 	}
 }
@@ -295,7 +392,7 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 func TestSSHAttachArgvThreadsPortIdentity(t *testing.T) {
 	h := NewSSHHost(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"})
 	got := h.AttachArgv("web", "", "")
-	wantPrefix := []string{"ssh", "-t", "-p", "2222", "-i", "/k", "u@h", "limactl", "shell", "web"}
+	wantPrefix := sshArgv(h, []string{"-t", "-p", "2222", "-i", "/k"}, "u@h", "limactl", "shell", "web")
 	if !slices.Equal(got[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("attach prefix = %v\nwant %v", got[:len(wantPrefix)], wantPrefix)
 	}
@@ -315,7 +412,8 @@ func TestSSHTwoStageUpload(t *testing.T) {
 		}
 		return exec.CommandContext(ctx, "true")
 	}}
-	c := New(hostWith(testCfg, rec))
+	h := hostWith(testCfg, rec)
+	c := New(h)
 
 	if err := c.Copy(context.Background(), io.Discard, false, "/host/file.txt", GuestPath("web", "/guest/dir")); err != nil {
 		t.Fatalf("Copy upload: %v", err)
@@ -331,7 +429,7 @@ func TestSSHTwoStageUpload(t *testing.T) {
 	copyCall := findLimactlCopy(t, rec.calls)
 	// The limactl copy must run over ssh, pin --backend=scp, and take the STAGED
 	// remote path (temp/basename) as its host endpoint, and web:/guest/dir as guest.
-	wantCopy := []string{"ssh", "dev@example.com", "limactl", "copy", "-v", "--backend=scp", tmp + "/file.txt", "web:/guest/dir"}
+	wantCopy := sshArgv(h, nil, "dev@example.com", "limactl", "copy", "-v", "--backend=scp", tmp+"/file.txt", "web:/guest/dir")
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -351,14 +449,15 @@ func TestSSHTwoStageDownload(t *testing.T) {
 		}
 		return exec.CommandContext(ctx, "true")
 	}}
-	c := New(hostWith(testCfg, rec))
+	h := hostWith(testCfg, rec)
+	c := New(h)
 
 	if err := c.Copy(context.Background(), io.Discard, true, GuestPath("web", "/guest/src"), "/host/dst"); err != nil {
 		t.Fatalf("Copy download: %v", err)
 	}
 
 	copyCall := findLimactlCopy(t, rec.calls)
-	wantCopy := []string{"ssh", "dev@example.com", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp}
+	wantCopy := sshArgv(h, nil, "dev@example.com", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp)
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy (download) = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -461,7 +560,7 @@ func TestSSHReadFile(t *testing.T) {
 		if string(b) != "hello" {
 			t.Fatalf("ReadFile = %q, want %q", b, "hello")
 		}
-		want := []string{"ssh", "dev@example.com", "cat", "/remote/.lima/web/cloud-config.yaml"}
+		want := sshArgv(h, nil, "dev@example.com", "cat", "/remote/.lima/web/cloud-config.yaml")
 		if !reflect.DeepEqual(rec.calls[0], want) {
 			t.Fatalf("ReadFile argv = %v, want %v", rec.calls[0], want)
 		}
@@ -579,10 +678,11 @@ func TestSSHFileMutations(t *testing.T) {
 	})
 	t.Run("RemoveAll", func(t *testing.T) {
 		rec := &recordingExec{}
-		if err := hostWith(testCfg, rec).RemoveAll("/remote/.lima/web"); err != nil {
+		h := hostWith(testCfg, rec)
+		if err := h.RemoveAll("/remote/.lima/web"); err != nil {
 			t.Fatalf("RemoveAll: %v", err)
 		}
-		want := []string{"ssh", "dev@example.com", "rm", "-rf", "--", "/remote/.lima/web"}
+		want := sshArgv(h, nil, "dev@example.com", "rm", "-rf", "--", "/remote/.lima/web")
 		if !reflect.DeepEqual(rec.calls[0], want) {
 			t.Fatalf("RemoveAll argv = %v, want %v", rec.calls[0], want)
 		}
