@@ -178,12 +178,12 @@ config:
 ---
 quadrantChart
     title Where the field sits
-    x-axis Cloud --> Local
+    x-axis Limited Environment Tooling --> Fully Functional Environment
     y-axis Host exposed --> Sealed off
-    quadrant-1 Local and sealed
-    quadrant-2 Sealed but remote
-    quadrant-3 General-purpose cloud dev
-    quadrant-4 Local but host-exposed
+    quadrant-1 Sealed and fully functional
+    quadrant-2 Sealed but limited
+    quadrant-3 Limited and exposed
+    quadrant-4 Functional but exposed
     Sandbar: [0.90, 0.94]
     E2B: [0.06, 0.94]
     Modal: [0.17, 0.90]
