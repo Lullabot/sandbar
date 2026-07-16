@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -85,6 +86,15 @@ type SSHHost struct {
 	// after the first `stat -c` rejection every later Stat/DiskAllocBytes goes
 	// straight to the BSD `-f` form instead of paying a doomed GNU probe first.
 	statBSD atomic.Bool
+
+	// controlDir, when non-empty, holds the OpenSSH ControlMaster unix-domain
+	// sockets for this process's ssh connections (see muxFlags). It is resolved
+	// once at construction (NewSSHHost) and left EMPTY when it could not be
+	// determined or created — connection multiplexing is a pure optimization,
+	// never a hard requirement for reaching the remote host, so a failure here
+	// must silently fall back to the pre-multiplexing argv shape rather than
+	// failing construction or any later command.
+	controlDir string
 }
 
 // Compile-time proof the SSH host satisfies the whole seam and the copy hook.
@@ -98,9 +108,23 @@ func NewSSHHost(cfg SSHConfig) *SSHHost {
 	if cfg.RemoteLimaHome == "" {
 		cfg.RemoteLimaHome = defaultRemoteLimaHome
 	}
-	return &SSHHost{cfg: cfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
+	h := &SSHHost{cfg: cfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
 		return exec.CommandContext(ctx, argv[0], argv[1:]...)
 	}}
+
+	// Resolve a per-user control-socket directory for OpenSSH connection
+	// multiplexing (see muxFlags). Best-effort: os.UserCacheDir or the MkdirAll
+	// can fail (a read-only/unset HOME, a sandboxed environment), and that must
+	// never make constructing an SSHHost — or any command it later runs — fail.
+	// It just means every command pays a fresh ssh handshake, exactly as before
+	// this feature existed.
+	if cacheDir, err := os.UserCacheDir(); err == nil {
+		dir := filepath.Join(cacheDir, "sandbar", "ssh")
+		if err := os.MkdirAll(dir, 0o700); err == nil {
+			h.controlDir = dir
+		}
+	}
+	return h
 }
 
 // --- ssh/scp argv construction --------------------------------------------------
@@ -129,10 +153,43 @@ func (h *SSHHost) target() string {
 	return h.cfg.Host
 }
 
+// muxFlags returns the OpenSSH connection-multiplexing flags shared by every
+// ssh and scp argv, or nil when controlDir could not be resolved (a pure
+// optimization, never a hard requirement — see NewSSHHost).
+//
+//   - ControlMaster=auto: the first connection to a target becomes the master;
+//     every later one to the SAME target (the 5s board refresh, a per-VM file
+//     read, a heartbeat restart, an interactive attach, an scp transfer, even
+//     the final refresh batched alongside tea.Quit) reuses its already
+//     -authenticated channel instead of paying a fresh handshake. Without this,
+//     a user whose ssh agent needs a per-connection unlock (a 1Password /
+//     SSH-agent prompt) gets re-prompted on EVERY one of those — on startup
+//     preflight, every refresh tick, and even at quit.
+//   - ControlPath=<controlDir>/%C: %C is ssh's OWN hash of local host + remote
+//     host + port + user, so the unix-domain socket path stays short (there is
+//     a hard AF_UNIX path-length limit) and unique per target without us
+//     computing anything.
+//   - ControlPersist=600: keeps the master alive for 600s after the LAST client
+//     disconnects, so a quick quit+relaunch (or the heartbeat's own periodic
+//     reconnect) finds the same still-authenticated master instead of
+//     re-prompting. The master exits on its own once idle that long — nothing
+//     is left running indefinitely.
+func (h *SSHHost) muxFlags() []string {
+	if h.controlDir == "" {
+		return nil
+	}
+	return []string{
+		"-o", "ControlMaster=auto",
+		"-o", "ControlPath=" + filepath.Join(h.controlDir, "%C"),
+		"-o", "ControlPersist=600",
+	}
+}
+
 // sshBase is the ssh argv prefix up to and INCLUDING the target: `ssh [-t] [-p
-// port] [-i identity] target`. tty adds -t for the interactive attach. Port is
-// omitted at the default (<=0 or 22) and identity when unset, so the common case
-// is the bare `ssh target …` the tests pin.
+// port] [-i identity] [mux flags] target`. tty adds -t for the interactive
+// attach. Port is omitted at the default (<=0 or 22) and identity when unset,
+// and the multiplexing flags are omitted when controlDir could not be
+// resolved, so the common case is the bare `ssh target …` the tests pin.
 func (h *SSHHost) sshBase(tty bool) []string {
 	a := []string{"ssh"}
 	if tty {
@@ -144,6 +201,7 @@ func (h *SSHHost) sshBase(tty bool) []string {
 	if h.cfg.IdentityPath != "" {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
+	a = append(a, h.muxFlags()...)
 	return append(a, h.target())
 }
 
@@ -159,7 +217,9 @@ func (h *SSHHost) sshCommand(tty bool, remoteArgv ...string) []string {
 }
 
 // scpCommand builds an scp argv. Note scp's port flag is -P (capital), NOT ssh's
-// -p — getting this wrong silently ignores a non-default port.
+// -p — getting this wrong silently ignores a non-default port. The same
+// multiplexing flags as sshBase are threaded in before the endpoints so an scp
+// transfer benefits from (and can itself become) the shared master connection.
 func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	a := []string{"scp"}
 	if recursive {
@@ -171,6 +231,7 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	if h.cfg.IdentityPath != "" {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
+	a = append(a, h.muxFlags()...)
 	return append(a, from, to)
 }
 
