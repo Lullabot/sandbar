@@ -669,13 +669,13 @@ func TestTileGaugeRowUsesDisplayWidthNotByteLength(t *testing.T) {
 	}
 }
 
-// --- Rules 3+4: a single VM's own mem/disk gauge warns below 5% free. ---
+// --- Rules 3+4: a single VM's own mem/disk gauge warns below the low-free threshold (10%). ---
 
-// A running VM whose guest heartbeat reports less than 5% memory free (rule
+// A running VM whose guest heartbeat reports less than 10% memory free (rule
 // 3) gets a "⚠ mem" label and its row rendered in warnStyle instead of the
-// ordinary chrome grey — while an otherwise-identical VM at or above 5% free
+// ordinary chrome grey — while an otherwise-identical VM at or above the threshold
 // renders EXACTLY as today (no marker, no colour change).
-func TestTileMemGaugeWarnsBelow5PercentFree(t *testing.T) {
+func TestTileMemGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 	low := baseTileInput()
 	low.VM = vm.VM{Name: "web", Status: "Running"}
 	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 970} // 3% free
@@ -697,7 +697,7 @@ func TestTileMemGaugeWarnsBelow5PercentFree(t *testing.T) {
 
 // The disk gauge is mem's exact twin (rule 4), using DiskUsed vs the VM's
 // allocated Disk size — the same numbers tileDiskLine already renders.
-func TestTileDiskGaugeWarnsBelow5PercentFree(t *testing.T) {
+func TestTileDiskGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 	low := baseTileInput()
 	low.VM = vm.VM{Name: "web", Status: "Stopped", Disk: "100000000000", DiskUsed: "97000000000"} // 3% free
 	got := ansi.Strip(renderTile(low))

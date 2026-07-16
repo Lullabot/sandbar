@@ -87,7 +87,7 @@ func TestCheckHostMemWarnEdgeTriggered(t *testing.T) {
 	mem := &m.members[0]
 	const total = int64(32) << 30 // 32 GiB
 
-	// Comfortably above 5% free: nothing logged.
+	// Comfortably above the 10% threshold: nothing logged.
 	mem.host.mem = total
 	mem.host.memAvail = total / 2 // 50% free
 	m.checkHostMemWarn(mem)
@@ -95,11 +95,11 @@ func TestCheckHostMemWarnEdgeTriggered(t *testing.T) {
 		t.Fatalf("above threshold: expected no warning, got %v", m.messages)
 	}
 
-	// Cross below 5% free: exactly one warning.
+	// Cross below the threshold: exactly one warning.
 	mem.host.memAvail = total * 4 / 100 // 4% free
 	m.checkHostMemWarn(mem)
 	if len(m.messages) != 1 {
-		t.Fatalf("crossing below 5%%: expected exactly one warning, got %v", m.messages)
+		t.Fatalf("crossing below the threshold: expected exactly one warning, got %v", m.messages)
 	}
 	if !strings.Contains(m.messages[0].text, "local") || !strings.Contains(m.messages[0].text, "memory low") {
 		t.Fatalf("warning text = %q, want it to name the member and say memory low", m.messages[0].text)
@@ -109,10 +109,10 @@ func TestCheckHostMemWarnEdgeTriggered(t *testing.T) {
 	m.checkHostMemWarn(mem)
 	m.checkHostMemWarn(mem)
 	if len(m.messages) != 1 {
-		t.Fatalf("staying below 5%%: expected still exactly one warning, got %d: %v", len(m.messages), m.messages)
+		t.Fatalf("staying below the threshold: expected still exactly one warning, got %d: %v", len(m.messages), m.messages)
 	}
 
-	// Recovers to >=5% free: the latch re-arms, silently (no NEW message for
+	// Recovers to back above the threshold: the latch re-arms, silently (no NEW message for
 	// the recovery itself).
 	mem.host.memAvail = total / 2
 	m.checkHostMemWarn(mem)
@@ -120,7 +120,7 @@ func TestCheckHostMemWarnEdgeTriggered(t *testing.T) {
 		t.Fatalf("recovery itself must not log anything, got %v", m.messages)
 	}
 
-	// Re-crossing below 5% free after the recovery: warns again.
+	// Re-crossing below the threshold after the recovery: warns again.
 	mem.host.memAvail = total * 4 / 100
 	m.checkHostMemWarn(mem)
 	if len(m.messages) != 2 {
@@ -144,7 +144,7 @@ func TestCheckHostDiskWarnEdgeTriggered(t *testing.T) {
 	mem.host.diskFree = total * 2 / 100 // 2% free
 	m.checkHostDiskWarn(mem)
 	if len(m.messages) != 1 {
-		t.Fatalf("crossing below 5%%: expected exactly one warning, got %v", m.messages)
+		t.Fatalf("crossing below the threshold: expected exactly one warning, got %v", m.messages)
 	}
 	if !strings.Contains(m.messages[0].text, "disk low") {
 		t.Fatalf("warning text = %q, want it to say disk low", m.messages[0].text)
@@ -152,7 +152,7 @@ func TestCheckHostDiskWarnEdgeTriggered(t *testing.T) {
 
 	m.checkHostDiskWarn(mem)
 	if len(m.messages) != 1 {
-		t.Fatalf("staying below 5%%: expected still exactly one warning, got %d", len(m.messages))
+		t.Fatalf("staying below the threshold: expected still exactly one warning, got %d", len(m.messages))
 	}
 
 	mem.host.diskFree = total // fully recovers
@@ -190,20 +190,20 @@ func TestCheckHostWarnAbsentReadingsNeverWarn(t *testing.T) {
 	}
 }
 
-// Exactly 5% free is NOT "less than 5%" — the boundary itself must not warn.
+// Exactly the threshold (10%) free is NOT "less than 10%" — the boundary itself must not warn.
 func TestCheckHostWarnExactBoundaryDoesNotWarn(t *testing.T) {
 	m := newTestModel(t)
 	mem := &m.members[0]
 
 	mem.host.mem = 100
-	mem.host.memAvail = 5 // exactly 5%
+	mem.host.memAvail = 10 // exactly 10% — the lowFreeThreshold boundary
 	m.checkHostMemWarn(mem)
 
 	mem.host.diskTotal = 100
-	mem.host.diskFree = 5
+	mem.host.diskFree = 10
 	m.checkHostDiskWarn(mem)
 
 	if len(m.messages) != 0 {
-		t.Fatalf("exactly 5%% free must not warn (the rule is strictly LESS than 5%%), got %v", m.messages)
+		t.Fatalf("exactly 10%% free must not warn (the rule is strictly LESS than the threshold), got %v", m.messages)
 	}
 }
