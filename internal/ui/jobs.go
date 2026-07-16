@@ -169,6 +169,14 @@ type jobSnapshot struct {
 	// config holds the clone token, and nothing a renderer can reach should.
 	Provision bool
 
+	// Recreates mirrors job.recreates: true for a Reset (deletes and re-creates
+	// its own VM), false for a fresh Create. The provisionDoneMsg handler
+	// (model.go) uses this to persist last-used-profile bookkeeping only for a
+	// genuine CREATE — a reset targets its VM's own already-fixed profile, not
+	// one the user picked from the create form's selector, so it must not
+	// silently override the create form's default the next time it opens.
+	Recreates bool
+
 	Output   string
 	Progress ansibleProgress
 }
@@ -512,6 +520,7 @@ func snapshotOf(j *job) jobSnapshot {
 		Err:       j.err,
 		Canceled:  j.canceled,
 		Provision: j.key.kind == kindProvision,
+		Recreates: j.recreates,
 		Output:    j.output.String(),
 		Progress:  j.parser.progress,
 	}
@@ -568,6 +577,28 @@ func (r *jobRegistry) runningKey(scope registry.Scope, name string) (jobKey, boo
 	defer r.mu.Unlock()
 	for _, k := range keysFor(scope, name) {
 		if j, ok := r.jobs[k]; ok && j.state == jobRunning {
+			return k, true
+		}
+	}
+	return jobKey{}, false
+}
+
+// runningInScope reports the key of ANY job in flight anywhere under scope —
+// a build or a file transfer, on any VM — and whether one was found. It is
+// the profile-level counterpart of Building/isRunning above (both per-VM):
+// the profile management screen (task 8) gates a whole profile's
+// disable/delete/connection-field-edit on it being IDLE, which means no run
+// in flight ACROSS ITS ENTIRE SCOPE, not just on one particular VM name —
+// mirroring the existing per-VM Delete gate (commandreg.go's notBuilding) one
+// level up, rather than inventing a second gating mechanism.
+func (r *jobRegistry) runningInScope(scope registry.Scope) (jobKey, bool) {
+	if r == nil {
+		return jobKey{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, j := range r.jobs {
+		if k.scope == scope && j.state == jobRunning {
 			return k, true
 		}
 	}

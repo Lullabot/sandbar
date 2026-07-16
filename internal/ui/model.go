@@ -20,6 +20,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
@@ -82,6 +83,12 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
+	// viewProfiles and viewProfileForm are the profile management screen
+	// (profilesview.go, task 8): a list of every connection profile, and a
+	// sub-form over one profile's fields (create/edit), following the same
+	// view-enum + sub-model pattern as viewForm/viewSecrets above.
+	viewProfiles
+	viewProfileForm
 	viewHelp
 )
 
@@ -194,6 +201,13 @@ type model struct {
 	// (tests) that never opens a form still keys begin*/checkNotBusy correctly.
 	formScope    registry.Scope
 	hostDiskFree int64 // free bytes on the Lima volume, sampled when the form opens (0 = unknown)
+	// formProfileIdx indexes the create form's profile selector into
+	// formProfiles() (the ENABLED profiles, store order) — task 9's Component 4
+	// create-time half. setDefaultFormProfile picks it (last-used, else Local)
+	// when the form opens; cycleFormProfile moves it (and formScope with it) as
+	// the user picks a different destination. Reset mode never touches it — a
+	// reset always targets its own VM's already-fixed member.
+	formProfileIdx int
 
 	// Reset mode reuses the create form to reset a managed VM: the Name is locked
 	// to the target and two preserve toggles follow the inputs.
@@ -269,6 +283,38 @@ type model struct {
 	secretsVM    string
 	secretsScope registry.Scope // the owning member's scope, captured when the editor opens
 	secretsErr   error
+
+	// profileStore is the persisted connection-profiles store (task 1),
+	// loaded exactly like reg/sec above (see New). The profile management
+	// screen (profilesview.go, task 8) creates/edits/enables/disables/deletes
+	// profiles through it and applies the change LIVE, without a restart: a
+	// pointer, like reg/sec, so a mutation persists across the value-passed
+	// model.
+	profileStore *profiles.Store
+
+	// Profile management screen (profilesview.go). profileCursor indexes
+	// profileStore.List() (its stable insertion order) for the list's ring.
+	// profileMsg is the last management action's result — a validation
+	// error, or an idle-gate refusal naming the blocking job — shown at the
+	// top of the screen until the next action replaces or clears it.
+	profileCursor int
+	profileMsg    string
+	// profileConfirmDeleteID is the id of a profile pending a delete
+	// confirmation ("" = none pending). Deleting a profile is a synchronous
+	// local store write, not an asynchronous VM lifecycle action, so it uses
+	// its own tiny confirm flag rather than the board's confirmState/
+	// beginAction (built for batching a spinner with a tea.Cmd).
+	profileConfirmDeleteID string
+
+	// Profile create/edit form (profilesview.go). profileFormID is "" while
+	// creating a new RemoteSSH profile, else the id of the profile being
+	// edited (the Local profile's rename-only form, or a RemoteSSH
+	// profile's full connection-field set).
+	profileFormID    string
+	profileFormType  profiles.Type
+	profileInputs    []textinput.Model
+	profileFormFocus int
+	profileFormErr   error
 }
 
 // New wires the dependencies into a ready-to-run tea.Model over a FLEET: one
@@ -302,6 +348,17 @@ func New(fleet provider.Fleet) tea.Model {
 	if sec == nil {
 		sec = secrets.NewEmpty()
 	}
+
+	// The profiles store gets the same tolerant posture: a corrupt file is
+	// quarantined and reseeded (profiles.LoadFrom's doc comment) rather than
+	// failing New outright. This is a SEPARATE load from whatever main.go
+	// already did to build fleet (mirroring how reg/sec above are loaded
+	// fresh here rather than threaded in as constructor args) — both reads
+	// see the same on-disk profiles.yaml, and main.go's own copy is never
+	// touched again after BuildFleet runs, so there is nothing to drift out
+	// of sync. This is what the profile management screen (profilesview.go)
+	// persists every create/edit/enable/disable/delete through.
+	profileStore, profErr := profiles.Load()
 
 	members := make([]fleetMember, 0, len(fleet))
 	active := 0
@@ -341,17 +398,18 @@ func New(fleet provider.Fleet) tea.Model {
 	}
 
 	m := model{
-		members:    members,
-		active:     active,
-		reg:        reg,
-		sec:        sec,
-		jobs:       newJobRegistry(),
-		heartbeats: newHeartbeatsResolver(fleetShellResolver(members)),
-		keys:       newKeyMap(),
-		help:       help.New(),
-		view:       viewBoard,
-		viewport:   viewport.New(),
-		spinner:    sp,
+		members:      members,
+		active:       active,
+		reg:          reg,
+		sec:          sec,
+		profileStore: profileStore,
+		jobs:         newJobRegistry(),
+		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
+		keys:         newKeyMap(),
+		help:         help.New(),
+		view:         viewBoard,
+		viewport:     viewport.New(),
+		spinner:      sp,
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
@@ -362,14 +420,15 @@ func New(fleet provider.Fleet) tea.Model {
 	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
 	// the model renders sensibly before the first real WindowSizeMsg arrives.
 	m.applySize(80, 24)
-	// Neither load failure may silently shadow the other.
-	switch {
-	case loadErr != nil && secErr != nil:
-		m.logMsg("warning: " + loadErr.Error() + "; " + secErr.Error())
-	case loadErr != nil:
-		m.logMsg("warning: " + loadErr.Error())
-	case secErr != nil:
-		m.logMsg("warning: " + secErr.Error())
+	// No one load failure may silently shadow another.
+	var warnings []string
+	for _, err := range []error{loadErr, secErr, profErr} {
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+	}
+	if len(warnings) > 0 {
+		m.logMsg("warning: " + strings.Join(warnings, "; "))
 	}
 	return m
 }
@@ -736,6 +795,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mem := &m.members[mi]
 		sc := mem.scope
 
+		// A member the user just DISABLED (task 8's live mutation) has no live
+		// binding any more — its provider is nil'd out precisely so nothing new
+		// gets kicked, but a refresh that was ALREADY in flight when the disable
+		// landed can still deliver its result afterward. That stale result — success
+		// or failure alike — must not resurrect the member: every branch below
+		// would otherwise flip it back to connConnected/connErrored the instant it
+		// arrives, silently undoing the disable the user just asked for.
+		if mem.state == connDisabled {
+			return m, nil
+		}
+
 		// The host capacity is sampled whether or not the LISTING succeeded, so
 		// adopt it before the error branches. It used to be adopted only on
 		// success — so during a clone window (lima#5236), which is exactly when a
@@ -975,6 +1045,18 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
+			// Task 9: a successful CREATE (never a Reset — job.Recreates is what
+			// tells the two apart; a reset targets its VM's own already-fixed
+			// member, not a profile the user picked from the create form's
+			// selector) persists the profile it targeted as last-used, so the
+			// create form defaults to it next time it opens.
+			if !job.Recreates && m.profileStore != nil {
+				if mem, ok := m.memberByScope(msg.job.scope); ok {
+					if err := m.profileStore.SetLastUsed(mem.profile.ID); err != nil {
+						m.logMsg("VM ready, but could not record its profile as last-used: " + err.Error())
+					}
+				}
+			}
 			// The create form's token becomes the VM's GH_TOKEN secret, so it can
 			// be edited later without a rebuild. It never enters the managed
 			// registry, which strips CloneToken by design (registry.Add). Seeding
@@ -1039,6 +1121,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDest(msg)
 		case viewSecrets:
 			return m.updateSecrets(msg)
+		case viewProfiles:
+			return m.updateProfiles(msg)
+		case viewProfileForm:
+			return m.updateProfileForm(msg)
 		case viewHelp:
 			return m.updateHelp(msg)
 		}
@@ -1095,6 +1181,12 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewSecrets:
 		m.secretsArea, cmd = m.secretsArea.Update(msg)
 		return m, cmd
+	case viewProfileForm:
+		cmds := make([]tea.Cmd, len(m.profileInputs))
+		for i := range m.profileInputs {
+			m.profileInputs[i], cmds[i] = m.profileInputs[i].Update(msg)
+		}
+		return m, tea.Batch(cmds...)
 	default:
 		return m, nil
 	}
@@ -1149,6 +1241,10 @@ func (m model) View() tea.View {
 		content = m.destView()
 	case viewSecrets:
 		content = m.secretsView()
+	case viewProfiles:
+		content = m.profilesView()
+	case viewProfileForm:
+		content = m.profileFormView()
 	case viewHelp:
 		content = m.helpView()
 	default:

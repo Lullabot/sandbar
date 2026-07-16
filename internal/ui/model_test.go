@@ -53,6 +53,12 @@ func isolateHostState(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("LIMA_HOME", t.TempDir())
+	// XDG_CONFIG_HOME covers the connection-profiles store (internal/profiles):
+	// New (model.go) loads it exactly like the registry/secrets stores above,
+	// so without this every test process would read and seed-write the
+	// developer's REAL ~/.config/sandbar/profiles.yaml the first time it built
+	// a model.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 }
 
 // newTestModelWithCli is newTestModel's parametrized form, for tests that need

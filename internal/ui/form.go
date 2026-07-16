@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -34,6 +35,21 @@ const (
 	fCloneURL
 	fCloneToken
 )
+
+// fProfileSelector is a sentinel m.focusIdx value (never a real m.inputs
+// index — every real one is >= 0) for the create form's profile selector,
+// rendered on its own line above Name. It sits OUTSIDE the ordinary
+// input <-> toggle ring: reached from fName by going backward (shift+tab / up)
+// and returning to fName going forward (tab / down / enter), rather than
+// being spliced into the ring's own wrap points. That is deliberate — the
+// ring's existing wrap (last toggle -> fName, see formFocusNext) is exercised
+// by TestCreateFormRebuildToggle, and a form freshly opened with 'n' (and a
+// real user typing right after) must still land in — and type into — the
+// Name field (teatest_test.go's golden-adjacent tests type immediately after
+// 'n'), so the selector could not become the new first stop without breaking
+// both. Reset mode never uses this value: a reset always targets its own VM's
+// already-fixed member, so it has no selector to focus.
+const fProfileSelector = -1
 
 var fieldLabels = []string{
 	"Name",
@@ -215,9 +231,10 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 // openForm initialises the create form and focuses the first field, returning
 // the cursor-blink command.
 func (m *model) openForm() tea.Cmd {
-	// A NEW VM targets the active member (task 9 lets the user pick). Its host
-	// sample supplies the cpu/memory/user defaults; its provider seeds the toggles.
-	m.formScope = m.activeScope()
+	// A NEW VM targets the profile selector's default pick — last-used, else
+	// Local (task 9's create-time half; setDefaultFormProfile). Its host sample
+	// supplies the cpu/memory/user defaults; its provider seeds the toggles.
+	m.setDefaultFormProfile()
 	hs := m.formHostSample()
 	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
 	m.focusIdx = 0
@@ -315,6 +332,101 @@ func (m model) hasStoredToken(scope registry.Scope, name string) bool {
 	return false
 }
 
+// formProfiles returns the ENABLED profiles the create form's selector offers
+// to choose among, in the profiles store's stable (insertion) order. A
+// disabled profile is never offered here — even though its member can still
+// linger in m.members (task 8's live mutation keeps a disabled member around,
+// dormant, so the header can still name it) — because it is not a place a new
+// VM could ever actually be provisioned.
+func (m model) formProfiles() []profiles.Profile {
+	var out []profiles.Profile
+	for _, p := range m.profileList() {
+		if p.Enabled {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// indexOfProfileID returns the index of the profile with the given id in
+// list, or -1 if absent (including id == "", so an unset last-used pointer
+// never matches by accident).
+func indexOfProfileID(list []profiles.Profile, id string) int {
+	if id == "" {
+		return -1
+	}
+	for i, p := range list {
+		if p.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// retargetFormScope points formScope at profile p's live member — the
+// provider, host sample and job/registry bookkeeping the rest of the form
+// resolves through (formProvider, formHostSample, beginJob) all follow it. A
+// profile with no live member (should not happen for anything formProfiles
+// offers, but guarded rather than assumed) leaves formScope untouched.
+func (m *model) retargetFormScope(p profiles.Profile) {
+	if mem, ok := m.memberIndexByProfileIDValue(p.ID); ok {
+		m.formScope = mem.scope
+	}
+}
+
+// setDefaultFormProfile picks the create form's INITIAL profile selection —
+// the last-used profile (by id, from the store), falling back to Local, and
+// finally to whatever is first in the enabled list — and points formScope at
+// it. Called from openForm BEFORE m.inputs exists: it touches formProfileIdx
+// and formScope only, never an input field (newInputs, right after, seeds
+// cpu/memory/user from the resulting formHostSample — see openForm).
+func (m *model) setDefaultFormProfile() {
+	list := m.formProfiles()
+	if len(list) == 0 {
+		// Nothing enabled to select (a degenerate store) — fall back exactly as
+		// sand did before this field existed.
+		m.formProfileIdx = 0
+		m.formScope = m.activeScope()
+		return
+	}
+	wantID := ""
+	if m.profileStore != nil {
+		wantID = m.profileStore.LastUsed()
+	}
+	idx := indexOfProfileID(list, wantID)
+	if idx < 0 {
+		// No last-used, or it points at a profile since disabled/deleted: Local.
+		idx = indexOfProfileID(list, profiles.LocalProfileID)
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	m.formProfileIdx = idx
+	m.retargetFormScope(list[idx])
+}
+
+// cycleFormProfile moves the profile selector by delta (+/-1, wrapping) among
+// the enabled profiles, retargets formScope at the newly selected one, and
+// re-seeds the cpu/memory/user fields from ITS host sample — so switching
+// profiles mid-form immediately shows suggestions scaled to the new host
+// rather than stale ones seeded (by newInputs, at open) for the old one. A
+// field the user has since typed over loses that edit; the selector is meant
+// to be picked before fine-tuning these, exactly as openForm itself seeds them
+// fresh every time the form opens.
+func (m *model) cycleFormProfile(delta int) {
+	list := m.formProfiles()
+	n := len(list)
+	if n == 0 {
+		return
+	}
+	m.formProfileIdx = ((m.formProfileIdx+delta)%n + n) % n
+	m.retargetFormScope(list[m.formProfileIdx])
+	hs := m.formHostSample()
+	m.inputs[fCPUs].SetValue(strconv.Itoa(defaultCPUs(hs.cpus)))
+	m.inputs[fMemory].SetValue(defaultMemory(hs.mem))
+	m.inputs[fUser].SetValue(orDefault(hs.user, hostUser()))
+}
+
 // formToggle is one checkbox in the form: a label, its per-field help, and
 // get/set closures onto the model field it drives. Both form modes (create
 // and reset) build their own list of these and share one focus walk and one
@@ -408,12 +520,32 @@ func (m model) toggles() []formToggle {
 // wrapping around. Past the last text input they walk into the toggles (see
 // createToggles), then wrap back to the first input — mirroring
 // resetFocusNext/Prev below, which do the same for reset mode's toggles.
+//
+// The profile selector (fProfileSelector) is a detour off the FRONT of that
+// ring, not spliced into it: going backward from fName reaches it, and going
+// forward from it returns to fName. The ring's own wrap (last toggle -> fName)
+// is untouched, so it still lands a form freshly opened with 'n' — and a real
+// user typing right after — in the Name field. See fProfileSelector's doc.
 func (m *model) focusNext() tea.Cmd {
+	if m.toggleFocus == -1 && m.focusIdx == fProfileSelector {
+		m.focusIdx = fName
+		return m.inputs[fName].Focus()
+	}
 	return m.formFocusNext(fName, fCloneToken)
 }
 
 func (m *model) focusPrev() tea.Cmd {
-	return m.formFocusPrev(fName, fCloneToken)
+	switch {
+	case m.toggleFocus == -1 && m.focusIdx == fProfileSelector:
+		// Already at the front of the ring; nothing further back.
+		return nil
+	case m.toggleFocus == -1 && m.focusIdx == fName:
+		m.inputs[fName].Blur()
+		m.focusIdx = fProfileSelector
+		return nil
+	default:
+		return m.formFocusPrev(fName, fCloneToken)
+	}
 }
 
 // resetFocusNext advances focus in reset mode: through the editable inputs
@@ -718,6 +850,21 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// On the focused profile selector, left/right cycles the enabled profile
+	// list rather than navigating between fields — the selector's own analogue
+	// of the toggle carve-out just above. Up/Down/Tab still move focus away
+	// from it as usual (handled by the switch below).
+	if m.toggleFocus == -1 && m.focusIdx == fProfileSelector {
+		switch msg.Code {
+		case tea.KeyLeft:
+			m.cycleFormProfile(-1)
+			return m, nil
+		case tea.KeyRight:
+			m.cycleFormProfile(1)
+			return m, nil
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
 		return m, m.focusPrev()
@@ -726,8 +873,9 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.focusNext()
 	}
 
-	// Only forward edits while a text input is focused (toggles aren't inputs).
-	if m.toggleFocus != -1 {
+	// Only forward edits while a text input is focused (toggles and the profile
+	// selector aren't inputs).
+	if m.toggleFocus != -1 || m.focusIdx == fProfileSelector {
 		return m, nil
 	}
 
@@ -784,6 +932,32 @@ func toggleRow(label string, on, focused bool) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
 }
 
+// profileSelectorRow renders the create form's profile selector: the
+// currently selected ENABLED profile's name, bracketed with cycle hints when
+// there is more than one to choose from, and highlighted like a focused label
+// when the selector itself has focus. formProfiles/formProfileIdx being empty
+// (a degenerate store with nothing enabled) renders an explanatory value
+// rather than indexing out of range.
+func (m model) profileSelectorRow() string {
+	list := m.formProfiles()
+	value := "(no enabled profiles)"
+	if len(list) > 0 {
+		i := m.formProfileIdx
+		if i < 0 || i >= len(list) {
+			i = 0
+		}
+		value = list[i].Name
+		if len(list) > 1 {
+			value = "< " + value + " >"
+		}
+	}
+	ls := labelStyle
+	if m.toggleFocus == -1 && m.focusIdx == fProfileSelector {
+		ls = focusedLabelStyle
+	}
+	return ls.Render("Profile:") + " " + value
+}
+
 // formHelp returns the bindings shown in the create/reset form's help bar.
 // 'q' is a text character in the form, so Quit is intentionally omitted (only
 // ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
@@ -802,6 +976,13 @@ func (m model) formView() string {
 	}
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
+
+	// The profile selector (task 9): which connection profile's provider/scope
+	// this create targets. Reset mode has none — a reset always targets its own
+	// VM's already-fixed member, never a place the user picks.
+	if !m.resetMode {
+		b.WriteString(m.profileSelectorRow() + "\n")
+	}
 
 	for i := range m.inputs {
 		// In reset mode the Name is fixed to the target VM: render it as a static,
@@ -844,6 +1025,8 @@ func (m model) formView() string {
 	switch {
 	case m.toggleFocus >= 0 && m.toggleFocus < len(toggles) && toggles[m.toggleFocus].help != "":
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(toggles[m.toggleFocus].help) + "\n")
+	case m.toggleFocus == -1 && m.focusIdx == fProfileSelector:
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render("←/→ to pick which connection profile creates this VM. The CPU/memory/user suggestions below scale to that profile's host.") + "\n")
 	case m.toggleFocus == -1 && m.focusIdx >= 0 && m.focusIdx < len(fieldInfo):
 		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
 		// wrapped help still fits inside the content column.
