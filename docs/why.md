@@ -32,7 +32,7 @@ We hope Sandbar is the answer!
 
 **1. sandbar VM has no writable path back to your machine.**
 
-**2. We work in a post-IDE world.**
+**2. Agentic tools replace IDEs in most cases.**
 
 Each VM is a full guest, not a container sharing your kernel. Its only
 mount is the read-only provisioning playbook. Lima's stock host-home
