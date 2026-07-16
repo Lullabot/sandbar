@@ -87,3 +87,73 @@ func TestClassifyNoSizeIsUnrenderable(t *testing.T) {
 		}
 	}
 }
+
+// classify's own zero-bands behaviour must be untouched by task 10:
+// classify(w,h) and classifyWithFooter thread a headerBands of 0 through
+// classifyWithHeaderBands, so every pre-task-10 caller/test keeps getting
+// exactly the base header height it always did.
+func TestClassifyRequestsNoHeaderBands(t *testing.T) {
+	lm := classify(120, 40)
+	if lm.HeaderBandLines != 0 {
+		t.Fatalf("classify(120,40).HeaderBandLines = %d, want 0 (classify never asks for bands)", lm.HeaderBandLines)
+	}
+}
+
+// A tall, wide terminal has room to grant every requested band in full.
+func TestClassifyWithHeaderBandsGrantsWhatFits(t *testing.T) {
+	lm := classifyWithHeaderBands(120, 40, 1, 3)
+	if lm.HeaderBandLines != 3 {
+		t.Fatalf("HeaderBandLines = %d, want 3 granted in full on a roomy terminal", lm.HeaderBandLines)
+	}
+	if lm.GridHeight <= 0 || lm.FooterHeight <= 0 {
+		t.Fatalf("classifyWithHeaderBands(120,40,1,3) must stay renderable: %+v", lm)
+	}
+	sum := lm.HeaderHeight + lm.MessagesHeight + lm.GridHeight + lm.FooterHeight
+	if sum > 40-appPaddingV {
+		t.Fatalf("pane heights sum to %d, exceeding the content height", sum)
+	}
+}
+
+// 80x24 — the narrowest supported terminal — must never break: however many
+// bands a large fleet wants, the grid and footer stay renderable, and
+// HeaderBandLines never claims more than the layout actually paid for.
+func TestClassifyWithHeaderBandsNeverBreaks80x24(t *testing.T) {
+	for _, want := range []int{0, 1, 2, 5, 20} {
+		lm := classifyWithHeaderBands(80, 24, 1, want)
+		if lm.GridHeight < minBudget {
+			t.Fatalf("headerBands=%d: GridHeight = %d, want >= %d (the grid must never break)", want, lm.GridHeight, minBudget)
+		}
+		if lm.FooterHeight <= 0 {
+			t.Fatalf("headerBands=%d: FooterHeight = %d, want > 0", want, lm.FooterHeight)
+		}
+		if lm.HeaderBandLines > want {
+			t.Fatalf("headerBands=%d: HeaderBandLines = %d, granted more than requested", want, lm.HeaderBandLines)
+		}
+		sum := lm.HeaderHeight + lm.MessagesHeight + lm.GridHeight + lm.FooterHeight
+		if sum > 24-appPaddingV {
+			t.Fatalf("headerBands=%d: pane heights sum to %d, exceeding the content height", want, sum)
+		}
+	}
+}
+
+// Bands are the FIRST thing shed when a short terminal cannot afford
+// everything — before the messages strip, before the full header — because a
+// summarized "+K more" row can say something useful in one line where losing
+// the messages strip or the title row cannot.
+func TestClassifyWithHeaderBandsShedBeforeMessagesAndHeader(t *testing.T) {
+	// A terminal too short to show every requested band, but tall enough for
+	// the messages strip and the full header (a few rows of slack above the
+	// bare minimum), must shed bands FIRST — the messages strip and header
+	// survive.
+	const h = messagesMinHeight + 5
+	lm := classifyWithHeaderBands(120, h, 1, 100)
+	if lm.HeaderBandLines >= 100 {
+		t.Fatalf("100 requested bands at height %d should not all be granted", h)
+	}
+	if lm.MessagesHeight == 0 {
+		t.Fatalf("bands must be shed before the messages strip, but the strip was shed at height %d", h)
+	}
+	if !lm.HeaderFull {
+		t.Fatalf("bands must be shed before the full header, but the header compacted at height %d", h)
+	}
+}

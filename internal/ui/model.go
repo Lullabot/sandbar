@@ -436,8 +436,12 @@ func (m *model) applySize(w, h int) {
 	// than a running one, so tiles jumped as the user arrowed between them — and the
 	// panes went on rendering at a height from a footer budget that no longer existed.
 	// A row of slack in the band is a cheap price for a layout that holds still.
-	m.layout = classify(w, h)
-	m.layout = classifyWithFooter(w, h, maxFooterHelpLines)
+	// Header bands (task 10) are threaded through exactly like the help bar's
+	// line count: desiredHeaderBands reads the CURRENT fleet state (members is
+	// always populated before applySize runs, both at New and at every resize),
+	// so classifyWithHeaderBands can budget the right number of extra header
+	// rows for the fleet as it stands right now, not just the terminal size.
+	m.layout = classifyWithHeaderBands(w, h, maxFooterHelpLines, m.desiredHeaderBands())
 
 	// The help bar's OWN width-based truncation is disabled (0): bubbles'
 	// ShortHelpView only stops adding items when it ALSO has room left for its
@@ -796,6 +800,11 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mem.lastErr = msg.err
 			mem.backoff++
 			m.logMsg("list failed: " + msg.err.Error())
+			// A member turning errored can change how many header bands the fleet
+			// wants (task 10) — re-run the same budgeting a resize would, at the
+			// terminal's CURRENT size, so the errored banner gets a row without
+			// waiting for the user to resize the terminal.
+			m.applySize(m.width, m.height)
 			return m, nil
 		}
 		// SUCCESS: the member is connected; reset its self-heal cadence and adopt
@@ -851,6 +860,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// job registry, so there is nothing to rebuild — only the focus ring has to
 		// be re-pinned against a fleet that may have gained or lost VMs, which Update
 		// does centrally (syncBoard) after this returns.
+		//
+		// A member turning connected can also change how many header bands the
+		// fleet wants (task 10's per-profile stats bands) — re-run the same
+		// budgeting a resize would, so the fleet's FIRST successful list already
+		// gets its band without waiting on a resize.
+		m.applySize(m.width, m.height)
 		return m, nil
 
 	case actionDoneMsg:
@@ -883,8 +898,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.jobs.remove(sc, msg.name)
 			// A deleted VM is no longer managed, and its host-stored secrets no
 			// longer have a guest to apply to; drop it from both indexes. Neither
-			// failure may silently shadow the other.
-			regErr := m.reg.Remove(msg.name)
+			// failure may silently shadow the other. Scoped to sc (the deleted VM's
+			// own member) — an unscoped Remove would target LocalScope and leave a
+			// remote VM's real entry dangling in the index.
+			regErr := m.reg.RemoveScoped(sc, msg.name)
 			// Scoped to the deleted VM's own member: never a bare name that could
 			// match a same-named VM under a different profile.
 			secErr := m.sec.Remove(msg.name, sc)

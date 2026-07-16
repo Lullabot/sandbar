@@ -130,6 +130,11 @@ func (m model) boardVMs() []boardVM {
 	var out []boardVM
 	for i := range m.members {
 		mem := m.members[i]
+		// A disabled member's tiles are hidden (task 10) — its binding is torn
+		// down and its last-known vms are stale, not a live roster to show.
+		if mem.state == connDisabled {
+			continue
+		}
 		on := make(map[string]bool, len(mem.vms))
 		idx := make(map[string]vm.VM, len(mem.vms))
 		for _, v := range mem.vms {
@@ -959,18 +964,26 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 	// so a same-named VM under another profile never lends this one its build/gauge.
 	job, hasJob := m.jobs.snapshot(provisionKey(v.scope, v.Name))
 	sample, hasSample := m.sampleOf(v.scope, v.Name)
+	// The tile's provenance label (task 10) names the OWNING member's profile —
+	// which profile this VM actually runs through — never guessed from the VM
+	// itself, since two profiles can share a name.
+	var profileLabel string
+	if mem, ok := m.memberByScope(v.scope); ok {
+		profileLabel = mem.profile.Name
+	}
 	return renderTile(tileInput{
-		VM:        v.VM,
-		Job:       job,
-		HasJob:    hasJob,
-		Sample:    sample,
-		HasSample: hasSample,
-		Traits:    traits[i],
-		Uniform:   uniform,
-		Focused:   v.Name == m.focusVM.Name,
-		Width:     m.layout.TileWidth,
-		Spinner:   frame,
-		Now:       now,
+		VM:           v.VM,
+		Job:          job,
+		HasJob:       hasJob,
+		Sample:       sample,
+		HasSample:    hasSample,
+		Traits:       traits[i],
+		Uniform:      uniform,
+		Focused:      v.Name == m.focusVM.Name,
+		Width:        m.layout.TileWidth,
+		Spinner:      frame,
+		Now:          now,
+		ProfileLabel: profileLabel,
 	})
 }
 

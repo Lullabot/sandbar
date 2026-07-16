@@ -58,6 +58,13 @@ const (
 	// DORMANT: rendered from the last-known list, but never reconciled or
 	// pruned on a failed list, and it self-heals with backoff.
 	connErrored
+	// connDisabled is a member whose profile the user disabled without
+	// deleting it (task 8's live mutation): its binding is torn down, its
+	// refresh/heartbeat cmds are stopped, and its tiles are hidden (boardVMs
+	// skips it) — but the member itself stays in the fleet so the header can
+	// still name it and say why its VMs are gone, exactly as an errored
+	// member does (task 10's banner row).
+	connDisabled
 )
 
 // backoffSteps is the errored-member self-heal schedule: instead of retrying

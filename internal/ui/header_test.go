@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -160,5 +162,148 @@ func TestHeaderAndTileAgreeOnTheSameSample(t *testing.T) {
 	}
 	if !strings.Contains(view, "75%") { // the tile's own cpu gauge, same sample
 		t.Fatalf("the tile should show the same reading on ITS scale (75%%), got:\n%s", view)
+	}
+}
+
+// --- Task 10: per-profile header bands and banners ---
+
+// The zero-config single-member fleet must want ZERO extra header bands —
+// its one capacity clause stays folded into headerCounts (hostCapacityText),
+// exactly as before this task. This is the single-profile parity the task
+// promises: nothing about the header's shape changes for the common case.
+func TestDesiredHeaderBandsSingleMemberIsZero(t *testing.T) {
+	m := newTestModel(t)
+	if got := m.desiredHeaderBands(); got != 0 {
+		t.Fatalf("desiredHeaderBands() = %d, want 0 for a single-member fleet", got)
+	}
+	if lines := m.headerBandLines(); lines != nil {
+		t.Fatalf("headerBandLines() = %v, want nil for a single-member fleet", lines)
+	}
+}
+
+// A multi-member fleet wants one band/banner per connected, disabled, or
+// errored member — never one for a member still connecting (that span is
+// covered by fleetConnectingBanner while the board is otherwise empty).
+func TestDesiredHeaderBandsCountsConnectedDisabledErrored(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, 120, 40)
+
+	m.members[0].state = connConnected
+	m.members[1].state = connConnecting
+	if got := m.desiredHeaderBands(); got != 1 {
+		t.Fatalf("desiredHeaderBands() = %d, want 1 (one connected, one still connecting)", got)
+	}
+
+	m.members[1].state = connDisabled
+	if got := m.desiredHeaderBands(); got != 2 {
+		t.Fatalf("desiredHeaderBands() = %d, want 2 (connected + disabled)", got)
+	}
+
+	m.members[1].state = connErrored
+	if got := m.desiredHeaderBands(); got != 2 {
+		t.Fatalf("desiredHeaderBands() = %d, want 2 (connected + errored)", got)
+	}
+}
+
+// A connected member's line is "<profile>: <its own host cpu/mem/disk>" —
+// the same use-not-allocation text hostCapacityText renders for the active
+// member, just addressed at this one.
+func TestMemberStatusLineConnected(t *testing.T) {
+	pinHostForHeader(t)
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, 120, 40)
+
+	mem := m.members[1]
+	mem.state = connConnected
+	mem.host.mem = 16 << 30
+	mem.host.diskFree = 60 << 30
+	mem.host.cpus = 16
+
+	line, ok := m.memberStatusLine(mem)
+	if !ok {
+		t.Fatalf("memberStatusLine(connected) reported nothing")
+	}
+	if !strings.HasPrefix(line, mem.profile.Name+": ") {
+		t.Fatalf("line = %q, want it to start with the profile's name", line)
+	}
+	if !strings.Contains(line, "disk free") {
+		t.Fatalf("line = %q, want the host capacity text folded in", line)
+	}
+}
+
+// A disabled member contributes a BANNER, not a stats band: it names the
+// profile and says why its tiles are missing.
+func TestMemberStatusLineDisabled(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	mem := m.members[1]
+	mem.state = connDisabled
+
+	line, ok := m.memberStatusLine(mem)
+	if !ok {
+		t.Fatalf("memberStatusLine(disabled) reported nothing")
+	}
+	if !strings.Contains(line, "disabled") {
+		t.Fatalf("line = %q, want it to say the profile is disabled", line)
+	}
+}
+
+// An errored member's banner names the connection error, so the user
+// understands why its VMs are absent instead of just seeing an empty board.
+func TestMemberStatusLineErrored(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	mem := m.members[1]
+	mem.state = connErrored
+	mem.lastErr = errors.New("ssh: connection refused")
+
+	line, ok := m.memberStatusLine(mem)
+	if !ok {
+		t.Fatalf("memberStatusLine(errored) reported nothing")
+	}
+	if !strings.Contains(line, "connection refused") {
+		t.Fatalf("line = %q, want the connection error named", line)
+	}
+}
+
+// A member still connecting has nothing to say in the header yet.
+func TestMemberStatusLineConnecting(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	mem := m.members[1]
+	mem.state = connConnecting
+
+	if _, ok := m.memberStatusLine(mem); ok {
+		t.Fatalf("memberStatusLine(connecting) should report nothing yet")
+	}
+}
+
+// When the fleet has more lines to say than the layout granted rows for,
+// headerBandLines summarizes the overflow into a single "+K more" row rather
+// than silently dropping members off the bottom.
+func TestHeaderBandLinesSummarizesOverflow(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, 120, 40)
+	m.members[0].state = connConnected
+	m.members[1].state = connErrored
+	m.members[1].lastErr = errors.New("unreachable")
+
+	// Force a granted budget smaller than the fleet's two lines, exactly as a
+	// short terminal would (classifyWithHeaderBands, layout.go) — this test
+	// pins headerBandLines' OWN summarizing behaviour independent of that
+	// negotiation.
+	m.layout.HeaderBandLines = 1
+	lines := m.headerBandLines()
+	if len(lines) != 1 {
+		t.Fatalf("headerBandLines() = %v, want exactly 1 line (the granted budget)", lines)
+	}
+	// budget=1 with 2 lines to say leaves no room for any individual line
+	// alongside the summary (shown = budget-1 = 0): the single granted row
+	// summarizes both.
+	if !strings.Contains(lines[0], "+2 more") {
+		t.Fatalf("headerBandLines()[0] = %q, want a \"+2 more\" summary", lines[0])
 	}
 }

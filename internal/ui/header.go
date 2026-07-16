@@ -40,19 +40,25 @@ const compactPrefix = "sand · "
 
 // headerView renders the pinned header band, HeaderHeight lines exactly:
 // full (a title line plus the counts) when the terminal is tall enough, or
-// compact (folded onto one line) once classify sheds the title (layout.go).
-// Every line is clipped to ContentWidth, the same honest clip the footer and the
+// compact (folded onto one line) once classify sheds the title (layout.go),
+// PLUS task 10's per-profile band/banner rows — however many
+// m.layout.HeaderBandLines was actually granted (see headerBandLines). Every
+// line is clipped to ContentWidth, the same honest clip the footer and the
 // activity line take.
 func (m model) headerView() string {
+	var lines []string
 	if m.layout.HeaderFull {
-		return m.clipLine(m.titleRow()) + "\n" +
-			m.clipLine(statusStyle.Render(m.headerCounts(m.layout.ContentWidth)))
+		lines = append(lines, m.clipLine(m.titleRow()),
+			m.clipLine(statusStyle.Render(m.headerCounts(m.layout.ContentWidth))))
+	} else {
+		// Compact: the title row is gone, and so is the version with it. The counts
+		// and the live host readout are worth more than knowing which build you are
+		// on, and at this height there is no room to argue about it.
+		budget := m.layout.ContentWidth - ansi.StringWidth(compactPrefix)
+		lines = append(lines, m.clipLine(statusStyle.Render(compactPrefix+m.headerCounts(budget))))
 	}
-	// Compact: the title row is gone, and so is the version with it. The counts and
-	// the live host readout are worth more than knowing which build you are on, and
-	// at this height there is no room to argue about it.
-	budget := m.layout.ContentWidth - ansi.StringWidth(compactPrefix)
-	return m.clipLine(statusStyle.Render(compactPrefix + m.headerCounts(budget)))
+	lines = append(lines, m.headerBandLines()...)
+	return strings.Join(lines, "\n")
 }
 
 // titleRow is "sand" on the left and the build on the right, which is the one
@@ -126,11 +132,16 @@ func (m model) fleetCountsText() string {
 // visible screen (the idle gate). So a reading can be genuinely absent, and when
 // it is this says so with an em dash rather than printing a 0 that would claim an
 // idle fleet — see tileGaugeNoReading, which makes the same refusal on the tile.
-func (m model) hostCapacityText() string {
-	// The single-band header reports the ACTIVE member's host (task 10 makes this
-	// per-profile). Sum only that member's board VMs against that member's host —
-	// for the zero-config single-member fleet this is the whole board, unchanged.
-	am := m.activeMember()
+func (m model) hostCapacityText() string { return m.hostCapacityTextFor(m.activeMember()) }
+
+// hostCapacityTextFor is hostCapacityText's per-member form (task 10): the
+// SAME use-not-allocation arithmetic below, just addressed at whichever
+// member the caller names instead of always the active one. hostCapacityText
+// (the single-band header's own text) is now a one-line call to this with
+// m.activeMember() — bit-identical to the pre-task-10 behaviour for the
+// zero-config single-member fleet, which is exactly the parity this task
+// promises. headerBandLines is the other caller, one per connected member.
+func (m model) hostCapacityTextFor(am fleetMember) string {
 	roster := m.boardVMs()
 
 	// Sum only the VMs actually reporting. A VM's CPUPct is a percentage of ITS OWN
@@ -235,4 +246,109 @@ func humanizeInt(n int64) string {
 		return "0 B"
 	}
 	return humanizeBytes(strconv.FormatInt(n, 10))
+}
+
+// desiredHeaderBands is how many EXTRA header rows (task 10) the fleet wants
+// right now: one per member that is connected, disabled, or errored — the
+// three states memberStatusLine has something to say about. A connecting
+// member says nothing here (fleetConnectingBanner already covers that span,
+// while the board is otherwise empty).
+//
+// The zero-config single-member fleet always wants ZERO extra bands: its one
+// capacity clause folds into headerCounts (hostCapacityText), exactly as
+// before this task, which is the single-profile parity this task promises.
+// applySize (model.go) calls this on every resize AND every member state
+// transition, so classifyWithHeaderBands' budget tracks the fleet, not just
+// the terminal size.
+func (m model) desiredHeaderBands() int {
+	if len(m.members) <= 1 {
+		return 0
+	}
+	n := 0
+	for i := range m.members {
+		switch m.members[i].state {
+		case connConnected, connDisabled, connErrored:
+			n++
+		}
+	}
+	return n
+}
+
+// memberStatusLine is one fleet member's header row, unstyled and
+// unclipped: a stats band (mem's own host cpu/mem/disk, hostCapacityTextFor)
+// while connected, or a banner naming the reason its tiles are absent while
+// disabled/errored. false while connecting — there is nothing to say about a
+// member still making its first connection here (see desiredHeaderBands).
+func (m model) memberStatusLine(mem fleetMember) (string, bool) {
+	switch mem.state {
+	case connConnected:
+		if cap := m.hostCapacityTextFor(mem); cap != "" {
+			return mem.profile.Name + ": " + cap, true
+		}
+		return mem.profile.Name + ": —", true
+	case connDisabled:
+		return mem.profile.Name + ": disabled", true
+	case connErrored:
+		if mem.lastErr != nil {
+			return mem.profile.Name + ": error: " + mem.lastErr.Error(), true
+		}
+		return mem.profile.Name + ": error", true
+	default:
+		return "", false
+	}
+}
+
+// headerBandLines renders task 10's per-profile rows: one line per connected
+// member (that member's own host cpu/mem/disk) and one BANNER line per
+// disabled/errored member (naming the profile and why its tiles are gone),
+// so a mixed fleet's status bar grows from the single capacity clause
+// headerCounts folds in for the zero-config default.
+//
+// Degradation at the narrowest supported terminal (80 columns) is two
+// independent, explicit rules:
+//
+//   - WIDTH: each line is truncated (with an ellipsis) to ContentWidth via
+//     m.clipLine — exactly the same honest clip every other header/footer
+//     line already takes. A long connection error is cut, never wrapped or
+//     left to overhang the terminal.
+//   - HEIGHT: classifyWithHeaderBands grants at most m.layout.HeaderBandLines
+//     rows, budgeted against the same header/messages/footer negotiation the
+//     help bar already goes through (layout.go) — bands are shed FIRST when a
+//     short terminal cannot afford everything. When the fleet has more lines
+//     to say than were granted, the LAST granted row summarizes the rest
+//     ("+K more") instead of silently dropping members off the bottom.
+func (m model) headerBandLines() []string {
+	if len(m.members) <= 1 {
+		return nil
+	}
+	var all []string
+	for i := range m.members {
+		if line, ok := m.memberStatusLine(m.members[i]); ok {
+			all = append(all, line)
+		}
+	}
+	budget := m.layout.HeaderBandLines
+	if budget <= 0 || len(all) == 0 {
+		return nil
+	}
+	if len(all) <= budget {
+		out := make([]string, len(all))
+		for i, s := range all {
+			out[i] = m.clipLine(statusStyle.Render(s))
+		}
+		return out
+	}
+	// More to say than the layout granted rows for: show as many in full as fit
+	// alongside a summary line, and fold the rest into that final "+K more" row
+	// rather than truncate the member list itself.
+	shown := budget - 1
+	if shown < 0 {
+		shown = 0
+	}
+	out := make([]string, 0, budget)
+	for _, s := range all[:shown] {
+		out = append(out, m.clipLine(statusStyle.Render(s)))
+	}
+	out = append(out, m.clipLine(statusStyle.Render(fmt.Sprintf("+%d more", len(all)-shown))))
+	return out
 }

@@ -117,8 +117,14 @@ is authoritative for the seam this work extends. Key facts that shape the approa
   schema v2): every entry carries `Provider` + `RemoteTarget`, and
   `AddScoped`/`ReconcileScoped`/`IsManagedInScope`/`ConfigInScope`/`BaseInScope`
   confine operations to one scope. A remote scope key is a stable
-  `user@host:port`. This means multi-fleet VM ownership needs **no** registry
-  schema change — a profile maps onto an existing scope.
+  `user@host:port`.
+  _**Correction (during execution, 2026-07-15):** this scope-awareness is only
+  **defensive** — the on-disk index is `vms map[string]entry` keyed by **bare
+  name**, so it stores the scope inside each entry but can hold only **one** entry
+  per name. Two same-named VMs across scopes cannot coexist (the second `AddScoped`
+  overwrites the first). Delivering same-name coexistence (criterion 9) therefore
+  **does** require a registry schema change — re-keying by `(scope, name)` with a
+  v2→v3 migration. This is **task 13**, added mid-execution._
 - **There is no host-side user config file today.** The only persisted stores are
   `managed-vms.json` (registry, under `$XDG_DATA_HOME/sandbar/`) and the secrets
   store. `gopkg.in/yaml.v3` is already a dependency (used for Lima instance-file
@@ -619,11 +625,14 @@ exercising the real system, not just re-running unit tests:
 
 The `worktree-lima-transport-refactor` branch has now **merged to `main`**
 (its Provider seam, scope-aware registry, and `SSHHost` transport are on `main`),
-so this work builds directly on `main`. It changes no **registry** schema — a
-profile reduces to the existing `registry.Scope`, so managed-VM indexes are read
-unchanged — but it **does** migrate the **secrets** store to add a scope
-dimension (Component 6); pre-migration secrets files load as local-scoped, so
-existing installs upgrade with zero manual steps. The only new persisted artifact
+so this work builds directly on `main`. It migrates **two** on-disk stores to a
+`(scope, name)` identity (both v2→v3, pre-migration files read as local-scoped so
+existing installs upgrade with zero manual steps): the **secrets** store
+(Component 6, task 2) and — _corrected during execution_ — the **registry**
+managed-VM index (**task 13**), which was found to be keyed by bare name and thus
+unable to hold two same-named VMs across scopes. _(The plan originally assumed the
+registry needed no schema change; that assumption was wrong — see the Background
+correction and Noteworthy Events.)_ The only new persisted artifact
 is `profiles.yaml`, created on demand (seeded with a Local profile). The removal
 of the env-var surface is the one intentional break, isolated to
 `internal/provider/select.go`, its tests, and the docs.
@@ -778,21 +787,22 @@ Verified acyclic; no orphan or circular references.
 - ✔️ Task 004: Replace `provider.Resolve` with a profile-driven fleet builder; remove env vars (depends on: 001) — `completed`
 - ✔️ Task 006: Scope-qualify the TUI's in-memory per-VM stores and both prune sites (depends on: 002) — `completed`
 
-### Phase 3: Fleet spine
-**Parallel Tasks:**
-- Task 005: Add `--profile` selection to `sand create`/`sand shell` (depends on: 001, 004)
-- Task 007: Promote the TUI model to an async per-profile fleet (depends on: 004, 006)
+### ✅ Phase 3: Fleet spine (run sequentially — shared `cmd/sand/main.go`)
+**Tasks:**
+- ✔️ Task 007: Promote the TUI model to an async per-profile fleet (depends on: 004, 006) — `completed`
+- ✔️ Task 005: Add `--profile` selection to `sand create`/`sand shell` (depends on: 001, 004) — `completed`
 
-### Phase 4: Profile UI surfaces
-**Parallel Tasks:**
-- Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007)
-- Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007)
+### Phase 4: Profile UI surfaces + registry keying (run sequentially — all touch `internal/ui`)
+**Tasks (sequential order: 010 → 013 → 008 → 009):**
 - Task 010: Tile profile labels and a per-profile status bar with error banners (depends on: 007)
+- Task 013: Re-key the registry by (scope, name) with an on-disk migration (depends on: 007) — _added mid-execution; see Noteworthy Events / Decision Log_
+- Task 008: Profile management screen with live fleet mutation and an idle gate (depends on: 001, 007)
+- Task 009: Add a create-form profile selector targeting the selected profile (depends on: 001, 003, 007, 013)
 
 ### Phase 5: Docs & regression gate
 **Parallel Tasks:**
 - Task 011: Update all documentation for Connection Profiles and the env-var removal (depends on: 005, 008, 009, 010)
-- Task 012: Fleet-wide integration & regression tests and coverage-floor gate (depends on: 007, 008, 009, 010)
+- Task 012: Fleet-wide integration & regression tests and coverage-floor gate (depends on: 007, 008, 009, 010, 013)
 
 ### Post-phase Actions
 - After each phase run `go build ./...` and `go test ./... -race`; a phase is not complete until the tree compiles and the suite is green (per `POST_PHASE.md`).

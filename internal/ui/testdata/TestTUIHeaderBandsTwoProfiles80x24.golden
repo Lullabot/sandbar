@@ -1,24 +1,18 @@
                                                                                 
    sand                                                                 v1.2.3  
-  2 sandboxes (1 running) · cpu —, mem —/16 GiB, 100 GiB disk free              
+  1 sandbox (1 running) · cpu —, mem —/16 GiB, 100 GiB disk free                
+  local: cpu —, mem —/16 GiB, 100 GiB disk free                                 
+  build-host: error: ssh: connection refused                                    
   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  
   ┃ claude                                                           [local] ┃  
-  ┃ ● Running  arch x86_64                                                   ┃  
+  ┃ ● Running                                                                ┃  
   ┃ cpu (4c) ····························································· — ┃  
   ┃ mem      ····························································· — ┃  
   ┃ disk     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ?/100 GiB ┃  
   ┃ up                                                                       ┃  
   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  
-  ╭──────────────────────────────────────────────────────────────────────────╮  
-  │ web                                                              [local] │  
-  │ ○ Stopped  arch aarch64                                                  │  
-  │                                                                          │  
-  │                                                                          │  
-  │ disk     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ?/50 GiB │  
-  │ never used                                                               │  
-  ╰──────────────────────────────────────────────────────────────────────────╯  
                                                                                 
-                                                                                
+  list failed: ssh: connection refused                                          
   ↑↓←→ move • n new • / search • x stop • r restart • R reset • enter/S shell   
   d delete • u upload • g download • e secrets • X stop all • q quit • ? keys   
                                                                                 
