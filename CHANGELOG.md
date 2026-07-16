@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.0](https://github.com/Lullabot/sandbar/compare/v0.5.0...v0.6.0) (2026-07-16)
+
+
+### Features
+
+* **cli:** sand create --profile and cross-profile sand shell ([b16c111](https://github.com/Lullabot/sandbar/commit/b16c11141ec13bd3bafd4f4dcbf112b61e320bba))
+* **fleet:** profile-driven fleet builder + scope-qualified VM identity ([3891c74](https://github.com/Lullabot/sandbar/commit/3891c74cb95f15b44bdbf81385503abf7ed98c9d))
+* **lima:** multiplex remote ssh over a shared ControlMaster connection ([9be5d41](https://github.com/Lullabot/sandbar/commit/9be5d417b42d20142bd87346bafad0712e19c144))
+* **profiles:** profiles store, secrets connection-scope migration, per-op provision host-access ([3d4aeae](https://github.com/Lullabot/sandbar/commit/3d4aeae79de90a798cff9768a8302ccd7fc08d68))
+* **ui,registry:** tile provenance + per-profile status bands; registry (scope,name) re-key ([5950654](https://github.com/Lullabot/sandbar/commit/595065430648ee0c895282593a2c04b38d30f98e))
+* **ui:** amber ⚠ for low hosts in the status bands, warn-styled messages, guest-true disk gauges ([f856386](https://github.com/Lullabot/sandbar/commit/f856386dd275baae9ceafd1f7c3ae2e4dd557a94))
+* **ui:** async per-profile fleet model ([2c49486](https://github.com/Lullabot/sandbar/commit/2c494861a6cfa3c44aeb421f18d3b70ba83f820e))
+* **ui:** log connection lifecycle to the session Messages list ([660866f](https://github.com/Lullabot/sandbar/commit/660866f1b3d74e3bf26c6b54d9cd398c275aa787))
+* **ui:** profile management screen + create-form profile selector ([37db3a8](https://github.com/Lullabot/sandbar/commit/37db3a831692013723e6748bf3e805a2a694d718))
+* **ui:** raise the low-free warning threshold from 5% to 10% ([6a3e7d3](https://github.com/Lullabot/sandbar/commit/6a3e7d352692bc7d527790288d7a58a198a881be))
+* **ui:** warn at &lt;5% free host memory/disk and flag starved VM tiles ([005181e](https://github.com/Lullabot/sandbar/commit/005181eb033bbde8f7d2c0139c99ce5265a32589))
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260713092006-0d683c34c74b ([#63](https://github.com/Lullabot/sandbar/issues/63)) ([77dd2d2](https://github.com/Lullabot/sandbar/commit/77dd2d2715e2c8c9429ee8fa94c78a81616beb39))
+* **ui,profiles,cli:** address high-effort review findings on the profiles fleet ([01b653c](https://github.com/Lullabot/sandbar/commit/01b653cd9cf9117dd93df868841df3bf71b659d1))
+* **ui:** stop repeating the active host's stats above the per-profile bands ([37cee99](https://github.com/Lullabot/sandbar/commit/37cee9974f4385ef2d9b3b17b3819a3c55143ec8))
+
 ## [0.5.0](https://github.com/Lullabot/sandbar/compare/v0.4.1...v0.5.0) (2026-07-15)
 
 
