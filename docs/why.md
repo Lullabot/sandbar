@@ -167,7 +167,6 @@ another:
 | [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), bubblewrap, Seatbelt | OS process confinement | Local | Per-process host confinement, policy-dependent, no provisioned environment |
 | [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | General-purpose remote dev, not agent-disposable |
 
-```mermaid
 ---
 config:
   quadrantChart:
@@ -177,63 +176,12 @@ config:
     pointLabelFontSize: 10
 ---
 quadrantChart
-    title Where the field sits
+    title An Overview of Sandboxing Tools (July 2026)
     x-axis Limited Environment Tooling --> Fully Functional Environment
     y-axis Host exposed --> Sealed off
     quadrant-1 Sealed and fully functional
     quadrant-2 Sealed but limited
-    quadrant-3 Limited and exposed
-    quadrant-4 Functional but exposed
-    Sandbar: [0.90, 0.94]
-    E2B: [0.30, 0.93]
-    Modal: [0.14, 0.90]
-    Daytona: [0.33, 0.82]
-    Runloop: [0.24, 0.86]
-    Vercel: [0.05, 0.86]
-    Cloudflare: [0.14, 0.78]
-    Blaxel: [0.05, 0.74]
-    Claude Code Web: [0.10, 0.66]
-    qbox: [0.44, 0.90]
-    Arrakis: [0.43, 0.76]
-    microsandbox: [0.37, 0.71]
-    SmolVM: [0.22, 0.68]
-    Codespaces: [0.60, 0.68]
-    Coder: [0.66, 0.76]
-    Gitpod/Ona: [0.55, 0.78]
-    claude-code-sandbox: [0.58, 0.48]
-    sandbox-runtime: [0.64, 0.42]
-    bubblewrap: [0.75, 0.40]
-    Seatbelt: [0.86, 0.44]
-    container-use: [0.62, 0.28]
-    ClaudeBox: [0.73, 0.26]
-    Devcontainer: [0.85, 0.22]
-    Vibe Kanban: [0.66, 0.10]
-    Conductor: [0.78, 0.08]
-    Crystal: [0.90, 0.12]
-    Sculptor: [0.72, 0.17]
-    clawk: [0.92, 0.36]
-    agent-vm: [0.82, 0.32]
-```
-
-The same chart, colored by where your code actually lives while the
-agent works on it:
-
-```mermaid
----
-config:
-  quadrantChart:
-    chartWidth: 760
-    chartHeight: 640
-    pointRadius: 4
-    pointLabelFontSize: 10
----
-quadrantChart
-    title Colored by where it runs
-    x-axis Limited Environment Tooling --> Fully Functional Environment
-    y-axis Host exposed --> Sealed off
-    quadrant-1 Sealed and fully functional
-    quadrant-2 Sealed but limited
-    quadrant-3 Limited and exposed
+    quadrant-3 (no one builds this)
     quadrant-4 Functional but exposed
     Sandbar:::local: [0.90, 0.94]
     E2B:::cloud: [0.30, 0.93]
