@@ -123,6 +123,21 @@ func (s *Store) Get(id string) (Profile, bool) {
 	return p, ok
 }
 
+// GetByName returns the first profile (in stable insertion order) with the
+// given display Name, and whether one was found. Used by the CLI's
+// `--profile <name>` flags, which address profiles by their (renameable)
+// display name rather than by their immutable ID — names are not enforced
+// unique, so a collision (only possible via a hand-edited profiles.yaml)
+// resolves to the earliest-created match.
+func (s *Store) GetByName(name string) (Profile, bool) {
+	for _, id := range s.order {
+		if p := s.profiles[id]; p.Name == name {
+			return p, true
+		}
+	}
+	return Profile{}, false
+}
+
 // generateID returns a short, random, stable-unique token for a new profile.
 // It is never derived from the profile's Name or connection target, both of
 // which are editable after creation.

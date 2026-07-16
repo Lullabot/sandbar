@@ -2,7 +2,7 @@
 id: 7
 group: "fleet"
 dependencies: [4, 6]
-status: "pending"
+status: "completed"
 created: 2026-07-15
 model: "opus"
 effort: "xhigh"

@@ -75,6 +75,7 @@ binary, so there is no ref to pin).
 Examples:
   sand create                                                   # host git identity
   sand create --git-name "Your Name" --git-email you@example.com
+  sand create --profile work                                    # create on the "work" connection profile
 
 Flags:
 `)
@@ -105,6 +106,7 @@ Flags:
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
+	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
 	// sand's playbook is
@@ -131,10 +133,13 @@ Flags:
 	// runs limactl — for a remote provider that is the REMOTE host's user, not
 	// this machine's, so cfg.User must not be defaulted before this either.
 	// Preflight runs here too, so a missing/old limactl fails before any config
-	// work.
-	p, scope, err := resolveSingle()
+	// work. --profile selects which ONE connection profile this create acts on
+	// (default: the store's last-used profile, else "local"); only that
+	// profile is built and preflighted — see bindingForProfileName.
+	store := loadStore()
+	p, scope, profile, err := bindingForProfileName(store, *profileFlag)
 	if err != nil {
-		return err
+		return fmt.Errorf("sand create: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -219,7 +224,18 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout)
+	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout); err != nil {
+		return err
+	}
+
+	// Record the profile as last-used only on a successful create — by ID, so
+	// a later rename of the profile does not lose the pointer (see
+	// Store.SetLastUsed). Best-effort: a failure to persist it must not turn a
+	// successful create into a reported failure.
+	if err := store.SetLastUsed(profile.ID); err != nil {
+		fmt.Fprintln(os.Stdout, "warning: could not record last-used profile:", err)
+	}
+	return nil
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs

@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -34,6 +38,17 @@ type vmGetter interface {
 	AttachArgv(v vm.VM) []string
 }
 
+// registryOwnership is the narrow registry surface resolveShellProvider needs
+// to determine which profile(s) own a managed VM name. Narrowed to an
+// interface (satisfied by *registry.Registry) so the ambiguous-ownership
+// decision logic can be unit tested with a fake that reports a name owned by
+// more than one scope at once — a state the real on-disk registry (currently
+// keyed by VM name alone, one entry per name) cannot reach through its own
+// public API, but which the decision logic must still handle correctly.
+type registryOwnership interface {
+	IsManagedInScope(name string, scope registry.Scope) bool
+}
+
 // runShell implements the `sand shell <name>` subcommand: it resolves the named
 // VM's status and instance dir together, refuses cleanly when the VM is unknown
 // or not running, and otherwise execs the attach argv built by the provider's
@@ -47,8 +62,9 @@ type vmGetter interface {
 // shellAttachArgv.
 func runShell(args []string) error {
 	fs := flag.NewFlagSet("shell", flag.ContinueOnError)
+	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME
+		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME [--profile <name>]
 
 Attach a shell to NAME's persistent tmux session in the guest.
 
@@ -65,10 +81,14 @@ own current one, so two terminals can look at two different windows of the
 same VM.
 
 The named VM must already exist and be running (see 'sand' to list instances,
-or 'sand create' to make one).
+or 'sand create' to make one). If NAME is managed under more than one
+connection profile, --profile picks which one to attach to.
 `)
 	}
-	if err := fs.Parse(args); err != nil {
+	// --profile may appear before or after NAME; reorder so all flags precede
+	// the positional argument, which is what flag.FlagSet.Parse requires (it
+	// stops parsing flags at the first non-flag token).
+	if err := fs.Parse(reorderShellFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // usage was already printed; -h/--help is not a failure
 		}
@@ -80,13 +100,18 @@ or 'sand create' to make one).
 	}
 	name := fs.Arg(0)
 
-	// scope is unused here: sand shell has no registry/managed-index
-	// bookkeeping of its own to confine to a provider (see resolveSingle).
-	// It still goes through resolveSingle, not NewDefault, so the same
-	// profile-selection logic governs all three entrypoints identically.
-	p, _, err := resolveSingle()
+	store := loadStore()
+	reg, loadErr := registry.Load()
+	if reg == nil {
+		reg = registry.NewEmpty()
+	}
+	if loadErr != nil {
+		fmt.Fprintln(os.Stderr, "warning:", loadErr)
+	}
+
+	p, err := resolveShellProvider(store, reg, name, *profileFlag)
 	if err != nil {
-		return err
+		return fmt.Errorf("sand shell: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -151,4 +176,97 @@ func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 	}
 
 	return l.AttachArgv(found), nil
+}
+
+// reorderShellFlags moves every recognised flag token (and, for --profile,
+// its value) ahead of the positional arguments in args, so `sand shell NAME
+// --profile work` parses the same as `sand shell --profile work NAME` under
+// flag.FlagSet, which otherwise stops parsing flags at the first non-flag
+// token. Only the flags this subcommand defines (-h/--help, --profile) are
+// recognised; anything else is left as positional so an unrecognised flag
+// still reaches fs.Parse and produces its normal error.
+func reorderShellFlags(args []string) []string {
+	var flagArgs, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-h" || a == "--help" || a == "-help":
+			flagArgs = append(flagArgs, a)
+		case a == "--profile" || a == "-profile":
+			flagArgs = append(flagArgs, a)
+			if i+1 < len(args) {
+				i++
+				flagArgs = append(flagArgs, args[i])
+			}
+		case strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-profile="):
+			flagArgs = append(flagArgs, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	return append(flagArgs, positional...)
+}
+
+// resolveShellProvider resolves which connection profile NAME lives on and
+// constructs its provider. An explicit profile name is used directly (a hard
+// error if it does not name an enabled profile). With no explicit profile:
+// a store with only one enabled profile always uses it (preserving `sand
+// shell`'s original behaviour of attaching to any VM the one configured
+// backend knows about, managed or not); with more than one enabled profile,
+// ownership is resolved from the registry's managed-VM index — the only
+// place sand records which profile's scope a VM belongs to. Zero owners is
+// "no such VM"; more than one requires --profile to disambiguate, and lists
+// the candidates by name.
+func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, profileFlag string) (provider.Provider, error) {
+	if profileFlag != "" {
+		p, ok := store.GetByName(profileFlag)
+		if !ok {
+			return nil, fmt.Errorf("unknown connection profile %q", profileFlag)
+		}
+		if !p.Enabled {
+			return nil, fmt.Errorf("profile %q is disabled", p.Name)
+		}
+		prov, _, err := providerForProfile(p)
+		return prov, err
+	}
+
+	enabled := make([]profiles.Profile, 0, len(store.List()))
+	for _, p := range store.List() {
+		if p.Enabled {
+			enabled = append(enabled, p)
+		}
+	}
+
+	var target profiles.Profile
+	switch {
+	case len(enabled) == 0:
+		return nil, fmt.Errorf("no enabled connection profile found (not even %q)", profiles.LocalProfileID)
+	case len(enabled) == 1:
+		// Only one profile is enabled: use it directly, exactly as `sand shell`
+		// always has, regardless of whether NAME is a sand-managed VM — there is
+		// no other profile it could possibly be on.
+		target = enabled[0]
+	default:
+		var owners []profiles.Profile
+		for _, p := range enabled {
+			if reg.IsManagedInScope(name, scopeForProfile(p)) {
+				owners = append(owners, p)
+			}
+		}
+		switch len(owners) {
+		case 0:
+			return nil, fmt.Errorf("no such VM %q (run 'sand' to list instances, or pass --profile if it is on a specific connection profile)", name)
+		case 1:
+			target = owners[0]
+		default:
+			names := make([]string, len(owners))
+			for i, o := range owners {
+				names[i] = o.Name
+			}
+			return nil, fmt.Errorf("%q exists under more than one connection profile (%s) — pass --profile to pick one", name, strings.Join(names, ", "))
+		}
+	}
+
+	prov, _, err := providerForProfile(target)
+	return prov, err
 }
