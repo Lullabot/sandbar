@@ -1,37 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### ⚠ BREAKING CHANGES
-
-* **profiles:** the `SAND_PROVIDER` / `SAND_REMOTE_HOST` / `SAND_REMOTE_USER` /
-  `SAND_REMOTE_PORT` / `SAND_REMOTE_IDENTITY` / `SAND_REMOTE_LIMA_HOME`
-  environment variables are removed entirely. They selected a single remote
-  target for the whole process; that surface is replaced by Connection
-  Profiles (`profiles.yaml`). Acceptable as a hard break: the env-var
-  selection surface was never in a tagged release. See
-  [Connection Profiles](docs/using-sand/connection-profiles.md) for the
-  replacement and the old-variable-to-field mapping.
-
-### Features
-
-* **profiles:** add Connection Profiles — a persisted, secret-free
-  `profiles.yaml` naming every location `sand` can run VMs on (the permanent
-  Local profile, plus any number of `remote-ssh` profiles), managed live from
-  the TUI's `p` screen, the create form's profile selector, and
-  `sand create --profile` / `sand shell NAME --profile`. Every enabled
-  profile is active at once: the board shows tiles from all of them side by
-  side, each labeled with its owning profile, with one status band (or a
-  disabled/errored banner) per profile in the header.
-* **registry:** bump the managed-VM index to schema v3, now keyed by
-  `(connection scope, name)` instead of bare name, so the same VM name can
-  exist independently under two different connection profiles. Migrated
-  transparently from v1/v2 on read.
-* **secrets:** bump the secrets store to schema v3, adding a connection-scope
-  dimension (which profile a VM's secrets belong to) alongside its
-  pre-existing per-directory scope. Migrated transparently from v1/v2 on
-  read, lifting every existing VM under the local connection scope.
-
 ## [0.5.0](https://github.com/Lullabot/sandbar/compare/v0.4.1...v0.5.0) (2026-07-15)
 
 
