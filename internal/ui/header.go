@@ -85,11 +85,19 @@ func (m model) headerCounts(width int) string {
 		width = 1
 	}
 	core := m.fleetCountsText()
-	if capacity := m.hostCapacityText(); capacity != "" {
-		sep := " · "
-		room := width - ansi.StringWidth(core) - ansi.StringWidth(sep)
-		if room >= ansi.StringWidth(capacity) {
-			core += sep + capacity
+	// When per-profile status bands are actually RENDERED (layout granted them
+	// lines), each member's host readout lives in its own band — repeating the
+	// active member's stats up here would print the local line twice. Gate on
+	// the GRANT, not desiredHeaderBands: a short terminal that sheds the bands
+	// falls back to this combined line, so the stats appear exactly once either
+	// way. A single-member fleet desires no bands and keeps today's one-liner.
+	if m.layout.HeaderBandLines == 0 {
+		if capacity := m.hostCapacityText(); capacity != "" {
+			sep := " · "
+			room := width - ansi.StringWidth(core) - ansi.StringWidth(sep)
+			if room >= ansi.StringWidth(capacity) {
+				core += sep + capacity
+			}
 		}
 	}
 	return ansi.Truncate(core, width, "…")

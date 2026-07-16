@@ -1,6 +1,6 @@
                                                                                                                                                                 
    sand                                                                                                                                                 v1.2.3  
-  1 sandbox (1 running) · cpu —, mem —/16 GiB, 100 GiB disk free                                                                                                
+  1 sandbox (1 running)                                                                                                                                         
   local: cpu —, mem —/16 GiB, 100 GiB disk free                                                                                                                 
   build-host: error: ssh: connection refused                                                                                                                    
   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  ╭────────────────────────────────────────────────╮                                                        
