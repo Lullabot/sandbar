@@ -51,18 +51,51 @@ func (m *model) checkHostCapacityWarn(mem *fleetMember) {
 	m.checkHostDiskWarn(mem)
 }
 
+// hostMemHasReading/hostDiskHasReading report whether host carries both
+// numbers a low-memory/low-disk check needs — the "zero means never sampled,
+// never guess" rule every hostSample field follows (fleet.go).
+func hostMemHasReading(host hostSample) bool  { return host.mem > 0 && host.memAvail > 0 }
+func hostDiskHasReading(host hostSample) bool { return host.diskFree > 0 && host.diskTotal > 0 }
+
+// hostMemLow reports whether host's available memory is below
+// lowFreeThreshold free, given a reading — the exact condition
+// checkHostMemWarn (below) latches its once-per-crossing Messages-log warning
+// on. header.go's band/counts clause highlighting calls this SAME function
+// (never a re-derived copy of the fraction check) so the steady visual state
+// in the header and the edge-triggered log line can never disagree about
+// what counts as low. Callers must guard with hostMemHasReading first: with
+// no reading this reports false, same as "not low", which is the right
+// answer for the header (no highlight) but NOT distinguishable from "healthy"
+// — checkHostMemWarn relies on the reading guard, not this return value, to
+// tell the two apart when deciding whether to re-arm its latch.
+func hostMemLow(host hostSample) bool {
+	if !hostMemHasReading(host) {
+		return false
+	}
+	return float64(host.memAvail)/float64(host.mem) < lowFreeThreshold
+}
+
+// hostDiskLow is hostMemLow's disk twin, shared the same way with
+// checkHostDiskWarn and header.go's clause highlighting.
+func hostDiskLow(host hostSample) bool {
+	if !hostDiskHasReading(host) {
+		return false
+	}
+	return float64(host.diskFree)/float64(host.diskTotal) < lowFreeThreshold
+}
+
 // checkHostMemWarn edge-triggers rule 1: a warning logged once when mem.host's
 // available memory crosses below lowFreeThreshold, latched on
 // mem.warnedHostMem (fleet.go) until the member recovers to at least lowFreeThreshold free, at
 // which point the latch clears and a later re-crossing warns again.
 func (m *model) checkHostMemWarn(mem *fleetMember) {
-	if mem.host.mem <= 0 || mem.host.memAvail <= 0 {
-		return // one of the two numbers has never been sampled — never guess
+	if !hostMemHasReading(mem.host) {
+		return // one of the two numbers has never been sampled — never guess, and never touch the latch
 	}
-	if float64(mem.host.memAvail)/float64(mem.host.mem) < lowFreeThreshold {
+	if hostMemLow(mem.host) {
 		if !mem.warnedHostMem {
 			mem.warnedHostMem = true
-			m.logMsg(fmt.Sprintf("warning: %s memory low — %s free of %s (<%.0f%%)",
+			m.logWarn(fmt.Sprintf("%s memory low — %s free of %s (<%.0f%%)",
 				mem.profile.Name, humanizeInt(mem.host.memAvail), humanizeInt(mem.host.mem), lowFreeThreshold*100))
 		}
 		return
@@ -74,13 +107,13 @@ func (m *model) checkHostMemWarn(mem *fleetMember) {
 // CONNECTED member, local included: a full local disk is exactly what a user
 // running sand on their own laptop wants to hear about.
 func (m *model) checkHostDiskWarn(mem *fleetMember) {
-	if mem.host.diskFree <= 0 || mem.host.diskTotal <= 0 {
+	if !hostDiskHasReading(mem.host) {
 		return
 	}
-	if float64(mem.host.diskFree)/float64(mem.host.diskTotal) < lowFreeThreshold {
+	if hostDiskLow(mem.host) {
 		if !mem.warnedHostDisk {
 			mem.warnedHostDisk = true
-			m.logMsg(fmt.Sprintf("warning: %s disk low — %s free of %s (<%.0f%%)",
+			m.logWarn(fmt.Sprintf("%s disk low — %s free of %s (<%.0f%%)",
 				mem.profile.Name, humanizeInt(mem.host.diskFree), humanizeInt(mem.host.diskTotal), lowFreeThreshold*100))
 		}
 		return

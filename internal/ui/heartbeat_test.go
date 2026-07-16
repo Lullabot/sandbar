@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 // The fixture is REAL text: the output of the REAL guestScript, run over a real
@@ -162,6 +164,93 @@ func TestParserIgnoresNoise(t *testing.T) {
 	}
 	if got[1].MemUsed != 400*1024 || got[1].MemTotal != 1000*1024 {
 		t.Fatalf("mem = %d/%d, want %d/%d", got[1].MemUsed, got[1].MemTotal, 400*1024, 1000*1024)
+	}
+}
+
+// The guest loop's df line reports the ROOT FILESYSTEM's used/total bytes —
+// the only honest source of "how full is this guest", because ZFS
+// compression and sparse disk images make the HOST-side du understate a
+// guest that is, from the inside, genuinely full. The parser accepts it
+// exactly like the cpu/mem lines: prefixed, tolerant, ignored if malformed.
+func TestParserAcceptsGuestDiskLine(t *testing.T) {
+	stream := "cpu  100 0 100 800 0 0 0 0 0 0\n" +
+		"MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		"DISK /dev/root 20971520 20500000 471520 98% /\n" +
+		heartbeatDelim + "\n"
+
+	var p sampleParser
+	got := p.feed([]byte(stream))
+	if len(got) != 1 {
+		t.Fatalf("got %d samples, want 1", len(got))
+	}
+	if !got[0].HasDisk() {
+		t.Fatal("a record carrying a DISK line must report a disk reading")
+	}
+	wantTotal := uint64(20971520) * 1024
+	wantUsed := uint64(20500000) * 1024
+	if got[0].DiskTotal != wantTotal || got[0].DiskUsed != wantUsed {
+		t.Fatalf("disk = %d/%d, want %d/%d", got[0].DiskUsed, got[0].DiskTotal, wantUsed, wantTotal)
+	}
+}
+
+// A record with no DISK line (an old guest's stream, predating this field, or
+// one whose heartbeat script hasn't been restarted since) must report NO disk
+// reading — never a fabricated zero standing in for "unknown". Absence, not
+// zero, is the honest answer, mirroring HasCPU/HasMem.
+func TestParserAbsentDiskLineHasDiskFalse(t *testing.T) {
+	stream := "cpu  100 0 100 800 0 0 0 0 0 0\n" +
+		"MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		heartbeatDelim + "\n"
+
+	var p sampleParser
+	got := p.feed([]byte(stream))
+	if len(got) != 1 {
+		t.Fatalf("got %d samples, want 1", len(got))
+	}
+	if got[0].HasDisk() {
+		t.Fatalf("no DISK line must mean HasDisk() false, got disk=%d/%d", got[0].DiskUsed, got[0].DiskTotal)
+	}
+}
+
+// A malformed DISK line (df failed and printed nothing but a trailing
+// newline, say) must be ignored like any other noise — never corrupt the
+// sample or panic.
+func TestParserIgnoresMalformedDiskLine(t *testing.T) {
+	stream := "cpu  100 0 100 800 0 0 0 0 0 0\n" +
+		"MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		"DISK \n" + // df produced nothing (e.g. a permission error to stderr)
+		heartbeatDelim + "\n"
+
+	var p sampleParser
+	got := p.feed([]byte(stream))
+	if len(got) != 1 {
+		t.Fatalf("got %d samples, want 1", len(got))
+	}
+	if got[0].HasDisk() {
+		t.Fatal("a malformed DISK line must not produce a disk reading")
+	}
+	if !got[0].HasMem() {
+		t.Fatal("a malformed DISK line must not corrupt the rest of the record")
+	}
+}
+
+// The guest script itself must actually probe the root filesystem — the
+// parser tests above are worthless if guestScript never emits the line they
+// parse. It keeps cat'ing /proc/stat and /proc/meminfo exactly as before
+// (verified by the fixture-driven tests elsewhere in this file).
+func TestGuestScriptProbesRootFilesystem(t *testing.T) {
+	got := guestScript(2 * time.Second)
+	if !strings.Contains(got, "df") {
+		t.Fatalf("guestScript() = %q, want it to invoke df for the root filesystem", got)
+	}
+	if !strings.Contains(got, "DISK ") {
+		t.Fatalf("guestScript() = %q, want a DISK-prefixed probe line the parser can key on", got)
+	}
+	if !strings.Contains(got, "/proc/stat") || !strings.Contains(got, "/proc/meminfo") {
+		t.Fatalf("guestScript() = %q, want the existing /proc reads kept intact", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -786,5 +787,104 @@ func TestTileWarningRenderingGolden(t *testing.T) {
 	got := ansi.Strip(renderTile(in))
 	if got != want {
 		t.Fatalf("tile rendering with both mem and disk below 5%% free changed.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// --- Guest-first, host-fallback disk rendering. ---
+//
+// A guest's filesystem can be genuinely full while the HOST-side du of its
+// instance directory still reads well under capacity — ZFS compression and
+// sparse disk images both let the backing image occupy far fewer host bytes
+// than the guest believes it has written. Once the heartbeat carries the
+// guest's own root-filesystem reading, the tile must draw THAT number, not
+// the host-side one that would otherwise understate a genuinely full guest.
+
+// A running VM with a guest disk reading draws the GUEST's own used/total,
+// not the host-side du — and warns when the guest itself is low on free
+// space, even though the host-side numbers alone would not have warned.
+func TestTileDiskLineRunningWithGuestSampleUsesGuestNumbers(t *testing.T) {
+	in := baseTileInput()
+	// Host-side: 10/20 GiB — comfortably under the warning line.
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "21474836480", DiskUsed: "10737418240"}
+	// Guest-side: the fs itself is nearly full.
+	const diskTotal, diskUsed = uint64(21474836480), uint64(21367462707) // ~19.9/20 GiB, ~99.5% used
+	in.Sample = guestSample{HasCPU: true, CPUPct: 5, MemTotal: 1000, MemUsed: 500,
+		DiskUsed: diskUsed, DiskTotal: diskTotal}
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "⚠ disk") {
+		t.Fatalf("a guest fs this full must warn even though the host-side numbers alone would not, got:\n%s", got)
+	}
+	wantUsed := humanizeBytes(strconv.FormatUint(diskUsed, 10))
+	wantTotal := humanizeBytes(strconv.FormatUint(diskTotal, 10))
+	if !strings.Contains(got, wantUsed+"/"+wantTotal) {
+		t.Fatalf("must render the GUEST's own used/total (%s/%s), got:\n%s", wantUsed, wantTotal, got)
+	}
+	hostUsed := humanizeBytes(in.VM.DiskUsed)
+	if strings.Contains(got, hostUsed+"/"+wantTotal) {
+		t.Fatalf("must NOT render the host-side du (%s) once a guest reading is present, got:\n%s", hostUsed, got)
+	}
+}
+
+// Without a guest disk reading — a stopped VM, or a running one whose
+// heartbeat hasn't produced one yet (an old guest, or the connection just
+// opened) — the tile keeps rendering the host-side du EXACTLY as it always
+// has. This is what the pre-existing disk tests above already pin (they never
+// set a guest disk reading); this test states the fallback rule explicitly
+// for a case those tests don't cover: a RUNNING VM with a sample that has
+// everything BUT a disk reading.
+func TestTileDiskLineRunningWithoutGuestDiskFallsBackToHostSide(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"} // 2% free, host-side
+	in.Sample = guestSample{HasCPU: true, CPUPct: 5, MemTotal: 1000, MemUsed: 500}               // no disk reading at all
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "⚠ disk") {
+		t.Fatalf("must fall back to the host-side du (which does warn here), got:\n%s", got)
+	}
+	want := humanizeBytes(in.VM.DiskUsed) + "/" + humanizeBytes(in.VM.Disk)
+	if !strings.Contains(got, want) {
+		t.Fatalf("must render the host-side numbers %q when no guest reading exists, got:\n%s", want, got)
+	}
+}
+
+// A guest reading must be honoured ONLY while the VM is Running: a stray
+// leftover sample (a stopped VM whose heartbeat sample has not been cleared)
+// must never resurrect a guest number for a VM the tile now shows as
+// Stopped — the host-side du is the only honest source once there is no live
+// guest to ask.
+func TestTileDiskLineStoppedNeverUsesGuestSampleEvenIfPresent(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Stopped", Disk: "100000000000", DiskUsed: "50000000000"} // 50% free, host-side
+	in.Sample = guestSample{DiskUsed: 99000000000, DiskTotal: 100000000000}                      // guest: 1% free — must NOT surface
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if strings.Contains(got, "⚠") {
+		t.Fatalf("a stopped VM must render the host-side disk numbers (50%% free), not a stray guest sample, got:\n%s", got)
+	}
+	want := humanizeBytes(in.VM.DiskUsed) + "/" + humanizeBytes(in.VM.Disk)
+	if !strings.Contains(got, want) {
+		t.Fatalf("must render the host-side numbers %q, got:\n%s", want, got)
+	}
+}
+
+// Exactly the threshold (10% free) on the GUEST'S OWN disk reading must not
+// warn — the same float-safe boundary rule lowFreeThreshold's own doc comment
+// requires of every low-capacity check in this package.
+func TestTileDiskLineGuestBoundaryExactlyAtThresholdDoesNotWarn(t *testing.T) {
+	in := baseTileInput()
+	// Host-side numbers would warn if they leaked through — proof the guest
+	// numbers, not these, are what's under test.
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "999999", DiskUsed: "999999"}
+	in.Sample = guestSample{HasCPU: true, CPUPct: 1, MemTotal: 1000, MemUsed: 1,
+		DiskUsed: 90, DiskTotal: 100} // exactly 10% free
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if strings.Contains(got, "⚠ disk") {
+		t.Fatalf("exactly 10%% free (the boundary) must not warn, got:\n%s", got)
 	}
 }

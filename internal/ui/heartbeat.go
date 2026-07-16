@@ -14,9 +14,10 @@ package ui
 // # The shape
 //
 // ONE long-lived `limactl shell` per RUNNING VM, running a loop that cats
-// /proc/stat and /proc/meminfo every heartbeatInterval and prints a delimiter. The
-// host parses the stream. The guest side is deliberately the dumbest thing that
-// works: a clever guest script is a thing that breaks on a distro nobody tested.
+// /proc/stat and /proc/meminfo, probes the root filesystem with `df -kP /`,
+// and prints a delimiter, every heartbeatInterval. The host parses the
+// stream. The guest side is deliberately the dumbest thing that works: a
+// clever guest script is a thing that breaks on a distro nobody tested.
 //
 // It is one shell per VM, NOT one per sample tick: each `limactl shell` costs
 // 150–400ms and a fresh SSH connection, so a per-tick spawn would cost more than
@@ -101,13 +102,28 @@ const (
 	carryLimit = 64 << 10
 )
 
-// guestScript is the in-guest loop: cat the two files, print a delimiter, sleep.
-// That is the whole of it, on purpose. Everything clever happens on the host, where
-// it can be tested. `limactl shell` escapes this correctly on its way through ssh
-// into the guest's login shell — verified against a real VM, not assumed.
+// guestScript is the in-guest loop: cat the two /proc files, probe the root
+// filesystem, print a delimiter, sleep. That is the whole of it, on purpose.
+// Everything clever happens on the host, where it can be tested. `limactl
+// shell` escapes this correctly on its way through ssh into the guest's login
+// shell — verified against a real VM, not assumed.
+//
+// The `df -kP / | tail -n 1` probe is what reports the GUEST's own view of its
+// root filesystem — the ONLY honest source of "how full is this guest".
+// v.DiskUsed (tile.go, populated at list time from a host-side `du` over the
+// instance directory) can read nowhere near full while the guest itself is
+// genuinely out of space: ZFS compression and sparse disk images both let the
+// backing image occupy far fewer host bytes than the guest believes it has
+// written, so a guest reporting its filesystem 100% full can still show as,
+// say, 18.5/20 GiB on the host. `echo -n 'DISK '` prefixes df's one data line
+// (tail -n 1 drops df's header) so the parser can key on it exactly the way it
+// keys on `cpu ` and `MemTotal:` — and so a df that fails (no stdout, just an
+// error to stderr) yields a harmless "DISK \n" the parser ignores rather than
+// a line it might misparse.
 func guestScript(every time.Duration) string {
 	secs := strconv.Itoa(int(every / time.Second))
-	return "while true; do cat /proc/stat /proc/meminfo; echo '" + heartbeatDelim + "'; sleep " + secs + "; done"
+	return "while true; do cat /proc/stat /proc/meminfo; echo -n 'DISK '; df -kP / | tail -n 1; echo '" +
+		heartbeatDelim + "'; sleep " + secs + "; done"
 }
 
 // guestSample is ONE utilization reading from inside a running guest, and it is the
@@ -137,11 +153,27 @@ type guestSample struct {
 	// said 316 MB while MemAvailable said 1637 MB of 2015 MB.
 	MemUsed  uint64
 	MemTotal uint64
+
+	// DiskUsed and DiskTotal are bytes on the GUEST's own root filesystem, read
+	// from its `df -kP /`. They are what the tile (tile.go) prefers over the
+	// host-side du the moment they are present: compression and sparse disk
+	// images make the host number lie about how full the guest actually is. A
+	// zero DiskTotal (HasDisk false) means NOT SAMPLED — an old guest whose
+	// heartbeat predates this probe, or one whose df failed — never a claim
+	// that the guest has no disk at all.
+	DiskUsed  uint64
+	DiskTotal uint64
 }
 
 // HasMem reports whether the sample carries a memory reading. Unlike cpu, memory is
 // an absolute — it is valid from the very first record.
 func (s guestSample) HasMem() bool { return s.MemTotal > 0 }
+
+// HasDisk reports whether the sample carries a guest root-filesystem reading.
+// Absent (false) is what an old guest's stream — or one whose df failed —
+// reports, and it must render as "no guest reading", never a fabricated
+// zero-byte disk.
+func (s guestSample) HasDisk() bool { return s.DiskTotal > 0 }
 
 // cpuTimes is one /proc/stat aggregate reading, in jiffies since boot.
 type cpuTimes struct {
@@ -164,6 +196,10 @@ type sampleParser struct {
 		total, avail uint64
 		haveTotal    bool
 		haveAvail    bool
+	}
+	disk struct {
+		used, total uint64
+		have        bool
 	}
 	prev     cpuTimes // the PREVIOUS record's counters — the other half of every delta
 	havePrev bool
@@ -231,6 +267,14 @@ func (p *sampleParser) line(line []byte) (guestSample, bool) {
 		if kb, ok := parseKB(line[len("MemAvailable:"):]); ok {
 			p.mem.avail, p.mem.haveAvail = kb, true
 		}
+
+	// The guest root filesystem's df line, prefixed by guestScript so it cannot
+	// be mistaken for ordinary command noise (a motd, a login banner) the way an
+	// unprefixed df line could be.
+	case bytes.HasPrefix(line, []byte("DISK ")):
+		if used, total, ok := parseDiskLine(line[len("DISK "):]); ok {
+			p.disk.used, p.disk.total, p.disk.have = used, total, true
+		}
 	}
 	return guestSample{}, false
 }
@@ -263,10 +307,20 @@ func (p *sampleParser) complete() (guestSample, bool) {
 		s.MemUsed = (p.mem.total - avail) * 1024
 	}
 
-	// A record with neither reading (a delimiter and nothing else — a guest with no
-	// /proc, say) is not a sample. Reporting it would put an empty tile's gauges
-	// through a pointless repaint and, worse, would look like a successful reading.
-	if !s.HasCPU && !s.HasMem() {
+	// The guest disk reading, like mem, is an absolute valid from the first
+	// record — but unlike mem it can legitimately be ABSENT (an old guest's
+	// stream predates the probe, or its df failed), so a zero total here means
+	// exactly that: no reading, never a claim of a zero-byte disk.
+	if p.disk.have && p.disk.total > 0 {
+		s.DiskUsed = p.disk.used
+		s.DiskTotal = p.disk.total
+	}
+
+	// A record with none of the three readings (a delimiter and nothing else —
+	// a guest with no /proc, say) is not a sample. Reporting it would put an
+	// empty tile's gauges through a pointless repaint and, worse, would look
+	// like a successful reading.
+	if !s.HasCPU && !s.HasMem() && !s.HasDisk() {
 		p.reset()
 		return guestSample{}, false
 	}
@@ -282,6 +336,7 @@ func (p *sampleParser) reset() {
 	p.cur = cpuTimes{}
 	p.mem.total, p.mem.avail = 0, 0
 	p.mem.haveTotal, p.mem.haveAvail = false, false
+	p.disk.used, p.disk.total, p.disk.have = 0, 0, false
 }
 
 // parseCPU reads the fields after `cpu `: user nice system idle iowait irq softirq
@@ -314,6 +369,29 @@ func parseCPU(rest []byte) (cpuTimes, bool) {
 		return cpuTimes{}, false
 	}
 	return t, true
+}
+
+// parseDiskLine reads the fields after `DISK `: guestScript's df -kP tail
+// line, `<filesystem> <1024-blocks> <used> <available> <capacity%> <mounted
+// on>`. Only the total (1024-blocks) and used columns are wanted; a line that
+// does not have at least four fields (df produced nothing — a permission
+// error went to stderr instead of stdout, say) is not usable and reports no
+// reading, the same tolerant failure every other line in this parser gives
+// noise it cannot use.
+func parseDiskLine(rest []byte) (used, total uint64, ok bool) {
+	f := bytes.Fields(rest)
+	if len(f) < 4 {
+		return 0, 0, false
+	}
+	totalKB, err := strconv.ParseUint(string(f[1]), 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	usedKB, err := strconv.ParseUint(string(f[2]), 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return usedKB * 1024, totalKB * 1024, true
 }
 
 // parseKB reads a /proc/meminfo value: `        2015496 kB`.
