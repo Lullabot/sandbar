@@ -98,7 +98,7 @@ func (m model) fleetCountsText() string {
 	roster := m.boardVMs()
 	running := 0
 	for _, v := range roster {
-		switch m.statusOf(v) {
+		switch m.statusOf(v.scope, v.VM) {
 		case statusRunning, statusBuilding:
 			running++
 		}
@@ -127,6 +127,10 @@ func (m model) fleetCountsText() string {
 // it is this says so with an em dash rather than printing a 0 that would claim an
 // idle fleet — see tileGaugeNoReading, which makes the same refusal on the tile.
 func (m model) hostCapacityText() string {
+	// The single-band header reports the ACTIVE member's host (task 10 makes this
+	// per-profile). Sum only that member's board VMs against that member's host —
+	// for the zero-config single-member fleet this is the whole board, unchanged.
+	am := m.activeMember()
 	roster := m.boardVMs()
 
 	// Sum only the VMs actually reporting. A VM's CPUPct is a percentage of ITS OWN
@@ -135,14 +139,14 @@ func (m model) hostCapacityText() string {
 	// compared against the host's core count.
 	var cpusUsed float64
 	var memUsed int64
-	// An EMPTY board is not an absent reading, it is a known zero: no sandboxes are
-	// using anything, because there are no sandboxes. The em dash is reserved for a
-	// VM that is up and simply has not reported. The readout stays on an empty board
-	// because free disk is precisely what a user wants to see in the moment BEFORE
-	// they create their first VM.
-	haveCPU, haveMem := len(roster) == 0, len(roster) == 0
+	active := 0
+	haveCPU, haveMem := false, false
 	for _, v := range roster {
-		s, ok := m.sampleOf(v.Name)
+		if v.scope != am.scope {
+			continue
+		}
+		active++
+		s, ok := m.sampleOf(v.scope, v.Name)
 		if !ok {
 			continue
 		}
@@ -155,18 +159,26 @@ func (m model) hostCapacityText() string {
 			haveMem = true
 		}
 	}
+	// An EMPTY board is not an absent reading, it is a known zero: no sandboxes are
+	// using anything, because there are none. The em dash is reserved for a VM that
+	// is up and simply has not reported. The readout stays on an empty board because
+	// free disk is precisely what a user wants to see in the moment BEFORE they
+	// create their first VM.
+	if active == 0 {
+		haveCPU, haveMem = true, true
+	}
 
 	// NO PROBING HERE. These are sampled in New (once, at startup) and re-sampled by
-	// listCmd, which runs off the Bubble Tea goroutine. hostMemBytes reads
+	// refreshCmd, which runs off the Bubble Tea goroutine. hostMemBytes reads
 	// /proc/meminfo and freeDiskBytes walks parent dirs and statfs's the Lima volume;
 	// either one on the render path is a blocking syscall ~10 times a second, and on
 	// a host where the probe returns 0 a "fall back and probe" guard would never stop
 	// firing. Zero simply means unknown, and the clause is dropped.
-	hostMem, hostDisk := m.headerMem, m.headerDiskFree
+	hostMem, hostDisk := am.host.mem, am.host.diskFree
 
-	// A remote provider samples the REMOTE host's core count into headerCPUs
-	// (listCmd); the local provider leaves it 0 and we read this machine's count.
-	hostCPUs := m.headerCPUs
+	// A remote provider samples the REMOTE host's core count; the local provider
+	// leaves it 0 and we read this machine's count.
+	hostCPUs := am.host.cpus
 	if hostCPUs == 0 {
 		hostCPUs = hostCPUsFn()
 	}

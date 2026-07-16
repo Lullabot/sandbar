@@ -232,22 +232,22 @@ func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
 	if got := sh.opened("down"); got != 0 {
 		t.Fatalf("a stopped VM must never have a shell opened into it, got %d", got)
 	}
-	if _, ok := l.m.sampleOf("down"); ok {
+	if _, ok := l.m.sampleOf(registry.LocalScope, "down"); ok {
 		t.Fatal("a stopped VM must have NO sample — a zero here is a fabricated reading")
 	}
 	// And the running one has no sample either until its first record lands: a
 	// heartbeat that is merely OPEN knows nothing yet.
-	if _, ok := l.m.sampleOf("up"); ok {
+	if _, ok := l.m.sampleOf(registry.LocalScope, "up"); ok {
 		t.Fatal("no sample may exist before the first record arrives")
 	}
 
 	// ONE shell per VM, not one per sample tick. Three records, still one shell.
 	sh.write(t, "up", record(100, 900, 1000, 600))
-	l.pump("up's first sample", func(m model) bool { _, ok := m.sampleOf("up"); return ok })
+	l.pump("up's first sample", func(m model) bool { _, ok := m.sampleOf(registry.LocalScope, "up"); return ok })
 
 	// THE FIRST SAMPLE CARRIES NO CPU. /proc/stat is cumulative; one reading is not a
 	// rate. Memory, being absolute, is there immediately.
-	first, _ := l.m.sampleOf("up")
+	first, _ := l.m.sampleOf(registry.LocalScope, "up")
 	if first.HasCPU {
 		t.Fatalf("the first sample must carry no cpu reading, got %.1f%%", first.CPUPct)
 	}
@@ -256,9 +256,9 @@ func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
 	}
 
 	sh.write(t, "up", record(200, 1700, 1000, 600))
-	l.pump("up's second sample", func(m model) bool { s, ok := m.sampleOf("up"); return ok && s.HasCPU })
+	l.pump("up's second sample", func(m model) bool { s, ok := m.sampleOf(registry.LocalScope, "up"); return ok && s.HasCPU })
 
-	second, _ := l.m.sampleOf("up")
+	second, _ := l.m.sampleOf(registry.LocalScope, "up")
 	// Δtotal = 900, Δidle = 800, so busy = 100/900 = 11.1%.
 	if got := second.CPUPct; got < 11.0 || got > 11.2 {
 		t.Fatalf("cpu = %.2f%%, want ~11.11%% (Δbusy/Δtotal across the two records)", got)
@@ -281,7 +281,7 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 
 	// Stopped: nothing.
 	l.send(vmsLoadedMsg{vms: vms("web", "Stopped")})
-	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
+	if n := len(l.m.heartbeats.names(registry.LocalScope)); n != 0 {
 		t.Fatalf("a stopped VM has %d heartbeats, want 0", n)
 	}
 
@@ -289,17 +289,17 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")
 	sh.write(t, "web", record(100, 900, 1000, 600))
-	l.pump("web's sample", func(m model) bool { _, ok := m.sampleOf("web"); return ok })
+	l.pump("web's sample", func(m model) bool { _, ok := m.sampleOf(registry.LocalScope, "web"); return ok })
 
 	// It stops. The heartbeat must go, and THE GAUGE MUST GO WITH IT: a reading left
 	// behind would render as a stopped VM still burning cpu.
 	l.send(vmsLoadedMsg{vms: vms("web", "Stopped")})
 	sh.await(t, "close:web")
 
-	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
+	if n := len(l.m.heartbeats.names(registry.LocalScope)); n != 0 {
 		t.Fatalf("a VM that left Running still has %d heartbeats", n)
 	}
-	if s, ok := l.m.sampleOf("web"); ok {
+	if s, ok := l.m.sampleOf(registry.LocalScope, "web"); ok {
 		t.Fatalf("a stopped VM's gauge is stuck at its last reading: %+v", s)
 	}
 
@@ -333,7 +333,7 @@ func TestHeartbeatNeverOpensForAnUnmanagedVM(t *testing.T) {
 	// directly on the registry and the fake shell's open counts.
 	l.send(vmsLoadedMsg{vms: vms("web", "Running", "stray", "Running")})
 
-	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
+	if n := len(l.m.heartbeats.names(registry.LocalScope)); n != 0 {
 		t.Fatalf("%d heartbeats open for a fleet with no managed VM at all — every one would be for a VM with no tile", n)
 	}
 	if got := sh.opened("web"); got != 0 {
@@ -361,10 +361,10 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 		t.Fatalf("expected the create form, got view %v", l.m.view)
 	}
 	sh.await(t, "close:web")
-	if n := len(l.m.heartbeats.names(l.m.scope)); n != 0 {
+	if n := len(l.m.heartbeats.names(registry.LocalScope)); n != 0 {
 		t.Fatalf("%d heartbeats still open behind another screen", n)
 	}
-	if _, ok := l.m.sampleOf("web"); ok {
+	if _, ok := l.m.sampleOf(registry.LocalScope, "web"); ok {
 		t.Fatal("a paused heartbeat must leave no sample behind to go stale")
 	}
 
@@ -431,18 +431,18 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 	sh.await(t, "open:web")
 	sh.write(t, "web", record(100, 900, 1000, 600))
 	sh.write(t, "web", record(200, 1700, 1000, 600))
-	l.pump("web's cpu reading", func(m model) bool { s, ok := m.sampleOf("web"); return ok && s.HasCPU })
+	l.pump("web's cpu reading", func(m model) bool { s, ok := m.sampleOf(registry.LocalScope, "web"); return ok && s.HasCPU })
 
 	// The VM is stopped from outside sand. Lima has not told us yet — m.vms still
 	// says Running — but the shell is already dead.
 	sh.die(t, "web", errors.New("exit status 255"))
 	sh.await(t, "close:web")
 
-	l.pump("the heartbeat to end", func(m model) bool { return len(m.heartbeats.names(m.scope)) == 0 })
+	l.pump("the heartbeat to end", func(m model) bool { return len(m.heartbeats.names(registry.LocalScope)) == 0 })
 
 	// NO STUCK GAUGE. The reading goes the moment the stream does, without waiting
 	// for a list refresh to come round and notice.
-	if s, ok := l.m.sampleOf("web"); ok {
+	if s, ok := l.m.sampleOf(registry.LocalScope, "web"); ok {
 		t.Fatalf("the gauge is stuck at the reading the VM died on: %+v", s)
 	}
 
@@ -457,7 +457,7 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 
 	// Once the cooldown lapses it does try again: this is a pause, not a blacklist.
 	l.m.heartbeats.mu.Lock()
-	l.m.heartbeats.cooldown[vmHandle{Scope: l.m.scope, Name: "web"}] = time.Now().Add(-time.Second)
+	l.m.heartbeats.cooldown[vmHandle{Scope: registry.LocalScope, Name: "web"}] = time.Now().Add(-time.Second)
 	l.m.heartbeats.mu.Unlock()
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")

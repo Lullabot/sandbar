@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/browse"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/x/ansi"
@@ -173,6 +174,7 @@ func TestEveryScreensFooterIsClippedToTheTerminal(t *testing.T) {
 	dest := m
 	dest.view = viewDest
 	dest.transferVM = "web"
+	dest.transferScope = registry.LocalScope
 	dest.transferSrc = "/home/u/file.txt"
 	dest.dest, _ = browse.NewDestInput("Destination dir: ", "/tmp/host-dst", nil)
 	models["dest"] = dest

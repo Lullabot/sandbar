@@ -9,6 +9,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -65,11 +66,19 @@ func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
 	t.Helper()
 	isolateHostState(t)
 	prov := &provision.Provisioner{Lima: cli}
-	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
+	m, ok := New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}
 	return m
+}
+
+// singleFleet wraps one provider/scope in a one-member fleet — the zero-config
+// shape (a single enabled Local profile) every unit test drives, so New builds a
+// board bit-identical to the pre-fleet single-provider model.
+func singleFleet(p provider.Provider, scope registry.Scope) provider.Fleet {
+	prof := profiles.Profile{ID: profiles.LocalProfileID, Name: profiles.DefaultLocalName, Type: profiles.TypeLocal, Enabled: true}
+	return provider.Fleet{{Profile: prof, Prov: p, Scope: scope}}
 }
 
 // putOnBoard places a VM on the board — managed AND reported by Lima, which is
@@ -87,14 +96,18 @@ func putOnBoard(t *testing.T, m model, v vm.VM) model {
 			t.Fatalf("seed %s as managed: %v", v.Name, err)
 		}
 	}
+	// The single-member (local) fleet holds the loaded list; mark it connected so
+	// the board is READY (boardReady) rather than treating this as a pre-connect
+	// empty board.
+	m.members[0].state = connConnected
 	found := false
-	for i := range m.vms {
-		if m.vms[i].Name == v.Name {
-			m.vms[i], found = v, true
+	for i := range m.members[0].vms {
+		if m.members[0].vms[i].Name == v.Name {
+			m.members[0].vms[i], found = v, true
 		}
 	}
 	if !found {
-		m.vms = append(m.vms, v)
+		m.members[0].vms = append(m.members[0].vms, v)
 	}
 	m.view = viewBoard
 	m.focusVM.Name = v.Name
@@ -568,6 +581,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	m := newTestModel(t)
 	m.view = viewDest
 	m.transferVM = "claude"
+	m.transferScope = registry.LocalScope
 	m.transferSrc = "/home/u/file.txt"
 	m.transferUpload = false // download: guest source → host destination
 	m.dest, _ = browse.NewDestInput("Destination dir: ", "/tmp/host-dst", nil)
@@ -590,7 +604,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	if s.Provision {
 		t.Fatal("a transfer must not be marked a provision")
 	}
-	if got := m.statusOf(vm.VM{Name: "claude", Status: "Running"}); got != statusRunning {
+	if got := m.statusOf(registry.LocalScope, vm.VM{Name: "claude", Status: "Running"}); got != statusRunning {
 		t.Fatalf("a running transfer must not make its VM read as Building, got %v", got)
 	}
 }
@@ -945,8 +959,8 @@ func TestBlankFieldsFallBackToDefaults(t *testing.T) {
 	if cfg.User == "" {
 		t.Errorf("User should default to the host user, got empty")
 	}
-	if cfg.Memory != defaultMemory(m.headerMem) {
-		t.Errorf("Memory = %q, want the host-capped default %q", cfg.Memory, defaultMemory(m.headerMem))
+	if cfg.Memory != defaultMemory(m.formHostSample().mem) {
+		t.Errorf("Memory = %q, want the host-capped default %q", cfg.Memory, defaultMemory(m.formHostSample().mem))
 	}
 	if cfg.Disk != "100GiB" {
 		t.Errorf("Disk = %q, want %q", cfg.Disk, "100GiB")
@@ -1197,7 +1211,7 @@ func TestStopAllTargetsFiltersToManagedRunning(t *testing.T) {
 	m = loaded.(model)
 
 	got := m.stopAllTargets()
-	if len(got) != 1 || got[0] != "managed-running" {
+	if len(got) != 1 || got[0].Name != "managed-running" {
 		t.Fatalf("stopAllTargets() = %v, want [managed-running]", got)
 	}
 }
@@ -1248,13 +1262,13 @@ func TestResetFormPlaceholdersSavedToken(t *testing.T) {
 		t.Fatalf("seed secret: %v", err)
 	}
 
-	m.openResetForm("has-token", vm.CreateConfig{Name: "has-token", BaseName: "sandbar-base"})
+	m.openResetForm(registry.LocalScope, "has-token", vm.CreateConfig{Name: "has-token", BaseName: "sandbar-base"})
 	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "***") {
 		t.Fatalf("token placeholder for a VM with a saved token = %q, want it to signal a saved token", ph)
 	}
 
 	m2 := newTestModel(t)
-	m2.openResetForm("no-token", vm.CreateConfig{Name: "no-token", BaseName: "sandbar-base"})
+	m2.openResetForm(registry.LocalScope, "no-token", vm.CreateConfig{Name: "no-token", BaseName: "sandbar-base"})
 	if ph := m2.inputs[fCloneToken].Placeholder; ph != "" {
 		t.Fatalf("token placeholder for a VM with no saved token = %q, want empty", ph)
 	}
@@ -1307,7 +1321,7 @@ func TestStopAllCmdReportsPartialFailureByName(t *testing.T) {
 	cli := lima.New(stopAllFakeRunner{failNames: map[string]bool{"bad": true}})
 	p := provider.NewLocalLima(cli, &provision.Provisioner{Lima: cli})
 
-	msg := stopAllCmd(p, []string{"good", "bad"})()
+	msg := stopAllCmd(p, registry.LocalScope, []string{"good", "bad"})()
 	done, ok := msg.(actionDoneMsg)
 	if !ok {
 		t.Fatalf("stopAllCmd's tea.Cmd returned %T, want actionDoneMsg", msg)
@@ -1340,43 +1354,68 @@ func TestSummarizeNamesTruncatesForNarrowWidth(t *testing.T) {
 	}
 }
 
-// TestConnectingInterstitial: a remote provider opens on a "Connecting to <host>…"
-// screen (not the board with local-looking stats), swallows non-quit keys, shows
-// a failed-connect error, and dismisses on the first successful list.
-func TestConnectingInterstitial(t *testing.T) {
+// TestFleetConnectingHint: while every member is still connecting/errored and no
+// tiles have landed, the board shows the "connecting to N profiles…" hint (with
+// the first member's error) instead of the empty-slot create invitation. The
+// board stays interactive throughout — a fleet never blocks on one member's
+// handshake — and the hint gives way to the ghost the moment a member connects.
+func TestFleetConnectingHint(t *testing.T) {
 	isolateHostState(t)
 	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "andrew@host:22"}
-	m, ok := New(&providerfake.Provider{}, remote).(model)
+	m, ok := New(singleFleet(&providerfake.Provider{}, remote)).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
-	if !m.connecting {
-		t.Fatal("a remote provider should start on the connecting interstitial")
+	m = resized(m, 100, 30)
+
+	// Nothing has connected: the grid shows the connecting hint, NOT the ghost.
+	if m.boardReady() {
+		t.Fatal("a fleet with no successful list yet must not be boardReady")
 	}
-	if got := m.connectingView(); !strings.Contains(got, "andrew@host:22") {
-		t.Fatalf("connectingView should name the target, got:\n%s", got)
+	if m.showsGhost() {
+		t.Fatal("the create-invitation ghost must be withheld until a member connects")
 	}
-	// A stray key (n = new VM) must NOT open a form while connecting.
-	after, _ := m.Update(runeKey('n'))
-	if am := after.(model); am.view != viewBoard || !am.connecting {
-		t.Fatalf("a keypress opened a screen while connecting: view=%v connecting=%v", am.view, am.connecting)
+	if got := m.gridView(); !strings.Contains(got, "Connecting to 1 profile") {
+		t.Fatalf("gridView should show the fleet-connecting hint, got:\n%s", got)
 	}
-	// A failed first list keeps the interstitial up and records the error.
-	failed, _ := after.(model).Update(vmsLoadedMsg{err: errors.New("ssh: connection refused")})
-	if fm := failed.(model); !fm.connecting || fm.connectErr == nil {
-		t.Fatal("a failed first connect should keep the interstitial and record the error")
+
+	// A failed first connect marks the member errored and surfaces its error in
+	// the hint — but the board is still interactive (a key opens a real screen).
+	failed, _ := m.Update(vmsLoadedMsg{scope: remote, err: errors.New("ssh: connection refused")})
+	fm := failed.(model)
+	if fm.members[0].state != connErrored {
+		t.Fatalf("a failed first list should mark the member errored, got %v", fm.members[0].state)
 	}
-	// The first successful list dismisses it.
-	done, _ := failed.(model).Update(vmsLoadedMsg{})
-	if done.(model).connecting {
-		t.Fatal("the first successful list should dismiss the interstitial")
+	if got := fm.gridView(); !strings.Contains(got, "ssh: connection refused") {
+		t.Fatalf("the connecting hint should surface the member's error, got:\n%s", got)
+	}
+	opened, _ := fm.Update(runeKey('n'))
+	if opened.(model).view != viewForm {
+		t.Fatal("the board must stay interactive while the fleet connects: 'n' should open the create form")
+	}
+
+	// The first successful list connects the member and dismisses the hint.
+	done, _ := fm.Update(vmsLoadedMsg{scope: remote})
+	dm := done.(model)
+	if !dm.boardReady() {
+		t.Fatal("a successful list should make the board ready")
+	}
+	if !dm.showsGhost() {
+		t.Fatal("once a member connects, the empty board should offer the create ghost")
 	}
 }
 
-// TestLocalProviderNoInterstitial: local Lima connects instantly — no interstitial.
-func TestLocalProviderNoInterstitial(t *testing.T) {
+// TestLocalMemberConnectsFast: a local member starts connecting and reaches
+// connected as soon as its (instant) first list lands — there is never a
+// user-facing blocking interstitial for local Lima.
+func TestLocalMemberConnectsFast(t *testing.T) {
 	isolateHostState(t)
-	if New(&providerfake.Provider{}, registry.LocalScope).(model).connecting {
-		t.Fatal("local Lima should not show the connecting interstitial")
+	m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)
+	if m.members[0].state != connConnecting {
+		t.Fatalf("a fresh member starts connecting, got %v", m.members[0].state)
+	}
+	done, _ := m.Update(vmsLoadedMsg{scope: registry.LocalScope})
+	if done.(model).members[0].state != connConnected {
+		t.Fatal("the first successful list should connect the local member")
 	}
 }

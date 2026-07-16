@@ -40,6 +40,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -82,7 +83,7 @@ const ghostFocusName = "\x00new"
 // sentinel byte makes it unique regardless of scope — but every assignment site
 // constructs the full vmHandle anyway, so the ring's field never silently
 // reverts to a bare name.
-func (m model) ghostFocusVM() vmHandle { return vmHandle{Scope: m.scope, Name: ghostFocusName} }
+func (m model) ghostFocusVM() vmHandle { return vmHandle{Scope: m.activeScope(), Name: ghostFocusName} }
 
 // isBaseImage reports whether name is a sand base image: a clone source for a
 // managed VM, or the default base name even before any clone exists. Base images
@@ -92,24 +93,27 @@ func (m model) isBaseImage(name string) bool {
 	return m.reg.IsBase(name) || name == vm.DefaultCreateConfig().BaseName
 }
 
-// lookupVM looks up a loaded VM record by name, reporting whether it was found.
-// The miss case is distinguishable from a real zero-value record, and both
-// callers need that: the VM screen's re-seed must route back to the board when
-// its VM is gone, and the board itself must be able to raise a tile for a VM
-// that does not exist YET (a create's clone does not land in `limactl list`
-// until minutes into its own build — the vm.VM{Name: name} returned here is that
-// tile's record).
-func (m model) lookupVM(name string) (vm.VM, bool) {
-	for _, v := range m.vms {
-		if v.Name == name {
-			return v, true
+// lookupVM looks up a loaded VM record by (scope, name), reporting whether it
+// was found. The miss case is distinguishable from a real zero-value record, and
+// both callers need that: the board must be able to raise a tile for a VM that
+// does not exist YET (a create's clone does not land in `limactl list` until
+// minutes into its own build — the vm.VM{Name: name} returned here is that
+// tile's record). Scoped, because a fleet may hold a same-named VM under two
+// profiles, each with its own record.
+func (m model) lookupVM(scope registry.Scope, name string) (vm.VM, bool) {
+	if mem, ok := m.memberByScope(scope); ok {
+		for _, v := range mem.vms {
+			if v.Name == name {
+				return v, true
+			}
 		}
 	}
 	return vm.VM{Name: name}, false
 }
 
 // boardVMs is THE ROSTER, alphabetically: every VM that gets a tile, and nothing
-// else.
+// else — the UNION across the whole fleet, each entry tagged with the scope of
+// the member that owns it.
 //
 // A tile exists iff the VM is a sand-managed clone — with one exception that is
 // not a loophole but the point: a VM with a PROVISION JOB gets a tile too.
@@ -118,32 +122,54 @@ func (m model) lookupVM(name string) (vm.VM, bool) {
 // walking only Lima and the registry would show nothing at all for exactly the
 // span the user is waiting on — and a FAILED build's VM (never recorded managed)
 // would have no tile to report the failure on, or to delete it from.
-func (m model) boardVMs() []vm.VM {
-	on := make(map[string]bool, len(m.vms))
-	for _, v := range m.vms {
-		if m.reg.IsManagedInScope(v.Name, m.scope) {
-			on[v.Name] = true
+//
+// Every membership question is PER MEMBER, against that member's own scope: a
+// listing (and its jobs) belongs to exactly one profile, so a same-named VM
+// under another profile is a distinct tile, never merged with this one.
+func (m model) boardVMs() []boardVM {
+	var out []boardVM
+	for i := range m.members {
+		mem := m.members[i]
+		on := make(map[string]bool, len(mem.vms))
+		idx := make(map[string]vm.VM, len(mem.vms))
+		for _, v := range mem.vms {
+			idx[v.Name] = v
+			if m.reg.IsManagedInScope(v.Name, mem.scope) {
+				on[v.Name] = true
+			}
+		}
+		for _, name := range m.jobs.names(mem.scope) {
+			if m.hasProvisionJob(mem.scope, name) {
+				on[name] = true
+			}
+		}
+		for name := range on {
+			v, ok := idx[name]
+			if !ok {
+				v = vm.VM{Name: name} // a miss is a VM being built: its record is its name
+			}
+			out = append(out, boardVM{VM: v, scope: mem.scope})
 		}
 	}
-	for _, name := range m.jobs.names(m.scope) {
-		if m.hasProvisionJob(name) {
-			on[name] = true
+	// Alphabetical by name (identical to the single-provider order for N=1), with
+	// a stable scope tiebreak so two same-named VMs across profiles order
+	// deterministically.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
 		}
-	}
-
-	out := make([]vm.VM, 0, len(on))
-	for name := range on {
-		v, _ := m.lookupVM(name) // a miss is a VM being built: its record is its name
-		out = append(out, v)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		if out[i].scope.Provider != out[j].scope.Provider {
+			return out[i].scope.Provider < out[j].scope.Provider
+		}
+		return out[i].scope.RemoteTarget < out[j].scope.RemoteTarget
+	})
 	return out
 }
 
 // visibleVMs is the roster narrowed by the live name search ('/'). It is what the
 // grid renders and what the focus ring moves over — and it is deliberately NOT
 // what stop-all acts on (see stopAllTargets).
-func (m model) visibleVMs() []vm.VM {
+func (m model) visibleVMs() []boardVM {
 	vms := m.boardVMs()
 	if m.searchQuery == "" {
 		return vms
@@ -158,8 +184,13 @@ func (m model) visibleVMs() []vm.VM {
 	return out
 }
 
-// vmIndex is the slot a name occupies in vms, or -1.
-func vmIndex(vms []vm.VM, name string) int {
+// vmIndex is the slot the ring's name occupies in vms, or -1. The ring is
+// matched by NAME (not the full handle): the tile it resolves to carries the
+// scope every action needs, and same-named cross-scope collisions are the rare
+// case task 10's provenance labels disambiguate — the safety that matters (a
+// delete keying the wrong scope) is preserved because focusedVM hands back a
+// scoped boardVM.
+func vmIndex(vms []boardVM, name string) int {
 	for i, v := range vms {
 		if v.Name == name {
 			return i
@@ -169,14 +200,14 @@ func vmIndex(vms []vm.VM, name string) int {
 }
 
 // focusedVM is THE single-sourced contract every verb on this board depends on:
-// the VM under the ring. It reports false when the board is empty (or the ring's
-// VM is not on it), and every caller must respect that rather than acting on a
-// zero-value VM.
-func (m model) focusedVM() (vm.VM, bool) {
+// the VM under the ring, WITH its owning scope. It reports false when the board
+// is empty (or the ring's VM is not on it), and every caller must respect that
+// rather than acting on a zero-value VM.
+func (m model) focusedVM() (boardVM, bool) {
 	vms := m.visibleVMs()
 	i := vmIndex(vms, m.focusVM.Name)
 	if i < 0 {
-		return vm.VM{}, false
+		return boardVM{}, false
 	}
 	return vms[i], true
 }
@@ -198,12 +229,13 @@ func (m *model) syncBoard() {
 		// and to nothing at all when there is not (a filter that matches no VM shows
 		// no ghost: the tiles are hidden, not absent, so there is nothing to invite).
 		//
-		// But only once the FIRST list has landed. Before that the board is empty
-		// because nothing is loaded, not because the host is bare, and adopting the
-		// ghost here would stick: the identity pin would then hold the ring on it as
-		// the real tiles arrived, so sand would open with the empty slot selected and
-		// enter would create a VM rather than open the first one.
-		if m.showsGhost() && m.vmsLoaded {
+		// But only once the fleet is READY (at least one member connected). Before
+		// that the board is empty because nothing has landed, not because the host is
+		// bare, and adopting the ghost here would stick: the identity pin would then
+		// hold the ring on it as the real tiles arrived, so sand would open with the
+		// empty slot selected and enter would create a VM rather than open the first
+		// one. showsGhost folds that readiness check in.
+		if m.showsGhost() {
 			m.focusVM = m.ghostFocusVM()
 		} else {
 			m.focusVM = vmHandle{}
@@ -216,7 +248,7 @@ func (m *model) syncBoard() {
 		return
 	}
 	if vmIndex(vms, m.focusVM.Name) < 0 {
-		m.focusVM = vmHandle{Scope: m.scope, Name: focusNeighbour(vms, m.focusVM.Name)}
+		m.focusVM = focusNeighbour(vms, m.focusVM.Name)
 	}
 	m.ensureFocusVisible()
 }
@@ -241,13 +273,14 @@ func (m model) focusIndex() int {
 	return vmIndex(m.visibleVMs(), m.focusVM.Name)
 }
 
-// focusCellName is focusIndex's inverse: the focus name for a grid slot.
-func (m model) focusCellName(i int) string {
+// focusCellHandle is focusIndex's inverse: the focus handle (scope + name) for a
+// grid slot. The last cell (past the visible VMs) is the ghost.
+func (m model) focusCellHandle(i int) vmHandle {
 	vms := m.visibleVMs()
 	if i < len(vms) {
-		return vms[i].Name
+		return vmHandle{Scope: vms[i].scope, Name: vms[i].Name}
 	}
-	return ghostFocusName
+	return m.ghostFocusVM()
 }
 
 // focusNeighbour picks where the ring lands when the VM it was on LEAVES the
@@ -258,19 +291,20 @@ func (m model) focusCellName(i int) string {
 // predictable identity, chosen from the board as it is now.
 //
 // vms is the sorted roster, so the last name that still sorts before `gone` is
-// that neighbour.
-func focusNeighbour(vms []vm.VM, gone string) string {
+// that neighbour. It returns the neighbour's full handle (scope + name) so the
+// ring lands with the owning profile in hand.
+func focusNeighbour(vms []boardVM, gone string) vmHandle {
 	if len(vms) == 0 {
-		return ""
+		return vmHandle{}
 	}
-	pick := vms[0].Name
+	pick := vms[0]
 	for _, v := range vms {
 		if v.Name >= gone {
 			break
 		}
-		pick = v.Name
+		pick = v
 	}
-	return pick
+	return vmHandle{Scope: pick.scope, Name: pick.Name}
 }
 
 // gridColumns is how many tiles fit side by side — from the LAYOUT MODE (task
@@ -311,7 +345,7 @@ func (m *model) moveFocus(dx, dy int) {
 	if i < 0 {
 		// The ring is on nothing (a board that just gained its first cell): the first
 		// arrow key adopts the first one rather than doing nothing.
-		m.focusVM = vmHandle{Scope: m.scope, Name: m.focusCellName(0)}
+		m.focusVM = m.focusCellHandle(0)
 		m.ensureFocusVisible()
 		return
 	}
@@ -339,7 +373,7 @@ func (m *model) moveFocus(dx, dy int) {
 	if target == i {
 		return
 	}
-	m.focusVM = vmHandle{Scope: m.scope, Name: m.focusCellName(target)}
+	m.focusVM = m.focusCellHandle(target)
 	m.ensureFocusVisible()
 }
 
@@ -348,7 +382,12 @@ func (m *model) moveFocus(dx, dy int) {
 // are hidden, not absent) — and gridView and ensureFocusVisible both ask here, so
 // the cell the grid draws and the cell the scroll accounts for cannot disagree.
 // They did, and the affordance paid for it: see ensureFocusVisible.
-func (m model) showsGhost() bool { return m.searchQuery == "" }
+// It is also withheld until the fleet is READY (boardReady): before any member
+// has connected, an empty board is empty because nothing has landed — not
+// because the user has no VMs — and the grid shows the connecting hint instead
+// of the create invitation (see gridView, and the vmsLoaded rationale it
+// replaced).
+func (m model) showsGhost() bool { return m.searchQuery == "" && m.boardReady() }
 
 // gridCells is how many cells the grid lays out: one per visible VM, plus the
 // ghost.
@@ -425,18 +464,38 @@ func (m *model) ensureFocusVisible() {
 // under its own Ansible run — the same hazard the per-VM verbs now gate on (see
 // notBuilding, commandreg.go). "Stop all" means the sandboxes the user is finished
 // with, not the one they are in the middle of creating.
-func (m model) stopAllTargets() []string {
-	var names []string
-	for _, v := range m.vms {
-		if v.Status != limaRunning || !m.reg.IsManagedInScope(v.Name, m.scope) || m.isBaseImage(v.Name) {
-			continue
+func (m model) stopAllTargets() []boardVM {
+	var out []boardVM
+	for i := range m.members {
+		mem := m.members[i]
+		for _, v := range mem.vms {
+			if v.Status != limaRunning || !m.reg.IsManagedInScope(v.Name, mem.scope) || m.isBaseImage(v.Name) {
+				continue
+			}
+			if m.vmBuilding(mem.scope, v.Name) {
+				continue
+			}
+			out = append(out, boardVM{VM: v, scope: mem.scope})
 		}
-		if m.vmBuilding(v.Name) {
-			continue
-		}
-		names = append(names, v.Name)
 	}
-	return names
+	return out
+}
+
+// stopAllCmds builds one stopAllCmd per member that has running targets, so each
+// profile's VMs are stopped through their OWN provider. targets is the fleet-wide
+// list (stopAllTargets); this groups them by scope.
+func (m model) stopAllCmds(targets []boardVM) tea.Cmd {
+	byScope := map[registry.Scope][]string{}
+	for _, t := range targets {
+		byScope[t.scope] = append(byScope[t.scope], t.Name)
+	}
+	var cmds []tea.Cmd
+	for sc, names := range byScope {
+		if p := m.provFor(sc); p != nil {
+			cmds = append(cmds, stopAllCmd(p, sc, names))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // busyVMs names every VM with work still in flight — a build, a file transfer, or
@@ -446,9 +505,12 @@ func (m model) stopAllTargets() []string {
 // and quitting abandons everything on it.
 func (m model) busyVMs() []string {
 	var names []string
-	for _, name := range m.jobs.names(m.scope) {
-		if m.jobs.isRunning(m.scope, name) {
-			names = append(names, name)
+	for i := range m.members {
+		sc := m.members[i].scope
+		for _, name := range m.jobs.names(sc) {
+			if m.jobs.isRunning(sc, name) {
+				names = append(names, name)
+			}
 		}
 	}
 	sort.Strings(names)
@@ -620,9 +682,13 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.logMsg("no running sand VMs to stop")
 			return m, nil
 		}
+		names := make([]string, len(targets))
+		for i, t := range targets {
+			names[i] = t.Name
+		}
 		m.confirm = &confirmState{
-			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(targets, m.width)),
-			run:     stopAllCmd(m.p, targets),
+			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(names, m.width)),
+			run:     m.stopAllCmds(targets),
 			working: fmt.Sprintf("stopping %d sand VMs…", len(targets)),
 		}
 		return m, nil
@@ -800,6 +866,13 @@ func (m model) gridView() string {
 		// user to create a VM here would be a lie about why they see nothing.
 		return statusStyle.Render(fmt.Sprintf("no VMs match %q — esc clears the filter", m.searchQuery))
 	}
+	if len(vms) == 0 && m.searchQuery == "" && !m.boardReady() {
+		// No tiles and the fleet has not connected yet: the board is empty because
+		// nothing has landed, not because the user has no VMs. Show the connecting
+		// hint rather than the "press enter to add a VM" ghost (which showsGhost also
+		// withholds until boardReady).
+		return clipBlock(m.fleetConnectingBanner(), m.layout.GridHeight, m.layout.ContentWidth)
+	}
 
 	// The exception-only badge rule (task 07) is a genuine equality test across the
 	// fleet ON THE BOARD: a badge answers "is this VM the odd one out", and the
@@ -815,7 +888,7 @@ func (m model) gridView() string {
 	voters := make([]vmTraits, 0, len(vms))
 	for i, v := range vms {
 		traits[i] = m.traitsOf(v)
-		if _, known := m.lookupVM(v.Name); known {
+		if _, known := m.lookupVM(v.scope, v.Name); known {
 			voters = append(voters, traits[i])
 		}
 	}
@@ -875,18 +948,19 @@ func (m model) gridView() string {
 
 // renderCell draws grid cell i: a VM's tile, or — for the cell just past the last
 // VM — the empty-slot ghost (see gridCells).
-func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUniformity, frame string, now time.Time) string {
+func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleetUniformity, frame string, now time.Time) string {
 	if i >= len(vms) {
 		return renderGhostTile(m.layout.TileWidth, m.focusIsGhost())
 	}
 	v := vms[i]
 	// The tile reads the VM's BUILD — never "whatever run this VM happens to have".
 	// A file copy against a running VM is not a build and must not be able to become
-	// one by occupying the same slot (jobs.go).
-	job, hasJob := m.jobs.snapshot(provisionKey(m.scope, v.Name))
-	sample, hasSample := m.sampleOf(v.Name)
+	// one by occupying the same slot (jobs.go). Keyed by the OWNING member's scope,
+	// so a same-named VM under another profile never lends this one its build/gauge.
+	job, hasJob := m.jobs.snapshot(provisionKey(v.scope, v.Name))
+	sample, hasSample := m.sampleOf(v.scope, v.Name)
 	return renderTile(tileInput{
-		VM:        v,
+		VM:        v.VM,
 		Job:       job,
 		HasJob:    hasJob,
 		Sample:    sample,
@@ -915,17 +989,17 @@ func (m model) renderCell(i int, vms []vm.VM, traits []vmTraits, uniform fleetUn
 // Managed therefore ends up TRUE for every tile on the board, which makes it
 // uniform by construction and the managed/external badge unreachable — exactly
 // what tile.go predicts once the board filters to sand's own VMs.
-func (m model) traitsOf(v vm.VM) vmTraits {
-	base, managed := m.reg.BaseInScope(v.Name, m.scope)
+func (m model) traitsOf(v boardVM) vmTraits {
+	base, managed := m.reg.BaseInScope(v.Name, v.scope)
 	if base == "" {
-		if cfg, ok := m.jobs.config(m.scope, v.Name); ok {
+		if cfg, ok := m.jobs.config(v.scope, v.Name); ok {
 			base = cfg.BaseName
 		}
 	}
 	return vmTraits{
 		Arch:    v.Arch,
 		Base:    base,
-		Managed: managed || m.hasProvisionJob(v.Name),
+		Managed: managed || m.hasProvisionJob(v.scope, v.Name),
 	}
 }
 
@@ -957,13 +1031,13 @@ func (m model) traitsOf(v vm.VM) vmTraits {
 // A cancelled build whose VM SURVIVES still gets its tile: a ^C during the
 // playbook leaves a booted, half-provisioned VM that is absolutely worth showing —
 // it exists, it is not managed, and `d` is how it gets cleared.
-func (m model) hasProvisionJob(name string) bool {
-	s, ok := m.jobs.snapshot(provisionKey(m.scope, name))
+func (m model) hasProvisionJob(scope registry.Scope, name string) bool {
+	s, ok := m.jobs.snapshot(provisionKey(scope, name))
 	if !ok || s.State == jobSucceeded {
 		return false
 	}
 	if s.Canceled {
-		if _, known := m.lookupVM(name); !known {
+		if _, known := m.lookupVM(scope, name); !known {
 			return false
 		}
 	}

@@ -57,12 +57,12 @@ func TestGenerateHomeBoardShot(t *testing.T) {
 	// The lima runner is never consulted: the board is hand-built below, not driven.
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	m := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
+	m := New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model)
 
 	const gib = int64(1) << 30
 	now := time.Now()
 
-	m.vms = []vm.VM{
+	m.members[0].vms = []vm.VM{
 		{
 			Name:     "drupal-contrib",
 			Status:   "Running",
@@ -84,12 +84,12 @@ func TestGenerateHomeBoardShot(t *testing.T) {
 			LastUsed: now.Add(-60 * time.Hour), // squarely inside the "2d ago" bucket
 		},
 	}
-	m.vmsLoaded = true
+	m.members[0].state = connConnected
 	m.focusVM.Name = "drupal-contrib" // the focused (blue-bordered) tile
 
 	// A live guest heartbeat for the running VM: cpu 34%, mem 3.4 GiB of 8 GiB.
 	// latest() only reads seen+last, so a bare struct is a complete reading here.
-	m.heartbeats.beats[vmHandle{Scope: m.scope, Name: "drupal-contrib"}] = &heartbeat{
+	m.heartbeats.beats[vmHandle{Scope: registry.LocalScope, Name: "drupal-contrib"}] = &heartbeat{
 		seen: true,
 		last: guestSample{
 			CPUPct:   34,

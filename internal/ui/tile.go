@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/lipgloss/v2"
@@ -468,16 +469,16 @@ func tileFooterLine(v vm.VM, now time.Time) string {
 // case of ha.stderr.log existing but being unreadable for some other reason
 // (a permissions problem, say) — evidence the VM error is real for
 // diagnostic without misreporting a never-started VM as used.
-func lastUsed(dir string) (time.Time, bool) {
+func lastUsed(hf lima.HostFiles, dir string) (time.Time, bool) {
 	if dir == "" {
 		return time.Time{}, false
 	}
-	fi, err := hostFiles.Stat(filepath.Join(dir, "ha.stderr.log"))
+	fi, err := hf.Stat(filepath.Join(dir, "ha.stderr.log"))
 	if err == nil {
 		return fi.ModTime(), true
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
-		if fi2, err2 := hostFiles.Stat(filepath.Join(dir, "disk")); err2 == nil {
+		if fi2, err2 := hf.Stat(filepath.Join(dir, "disk")); err2 == nil {
 			return fi2.ModTime(), true
 		}
 	}
@@ -492,12 +493,12 @@ func lastUsed(dir string) (time.Time, bool) {
 // advancing as the hostagent logs, and so cannot stand in for a boot marker
 // the way it can for a stopped VM's last-used time. qemu.pid, written at the
 // same moment, is the fallback if ha.pid is missing but the VM is running.
-func upSince(dir string) (time.Time, bool) {
+func upSince(hf lima.HostFiles, dir string) (time.Time, bool) {
 	if dir == "" {
 		return time.Time{}, false
 	}
 	for _, name := range []string{"ha.pid", "qemu.pid"} {
-		if fi, err := hostFiles.Stat(filepath.Join(dir, name)); err == nil {
+		if fi, err := hf.Stat(filepath.Join(dir, name)); err == nil {
 			return fi.ModTime(), true
 		}
 	}

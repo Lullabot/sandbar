@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -44,20 +45,21 @@ type vmCommand struct {
 	// "u upload" tells you the key, not what it copies where. This is the sentence a
 	// user reads once and then never needs again.
 	about      string
-	enabledFor func(m model, v vm.VM) bool
-	action     func(m *model, v vm.VM) tea.Cmd
+	enabledFor func(m model, v boardVM) bool
+	action     func(m *model, v boardVM) tea.Cmd
 }
 
-// vmBuilding reports whether name is mid-build. Nil-safe: a model with no job
-// registry has nothing building.
-func (m model) vmBuilding(name string) bool {
-	return m.jobs.Building(m.scope, name)
+// vmBuilding reports whether (scope, name) is mid-build. Nil-safe: a model with
+// no job registry has nothing building. Scoped, so a fleet's same-named VMs are
+// gated independently.
+func (m model) vmBuilding(scope registry.Scope, name string) bool {
+	return m.jobs.Building(scope, name)
 }
 
-// vmHasRetainedRun reports whether name has a run whose log can be reopened.
-// Nil-safe, for the same reason.
-func (m model) vmHasRetainedRun(name string) bool {
-	return m.jobs.HasRetainedRun(m.scope, name)
+// vmHasRetainedRun reports whether (scope, name) has a run whose log can be
+// reopened. Nil-safe, for the same reason.
+func (m model) vmHasRetainedRun(scope registry.Scope, name string) bool {
+	return m.jobs.HasRetainedRun(scope, name)
 }
 
 // alwaysEnabled is the enabledFor for vmCommands that genuinely have nothing
@@ -69,7 +71,7 @@ func (m model) vmHasRetainedRun(name string) bool {
 // command that used to sit here (Reset, Upload, Download) had a real
 // decline branch that advertised the verb and then did nothing but set a
 // status message; those now gate in enabledFor instead.
-func alwaysEnabled(model, vm.VM) bool { return true }
+func alwaysEnabled(model, boardVM) bool { return true }
 
 // notBuilding gates every verb that would DISRUPT A BUILD, and it is the guard the
 // board's own liveness made necessary.
@@ -87,7 +89,7 @@ func alwaysEnabled(model, vm.VM) bool { return true }
 // full-screen progress view froze the keyboard for the whole build, so no key
 // could reach them. This plan removed that freeze — deliberately, it is the
 // headline feature — and these gates are what has to replace it.
-func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
+func notBuilding(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) }
 
 // enterTarget is what Enter does to the tile under the ring: the ONE obvious
 // thing for the state that tile is in.
@@ -111,10 +113,10 @@ func notBuilding(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) }
 // ok=false means Enter does nothing here, and boardHelp must not advertise it.
 // That happens when the routed verb is gated off: a building VM whose run is not
 // retained (nothing to show yet), for instance.
-func (m model) enterTarget(v vm.VM) (vmCommand, bool) {
+func (m model) enterTarget(v boardVM) (vmCommand, bool) {
 	var want string
 	switch {
-	case m.vmBuilding(v.Name):
+	case m.vmBuilding(v.scope, v.Name):
 		want = "log"
 	case v.Status == limaRunning:
 		want = "shell"
@@ -139,30 +141,30 @@ var vmCommands = []vmCommand{
 		id:         "start",
 		binding:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start")),
 		about:      "Boot the VM. Its host-stored secrets are written into the guest as it comes up.",
-		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status != limaRunning },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status != limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
 			m.logMsg("starting " + v.Name + "…")
-			user, scopes := m.secretsFor(v.Name)
-			return m.beginAction(startCmd(m.p, v.Name, user, scopes))
+			user, scopes := m.secretsFor(v.scope, v.Name)
+			return m.beginAction(startCmd(m.provFor(v.scope), v.scope, v.Name, user, scopes))
 		},
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
 		about:      "Shut the VM down cleanly. Its disk and its secrets are kept.",
-		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
 			m.logMsg("stopping " + v.Name + "…")
-			return m.beginAction(stopCmd(m.p, v.Name))
+			return m.beginAction(stopCmd(m.provFor(v.scope), v.scope, v.Name))
 		},
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 		about:      "Stop the VM and start it again, applying any secrets you have changed since it booted.",
 		enabledFor: notBuilding,
-		action: func(m *model, v vm.VM) tea.Cmd {
+		action: func(m *model, v boardVM) tea.Cmd {
 			m.logMsg("restarting " + v.Name + "…")
-			user, scopes := m.secretsFor(v.Name)
-			return m.beginAction(restartCmd(m.p, v.Name, user, scopes))
+			user, scopes := m.secretsFor(v.scope, v.Name)
+			return m.beginAction(restartCmd(m.provFor(v.scope), v.scope, v.Name, user, scopes))
 		},
 	},
 	{
@@ -179,16 +181,16 @@ var vmCommands = []vmCommand{
 		// "why" is already visible in the VM record's Managed field, the same
 		// way Status explains a hidden Start/Stop, so gating here loses no
 		// information a user could act on.
-		enabledFor: func(m model, v vm.VM) bool {
+		enabledFor: func(m model, v boardVM) bool {
 			if !notBuilding(m, v) {
 				return false
 			}
-			_, ok := manage.RecreateBase(m.reg, v.Name, m.scope)
+			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope)
 			return ok
 		},
-		action: func(m *model, v vm.VM) tea.Cmd {
+		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			base, ok := manage.RecreateBase(m.reg, name, m.scope)
+			base, ok := manage.RecreateBase(m.reg, name, v.scope)
 			if !ok {
 				// Unreachable via normal dispatch — enabledFor above already excludes
 				// this VM. Guarded anyway so a direct call never opens a form with a
@@ -200,7 +202,7 @@ var vmCommands = []vmCommand{
 			// token is not stored, so a VM that cloned a private repo will need it
 			// re-supplied. Fall back to a minimal config if no snapshot exists
 			// (e.g. a pre-snapshot index entry).
-			cfg, found := m.reg.ConfigInScope(name, m.scope)
+			cfg, found := m.reg.ConfigInScope(name, v.scope)
 			if !found || cfg.Name == "" {
 				cfg = vm.DefaultCreateConfig()
 				cfg.Name = name
@@ -209,7 +211,9 @@ var vmCommands = []vmCommand{
 				cfg.GitEmail = hostGit("user.email")
 			}
 			cfg.BaseName = base
-			return m.openResetForm(name, cfg)
+			// A reset targets the VM's OWN member — the form's provider, host
+			// defaults and bookkeeping resolve through v.scope, not the active one.
+			return m.openResetForm(v.scope, name, cfg)
 		},
 	},
 	{
@@ -226,8 +230,8 @@ var vmCommands = []vmCommand{
 		// the host-tmux fast path, which does not suspend the TUI, still attaches a
 		// live session to a VM the reset is about to delete — so kept exactly as-is
 		// (considered and deliberately retained, not an oversight to "fix").
-		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
 			// Same predicate shellCmd branches on, so the copy always describes the
 			// branch that actually fires.
 			if hostInTmux() {
@@ -235,7 +239,7 @@ var vmCommands = []vmCommand{
 			} else {
 				m.logMsg("attaching to " + v.Name + " — C-a d detaches; the TUI resumes when you detach or exit")
 			}
-			return shellCmd(m.p, v)
+			return shellCmd(m.provFor(v.scope), v.scope, v.VM)
 		},
 	},
 	{
@@ -244,15 +248,17 @@ var vmCommands = []vmCommand{
 		// Delete raises the confirm overlay unconditionally today; the job
 		// registry (task 04) will additionally disable Delete while a VM is
 		// mid-build via vmBuilding.
-		enabledFor: func(m model, v vm.VM) bool { return !m.vmBuilding(v.Name) },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) },
+		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
 			// Delete's action RAISES the confirm; it never deletes directly — the
 			// actual deleteCmd only runs once the user presses 'y' (updateConfirm
-			// in model.go).
+			// in model.go). deleteCmd carries the owning scope so the actionDoneMsg
+			// handler prunes THIS profile's job/secrets, never a same-named VM's
+			// under another.
 			m.confirm = &confirmState{
 				prompt:  fmt.Sprintf("Delete %q?", name),
-				run:     deleteCmd(m.p, name),
+				run:     deleteCmd(m.provFor(v.scope), v.scope, name),
 				working: "deleting " + name + "…",
 			}
 			return nil
@@ -270,8 +276,8 @@ var vmCommands = []vmCommand{
 		// it back, so a copy launched into it mid-reset streams the user's files into
 		// a VM that is about to be destroyed — and reports success. submitReset already
 		// refuses a reset while a copy runs; this is the other half of that guard.
-		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
 			next, cmd := m.startTransfer(v, true) // host → guest
 			*m = next.(model)
 			return cmd
@@ -284,8 +290,8 @@ var vmCommands = []vmCommand{
 		// harmless here since the detail screen has no table.
 		binding:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "download")),
 		about:      "Copy a file or directory out of the guest onto this machine.",
-		enabledFor: func(m model, v vm.VM) bool { return notBuilding(m, v) && v.Status == limaRunning },
-		action: func(m *model, v vm.VM) tea.Cmd {
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
 			next, cmd := m.startTransfer(v, false) // guest → host
 			*m = next.(model)
 			return cmd
@@ -295,8 +301,8 @@ var vmCommands = []vmCommand{
 		binding:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "secrets")),
 		about:      "Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start.",
 		enabledFor: alwaysEnabled, // secrets live on the host, editable whether or not the VM is up
-		action: func(m *model, v vm.VM) tea.Cmd {
-			return m.openSecrets(v.Name)
+		action: func(m *model, v boardVM) tea.Cmd {
+			return m.openSecrets(v.scope, v.Name)
 		},
 	},
 	{
@@ -310,9 +316,9 @@ var vmCommands = []vmCommand{
 		// what makes a failed VM's Failed status sticky), so this verb is the
 		// difference between a red tile that reports a problem and one that can
 		// explain it. Offered only when there is a run to show.
-		enabledFor: func(m model, v vm.VM) bool { return m.vmHasRetainedRun(v.Name) },
-		action: func(m *model, v vm.VM) tea.Cmd {
-			return m.showJobLog(v.Name)
+		enabledFor: func(m model, v boardVM) bool { return m.vmHasRetainedRun(v.scope, v.Name) },
+		action: func(m *model, v boardVM) tea.Cmd {
+			return m.showJobLog(v.scope, v.Name)
 		},
 	},
 }

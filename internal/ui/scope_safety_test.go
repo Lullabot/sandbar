@@ -236,7 +236,7 @@ func TestExplicitDeleteOnlyPrunesItsOwnScopesState(t *testing.T) {
 // an unrelated profile's same-named one instead.
 func TestReconcileDropPrunesTheModelsOwnScopeNotAHardcodedOne(t *testing.T) {
 	m := newTestModel(t)
-	m.scope = foreignScope // this model is a non-local connection profile
+	m.members[0].scope = foreignScope // this model is a non-local connection profile
 
 	sec := secrets.NewEmpty()
 	if err := sec.Set("shared-name", foreignScope, map[string]string{"GH_TOKEN": "mine"}); err != nil {
@@ -280,7 +280,7 @@ func TestReconcileDropPrunesTheModelsOwnScopeNotAHardcodedOne(t *testing.T) {
 // both the job registry and the secrets store.
 func TestExplicitDeletePrunesTheModelsOwnScopeNotAHardcodedOne(t *testing.T) {
 	m := newTestModel(t)
-	m.scope = foreignScope // this model is a non-local connection profile
+	m.members[0].scope = foreignScope // this model is a non-local connection profile
 
 	sec := secrets.NewEmpty()
 	if err := sec.Set("shared-name", foreignScope, map[string]string{"GH_TOKEN": "mine"}); err != nil {

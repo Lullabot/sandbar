@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,7 +46,7 @@ func walkResetFocusPrev(m *model, n int) []int {
 // fHostname.
 func TestResetFocusNextToggleHidden(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
 	if m.projectToggleEnabled {
 		t.Fatalf("projectToggleEnabled = true, want false for empty CloneURL")
 	}
@@ -86,7 +87,7 @@ func TestResetFocusNextToggleHidden(t *testing.T) {
 // toggle (0), never 1.
 func TestResetFocusPrevToggleHidden(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
@@ -119,7 +120,7 @@ func TestResetFocusPrevToggleHidden(t *testing.T) {
 // the project toggle is visible: fCloneToken -> toggle0 -> toggle1 -> fHostname.
 func TestResetFocusNextToggleShown(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
 	if !m.projectToggleEnabled {
 		t.Fatalf("projectToggleEnabled = false, want true for a URL with an org segment")
 	}
@@ -144,7 +145,7 @@ func TestResetFocusNextToggleShown(t *testing.T) {
 // TestResetFocusPrevToggleShown mirrors TestResetFocusNextToggleShown.
 func TestResetFocusPrevToggleShown(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
@@ -168,7 +169,7 @@ func TestResetFocusPrevToggleShown(t *testing.T) {
 // protect, and the label names the concrete directory.
 func TestFormViewProjectToggleLabel(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL
 	view := m.formView()
 	if strings.Contains(view, "Preserve ~/") {
 		t.Fatalf("formView with no CloneURL contains %q, want no project-preserve line", "Preserve ~/")
@@ -178,7 +179,7 @@ func TestFormViewProjectToggleLabel(t *testing.T) {
 	}
 
 	m2 := newTestModel(t)
-	m2.openResetForm("vm2", vm.CreateConfig{Name: "vm2", CloneURL: "https://github.com/lullabot/sandbar"})
+	m2.openResetForm(registry.LocalScope, "vm2", vm.CreateConfig{Name: "vm2", CloneURL: "https://github.com/lullabot/sandbar"})
 	view2 := m2.formView()
 	if !strings.Contains(view2, "Preserve ~/github.com/lullabot") {
 		t.Fatalf("formView for https://github.com/lullabot/sandbar missing %q; got:\n%s", "Preserve ~/github.com/lullabot", view2)
@@ -190,7 +191,7 @@ func TestFormViewProjectToggleLabel(t *testing.T) {
 // even though the URL itself is non-empty.
 func TestOpenResetFormNoOrgSegment(t *testing.T) {
 	m := newTestModel(t)
-	m.openResetForm("vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/repo"})
+	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/repo"})
 	if m.projectToggleEnabled {
 		t.Fatalf("projectToggleEnabled = true for a no-org-segment URL, want false")
 	}
@@ -337,7 +338,7 @@ func TestResetReplaysTheRecordedToolset(t *testing.T) {
 		WithGo:     false, // explicitly opted out
 		WithJava:   false, // explicitly opted out
 	}
-	m.openResetForm("vm1", recorded)
+	m.openResetForm(registry.LocalScope, "vm1", recorded)
 
 	cfg, err := m.buildConfig()
 	if err != nil {

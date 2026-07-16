@@ -751,7 +751,7 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 		t.Fatalf("esc during a build should return to the board, got view %v", l.m.view)
 	}
 	l.m.focusVM.Name = "web"
-	if !l.m.vmBuilding("web") {
+	if !l.m.vmBuilding(registry.LocalScope, "web") {
 		t.Fatal("precondition: web must be mid-build")
 	}
 
@@ -956,7 +956,7 @@ func TestQuitIsOfferedOnTheBoardAndNowhereElse(t *testing.T) {
 	l.exec(l.m.beginProvision("Creating web2", job.run, vm.CreateConfig{Name: "web2", BaseName: "sandbar-base"}))
 	job.done <- nil
 	l.pump("web2 to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web2") })
-	l.exec(l.m.showJobLog("web2"))
+	l.exec(l.m.showJobLog(registry.LocalScope, "web2"))
 	if l.m.view != viewProgress {
 		t.Fatalf("precondition: the log should be on screen, got view %v", l.m.view)
 	}

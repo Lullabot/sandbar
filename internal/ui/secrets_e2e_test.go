@@ -160,7 +160,7 @@ func TestE2ESecretsSaveOnRunningVMReachesGuestWithoutRestart(t *testing.T) {
 		t.Fatalf("New did not return a model")
 	}
 	m = resized(m, 100, 30)
-	m.vms = []vm.VM{{Name: name, Status: "Running"}}
+	m.members[0].vms = []vm.VM{{Name: name, Status: "Running"}}
 	m = openSecretsViaKey(t, m, name, "Running")
 	m = typeInto(m, "GH_TOKEN=new-token-e2e")
 

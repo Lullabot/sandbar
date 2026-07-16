@@ -481,7 +481,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	cfgB := baseCfg
 	cfgB.Name, cfgB.GitName, cfgB.GitEmail = nameB, "Sand E2E B", "sand-e2e-b@example.com"
 
-	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
+	m, ok := New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
@@ -491,9 +491,9 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// Start both provisions — beginProvision is exactly what the create form
 	// calls. Both goroutines are running against real limactl the instant exec
 	// returns.
-	cmdA := l.m.beginProvision("Creating "+nameA, e2eCreateVM(l.m.p), cfgA)
+	cmdA := l.m.beginProvision("Creating "+nameA, e2eCreateVM(l.m.provFor(registry.LocalScope)), cfgA)
 	l.exec(cmdA)
-	cmdB := l.m.beginProvision("Creating "+nameB, e2eCreateVM(l.m.p), cfgB)
+	cmdB := l.m.beginProvision("Creating "+nameB, e2eCreateVM(l.m.provFor(registry.LocalScope)), cfgB)
 	l.exec(cmdB)
 
 	if !l.m.jobs.isRunning(registry.LocalScope, nameA) || !l.m.jobs.isRunning(registry.LocalScope, nameB) {
@@ -591,14 +591,14 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	// healthy, running guest" shape this test exists to catch.
 	cfg.CloneURL = "https://sand-e2e-does-not-exist.invalid/org/repo.git"
 
-	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
+	m, ok := New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model)
 	if !ok {
 		t.Fatal("New did not return a model")
 	}
 	m = resized(m, 100, 30)
 	l := newTeaLoop(t, m)
 
-	cmd := l.m.beginProvision("Creating "+name, e2eCreateVM(l.m.p), cfg)
+	cmd := l.m.beginProvision("Creating "+name, e2eCreateVM(l.m.provFor(registry.LocalScope)), cfg)
 	l.exec(cmd)
 
 	pumpTimeout(t, l, "the provision to finish (and fail)", 15*time.Minute, func(m model) bool {
@@ -644,11 +644,11 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	// refresh tick actually lands in the real program.
 	l.m.view = viewBoard
 	l.send(vmsLoadedMsg{vms: realVMs})
-	afterRefresh, ok := l.m.lookupVM(name)
+	afterRefresh, ok := l.m.lookupVM(registry.LocalScope, name)
 	if !ok {
 		t.Fatalf("%s should still be on the board after a refresh", name)
 	}
-	if got := l.m.statusOf(afterRefresh); got != statusFailed {
+	if got := l.m.statusOf(registry.LocalScope, afterRefresh); got != statusFailed {
 		t.Fatalf("after a refresh tick, status = %v — want it to STAY Failed", got)
 	}
 
@@ -661,7 +661,7 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 		t.Fatal("the retained log should hold the provisioner's streamed output, got none")
 	}
 	l.m.view = viewBoard
-	l.m.showJobLog(name)
+	l.m.showJobLog(registry.LocalScope, name)
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, name) {
 		t.Fatalf("reopening the log should show the progress view for %s (view=%v job=%+v)", name, l.m.view, l.m.progressJob)
 	}

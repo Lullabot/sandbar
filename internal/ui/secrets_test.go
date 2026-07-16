@@ -19,7 +19,7 @@ import (
 func TestSecretsViewFitsAndTipReflows(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 100, 30)
-	m.openSecrets("claude")
+	m.openSecrets(registry.LocalScope, "claude")
 
 	view := m.secretsView()
 	lines := strings.Split(view, "\n")

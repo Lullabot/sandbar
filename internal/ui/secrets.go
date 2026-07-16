@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
 
 	"charm.land/bubbles/v2/key"
@@ -39,7 +40,7 @@ func secretsEditorSize(lm layoutMode) (width, height int) {
 // Deliberately callable regardless of the VM's running status — secrets live
 // on the host and only reach the guest on its next start, so there is no
 // reason to gate editing on it being up.
-func (m *model) openSecrets(name string) tea.Cmd {
+func (m *model) openSecrets(scope registry.Scope, name string) tea.Cmd {
 	ta := textarea.New()
 	// This is a plain KEY=VALUE / [scope] env editor, not a code buffer: drop the
 	// line-number gutter (the stray "1") and the default "┃ " line prompt, which
@@ -57,12 +58,13 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	styles.Focused.CursorLine = lipgloss.NewStyle()
 	styles.Blurred.CursorLine = lipgloss.NewStyle()
 	ta.SetStyles(styles)
-	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name, m.scope)))
+	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name, scope)))
 	w, h := secretsEditorSize(m.layout)
 	ta.SetWidth(w)
 	ta.SetHeight(h)
 	m.secretsArea = ta
 	m.secretsVM = name
+	m.secretsScope = scope // this VM's own member — the save path applies to it
 	m.secretsErr = nil
 	m.view = viewSecrets
 	// Focus the STORED textarea, not the local copy: Focus has a pointer receiver,
@@ -209,17 +211,18 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.secretsErr = err
 			return m, nil
 		}
-		if err := m.sec.SetAll(m.secretsVM, m.scope, scopes); err != nil {
+		if err := m.sec.SetAll(m.secretsVM, m.secretsScope, scopes); err != nil {
 			m.secretsErr = err
 			return m, nil
 		}
 		m.secretsErr = nil
 		name := m.secretsVM
+		sc := m.secretsScope
 		m.view = viewBoard
-		if v, ok := m.lookupVM(name); ok && v.Status == limaRunning {
+		if v, ok := m.lookupVM(sc, name); ok && v.Status == limaRunning {
 			m.logMsg("secrets saved for " + name + " — applying to the running VM…")
-			user, liveScopes := m.secretsFor(name)
-			return m, m.beginAction(applySecretsCmd(m.p, name, user, liveScopes))
+			user, liveScopes := m.secretsFor(sc, name)
+			return m, m.beginAction(applySecretsCmd(m.provFor(sc), sc, name, user, liveScopes))
 		}
 		m.logMsg("secrets saved for " + name + " — they apply on next start")
 		return m, nil

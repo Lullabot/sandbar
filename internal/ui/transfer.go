@@ -31,8 +31,9 @@ import (
 // focus ring: the transfer would target whichever VM the user last zoomed into.
 // There is exactly one source for "which VM is this verb acting on", and it is
 // this argument.
-func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
+func (m model) startTransfer(v boardVM, upload bool) (tea.Model, tea.Cmd) {
 	m.transferVM = v.Name
+	m.transferScope = v.scope // the transfer runs against THIS VM's own member
 	m.transferUpload = upload
 
 	var lister browse.DirLister
@@ -44,8 +45,8 @@ func (m model) startTransfer(v vm.VM, upload bool) (tea.Model, tea.Cmd) {
 		title = "Upload — pick a host file or directory"
 	} else {
 		// Download: browse the GUEST for a source, starting at the project checkout.
-		lister = browse.NewGuestLister(m.p, m.transferVM)
-		startDir = m.guestDefaultDir(v)
+		lister = browse.NewGuestLister(m.provFor(m.transferScope), m.transferVM)
+		startDir = m.guestDefaultDir(v.VM)
 		title = "Download — pick a guest file or directory"
 	}
 	m.browser = browse.NewBrowser(lister, title)
@@ -74,12 +75,12 @@ func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		def := m.hostWorkDir()
 		var destLister browse.DirLister = browse.NewLocalLister()
 		if m.transferUpload {
-			// The instance record comes from the TRANSFER's VM (m.transferVM), looked
-			// up in the loaded fleet — not from m.detail, which is the VM screen's
-			// record and need not be this one now that the board fires transfers too.
-			target, _ := m.lookupVM(m.transferVM)
+			// The instance record comes from the TRANSFER's VM+scope, looked up in
+			// its owning member — not from m.detail, which is the VM screen's record
+			// and need not be this one now that the board fires transfers too.
+			target, _ := m.lookupVM(m.transferScope, m.transferVM)
 			def = m.guestDefaultDir(target) // an upload lands in the guest
-			destLister = browse.NewGuestLister(m.p, m.transferVM)
+			destLister = browse.NewGuestLister(m.provFor(m.transferScope), m.transferVM)
 		}
 		var initCmd tea.Cmd
 		m.dest, initCmd = browse.NewDestInput("Destination dir: ", def, destLister)
@@ -124,12 +125,13 @@ func (m model) updateDest(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // not yet exist, so the SECOND upload of the same directory landed in
 // dest/mydir/mydir. Verified against real limactl 2.1.3.
 func (m model) launchCopy() (tea.Model, tea.Cmd) {
+	prov := m.provFor(m.transferScope)
 	destDir := m.dest.Value()
 	var src, dst string
 	if m.transferUpload {
-		src, dst = m.transferSrc, m.p.GuestPath(m.transferVM, destDir)
+		src, dst = m.transferSrc, prov.GuestPath(m.transferVM, destDir)
 	} else {
-		src, dst = m.p.GuestPath(m.transferVM, m.transferSrc), destDir
+		src, dst = prov.GuestPath(m.transferVM, m.transferSrc), destDir
 	}
 
 	verb := "Downloading "
@@ -147,7 +149,7 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 		// would be blank but for the spinner. The endpoints tell the user exactly
 		// what is moving and where.
 		fmt.Fprintf(out, "Copying %s\n     to %s\n\n", src, dst)
-		return m.p.Copy(ctx, out, recursive, src, dst)
+		return prov.Copy(ctx, out, recursive, src, dst)
 	}
 	// The copy gets the VM's TRANSFER slot, never its provision slot. That is what
 	// keeps provisionDoneMsg from recording it in the managed registry (a copy is
@@ -155,7 +157,7 @@ func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	// runs — and what stops it from evicting a retained failed build, whose red
 	// tile and Ansible log are the only record the user has of why that VM is
 	// broken. Both runs can be in flight at once; each has its own log.
-	key := transferKey(m.scope, m.transferVM)
+	key := transferKey(m.transferScope, m.transferVM)
 	cmd, started := m.beginStream(key, title, run)
 	// A transfer opens its log, unlike a build. A build has a tile to render its
 	// progress onto and a board worth staying on; a transfer has no tile bar of its
@@ -212,10 +214,11 @@ func (m model) hostWorkDir() string {
 // recorded config, then host user). v is the VM record the caller is acting
 // on (see startTransfer).
 func (m model) guestDefaultDir(v vm.VM) string {
-	cfg, ok := m.reg.ConfigInScope(m.transferVM, m.scope)
-	home := m.p.GuestHome(v)
+	prov := m.provFor(m.transferScope)
+	cfg, ok := m.reg.ConfigInScope(m.transferVM, m.transferScope)
+	home := prov.GuestHome(v)
 	if home == "" {
-		user := m.p.GuestUser(v)
+		user := prov.GuestUser(v)
 		if user == "" && ok {
 			user = cfg.User
 		}

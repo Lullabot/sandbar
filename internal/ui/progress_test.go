@@ -67,7 +67,7 @@ func TestProgressLogBoxFitsTheTerminal(t *testing.T) {
 		job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install every base-phase package in a single transaction]\n")
 
 		// Open the run's log — the view under test (what `l`, and now enter, show).
-		l.exec(l.m.showJobLog("web"))
+		l.exec(l.m.showJobLog(registry.LocalScope, "web"))
 		if l.m.view != viewProgress {
 			t.Fatalf("%dx%d: precondition: showJobLog must open the progress view, got %v", size.w, size.h, l.m.view)
 		}

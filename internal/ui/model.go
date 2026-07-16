@@ -92,32 +92,25 @@ const (
 // one registry every model copy shares. That is the whole reason the registry is
 // a pointer: a copied model must not fork the work it is watching.
 type model struct {
-	// p is the backend seam: the local Lima provider by default (identical to
-	// sand's historic direct use of the concrete lima client), or — once plan
-	// 15 task 4/5 lands provider selection — a remote-Lima-over-SSH provider
-	// satisfying the exact same interface. Every VM lifecycle call, guest
-	// exec/copy, and interactive attach argv is reached through it; no field
-	// on model holds a Lima-concrete type any more.
-	p    provider.Provider
+	// members is the FLEET: one sub-state per ENABLED connection profile
+	// (provider.BuildFleet → New), each with its own provider, scope,
+	// host-access seam, last-known VM list, host sample, connection status,
+	// last error and self-heal backoff (see fleetMember, fleet.go). It replaces
+	// the single `p`/`scope` the model used to hold — deliberately, so any path
+	// that still assumed one provider fails to compile. The board roster is the
+	// UNION of every member's managed VMs (boardVMs); each member lists,
+	// reconciles, heartbeats and self-heals independently, so a slow or
+	// unreachable remote never blocks the UI. It is value state, updated by
+	// returning copies from Update handlers exactly like m.vms was.
+	members []fleetMember
+	// active is the index of the member the single-band header reports and a NEW
+	// create targets (task 10 makes the header per-profile; task 9 lets the
+	// create form pick). Pinned by New to the Local member, or the first.
+	active int
+
 	reg  *registry.Registry
 	keys keyMap
 	help help.Model
-
-	// scope is the registry.Scope that p owns (registry.LocalScope for the
-	// default local Lima provider) — see provider.Resolve. It confines every
-	// manage.Reconcile/RecordSuccess/RecreateBase call this model makes to p's
-	// own managed-VM entries, so a remote provider's VMs (plan 15 task 5) are
-	// never pruned by, or mistaken for, a listing from this one, and vice versa.
-	scope registry.Scope
-
-	// connecting is true from startup until the FIRST remote list succeeds, and
-	// only for a remote provider (local Lima is instant). While it is set, View
-	// shows a "Connecting to <host>…" interstitial instead of the board — which
-	// would otherwise briefly render local-looking host stats before the SSH
-	// handshake lands. connectErr holds the last failed-connect error to show
-	// under it; both clear on the first successful list. ctrl+c / q still quit.
-	connecting bool
-	connectErr error
 
 	view   view
 	width  int
@@ -131,11 +124,6 @@ type model struct {
 	// Update goroutine ever writes to it.
 	messages []message
 
-	// vms is every VM Lima reported; the board (board.go) derives its roster from it
-	// — managed clones only, always. There is no second per-VM screen to keep in
-	// sync with it: the VM screen was deleted, and the tile is the whole record.
-	vms []vm.VM
-
 	// focusVM is the VM under the board's focus ring: AN IDENTITY, NEVER A SLOT
 	// INDEX. A refresh, an insertion, a deletion or a filter keystroke reorders the
 	// grid; the ring stays on the same VM, because a ring that tracked the index
@@ -148,44 +136,8 @@ type model struct {
 	focusVM   vmHandle
 	scrollRow int
 
-	// vmsLoaded records that the FIRST `limactl list` has landed. Before it does,
-	// the board is empty because nothing has been loaded yet — not because the host
-	// has no VMs — and syncBoard must not read that transient emptiness as "this
-	// user has no sandboxes" and park the ring on the empty-slot invitation. It did,
-	// and the ring then stayed there (correctly, by the identity pin) even once the
-	// real tiles arrived: sand opened with the ring on the ghost and enter created a
-	// VM instead of opening the first one.
-	vmsLoaded bool
-
 	// helpScroll is the `?` screen's scroll offset (help.go).
 	helpScroll int
-
-	// listRaceTicks counts CONSECUTIVE `limactl list` failures that look like the one
-	// failure which is not a failure: another instance mid-clone or mid-delete
-	// (lima#5236). One tick logs the pause; listRaceLimit ticks means it was never a
-	// clone window at all, and the real error is surfaced instead. Reset by any
-	// successful list.
-	listRaceTicks int
-
-	// headerMem / headerDiskFree are the header band's host capacity, sampled by
-	// listCmd OFF the Update goroutine rather than probed on every render (hostMemBytes
-	// reads /proc/meminfo; freeDiskBytes statfs's the Lima volume, which can block on a
-	// stale mount). Zero means "not sampled yet" and the header probes directly — see
-	// hostCapacityText. Distinct from the create form's own hostDiskFree below, which
-	// is a one-shot sample taken when that form opens.
-	headerMem      int64
-	headerDiskFree int64
-	// headerCPUs is the limactl host's core count from the same listCmd sample.
-	// Zero means "not sampled" and the header falls back to this process's local
-	// core count; for a remote provider it is the REMOTE host's core count.
-	headerCPUs int
-
-	// hostUser is the limactl host's login user (listCmd sample) — the account
-	// Lima creates the guest for and `limactl shell` logs into, so the create
-	// form defaults a new VM's user to it. Empty until the first sample; the form
-	// then falls back to this machine's user. For a remote provider it is the
-	// REMOTE host's user (so the playbook provisions the user the shell lands in).
-	hostUser string
 
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
@@ -231,9 +183,16 @@ type model struct {
 	confirm *confirmState
 
 	// Create form.
-	inputs       []textinput.Model
-	focusIdx     int
-	formErr      error
+	inputs   []textinput.Model
+	focusIdx int
+	formErr  error
+	// formScope is the member a create/reset targets: the ACTIVE member for a
+	// new VM, or the focused VM's own member for a reset. The form's provider,
+	// host-derived defaults (cpus/memory/user), managed-index bookkeeping and
+	// GH_TOKEN secret all resolve through it, so a create can never land on the
+	// wrong profile. Defaulted to the active scope in New, so a hand-built model
+	// (tests) that never opens a form still keys begin*/checkNotBusy correctly.
+	formScope    registry.Scope
 	hostDiskFree int64 // free bytes on the Lima volume, sampled when the form opens (0 = unknown)
 
 	// Reset mode reuses the create form to reset a managed VM: the Name is locked
@@ -290,38 +249,41 @@ type model struct {
 	// flag.
 	spinning bool
 
-	// refreshing is true while exactly one board refresh-tick loop (refresh.go)
-	// is in flight — tickRefresh's guard against stacking loops, the same
-	// problem spinning solves for the spinner.
-	refreshing bool
-
 	// File transfer (Upload/Download). The browser and dest prompt are copy-safe
 	// (only a list.Model / textinput.Model plus small scalars), matching the
 	// value-passed model. destination is always a directory; the source is placed
 	// inside it, so the result is identical across the rsync/scp copy backends.
 	browser           browse.Browser
 	dest              browse.DestInput
-	transferVM        string // VM the transfer targets
-	transferUpload    bool   // true = upload (host→guest); false = download (guest→host)
-	transferSrc       string // chosen source (absolute; a host path, or a guest path without the "vm:" prefix)
-	transferRecursive bool   // the source is a directory (copied with -r)
+	transferVM        string         // VM the transfer targets
+	transferScope     registry.Scope // the owning member's scope, captured when the transfer opens
+	transferUpload    bool           // true = upload (host→guest); false = download (guest→host)
+	transferSrc       string         // chosen source (absolute; a host path, or a guest path without the "vm:" prefix)
+	transferRecursive bool           // the source is a directory (copied with -r)
 
 	// Secrets editor. sec is the host-side store (a pointer, so the value-passed
 	// model stays cheap to copy). secretsArea holds the KEY=VALUE buffer and
 	// secretsVM the VM it belongs to.
-	sec         *secrets.Store
-	secretsArea textarea.Model
-	secretsVM   string
-	secretsErr  error
+	sec          *secrets.Store
+	secretsArea  textarea.Model
+	secretsVM    string
+	secretsScope registry.Scope // the owning member's scope, captured when the editor opens
+	secretsErr   error
 }
 
-// New wires the dependencies into a ready-to-run tea.Model. p is the backend
-// (see provider.NewDefault for the constructor all three sand entrypoints
-// share) and scope is the registry.Scope it owns (see provider.Resolve,
-// which every entrypoint resolves p and scope from together) — the model's
-// own managed-index bookkeeping (manage.Reconcile/RecordSuccess/RecreateBase)
-// stays confined to it.
-func New(p provider.Provider, scope registry.Scope) tea.Model {
+// New wires the dependencies into a ready-to-run tea.Model over a FLEET: one
+// per-profile sub-state per binding in fleet (provider.BuildFleet — one enabled
+// profile each). The board is the union of every member's managed VMs; each
+// member connects, lists, reconciles and self-heals on its own tea.Cmd (Init),
+// so a slow or unreachable remote never blocks the UI. A binding whose provider
+// failed to construct (Binding.Err set, Prov nil) becomes a dormant error member
+// rather than aborting the whole fleet.
+//
+// For the zero-config store — a single enabled Local profile — the fleet has
+// exactly one member and every path resolves to registry.LocalScope, so the
+// board, header and create form render bit-identically to the pre-fleet
+// single-provider model.
+func New(fleet provider.Fleet) tea.Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
@@ -341,17 +303,50 @@ func New(p provider.Provider, scope registry.Scope) tea.Model {
 		sec = secrets.NewEmpty()
 	}
 
+	members := make([]fleetMember, 0, len(fleet))
+	active := 0
+	for i, b := range fleet {
+		mem := fleetMember{
+			profile: b.Profile,
+			prov:    b.Prov,
+			scope:   b.Scope,
+			state:   connConnecting,
+			lastErr: b.Err,
+		}
+		// An error binding starts errored (nothing to construct a seam from);
+		// a real member carries its own host-access seam and, if it is a local
+		// backend, a seeded host sample so the header renders sensible numbers
+		// before its first list lands. hostMemBytes reads /proc/meminfo and
+		// freeDiskBytes statfs's the Lima volume; a header that fell back to
+		// probing every frame would block on a stale mount, and FOREVER on a
+		// host where the probe legitimately returns 0 (a zero sentinel is never
+		// replaced by another zero) — so it is sampled ONCE here.
+		if b.Prov != nil {
+			mem.hostFiles = b.Prov.HostFiles()
+			if b.Scope.RemoteTarget == "" {
+				mem.host.mem = hostMemBytesFn()
+				mem.host.diskFree = hostDiskFreeFn()
+			}
+		} else {
+			mem.state = connErrored
+			mem.hostFiles = lima.LocalFiles()
+		}
+		members = append(members, mem)
+		// The single-band header and a new create target the Local member when
+		// the fleet has one; otherwise the first member. Task 9 lets the create
+		// form pick; task 10 makes the header per-profile.
+		if b.Scope == registry.LocalScope {
+			active = i
+		}
+	}
+
 	m := model{
-		p:     p,
-		reg:   reg,
-		scope: scope,
-		// A remote scope carries its target ("user@host:port"); local Lima never
-		// does. Start on the connecting interstitial for remote so the board's
-		// local-looking startup data isn't shown before the SSH handshake lands.
-		connecting: scope.RemoteTarget != "",
+		members:    members,
+		active:     active,
+		reg:        reg,
 		sec:        sec,
 		jobs:       newJobRegistry(),
-		heartbeats: newHeartbeats(p),
+		heartbeats: newHeartbeatsResolver(fleetShellResolver(members)),
 		keys:       newKeyMap(),
 		help:       help.New(),
 		view:       viewBoard,
@@ -360,16 +355,10 @@ func New(p provider.Provider, scope registry.Scope) tea.Model {
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
-
-		// Probe the host ONCE, here, so View never has to. Every list refresh
-		// re-samples these (off the Update goroutine — see listCmd), but the header
-		// renders before the first list lands, and a header that fell back to probing
-		// would statfs the Lima volume on every frame until then — and FOREVER on a
-		// host where the probe legitimately returns 0, because a zero sentinel is
-		// never replaced by another zero.
-		headerMem:      hostMemBytesFn(),
-		headerDiskFree: hostDiskFreeFn(),
 	}
+	// A create/reset dispatched before any form opens (tests) still keys its
+	// job/registry work correctly: default the form target to the active member.
+	m.formScope = m.activeScope()
 	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
 	// the model renders sensibly before the first real WindowSizeMsg arrives.
 	m.applySize(80, 24)
@@ -385,9 +374,44 @@ func New(p provider.Provider, scope registry.Scope) tea.Model {
 	return m
 }
 
-// Init kicks off the first list load.
+// fleetShellResolver maps a VM's scope to the guestShell that reaches its guest —
+// the owning member's provider. The heartbeat registry keys every live shell by
+// the full (scope, name) handle, so it holds connections into VMs across
+// profiles at once; this resolver is what makes a remote VM's heartbeat shell
+// into the remote host and a local VM's into local Lima. A same-named VM under
+// two profiles reaches two different guests, never one. The members snapshot is
+// captured at New (the fleet is fixed for this task's lifetime); a member with
+// no provider (error binding) resolves to nil, so no heartbeat opens for it.
+func fleetShellResolver(members []fleetMember) shellFor {
+	snapshot := append([]fleetMember(nil), members...)
+	return func(sc registry.Scope) guestShell {
+		for i := range snapshot {
+			if snapshot[i].scope == sc {
+				if snapshot[i].prov == nil {
+					return nil
+				}
+				return snapshot[i].prov
+			}
+		}
+		return nil
+	}
+}
+
+// Init kicks off every member's connect: a preflight + first list, each on its
+// OWN tea.Cmd, so startup never blocks on a remote handshake. A member whose
+// preflight blocks or times out marks itself an error member (its refreshCmd
+// returns a failing vmsLoadedMsg) without holding up the board or any other
+// member. An error binding (nil provider) has nothing to connect.
 func (m model) Init() tea.Cmd {
-	return listCmd(m.p)
+	var cmds []tea.Cmd
+	for i := range m.members {
+		mem := m.members[i]
+		if mem.prov == nil {
+			continue
+		}
+		cmds = append(cmds, refreshCmd(mem.scope, mem.prov, mem.hostFiles, true))
+	}
+	return tea.Batch(cmds...)
 }
 
 // applySize recomputes the layout mode for a new terminal size and pushes its
@@ -569,11 +593,11 @@ func (m model) clipLine(s string) string {
 // comparable struct (Provider + RemoteTarget), so vmHandle is itself a valid
 // map key.
 //
-// Today every model holds exactly one scope (m.scope), so every vmHandle in a
-// running model carries the same Scope and this is, for now, a type-safety
-// harness rather than something that changes behaviour — task 7 is what
-// supplies genuinely different scopes and makes these keys start doing real
-// work.
+// With the fleet (task 7) a model holds one scope PER MEMBER, so a running board
+// genuinely carries vmHandles under several scopes at once — which is exactly
+// what makes these composite keys load-bearing rather than a type-safety
+// harness: a reconcile, a heartbeat teardown, or a delete for one profile's
+// "web" keys on (its scope, "web") and cannot reach another profile's.
 type vmHandle struct {
 	Scope registry.Scope
 	Name  string
@@ -653,24 +677,36 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// exceptional one. ended() drops the reading, so the gauge goes with the VM
 		// instead of freezing at whatever it last said.
 		if !msg.ok {
-			m.heartbeats.ended(m.scope, msg.vm, msg.epoch)
+			m.heartbeats.ended(msg.scope, msg.vm, msg.epoch)
 			return m, nil
 		}
 		// fold returns nil for a sample from a connection that has since been replaced,
 		// which ends that stale read loop rather than letting it double up on the live
-		// one.
-		return m, heartbeatReadCmd(msg.vm, msg.epoch, m.heartbeats.fold(m.scope, msg.vm, msg.epoch, msg.sample))
+		// one. Routed by the sample's own scope, so a fleet's same-named VMs never
+		// cross streams.
+		return m, heartbeatReadCmd(msg.scope, msg.vm, msg.epoch, m.heartbeats.fold(msg.scope, msg.vm, msg.epoch, msg.sample))
 
 	case refreshTickMsg:
-		// This loop iteration is done; tickRefresh (called centrally after every
-		// message — see Update) re-arms the next one iff shouldTick still allows
-		// it, which is what makes the loop stop on its own once the board is no
-		// longer the active, recently-used screen.
-		m.refreshing = false
+		// This member's loop iteration is done; tickRefresh (called centrally after
+		// every message — see Update) re-arms the next one at THIS member's cadence
+		// iff shouldTick still allows it, which is what makes each member's loop stop
+		// on its own once the board is no longer the active, recently-used screen.
+		i, ok := m.routeIndex(msg.scope)
+		if !ok {
+			return m, nil
+		}
+		m.members[i].arming = false
 		if !m.shouldTick() {
 			return m, nil
 		}
-		return m, listCmd(m.p)
+		mem := m.members[i]
+		if mem.prov == nil {
+			return m, nil
+		}
+		// Re-preflight only while this member is NOT already connected — its
+		// errored-self-heal retry re-runs the handshake, a healthy member just
+		// re-lists (the pre-fleet local behaviour).
+		return m, refreshCmd(mem.scope, mem.prov, mem.hostFiles, mem.state != connConnected)
 
 	case spinner.TickMsg:
 		// The spinner animates for any job in flight (on any VM, whether or not its
@@ -686,33 +722,32 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case vmsLoadedMsg:
-		// First remote list back: a success dismisses the "Connecting…"
-		// interstitial and reveals the board; a failure keeps it up (the refresh
-		// loop retries every refreshInterval) and shows the error beneath it, so a
-		// wedged or misconfigured connection is visible rather than a frozen board.
-		if m.connecting {
-			if msg.err == nil {
-				m.connecting, m.connectErr = false, nil
-			} else {
-				m.connectErr = msg.err
-			}
+		// Route the result to the member that produced it (a fleet lists every
+		// member on its own tea.Cmd). A zero-scope message — a hand-built test —
+		// routes to the active member.
+		mi, ok := m.routeIndex(msg.scope)
+		if !ok {
+			return m, nil
 		}
-		// The host capacity is sampled by listCmd whether or not the LISTING succeeded,
-		// so adopt it before the error branches. It used to be adopted only on success —
-		// so during a clone window (lima#5236), which is exactly when a 20GiB base image
-		// is being copied onto the disk, the header's "free disk" figure froze at its
-		// startup value and told the user nothing was being consumed.
+		mem := &m.members[mi]
+		sc := mem.scope
+
+		// The host capacity is sampled whether or not the LISTING succeeded, so
+		// adopt it before the error branches. It used to be adopted only on
+		// success — so during a clone window (lima#5236), which is exactly when a
+		// 20GiB base image is being copied onto the disk, the header's "free disk"
+		// figure froze at its startup value and told the user nothing was consumed.
 		if msg.hostMem > 0 {
-			m.headerMem = msg.hostMem
+			mem.host.mem = msg.hostMem
 		}
 		if msg.hostDiskFree > 0 {
-			m.headerDiskFree = msg.hostDiskFree
+			mem.host.diskFree = msg.hostDiskFree
 		}
 		if msg.hostCPUs > 0 {
-			m.headerCPUs = msg.hostCPUs
+			mem.host.cpus = msg.hostCPUs
 		}
 		if msg.hostUser != "" {
-			m.hostUser = msg.hostUser
+			mem.host.user = msg.hostUser
 		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or
@@ -728,53 +763,60 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			//
 			// The listing sand already has stays on screen — the other VMs have not
 			// changed, and the building VM's own tile comes from the job registry, not
-			// from Lima — and the condition is stated ONCE, when it starts.
+			// from Lima — and the condition is stated ONCE, when it starts. The clone
+			// window is per MEMBER: a clone in flight on one profile must not suppress
+			// another's errors, so the counter lives on the member.
 			// …but the suppression is BOUNDED, and it has to be. The signature is an
 			// error string, and it cannot tell a clone in flight from an instance
 			// directory that is permanently broken — a clone that was killed leaves
 			// exactly the same half-written directory, and `limactl list` then fails
-			// FOREVER. Suppressing that would leave sand sitting on an empty board with
-			// one stale line about a clone that finished hours ago, and no way for the
-			// user to find out why they have no VMs.
+			// FOREVER. A clone window is 40-60s; anything still failing after
+			// listRaceLimit is not a window, and the real error is surfaced instead.
 			//
-			// A clone window is 40-60s. Anything still failing after listRaceLimit is not
-			// a window, and the real error — limactl's own stderr, naming the instance it
-			// cannot load — is the only thing that can get the user out of it.
+			// A clone window does NOT flip the member to errored (it is the normal
+			// state of a create, and its last-known list is still valid): the member
+			// keeps its current state and cadence.
 			if errors.Is(msg.err, lima.ErrListRacedInstanceDir) {
-				m.listRaceTicks++
+				mem.listRace++
 				switch {
-				case m.listRaceTicks == 1:
+				case mem.listRace == 1:
 					m.logMsg("VM list paused while another instance is cloned or deleted (lima#5236)")
-				case m.listRaceTicks == listRaceLimit:
+				case mem.listRace == listRaceLimit:
 					m.logMsg("VM list STILL failing — this is no longer a clone window. " +
 						"An instance directory is broken; remove it and sand will recover: " + msg.err.Error())
 				}
 				return m, nil
 			}
-			m.listRaceTicks = 0
+			// A REAL failure: mark the member errored and advance its backoff so the
+			// next refresh tick retries at a longer interval (self-heal). Its
+			// last-known VM list stays DORMANT — rendered, but not reconciled or
+			// pruned, since a failed list is no evidence a VM was deleted.
+			mem.listRace = 0
+			mem.state = connErrored
+			mem.lastErr = msg.err
+			mem.backoff++
 			m.logMsg("list failed: " + msg.err.Error())
 			return m, nil
 		}
-		m.listRaceTicks = 0
-		m.vms = msg.vms // DiskUsed / UpSince / LastUsed are measured in listCmd, off the Update goroutine
-		m.vmsLoaded = true
+		// SUCCESS: the member is connected; reset its self-heal cadence and adopt
+		// the fresh list.
+		mem.listRace = 0
+		mem.state = connConnected
+		mem.lastErr = nil
+		mem.backoff = 0
+		mem.vms = msg.vms // DiskUsed / UpSince / LastUsed sampled in refreshCmd, off the Update goroutine
+
 		// ORDER MATTERS, and it is enforced by the data, not by this comment.
 		//
 		// The job registry goes FIRST. It knows which absences are legitimate — a
 		// build whose clone has not landed, a reset that deleted its own VM — and it
 		// hands those names back as `protected`. Everything downstream then treats
-		// them as present.
-		//
-		// That is not bookkeeping. manage.Reconcile drops any managed VM missing from
-		// the list, and a dropped VM's HOST SECRETS ARE DELETED below — permanently,
-		// GH_TOKEN included. A VM mid-reset is missing from the list by design, so
-		// without this it was unmanaged and stripped of its secrets on the next 5s
-		// refresh; the reset then rebuilt it and applied an empty secrets.env, and git
-		// auth inside the rebuilt sandbox simply stopped working with nothing on screen
-		// to explain why. The exemption is decided ONCE, in the registry, rather than
-		// re-derived here from a different question.
+		// them as present. All of it is SCOPED to this member (sc): a listing for one
+		// profile has no opinion about another profile's same-named VM, and reconcile
+		// feeds straight into a host-secrets deletion below — so a cross-scope prune
+		// here would delete the wrong VM's GH_TOKEN.
 		listed := present(msg.vms)
-		reaped, protected := m.jobs.reconcile(m.scope, listed)
+		reaped, protected := m.jobs.reconcile(sc, listed)
 		if len(reaped) > 0 {
 			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
 			// Nothing left to show for the run the user was watching.
@@ -783,39 +825,43 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Reconcile the managed index against reality so a VM deleted outside the TUI
-		// stops being flagged managed (and recreate-able) — but a VM the registry just
-		// vouched for counts as present. Shared with the headless `sand create` path
-		// (internal/manage) so the two entrypoints cannot drift.
+		// Reconcile this member's managed index against reality so a VM deleted
+		// outside the TUI stops being flagged managed (and recreate-able) — but a VM
+		// the registry just vouched for counts as present. Shared with the headless
+		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
 		live := msg.vms
 		for _, name := range protected {
 			live = append(live, vm.VM{Name: name})
 		}
-		dropped, err := manage.Reconcile(m.reg, live, m.scope)
+		dropped, err := manage.Reconcile(m.reg, live, sc)
 		if err != nil {
 			m.logMsg("warning: could not update managed index: " + err.Error())
 		}
 		// A VM that vanished outside the TUI (and so got dropped above) also loses
 		// its host-stored secrets — there is no guest left to apply them to, and
 		// keeping them around risks silently reattaching stale secrets to an
-		// unrelated VM that later reuses the name. Best-effort: a failure here
-		// isn't worth displacing the reconcile status above.
+		// unrelated VM that later reuses the name. Best-effort. Scoped to sc — this
+		// reconcile only reasoned about VMs in this member's scope, so the secret it
+		// prunes must be scoped identically, never a bare name matching another
+		// profile's same-named VM.
 		for _, name := range dropped {
-			// Scoped to m.scope: this reconcile only ever reasoned about VMs
-			// in this model's own scope (manage.Reconcile above was called
-			// with m.scope), so the secret it prunes must be scoped
-			// identically — never a bare name that could match another
-			// profile's same-named VM.
-			_ = m.sec.Remove(name, m.scope)
+			_ = m.sec.Remove(name, sc)
 		}
-		// The board's tiles come straight off m.vms + the registry + the job
-		// registry, so there is nothing to rebuild — only the focus ring has to be
-		// re-pinned against a fleet that may have gained or lost VMs, which Update
+		// The board's tiles come straight off the members' vms + the registry + the
+		// job registry, so there is nothing to rebuild — only the focus ring has to
+		// be re-pinned against a fleet that may have gained or lost VMs, which Update
 		// does centrally (syncBoard) after this returns.
 		return m, nil
 
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner
+		// The action carries the OWNING member's scope, so a delete prunes — and the
+		// follow-up refresh re-lists — the right profile. A zero-value scope (a
+		// hand-built test action) falls back to the active member.
+		sc := msg.scope
+		if _, ok := m.memberIndex(sc); !ok {
+			sc = m.activeScope()
+		}
 		label := msg.action + " " + msg.name
 		var text string // built below, then logged ONCE at the end (see the warn append)
 		switch {
@@ -834,15 +880,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// to be acted on, and deleting the VM is acting on it. (A run still in
 			// flight is cancelled by remove — Delete is gated on !vmBuilding, so that
 			// only happens if the VM was deleted from outside sand.)
-			m.jobs.remove(m.scope, msg.name)
+			m.jobs.remove(sc, msg.name)
 			// A deleted VM is no longer managed, and its host-stored secrets no
 			// longer have a guest to apply to; drop it from both indexes. Neither
 			// failure may silently shadow the other.
 			regErr := m.reg.Remove(msg.name)
-			// Scoped to m.scope: the VM the user just deleted is THIS model's
-			// VM, in THIS model's scope — never a bare name that could match a
-			// same-named VM under a different profile.
-			secErr := m.sec.Remove(msg.name, m.scope)
+			// Scoped to the deleted VM's own member: never a bare name that could
+			// match a same-named VM under a different profile.
+			secErr := m.sec.Remove(msg.name, sc)
 			switch {
 			case regErr != nil && secErr != nil:
 				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
@@ -863,7 +908,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text += " (warning: " + msg.warn + ")"
 		}
 		m.logMsg(text)
-		return m, listCmd(m.p) // refresh after every action
+		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
 
 	case provisionOutputMsg:
 		// The chunk is keyed by RUN — the VM and which of its runs — so N jobs can
@@ -892,9 +937,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setOutput()
 		}
 		// A user-canceled run leaves partial state behind; don't record it as
-		// managed and don't surface its (kill-induced) error as a failure.
+		// managed and don't surface its (kill-induced) error as a failure. Refresh
+		// the OWNING member (the build's scope), not the active one.
 		if job.Canceled {
-			return m, listCmd(m.p)
+			return m, m.refreshMemberCmd(msg.job.scope)
 		}
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
@@ -909,7 +955,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg, isProvision := m.jobs.config(msg.job.scope, msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
-			if err := manage.RecordSuccess(m.reg, cfg, m.scope); err != nil {
+			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// The create form's token becomes the VM's GH_TOKEN secret, so it can
@@ -923,9 +969,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
 			// cannot corrupt the store ahead of Set validating it.
 			if cfg.CloneToken != "" {
-				pairs := m.sec.Get(cfg.Name, m.scope)
+				pairs := m.sec.Get(cfg.Name, msg.job.scope)
 				pairs["GH_TOKEN"] = cfg.CloneToken
-				if err := m.sec.Set(cfg.Name, m.scope, pairs); err != nil {
+				if err := m.sec.Set(cfg.Name, msg.job.scope, pairs); err != nil {
 					m.logMsg("VM ready, but the token could not be saved as a secret: " + err.Error())
 				}
 			}
@@ -934,13 +980,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// so the guest would have no secrets.env until the VM's *next* start.
 			// Dispatch the apply now (batched with the list refresh) so a user who
 			// creates a VM and immediately shells in finds GH_TOKEN already set.
-			user, scopes := m.secretsFor(cfg.Name)
-			applyCmd = applySecretsCmd(m.p, cfg.Name, user, scopes)
+			user, scopes := m.secretsFor(msg.job.scope, cfg.Name)
+			applyCmd = applySecretsCmd(m.provFor(msg.job.scope), msg.job.scope, cfg.Name, user, scopes)
 		}
+		refresh := m.refreshMemberCmd(msg.job.scope) // refresh the build's own member
 		if applyCmd != nil {
-			return m, tea.Batch(listCmd(m.p), applyCmd)
+			return m, tea.Batch(refresh, applyCmd)
 		}
-		return m, listCmd(m.p) // refresh the list the user returns to
+		return m, refresh
 
 	case tea.KeyPressMsg:
 		// Any key is proof someone is still there, which is half of the idle gate (see
@@ -961,15 +1008,6 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, tea.Quit
-		}
-		if m.connecting {
-			// The board isn't shown yet — only quit is meaningful. ctrl+c was
-			// handled above; q quits too. Everything else is swallowed so a
-			// stray keypress can't open a form over the connecting screen.
-			if key.Matches(msg, m.keys.Quit) {
-				return m, tea.Quit
-			}
-			return m, nil
 		}
 		switch m.view {
 		case viewBoard:
@@ -1083,20 +1121,18 @@ func (m model) confirmView() string {
 // field, so it is set here instead of in cmd/sand/main.go.
 func (m model) View() tea.View {
 	var content string
-	switch {
-	case m.connecting:
-		content = m.connectingView()
-	case m.view == viewForm:
+	switch m.view {
+	case viewForm:
 		content = m.formView()
-	case m.view == viewProgress:
+	case viewProgress:
 		content = m.progressView()
-	case m.view == viewBrowse:
+	case viewBrowse:
 		content = m.browser.View()
-	case m.view == viewDest:
+	case viewDest:
 		content = m.destView()
-	case m.view == viewSecrets:
+	case viewSecrets:
 		content = m.secretsView()
-	case m.view == viewHelp:
+	case viewHelp:
 		content = m.helpView()
 	default:
 		content = m.boardView()

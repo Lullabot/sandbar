@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -214,7 +215,11 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 // openForm initialises the create form and focuses the first field, returning
 // the cursor-blink command.
 func (m *model) openForm() tea.Cmd {
-	m.inputs = newInputs(m.headerCPUs, m.headerMem, m.hostUser)
+	// A NEW VM targets the active member (task 9 lets the user pick). Its host
+	// sample supplies the cpu/memory/user defaults; its provider seeds the toggles.
+	m.formScope = m.activeScope()
+	hs := m.formHostSample()
+	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
 	m.focusIdx = 0
 	m.formErr = nil
 	m.hostDiskFree = freeDiskBytes()
@@ -228,8 +233,13 @@ func (m *model) openForm() tea.Cmd {
 	// an older sand that recorded no tool-set), there is nothing to show but the
 	// default: everything on.
 	cfg := vm.DefaultCreateConfig()
-	if base, ok := provision.BaseToolset(m.p.HostFiles(), cfg.BaseName); ok {
-		cfg.ApplyToolset(base)
+	// The active member can, in a degenerate fleet, be an error binding with no
+	// provider; guard the seam so opening the form never nil-panics. The toggles
+	// then fall back to the all-on default (nothing to read a base tool-set from).
+	if p := m.formProvider(); p != nil {
+		if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
+			cfg.ApplyToolset(base)
+		}
 	}
 	m.toolClaude = cfg.WithClaude
 	m.toolDDEV = cfg.WithDDEV
@@ -244,8 +254,12 @@ func (m *model) openForm() tea.Cmd {
 // target VM's recorded config. The Name is locked to the VM being reset, so focus
 // starts on the first editable field (Hostname); the clone token is never stored,
 // so it is left blank to be re-supplied for a private repo.
-func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
-	m.inputs = newInputs(m.headerCPUs, m.headerMem, m.hostUser)
+func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateConfig) tea.Cmd {
+	// A reset targets the VM's OWN member (scope), not the active one — its host
+	// sample, provider and bookkeeping all resolve through m.formScope.
+	m.formScope = scope
+	hs := m.formHostSample()
+	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
 	m.inputs[fName].SetValue(cfg.Name)
 	m.inputs[fHostname].SetValue(cfg.Hostname)
 	m.inputs[fUser].SetValue(cfg.User)
@@ -262,7 +276,7 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 	// confusing ("is there no token?"); a placeholder makes clear that blank keeps
 	// the saved token and typing replaces it (submitReset only overwrites the
 	// secret when the field is non-empty).
-	if m.hasStoredToken(cfg.Name) {
+	if m.hasStoredToken(scope, cfg.Name) {
 		m.inputs[fCloneToken].Placeholder = "*** saved — leave blank to keep it"
 	}
 
@@ -292,8 +306,8 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 // hasStoredToken reports whether the VM already has a GH_TOKEN secret in any
 // scope (global or directory-scoped). The reset form uses it to decide whether
 // to hint — via the token field's placeholder — that a saved token exists.
-func (m model) hasStoredToken(name string) bool {
-	for _, pairs := range m.sec.GetAll(name, m.scope) {
+func (m model) hasStoredToken(scope registry.Scope, name string) bool {
+	for _, pairs := range m.sec.GetAll(name, scope) {
 		if _, ok := pairs["GH_TOKEN"]; ok {
 			return true
 		}
@@ -486,7 +500,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.GitEmail = m.field(fGitEmail)
 
 	if cpuStr := m.field(fCPUs); cpuStr == "" {
-		cfg.CPUs = defaultCPUs(m.headerCPUs)
+		cfg.CPUs = defaultCPUs(m.formHostSample().cpus)
 	} else {
 		cpus, err := vm.ParseCPUs(cpuStr)
 		if err != nil {
@@ -495,7 +509,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.CPUs = cpus
 	}
 
-	cfg.Memory = orDefault(m.field(fMemory), defaultMemory(m.headerMem))
+	cfg.Memory = orDefault(m.field(fMemory), defaultMemory(m.formHostSample().mem))
 	cfg.Disk = orDefault(m.field(fDisk), cfg.Disk)
 	if lang := strings.TrimSpace(os.Getenv("LANG")); lang != "" {
 		cfg.Locale = lang // matches the script's LOCALE="${LANG:-en_US.UTF-8}"
@@ -605,8 +619,16 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// under the base lock inside CreateVMWithOptions, not as a pre-lock delete
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
+	// Resolve the provider NOW and capture it by value: the run closure executes
+	// on beginStream's goroutine, so it must not read m.members (which the Update
+	// goroutine mutates). The provider itself is immutable for the session.
+	prov := m.formProvider()
+	if prov == nil {
+		m.formErr = fmt.Errorf("this connection profile is not available")
+		return m, nil
+	}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
-		return m.p.Create(ctx, c, opts, out)
+		return prov.Create(ctx, c, opts, out)
 	}
 	cmd := m.beginProvision("Creating "+cfg.Name, run, cfg)
 	return m, cmd
@@ -624,7 +646,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 // clone URL, wrong token, recorded as managed when that build succeeded, and
 // rebuilt from the wrong config by any later Reset.
 func (m model) checkNotBusy(name string) error {
-	if !m.jobs.isRunning(m.scope, name) {
+	if !m.jobs.isRunning(m.formScope, name) {
 		return nil
 	}
 	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)
@@ -655,8 +677,11 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	}
 	m.formErr = nil
 	opts := provision.ResetOptions{PreserveClaude: m.preserveClaude, PreserveProject: m.preserveProject && m.projectToggleEnabled}
+	// Capture the provider by value (see submitForm): the run closure runs on
+	// beginStream's goroutine and must not read the mutable m.members slice.
+	prov := m.formProvider()
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
-		return m.p.Reset(ctx, c, opts, out)
+		return prov.Reset(ctx, c, opts, out)
 	}
 	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
 	// its VM legitimately vanishes from `limactl list` mid-run. The registry has to

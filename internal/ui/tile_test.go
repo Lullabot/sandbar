@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/x/ansi"
@@ -347,7 +348,7 @@ func TestComputeFleetUniformityEdgeCases(t *testing.T) {
 
 func TestLastUsedNeverStartedReadsAsNeverUsed(t *testing.T) {
 	dir := t.TempDir() // no ha.stderr.log, no disk file: a VM that was created but never started
-	if _, ok := lastUsed(dir); ok {
+	if _, ok := lastUsed(lima.LocalFiles(), dir); ok {
 		t.Fatalf("a VM with no ha.stderr.log must read as never used")
 	}
 }
@@ -368,7 +369,7 @@ func TestLastUsedSourcesHaStderrLogMtime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := lastUsed(dir)
+	got, ok := lastUsed(lima.LocalFiles(), dir)
 	if !ok {
 		t.Fatal("expected a last-used time")
 	}
@@ -378,7 +379,7 @@ func TestLastUsedSourcesHaStderrLogMtime(t *testing.T) {
 }
 
 func TestLastUsedEmptyDirIsNeverUsed(t *testing.T) {
-	if _, ok := lastUsed(""); ok {
+	if _, ok := lastUsed(lima.LocalFiles(), ""); ok {
 		t.Fatal("an empty dir must report never used")
 	}
 }
@@ -396,7 +397,7 @@ func TestUpSinceSourcesHaPidMtime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := upSince(dir)
+	got, ok := upSince(lima.LocalFiles(), dir)
 	if !ok {
 		t.Fatal("expected an up-since time")
 	}
@@ -407,7 +408,7 @@ func TestUpSinceSourcesHaPidMtime(t *testing.T) {
 
 func TestUpSinceNoPidFileIsUnknown(t *testing.T) {
 	dir := t.TempDir()
-	if _, ok := upSince(dir); ok {
+	if _, ok := upSince(lima.LocalFiles(), dir); ok {
 		t.Fatal("a dir with no pid file should report unknown, not a fabricated time")
 	}
 }
@@ -464,7 +465,7 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 	// The tile RENDERS a sampled time; it does not stat for one. listCmd does the
 	// stat, off the Bubble Tea goroutine (see its doc) — so the test samples the same
 	// way and hands the result to the tile, exactly as the real flow does.
-	upAt, ok := upSince(dir)
+	upAt, ok := upSince(lima.LocalFiles(), dir)
 	if !ok {
 		t.Fatal("upSince should read the boot time from ha.pid")
 	}
@@ -484,7 +485,7 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(stoppedDir, "ha.stderr.log"), stopAt, stopAt); err != nil {
 		t.Fatal(err)
 	}
-	usedAt, ok := lastUsed(stoppedDir)
+	usedAt, ok := lastUsed(lima.LocalFiles(), stoppedDir)
 	if !ok {
 		t.Fatal("lastUsed should read the shutdown time from ha.stderr.log")
 	}
@@ -497,7 +498,7 @@ func TestTileFooterLineRunningVsStopped(t *testing.T) {
 	}
 
 	neverDir := t.TempDir()
-	if _, ok := lastUsed(neverDir); ok {
+	if _, ok := lastUsed(lima.LocalFiles(), neverDir); ok {
 		t.Fatal("a never-started VM has no ha.stderr.log, so lastUsed must report nothing")
 	}
 	never := baseTileInput()

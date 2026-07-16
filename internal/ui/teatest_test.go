@@ -82,7 +82,7 @@ func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	return teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov), registry.LocalScope), teatest.WithInitialTermSize(w, h))
+	return teatest.NewTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(w, h))
 }
 
 // pinHostCapacity overrides the header's host-capacity probes (header.go)
@@ -273,7 +273,7 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	runner := &buildingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	cli := lima.New(runner)
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir()}
-	tm := teatest.NewTestModel(t, New(provider.NewLocalLima(cli, prov), registry.LocalScope), teatest.WithInitialTermSize(100, 30))
+	tm := teatest.NewTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(100, 30))
 
 	// The managed index is empty here, so the canned VMs get no tile: the board
 	// opens on its empty-slot invitation.
@@ -316,7 +316,7 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	// The build is still running, and its log kept filling while the user was away.
 	close(runner.release)
 	fm := finalModel(t, tm)
-	if !fm.vmHasRetainedRun("newvm") {
+	if !fm.vmHasRetainedRun(registry.LocalScope, "newvm") {
 		t.Fatal("the build should have been retained as newvm's run")
 	}
 	s, _ := fm.jobs.snapshot(provisionKey(registry.LocalScope, "newvm"))
