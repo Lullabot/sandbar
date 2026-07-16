@@ -215,6 +215,64 @@ quadrantChart
     agent-vm: [0.82, 0.32]
 ```
 
+The same chart, colored by where your code actually lives while the
+agent works on it:
+
+```mermaid
+---
+config:
+  quadrantChart:
+    chartWidth: 760
+    chartHeight: 640
+    pointRadius: 4
+    pointLabelFontSize: 10
+---
+quadrantChart
+    title Colored by where it runs
+    x-axis Limited Environment Tooling --> Fully Functional Environment
+    y-axis Host exposed --> Sealed off
+    quadrant-1 Sealed and fully functional
+    quadrant-2 Sealed but limited
+    quadrant-3 Limited and exposed
+    quadrant-4 Functional but exposed
+    Sandbar:::local: [0.90, 0.94]
+    E2B:::cloud: [0.30, 0.93]
+    Modal:::cloud: [0.14, 0.90]
+    Daytona:::cloud: [0.33, 0.82]
+    Runloop:::cloud: [0.24, 0.86]
+    Vercel:::cloud: [0.05, 0.86]
+    Cloudflare:::cloud: [0.14, 0.78]
+    Blaxel:::cloud: [0.05, 0.74]
+    Claude Code Web:::cloud: [0.10, 0.66]
+    qbox:::selfhost: [0.44, 0.90]
+    Arrakis:::selfhost: [0.43, 0.76]
+    microsandbox:::selfhost: [0.37, 0.71]
+    SmolVM:::local: [0.22, 0.68]
+    Codespaces:::cloud: [0.60, 0.68]
+    Coder:::selfhost: [0.66, 0.76]
+    Gitpod/Ona:::cloud: [0.55, 0.78]
+    claude-code-sandbox:::local: [0.58, 0.48]
+    sandbox-runtime:::local: [0.64, 0.42]
+    bubblewrap:::local: [0.75, 0.40]
+    Seatbelt:::local: [0.86, 0.44]
+    container-use:::local: [0.62, 0.28]
+    ClaudeBox:::local: [0.73, 0.26]
+    Devcontainer:::local: [0.85, 0.22]
+    Vibe Kanban:::local: [0.66, 0.10]
+    Conductor:::local: [0.78, 0.08]
+    Crystal:::local: [0.90, 0.12]
+    Sculptor:::local: [0.72, 0.17]
+    clawk:::local: [0.92, 0.36]
+    agent-vm:::local: [0.82, 0.32]
+    classDef local color: #4d7fd6
+    classDef selfhost color: #e8871a
+    classDef cloud color: #8a8a8a
+```
+
+Blue dots run on your machine, orange on servers you operate, and grey
+in someone else's cloud. Sandbar is the only blue dot in the sealed and
+fully functional quadrant.
+
 The tools that get the VM boundary right still mount your files into
 it, and the tools that restrict the environment do it in the cloud or
 as an SDK that likely doesn't work with your build tools. Sandbar is
