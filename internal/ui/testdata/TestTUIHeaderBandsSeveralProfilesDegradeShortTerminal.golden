@@ -5,6 +5,6 @@
   +2 more                                                                       
   ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  
                                                                                 
-  list failed: ssh: connection refused                                          
+  connected to ci-host                                                          
   ↑↓←→ move • n new • / search • x stop • r restart • R reset • enter/S shell…  
                                                                                 

@@ -19,11 +19,11 @@
   │                                                                                                                                                        │    
   │                                                                                                                                                        │    
   │                                                                                                                                                        │    
-  │                                                                                                                                                        │    
-  │                                                                                                                                                        │    
-  │                                                                                                                                                        │    
-  │                                                                                                                                                        │    
+  │ connecting to build-host…                                                                                                                              │    
+  │ connecting to ci-host…                                                                                                                                 │    
+  │ connecting to archived-host…                                                                                                                           │    
   │ list failed: ssh: connection refused                                                                                                                   │    
+  │ connected to ci-host                                                                                                                                   │    
   ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯    
                                                                                                                                                                 
                                                                                                                                                                 

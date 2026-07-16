@@ -417,6 +417,17 @@ func New(fleet provider.Fleet) tea.Model {
 	// A create/reset dispatched before any form opens (tests) still keys its
 	// job/registry work correctly: default the form target to the active member.
 	m.formScope = m.activeScope()
+	// Announce each REMOTE connection attempt in the session log. The local
+	// member is deliberately silent here: it is the machine sand runs on, not a
+	// connection — logging "connecting to local" at every startup would be
+	// noise, and would break the zero-config board's bit-parity with the
+	// pre-profiles TUI. (Deliberate user actions like disable still log for
+	// every profile — see disableProfile.)
+	for i := range m.members {
+		if m.members[i].profile.Type == profiles.TypeRemoteSSH && m.members[i].prov != nil {
+			m.logMsg("connecting to " + m.members[i].profile.Name + "…")
+		}
+	}
 	// Seed a sane pre-resize default (mirrors the terminal's classic 80x24) so
 	// the model renders sensibly before the first real WindowSizeMsg arrives.
 	m.applySize(80, 24)
@@ -865,6 +876,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// next refresh tick retries at a longer interval (self-heal). Its
 			// last-known VM list stays DORMANT — rendered, but not reconciled or
 			// pruned, since a failed list is no evidence a VM was deleted.
+			// An INTERRUPTION (a member that was connected going dark) logs
+			// "reconnecting" — the backoff loop below is already doing exactly
+			// that. A first-connect failure is not a REconnect and stays with
+			// the plain "list failed" line.
+			if mem.state == connConnected && mem.profile.Type == profiles.TypeRemoteSSH {
+				m.logMsg("reconnecting to " + mem.profile.Name + "…")
+			}
 			mem.listRace = 0
 			mem.state = connErrored
 			mem.lastErr = msg.err
@@ -878,7 +896,18 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// SUCCESS: the member is connected; reset its self-heal cadence and adopt
-		// the fresh list.
+		// the fresh list. Log the TRANSITION into connected (never the steady
+		// state — this handler runs every refresh): a first connect says
+		// "connected", a recovery from an interruption says "reconnected",
+		// matching the "reconnecting" line the failure path logged. The local
+		// member stays silent (see New).
+		if mem.state != connConnected && mem.profile.Type == profiles.TypeRemoteSSH {
+			if mem.state == connErrored {
+				m.logMsg("reconnected to " + mem.profile.Name)
+			} else {
+				m.logMsg("connected to " + mem.profile.Name)
+			}
+		}
 		mem.listRace = 0
 		mem.state = connConnected
 		mem.lastErr = nil
