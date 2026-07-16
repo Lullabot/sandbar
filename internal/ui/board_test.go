@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -108,7 +109,7 @@ func TestBoardOrderIsAlphabeticalAndStableAcrossAStateChange(t *testing.T) {
 
 	// Focus the middle tile and stop it — the verb whose side effect would
 	// teleport the tile if the board sorted by status.
-	m.focusName = "db"
+	m.focusVM.Name = "db"
 	m, cmd := press(t, m, runeKey('x'))
 	if done := actionDone(t, cmd); done.name != "db" {
 		t.Fatalf("'x' acted on %q, want the focused VM db", done.name)
@@ -148,7 +149,7 @@ func TestFocusIsPinnedToIdentityAcrossARefreshThatReorders(t *testing.T) {
 		vm.VM{Name: "db", Status: "Running"},
 		vm.VM{Name: "web", Status: "Running"},
 	)
-	m.focusName = "web"
+	m.focusVM.Name = "web"
 	if got := indexOf(boardNames(m), "web"); got != 1 {
 		t.Fatalf("precondition: web should start in slot 1, got %d", got)
 	}
@@ -160,8 +161,8 @@ func TestFocusIsPinnedToIdentityAcrossARefreshThatReorders(t *testing.T) {
 		vm.VM{Name: "api", Status: "Running"},
 	)
 
-	if m.focusName != "web" {
-		t.Fatalf("focus = %q after an insertion before it, want it pinned to web", m.focusName)
+	if m.focusVM.Name != "web" {
+		t.Fatalf("focus = %q after an insertion before it, want it pinned to web", m.focusVM.Name)
 	}
 	if got := indexOf(boardNames(m), "web"); got != 2 {
 		t.Fatalf("precondition: web's SLOT should have moved to 2, got %d (the test proves nothing otherwise)", got)
@@ -186,35 +187,35 @@ func TestFocusFallsToANeighbourWhenTheFocusedVMDisappears(t *testing.T) {
 	// The middle tile is deleted: the ring falls BACK to api, not forward onto
 	// web (which is what now sits in db's old slot).
 	m := base
-	m.focusName = "db"
+	m.focusVM.Name = "db"
 	m = loadManaged(t, m,
 		vm.VM{Name: "api", Status: "Running"},
 		vm.VM{Name: "web", Status: "Running"},
 	)
-	if m.focusName != "api" {
-		t.Fatalf("focus = %q after deleting db, want its neighbour api (web now occupies db's old slot)", m.focusName)
+	if m.focusVM.Name != "api" {
+		t.Fatalf("focus = %q after deleting db, want its neighbour api (web now occupies db's old slot)", m.focusVM.Name)
 	}
 
 	// The FIRST tile is deleted: there is no preceding neighbour, so the ring
 	// takes the one that is now first.
 	m2 := base
-	m2.focusName = "api"
+	m2.focusVM.Name = "api"
 	m2 = loadManaged(t, m2,
 		vm.VM{Name: "db", Status: "Running"},
 		vm.VM{Name: "web", Status: "Running"},
 	)
-	if m2.focusName != "db" {
-		t.Fatalf("focus = %q after deleting the first tile, want db", m2.focusName)
+	if m2.focusVM.Name != "db" {
+		t.Fatalf("focus = %q after deleting the first tile, want db", m2.focusVM.Name)
 	}
 
 	// The last VM goes: the ring lands on the ghost — the only cell left, and the
 	// one thing worth doing on an empty board — and nothing panics. It is still NOT
 	// a focused VM, so no per-VM verb can fire on it.
 	m3 := base
-	m3.focusName = "web"
+	m3.focusVM.Name = "web"
 	m3 = loadManaged(t, m3)
 	if !m3.focusIsGhost() {
-		t.Fatalf("an emptied board should focus the ghost, got %q", m3.focusName)
+		t.Fatalf("an emptied board should focus the ghost, got %q", m3.focusVM.Name)
 	}
 	if _, ok := m3.focusedVM(); ok {
 		t.Fatal("the ghost is not a VM: an empty board must report no focused VM")
@@ -231,7 +232,7 @@ func TestVerbAfterARefreshReachesTheVMUnderTheRing(t *testing.T) {
 		vm.VM{Name: "db", Status: "Running"},
 		vm.VM{Name: "web", Status: "Running"},
 	)
-	m.focusName = "web" // slot 1
+	m.focusVM.Name = "web" // slot 1
 
 	// api slides in first; "slot 1" is now db, but the ring is on web.
 	m = loadManaged(t, m,
@@ -365,7 +366,7 @@ func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 
 	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
-	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
+	if _, ok := m.jobs.finish(provisionKey(registry.LocalScope, "newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded build should finish")
 	}
 	// The refresh now reports the half-built VM Lima was left holding.
@@ -401,7 +402,7 @@ func TestFailedBuildKeepsItsTile(t *testing.T) {
 	m = resized(m, 120, 40)
 	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
-	if _, ok := m.jobs.finish(provisionKey("newvm"), errAnsibleBoom); !ok {
+	if _, ok := m.jobs.finish(provisionKey(registry.LocalScope, "newvm"), errAnsibleBoom); !ok {
 		t.Fatal("precondition: the seeded job should finish")
 	}
 
@@ -512,13 +513,13 @@ func TestFocusIsPinnedAcrossAFilterChange(t *testing.T) {
 	)
 
 	// The focused VM survives the filter: it keeps the ring, at a new slot.
-	m.focusName = "web"
+	m.focusVM.Name = "web"
 	m, _ = press(t, m, runeKey('/'))
 	for _, r := range []rune{'w', 'e', 'b'} {
 		m, _ = press(t, m, runeKey(r))
 	}
-	if m.focusName != "web" {
-		t.Fatalf("focus = %q, want it pinned to the still-visible web", m.focusName)
+	if m.focusVM.Name != "web" {
+		t.Fatalf("focus = %q, want it pinned to the still-visible web", m.focusVM.Name)
 	}
 	if got := indexOf(boardNames(m), "web"); got != 0 {
 		t.Fatalf("precondition: web's slot should have moved to 0, got %d", got)
@@ -526,19 +527,19 @@ func TestFocusIsPinnedAcrossAFilterChange(t *testing.T) {
 
 	// Clearing the filter must not silently slide the ring onto slot 0's VM.
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.focusName != "web" {
-		t.Fatalf("focus = %q after clearing the filter, want web", m.focusName)
+	if m.focusVM.Name != "web" {
+		t.Fatalf("focus = %q after clearing the filter, want web", m.focusVM.Name)
 	}
 
 	// A filter that HIDES the focused VM hands the ring to a neighbour that is
 	// actually on the board.
-	m.focusName = "db"
+	m.focusVM.Name = "db"
 	m, _ = press(t, m, runeKey('/'))
 	for _, r := range []rune{'w', 'e', 'b'} {
 		m, _ = press(t, m, runeKey(r))
 	}
-	if m.focusName != "web" {
-		t.Fatalf("focus = %q after the filter hid db, want the only visible tile web", m.focusName)
+	if m.focusVM.Name != "web" {
+		t.Fatalf("focus = %q after the filter hid db, want the only visible tile web", m.focusVM.Name)
 	}
 }
 
@@ -600,7 +601,7 @@ func TestBoardScrollsToKeepTheFocusedTileVisible(t *testing.T) {
 		t.Fatalf("precondition: 80x24 should show two tile rows, got %d", rows)
 	}
 
-	m.focusName = "vm-a"
+	m.focusVM.Name = "vm-a"
 	m.scrollRow = 0
 	if view := ansi.Strip(m.boardView()); !strings.Contains(view, "vm-a") || strings.Contains(view, "vm-c") {
 		t.Fatalf("the first screenful should hold vm-a and vm-b only, got:\n%s", view)
@@ -611,8 +612,8 @@ func TestBoardScrollsToKeepTheFocusedTileVisible(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	if m.focusName != "vm-d" {
-		t.Fatalf("three downs from vm-a should focus vm-d, got %q (the ring is trapped)", m.focusName)
+	if m.focusVM.Name != "vm-d" {
+		t.Fatalf("three downs from vm-a should focus vm-d, got %q (the ring is trapped)", m.focusVM.Name)
 	}
 	if m.scrollRow != 2 {
 		t.Fatalf("scrollRow = %d, want 2 (the grid must scroll to keep vm-d visible)", m.scrollRow)
@@ -629,8 +630,8 @@ func TestBoardScrollsToKeepTheFocusedTileVisible(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	}
-	if m.focusName != "vm-a" || m.scrollRow != 0 {
-		t.Fatalf("arrowing back should return to vm-a at the top (focus=%q scrollRow=%d)", m.focusName, m.scrollRow)
+	if m.focusVM.Name != "vm-a" || m.scrollRow != 0 {
+		t.Fatalf("arrowing back should return to vm-a at the top (focus=%q scrollRow=%d)", m.focusVM.Name, m.scrollRow)
 	}
 	// The ring never falls off the end of the board. The last CELL is the ghost —
 	// it sits after the final tile — so that is where a run of downs comes to rest.
@@ -638,11 +639,11 @@ func TestBoardScrollsToKeepTheFocusedTileVisible(t *testing.T) {
 		m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if !m.focusIsGhost() {
-		t.Fatalf("focus = %q, want the ghost, the last cell (the ring must clamp, not wrap or vanish)", m.focusName)
+		t.Fatalf("focus = %q, want the ghost, the last cell (the ring must clamp, not wrap or vanish)", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
-	if m.focusName != "vm-e" {
-		t.Fatalf("up from the ghost should return to the last tile vm-e, got %q", m.focusName)
+	if m.focusVM.Name != "vm-e" {
+		t.Fatalf("up from the ghost should return to the last tile vm-e, got %q", m.focusVM.Name)
 	}
 }
 
@@ -658,15 +659,15 @@ func TestBoardFocusMovesInTwoDimensions(t *testing.T) {
 	if m.layout.Columns != 2 {
 		t.Fatalf("precondition: 120x40 should give two tile columns, got %d", m.layout.Columns)
 	}
-	m.focusName = "vm-a"
+	m.focusVM.Name = "vm-a"
 
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.focusName != "vm-b" {
-		t.Fatalf("right from vm-a should focus vm-b, got %q", m.focusName)
+	if m.focusVM.Name != "vm-b" {
+		t.Fatalf("right from vm-a should focus vm-b, got %q", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
-	if m.focusName != "vm-b" {
-		t.Fatalf("right at the row's edge must not move (or wrap), got %q", m.focusName)
+	if m.focusVM.Name != "vm-b" {
+		t.Fatalf("right at the row's edge must not move (or wrap), got %q", m.focusVM.Name)
 	}
 	// Down from vm-b lands on the GHOST: three VMs in two columns put the empty
 	// slot directly beneath vm-b, and the ghost is a cell the ring moves over like
@@ -674,19 +675,19 @@ func TestBoardFocusMovesInTwoDimensions(t *testing.T) {
 	// something the ring could not land on.
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.focusIsGhost() {
-		t.Fatalf("down from vm-b (slot 1) should land on the ghost directly below it, got %q", m.focusName)
+		t.Fatalf("down from vm-b (slot 1) should land on the ghost directly below it, got %q", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.focusName != "vm-c" {
-		t.Fatalf("left from the ghost should focus vm-c beside it, got %q", m.focusName)
+	if m.focusVM.Name != "vm-c" {
+		t.Fatalf("left from the ghost should focus vm-c beside it, got %q", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	if m.focusName != "vm-c" {
-		t.Fatalf("left at the row's first column must not move, got %q", m.focusName)
+	if m.focusVM.Name != "vm-c" {
+		t.Fatalf("left at the row's first column must not move, got %q", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
-	if m.focusName != "vm-a" {
-		t.Fatalf("up from vm-c should focus vm-a, got %q", m.focusName)
+	if m.focusVM.Name != "vm-a" {
+		t.Fatalf("up from vm-c should focus vm-a, got %q", m.focusVM.Name)
 	}
 }
 
@@ -700,14 +701,14 @@ func TestEnterOnARunningVMShellsIn(t *testing.T) {
 		vm.VM{Name: "api", Status: "Running"},
 		vm.VM{Name: "web", Status: "Running"},
 	)
-	m.focusName = "web"
+	m.focusVM.Name = "web"
 
 	after, cmd := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter on a running VM must shell in, got no command")
 	}
-	if after.focusName != "web" {
-		t.Fatalf("enter must not move the ring, got %q", after.focusName)
+	if after.focusVM.Name != "web" {
+		t.Fatalf("enter must not move the ring, got %q", after.focusVM.Name)
 	}
 	// The shell verb announces itself on the status line, and it is the only verb
 	// Enter can route a running VM to.
@@ -721,7 +722,7 @@ func TestEnterOnARunningVMShellsIn(t *testing.T) {
 func TestEnterOnAStoppedVMStartsIt(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Stopped"})
-	m.focusName = "web"
+	m.focusVM.Name = "web"
 
 	after, cmd := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
@@ -742,14 +743,14 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install]\n")
 
 	// Back to the board, where the tile for the in-flight build sits under the ring.
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if l.m.view != viewBoard {
 		t.Fatalf("esc during a build should return to the board, got view %v", l.m.view)
 	}
-	l.m.focusName = "web"
+	l.m.focusVM.Name = "web"
 	if !l.m.vmBuilding("web") {
 		t.Fatal("precondition: web must be mid-build")
 	}
@@ -759,7 +760,7 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 	if l.m.view != viewProgress {
 		t.Fatalf("enter on a building VM must reopen its log (viewProgress), got view %v", l.m.view)
 	}
-	if l.m.jobs.isRunning("web") != true {
+	if l.m.jobs.isRunning(registry.LocalScope, "web") != true {
 		t.Fatal("showing the log must not disturb the build")
 	}
 }
@@ -775,7 +776,7 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 func TestBoardFooterUpdatesAsTheFocusedVMsStateChanges(t *testing.T) {
 	m := newTestModel(t)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
-	m.focusName = "web"
+	m.focusVM.Name = "web"
 
 	rendered := plainHelp(m.boardView())
 	if !strings.Contains(rendered, "x stop") {
@@ -817,7 +818,7 @@ func TestBoardVerbsFireOnlyWhenEnabledForTheFocusedVM(t *testing.T) {
 		vm.VM{Name: "on", Status: "Running"},
 	)
 
-	m.focusName = "off"
+	m.focusVM.Name = "off"
 	after, cmd := press(t, m, runeKey('x')) // stop is disabled for a stopped VM
 	if cmd != nil || after.acting {
 		t.Fatal("'x' on a stopped focused VM must be a silent no-op")
@@ -830,7 +831,7 @@ func TestBoardVerbsFireOnlyWhenEnabledForTheFocusedVM(t *testing.T) {
 		t.Fatalf("'s' started %q, want the focused off", done.name)
 	}
 
-	m.focusName = "on"
+	m.focusVM.Name = "on"
 	after, cmd = press(t, m, runeKey('x'))
 	if cmd == nil || !after.acting {
 		t.Fatal("'x' on a running focused VM should dispatch a stop")
@@ -841,7 +842,7 @@ func TestBoardVerbsFireOnlyWhenEnabledForTheFocusedVM(t *testing.T) {
 
 	// 'd' raises the confirm for the focused VM — the destructive key must name
 	// the VM under the ring and nothing else.
-	m.focusName = "off"
+	m.focusVM.Name = "off"
 	after, cmd = press(t, m, runeKey('d'))
 	if cmd != nil {
 		t.Fatal("'d' must confirm before deleting anything")
@@ -864,8 +865,8 @@ func TestTransferFromTheBoardTargetsTheFocusedTile(t *testing.T) {
 	)
 
 	// The ring visits api first, then settles on web. Only web may be uploaded into.
-	m.focusName = "api"
-	m.focusName = "web"
+	m.focusVM.Name = "api"
+	m.focusVM.Name = "web"
 
 	m, _ = press(t, m, runeKey('u')) // upload
 	if m.view != viewBrowse {
@@ -893,7 +894,7 @@ func TestGhostTileInvitesTheFirstVM(t *testing.T) {
 	// so the ring is already on it and enter creates a VM. The invitation used to be
 	// an instruction the ring could never land on.
 	if !m.focusIsGhost() {
-		t.Fatalf("an empty board should focus the ghost, got focusName %q", m.focusName)
+		t.Fatalf("an empty board should focus the ghost, got focusName %q", m.focusVM.Name)
 	}
 	entered, _ := press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if entered.view != viewForm {
@@ -913,7 +914,7 @@ func TestGhostTileInvitesTheFirstVM(t *testing.T) {
 	// seconds. Nothing destructive can fire on the ghost, so leaving it there is
 	// safe; arrowing to the new tile is one keypress.
 	if !m.focusIsGhost() {
-		t.Fatalf("the ring should stay on the ghost the user is on, got %q", m.focusName)
+		t.Fatalf("the ring should stay on the ghost the user is on, got %q", m.focusVM.Name)
 	}
 }
 
@@ -954,7 +955,7 @@ func TestQuitIsOfferedOnTheBoardAndNowhereElse(t *testing.T) {
 	l := newTeaLoop(t, p)
 	l.exec(l.m.beginProvision("Creating web2", job.run, vm.CreateConfig{Name: "web2", BaseName: "sandbar-base"}))
 	job.done <- nil
-	l.pump("web2 to finish", func(m model) bool { return !m.jobs.isRunning("web2") })
+	l.pump("web2 to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web2") })
 	l.exec(l.m.showJobLog("web2"))
 	if l.m.view != viewProgress {
 		t.Fatalf("precondition: the log should be on screen, got view %v", l.m.view)
@@ -1020,7 +1021,7 @@ func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
 	if cmd != nil || declined.confirm != nil {
 		t.Fatal("declining the quit should dismiss the overlay and do nothing else")
 	}
-	if !declined.jobs.isRunning("newvm") {
+	if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
 		t.Fatal("declining the quit must not touch the build")
 	}
 }
@@ -1062,17 +1063,17 @@ func TestGhostTileIsReachableWithTwoVMsInOneColumn(t *testing.T) {
 		t.Fatalf("precondition: 80x24 should give one column and two tile rows, got %d column(s), %d row(s)",
 			m.layout.Columns, m.visibleTileRows())
 	}
-	m.focusName = "vm-a"
+	m.focusVM.Name = "vm-a"
 
 	// Arrowing down walks vm-a → vm-b → the ghost, scrolling as it goes. The ghost
 	// is a cell the ring lands on, so reaching it is just movement.
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.focusName != "vm-b" {
-		t.Fatalf("down from vm-a should focus vm-b, got %q", m.focusName)
+	if m.focusVM.Name != "vm-b" {
+		t.Fatalf("down from vm-a should focus vm-b, got %q", m.focusVM.Name)
 	}
 	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if !m.focusIsGhost() {
-		t.Fatalf("down from vm-b should reach the ghost, got %q", m.focusName)
+		t.Fatalf("down from vm-b should reach the ghost, got %q", m.focusVM.Name)
 	}
 	view := ansi.Strip(m.boardView())
 	if !strings.Contains(view, ghostTileText) {
@@ -1096,7 +1097,7 @@ func TestEnterIsAdvertisedWithTheVerbItRuns(t *testing.T) {
 
 	// The verb enter routes to carries BOTH keys, rather than enter getting a line
 	// of its own that repeats the same word.
-	m.focusName = "web" // running -> shell
+	m.focusVM.Name = "web" // running -> shell
 	if !strings.Contains(boardVerbs(m), "enter/S shell") {
 		t.Fatalf("a running tile must advertise enter alongside S on the shell verb:\n%s", boardVerbs(m))
 	}
@@ -1104,12 +1105,12 @@ func TestEnterIsAdvertisedWithTheVerbItRuns(t *testing.T) {
 		t.Fatalf("enter must not get a duplicate line of its own:\n%s", boardVerbs(m))
 	}
 
-	m.focusName = "api" // stopped -> start
+	m.focusVM.Name = "api" // stopped -> start
 	if !strings.Contains(boardVerbs(m), "enter/s start") {
 		t.Fatalf("a stopped tile must advertise enter alongside s on the start verb:\n%s", boardVerbs(m))
 	}
 
-	m.focusName = ghostFocusName
+	m.focusVM.Name = ghostFocusName
 	if !strings.Contains(boardVerbs(m), "enter new VM") {
 		t.Fatalf("the ghost must advertise enter as the create verb:\n%s", boardVerbs(m))
 	}

@@ -146,9 +146,9 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	if m.jobs == nil {
 		m.jobs = newJobRegistry()
 	}
-	key := provisionKey(name)
+	key := provisionKey(m.scope, name)
 	if cfg.Name == "" {
-		key = transferKey(name)
+		key = transferKey(m.scope, name)
 	}
 	if !m.jobs.begin(&job{
 		key:    key,
@@ -158,7 +158,7 @@ func seedJob(t *testing.T, m *model, name string, cfg vm.CreateConfig) {
 	}) {
 		t.Fatalf("seedJob: %s already has a run of this kind in flight", name)
 	}
-	m.jobs.markProvision(name, cfg, false)
+	m.jobs.markProvision(m.scope, name, cfg, false)
 	m.progressJob = key
 	m.view = viewProgress
 }
@@ -189,13 +189,13 @@ func TestTwoJobsInFlight(t *testing.T) {
 	cmdB := l.m.beginProvision("Creating beta", beta.run, vm.CreateConfig{Name: "beta", BaseName: "sandbar-base"})
 	l.exec(cmdB)
 
-	if !l.m.jobs.isRunning("alpha") || !l.m.jobs.isRunning("beta") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "alpha") || !l.m.jobs.isRunning(registry.LocalScope, "beta") {
 		t.Fatal("both provisions should be in flight at once")
 	}
 	// Neither VM exists in `limactl list` yet — a create's clone lands minutes into
 	// its own build — so the registry is the only thing that knows they are being
 	// built at all. The board reads them from here to raise their tiles.
-	if got := l.m.jobs.names(); len(got) != 2 {
+	if got := l.m.jobs.names(registry.LocalScope); len(got) != 2 {
 		t.Fatalf("the registry should list both jobs (a building VM has no Lima record yet), got %v", got)
 	}
 
@@ -217,7 +217,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 				return
 			default:
 				for _, n := range []string{"alpha", "beta"} {
-					s, ok := reg.snapshot(provisionKey(n))
+					s, ok := reg.snapshot(provisionKey(registry.LocalScope, n))
 					_ = deriveStatus(vm.VM{Name: n, Status: "Running"}, s, ok)
 				}
 			}
@@ -229,12 +229,12 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}()
 
 	// Interleave the two streams. Each chunk must land in its own VM's buffer.
-	alpha.write(l, provisionKey("alpha"), "TASK [base : alpha-one]\n")
-	beta.write(l, provisionKey("beta"), "TASK [base : beta-one]\n")
-	alpha.write(l, provisionKey("alpha"), "TASK [base : alpha-two]\n")
-	beta.write(l, provisionKey("beta"), "TASK [base : beta-two]\n")
+	alpha.write(l, provisionKey(registry.LocalScope, "alpha"), "TASK [base : alpha-one]\n")
+	beta.write(l, provisionKey(registry.LocalScope, "beta"), "TASK [base : beta-one]\n")
+	alpha.write(l, provisionKey(registry.LocalScope, "alpha"), "TASK [base : alpha-two]\n")
+	beta.write(l, provisionKey(registry.LocalScope, "beta"), "TASK [base : beta-two]\n")
 
-	outA, outB := jobOutput(l.m, provisionKey("alpha")), jobOutput(l.m, provisionKey("beta"))
+	outA, outB := jobOutput(l.m, provisionKey(registry.LocalScope, "alpha")), jobOutput(l.m, provisionKey(registry.LocalScope, "beta"))
 	if strings.Contains(outA, "beta-") {
 		t.Fatalf("beta's output leaked into alpha's buffer:\n%s", outA)
 	}
@@ -249,11 +249,11 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}
 
 	// Each job parses its OWN Ansible progress — the counters must not be shared.
-	sa, _ := l.m.jobs.snapshot(provisionKey("alpha"))
+	sa, _ := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "alpha"))
 	if sa.Progress.Task != "alpha-two" || sa.Progress.Index != 2 {
 		t.Fatalf("alpha's parsed progress = %+v, want task alpha-two at index 2", sa.Progress)
 	}
-	sb, _ := l.m.jobs.snapshot(provisionKey("beta"))
+	sb, _ := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "beta"))
 	if sb.Progress.Task != "beta-two" || sb.Progress.Index != 2 {
 		t.Fatalf("beta's parsed progress = %+v, want task beta-two at index 2", sb.Progress)
 	}
@@ -261,19 +261,19 @@ func TestTwoJobsInFlight(t *testing.T) {
 	// CANCELLATION IS PER-JOB. Reopen alpha's log (the retained-run verb) so the
 	// progress screen targets alpha, then ctrl+c: only alpha may be cancelled.
 	l.m.view = viewBoard
-	l.m.focusName = "alpha"
+	l.m.focusVM.Name = "alpha"
 	l.send(runeKey('l'))
-	if l.m.view != viewProgress || l.m.progressJob != provisionKey("alpha") {
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, "alpha") {
 		t.Fatalf("reopening alpha's log should show it in the progress view (view=%v job=%+v)", l.m.view, l.m.progressJob)
 	}
 	l.send(ctrlKey('c'))
 
-	l.pump("alpha to finish cancelling", func(m model) bool { return !m.jobs.isRunning("alpha") })
+	l.pump("alpha to finish cancelling", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "alpha") })
 
-	if !l.m.jobs.isRunning("beta") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "beta") {
 		t.Fatal("cancelling alpha must not touch beta")
 	}
-	if s, _ := l.m.jobs.snapshot(provisionKey("alpha")); !s.Canceled {
+	if s, _ := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "alpha")); !s.Canceled {
 		t.Fatalf("alpha should be marked cancelled, got %+v", s)
 	}
 	// A cancelled run leaves partial state: it is not recorded as managed, and it
@@ -286,18 +286,18 @@ func TestTwoJobsInFlight(t *testing.T) {
 	}
 
 	// beta is untouched and still streaming — its buffer never saw alpha's cancel.
-	beta.write(l, provisionKey("beta"), "TASK [base : beta-three]\n")
-	if strings.Contains(jobOutput(l.m, provisionKey("beta")), "^C") {
-		t.Fatalf("alpha's cancel notice leaked into beta's buffer:\n%s", jobOutput(l.m, provisionKey("beta")))
+	beta.write(l, provisionKey(registry.LocalScope, "beta"), "TASK [base : beta-three]\n")
+	if strings.Contains(jobOutput(l.m, provisionKey(registry.LocalScope, "beta")), "^C") {
+		t.Fatalf("alpha's cancel notice leaked into beta's buffer:\n%s", jobOutput(l.m, provisionKey(registry.LocalScope, "beta")))
 	}
 
 	// beta finishes cleanly: it (and only it) is recorded as managed.
 	beta.done <- nil
-	l.pump("beta to finish", func(m model) bool { return !m.jobs.isRunning("beta") })
+	l.pump("beta to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "beta") })
 	if !l.m.reg.IsManaged("beta") {
 		t.Fatal("a successful provision should be recorded as managed")
 	}
-	if s, _ := l.m.jobs.snapshot(provisionKey("beta")); s.State != jobSucceeded {
+	if s, _ := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "beta")); s.State != jobSucceeded {
 		t.Fatalf("beta should have succeeded, got %+v", s)
 	}
 }
@@ -311,10 +311,10 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 
 	fail := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", fail.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	fail.write(l, provisionKey("web"), "TASK [dev-tools : Install Docker]\nfatal: [localhost]: FAILED!\n")
+	fail.write(l, provisionKey(registry.LocalScope, "web"), "TASK [dev-tools : Install Docker]\nfatal: [localhost]: FAILED!\n")
 
 	fail.done <- errors.New("provisioning (base) failed for \"web\"")
-	l.pump("web to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("web to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	v := vm.VM{Name: "web", Status: "Running"} // Lima still calls the half-built VM Running
 	if got := l.m.statusOf(v); got != statusFailed {
@@ -324,7 +324,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 	// The refresh tick that would have dropped it.
 	l.send(vmsLoadedMsg{vms: []vm.VM{v}})
 
-	s, ok := l.m.jobs.snapshot(provisionKey("web"))
+	s, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web"))
 	if !ok {
 		t.Fatal("a failed job must survive a list refresh — dropping it turns the tile green")
 	}
@@ -344,7 +344,7 @@ func TestFailedJobSurvivesRefresh(t *testing.T) {
 
 	// Deleting the VM is the user acting on it: the retained run goes with it.
 	l.send(actionDoneMsg{action: "delete", name: "web"})
-	if _, ok := l.m.jobs.snapshot(provisionKey("web")); ok {
+	if _, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web")); ok {
 		t.Fatal("deleting a VM should drop its retained run")
 	}
 }
@@ -369,21 +369,21 @@ func TestJobReapedWhenVMDisappears(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	cmd, _ := l.m.beginStream(transferKey("web"), "Uploading to web", run)
+	cmd, _ := l.m.beginStream(transferKey(registry.LocalScope, "web"), "Uploading to web", run)
 	l.exec(cmd)
 	<-blocked
 
 	// The VM is present at first — that is what makes a later absence evidence of
 	// a DISAPPEARANCE rather than of a create whose VM does not exist yet.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("the job should still be running while its VM is present")
 	}
 
 	// It vanishes.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "other", Status: "Running"}}})
 
-	if _, ok := l.m.jobs.snapshot(transferKey("web")); ok {
+	if _, ok := l.m.jobs.snapshot(transferKey(registry.LocalScope, "web")); ok {
 		t.Fatal("a job whose VM disappeared must be reaped from the registry")
 	}
 	select {
@@ -402,18 +402,18 @@ func TestCreateJobNotReapedBeforeItsVMAppears(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "==> Building base image\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "==> Building base image\n")
 
 	// Several refreshes in which the VM being built does not exist yet.
 	for i := 0; i < 3; i++ {
 		l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "unrelated", Status: "Running"}}})
 	}
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("a create whose VM has not appeared yet must NOT be reaped — that would kill every build")
 	}
 
 	job.done <- nil
-	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // A reset deletes and re-creates its own VM, so its VM legitimately vanishes
@@ -425,21 +425,21 @@ func TestResetJobSurvivesItsOwnDelete(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "==> Deleting web\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "==> Deleting web\n")
 
 	// Present, then gone (the reset just deleted it), then back (the re-clone).
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("a reset must survive the deletion it performs itself")
 	}
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("a reset must survive its own delete/re-clone cycle")
 	}
 
 	job.done <- nil
-	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // deriveStatus is the pure function the tile renderer (task 07) consumes: the
@@ -489,14 +489,14 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install]\n")
 
 	// esc backs out of the progress screen WITHOUT cancelling the build.
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if l.m.view != viewBoard {
 		t.Fatalf("esc during a build should return to the list, got view %v", l.m.view)
 	}
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("leaving the progress screen must NOT cancel the build")
 	}
 
@@ -508,9 +508,9 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 	// The still-running job keeps streaming into its own buffer while the user is
 	// elsewhere, and reopening its log shows it.
-	job.write(l, provisionKey("web"), "TASK [base : Node]\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Node]\n")
 	l.m.view = viewBoard
-	l.m.focusName = "web"
+	l.m.focusVM.Name = "web"
 	l.send(runeKey('l'))
 	if l.m.view != viewProgress {
 		t.Fatalf("'l' should reopen the run's log, got view %v", l.m.view)
@@ -520,7 +520,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 	}
 
 	job.done <- nil
-	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // Submitting the create form lands on the BOARD, not on a full-screen Ansible log.
@@ -549,7 +549,7 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 	}
 	l.send(ctrlKey('s'))
 
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("submitting the form should start the build")
 	}
 	if l.m.view != viewBoard {
@@ -569,14 +569,14 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 
 	// The log is not lost — it is one 'l' away from the tile.
 	l.m.view = viewBoard
-	l.m.focusName = "web"
+	l.m.focusVM.Name = "web"
 	l.send(runeKey('l'))
-	if l.m.view != viewProgress || l.m.progressJob != provisionKey("web") {
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, "web") {
 		t.Fatalf("'l' should reopen the build's log (view=%v job=%+v)", l.m.view, l.m.progressJob)
 	}
 
 	l.send(ctrlKey('c'))
-	l.pump("web to finish cancelling", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("web to finish cancelling", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // The reopen-log verb is state-gated on the VM having a run to show: a VM that
@@ -612,9 +612,9 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	build := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED! => the play exploded\n")
+	build.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install Docker] ***\nfatal: [web]: FAILED! => the play exploded\n")
 	build.done <- errAnsibleBoom
-	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	// Lima reports the half-built VM as Running; it always does.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
@@ -625,13 +625,13 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 
 	// The user uploads a file to it.
 	upload := newFakeJob()
-	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
+	uploadCmd, started := l.m.beginStream(transferKey(registry.LocalScope, "web"), "Uploading notes.txt", upload.stream)
 	// beginStream starts a job; it does not pick a screen. Mirror what the real
 	// caller (confirmDest, transfer.go) does after it, so this test exercises the
 	// transfer as the user gets it — a build would NOT do this, which is the whole
 	// difference between the two callers.
 	if started {
-		l.m.focusJob(transferKey("web"))
+		l.m.focusJob(transferKey(registry.LocalScope, "web"))
 	}
 	l.exec(uploadCmd)
 
@@ -654,7 +654,7 @@ func TestATransferNeverEvictsARetainedFailedBuild(t *testing.T) {
 	}
 
 	upload.done <- nil
-	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	// And the tile STILL says Failed once the copy is done: only the user acting on
 	// the VM (a reset, a delete) clears that.
@@ -685,7 +685,7 @@ func TestARefusedCreateDoesNotPromoteAnInFlightTransfer(t *testing.T) {
 	l := newTeaLoop(t, m)
 
 	upload := newFakeJob()
-	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
+	uploadCmd, _ := l.m.beginStream(transferKey(registry.LocalScope, "web"), "Uploading notes.txt", upload.stream)
 	l.exec(uploadCmd)
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 
@@ -702,12 +702,12 @@ func TestARefusedCreateDoesNotPromoteAnInFlightTransfer(t *testing.T) {
 	if l.m.vmBuilding("web") {
 		t.Fatal("a copy in flight must not gate Delete the way a build does")
 	}
-	if cfg, _ := l.m.jobs.config("web"); cfg.Name != "" {
+	if cfg, _ := l.m.jobs.config(registry.LocalScope, "web"); cfg.Name != "" {
 		t.Fatalf("the refused create's config must not be attached to the copy in flight, got %+v", cfg)
 	}
 
 	upload.done <- nil
-	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the upload to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // Consequence (b) of the same bug: a create for a VM that is ALREADY BUILDING
@@ -721,15 +721,15 @@ func TestASecondCreateDoesNotSwapTheRunningBuildsConfig(t *testing.T) {
 	build := newFakeJob()
 	real := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, Memory: "4GiB", CloneURL: "https://github.com/acme/real"}
 	l.exec(l.m.beginProvision("Creating web", build.run, real))
-	build.write(l, provisionKey("web"), "==> Cloning web from base image\n")
+	build.write(l, provisionKey(registry.LocalScope, "web"), "==> Cloning web from base image\n")
 
 	wrong := vm.CreateConfig{Name: "web", BaseName: "other-base", CPUs: 8, Memory: "32GiB", CloneURL: "https://github.com/acme/wrong", CloneToken: "ghp_secret"}
 	l.exec(l.m.beginProvision("Creating web", mustNotRun(t), wrong))
 
-	if got := l.m.jobs.names(); len(got) != 1 {
+	if got := l.m.jobs.names(registry.LocalScope); len(got) != 1 {
 		t.Fatalf("the refused create must not register a second run for web, got %v", got)
 	}
-	got, ok := l.m.jobs.config("web")
+	got, ok := l.m.jobs.config(registry.LocalScope, "web")
 	if !ok {
 		t.Fatal("the build in flight should still carry its own config")
 	}
@@ -742,7 +742,7 @@ func TestASecondCreateDoesNotSwapTheRunningBuildsConfig(t *testing.T) {
 	}
 
 	build.done <- nil
-	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // THE FORM REFUSES A NAME THAT IS ALREADY BUSY, and says so with the name still on
@@ -781,10 +781,10 @@ func TestCreateFormRefusesANameWithARunInFlight(t *testing.T) {
 		t.Fatal("a refused create must dispatch nothing")
 	}
 	// And the build it collided with is untouched — same config, still the only run.
-	if got := m.jobs.names(); len(got) != 1 {
+	if got := m.jobs.names(registry.LocalScope); len(got) != 1 {
 		t.Fatalf("the refused create must not register a run, got %v", got)
 	}
-	if got, _ := m.jobs.config("web"); got != building {
+	if got, _ := m.jobs.config(registry.LocalScope, "web"); got != building {
 		t.Fatalf("the running build's config = %+v, want it untouched (%+v)", got, building)
 	}
 }
@@ -807,7 +807,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 	cfg := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, CloneToken: "ghp_secret"}
 	l.exec(l.m.beginProvision("Creating web", build.run, cfg))
 	build.done <- nil
-	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 	if !l.m.reg.IsManaged("web") {
 		t.Fatal("precondition: a successful build records the VM as managed")
@@ -820,13 +820,13 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 	}
 
 	upload := newFakeJob()
-	uploadCmd, started := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
+	uploadCmd, started := l.m.beginStream(transferKey(registry.LocalScope, "web"), "Uploading notes.txt", upload.stream)
 	if !started {
 		t.Fatal("a copy must start on a VM whose build has finished")
 	}
 	l.exec(uploadCmd)
 	upload.done <- nil
-	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	if got := l.m.sec.Get("web", registry.LocalScope); got["GH_TOKEN"] != "" {
 		t.Fatalf("a finished copy re-seeded the build's clone token into the secrets store: %v", got)
@@ -845,17 +845,17 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 
 	build := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	build.write(l, provisionKey("web"), "TASK [base : Install Docker] ***\n")
+	build.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install Docker] ***\n")
 	build.done <- nil
-	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 
 	upload := newFakeJob()
-	uploadCmd, _ := l.m.beginStream(transferKey("web"), "Uploading notes.txt", upload.stream)
+	uploadCmd, _ := l.m.beginStream(transferKey(registry.LocalScope, "web"), "Uploading notes.txt", upload.stream)
 	l.exec(uploadCmd)
-	upload.write(l, transferKey("web"), "copied notes.txt\n")
+	upload.write(l, transferKey(registry.LocalScope, "web"), "copied notes.txt\n")
 	upload.done <- nil
-	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the copy to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	l.m.view = viewBoard
 	l.m.showJobLog("web")
@@ -864,7 +864,7 @@ func TestReopenLogShowsTheMostRecentRunWhenTheBuildSucceeded(t *testing.T) {
 		t.Fatalf("`l` should reopen the most recent run once the build has succeeded, got (ok=%v):\n%s", ok, s.Output)
 	}
 	// Both runs are still retained — the copy did not evict the build.
-	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+	if _, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web")); !ok {
 		t.Fatal("the succeeded build must still be retained alongside the copy")
 	}
 }
@@ -892,7 +892,7 @@ func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	l := newTeaLoop(t, m)
 	job := newFakeJob()
 	l.exec(l.m.beginReset("Resetting web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	if !l.m.jobs.isRunning("web") {
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("precondition: the reset should be in flight")
 	}
 
@@ -905,9 +905,9 @@ func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	if !l.m.reg.IsManaged("web") {
 		t.Fatal("a VM mid-reset must stay managed — its absence from limactl list is expected, not a disappearance")
 	}
-	if l.m.jobs.isRunning("web") {
+	if l.m.jobs.isRunning(registry.LocalScope, "web") {
 		job.done <- nil
-		l.pump("the reset to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+		l.pump("the reset to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 	}
 }
 
@@ -932,7 +932,7 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	// Lima reports the provisioning guest as Running — this is the whole trap.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running", CPUs: 2}}})
-	l.m.focusName = "web"
+	l.m.focusVM.Name = "web"
 
 	web, _ := l.m.lookupVM("web")
 	if got := l.m.statusOf(web); got != statusBuilding {
@@ -965,7 +965,7 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 	}
 
 	job.done <- nil
-	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
 // A VM DELETED OUTSIDE SAND MUST LOSE ITS TILE. The job registry retains every run
@@ -986,7 +986,7 @@ func TestAVMDeletedOutsideSandLosesItsTile(t *testing.T) {
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.done <- nil
-	l.pump("the build to succeed", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to succeed", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})
 
 	if !l.m.reg.IsManaged("web") {
@@ -1003,7 +1003,7 @@ func TestAVMDeletedOutsideSandLosesItsTile(t *testing.T) {
 		t.Fatalf("a VM deleted outside sand must lose its tile, got %v (the retained succeeded job re-admitted it)", got)
 	}
 	// The run's log is still retained — that is not what was wrong.
-	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+	if _, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web")); !ok {
 		t.Fatal("the run itself should still be retained; only the ROSTER must stop counting it")
 	}
 }
@@ -1017,7 +1017,7 @@ func TestAFailedBuildKeepsItsTileWithNoLimaRecord(t *testing.T) {
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
 	job.done <- errAnsibleBoom
-	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
 
 	if got := boardNames(l.m); len(got) != 1 || got[0] != "web" {
@@ -1147,7 +1147,7 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 
 	// The reset deletes the instance, then FAILS before cloning it back.
 	job.done <- errAnsibleBoom
-	l.pump("the reset to fail", func(m model) bool { return !m.jobs.isRunning("web") })
+	l.pump("the reset to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 
 	// The refresh lands: web is gone from Lima, because the reset deleted it.
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
@@ -1158,12 +1158,12 @@ func TestAFAILEDResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 	if !l.m.reg.IsManaged("web") {
 		t.Fatal("a VM whose reset failed must stay managed — otherwise R is hidden and the user cannot retry the very thing the red tile is telling them to")
 	}
-	if _, ok := l.m.jobs.snapshot(provisionKey("web")); !ok {
+	if _, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web")); !ok {
 		t.Fatal("the failed run must be retained so the tile can report it")
 	}
 
 	// And `d` still clears everything deliberately.
-	l.m.focusName = "web"
+	l.m.focusVM.Name = "web"
 	l.send(actionDoneMsg{action: "delete", name: "web"})
 	if got := l.m.sec.Get("web", registry.LocalScope)["GH_TOKEN"]; got != "" {
 		t.Fatalf("deleting the VM must take its secrets with it, got %q", got)
@@ -1182,14 +1182,14 @@ func TestCanceledBuildWhoseVMIsGoneLeavesNoTile(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
-	if !l.m.jobs.isRunning("web") {
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install]\n")
+	if !l.m.jobs.isRunning(registry.LocalScope, "web") {
 		t.Fatal("precondition: web must be mid-build")
 	}
 
 	// ^C, and the run reports back cancelled.
-	l.m.jobs.cancelJob(provisionKey("web"))
-	l.send(provisionDoneMsg{job: provisionKey("web"), err: context.Canceled})
+	l.m.jobs.cancelJob(provisionKey(registry.LocalScope, "web"))
+	l.send(provisionDoneMsg{job: provisionKey(registry.LocalScope, "web"), err: context.Canceled})
 
 	// The refresh that follows: the VM is gone — the create cleaned it up.
 	l.send(vmsLoadedMsg{vms: nil})
@@ -1211,10 +1211,10 @@ func TestCanceledBuildWhoseVMSurvivesKeepsItsTile(t *testing.T) {
 
 	job := newFakeJob()
 	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-	job.write(l, provisionKey("web"), "TASK [base : Install]\n")
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install]\n")
 
-	l.m.jobs.cancelJob(provisionKey("web"))
-	l.send(provisionDoneMsg{job: provisionKey("web"), err: context.Canceled})
+	l.m.jobs.cancelJob(provisionKey(registry.LocalScope, "web"))
+	l.send(provisionDoneMsg{job: provisionKey(registry.LocalScope, "web"), err: context.Canceled})
 
 	// The VM booted before the ^C, so it is still there.
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "web", Status: "Running"}}})

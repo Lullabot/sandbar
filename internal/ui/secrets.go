@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/secrets"
 
 	"charm.land/bubbles/v2/key"
@@ -58,10 +57,7 @@ func (m *model) openSecrets(name string) tea.Cmd {
 	styles.Focused.CursorLine = lipgloss.NewStyle()
 	styles.Blurred.CursorLine = lipgloss.NewStyle()
 	ta.SetStyles(styles)
-	// TODO(task 6): real scope — pass the VM's actual connection scope
-	// (m.scope) once secrets are threaded per-scope; for now every VM is
-	// treated as local.
-	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name, registry.LocalScope)))
+	ta.SetValue(renderPairsForEditor(m.sec.GetAll(name, m.scope)))
 	w, h := secretsEditorSize(m.layout)
 	ta.SetWidth(w)
 	ta.SetHeight(h)
@@ -213,10 +209,7 @@ func (m model) updateSecrets(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.secretsErr = err
 			return m, nil
 		}
-		// TODO(task 6): real scope — pass the VM's actual connection scope
-		// (m.scope) once secrets are threaded per-scope; for now every VM is
-		// treated as local.
-		if err := m.sec.SetAll(m.secretsVM, registry.LocalScope, scopes); err != nil {
+		if err := m.sec.SetAll(m.secretsVM, m.scope, scopes); err != nil {
 			m.secretsErr = err
 			return m, nil
 		}

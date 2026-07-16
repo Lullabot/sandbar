@@ -136,13 +136,16 @@ type model struct {
 	// sync with it: the VM screen was deleted, and the tile is the whole record.
 	vms []vm.VM
 
-	// focusName is the VM under the board's focus ring: AN IDENTITY, NEVER A SLOT
+	// focusVM is the VM under the board's focus ring: AN IDENTITY, NEVER A SLOT
 	// INDEX. A refresh, an insertion, a deletion or a filter keystroke reorders the
 	// grid; the ring stays on the same VM, because a ring that tracked the index
 	// would silently slide onto a different VM and hand the next destructive key to
-	// it. scrollRow is the first tile ROW the grid viewport shows, and only
+	// it. It is a vmHandle (scope + name), not a bare name, so the ring's identity
+	// can never be mistaken for "whatever VM has this name" once more than one
+	// scope is in play (task 7) — renamed from focusName for exactly that reason.
+	// scrollRow is the first tile ROW the grid viewport shows, and only
 	// ensureFocusVisible moves it — so the viewport cannot drift away from the ring.
-	focusName string
+	focusVM   vmHandle
 	scrollRow int
 
 	// vmsLoaded records that the FIRST `limactl list` has landed. Before it does,
@@ -552,6 +555,30 @@ func (m model) clipLine(s string) string {
 	return ansi.Truncate(s, m.layout.ContentWidth, "…")
 }
 
+// vmHandle is a VM's full identity: which connection scope it lives under,
+// plus its name. It is the composite key every per-VM in-memory store
+// (heartbeatRegistry, jobRegistry via jobKey, and the board's focus ring)
+// keys on, in place of a bare name.
+//
+// Why this exists: a bare name is not a VM's identity, it is a VM's LABEL —
+// and two profiles (task 7's fleet) can label two entirely different VMs
+// "web". Keying (or pruning) by name alone means a reconcile or delete
+// running against one profile can silently act on another profile's VM that
+// happens to share the name: stop its heartbeat, evict its retained job, or —
+// the HIGH-severity case — delete its host secrets. registry.Scope is a small
+// comparable struct (Provider + RemoteTarget), so vmHandle is itself a valid
+// map key.
+//
+// Today every model holds exactly one scope (m.scope), so every vmHandle in a
+// running model carries the same Scope and this is, for now, a type-safety
+// harness rather than something that changes behaviour — task 7 is what
+// supplies genuinely different scopes and makes these keys start doing real
+// work.
+type vmHandle struct {
+	Scope registry.Scope
+	Name  string
+}
+
 // present indexes a freshly loaded VM list by name, for jobRegistry.reconcile.
 func present(vms []vm.VM) map[string]bool {
 	set := make(map[string]bool, len(vms))
@@ -626,13 +653,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// exceptional one. ended() drops the reading, so the gauge goes with the VM
 		// instead of freezing at whatever it last said.
 		if !msg.ok {
-			m.heartbeats.ended(msg.vm, msg.epoch)
+			m.heartbeats.ended(m.scope, msg.vm, msg.epoch)
 			return m, nil
 		}
 		// fold returns nil for a sample from a connection that has since been replaced,
 		// which ends that stale read loop rather than letting it double up on the live
 		// one.
-		return m, heartbeatReadCmd(msg.vm, msg.epoch, m.heartbeats.fold(msg.vm, msg.epoch, msg.sample))
+		return m, heartbeatReadCmd(msg.vm, msg.epoch, m.heartbeats.fold(m.scope, msg.vm, msg.epoch, msg.sample))
 
 	case refreshTickMsg:
 		// This loop iteration is done; tickRefresh (called centrally after every
@@ -747,7 +774,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// to explain why. The exemption is decided ONCE, in the registry, rather than
 		// re-derived here from a different question.
 		listed := present(msg.vms)
-		reaped, protected := m.jobs.reconcile(listed)
+		reaped, protected := m.jobs.reconcile(m.scope, listed)
 		if len(reaped) > 0 {
 			m.logMsg("canceled the run for " + strings.Join(reaped, ", ") + ": the VM disappeared")
 			// Nothing left to show for the run the user was watching.
@@ -774,10 +801,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// unrelated VM that later reuses the name. Best-effort: a failure here
 		// isn't worth displacing the reconcile status above.
 		for _, name := range dropped {
-			// TODO(task 6): real scope — pass the VM's actual connection
-			// scope (m.scope) once secrets are threaded per-scope; for now
-			// every VM is treated as local.
-			_ = m.sec.Remove(name, registry.LocalScope)
+			// Scoped to m.scope: this reconcile only ever reasoned about VMs
+			// in this model's own scope (manage.Reconcile above was called
+			// with m.scope), so the secret it prunes must be scoped
+			// identically — never a bare name that could match another
+			// profile's same-named VM.
+			_ = m.sec.Remove(name, m.scope)
 		}
 		// The board's tiles come straight off m.vms + the registry + the job
 		// registry, so there is nothing to rebuild — only the focus ring has to be
@@ -805,15 +834,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// to be acted on, and deleting the VM is acting on it. (A run still in
 			// flight is cancelled by remove — Delete is gated on !vmBuilding, so that
 			// only happens if the VM was deleted from outside sand.)
-			m.jobs.remove(msg.name)
+			m.jobs.remove(m.scope, msg.name)
 			// A deleted VM is no longer managed, and its host-stored secrets no
 			// longer have a guest to apply to; drop it from both indexes. Neither
 			// failure may silently shadow the other.
 			regErr := m.reg.Remove(msg.name)
-			// TODO(task 6): real scope — pass the VM's actual connection
-			// scope (m.scope) once secrets are threaded per-scope; for now
-			// every VM is treated as local.
-			secErr := m.sec.Remove(msg.name, registry.LocalScope)
+			// Scoped to m.scope: the VM the user just deleted is THIS model's
+			// VM, in THIS model's scope — never a bare name that could match a
+			// same-named VM under a different profile.
+			secErr := m.sec.Remove(msg.name, m.scope)
 			switch {
 			case regErr != nil && secErr != nil:
 				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
@@ -877,7 +906,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// finishing against a VM that also holds a retained build would otherwise
 		// re-record that build's config (and re-seed its GH_TOKEN) as if the copy had
 		// produced it.
-		cfg, isProvision := m.jobs.config(msg.job.vm)
+		cfg, isProvision := m.jobs.config(msg.job.scope, msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
 			if err := manage.RecordSuccess(m.reg, cfg, m.scope); err != nil {
@@ -894,12 +923,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
 			// cannot corrupt the store ahead of Set validating it.
 			if cfg.CloneToken != "" {
-				// TODO(task 6): real scope — pass the VM's actual connection
-				// scope (m.scope) once secrets are threaded per-scope; for
-				// now every VM is treated as local.
-				pairs := m.sec.Get(cfg.Name, registry.LocalScope)
+				pairs := m.sec.Get(cfg.Name, m.scope)
 				pairs["GH_TOKEN"] = cfg.CloneToken
-				if err := m.sec.Set(cfg.Name, registry.LocalScope, pairs); err != nil {
+				if err := m.sec.Set(cfg.Name, m.scope, pairs); err != nil {
 					m.logMsg("VM ready, but the token could not be saved as a secret: " + err.Error())
 				}
 			}

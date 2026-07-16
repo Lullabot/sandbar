@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/help"
@@ -20,8 +21,8 @@ func TestProgressReturnsToTheBoard(t *testing.T) {
 		name string
 		key  jobKey
 	}{
-		{"a provision returns to the board", provisionKey("claude")},
-		{"a transfer returns to the board too", transferKey("claude")},
+		{"a provision returns to the board", provisionKey(registry.LocalScope, "claude")},
+		{"a transfer returns to the board too", transferKey(registry.LocalScope, "claude")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := newJobRegistry()
@@ -40,7 +41,7 @@ func TestProgressReturnsToTheBoard(t *testing.T) {
 // still work — the alternative is a user stranded on a screen about a VM that no
 // longer exists.
 func TestProgressSurvivesAReapedJob(t *testing.T) {
-	m := model{view: viewProgress, progressJob: provisionKey("gone"), jobs: newJobRegistry(), keys: newKeyMap(), help: help.New()}
+	m := model{view: viewProgress, progressJob: provisionKey(registry.LocalScope, "gone"), jobs: newJobRegistry(), keys: newKeyMap(), help: help.New()}
 	if out := m.progressView(); !strings.Contains(out, "esc") {
 		t.Fatalf("a vanished run should still offer a way out, got:\n%s", out)
 	}
@@ -63,7 +64,7 @@ func TestProgressLogBoxFitsTheTerminal(t *testing.T) {
 
 		job := newFakeJob()
 		l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
-		job.write(l, provisionKey("web"), "TASK [base : Install every base-phase package in a single transaction]\n")
+		job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install every base-phase package in a single transaction]\n")
 
 		// Open the run's log — the view under test (what `l`, and now enter, show).
 		l.exec(l.m.showJobLog("web"))

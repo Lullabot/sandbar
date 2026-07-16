@@ -55,6 +55,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -72,19 +73,30 @@ const (
 	kindTransfer
 )
 
-// jobKey identifies one run: the VM, and which of its runs.
+// jobKey identifies one run: the connection scope, the VM, and which of its
+// runs. Scope is part of the identity — not decoration — so a job for "web"
+// under one profile can never be looked up, retained-run-checked, or reaped
+// as if it were "web" under another (task 7's fleet). Every constructor below
+// takes scope explicitly for exactly that reason.
 type jobKey struct {
-	vm   string
-	kind jobKind
+	scope registry.Scope
+	vm    string
+	kind  jobKind
 }
 
-func provisionKey(name string) jobKey { return jobKey{vm: name, kind: kindProvision} }
-func transferKey(name string) jobKey  { return jobKey{vm: name, kind: kindTransfer} }
+func provisionKey(scope registry.Scope, name string) jobKey {
+	return jobKey{scope: scope, vm: name, kind: kindProvision}
+}
+func transferKey(scope registry.Scope, name string) jobKey {
+	return jobKey{scope: scope, vm: name, kind: kindTransfer}
+}
 
 // keysFor is a VM's two possible slots, provision first. Every "does this VM have
 // a run" question is two map lookups rather than a scan, and the fixed order is
 // what makes the answers deterministic.
-func keysFor(name string) [2]jobKey { return [2]jobKey{provisionKey(name), transferKey(name)} }
+func keysFor(scope registry.Scope, name string) [2]jobKey {
+	return [2]jobKey{provisionKey(scope, name), transferKey(scope, name)}
+}
 
 // jobState is a job's lifecycle state. A finished job — succeeded OR failed —
 // stays in the registry with its log: that retention is what makes the tile's
@@ -182,20 +194,21 @@ func newJobRegistry() *jobRegistry {
 	return &jobRegistry{jobs: make(map[jobKey]*job)}
 }
 
-// Building reports whether name has a PROVISION in flight — a build, not a file
-// transfer. It gates Delete: a VM must not be deleted out from under its own
-// build.
-func (r *jobRegistry) Building(name string) bool {
-	s, ok := r.snapshot(provisionKey(name))
+// Building reports whether (scope, name) has a PROVISION in flight — a build, not
+// a file transfer. It gates Delete: a VM must not be deleted out from under its
+// own build.
+func (r *jobRegistry) Building(scope registry.Scope, name string) bool {
+	s, ok := r.snapshot(provisionKey(scope, name))
 	return ok && s.Running()
 }
 
-// HasRetainedRun reports whether name has a run — of either kind — whose log can
-// be reopened. That includes a run still IN FLIGHT: the whole point of the
-// un-frozen keyboard is that the user can walk away from a build and come back to
-// it, so "reopen this VM's log" must work while it is still being written.
-func (r *jobRegistry) HasRetainedRun(name string) bool {
-	_, ok := r.logKey(name)
+// HasRetainedRun reports whether (scope, name) has a run — of either kind —
+// whose log can be reopened. That includes a run still IN FLIGHT: the whole
+// point of the un-frozen keyboard is that the user can walk away from a build
+// and come back to it, so "reopen this VM's log" must work while it is still
+// being written.
+func (r *jobRegistry) HasRetainedRun(scope registry.Scope, name string) bool {
+	_, ok := r.logKey(scope, name)
 	return ok
 }
 
@@ -232,13 +245,13 @@ func (r *jobRegistry) begin(j *job) bool {
 // already in flight for that name — swapping a running build's cpus/memory/clone
 // URL/token, or turning a `limactl copy` into a "build" outright. beginStream now
 // reports whether it started the job, and only a started job is marked.
-func (r *jobRegistry) markProvision(name string, cfg vm.CreateConfig, recreates bool) {
+func (r *jobRegistry) markProvision(scope registry.Scope, name string, cfg vm.CreateConfig, recreates bool) {
 	if r == nil || cfg.Name == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[provisionKey(name)]
+	j, ok := r.jobs[provisionKey(scope, name)]
 	if !ok || j.state != jobRunning {
 		return
 	}
@@ -321,17 +334,20 @@ func (r *jobRegistry) cancelJob(key jobKey) bool {
 	return true
 }
 
-// remove drops EVERY run a VM has — both slots — cancelling whichever are still
-// in flight. This is "the user acted on it": deleting a VM leaves its retained
-// runs with nothing to describe, and a copy still streaming into a VM that no
-// longer exists is not work worth finishing.
-func (r *jobRegistry) remove(name string) {
+// remove drops EVERY run a VM has — both slots, in scope — cancelling whichever
+// are still in flight. This is "the user acted on it": deleting a VM leaves its
+// retained runs with nothing to describe, and a copy still streaming into a VM
+// that no longer exists is not work worth finishing.
+//
+// Scoped to (scope, name): removing this VM's runs must never reach into
+// another scope's same-named VM's runs.
+func (r *jobRegistry) remove(scope registry.Scope, name string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	var stopped []stopper
-	for _, k := range keysFor(name) {
+	for _, k := range keysFor(scope, name) {
 		if j, ok := r.jobs[k]; ok {
 			stopped = append(stopped, stopperFor(j))
 			delete(r.jobs, k)
@@ -370,7 +386,16 @@ func (r *jobRegistry) remove(name string) {
 // the same predicate and cannot be kept the same by hoping. Feeding `protected` into
 // the list `manage.Reconcile` sees makes the ordering a data dependency instead of a
 // paragraph of prose.
-func (r *jobRegistry) reconcile(present map[string]bool) (reaped, protected []string) {
+//
+// SCOPED: present is one profile's listing, so only THIS scope's jobs may be
+// examined against it — a job key belonging to a different scope is skipped
+// entirely, untouched by either the "seen" bookkeeping or the reaper. Without
+// this, a job for a same-named VM under another profile would be reaped (or
+// falsely marked seen) by a listing that says nothing about it at all. This is
+// the HIGH-severity guard: `dropped`/`protected` feed straight into a host
+// secrets deletion (see the caller in model.go), so a cross-scope reap here
+// would delete the wrong VM's secrets.
+func (r *jobRegistry) reconcile(scope registry.Scope, present map[string]bool) (reaped, protected []string) {
 	if r == nil {
 		return nil, nil
 	}
@@ -379,6 +404,11 @@ func (r *jobRegistry) reconcile(present map[string]bool) (reaped, protected []st
 	spared := make(map[string]bool)
 	var stopped []stopper
 	for key, j := range r.jobs {
+		if key.scope != scope {
+			// Not this profile's job: leave it entirely alone, whether it is running,
+			// finished, seen, or not — this listing has no opinion about it.
+			continue
+		}
 		if present[key.vm] {
 			if j.state == jobRunning {
 				j.seen = true
@@ -493,13 +523,13 @@ func snapshotOf(j *job) jobSnapshot {
 // GH_TOKEN), and nothing that renders should be able to reach a token. A VM with
 // no build (only a copy, or nothing) has none, which is exactly why a copy is
 // never recorded as a managed VM.
-func (r *jobRegistry) config(name string) (vm.CreateConfig, bool) {
+func (r *jobRegistry) config(scope registry.Scope, name string) (vm.CreateConfig, bool) {
 	if r == nil {
 		return vm.CreateConfig{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	j, ok := r.jobs[provisionKey(name)]
+	j, ok := r.jobs[provisionKey(scope, name)]
 	if !ok {
 		return vm.CreateConfig{}, false
 	}
@@ -519,24 +549,24 @@ func (r *jobRegistry) reader(key jobKey) *readPipe {
 	return nil
 }
 
-// isRunning reports whether name has ANY run in flight — a build or a copy. It is
-// what refuses a create/reset for a VM that is already busy, and what the quit
-// confirmation counts.
-func (r *jobRegistry) isRunning(name string) bool {
-	_, ok := r.runningKey(name)
+// isRunning reports whether (scope, name) has ANY run in flight — a build or a
+// copy. It is what refuses a create/reset for a VM that is already busy, and
+// what the quit confirmation counts.
+func (r *jobRegistry) isRunning(scope registry.Scope, name string) bool {
+	_, ok := r.runningKey(scope, name)
 	return ok
 }
 
-// runningKey names the run in flight for a VM — the build if both are (a copy can
-// legitimately be running against a VM that a reset is about to rebuild), since
-// the build is the one whose loss would cost the most.
-func (r *jobRegistry) runningKey(name string) (jobKey, bool) {
+// runningKey names the run in flight for (scope, name) — the build if both are (a
+// copy can legitimately be running against a VM that a reset is about to
+// rebuild), since the build is the one whose loss would cost the most.
+func (r *jobRegistry) runningKey(scope registry.Scope, name string) (jobKey, bool) {
 	if r == nil {
 		return jobKey{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, k := range keysFor(name) {
+	for _, k := range keysFor(scope, name) {
 		if j, ok := r.jobs[k]; ok && j.state == jobRunning {
 			return k, true
 		}
@@ -555,7 +585,7 @@ func (r *jobRegistry) runningKey(name string) (jobKey, bool) {
 //     history, and the copy the user just ran is what "show me the log" means.
 //
 // It reports false when the VM has no run at all, which is what gates the verb off.
-func (r *jobRegistry) logKey(name string) (jobKey, bool) {
+func (r *jobRegistry) logKey(scope registry.Scope, name string) (jobKey, bool) {
 	if r == nil {
 		return jobKey{}, false
 	}
@@ -563,7 +593,7 @@ func (r *jobRegistry) logKey(name string) (jobKey, bool) {
 	defer r.mu.Unlock()
 
 	var best *job
-	for _, k := range keysFor(name) {
+	for _, k := range keysFor(scope, name) {
 		j, ok := r.jobs[k]
 		if !ok {
 			continue
@@ -610,13 +640,16 @@ func (r *jobRegistry) running(key jobKey) bool {
 	return ok && s.Running()
 }
 
-// names lists every VM that has a run — once each, however many kinds it has — in
-// no order. The board (task 08) needs it because a VM being CREATED does not
-// appear in `limactl list` until its clone lands — minutes into its own build — so
-// a board that walked only the Lima list would show nothing at all for exactly the
-// span the user is waiting on, and the signature moment of the whole plan (press
-// n, a building tile appears) would not happen.
-func (r *jobRegistry) names() []string {
+// names lists every VM IN scope that has a run — once each, however many kinds it
+// has — in no order. The board (task 08) needs it because a VM being CREATED does
+// not appear in `limactl list` until its clone lands — minutes into its own build
+// — so a board that walked only the Lima list would show nothing at all for
+// exactly the span the user is waiting on, and the signature moment of the whole
+// plan (press n, a building tile appears) would not happen.
+//
+// Scoped to scope: a board built from one profile's roster must never gain a
+// tile for another profile's same-named build.
+func (r *jobRegistry) names(scope registry.Scope) []string {
 	if r == nil {
 		return nil
 	}
@@ -625,7 +658,7 @@ func (r *jobRegistry) names() []string {
 	seen := make(map[string]bool, len(r.jobs))
 	names := make([]string, 0, len(r.jobs))
 	for key := range r.jobs {
-		if seen[key.vm] {
+		if key.scope != scope || seen[key.vm] {
 			continue
 		}
 		seen[key.vm] = true
@@ -696,6 +729,6 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 // run it happens to have": a copy in flight is not a build, and must not be able
 // to become one by standing in the same slot.
 func (m model) statusOf(v vm.VM) derivedStatus {
-	job, ok := m.jobs.snapshot(provisionKey(v.Name))
+	job, ok := m.jobs.snapshot(provisionKey(m.scope, v.Name))
 	return deriveStatus(v, job, ok)
 }

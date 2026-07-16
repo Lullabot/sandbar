@@ -186,7 +186,7 @@ func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 		CloneToken: "ghp_x",
 	})
 
-	next, cmd := m.Update(provisionDoneMsg{job: provisionKey("claude")})
+	next, cmd := m.Update(provisionDoneMsg{job: provisionKey(registry.LocalScope, "claude")})
 	m = next.(model)
 
 	if got := m.sec.Get("claude", registry.LocalScope)["GH_TOKEN"]; got != "ghp_x" {
@@ -213,7 +213,7 @@ func TestNoTokenLeavesExistingSecretsAlone(t *testing.T) {
 	}
 	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 
-	next, _ := m.Update(provisionDoneMsg{job: provisionKey("claude")})
+	next, _ := m.Update(provisionDoneMsg{job: provisionKey(registry.LocalScope, "claude")})
 	m = next.(model)
 
 	got := m.sec.Get("claude", registry.LocalScope)

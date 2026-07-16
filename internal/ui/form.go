@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/provision"
-	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
@@ -294,10 +293,7 @@ func (m *model) openResetForm(name string, cfg vm.CreateConfig) tea.Cmd {
 // scope (global or directory-scoped). The reset form uses it to decide whether
 // to hint — via the token field's placeholder — that a saved token exists.
 func (m model) hasStoredToken(name string) bool {
-	// TODO(task 6): real scope — pass the VM's actual connection scope
-	// (m.scope) once secrets are threaded per-scope; for now every VM is
-	// treated as local.
-	for _, pairs := range m.sec.GetAll(name, registry.LocalScope) {
+	for _, pairs := range m.sec.GetAll(name, m.scope) {
 		if _, ok := pairs["GH_TOKEN"]; ok {
 			return true
 		}
@@ -628,7 +624,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 // clone URL, wrong token, recorded as managed when that build succeeded, and
 // rebuilt from the wrong config by any later Reset.
 func (m model) checkNotBusy(name string) error {
-	if !m.jobs.isRunning(name) {
+	if !m.jobs.isRunning(m.scope, name) {
 		return nil
 	}
 	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)

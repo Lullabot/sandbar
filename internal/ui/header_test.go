@@ -15,9 +15,9 @@ import (
 // either of them.
 func seedSample(m *model, name string, s guestSample) {
 	if m.heartbeats.beats == nil {
-		m.heartbeats.beats = map[string]*heartbeat{}
+		m.heartbeats.beats = map[vmHandle]*heartbeat{}
 	}
-	m.heartbeats.beats[name] = &heartbeat{
+	m.heartbeats.beats[vmHandle{Scope: m.scope, Name: name}] = &heartbeat{
 		cancel: func() {},
 		ch:     make(chan guestSample, 1),
 		last:   s,

@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -82,10 +81,10 @@ or 'sand create' to make one).
 	name := fs.Arg(0)
 
 	// scope is unused here: sand shell has no registry/managed-index
-	// bookkeeping of its own to confine to a provider (see provider.Resolve).
-	// It still goes through Resolve, not NewDefault, so the same opt-in
-	// selection environment governs all three entrypoints identically.
-	p, _, err := provider.Resolve()
+	// bookkeeping of its own to confine to a provider (see resolveSingle).
+	// It still goes through resolveSingle, not NewDefault, so the same
+	// profile-selection logic governs all three entrypoints identically.
+	p, _, err := resolveSingle()
 	if err != nil {
 		return err
 	}

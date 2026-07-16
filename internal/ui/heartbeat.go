@@ -57,6 +57,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/registry"
+
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -389,11 +391,11 @@ type heartbeat struct {
 // none.
 type heartbeatRegistry struct {
 	mu    sync.Mutex
-	beats map[string]*heartbeat
+	beats map[vmHandle]*heartbeat
 
 	// cooldown holds VMs whose heartbeat DIED ON ITS OWN, and until when they may
 	// not be retried. See heartbeatRetry.
-	cooldown map[string]time.Time
+	cooldown map[vmHandle]time.Time
 
 	nextEpoch uint64
 
@@ -406,31 +408,34 @@ type heartbeatRegistry struct {
 
 func newHeartbeats(shell guestShell) *heartbeatRegistry {
 	return &heartbeatRegistry{
-		beats:    make(map[string]*heartbeat),
-		cooldown: make(map[string]time.Time),
+		beats:    make(map[vmHandle]*heartbeat),
+		cooldown: make(map[vmHandle]time.Time),
 		shell:    shell,
 		interval: heartbeatInterval,
 		retry:    heartbeatRetry,
 	}
 }
 
-// start opens a heartbeat for name and spawns its sampler. It reports false — and
-// starts nothing — when one is already open, when the VM is in its post-failure
-// cooldown, or when there is no shell to open (a hand-built model).
-func (r *heartbeatRegistry) start(name string) (uint64, <-chan guestSample, bool) {
+// start opens a heartbeat for (scope, name) and spawns its sampler. It reports
+// false — and starts nothing — when one is already open, when the VM is in
+// its post-failure cooldown, or when there is no shell to open (a hand-built
+// model). Keyed on the full vmHandle so a VM under one scope never collides
+// with a same-named VM under another.
+func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-chan guestSample, bool) {
 	if r == nil || r.shell == nil {
 		return 0, nil, false
 	}
+	key := vmHandle{Scope: scope, Name: name}
 	r.mu.Lock()
-	if _, ok := r.beats[name]; ok {
+	if _, ok := r.beats[key]; ok {
 		r.mu.Unlock()
 		return 0, nil, false
 	}
-	if until, ok := r.cooldown[name]; ok && time.Now().Before(until) {
+	if until, ok := r.cooldown[key]; ok && time.Now().Before(until) {
 		r.mu.Unlock()
 		return 0, nil, false
 	}
-	delete(r.cooldown, name)
+	delete(r.cooldown, key)
 
 	r.nextEpoch++
 	epoch := r.nextEpoch
@@ -438,7 +443,7 @@ func (r *heartbeatRegistry) start(name string) (uint64, <-chan guestSample, bool
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
-	r.beats[name] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch}
+	r.beats[key] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch}
 	shell, interval := r.shell, r.interval
 	r.mu.Unlock()
 
@@ -459,20 +464,24 @@ func (r *heartbeatRegistry) start(name string) (uint64, <-chan guestSample, bool
 	return epoch, ch, true
 }
 
-// stop ends name's heartbeat DELIBERATELY: because the VM left Running, or because
-// the board is no longer the screen the user is on. The entry goes at once, so the
-// gauge disappears now rather than freezing at its last value.
+// stop ends (scope, name)'s heartbeat DELIBERATELY: because the VM left Running,
+// or because the board is no longer the screen the user is on. The entry goes at
+// once, so the gauge disappears now rather than freezing at its last value.
+//
+// Scoped: stopping this VM must never reach into another scope's same-named
+// heartbeat.
 //
 // No cooldown is recorded: this heartbeat did not fail, so returning to the board
 // must bring it straight back.
-func (r *heartbeatRegistry) stop(name string) {
+func (r *heartbeatRegistry) stop(scope registry.Scope, name string) {
 	if r == nil {
 		return
 	}
+	key := vmHandle{Scope: scope, Name: name}
 	r.mu.Lock()
-	hb, ok := r.beats[name]
+	hb, ok := r.beats[key]
 	if ok {
-		delete(r.beats, name)
+		delete(r.beats, key)
 	}
 	r.mu.Unlock()
 
@@ -492,9 +501,9 @@ func (r *heartbeatRegistry) stopAll() {
 	}
 	r.mu.Lock()
 	stopping := make([]*heartbeat, 0, len(r.beats))
-	for name, hb := range r.beats {
+	for key, hb := range r.beats {
 		stopping = append(stopping, hb)
-		delete(r.beats, name)
+		delete(r.beats, key)
 	}
 	r.mu.Unlock()
 
@@ -507,13 +516,13 @@ func (r *heartbeatRegistry) stopAll() {
 // stale epoch — a sample from a connection that has since been stopped, and perhaps
 // replaced — is DROPPED, and the nil channel ends its read loop instead of letting
 // it double up on the live one.
-func (r *heartbeatRegistry) fold(name string, epoch uint64, s guestSample) <-chan guestSample {
+func (r *heartbeatRegistry) fold(scope registry.Scope, name string, epoch uint64, s guestSample) <-chan guestSample {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	hb, ok := r.beats[name]
+	hb, ok := r.beats[vmHandle{Scope: scope, Name: name}]
 	if !ok || hb.epoch != epoch {
 		return nil
 	}
@@ -533,15 +542,16 @@ func (r *heartbeatRegistry) fold(name string, epoch uint64, s guestSample) <-cha
 //
 // A stale epoch means the heartbeat was ALREADY stopped deliberately and this is
 // just its goroutine finishing: nothing to drop, and nothing to cool down.
-func (r *heartbeatRegistry) ended(name string, epoch uint64) {
+func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint64) {
 	if r == nil {
 		return
 	}
+	key := vmHandle{Scope: scope, Name: name}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if hb, ok := r.beats[name]; ok && hb.epoch == epoch {
-		delete(r.beats, name)
-		r.cooldown[name] = time.Now().Add(r.retry)
+	if hb, ok := r.beats[key]; ok && hb.epoch == epoch {
+		delete(r.beats, key)
+		r.cooldown[key] = time.Now().Add(r.retry)
 	}
 }
 
@@ -552,43 +562,50 @@ func (r *heartbeatRegistry) ended(name string, epoch uint64) {
 //
 // False is not zero. A tile handed false must render the ABSENCE of a reading; a
 // tile that renders it as 0% has invented a fact.
-func (r *heartbeatRegistry) latest(name string) (guestSample, bool) {
+func (r *heartbeatRegistry) latest(scope registry.Scope, name string) (guestSample, bool) {
 	if r == nil {
 		return guestSample{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	hb, ok := r.beats[name]
+	hb, ok := r.beats[vmHandle{Scope: scope, Name: name}]
 	if !ok || !hb.seen {
 		return guestSample{}, false
 	}
 	return hb.last, true
 }
 
-// names lists the VMs with a heartbeat open, in no order.
-func (r *heartbeatRegistry) names() []string {
+// names lists the VMs with a heartbeat open IN scope, in no order. Scoped so a
+// caller reconciling one profile's roster never sees — and so never mistakenly
+// stops — another profile's heartbeats.
+func (r *heartbeatRegistry) names(scope registry.Scope) []string {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]string, 0, len(r.beats))
-	for name := range r.beats {
-		out = append(out, name)
+	for key := range r.beats {
+		if key.Scope == scope {
+			out = append(out, key.Name)
+		}
 	}
 	return out
 }
 
-// forget drops a VM's cooldown so it is not remembered after the VM itself is gone.
-func (r *heartbeatRegistry) forget(keep map[string]bool) {
+// forget drops scope's VMs' cooldowns that are not in keep, so a cooldown is not
+// remembered after the VM itself is gone. Scoped: it must never clear another
+// scope's cooldown entries, regardless of what keep (built from just this
+// scope's roster) does or does not contain.
+func (r *heartbeatRegistry) forget(scope registry.Scope, keep map[string]bool) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for name := range r.cooldown {
-		if !keep[name] {
-			delete(r.cooldown, name)
+	for key := range r.cooldown {
+		if key.Scope == scope && !keep[key.Name] {
+			delete(r.cooldown, key)
 		}
 	}
 }
@@ -697,9 +714,11 @@ func (m model) syncHeartbeats() tea.Cmd {
 	}
 
 	// Close what should no longer be open: a VM that left Running, or was deleted.
-	for _, name := range m.heartbeats.names() {
+	// Scoped to m.scope, so this model's roster reconciliation can never stop a
+	// heartbeat belonging to some other profile's same-named VM.
+	for _, name := range m.heartbeats.names(m.scope) {
 		if !want[name] {
-			m.heartbeats.stop(name)
+			m.heartbeats.stop(m.scope, name)
 		}
 	}
 	// And open what should be. start is a no-op for a VM that already has one, so
@@ -709,16 +728,16 @@ func (m model) syncHeartbeats() tea.Cmd {
 		if !want[v.Name] {
 			continue
 		}
-		if epoch, ch, ok := m.heartbeats.start(v.Name); ok {
+		if epoch, ch, ok := m.heartbeats.start(m.scope, v.Name); ok {
 			cmds = append(cmds, heartbeatReadCmd(v.Name, epoch, ch))
 		}
 	}
-	m.heartbeats.forget(want)
+	m.heartbeats.forget(m.scope, want)
 	return tea.Batch(cmds...)
 }
 
 // sampleOf is the tile renderer's accessor (task 07): the live reading for a VM, or
 // false if there is none to show.
 func (m model) sampleOf(name string) (guestSample, bool) {
-	return m.heartbeats.latest(name)
+	return m.heartbeats.latest(m.scope, name)
 }

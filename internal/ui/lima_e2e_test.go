@@ -231,7 +231,7 @@ func TestE2EHeartbeatParsesRealGuestAndCPUMoves(t *testing.T) {
 	}
 
 	r := newHeartbeats(cli)
-	_, ch, ok := r.start(name)
+	_, ch, ok := r.start(registry.LocalScope, name)
 	if !ok {
 		t.Fatal("start: heartbeat did not open")
 	}
@@ -324,7 +324,7 @@ func TestE2EHeartbeatTerminatesWhenVMStoppedUnderneath(t *testing.T) {
 	r := newHeartbeats(cli)
 	base := runtime.NumGoroutine()
 
-	epoch, ch, ok := r.start(name)
+	epoch, ch, ok := r.start(registry.LocalScope, name)
 	if !ok {
 		t.Fatal("start: heartbeat did not open")
 	}
@@ -343,17 +343,17 @@ func TestE2EHeartbeatTerminatesWhenVMStoppedUnderneath(t *testing.T) {
 		for {
 			s, open := <-ch
 			if !open {
-				r.ended(name, epoch)
+				r.ended(registry.LocalScope, name, epoch)
 				return
 			}
-			if next := r.fold(name, epoch, s); next == nil {
+			if next := r.fold(registry.LocalScope, name, epoch, s); next == nil {
 				return
 			}
 		}
 	}()
 
 	waitFor(t, "the first sample from the real guest", func() bool {
-		_, ok := r.latest(name)
+		_, ok := r.latest(registry.LocalScope, name)
 		return ok
 	})
 
@@ -368,7 +368,7 @@ func TestE2EHeartbeatTerminatesWhenVMStoppedUnderneath(t *testing.T) {
 	// measured ~300ms once the guest is actually gone, but scheduling and
 	// process-exit slop are real against an actual VM) more room.
 	e2eWaitForLonger(t, "the heartbeat to end on its own after the VM stops", 30*time.Second, func() bool {
-		_, ok := r.latest(name)
+		_, ok := r.latest(registry.LocalScope, name)
 		return !ok
 	})
 	readers.Wait()
@@ -496,7 +496,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	cmdB := l.m.beginProvision("Creating "+nameB, e2eCreateVM(l.m.p), cfgB)
 	l.exec(cmdB)
 
-	if !l.m.jobs.isRunning(nameA) || !l.m.jobs.isRunning(nameB) {
+	if !l.m.jobs.isRunning(registry.LocalScope, nameA) || !l.m.jobs.isRunning(registry.LocalScope, nameB) {
 		t.Fatal("both provisions should be in flight at once")
 	}
 
@@ -505,8 +505,8 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// would time out long before A's own clone+configure+start+finalize even
 	// finishes, since B would not even have started.
 	pumpTimeout(t, l, "both jobs to report real Ansible progress", 15*time.Minute, func(m model) bool {
-		sa, okA := m.jobs.snapshot(provisionKey(nameA))
-		sb, okB := m.jobs.snapshot(provisionKey(nameB))
+		sa, okA := m.jobs.snapshot(provisionKey(registry.LocalScope, nameA))
+		sb, okB := m.jobs.snapshot(provisionKey(registry.LocalScope, nameB))
 		return okA && okB && sa.Progress.Total > 0 && sb.Progress.Total > 0
 	})
 
@@ -515,7 +515,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// base image …`), so real cross-routing would leak the OTHER VM's name
 	// into this job's buffer — a failure mode two independently fed fake
 	// streams cannot exhibit, because nothing routes them but the test itself.
-	outA, outB := jobOutput(l.m, provisionKey(nameA)), jobOutput(l.m, provisionKey(nameB))
+	outA, outB := jobOutput(l.m, provisionKey(registry.LocalScope, nameA)), jobOutput(l.m, provisionKey(registry.LocalScope, nameB))
 	if strings.Contains(outA, nameB) {
 		t.Fatalf("%s's job log contains %s's name — output crossed streams:\n%s", nameA, nameB, outA)
 	}
@@ -527,36 +527,36 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// retained-run verb) and ctrl+c: only A's real limactl subprocess may be
 	// killed.
 	l.m.view = viewBoard
-	l.m.focusName = nameA
+	l.m.focusVM.Name = nameA
 	l.send(runeKey('l'))
-	if l.m.view != viewProgress || l.m.progressJob != provisionKey(nameA) {
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, nameA) {
 		t.Fatalf("reopening %s's log should show it on the progress view (view=%v job=%+v)", nameA, l.m.view, l.m.progressJob)
 	}
 	l.send(ctrlKey('c'))
 
 	pumpTimeout(t, l, nameA+" to finish cancelling", time.Minute, func(m model) bool {
-		return !m.jobs.isRunning(nameA)
+		return !m.jobs.isRunning(registry.LocalScope, nameA)
 	})
-	if s, _ := l.m.jobs.snapshot(provisionKey(nameA)); !s.Canceled {
+	if s, _ := l.m.jobs.snapshot(provisionKey(registry.LocalScope, nameA)); !s.Canceled {
 		t.Fatalf("%s should be marked cancelled", nameA)
 	}
-	if !l.m.jobs.isRunning(nameB) {
+	if !l.m.jobs.isRunning(registry.LocalScope, nameB) {
 		t.Fatal("cancelling A must not touch B — B should still be running")
 	}
 
 	// B RUNS TO COMPLETION, UNTOUCHED BY A's CANCELLATION.
 	pumpTimeout(t, l, nameB+" to finish", 15*time.Minute, func(m model) bool {
-		return !m.jobs.isRunning(nameB)
+		return !m.jobs.isRunning(registry.LocalScope, nameB)
 	})
-	sb, ok := l.m.jobs.snapshot(provisionKey(nameB))
+	sb, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, nameB))
 	if !ok {
 		t.Fatal("B's job should be retained")
 	}
 	if sb.Failed() {
 		t.Fatalf("B should have succeeded (a real create against a real, already-built base), got err=%v\noutput:\n%s", sb.Err, sb.Output)
 	}
-	if strings.Contains(jobOutput(l.m, provisionKey(nameB)), "^C") {
-		t.Fatalf("A's cancel notice leaked into B's buffer:\n%s", jobOutput(l.m, provisionKey(nameB)))
+	if strings.Contains(jobOutput(l.m, provisionKey(registry.LocalScope, nameB)), "^C") {
+		t.Fatalf("A's cancel notice leaked into B's buffer:\n%s", jobOutput(l.m, provisionKey(registry.LocalScope, nameB)))
 	}
 }
 
@@ -602,10 +602,10 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	l.exec(cmd)
 
 	pumpTimeout(t, l, "the provision to finish (and fail)", 15*time.Minute, func(m model) bool {
-		return !m.jobs.isRunning(name)
+		return !m.jobs.isRunning(registry.LocalScope, name)
 	})
 
-	snap, ok := l.m.jobs.snapshot(provisionKey(name))
+	snap, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, name))
 	if !ok {
 		t.Fatal("the job should be retained after finishing")
 	}
@@ -654,7 +654,7 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 
 	// THE RETAINED LOG IS REOPENABLE: still there, and unchanged, after
 	// navigating away and back.
-	if !l.m.jobs.HasRetainedRun(name) {
+	if !l.m.jobs.HasRetainedRun(registry.LocalScope, name) {
 		t.Fatal("the failed run's log should be retained and reopenable")
 	}
 	if snap.Output == "" {
@@ -662,10 +662,10 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 	}
 	l.m.view = viewBoard
 	l.m.showJobLog(name)
-	if l.m.view != viewProgress || l.m.progressJob != provisionKey(name) {
+	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, name) {
 		t.Fatalf("reopening the log should show the progress view for %s (view=%v job=%+v)", name, l.m.view, l.m.progressJob)
 	}
-	reopened, ok := l.m.jobs.snapshot(provisionKey(name))
+	reopened, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, name))
 	if !ok || reopened.Output != snap.Output {
 		t.Fatalf("the reopened log should be identical to the retained one (navigating away and back must not lose it)")
 	}

@@ -57,7 +57,8 @@ type SSHConfig struct {
 }
 
 // defaultRemoteLimaHome is where a remote host keeps its Lima state when
-// SAND_REMOTE_LIMA_HOME is unset. It is RELATIVE (no leading / or ~) on purpose:
+// SSHConfig.RemoteLimaHome is unset/empty. It is RELATIVE (no leading / or ~)
+// on purpose:
 // the remote login home is unknown from here without a round trip, and a relative
 // path handed to `ssh host cat .lima/…` resolves against the remote $HOME, which
 // is exactly `~/.lima` — Lima's default — without us having to learn the remote

@@ -37,7 +37,7 @@ func boardVerbs(m model) string {
 func focusTile(t *testing.T, m model, vms ...vm.VM) model {
 	t.Helper()
 	m = loadManaged(t, m, vms...)
-	m.focusName = vms[0].Name
+	m.focusVM.Name = vms[0].Name
 	return m
 }
 
@@ -101,7 +101,7 @@ func TestStartOfferedOnlyWhenStopped(t *testing.T) {
 	)
 
 	running := m
-	running.focusName = "running-vm"
+	running.focusVM.Name = "running-vm"
 	if strings.Contains(boardVerbs(running), "s start") {
 		t.Fatalf("a running VM's help bar must not offer start, got:\n%s", boardVerbs(running))
 	}
@@ -110,7 +110,7 @@ func TestStartOfferedOnlyWhenStopped(t *testing.T) {
 	}
 
 	stopped := m
-	stopped.focusName = "stopped-vm"
+	stopped.focusVM.Name = "stopped-vm"
 	if !strings.Contains(boardVerbs(stopped), "s start") {
 		t.Fatalf("a stopped VM's help bar should offer start, got:\n%s", boardVerbs(stopped))
 	}
@@ -149,7 +149,7 @@ func TestBoardHelpAndDispatchAgree(t *testing.T) {
 
 	for _, name := range []string{"stopped-vm", "running-vm"} {
 		mm := m
-		mm.focusName = name
+		mm.focusVM.Name = name
 		focused, ok := mm.focusedVM()
 		if !ok {
 			t.Fatalf("precondition: %s should have a tile under the ring", name)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/ui"
 	buildversion "github.com/lullabot/sandbar/internal/version"
 
@@ -54,12 +53,12 @@ func main() {
 // default) `sand` entrypoint.
 func runTUI() {
 	// scope is the registry.Scope the resolved provider owns (registry.LocalScope
-	// for the default, unconfigured local Lima) — see provider.Resolve. The TUI
+	// for the default, unconfigured local Lima) — see resolveSingle. The TUI
 	// threads it through to its own manage.Reconcile/RecordSuccess bookkeeping
 	// (internal/ui/model.go) so it stays in lockstep with the headless `sand
 	// create` path (cmd/sand/create.go) on which entries belong to which
 	// provider.
-	p, scope, err := provider.Resolve()
+	p, scope, err := resolveSingle()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

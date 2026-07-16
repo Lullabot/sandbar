@@ -97,7 +97,7 @@ func putOnBoard(t *testing.T, m model, v vm.VM) model {
 		m.vms = append(m.vms, v)
 	}
 	m.view = viewBoard
-	m.focusName = v.Name
+	m.focusVM.Name = v.Name
 	return m
 }
 
@@ -235,11 +235,11 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 	build := newFakeJob()
 	l.exec(l.m.beginProvision("Creating orphan", build.run, vm.CreateConfig{Name: "orphan", BaseName: "sandbar-base"}))
 	build.done <- errAnsibleBoom
-	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning("orphan") })
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "orphan") })
 	l.send(vmsLoadedMsg{vms: []vm.VM{{Name: "orphan", Status: "Running", CPUs: 2}}})
 
 	m = l.m
-	m.focusName = "orphan"
+	m.focusVM.Name = "orphan"
 	if m.reg.IsManaged("orphan") {
 		t.Fatal("precondition: a failed build must not be recorded managed")
 	}
@@ -297,7 +297,7 @@ func openReset(t *testing.T, cfg vm.CreateConfig) model {
 	m = loaded.(model)
 
 	m.view = viewBoard
-	m.focusName = cfg.Name
+	m.focusVM.Name = cfg.Name
 	after, _ := m.Update(runeKey('R'))
 	return after.(model)
 }
@@ -315,7 +315,7 @@ func TestResetGateManagedOffersReset(t *testing.T) {
 	}})
 	m = loaded.(model)
 	m.view = viewBoard
-	m.focusName = cfg.Name
+	m.focusVM.Name = cfg.Name
 
 	if !strings.Contains(boardVerbs(m), "R reset") {
 		t.Fatalf("a sand-managed VM's help bar should offer reset, got:\n%s", boardVerbs(m))
@@ -426,13 +426,13 @@ func TestResetDiskFloorAndDispatch(t *testing.T) {
 	m.inputs[fDisk].SetValue("100GiB")
 	accepted, _ := m.Update(ctrlKey('s'))
 	m = accepted.(model)
-	if m.view != viewBoard || !m.jobs.isRunning("claude") {
+	if m.view != viewBoard || !m.jobs.isRunning(registry.LocalScope, "claude") {
 		t.Fatalf("a valid reset should provision and land on the board (view=%v)", m.view)
 	}
 	// A reset deletes and re-clones its own VM, so it must be exempt from the
 	// disappeared-VM reaper — see TestResetJobSurvivesItsOwnDelete.
 	m.jobs.mu.Lock()
-	recreates := m.jobs.jobs[provisionKey("claude")].recreates
+	recreates := m.jobs.jobs[provisionKey(registry.LocalScope, "claude")].recreates
 	m.jobs.mu.Unlock()
 	if !recreates {
 		t.Fatal("a reset's job must be flagged as one that recreates its own VM")
@@ -578,7 +578,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	if m.view != viewProgress {
 		t.Fatalf("confirming the destination should switch to progress, view=%v", m.view)
 	}
-	if !m.jobs.isRunning("claude") {
+	if !m.jobs.isRunning(registry.LocalScope, "claude") {
 		t.Fatal("confirming should start the transfer as a job on its VM")
 	}
 	if cmd == nil {
@@ -586,7 +586,7 @@ func TestDestConfirmTransitionsToProgress(t *testing.T) {
 	}
 	// A transfer's job carries no provision config, so it is neither recorded as a
 	// managed VM nor rendered as a Building tile.
-	s, _ := m.jobs.snapshot(transferKey("claude"))
+	s, _ := m.jobs.snapshot(transferKey(registry.LocalScope, "claude"))
 	if s.Provision {
 		t.Fatal("a transfer must not be marked a provision")
 	}
@@ -601,7 +601,7 @@ func TestTransferNotRecordedManaged(t *testing.T) {
 	m := newTestModel(t)
 	seedJob(t, &m, "claude", vm.CreateConfig{}) // a transfer's job carries no config
 
-	done, _ := m.Update(provisionDoneMsg{job: transferKey("claude")})
+	done, _ := m.Update(provisionDoneMsg{job: transferKey(registry.LocalScope, "claude")})
 	m = done.(model)
 
 	if m.reg.IsManaged("claude") {
@@ -1042,7 +1042,7 @@ func TestLongOutputLineWraps(t *testing.T) {
 	// A 69-char unbroken token: the first 20 chars fill one wrapped line, so a
 	// truncating viewport would drop the trailing marker entirely.
 	line := strings.Repeat("A", 60) + "ENDMARKER"
-	out, _ := m.Update(provisionOutputMsg{job: provisionKey("claude"), chunk: line})
+	out, _ := m.Update(provisionOutputMsg{job: provisionKey(registry.LocalScope, "claude"), chunk: line})
 	m = out.(model)
 
 	view := m.viewport.View()
@@ -1073,7 +1073,7 @@ func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	seedJob(t, &m, "claude", vm.CreateConfig{Name: "claude", BaseName: "sandbar-base"})
 	called := make(chan struct{})
 	m.jobs.mu.Lock()
-	m.jobs.jobs[provisionKey("claude")].cancel = func() { close(called) }
+	m.jobs.jobs[provisionKey(registry.LocalScope, "claude")].cancel = func() { close(called) }
 	m.jobs.mu.Unlock()
 
 	after, cmd := m.Update(ctrlKey('c'))
@@ -1084,7 +1084,7 @@ func TestCtrlCCancelsRunningProvision(t *testing.T) {
 	default:
 		t.Fatal("ctrl+c during a build should cancel the provisioner context")
 	}
-	if s, _ := m.jobs.snapshot(provisionKey("claude")); !s.Canceled {
+	if s, _ := m.jobs.snapshot(provisionKey(registry.LocalScope, "claude")); !s.Canceled {
 		t.Fatal("ctrl+c during a build should mark the run canceled")
 	}
 	if m.view != viewProgress {
@@ -1112,14 +1112,14 @@ func TestQDoesNotQuitDuringProvision(t *testing.T) {
 func TestCanceledRunIsNotRecordedManaged(t *testing.T) {
 	m := newTestModel(t)
 	seedJob(t, &m, "myvm", vm.CreateConfig{Name: "myvm", BaseName: "sandbar-base"})
-	if !m.jobs.cancelJob(provisionKey("myvm")) {
+	if !m.jobs.cancelJob(provisionKey(registry.LocalScope, "myvm")) {
 		t.Fatal("precondition: the running job should be cancellable")
 	}
 
-	done, _ := m.Update(provisionDoneMsg{job: provisionKey("myvm"), err: context.Canceled})
+	done, _ := m.Update(provisionDoneMsg{job: provisionKey(registry.LocalScope, "myvm"), err: context.Canceled})
 	m = done.(model)
 
-	s, ok := m.jobs.snapshot(provisionKey("myvm"))
+	s, ok := m.jobs.snapshot(provisionKey(registry.LocalScope, "myvm"))
 	if !ok || s.Running() {
 		t.Fatal("a done message should end the run")
 	}
