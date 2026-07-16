@@ -206,6 +206,12 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 		if scope.RemoteTarget == "" {
 			mem.host.mem, mem.host.diskFree = hostMemBytesFn(), hostDiskFreeFn()
 		}
+		// Live enable/edit of a remote starts a fresh connection attempt —
+		// same announcement New makes for the startup fleet (local stays
+		// silent there and here alike).
+		if p.Type == profiles.TypeRemoteSSH {
+			m.logMsg("connecting to " + p.Name + "…")
+		}
 	}
 
 	if i, exists := m.memberIndexByProfileID(p.ID); exists {
@@ -272,6 +278,10 @@ func (m *model) disableProfile(id string) {
 		m.members[i].prov = nil
 		m.members[i].state = connDisabled
 		m.members[i].lastErr = nil
+		// A deliberate disable logs for EVERY profile type (unlike the
+		// connect/reconnect chatter, which is remote-only — see New): the user
+		// asked for this disconnect, so the session log should say it happened.
+		m.logMsg("disconnected from " + p.Name + " (disabled)")
 	}
 	// The disabled member's provider is now nil; the resolver must reflect
 	// that too, exactly like every other fleet mutation (see setShell).
