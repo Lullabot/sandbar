@@ -176,12 +176,12 @@ config:
     pointLabelFontSize: 10
 ---
 quadrantChart
-    title An Overview of Sandboxing Tools (July 2026)
+    title An Overview of Sandboxing Tools - July 2026
     x-axis Limited Environment Tooling --> Fully Functional Environment
     y-axis Host exposed --> Sealed off
     quadrant-1 Sealed and fully functional
     quadrant-2 Sealed but limited
-    quadrant-3 (no one builds this)
+    quadrant-3 no one builds this
     quadrant-4 Functional but exposed
     Sandbar:::local: [0.90, 0.94]
     E2B:::cloud: [0.30, 0.93]
