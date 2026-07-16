@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.0](https://github.com/Lullabot/sandbar/compare/v0.4.1...v0.5.0) (2026-07-15)
+
+
+### Features
+
+* install GitLab and drupal.org CLIs ([#50](https://github.com/Lullabot/sandbar/issues/50)) ([32ccf73](https://github.com/Lullabot/sandbar/commit/32ccf7317e3cf30a51bf1f1c18f8edaefe5798dc))
+* **provider:** add the Provider interface and local Lima provider (plan 15 phase 2) ([bb814d4](https://github.com/Lullabot/sandbar/commit/bb814d446187aad90c1d3d0b864ddf37fd6a4af1))
+* **provider:** remote Lima over SSH provider (plan 15 phase 4) ([aa5e670](https://github.com/Lullabot/sandbar/commit/aa5e670f000664605868c63c1f1bdd493496eaae))
+* **registry,provider:** provider-aware registry + provider selection (plan 15 phase 3b) ([4a056d3](https://github.com/Lullabot/sandbar/commit/4a056d3a71d724fa32680d9378d6e7109e449bf9))
+* **shell:** forward host COLORTERM into the guest tmux session ([#57](https://github.com/Lullabot/sandbar/issues/57)) ([1db98e5](https://github.com/Lullabot/sandbar/commit/1db98e5f91929e40ca53141bc1f661de21e37a80))
+
+
+### Bug Fixes
+
+* **lima:** filter scp's SFTP-mode -v banner from copy output ([b4c59ff](https://github.com/Lullabot/sandbar/commit/b4c59ffa30a224677c5fa947ca69a848aca2e003))
+* **provider,ui:** board header shows the REMOTE host's cpu/mem/disk ([818394c](https://github.com/Lullabot/sandbar/commit/818394c7155e7d75cde67e8195185f427bf06213))
+* **provider,ui:** default a remote VM's user to the remote host + connecting interstitial ([f73c29c](https://github.com/Lullabot/sandbar/commit/f73c29ca61d6297716a405418b96cbf896a32371))
+* **provider:** address high-effort review findings on the remote provider ([9a68421](https://github.com/Lullabot/sandbar/commit/9a684216a6ff03f2ec075432e635cfdbb9da1db2))
+* **provider:** make remote base creation work (overlay + playbook on the remote host) ([59118a0](https://github.com/Lullabot/sandbar/commit/59118a08e06a33824d6fa4f625099855cf96640c))
+* **provider:** thread host COLORTERM through provider AttachArgv (rebase onto [#57](https://github.com/Lullabot/sandbar/issues/57)) ([8c070f1](https://github.com/Lullabot/sandbar/commit/8c070f182ed88fb0b2563ed32074b290b0651f70))
+* **ui,provider:** board tiles sample the REMOTE host's disk (and stat works on macOS) ([69b3a2c](https://github.com/Lullabot/sandbar/commit/69b3a2c0ccf1766cd46d7571f08f4ccafca51313))
+* **ui:** create-form cpu/memory defaults scale to the REMOTE host ([d4923db](https://github.com/Lullabot/sandbar/commit/d4923db2d934a0dfd7c9c5b478044eef367909ca))
+* **ui:** show what a file transfer is copying (remote gives no scp progress) ([62ce169](https://github.com/Lullabot/sandbar/commit/62ce1698c1bd93c3e49eff101a86e57dfa43454c))
+
 ## [0.4.1](https://github.com/Lullabot/sandbar/compare/v0.4.0...v0.4.1) (2026-07-15)
 
 
