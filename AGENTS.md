@@ -23,13 +23,25 @@ it is not where prose belongs.
 - `provider` — the backend-agnostic seam (`Provider` interface) that owns the
   whole VM lifecycle (discovery, power, provisioning), guest transport, and
   interactive attach. Two implementations: local Lima (`NewLocalLima`) and
-  remote-Lima-over-SSH (`NewRemoteLima`, plan 15 task 5). Centralised
-  construction via `NewDefault()` (zero-config local) and `Resolve()`
-  (provider selection via `SAND_*` env vars), so the three entrypoints
-  (TUI, headless `sand create`, `sand shell`) cannot drift. The `lima`
-  package now exports a host-access seam (`Host` = `Runner` + `HostFiles`,
-  local vs SSH) that the two providers differ on; the local provider is
-  behaviourally identical to sand's previous direct use of `*lima.Client`.
+  remote-Lima-over-SSH (`NewRemoteLima`, plan 15 task 5). There is no
+  process-global "the provider" anymore: `provider.BuildFleet` (plan 16)
+  constructs one `Binding` (provider + registry.Scope) **per enabled
+  Connection Profile** from `internal/profiles`' persisted store, so a
+  headless command binds to exactly the one profile it's told to act on
+  (`--profile`, else last-used, else Local), and the TUI holds one binding
+  per enabled profile live at once. The old `SAND_PROVIDER`/`SAND_REMOTE_*`
+  env-var selection (`Resolve()`) is **removed** — profiles are the only
+  configuration surface now. The `lima` package exports a host-access seam
+  (`Host` = `Runner` + `HostFiles`, local vs SSH) that the two providers
+  differ on; the local provider is behaviourally identical to sand's
+  previous direct use of `*lima.Client`.
+- `profiles` — the persisted, secret-free Connection Profile model
+  (`profiles.yaml`) that is now the single source of truth for every
+  location `sand` can run VMs on: a permanent Local profile plus any number
+  of named `remote-ssh` profiles (host/user/port/key-path/Lima-home, no
+  secrets). Deliberately does not import `provider` (to avoid an import
+  cycle) — `provider.BuildFleet` is what converts a `Profile` into a
+  `Binding`.
 - `lima` — typed wrapper over the `limactl` CLI. All subprocess execution goes
   through the `Host` interface (a union of `Runner` and `HostFiles` seams),
   and `Runner` is the gateway for subprocess execution — both implement it
@@ -40,19 +52,25 @@ it is not where prose belongs.
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
   not directly on `Provider`.
-- `registry` — managed-VM index, now provider-tagged (schema v2, auto-migrated
-  on read). Each entry's `Scope` is derived from which provider created it
-  (`LocalScope` for local Lima, a remote identity like `user@host:port` for
-  remote), so a remote host's VMs never mix with the local list.
-- `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/…).
-- `secrets`, `manage`, `browse`, `vm` — host-side secrets store, shared registry
-  bookkeeping, file browser, domain types.
+- `registry` — managed-VM index, now `(connection scope, name)`-keyed
+  (schema v3, auto-migrated on read). Each entry's connection `Scope` is
+  derived from which profile's provider created it (`LocalScope` for local
+  Lima, a remote identity like `user@host:port` for remote), so the same VM
+  name can exist independently under two different profiles and a remote
+  profile's VMs never mix with the local list.
+- `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
+  profile-management/…).
+- `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
+  now also keyed by connection scope — distinct from its pre-existing
+  per-directory scope, see `docs/reference/files-and-state.md`), shared
+  registry bookkeeping, file browser, domain types.
 
 Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
 (`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
-keep them from drifting — the create/TUI paths construct their provider via
-`provider.Resolve()` (centralised, wrapping `provider.NewDefault()` with optional
-selection), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
+keep them from drifting — the create/TUI paths construct their provider(s) via
+`provider.BuildFleet` over the `profiles` store's enabled profiles (a headless
+command binds only the one profile it targets; the TUI binds every enabled
+one), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
 construct their guest-attach command exclusively via `provider.AttachArgv()`,
 the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
 

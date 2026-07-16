@@ -38,6 +38,16 @@ for the full walkthrough, or the
 [CLI Reference](https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/)
 for every command and flag.
 
+By default `sand` manages VMs on a local Lima. It can also manage a **fleet**
+of VMs spread across your local machine and one or more remote hosts over
+SSH, all at once — each host you add is a named **Connection Profile**,
+managed entirely from the TUI's `p` screen or hand-edited in a secret-free,
+shareable `profiles.yaml`. See
+[Connection Profiles](https://lullabot.github.io/sandbar/latest/using-sand/connection-profiles/)
+for the model. (Earlier, unreleased builds selected a single remote target
+via `SAND_PROVIDER` / `SAND_REMOTE_*` environment variables; that surface has
+been removed in favor of profiles.)
+
 ## Development
 
 Building from a checkout, running tests, and how `sand` embeds and runs

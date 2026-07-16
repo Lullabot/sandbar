@@ -8,11 +8,30 @@ out; every other page links here instead of restating them.
 
 | Path | What it holds | Safe to delete? |
 | --- | --- | --- |
-| `${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json` | The secret-free index of every `sand`-managed VM: which VMs `sand` created, the base image each was cloned from, and each VM's create configuration (the settings that pre-fill the form when you `Reset`). | Yes, but you lose the pre-filled reset config and `sand`'s record of which VMs it manages — a VM's actual disk is untouched, and Lima will still list it, but `sand` will no longer treat it as managed. |
+| `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml` | The [Connection Profiles](../using-sand/connection-profiles.md) config: every location `sand` can run VMs on (the permanent Local profile, plus any `remote-ssh` profiles you've added), each profile's host/user/port/key-path/Lima-home, and which profile was last used. **Secret-free** — no password or key material, only a path to a key file — and hand-editable YAML. | Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — `sand` reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again. |
+| `${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json` | The secret-free index of every `sand`-managed VM: which VMs `sand` created, the base image each was cloned from, and each VM's create configuration (the settings that pre-fill the form when you `Reset`). Since schema version 3, each entry is keyed by **(connection scope, name)** rather than by bare name, so the same VM name can exist under two different connection profiles without colliding. | Yes, but you lose the pre-filled reset config and `sand`'s record of which VMs it manages — a VM's actual disk is untouched, and Lima will still list it, but `sand` will no longer treat it as managed. |
 | `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json` | The secret store: every KEY=VALUE pair you've set for every VM, across all scopes. Stored **unencrypted**, mode `0600` inside a `0700` directory. | Only if you're prepared to re-enter every secret for every VM — deleting it does not touch a running VM's already-rendered guest files, but the next apply will have nothing to render. |
 | `${LIMA_HOME:-~/.lima}` | Lima's own instance store — disk images, `lima.yaml`, per-instance logs. `sand` does not own this directory; Lima does. | `sand` never deletes it directly; use `limactl delete` or Lima's own tooling. |
 
-Sources: `internal/registry/registry.go:53` and `internal/registry/registry.go:62` (`managed-vms.json` default path), `internal/registry/registry.go:172` (the config saved into that index is the create config, stripped of the clone token), `internal/secrets/secrets.go:124` and `internal/secrets/secrets.go:133` (`secrets.json` default path), `internal/secrets/secrets.go:342`-`internal/secrets/secrets.go:350` (directory forced to `0700`) and `internal/secrets/secrets.go:357`-`internal/secrets/secrets.go:359` (file created at `0600`), `internal/provision/baseversion.go:62`-`internal/provision/baseversion.go:68` (`LIMA_HOME` fallback to `~/.lima`).
+Sources: `internal/profiles/store.go` (`profiles.yaml` default path, schema, and CRUD), `internal/registry/registry.go:53` and `internal/registry/registry.go:62` (`managed-vms.json` default path), `internal/registry/registry.go:172` (the config saved into that index is the create config, stripped of the clone token), `internal/registry/registry.go:107`-`internal/registry/registry.go:129` (the v3 `(scope, name)`-keyed array shape), `internal/secrets/secrets.go:124` and `internal/secrets/secrets.go:133` (`secrets.json` default path), `internal/secrets/secrets.go:342`-`internal/secrets/secrets.go:350` (directory forced to `0700`) and `internal/secrets/secrets.go:357`-`internal/secrets/secrets.go:359` (file created at `0600`), `internal/provision/baseversion.go:62`-`internal/provision/baseversion.go:68` (`LIMA_HOME` fallback to `~/.lima`).
+
+### Two different "scope" dimensions
+
+Two unrelated things are both called a "scope" in this file store, and it's
+easy to conflate them:
+
+- The **connection scope** (`registry.Scope`: which [Connection
+  Profile](../using-sand/connection-profiles.md) — local, or a specific
+  `user@host:port` — a VM lives on) is what schema version 3 added to both
+  `managed-vms.json` and `secrets.json`. It's what lets the same VM *name*
+  exist independently on two different profiles.
+- The secrets store's pre-existing **directory scope** (`global`, or a
+  path like `foo/bar`) is unrelated and unchanged by this — it's *within
+  one VM*, picking which guest directory a secret's `.env` lands in. See
+  [Secrets](../using-sand/secrets.md#scopes-global-vs-per-directory).
+
+A single secret is addressed by the combination of both: connection scope →
+VM name → directory scope → key.
 
 ## Legacy data-directory migration
 

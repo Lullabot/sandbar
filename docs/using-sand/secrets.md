@@ -24,7 +24,17 @@ For the exact schema and how it's kept there, see
 
 Secrets are organized into **scopes**. The **global** scope applies to the
 whole VM. Any other scope is a directory path relative to the guest home,
-such as `foo/bar`.
+such as `foo/bar`. This directory scope is entirely within one VM — it's
+unrelated to which [Connection Profile](connection-profiles.md) that VM
+runs on. Since the same VM name can exist under two different profiles at
+once (see [Connection Profiles](connection-profiles.md#all-enabled-profiles-are-active-at-once)),
+the secrets store also keys everything by which profile's connection a VM
+belongs to first, so editing `claude`'s secrets on your `work` profile never
+touches a same-named `claude` on `local`. You never see or manage that
+connection-scope key directly — `e` on a tile always opens the right VM's
+secrets, on whichever profile that tile's VM actually lives on. See
+[Files and State](../reference/files-and-state.md#two-different-scope-dimensions)
+for how the two scope dimensions are kept distinct on disk.
 
 Where each scope lands in the guest:
 
