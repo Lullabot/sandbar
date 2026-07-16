@@ -307,3 +307,28 @@ func TestHeaderBandLinesSummarizesOverflow(t *testing.T) {
 		t.Fatalf("headerBandLines()[0] = %q, want a \"+2 more\" summary", lines[0])
 	}
 }
+
+// When per-profile bands are actually rendered, the counts line must NOT also
+// carry the active member's host readout — that would print the local stats
+// twice (once up top, once in its band). And when a short terminal sheds the
+// bands (HeaderBandLines granted 0 despite a multi-member fleet), the combined
+// line is the fallback and the readout returns: stats appear exactly once
+// either way.
+func TestHeaderCountsDropsCapacityWhenBandsRender(t *testing.T) {
+	pinHostForHeader(t)
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, 120, 40)
+	m.members[0].state = connConnected
+	m.members[1].state = connConnected
+
+	m.layout.HeaderBandLines = 2 // bands granted: readout lives in the bands
+	if line := m.headerCounts(120); strings.Contains(line, "cpu") {
+		t.Fatalf("headerCounts with rendered bands still embeds the host readout: %q", line)
+	}
+
+	m.layout.HeaderBandLines = 0 // bands shed: combined line is the only home
+	if line := m.headerCounts(120); !strings.Contains(line, "cpu") {
+		t.Fatalf("headerCounts with bands shed lost the host readout entirely: %q", line)
+	}
+}
