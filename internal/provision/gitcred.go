@@ -45,9 +45,9 @@ type gitCredEntry struct {
 
 // collectGitCredEntries walks scopes (as delivered by secrets.Store.GetAll)
 // and returns one gitCredEntry per (scope, KEY) pair where KEY is in
-// recognizedForgeTokens AND scope is non-empty. This redesign's git-credential
+// recognizedForgeTokens AND scope is non-empty. The git-credential
 // wiring covers the scoped case only — a recognized token in the global ("")
-// scope is still delivered as a plain env var (see ApplySecrets/task 03) but
+// scope is still delivered as a plain env var (see ApplySecrets) but
 // does not additionally wire a VM-wide git credential helper. A KEY that is
 // not in recognizedForgeTokens produces no entry at all, regardless of scope.
 //
@@ -125,7 +125,7 @@ func renderGitconfigInclude(homeAbs, slug string) string {
 // short-circuit it.
 //
 // homeAbs is used only by the default-helper branch; collectGitCredEntries
-// never produces a scope=="" entry (this redesign wires the scoped case
+// never produces a scope=="" entry (the wiring covers the scoped case
 // only — see its doc comment), so in ApplySecrets's actual call site this
 // branch is currently dead code, kept for the renderer's generality and for
 // direct unit testing of the ordering property above.
@@ -238,8 +238,8 @@ mv "$tmp" "$gc"
 // stdin) plus its paired gitconfig.d include, then runs the reconcile pass
 // unconditionally so scopes no longer holding a recognized token are pruned
 // and the managed ~/.gitconfig block is regenerated (or cleared) from the
-// current set. Called by ApplySecrets after the plain scoped env-var delivery
-// (task 03), which is unaffected — a recognized token is still delivered as a
+// current set. Called by ApplySecrets after the plain scoped env-var delivery,
+// which is unaffected — a recognized token is still delivered as a
 // plain env var in addition to this wiring.
 func applyGitCredEntries(ctx context.Context, cli guestRunner, name, user string, entries []gitCredEntry, out io.Writer) error {
 	for _, e := range entries {

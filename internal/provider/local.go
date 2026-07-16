@@ -15,14 +15,14 @@ import (
 // pieces that already do the work and delegates to them —
 //
 //   - core (*lima.Client) drives limactl for discovery, power, and guest
-//     transport, over the task-1 host-access seam;
+//     transport, over the host-access seam (lima.Host);
 //   - prov (*provision.Provisioner) owns the base-build / clone / finalize
 //     lifecycle for Create / Recreate / Reset.
 //
 // The provisioner keeps depending on the lima core directly (prov.Lima), NOT on
 // Provider, which is what keeps the dependency graph acyclic: consumers ->
-// Provider -> { lima core, provisioner }, and provisioner -> lima core. A remote
-// provider (plan 15 task 5) is this same shape configured with the SSH
+// Provider -> { lima core, provisioner }, and provisioner -> lima core. The
+// remote provider (remote.go) is this same shape configured with the SSH
 // host-access implementation.
 type limaProvider struct {
 	core *lima.Client

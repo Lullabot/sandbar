@@ -15,8 +15,8 @@ type layoutMode struct {
 	ContentHeight int
 
 	// Columns/TileWidth are the tile grid's budget: how many tile columns fit
-	// side by side, and how wide each one gets. Task 07 renders tiles at
-	// TileWidth x tileHeight (below); this task only decides the numbers.
+	// side by side, and how wide each one gets. The tile renderer draws tiles
+	// at TileWidth x tileHeight (below); this file only decides the numbers.
 	Columns   int
 	TileWidth int
 
@@ -26,8 +26,8 @@ type layoutMode struct {
 	HeaderHeight int
 	HeaderFull   bool
 
-	// HeaderBandLines is how many EXTRA header rows (task 10: one per-profile
-	// stats band or disabled/errored banner, beyond the base title+counts) the
+	// HeaderBandLines is how many EXTRA header rows (one per-profile stats
+	// band or disabled/errored banner, beyond the base title+counts) the
 	// caller may render this frame — already folded into HeaderHeight above.
 	// It is granted, not requested: classifyWithHeaderBands negotiates it
 	// against the same budget the messages strip and the help bar compete
@@ -47,8 +47,8 @@ type layoutMode struct {
 	MessagesHeight int
 
 	// GridHeight is the main scrollable pane's row budget — the tile grid on
-	// the board, and (until later tasks replace them) the list table, the
-	// progress viewport, the secrets textarea, and the file browser. It never
+	// the board, the progress viewport, the secrets textarea, and the file
+	// browser. It never
 	// goes to zero: the grid and the footer are the last things to shrink.
 	GridHeight int
 
@@ -88,8 +88,8 @@ func (l layoutMode) GridWidth() int {
 	return clamp(w, minBudget)
 }
 
-// Tile size budget, exported for task 07 (the board/tile renderer) and task
-// 08 to build against. A tile's content is at most six lines (title, status,
+// Tile size budget, for the board and the tile renderer to build
+// against. A tile's content is at most six lines (title, status,
 // cpu, mem, disk, up/last-used) plus a rounded border top and bottom, hence
 // tileHeight = 6 + 2. tileMinWidth is the narrowest a tile can render before
 // its content gets cramped; classify uses it to decide how many columns fit,
@@ -180,13 +180,13 @@ func classify(w, h int) layoutMode { return classifyWithFooter(w, h, 1) }
 // off the bottom of an 80x24 terminal once already.
 //
 // It requests zero header bands (see classifyWithHeaderBands): the plain
-// two-argument shape every pre-task-10 caller and test still uses, for a
-// fleet whose header never grows past the base title+counts.
+// two-argument shape used by every caller and test that predates per-profile
+// header bands, for a fleet whose header never grows past the base title+counts.
 func classifyWithFooter(w, h, helpLines int) layoutMode {
 	return classifyWithHeaderBands(w, h, helpLines, 0)
 }
 
-// classifyWithHeaderBands is classifyWithFooter plus task 10's per-profile
+// classifyWithHeaderBands is classifyWithFooter plus the per-profile
 // header rows: headerBands is how many EXTRA lines the header wants (one per
 // connected/disabled/errored fleet member beyond the first — see
 // model.desiredHeaderBands), and HeaderBandLines on the returned mode is how

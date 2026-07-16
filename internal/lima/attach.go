@@ -110,7 +110,7 @@ func guestAttachExpr(colortermEnv string) string {
 // package builds be unit-tested without a real limactl, which AGENTS.md requires.
 // The caller execs it with a real TTY attached (tmux refuses to run without one).
 //
-// Three argv details, each learned against a real VM (plan 14, task 01) and each
+// Three argv details, each learned against a real VM and each
 // silently fatal if a future edit "tidies" it:
 //
 //   - `--workdir` comes BEFORE the instance name. After it, limactl stops treating

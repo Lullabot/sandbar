@@ -191,9 +191,9 @@ func TestFleetBoardStaysInteractiveWhileAMemberBlocks(t *testing.T) {
 	tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
 }
 
-// TestGhostSurvivesPersistentListErrorsAfterFirstSuccess pins finding 10 from
-// the plan-16 code review: boardReady's doc says "has any list ever
-// succeeded", but it used to check members' CURRENT state (connConnected)
+// TestGhostSurvivesPersistentListErrorsAfterFirstSuccess pins a boardReady
+// regression: boardReady's doc says "has any list ever succeeded", but it
+// used to check members' CURRENT state (connConnected)
 // only — so a sole member that connects with zero VMs (the create-ghost
 // shows, boardReady flips true) and LATER starts failing persistently would
 // flip right back to connErrored, and boardReady would un-ring that bell:

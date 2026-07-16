@@ -21,10 +21,10 @@ import (
 //
 // It resolves to LOCAL Lima only — an unconfigured `sand` behaves exactly as
 // it does today. Provider SELECTION (choosing a remote target instead) is
-// plan 15 task 4/5's job; this function is the seam that work hooks into,
-// deliberately given a clean, argument-free signature so a later change can
-// grow it (e.g. into one that reads configuration) without every call site
-// changing shape again.
+// Resolve's job (select.go), which wraps this function as its local path;
+// NewDefault is deliberately given a clean, argument-free signature so a later
+// change can grow it (e.g. into one that reads configuration) without every
+// call site changing shape again.
 func NewDefault() (Provider, error) {
 	core := lima.New(lima.NewExecRunner())
 	// PlaybookDir is left empty: the Provisioner locates the embedded playbook

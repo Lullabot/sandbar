@@ -128,7 +128,7 @@ func TestBoardOrderIsAlphabeticalAndStableAcrossAStateChange(t *testing.T) {
 		t.Fatalf("stopping the focused VM moved its tile from slot %d to %d — the order must not depend on status", before, got)
 	}
 	// And the rendered board agrees: still api, db, web, left-to-right, top-to-bottom.
-	// The GRID specifically, not the whole screen: task 09's messages strip just
+	// The GRID specifically, not the whole screen: the messages strip just
 	// logged "stopping db…" above it, and that "db" substring would otherwise be
 	// mistaken for the tile's.
 	view := ansi.Strip(m.gridView())
@@ -317,7 +317,7 @@ func TestBuildingVMGetsATileBeforeLimaKnowsIt(t *testing.T) {
 	}
 }
 
-// The exception-only badges (task 07) must not fire on facts a VM does not have
+// The exception-only badges (tile.go) must not fire on facts a VM does not have
 // YET. A VM mid-create is absent from `limactl list` and from the managed index,
 // so reading its arch/base/managed straight off those sources reports an unknown
 // as a DISAGREEMENT — and the whole board sprouts "arch … · base … · managed"
@@ -768,11 +768,11 @@ func TestEnterOnABuildingVMShowsTheLog(t *testing.T) {
 	}
 }
 
-// THE FOOTER IS THE PAYOFF FOR THE COMMAND REGISTRY (task 02): boardHelp
+// THE FOOTER IS THE PAYOFF FOR THE COMMAND REGISTRY (commandreg.go): boardHelp
 // derives from the exact same detailCommands list and the exact same
 // enabledFor(model, vm.VM) predicate the dispatcher above uses, so it cannot
 // advertise a verb that would do nothing to the tile under the ring. Proven
-// here the way the plan's self-validation step 3f demands: focus a RUNNING
+// here end to end, through real state changes: focus a RUNNING
 // VM (footer offers Stop, not Start), stop it for real through the
 // dispatcher, and watch the footer flip — Stop disappears, Start appears —
 // once the refresh that follows the action reports the new state.
@@ -986,7 +986,7 @@ func offersQuit(bindings []key.Binding) bool {
 	return false
 }
 
-// 'q' must not orphan work. Task 04 left the board's quit unconditional, so a
+// 'q' must not orphan work. The board's quit used to be unconditional, so a
 // user with a background build in flight could end the session — and the
 // half-built VM — with the reflex that ends every other TUI. It now confirms.
 func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
@@ -1119,8 +1119,8 @@ func TestEnterIsAdvertisedWithTheVerbItRuns(t *testing.T) {
 	}
 }
 
-// TestFocusRingDisambiguatesSameNameAcrossScopes pins finding 2 from the
-// plan-16 code review: the focus ring used to resolve by BARE NAME
+// TestFocusRingDisambiguatesSameNameAcrossScopes pins a focus-ring scoping bug:
+// the ring used to resolve by BARE NAME
 // (vmIndex/focusIndex/focusedVM/renderCell), so with a local "web" and a
 // remote "web" on the board at once, the ring could never land on the second
 // one — focusedVM() kept resolving to whichever one sorted first, BOTH tiles

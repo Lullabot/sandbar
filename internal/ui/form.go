@@ -258,8 +258,8 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 // opens, never stall behind either one.
 func (m *model) openForm() tea.Cmd {
 	// A NEW VM targets the profile selector's default pick — last-used, else
-	// Local (task 9's create-time half; setDefaultFormProfile). Its host sample
-	// supplies the cpu/memory/user defaults; its provider seeds the toggles.
+	// Local (setDefaultFormProfile). Its host sample supplies the cpu/memory/user
+	// defaults; its provider seeds the toggles.
 	m.setDefaultFormProfile()
 	hs := m.formHostSample()
 	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
@@ -273,9 +273,8 @@ func (m *model) openForm() tea.Cmd {
 	// tool-set stamp comes back, via toolsetLoadedMsg (model.go). Reading it
 	// HERE, synchronously, used to be a blocking ssh round trip whenever the
 	// form's target profile is remote — the whole TUI froze behind a slow or
-	// dead host (finding 4 in the plan-16 code review). One frame showing the
-	// default before the real stamp lands is a fair price for a form that never
-	// blocks the keyboard.
+	// dead host. One frame showing the default before the real stamp lands is a
+	// fair price for a form that never blocks the keyboard.
 	cfg := vm.DefaultCreateConfig()
 	m.toolClaude = cfg.WithClaude
 	m.toolCodex = cfg.WithCodex
@@ -400,7 +399,7 @@ func (m model) hasStoredToken(scope registry.Scope, name string) bool {
 // formProfiles returns the ENABLED profiles the create form's selector offers
 // to choose among, in the profiles store's stable (insertion) order. A
 // disabled profile is never offered here — even though its member can still
-// linger in m.members (task 8's live mutation keeps a disabled member around,
+// linger in m.members (disableProfile keeps a disabled member around,
 // dormant, so the header can still name it) — because it is not a place a new
 // VM could ever actually be provisioned.
 func (m model) formProfiles() []profiles.Profile {
@@ -1063,7 +1062,7 @@ func (m model) formView() string {
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 
-	// The profile selector (task 9): which connection profile's provider/scope
+	// The profile selector: which connection profile's provider/scope
 	// this create targets. Reset mode has none — a reset always targets its own
 	// VM's already-fixed member, never a place the user picks.
 	if !m.resetMode {

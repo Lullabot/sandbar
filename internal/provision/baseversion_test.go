@@ -256,8 +256,8 @@ func TestPlaybookVersion_ConfigsDifferingOnlyInWithJavaProduceDifferentStamps(t 
 	}
 }
 
-// TestContentPlaybookVersion_DifferentToolsetDifferentStamp is the wiring
-// this task exists to land: contentPlaybookVersion must fold its toolset
+// TestContentPlaybookVersion_DifferentToolsetDifferentStamp pins the
+// load-bearing wiring: contentPlaybookVersion must fold its toolset
 // argument into the stamp, not a hardcoded placeholder, so changing
 // vm.CreateConfig's tool-set selection alone (no playbook edit at all) still
 // marks the base stale.
@@ -323,7 +323,7 @@ func TestBaseStale_MatchingV2StampNotStale(t *testing.T) {
 	}
 }
 
-// TestBaseStale_PassesConfigToolsetKey is the wiring this task lands:
+// TestBaseStale_PassesConfigToolsetKey pins the toolset wiring:
 // baseStale must ask playbookVersionFn for the stamp using cfg's OWN
 // ToolsetKey(), not a hardcoded placeholder — so a create with a
 // non-default tool-set selection is compared against the right "want".
@@ -488,7 +488,7 @@ func TestToolsetFromStamp_ExtractsSuffix(t *testing.T) {
 }
 
 // TestWriteBaseVersion_RoundTripsVersionAndBuiltAt is the real filesystem round
-// trip task 8 adds: writeBaseVersion must record BOTH the version AND a
+// trip: writeBaseVersion must record BOTH the version AND a
 // BuiltAt timestamp close to "now", and readBaseVersion/readBaseBuiltAt must
 // read them back correctly through the real stamp file (not a stub).
 func TestWriteBaseVersion_RoundTripsVersionAndBuiltAt(t *testing.T) {
@@ -524,8 +524,8 @@ func TestReadBaseBuiltAt_MissingStampIsNotOk(t *testing.T) {
 	}
 }
 
-// TestReadBaseBuiltAt_PreTimestampStampIsNotOk: a stamp written by a sand
-// binary that predates this task (version only, no second line) must report
+// TestReadBaseBuiltAt_PreTimestampStampIsNotOk: a stamp written by an older
+// sand binary (version only, no second line) must report
 // ok=false for BuiltAt — never guess a build time — while readBaseVersion
 // keeps reading the version line exactly as before.
 func TestReadBaseBuiltAt_PreTimestampStampIsNotOk(t *testing.T) {
@@ -582,7 +582,7 @@ func TestParseBaseStamp_EmptyIsNotOk(t *testing.T) {
 }
 
 // TestShrunkTools_DetectsAndOmitsCorrectly is the end-to-end shrink-detection
-// case this task's advisory depends on: a base stamped with the full
+// case the shrink advisory depends on: a base stamped with the full
 // tool-set, reapplied with Java deselected, must report exactly ["java"] —
 // and a growing or unchanged selection must report nothing.
 func TestShrunkTools_DetectsAndOmitsCorrectly(t *testing.T) {

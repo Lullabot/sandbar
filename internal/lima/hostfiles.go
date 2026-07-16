@@ -8,9 +8,9 @@ package lima
 //
 // Today those two things are the same machine, and the local implementation here
 // is byte-for-byte the direct os.* / filepath calls it replaces. The seam exists
-// because they need not stay the same machine: a remote-Lima provider (plan 15
-// task 5) runs limactl over SSH, and then the instance files live on the REMOTE
-// host — reading them off the local filesystem would return nothing. That
+// because they need not stay the same machine: the remote-Lima provider
+// (sshhost.go) runs limactl over SSH, and then the instance files live on the
+// REMOTE host — reading them off the local filesystem would return nothing. That
 // provider satisfies the same interface by reading over SSH, and every caller
 // that goes through the seam works remotely without knowing it moved.
 
@@ -24,10 +24,11 @@ import (
 
 // Host is the full host-access seam: the machine limactl runs on, exposing both
 // its subprocess execution (Runner) and its Lima instance files (HostFiles).
-// Local Lima is a Runner plus localFiles; a remote-Lima provider (plan 15 task 5)
-// implements the whole thing over SSH. Nothing in this task constructs a Host —
-// it is the interface tasks 2 and 5 build their providers against; the local
-// callers here reach the two halves through Runner and LocalFiles() directly.
+// Local Lima is a Runner plus localFiles; the remote-Lima provider implements
+// the whole thing over SSH (sshhost.go). Nothing in this file constructs a
+// Host — it is the interface the providers (internal/provider) are built
+// against; the local callers here reach the two halves through Runner and
+// LocalFiles() directly.
 type Host interface {
 	Runner
 	HostFiles

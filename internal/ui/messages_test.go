@@ -12,7 +12,7 @@ import (
 
 // THE RING IS BOUNDED: session-only, capped at maxMessages, so a long-lived
 // session cannot grow it without limit — the memory-leak twin of the
-// invisibility this plan otherwise exists to remove. The OLDEST entries are
+// invisibility the log otherwise exists to remove. The OLDEST entries are
 // what get dropped as the ring fills, never the newest.
 func TestMessageRingIsBounded(t *testing.T) {
 	m := newTestModel(t)

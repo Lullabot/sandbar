@@ -65,7 +65,7 @@ func isolateHostState(t *testing.T) {
 // to observe or control the lima.Client's underlying calls (e.g. a
 // secretsFakeRunner asserting exactly what ApplySecrets sent toward the
 // guest) rather than the no-op fakeRunner. It wraps cli in the local Lima
-// provider (task 2's provider.NewLocalLima) — the same composition
+// provider (provider.NewLocalLima) — the same composition
 // provider.NewDefault performs for a real limactl — so the model is built
 // exactly the way every real entrypoint builds it, just over a fake runner.
 func newTestModelWithCli(t *testing.T, cli *lima.Client) model {
@@ -1022,7 +1022,7 @@ func TestEnterAdvancesFieldNotSubmit(t *testing.T) {
 
 // isQuitCmd reports whether cmd is tea.Quit, or a tea.Batch containing it —
 // Update (model.go) always batches whatever a dispatch returns with
-// syncHeartbeats/tickRefresh, and since task 09 both are routinely non-nil
+// syncHeartbeats/tickRefresh, and both are routinely non-nil
 // on a fresh idle model (shouldTick starts true), so a plain tea.Quit from
 // ctrl+c or 'q' now regularly arrives wrapped in a tea.BatchMsg rather than
 // bare. The fake runner makes any incidental command this triggers a

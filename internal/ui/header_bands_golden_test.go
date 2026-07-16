@@ -1,22 +1,23 @@
 package ui
 
-// header_bands_golden_test.go locks task 10's rendering: the per-tile
-// profile label, and the header's growth from one host-capacity band to one
-// band per connected profile plus a banner row per disabled/errored one — at
-// the plan's narrowest supported terminal (80 columns) and a wide one, for
-// two profiles and for several (mixing connected, disabled and errored).
+// header_bands_golden_test.go locks the per-profile header-band rendering:
+// the per-tile profile label, and the header's growth from one host-capacity
+// band to one band per connected profile plus a banner row per
+// disabled/errored one — at the minimum supported width, 80 columns, and a
+// wide one, for two profiles and for several (mixing connected, disabled and
+// errored).
 //
 // The single-profile case is already covered by TestTUIBoardGolden80x24 /
-// TestTUIBoardGoldenWide (teatest_test.go): this task only added the tile's
-// [local] label there, which those goldens now pin.
+// TestTUIBoardGoldenWide (teatest_test.go), which now also pin the tile's
+// [local] label.
 //
 // Multi-member states are driven the same way fleet_test.go's async tests
 // already do — real vmsLoadedMsg values through Update, over providerfake —
-// rather than the full teatest event loop, since a DISABLED member has no
-// live trigger yet (task 8 owns that mutation): this is the deterministic,
-// synchronous equivalent the plan's own note allows ("construct deterministic
-// member states"), snapshotting m.View() directly against the same golden
-// mechanism (golden.RequireEqual) teatest.RequireEqualOutput wraps.
+// rather than the full teatest event loop. A DISABLED member cannot be
+// reached through the event loop here, so these tests construct the member
+// states deterministically instead, snapshotting m.View() directly against
+// the same golden mechanism (golden.RequireEqual) teatest.RequireEqualOutput
+// wraps.
 
 import (
 	"errors"
@@ -208,7 +209,7 @@ func TestTUIHeaderBandsSeveralProfiles80x24(t *testing.T) {
 		hostCPUs:     8,
 	})
 	m = next.(model)
-	// Disabling a profile has no live trigger yet (task 8 owns that mutation) —
+	// disableProfile (profilesview.go) is what performs this mutation live —
 	// this mirrors it directly, then re-runs the same layout budgeting a resize
 	// or a real state transition would (see applySize's callers, model.go).
 	m.members[3].state = connDisabled

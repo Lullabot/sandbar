@@ -10,7 +10,7 @@ import (
 )
 
 // hostFiles is the host-access seam these guest-identity reads go through. It
-// defaults to the local filesystem; a remote-Lima provider (plan 15 task 5) reads
+// defaults to the local filesystem; the remote-Lima provider (sshhost.go) reads
 // the same ssh.config / cloud-config.yaml off the host where the instance lives.
 var hostFiles HostFiles = LocalFiles()
 
@@ -34,8 +34,8 @@ var hostFiles HostFiles = LocalFiles()
 // user carrying a homedir. Returns "" when it can't be determined so the caller
 // can fall back.
 //
-// It reads through the package-default local host-access seam. A remote-Lima
-// provider (plan 15 task 5) whose instance files live on another host reads the
+// It reads through the package-default local host-access seam. The remote-Lima
+// provider, whose instance files live on another host, reads the
 // same cloud-config.yaml over SSH via GuestHomeVia, passing its own HostFiles —
 // so the guest home is resolved from wherever the instance actually lives.
 func GuestHome(instanceDir string) string { return GuestHomeVia(hostFiles, instanceDir) }

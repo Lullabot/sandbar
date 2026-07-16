@@ -24,7 +24,7 @@ func TestApplySecrets_SecretNeverOnArgv(t *testing.T) {
 	}
 
 	// Global-only apply: the write call, the profile/bashrc ensure call, and
-	// the git-credential reconcile pass (task 04, runs unconditionally even
+	// the git-credential reconcile pass (which runs unconditionally even
 	// with zero recognized forge tokens — see gitcred.go).
 	if len(f.calls) != 3 {
 		t.Fatalf("want exactly 3 limactl calls (write + ensure-profile + git-cred reconcile), got %d: %v", len(f.calls), f.calls)
@@ -214,7 +214,7 @@ func TestApplySecrets_ScopedWritesEnvAndDirenvAllow(t *testing.T) {
 
 	// global clear, ensure-profile, guest-home lookup (getent), scoped write,
 	// direnv allow, plus GH_TOKEN's git-credential write and the git-cred
-	// reconcile pass (task 04 — see gitcred_test.go's dedicated
+	// reconcile pass (see gitcred_test.go's dedicated
 	// TestApplySecrets_ScopedGHTokenWritesGitCredentials for the detailed
 	// git-credential assertions; this test stays focused on the plain
 	// scoped-env-var + direnv path).
@@ -296,8 +296,8 @@ func TestApplySecrets_EmptyScopesMapAppliesNoScopedFiles(t *testing.T) {
 	}
 }
 
-// TestRenderDotenv_LiteralSafety is the meaningful test the plan calls out
-// explicitly: a value containing a single quote, a command substitution, and a
+// TestRenderDotenv_LiteralSafety pins the injection-safety property RenderDotenv
+// exists to guarantee: a value containing a single quote, a command substitution, and a
 // backtick must reach the rendered dotenv text completely literally — none of
 // them may be interpreted as shell/dotenv syntax by direnv's loader.
 func TestRenderDotenv_LiteralSafety(t *testing.T) {

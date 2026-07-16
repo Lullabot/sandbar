@@ -57,7 +57,7 @@ type Scope struct {
 
 // LocalScope is the Scope every sand entrypoint uses when unconfigured (an
 // unconfigured `sand` only ever talks to local Lima). Provider selection
-// (plan 15 task 5) constructs a remote Scope from its resolved target
+// (provider.Resolve) constructs a remote Scope from its resolved target
 // configuration instead.
 //
 // Scope is comparable (a plain Provider+RemoteTarget struct), so since this

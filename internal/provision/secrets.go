@@ -79,7 +79,7 @@ done
 // quote as the four-byte sequence quote/backslash/quote/quote (close the
 // quoted span, emit one escaped literal quote, reopen the span). It is a
 // local copy of the identical technique in internal/secrets.Render
-// (unexported there, and internal/secrets is frozen for this task); it is
+// (unexported there, and internal/secrets is deliberately left untouched); it is
 // reused here for two purposes: rendering a scoped .env's values (see
 // RenderDotenv) and, as defense in depth, quoting a scope name before it is
 // interpolated into an in-guest script — even though secrets.ValidScope
@@ -153,12 +153,12 @@ cat > "$d/.env"
 // its ~/<scope>/.env path — is no longer known to this function, so a
 // dropped scope's stale .env is NOT removed here. Doing so would require
 // either guest-side state tracking (deliberately out of scope for this
-// delivery layer — see plan 12 task 03's implementation notes) or an unsafe
+// delivery layer) or an unsafe
 // enumeration of the guest's home tree that risks touching a legitimate,
 // unrelated project .env file. Every apply DOES write-or-refresh every scope
 // currently present in the map, so this reduces to: a scope's guest file
 // lags one apply behind its removal from the store. This limitation is
-// shared with task 04's forge-credential pruning.
+// shared with the forge-credential pruning in gitcred.go.
 func ApplySecrets(ctx context.Context, cli guestRunner, name, user string, scopes map[string]map[string]string, out io.Writer) error {
 	global := scopes[""]
 	if len(global) == 0 {
@@ -207,7 +207,7 @@ func ApplySecrets(ctx context.Context, cli guestRunner, name, user string, scope
 		}
 	}
 
-	// Git-credential wiring (task 04): for each recognized forge token
+	// Git-credential wiring: for each recognized forge token
 	// (see recognizedForgeTokens in gitcred.go — the ONLY place in sand that
 	// knows a forge exists) found in a non-empty scope, additionally render
 	// main's proven per-scope git-credentials + gitconfig.d include +

@@ -241,7 +241,7 @@ func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 // TestBuildExtraVars_AptUpgradeOmittedByDefault: a plain base build/re-apply
 // (aptUpgrade=false) must never emit base_apt_upgrade — roles/base/tasks/main.yml
 // defaults it to false, but this pins the Go side of that contract too, so a
-// cold base build never gets a second apt pass (task 3's "one apt pass" property).
+// cold base build never gets a second apt pass (the "one apt pass" property).
 func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
 	cfg := fullConfig()
 	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)

@@ -66,7 +66,7 @@ func (m model) vmHasRetainedRun(scope registry.Scope, name string) bool {
 // to gate: Restart always performs a real stop-then-start regardless of the
 // VM's current status (a stopped VM's "stop" half is a harmless no-op, but
 // the "start" half is real work), and Secrets is legitimate to open and save
-// on both a running VM (task 06: applies live to the guest) and a stopped
+// on both a running VM (it applies live to the guest) and a stopped
 // one (it applies on next start) — see vmCommands below. Every other
 // command that used to sit here (Reset, Upload, Download) had a real
 // decline branch that advertised the verb and then did nothing but set a
@@ -87,8 +87,8 @@ func alwaysEnabled(model, boardVM) bool { return true }
 // Only Delete consulted the registry, because it was the only verb that could
 // obviously destroy a build. The others were protected by ACCIDENT: the old
 // full-screen progress view froze the keyboard for the whole build, so no key
-// could reach them. This plan removed that freeze — deliberately, it is the
-// headline feature — and these gates are what has to replace it.
+// could reach them. That freeze is gone — the board stays live and keyboard-driven
+// throughout a build, deliberately — and these gates are what replaces it.
 func notBuilding(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) }
 
 // enterTarget is what Enter does to the tile under the ring: the ONE obvious
@@ -246,7 +246,7 @@ var vmCommands = []vmCommand{
 		binding: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		about:   "Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it.",
 		// Delete raises the confirm overlay unconditionally today; the job
-		// registry (task 04) will additionally disable Delete while a VM is
+		// registry (jobs.go) will additionally disable Delete while a VM is
 		// mid-build via vmBuilding.
 		enabledFor: func(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) },
 		action: func(m *model, v boardVM) tea.Cmd {

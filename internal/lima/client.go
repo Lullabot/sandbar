@@ -194,12 +194,11 @@ func (c *Client) Clone(base, name string) error { return c.run("clone", base, na
 // that makes "delete the VM and everything it produced is gone" true, and it
 // does not hold by itself; it holds because this strip runs on every clone,
 // every time. RenderBaseOverlay does not currently add a writable mount
-// (strikethroo plan 13, task 10 tried a writable apt-archive-cache mount and
-// backed it out — see that function's doc comment — in favour of an
-// `limactl copy` seed/harvest that needs no mount at all), so today this strip
-// has nothing to remove. It stays anyway, as a standing guard: the day
-// someone adds a writable mount back to the base overlay, this is what stops
-// it from silently reaching every clone.
+// (a writable apt-archive-cache mount was tried and backed out — see that
+// function's doc comment — in favour of an `limactl copy` seed/harvest that
+// needs no mount at all), so today this strip has nothing to remove. It stays
+// anyway, as a standing guard: the day someone adds a writable mount back to
+// the base overlay, this is what stops it from silently reaching every clone.
 //
 // The strip selects OUT any mount with `writable: true`, rather than removing
 // one specific mount by mountPoint. That guarantees the property we actually

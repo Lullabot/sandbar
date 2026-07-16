@@ -16,9 +16,9 @@ package ui
 // state, and kicks its connect/list cmd — see rebuildMember. DISABLE tears
 // the binding down (nils the provider, marks the member connDisabled) but
 // KEEPS the member in the fleet, exactly like an error binding, so the header
-// (task 10) can still name it; DELETE drops the member outright. Both leave
-// the profile's registry/secrets entries dormant on disk — no reconcile, no
-// prune (see the plan's Decision Log).
+// can still name it; DELETE drops the member outright. Both leave the
+// profile's registry/secrets entries dormant on disk — no reconcile, no
+// prune — so they reappear intact if the profile is re-enabled or re-added.
 //
 // DISABLE, DELETE and a CONNECTION-FIELD edit are gated on the profile being
 // IDLE: reusing the job registry's per-scope running check (jobs.go's
@@ -249,8 +249,8 @@ func (m *model) enableProfile(id string) tea.Cmd {
 }
 
 // disableProfile persists id as disabled and tears its live binding down:
-// the member ITSELF stays in the fleet (task 10's header/board still name
-// it), but its provider is dropped and its state becomes connDisabled — which
+// the member ITSELF stays in the fleet (the header/board still name it), but
+// its provider is dropped and its state becomes connDisabled — which
 // is what stops tickRefresh from re-arming its refresh loop (fleet.go, a nil
 // provider is never armed) and boardVMs from rendering its now-stale tiles
 // (board.go already skips a connDisabled member). Gated on the profile being

@@ -1,7 +1,7 @@
 package ui
 
 // profilesview_management_test.go drives the profile management screen
-// (task 8) through the REAL key dispatch path — updateProfiles and
+// through the REAL key dispatch path — updateProfiles and
 // updateProfileForm, exactly as a user's keystrokes travel — rather than
 // calling its handlers directly. profilesview_test.go already pins the
 // live-mutation BEHAVIOUR at the method level (enable/disable/delete/rename);

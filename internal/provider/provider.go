@@ -3,15 +3,14 @@
 // transport (exec and copy), and the interactive attach argv, so every consumer
 // depends on one thing that can be satisfied by more than one backend.
 //
-// Today there is exactly one implementation — the local Lima provider
-// (NewLocalLima), which composes the seam-backed lima core and the existing
-// provision.Provisioner — and its behaviour is identical to sand's current
-// direct use of *lima.Client. A remote-Lima-over-SSH provider (plan 15 task 5)
-// will satisfy the SAME interface by running limactl on another host; the
-// future proxmox / DigitalOcean / Linode backends plug in the same way. The
-// interface is a faithful ENVELOPE of what sand already does — every method maps
-// to a current *lima.Client method, a free provision function, or a lima helper,
-// and nothing speculative is added.
+// The default implementation is the local Lima provider (NewLocalLima), which
+// composes the seam-backed lima core and the existing provision.Provisioner —
+// its behaviour is identical to sand's earlier direct use of *lima.Client. The
+// remote-Lima-over-SSH provider (remote.go) satisfies the SAME interface by
+// running limactl on another host; the future proxmox / DigitalOcean / Linode
+// backends plug in the same way. The interface is a faithful ENVELOPE of what
+// sand already does — every method maps to a current *lima.Client method, a
+// free provision function, or a lima helper, and nothing speculative is added.
 //
 // Deliberately NOT on this interface: the base-image machinery internals
 // (limactl clone / edit / the streaming create-and-clone) that only the

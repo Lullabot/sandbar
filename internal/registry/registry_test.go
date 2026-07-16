@@ -309,9 +309,9 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 }
 
 // TestLoad_V1MigratesTwoEntriesToV2WithProviderTag is the load-bearing
-// migration proof this task adds (plan 15 task 4's TDD requirement (a)): a
-// pre-migration v1 file with TWO existing entries, loaded through the new
-// code, must come back on disk rewritten with BOTH entries tagged as the
+// migration proof for LoadFrom: a pre-migration v1 file with TWO existing
+// entries, loaded through the current code, must come back on disk
+// rewritten with BOTH entries tagged as the
 // local Lima provider and the schema version bumped to the current version
 // (3, which folds the v1->v2 provider/base-rename step and the v2->v3
 // (scope,name) re-keying into one load) — no data loss, and the rewrite

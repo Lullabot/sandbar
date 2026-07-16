@@ -340,7 +340,7 @@ func TestCreateVM_MigratesLegacyBaseThenClones(t *testing.T) {
 // acceptance criterion: a guest that does not report
 // /var/run/reboot-required must not be stopped and started after finalize —
 // the two stated reasons for the old unconditional bounce (the finalize apt
-// upgrade, removed in task 8; and docker-group membership, granted in the
+// upgrade, which no longer exists; and docker-group membership, granted in the
 // BASE phase and baked into the image) are both gone, so a create that never
 // asked the guest to reboot pays none of that latency.
 func TestCreateVM_NoBounceWithoutRebootMarker(t *testing.T) {
@@ -404,7 +404,7 @@ func TestCreateVM_BouncesWhenRebootRequired(t *testing.T) {
 // TestDefaultGuestScriptStaysCollectionFree pins the default (SAND_PROFILE
 // unset) in-guest script to never install any Ansible collection: profile_tasks
 // lives in ansible.posix, which the default Lima dependency script does not
-// install (strikethroo plan 13, task 02), so the default path must not depend
+// install, so the default path must not depend
 // on it either. It must also not enable the callback — an enabled-but-missing
 // profile_tasks is exactly the warning that reads to end users as a broken
 // build, which is why ansible.cfg no longer turns it on unconditionally.

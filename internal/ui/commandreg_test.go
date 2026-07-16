@@ -133,7 +133,7 @@ func TestShellOfferedOnlyWhenRunning(t *testing.T) {
 	}
 }
 
-// Paste (the `v` verb, task 5) is offered (and fires) only when the VM is
+// Paste (the `v` verb) is offered (and fires) only when the VM is
 // running — the same Shell/Upload/Download gate — and it must not route
 // through the file-browser wizard: pressing it should not change m.view off
 // the board (decision B: stay on board).

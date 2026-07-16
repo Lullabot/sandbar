@@ -61,7 +61,7 @@ var (
 			BorderForeground(lipgloss.Color("63")).
 			PaddingLeft(1)
 
-	// Tile status colours (task 07, tile.go): the SAME ANSI-256 indices used
+	// Tile status colours (tile.go): the SAME ANSI-256 indices used
 	// above, not a second palette — 42 (okStyle's green) for running, 245
 	// (statusStyle's dim grey) for stopped, 214 (warnStyle's amber) for
 	// building, 203 (errStyle's red) for failed. Colour is never the only

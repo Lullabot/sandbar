@@ -194,7 +194,7 @@ func record(user, idle, memTotalKB, memAvailKB int) string {
 // heartbeatModel is a model wired to a fake guest shell instead of a real
 // limactl. managed names it as sand-managed BEFORE any vmsLoadedMsg lands:
 // syncHeartbeats only opens a shell for a VM that has a tile on the board
-// (task 09's roster-narrowing fix — see the comment on syncHeartbeats), and
+// (the roster-narrowing fix — see the comment on syncHeartbeats), and
 // the board is managed-clones-only, always, so a heartbeat test's VM needs a
 // tile exactly the way a board test's does (see board_test.go's loadManaged).
 func heartbeatModel(t *testing.T, sh *fakeShell, managed ...string) model {
@@ -219,7 +219,7 @@ func vms(pairs ...string) []vm.VM {
 }
 
 // A STOPPED VM GETS NO HEARTBEAT AND THEREFORE NO SAMPLE. This is the honesty
-// requirement in its purest form: the tile renderer's job (task 07) is to draw the
+// requirement in its purest form: the tile renderer's job is to draw the
 // ABSENCE of a reading, and this test is what guarantees there is genuinely nothing
 // to draw — not a zero, not a stale value, nothing.
 func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
@@ -312,7 +312,7 @@ func TestHeartbeatFollowsTheRunningTransition(t *testing.T) {
 	}
 }
 
-// GAP (b) TASK 08 LEFT OPEN, closed here: syncHeartbeats used to open a shell
+// A GAP THE BOARD FILTER LEFT OPEN, closed here: syncHeartbeats used to open a shell
 // for every VM Lima reported Running, whether or not it had a tile on the
 // board — an unmanaged VM, or a stray, got the exact same live SSH
 // connection as a managed one. That is a real resource cost (one SSH

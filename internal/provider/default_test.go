@@ -6,7 +6,7 @@ import (
 	"github.com/lullabot/sandbar/internal/provider"
 )
 
-// TestNewDefaultReturnsAUsableLocalProvider is task 3's central regression
+// TestNewDefaultReturnsAUsableLocalProvider is the central regression
 // tripwire for the centralised constructor: every one of the three sand
 // entrypoints (cmd/sand/main.go, create.go, shell.go) now calls
 // provider.NewDefault instead of separately wiring lima.New +

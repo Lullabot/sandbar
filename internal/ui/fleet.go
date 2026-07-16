@@ -15,7 +15,7 @@ package ui
 // one fleetMember per ENABLED profile (from provider.BuildFleet) — and threads
 // the OWNING scope through every per-VM operation so two profiles that both have
 // a VM named "web" can never prune, delete, or sample each other's (the
-// vmHandle/jobKey scope keys task 6 introduced are what make that safe).
+// vmHandle/jobKey scope keys are what make that safe).
 //
 // # Model-by-value discipline
 //
@@ -40,7 +40,7 @@ import (
 
 // connState is one fleet member's connection lifecycle. It is deliberately NOT
 // derivedStatus (which is a VM's status): this is about the PROFILE's link to
-// its backend, surfaced by task 10's per-profile status bar.
+// its backend, surfaced by the per-profile status bar.
 type connState int
 
 const (
@@ -59,11 +59,11 @@ const (
 	// pruned on a failed list, and it self-heals with backoff.
 	connErrored
 	// connDisabled is a member whose profile the user disabled without
-	// deleting it (task 8's live mutation): its binding is torn down, its
-	// refresh/heartbeat cmds are stopped, and its tiles are hidden (boardVMs
+	// deleting it (disableProfile, profilesview.go): its binding is torn down,
+	// its refresh/heartbeat cmds are stopped, and its tiles are hidden (boardVMs
 	// skips it) — but the member itself stays in the fleet so the header can
 	// still name it and say why its VMs are gone, exactly as an errored
-	// member does (task 10's banner row).
+	// member does (the header's banner row).
 	connDisabled
 )
 
@@ -105,7 +105,7 @@ type fleetMember struct {
 	// prov is the constructed backend, or nil for an error binding (a profile
 	// whose provider failed to construct — see provider.Binding.Err). A nil-prov
 	// member is permanently errored for this session: it never lists and never
-	// self-heals (task 8's live mutation is what re-builds it).
+	// self-heals (rebuildMember, profilesview.go, is what re-builds it).
 	prov  provider.Provider
 	scope registry.Scope
 	// hostFiles is this member's host-access seam — the local filesystem for
@@ -211,10 +211,10 @@ func (m model) memberByScope(sc registry.Scope) (fleetMember, bool) {
 // did when there was only one provider. Production always tags the scope.
 //
 // Any OTHER unmatched, NON-zero scope is deliberately NOT routed to the active
-// member — it is reported not-found instead. Before task 8 this branch was
+// member — it is reported not-found instead. This branch used to be
 // unreachable in production: the fleet's member count never changed after New,
-// so a genuinely-tagged scope always matched some member. Task 8's live
-// profile management changes that — DELETING a profile drops its member
+// so a genuinely-tagged scope always matched some member. Live profile
+// management changes that — DELETING a profile drops its member
 // outright — so an in-flight refresh/connect cmd that was already running
 // against that scope can still deliver its result afterward, for a scope no
 // member owns any more. Falling back to "active" here would silently splice
@@ -232,8 +232,8 @@ func (m model) routeIndex(sc registry.Scope) (int, bool) {
 }
 
 // activeIndex is the member the single-band header and a NEW create target use
-// (task 10 makes the header multi-band; task 9 lets the create form pick). It is
-// pinned by New (the Local member, or the first) and clamped to a valid slot.
+// (the header is multi-band, and the create form has its own profile
+// picker). It is pinned by New (the Local member, or the first) and clamped to a valid slot.
 func (m model) activeIndex() int {
 	i := m.active
 	if i < 0 || i >= len(m.members) {

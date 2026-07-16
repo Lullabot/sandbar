@@ -1,8 +1,8 @@
 // Package profiles owns the persisted, secret-free connection-profile model
-// that replaces the SAND_* environment variables (plan 15 task 4/7) as the
+// that replaces the SAND_* environment variables as the
 // single source of truth for every location Sandbar can run VMs on. A
-// Profile is either the permanent Local profile or a RemoteSSH profile; later
-// tasks (fleet builder, CLI, TUI) convert a Profile into a
+// Profile is either the permanent Local profile or a RemoteSSH profile; the
+// fleet builder, CLI, and TUI convert a Profile into a
 // provider.TargetConfig in the provider layer — this package deliberately
 // does not import internal/provider or internal/ui, to avoid an import
 // cycle (provider will import profiles, not the other way around).

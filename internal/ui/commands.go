@@ -93,7 +93,7 @@ type (
 		job jobKey
 		err error
 	}
-	// pasteResultMsg reports the outcome of the `v` paste-image verb (task 5):
+	// pasteResultMsg reports the outcome of the `v` paste-image verb:
 	// PasteImage's Result, or an error if the guest write itself failed. name is
 	// the VM the verb fired on — the command-registry argument, never
 	// m.detail — so the status line always describes the tile that actually
@@ -199,7 +199,7 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 
 // errNoProvider is what an error binding's member reports as its list error: its
 // provider failed to construct, so there is nothing to list. It is surfaced as
-// the member's lastErr (task 10's status bar) rather than crashing the fleet.
+// the member's lastErr (the per-profile status bar) rather than crashing the fleet.
 var errNoProvider = fmt.Errorf("connection profile could not be constructed")
 
 // startCmd boots a stopped VM and then writes its host-stored secrets into

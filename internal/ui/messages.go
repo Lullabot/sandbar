@@ -35,7 +35,7 @@ type message struct {
 
 // maxMessages bounds the ring. sand can run for hours in one session (or
 // days, over ssh); a log that grew forever would be the memory-leak twin of
-// the invisibility this whole plan exists to remove.
+// the invisibility this log exists to remove.
 const maxMessages = 50
 
 // logMsg appends one line to the session's message log, timestamped now, and

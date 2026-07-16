@@ -1,9 +1,9 @@
 package ui
 
-// scope_safety_test.go is the regression suite for task 6's HIGH-severity
+// scope_safety_test.go is the regression suite for the HIGH-severity
 // data-loss guard: a VM name is a LABEL, not an identity, and two connection
-// profiles (task 7's fleet) can legitimately label two entirely different
-// VMs the same thing. Before this task, every in-memory per-VM store here
+// profiles in the fleet can legitimately label two entirely different VMs
+// the same thing. Before scopes were threaded through, every per-VM store here
 // (the heartbeat registry, the job registry, and both of model.go's prune
 // sites) keyed — or pruned — by bare name. A reconcile or an explicit delete
 // run against one profile's "web" could silently reach into another
@@ -125,8 +125,8 @@ func TestHeartbeatStopAndEndedNeverTouchAnotherScope(t *testing.T) {
 // has its host secrets removed — but only in the model's OWN scope. A
 // same-named secret filed under a different profile, sitting in the very
 // same (shared) secrets.Store, must survive completely intact. This is the
-// plan's HIGH-severity risk made concrete: before this task, the prune call
-// was hardcoded to registry.LocalScope regardless of which scope actually
+// HIGH-severity data-loss risk made concrete: the prune call used to be
+// hardcoded to registry.LocalScope regardless of which scope actually
 // owned the VM.
 func TestReconcileDropOnlyPrunesItsOwnScopesSecrets(t *testing.T) {
 	m := newTestModel(t) // m.scope == registry.LocalScope
@@ -227,9 +227,8 @@ func TestExplicitDeleteOnlyPrunesItsOwnScopesState(t *testing.T) {
 }
 
 // TestReconcileDropPrunesTheModelsOwnScopeNotAHardcodedOne pins the exact
-// regression this task fixes: before it, every prune call was hardcoded to
-// registry.LocalScope (the TODO(task 6) markers) regardless of what the
-// model's OWN scope actually was. That bug is invisible whenever the model's
+// regression scope threading fixes: every prune call used to be hardcoded to
+// registry.LocalScope regardless of what the model's OWN scope actually was. That bug is invisible whenever the model's
 // scope happens to BE LocalScope (every other test in this file uses the
 // default local model, so none of them can tell "hardcoded LocalScope" apart
 // from "correctly threaded m.scope" — they are the same value). Here the
@@ -327,10 +326,9 @@ func TestExplicitDeletePrunesTheModelsOwnScopeNotAHardcodedOne(t *testing.T) {
 }
 
 // TestActionDoneMsgWithOrphanedScopePrunesItsOwnScopeNotTheActiveOne pins
-// finding 1 from the plan-16 code review: actionDoneMsg's delete branch used
-// to fall back to the ACTIVE member's scope whenever msg.scope no longer
-// matched any CURRENT member — which happens whenever the profile that owned
-// the action was deleted (or connection-edited, which rebuilds its member)
+// a scope-fallback bug: actionDoneMsg's delete branch used to fall back to
+// the ACTIVE member's scope whenever msg.scope no longer matched any CURRENT
+// member — which happens whenever the profile that owned the action was deleted (or connection-edited, which rebuilds its member)
 // while the action was still in flight. Lifecycle actions are NOT jobs, so
 // the idle gate never blocks this. That fallback then ran the destructive
 // prune (RemoveScoped + secrets.Remove) under the WRONG (active/local) scope

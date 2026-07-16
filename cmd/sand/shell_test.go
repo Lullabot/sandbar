@@ -38,7 +38,7 @@ func (s stubVMLister) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), "")
 }
 
-// TestShellAttachArgvNotRunning verifies task 3's central refusal: a VM that
+// TestShellAttachArgvNotRunning verifies the central refusal: a VM that
 // exists but is not Running must produce a clear, actionable message quoting
 // its actual status — not a raw limactl error and not a silent attempt to
 // attach to a stopped VM.
@@ -86,8 +86,8 @@ func TestShellAttachArgvListError(t *testing.T) {
 }
 
 // TestShellAttachArgvRunning verifies the happy path returns a non-empty argv
-// built through lima.AttachArgv (task 2's builder) rather than constructing
-// its own guest-attach command.
+// built through lima.AttachArgv rather than constructing its own guest-attach
+// command.
 func TestShellAttachArgvRunning(t *testing.T) {
 	l := stubVMLister{vms: []vm.VM{{Name: "foo", Status: "Running", Dir: "/nonexistent/instance/dir"}}}
 

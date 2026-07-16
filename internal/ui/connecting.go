@@ -10,7 +10,7 @@ package ui
 // because nothing has landed — not because the user has no VMs. Showing the
 // bare "press enter to add a VM" ghost there would misrepresent an in-flight
 // fleet as an empty one. Once ANY member connects (boardReady), the ghost/roster
-// takes over; task 10's status bar surfaces per-profile connection state.
+// takes over; the per-profile status bar surfaces per-profile connection state.
 
 import (
 	"fmt"

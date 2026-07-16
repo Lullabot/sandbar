@@ -9,9 +9,9 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 )
 
-// TestGitCredSlug pins the slug grammar the task spells out verbatim: the
-// empty (global) scope slugs to "default", and a non-empty scope collapses any
-// run of non-alphanumerics to a single '-'.
+// TestGitCredSlug pins the slug grammar verbatim: the empty (global) scope
+// slugs to "default", and a non-empty scope collapses any run of
+// non-alphanumerics to a single '-'.
 func TestGitCredSlug(t *testing.T) {
 	cases := []struct{ scope, want string }{
 		{"", "default"},
@@ -44,9 +44,9 @@ func TestCollectGitCredEntries_RecognizedScopedKey(t *testing.T) {
 }
 
 // TestCollectGitCredEntries_NonRecognizedKeyProducesNoWiring is the explicit
-// negative case the task calls out: a scoped secret whose KEY is not in
-// recognizedForgeTokens must produce zero git-credential wiring, even though it
-// is still delivered as a plain scoped env var by the (unrelated) dotenv path.
+// negative case: a scoped secret whose KEY is not in recognizedForgeTokens
+// must produce zero git-credential wiring, even though it is still delivered
+// as a plain scoped env var by the (unrelated) dotenv path.
 func TestCollectGitCredEntries_NonRecognizedKeyProducesNoWiring(t *testing.T) {
 	scopes := map[string]map[string]string{
 		"github.com/acme": {"SOME_OTHER_TOKEN": "v"},
@@ -57,9 +57,9 @@ func TestCollectGitCredEntries_NonRecognizedKeyProducesNoWiring(t *testing.T) {
 	}
 }
 
-// TestCollectGitCredEntries_GlobalScopeNotWired: this redesign's scope for
-// credential wiring is the non-empty-scope case only (see the task's
-// implementation notes); a GH_TOKEN in the global ("") scope must not produce a
+// TestCollectGitCredEntries_GlobalScopeNotWired: the git-credential wiring
+// covers the non-empty-scope case only (see collectGitCredEntries's doc
+// comment); a GH_TOKEN in the global ("") scope must not produce a
 // git-credential entry.
 func TestCollectGitCredEntries_GlobalScopeNotWired(t *testing.T) {
 	scopes := map[string]map[string]string{
@@ -97,10 +97,10 @@ func TestRenderGitconfigInclude_FileArgIsAbsoluteNotTilde(t *testing.T) {
 	}
 }
 
-// TestRenderGitconfigManagedBlock_ScopedBeforeDefault asserts the ordering
-// property the task calls out explicitly: git's credential subsystem stops at
-// the FIRST helper that returns a full credential — it does not prefer a more
-// specific one found later — so every scoped includeIf stanza must precede any
+// TestRenderGitconfigManagedBlock_ScopedBeforeDefault asserts the load-bearing
+// ordering property: git's credential subsystem stops at the FIRST helper
+// that returns a full credential — it does not prefer a more specific one
+// found later — so every scoped includeIf stanza must precede any
 // unconditional default [credential] helper line.
 func TestRenderGitconfigManagedBlock_ScopedBeforeDefault(t *testing.T) {
 	entries := []gitCredEntry{
@@ -139,8 +139,9 @@ func TestRenderGitconfigManagedBlock_EmptyClearsBlock(t *testing.T) {
 
 // TestApplySecrets_ScopedGHTokenWritesGitCredentials covers the end-to-end
 // wiring for a scoped GH_TOKEN: it must still be delivered as a plain env var
-// (task 03, unaffected) AND additionally produce a per-scope git-credentials
-// write (token over stdin, never argv) and a gitconfig reconcile pass.
+// (the scoped .env delivery, unaffected) AND additionally produce a per-scope
+// git-credentials write (token over stdin, never argv) and a gitconfig
+// reconcile pass.
 func TestApplySecrets_ScopedGHTokenWritesGitCredentials(t *testing.T) {
 	const token = "GH_TOKEN_SENTINEL"
 	f := &fakeRunner{}
@@ -190,7 +191,7 @@ func TestApplySecrets_ScopedGHTokenWritesGitCredentials(t *testing.T) {
 	}
 
 	// The token is expected on TWO streams: the plain scoped .env write
-	// (task 03, unaffected KEY=VALUE dotenv form) and the git-credential
+	// (the unaffected KEY=VALUE dotenv form) and the git-credential
 	// write (the proven https://user:token@host line). Only the latter is
 	// asserted for exact form here.
 	var sawCredLine bool

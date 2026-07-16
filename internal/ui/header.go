@@ -41,7 +41,7 @@ const compactPrefix = "sand · "
 // headerView renders the pinned header band, HeaderHeight lines exactly:
 // full (a title line plus the counts) when the terminal is tall enough, or
 // compact (folded onto one line) once classify sheds the title (layout.go),
-// PLUS task 10's per-profile band/banner rows — however many
+// PLUS the per-profile band/banner rows — however many
 // m.layout.HeaderBandLines was actually granted (see headerBandLines). Every
 // line is clipped to ContentWidth, the same honest clip the footer and the
 // activity line take.
@@ -103,9 +103,9 @@ func (m model) headerCounts(width int) string {
 	return ansi.Truncate(core, width, "…")
 }
 
-// fleetCountsText is "N sandboxes (M running)" — the board's roster (task 08:
-// managed clones, plus a VM whose provision job hasn't landed in `limactl
-// list` yet), and how many of them Lima (or a build) reports up right now.
+// fleetCountsText is "N sandboxes (M running)" — the board's roster (managed
+// clones, plus a VM whose provision job hasn't landed in `limactl list`
+// yet), and how many of them Lima (or a build) reports up right now.
 // Building counts as running: the guest is up even while Ansible still owns
 // the tile's status word.
 func (m model) fleetCountsText() string {
@@ -142,13 +142,13 @@ func (m model) fleetCountsText() string {
 // idle fleet — see tileGaugeNoReading, which makes the same refusal on the tile.
 func (m model) hostCapacityText() string { return m.hostCapacityTextFor(m.activeMember()) }
 
-// hostCapacityTextFor is hostCapacityText's per-member form (task 10): the
-// SAME use-not-allocation arithmetic below, just addressed at whichever
-// member the caller names instead of always the active one. hostCapacityText
-// (the single-band header's own text) is now a one-line call to this with
-// m.activeMember() — bit-identical to the pre-task-10 behaviour for the
-// zero-config single-member fleet, which is exactly the parity this task
-// promises. headerBandLines is the other caller, one per connected member.
+// hostCapacityTextFor is hostCapacityText's per-member form: the SAME
+// use-not-allocation arithmetic below, just addressed at whichever member the
+// caller names instead of always the active one. hostCapacityText (the
+// single-band header's own text) is a one-line call to this with
+// m.activeMember() — bit-identical to the single-band behaviour for the
+// zero-config single-member fleet, which is the parity this split has to
+// preserve. headerBandLines is the other caller, one per connected member.
 func (m model) hostCapacityTextFor(am fleetMember) string {
 	roster := m.boardVMs()
 
@@ -298,7 +298,7 @@ func humanizeInt(n int64) string {
 	return humanizeBytes(strconv.FormatInt(n, 10))
 }
 
-// desiredHeaderBands is how many EXTRA header rows (task 10) the fleet wants
+// desiredHeaderBands is how many EXTRA header rows the fleet wants
 // right now: one per member that is connected, disabled, or errored — the
 // three states memberStatusLine has something to say about. A connecting
 // member says nothing here (fleetConnectingBanner already covers that span,
@@ -348,7 +348,7 @@ func (m model) memberStatusLine(mem fleetMember) (string, bool) {
 	}
 }
 
-// headerBandLines renders task 10's per-profile rows: one line per connected
+// headerBandLines renders the per-profile rows: one line per connected
 // member (that member's own host cpu/mem/disk) and one BANNER line per
 // disabled/errored member (naming the profile and why its tiles are gone),
 // so a mixed fleet's status bar grows from the single capacity clause

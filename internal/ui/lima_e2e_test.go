@@ -2,18 +2,18 @@
 
 // This file boots REAL Lima VMs and so is gated behind the `limae2e` build
 // tag (and the LIMA_E2E env var) — it never runs in the normal
-// `go test ./...`. It is task 10's insurance policy: the four e2e tests for
-// this plan's claims that cross a process or machine boundary and so cannot
-// be proven in-process, plus the empirical answers to the plan's open Lima
-// questions.
+// `go test ./...`. It is the suite's insurance policy: the four e2e tests
+// for the claims that cross a process or machine boundary and so cannot be
+// proven in-process, plus the empirical answers to open questions about
+// Lima's real behaviour.
 //
 // Run (needs limactl + nested virt/KVM; downloads the Debian 13 image once):
 //
 //	LIMA_E2E=1 go test -tags limae2e -timeout 45m -run TestE2E ./internal/ui/
 //
 // The FIFTH real-Lima e2e test for this package — the secrets save-on-a-
-// running-VM round trip — already exists, in secrets_e2e_test.go (task 06). It
-// is NOT duplicated here; see this file's tests below for the other four:
+// running-VM round trip — already exists, in secrets_e2e_test.go. It is NOT
+// duplicated here; see this file's tests below for the other four:
 //
 //  1. TestE2EHeartbeatParsesRealGuestAndCPUMoves — the streaming shell against
 //     a real guest yields plausible cpu/mem samples, and cpu% visibly moves
@@ -26,7 +26,7 @@
 //  4. TestE2ETwoVMsProvisionConcurrently — two real provisions in flight at
 //     once, output routed to the right VM, cancellation scoped to one job.
 //  5. TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable — THE
-//     plan's most dangerous failure mode: Lima reports a provisioning VM as
+//     single most dangerous failure mode: Lima reports a provisioning VM as
 //     Running even after its Ansible run has failed, so the derived tile
 //     status is the only thing standing between the user and a false "your
 //     sandbox is healthy".
@@ -79,7 +79,7 @@ func e2eCreateVM(p provider.Provider) provisionFunc {
 }
 
 // e2eMinimalOverlay writes secretsE2EOverlay — the same ansible-free, disk-
-// floor overlay secrets_e2e_test.go (task 06) boots from — to a temp file and
+// floor overlay secrets_e2e_test.go boots from — to a temp file and
 // returns its path. Shared rather than redeclared: a second `const
 // secretsE2EOverlay = ...` in this package would not even compile.
 func e2eMinimalOverlay(t *testing.T) string {
@@ -364,9 +364,9 @@ func TestE2EHeartbeatTerminatesWhenVMStoppedUnderneath(t *testing.T) {
 
 	// NO GAUGE LEFT STUCK: the reading must go the moment the stream does.
 	// waitFor's own deadline (10s, heartbeat_lifecycle_test.go) was sized for
-	// an instant fake stream; give a real `limactl shell` teardown (task 05
-	// measured ~300ms once the guest is actually gone, but scheduling and
-	// process-exit slop are real against an actual VM) more room.
+	// an instant fake stream; give a real `limactl shell` teardown (measured
+	// at ~300ms against a real VM once the guest is actually gone, but
+	// scheduling and process-exit slop are real against an actual VM) more room.
 	e2eWaitForLonger(t, "the heartbeat to end on its own after the VM stops", 30*time.Second, func() bool {
 		_, ok := r.latest(registry.LocalScope, name)
 		return !ok
@@ -379,8 +379,8 @@ func TestE2EHeartbeatTerminatesWhenVMStoppedUnderneath(t *testing.T) {
 
 // `LAST USED` AFTER A REAL STOP, and the never-started VM's honest absence.
 // The in-process tests fabricate an mtime; this is the only thing that can
-// prove Lima actually writes ha.stderr.log where — and when — the plan
-// assumes it does.
+// prove Lima actually writes ha.stderr.log where — and when — the last-used
+// probe assumes it does.
 func TestE2ELastUsedAfterRealStopAndNeverStarted(t *testing.T) {
 	if os.Getenv("LIMA_E2E") == "" {
 		t.Skip("set LIMA_E2E=1 (and -tags limae2e) to run the real-Lima e2e tests")
@@ -561,7 +561,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 }
 
 // A DELIBERATELY FAILED PROVISION RENDERS `Failed`, NOT A GREEN "Running".
-// This is the plan's most dangerous single failure mode: Lima has no concept
+// This is the most dangerous single failure mode: Lima has no concept
 // of "provisioning" — to `limactl list`, a VM whose finalize Ansible run just
 // failed is indistinguishable from a perfectly healthy one, because the VM
 // itself booted fine and is still up. Every layer below the job registry
@@ -630,8 +630,8 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 		t.Fatalf("the VM should exist in `limactl list` (finalize runs after clone+configure+start): %+v", realVMs)
 	}
 	if v.Status != "Running" {
-		t.Fatalf("PLAN ASSUMPTION CHECK FAILED: expected Lima to report the VM Running (finalize fails AFTER a successful boot), got %q — "+
-			"if Lima's real behaviour has changed, this test's premise (and the plan's) needs revisiting, not a loosened assertion", v.Status)
+		t.Fatalf("ASSUMPTION CHECK FAILED: expected Lima to report the VM Running (finalize fails AFTER a successful boot), got %q — "+
+			"if Lima's real behaviour has changed, this test's premise needs revisiting, not a loosened assertion", v.Status)
 	}
 	if got := deriveStatus(v, snap, ok); got != statusFailed {
 		t.Fatalf("Lima reports %q for a VM whose provision failed, and the derived tile status = %v — want Failed. "+

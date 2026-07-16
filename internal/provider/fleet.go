@@ -45,9 +45,10 @@ var (
 // Construction is cheap and never blocks on the network: neither NewDefault
 // nor NewRemoteLima performs a round-trip at construction time, only when a
 // method (Preflight, List, ...) is later called on the result. BuildFleet
-// itself never calls Preflight — that stays the caller's job (task 5
-// preflights the one CLI-selected profile; task 7 preflights every fleet
-// member asynchronously in the TUI), so building the fleet is always fast
+// itself never calls Preflight — that stays the caller's job (the CLI
+// preflights only the one selected profile, e.g. cmd/sand/create.go; the TUI
+// preflights every fleet member asynchronously, in internal/ui/commands.go's
+// refreshCmd), so building the fleet is always fast
 // regardless of how many profiles are enabled or reachable.
 //
 // A profile whose provider fails to construct becomes an error binding (Err

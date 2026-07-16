@@ -88,10 +88,10 @@ func TestClassifyNoSizeIsUnrenderable(t *testing.T) {
 	}
 }
 
-// classify's own zero-bands behaviour must be untouched by task 10:
-// classify(w,h) and classifyWithFooter thread a headerBands of 0 through
-// classifyWithHeaderBands, so every pre-task-10 caller/test keeps getting
-// exactly the base header height it always did.
+// classify's own zero-bands behaviour must be untouched by the per-profile
+// header bands: classify(w,h) and classifyWithFooter thread a headerBands of 0
+// through classifyWithHeaderBands, so every caller that does not ask for bands
+// keeps getting exactly the base header height it always did.
 func TestClassifyRequestsNoHeaderBands(t *testing.T) {
 	lm := classify(120, 40)
 	if lm.HeaderBandLines != 0 {

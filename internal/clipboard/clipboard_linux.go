@@ -12,8 +12,8 @@ import (
 // readImagePNG implements the Linux clipboard-image read: gate on an
 // advertised image/png TARGETS/type-listing entry, then fetch — never the
 // other way around. xclip (X11) is tried first; wl-paste (Wayland) is tried
-// only when xclip's binary itself is absent, mirroring the plan's documented
-// probe order. Neither binary present is ErrUnsupported; either binary
+// only when xclip's binary itself is absent — X11 first, Wayland strictly as
+// a fallback. Neither binary present is ErrUnsupported; either binary
 // present but advertising no image/png is ErrNoImage with ZERO fetch.
 func readImagePNG() ([]byte, error) {
 	ctx := context.Background()

@@ -5,11 +5,11 @@
 // its siblings in this package — it never runs in the normal `go test ./...`
 // (AGENTS.md's hard rule: no test may require a real limactl without the tag).
 //
-// Plan 14 (tmux-backed multi-shell access) rests on three claims that cross a
+// Tmux-backed multi-shell access rests on three claims that cross a
 // process/machine boundary and so cannot be proven by a fake lima.Runner or by
 // asserting on argv alone (attach_test.go already does the latter, in-process):
 //
-//  1. TestE2EShellSessionPersistsAcrossDetach — the headline claim. A process
+//  1. TestE2EShellSessionPersistsAcrossDetach — the core claim. A process
 //     started in the attached session survives its client detaching (closing
 //     the terminal), and a fresh attach afterwards finds the session — and the
 //     process — still there.
@@ -18,7 +18,7 @@
 //     window set, the second client's own window switch does not move the
 //     first, and neither client's display is size-clamped to the other's.
 //  3. TestE2EShellDestroyUnattachedAsymmetry — the single most dangerous
-//     failure mode this plan can ship, asserted explicitly rather than
+//     failure mode this feature can ship, asserted explicitly rather than
 //     eyeballed: when the grouped client detaches, ITS session evaporates
 //     while `main` — and anything running in it — survives; and `main` keeps
 //     surviving even after every client has gone, because that persistence,
@@ -37,8 +37,8 @@
 //
 // Driving the actual attach needs a real controlling terminal — tmux refuses
 // to run without one ("open terminal failed: not a terminal"), and a Go test
-// binary has none. e2eHostTmux fabricates one exactly the way task 06's manual
-// validation harness does by hand: a PRIVATE host tmux server on its own -S
+// binary has none. e2eHostTmux fabricates one exactly the way the manual
+// validation harness did by hand: a PRIVATE host tmux server on its own -S
 // socket path (never the default socket, never touched with kill-server, only
 // ever killed by session name), used purely as a PTY source for driving
 // `limactl shell` interactively and for reading back what appeared on screen.
@@ -124,7 +124,7 @@ func (h *e2eHostTmux) kill(session string) {
 }
 
 // waitForAttach polls session's pane for a guest tmux STATUS BAR — the same
-// signal ("[main…" / "[sand-…") task 01's manual PTY probe used to prove
+// signal ("[main…" / "[sand-…") the original manual PTY probe used to prove
 // `limactl shell` allocates a real terminal — rather than a fixed sleep, and
 // fails loudly on a timeout instead of racing ahead onto a not-yet-attached
 // pane.
@@ -153,7 +153,7 @@ func (h *e2eHostTmux) waitForAttach(session string, timeout time.Duration) {
 // before its first start: a bare `limactl clone` does NOT inherit the shared
 // base's modest footprint (ensureSharedBase's own comment explains why that
 // footprint is modest — this host has 16 cores/15GiB and sand-tmux-probe, the
-// plan's own probe VM, is left running at 8GiB throughout this validation) —
+// long-lived probe VM, is left running at 8GiB throughout this validation) —
 // left unconfigured, a clone defaults to the template's own (much larger)
 // footprint, which was observed to make `limactl start` fail under real
 // resource contention on this exact host.
@@ -191,10 +191,10 @@ func e2eAttachArgv(t *testing.T, cli *lima.Client, name string) []string {
 	return lima.AttachArgv(name, lima.GuestHome(dir), os.Getenv("COLORTERM"))
 }
 
-// THE HEADLINE CLAIM: a process started in the attached session survives its
-// client detaching — and the session (with that process still in it) is still
-// there for a fresh attach afterwards. This is the entire reason this plan
-// exists; if it regresses, everything else in the plan is decoration.
+// THE CORE CLAIM of tmux-backed shells: a process started in the attached
+// session survives its client detaching — and the session (with that process
+// still in it) is still there for a fresh attach afterwards. This is the entire
+// reason the feature exists; if it regresses, everything else is decoration.
 func TestE2EShellSessionPersistsAcrossDetach(t *testing.T) {
 	if os.Getenv("LIMA_E2E") == "" {
 		t.Skip("set LIMA_E2E=1 (and -tags limae2e) to run the real-Lima e2e tests")
@@ -231,8 +231,8 @@ func TestE2EShellSessionPersistsAcrossDetach(t *testing.T) {
 	}
 
 	// Re-attach with a FRESH client and confirm the window (and the still-
-	// running marker) is still there — this is "quit the TUI, close the
-	// terminal, open a new one" from the plan's own validation step 3.
+	// running marker) is still there — this is the "quit the TUI, close the
+	// terminal, open a new one" scenario, exercised end to end.
 	h.newSession("c2", 200, 50, argv...)
 	h.waitForAttach("c2", 30*time.Second)
 	t.Cleanup(func() { h.kill("c2") })
@@ -377,6 +377,6 @@ func TestE2EShellDestroyUnattachedAsymmetry(t *testing.T) {
 		t.Fatalf("'main' should still exist, unattached, after every client has detached; got: %q", final)
 	}
 	if out := e2eGuestOut(t, cli, name, "pgrep", "-af", "sleep 90"); !strings.Contains(out, "sleep 90") {
-		t.Fatalf("CRITICAL: the marker process died after the LAST client detached — persistence (this plan's headline claim) is broken. pgrep: %q", out)
+		t.Fatalf("CRITICAL: the marker process died after the LAST client detached — the core persistence guarantee of tmux-backed shells is broken. pgrep: %q", out)
 	}
 }

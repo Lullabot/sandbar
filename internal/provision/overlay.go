@@ -39,7 +39,7 @@ const overlayContainerd = `containerd:
 `
 
 // overlayProvision is the fixed dependency provision script. It installs just
-// enough (ansible-core, rsync, and task 3's apt prerequisites) for the
+// enough (ansible-core, rsync, and a few apt prerequisites) for the
 // playbook to be run later over `limactl shell`; the heavy playbook itself is
 // NOT run here so its output can stream to the terminal. ansible-core (8MB
 // installed) replaces Debian's fat `ansible` bundle (200MB installed) — the
@@ -85,22 +85,22 @@ const overlayProvision = `provision:
 // RenderBaseOverlay produces the Lima overlay YAML for the base image: the
 // inherited Debian 13 template, cpus/memory/disk, a read-only mount of the
 // playbook directory at /mnt/playbook, and the dependency provision script that
-// installs ansible-core, rsync, and task 3's apt prerequisites. It mirrors the
+// installs ansible-core, rsync, and a few apt prerequisites. It mirrors the
 // original bash provisioner's render_base_overlay.
 //
-// It deliberately does NOT mount a host apt-archive cache (strikethroo plan 13,
-// task 10 considered this and backed it out): Lima's mount type on a host
-// without virtiofsd installed falls back to reverse-sshfs, and reverse-sshfs
+// It deliberately does NOT mount a host apt-archive cache (that design was
+// tried and backed out): Lima's mount type on a host without virtiofsd
+// installed falls back to reverse-sshfs, and reverse-sshfs
 // does not honour a guest chown of the mounted directory — `chown _apt
 // /mnt/apt-cache/partial` fails with EPERM, which is fatal to apt's use of that
 // directory as Dir::Cache::archives. virtiofsd is not bundled with Lima and is
 // not guaranteed present on an arbitrary Linux host, so this is not a one-host
-// fluke; it is the documented risk the task's own notes anticipated (Lima's
-// reverse-sshfs default on macOS carries the same restriction). The apt cache
-// is instead seeded/harvested via `limactl copy` around the base playbook run
-// — see aptcache.go — which needs no host mount at all, so there is nothing
-// here to strip from a clone. Client.Configure still strips any writable mount
-// a clone inherits, as a standing guard against a future overlay change.
+// fluke (Lima's reverse-sshfs default on macOS carries the same restriction).
+// The apt cache is instead seeded/harvested via `limactl copy` around the base
+// playbook run — see aptcache.go — which needs no host mount at all, so there
+// is nothing here to strip from a clone. Client.Configure still strips any
+// writable mount a clone inherits, as a standing guard against a future
+// overlay change.
 func RenderBaseOverlay(cfg vm.CreateConfig, playbookDir string) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(overlayHeader)
