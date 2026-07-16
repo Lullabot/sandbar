@@ -163,26 +163,49 @@ func limaHomeDir() string {
 	return filepath.Join(home, ".lima")
 }
 
-// freeDiskBytes reports the free space on the volume backing Lima's instance
-// store, best-effort (0 = unknown, so callers don't warn). ~/.lima may not exist
-// yet on a fresh host, so it climbs to the nearest existing ancestor — the same
-// filesystem the new VM's disk will land on.
-func freeDiskBytes() int64 {
+// limaStorageDir resolves the directory whose filesystem freeDiskBytes and
+// totalDiskBytes probe: Lima's home, climbing to the nearest existing
+// ancestor — ~/.lima may not exist yet on a fresh host, and the nearest
+// existing ancestor is the same filesystem the new VM's disk will land on.
+// "" when it cannot be resolved at all (no home directory), which both
+// callers turn into their "unknown" zero rather than statting a wrong path.
+func limaStorageDir() string {
 	dir := limaHomeDir()
 	if dir == "" {
-		return 0
+		return ""
 	}
 	for {
 		if _, err := os.Stat(dir); err == nil {
-			break
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir { // reached the root without an existing dir
-			return 0
+			return ""
 		}
 		dir = parent
 	}
+}
+
+// freeDiskBytes reports the free space on the volume backing Lima's instance
+// store, best-effort (0 = unknown, so callers don't warn).
+func freeDiskBytes() int64 {
+	dir := limaStorageDir()
+	if dir == "" {
+		return 0
+	}
 	return hostDiskFreeBytes(dir)
+}
+
+// totalDiskBytes is freeDiskBytes' total-side companion: the TOTAL (not free)
+// size of the same volume, resolved via the identical directory climb, so a
+// host-disk low-capacity warning (hostwarn.go) can compute a free% for the
+// local host without a second, differently-resolved path.
+func totalDiskBytes() int64 {
+	dir := limaStorageDir()
+	if dir == "" {
+		return 0
+	}
+	return hostDiskTotalBytes(dir)
 }
 
 // orDefault returns v when it has content, else def — the Go analogue of the

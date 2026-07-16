@@ -480,3 +480,31 @@ func TestDefaultsScaleToHostResources(t *testing.T) {
 		t.Error("defaultMemory(0) should fall back to the local probe, got empty")
 	}
 }
+
+// totalDiskBytes is freeDiskBytes' total-side companion (used by the
+// host-disk low-capacity warning, hostwarn.go): it must resolve the SAME
+// directory freeDiskBytes does (climbing to the nearest existing ancestor of
+// LIMA_HOME) and report a total no smaller than the free space on that same
+// path.
+func TestTotalDiskBytesMatchesFreeDiskBytesDir(t *testing.T) {
+	isolateHostState(t) // sets LIMA_HOME to a fresh temp dir
+
+	total := totalDiskBytes()
+	free := freeDiskBytes()
+	if total <= 0 {
+		t.Fatalf("totalDiskBytes() = %d, want > 0 under an isolated LIMA_HOME", total)
+	}
+	if total < free {
+		t.Fatalf("totalDiskBytes() = %d must be >= freeDiskBytes() = %d", total, free)
+	}
+}
+
+// An unresolvable home directory (HOME unset, LIMA_HOME unset) degrades to 0
+// for both — never a fabricated total to warn from.
+func TestTotalDiskBytesUnresolvableHomeIsZero(t *testing.T) {
+	t.Setenv("LIMA_HOME", "")
+	t.Setenv("HOME", "")
+	if got := totalDiskBytes(); got != 0 {
+		t.Fatalf("totalDiskBytes() with no resolvable home = %d, want 0", got)
+	}
+}

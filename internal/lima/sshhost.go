@@ -528,35 +528,45 @@ func (h *SSHHost) HostUser() string {
 	return h.user
 }
 
-// HostResources samples the remote host's CPU count, total memory (bytes) and
-// free disk (bytes) in ONE ssh round trip, for the board header's denominators.
-// It is best-effort — any field the remote shell cannot produce comes back 0 —
-// because a wrong or missing host total must never break the header or a refresh.
+// HostResources samples the remote host's CPU count, total memory (bytes),
+// free disk (bytes) AND total disk (bytes) in ONE ssh round trip, for the board
+// header's denominators and (diskTotalBytes) the host-capacity-warning feature's
+// free% arithmetic (internal/ui/hostwarn.go — a percentage needs both halves,
+// and sampling them apart would be a second remote round trip for a number
+// that `df` already prints in the same line as the free one). It is
+// best-effort — any field the remote shell cannot produce comes back 0 —
+// because a wrong or missing host total must never break the header or a
+// refresh.
 //
 // The script is portable across the two platforms Lima runs on: nproc /
-// /proc/meminfo on Linux, sysctl on macOS; df -Pk for free KiB on both, falling
-// back to $HOME when the Lima store dir does not exist yet.
-func (h *SSHHost) HostResources() (cpus int, memBytes, diskFreeBytes int64) {
+// /proc/meminfo on Linux, sysctl on macOS; df -Pk for free/total KiB on both,
+// falling back to $HOME when the Lima store dir does not exist yet.
+func (h *SSHHost) HostResources() (cpus int, memBytes, diskFreeBytes, diskTotalBytes int64) {
 	// RemoteLimaHome is never "" at runtime — NewSSHHost defaults it — so use it
 	// directly, as LimaHome and StagePlaybook do.
 	limaHome := h.cfg.RemoteLimaHome
 	script := `c=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)
 if [ -r /proc/meminfo ]; then m=$(awk '/^MemTotal:/{print $2*1024}' /proc/meminfo); else m=$(sysctl -n hw.memsize 2>/dev/null || echo 0); fi
 d=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $4*1024}')
-[ -z "$d" ] && d=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4*1024}')
-echo "${c:-0} ${m:-0} ${d:-0}"`
+t=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $2*1024}')
+if [ -z "$d" ]; then
+  d=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4*1024}')
+  t=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $2*1024}')
+fi
+echo "${c:-0} ${m:-0} ${d:-0} ${t:-0}"`
 	out, _, err := h.runRemote(context.Background(), nil, "sh", "-c", script)
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
 	fields := strings.Fields(string(out))
-	if len(fields) != 3 {
-		return 0, 0, 0
+	if len(fields) != 4 {
+		return 0, 0, 0, 0
 	}
 	cpus, _ = strconv.Atoi(fields[0])
 	memBytes, _ = strconv.ParseInt(fields[1], 10, 64)
 	diskFreeBytes, _ = strconv.ParseInt(fields[2], 10, 64)
-	return cpus, memBytes, diskFreeBytes
+	diskTotalBytes, _ = strconv.ParseInt(fields[3], 10, 64)
+	return cpus, memBytes, diskFreeBytes, diskTotalBytes
 }
 
 // --- copy across the hop --------------------------------------------------------

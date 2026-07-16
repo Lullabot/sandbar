@@ -753,15 +753,17 @@ func TestSSHHostUser(t *testing.T) {
 }
 
 func TestSSHHostResources(t *testing.T) {
-	t.Run("parses cpus mem disk", func(t *testing.T) {
+	t.Run("parses cpus mem disk-free disk-total", func(t *testing.T) {
 		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
-			// The one probe script echoes "cpus mem disk" (bytes).
-			return sh(ctx, "printf '%s' '8 16777216000 500000000000'")
+			// The one probe script echoes "cpus mem disk-free disk-total" (bytes) — the
+			// host-capacity-warning feature needs the TOTAL alongside the free reading
+			// already there, so a free% is computable without a second round trip.
+			return sh(ctx, "printf '%s' '8 16777216000 500000000000 1000000000000'")
 		}}
 		h := hostWith(testCfg, rec)
-		cpus, mem, disk := h.HostResources()
-		if cpus != 8 || mem != 16777216000 || disk != 500000000000 {
-			t.Fatalf("HostResources = (%d, %d, %d), want (8, 16777216000, 500000000000)", cpus, mem, disk)
+		cpus, mem, disk, diskTotal := h.HostResources()
+		if cpus != 8 || mem != 16777216000 || disk != 500000000000 || diskTotal != 1000000000000 {
+			t.Fatalf("HostResources = (%d, %d, %d, %d), want (8, 16777216000, 500000000000, 1000000000000)", cpus, mem, disk, diskTotal)
 		}
 	})
 	t.Run("degrades to zeros on failure", func(t *testing.T) {
@@ -769,8 +771,8 @@ func TestSSHHostResources(t *testing.T) {
 			return sh(ctx, "exit 1") // probe failed — header must just drop the clause
 		}}
 		h := hostWith(testCfg, rec)
-		if c, m, d := h.HostResources(); c != 0 || m != 0 || d != 0 {
-			t.Fatalf("HostResources on failure = (%d,%d,%d), want all zero", c, m, d)
+		if c, m, d, dt := h.HostResources(); c != 0 || m != 0 || d != 0 || dt != 0 {
+			t.Fatalf("HostResources on failure = (%d,%d,%d,%d), want all zero", c, m, d, dt)
 		}
 	})
 }

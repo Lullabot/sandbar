@@ -8,3 +8,5 @@ package ui
 func hostMemBytes() int64 { return 0 }
 
 func hostDiskFreeBytes(string) int64 { return 0 }
+
+func hostDiskTotalBytes(string) int64 { return 0 }

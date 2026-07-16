@@ -642,3 +642,149 @@ func TestRenderTileZeroValueDoesNotPanic(t *testing.T) {
 	}()
 	renderTile(tileInput{})
 }
+
+// tileGaugeRow's label/bar/value arithmetic must use DISPLAY width (ansi.
+// StringWidth), not byte length: a label carrying a multi-byte rune (the
+// coming low-capacity warning marker, "⚠") is padded by fmt's %-*s verb to a
+// given number of RUNES, whose UTF-8 byte length is wider than its terminal
+// column count — using len() there would starve the bar by the difference
+// and leave the row short of the tile's fixed width before tilePad's final
+// safety net silently pads it back out, which would misalign the bar/value
+// against every sibling row even though the overall width comes out right.
+func TestTileGaugeRowUsesDisplayWidthNotByteLength(t *testing.T) {
+	const width = 40
+	asciiRow := tileGaugeRow("cpu", "50%", width, func(barWidth int) string { return strings.Repeat("#", barWidth) })
+	warnRow := tileGaugeRow("⚠ cpu", "50%", width, func(barWidth int) string { return strings.Repeat("#", barWidth) })
+
+	// Both labels are padded by fmt's %-*s to the SAME tileGaugeLabelWidth
+	// (measured in runes/columns, not bytes), so both rows must reserve the
+	// exact same bar width — regardless of "⚠" costing 3 UTF-8 bytes for one
+	// display column. A byte-length-based computation would (wrongly) starve
+	// the multi-byte row's bar by the extra bytes, which is exactly the bug
+	// this pins closed.
+	asciiBar := strings.Count(asciiRow, "#")
+	warnBar := strings.Count(warnRow, "#")
+	if asciiBar != warnBar {
+		t.Fatalf("bar width must not depend on a label's BYTE length: ascii bar=%d, warn bar=%d, want equal", asciiBar, warnBar)
+	}
+}
+
+// --- Rules 3+4: a single VM's own mem/disk gauge warns below 5% free. ---
+
+// A running VM whose guest heartbeat reports less than 5% memory free (rule
+// 3) gets a "⚠ mem" label and its row rendered in warnStyle instead of the
+// ordinary chrome grey — while an otherwise-identical VM at or above 5% free
+// renders EXACTLY as today (no marker, no colour change).
+func TestTileMemGaugeWarnsBelow5PercentFree(t *testing.T) {
+	low := baseTileInput()
+	low.VM = vm.VM{Name: "web", Status: "Running"}
+	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 970} // 3% free
+	low.HasSample = true
+	got := ansi.Strip(renderTile(low))
+	if !strings.Contains(got, "⚠ mem") {
+		t.Fatalf("mem free below 5%% must show the ⚠ mem marker, got:\n%s", got)
+	}
+
+	ok := baseTileInput()
+	ok.VM = vm.VM{Name: "web", Status: "Running"}
+	ok.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 900} // 10% free
+	ok.HasSample = true
+	got2 := ansi.Strip(renderTile(ok))
+	if strings.Contains(got2, "⚠") {
+		t.Fatalf("mem free at 10%% must NOT show a warning marker, got:\n%s", got2)
+	}
+}
+
+// The disk gauge is mem's exact twin (rule 4), using DiskUsed vs the VM's
+// allocated Disk size — the same numbers tileDiskLine already renders.
+func TestTileDiskGaugeWarnsBelow5PercentFree(t *testing.T) {
+	low := baseTileInput()
+	low.VM = vm.VM{Name: "web", Status: "Stopped", Disk: "100000000000", DiskUsed: "97000000000"} // 3% free
+	got := ansi.Strip(renderTile(low))
+	if !strings.Contains(got, "⚠ disk") {
+		t.Fatalf("disk free below 5%% must show the ⚠ disk marker, got:\n%s", got)
+	}
+
+	ok := baseTileInput()
+	ok.VM = vm.VM{Name: "web", Status: "Stopped", Disk: "100000000000", DiskUsed: "50000000000"} // 50% free
+	got2 := ansi.Strip(renderTile(ok))
+	if strings.Contains(got2, "⚠") {
+		t.Fatalf("disk free at 50%% must NOT show a warning marker, got:\n%s", got2)
+	}
+}
+
+// Both warnings can be active on the same tile simultaneously.
+func TestTileBothMemAndDiskWarningsSimultaneously(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"} // 2% free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}              // 2% free
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "⚠ mem") || !strings.Contains(got, "⚠ disk") {
+		t.Fatalf("both mem and disk must warn simultaneously, got:\n%s", got)
+	}
+}
+
+// A VM with NO reading (heartbeat quiet, or disk unmeasurable) must never
+// invent a warning — mirroring tileGaugeNoReading's own refusal.
+func TestTileNoReadingNeverWarns(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: ""} // disk unmeasurable
+	in.HasSample = false                                                              // no heartbeat sample at all
+
+	got := ansi.Strip(renderTile(in))
+	if strings.Contains(got, "⚠") {
+		t.Fatalf("no reading must never show a warning marker, got:\n%s", got)
+	}
+}
+
+// The marker must never overflow or force the tile's fixed width to change:
+// a warned row still measures exactly the tile's inner width, single-cell
+// glyph and all.
+func TestTileWarningMarkerNeverOverflowsFixedWidth(t *testing.T) {
+	in := baseTileInput()
+	in.Width = 44
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}
+	in.HasSample = true
+
+	got := renderTile(in)
+	lines := strings.Split(ansi.Strip(got), "\n")
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != in.Width {
+			t.Fatalf("line %d width = %d, want exactly %d (the tile's fixed full width, border included): %q", i, w, in.Width, l)
+		}
+	}
+}
+
+// TestTileWarningRenderingGolden pins the EXACT rendering of a tile with both
+// mem and disk below 5% free, at a fixed 44-column width — the low-capacity-
+// warning feature's one golden, extending this file's existing inline-golden
+// style (ansi.Strip + a literal expected string, as every other test above
+// already asserts against) rather than a new testdata/*.golden fixture: the
+// exact text is what's load-bearing here, not a whole-board render.
+func TestTileWarningRenderingGolden(t *testing.T) {
+	in := baseTileInput()
+	in.Width = 44
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"} // 2% disk free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}              // 2% mem free
+	in.HasSample = true
+	in.Now = time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+
+	want := strings.Join([]string{
+		"╭──────────────────────────────────────────╮",
+		"│ web                                      │",
+		"│ ● Running                                │",
+		"│ cpu      ███░░░░░░░░░░░░░░░░░░░░░░░░ 10% │",
+		"│ ⚠ mem    ██████████████████ 980 B/1000 B │",
+		"│ ⚠ disk   █████████████ 91.3 GiB/93.1 GiB │",
+		"│ up                                       │",
+		"╰──────────────────────────────────────────╯",
+	}, "\n")
+
+	got := ansi.Strip(renderTile(in))
+	if got != want {
+		t.Fatalf("tile rendering with both mem and disk below 5%% free changed.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}

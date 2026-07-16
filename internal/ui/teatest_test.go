@@ -100,7 +100,22 @@ func pinHostCapacity(t *testing.T, memBytes, diskFreeBytes int64) {
 	hostMemBytesFn = func() int64 { return memBytes }
 	hostDiskFreeFn = func() int64 { return diskFreeBytes }
 	hostCPUsFn = func() int { return 16 }
-	t.Cleanup(func() { hostMemBytesFn, hostDiskFreeFn, hostCPUsFn = origMem, origDisk, origCPU })
+	// The low-capacity-warning feature's two extra inputs (hostwarn.go) are
+	// pinned too, comfortably away from its 5%-free threshold — 100% free, in
+	// fact (memAvail == the total; diskTotal == the free figure already
+	// pinned above). Every teatest golden boots the REAL refreshCmd, which
+	// samples these for real (hostMemAvailBytes reads this box's actual
+	// /proc/meminfo; the local disk-total fallback statfs's this box's real
+	// volume) — a golden must never spuriously grow a warning line in its
+	// Messages strip just because the machine actually running the test
+	// happens to be low on RAM or disk right now.
+	origMemAvail, origDiskTotal := hostMemAvailFn, hostDiskTotalFn
+	hostMemAvailFn = func(lima.HostFiles) (int64, bool) { return memBytes, true }
+	hostDiskTotalFn = func() int64 { return diskFreeBytes }
+	t.Cleanup(func() {
+		hostMemBytesFn, hostDiskFreeFn, hostCPUsFn = origMem, origDisk, origCPU
+		hostMemAvailFn, hostDiskTotalFn = origMemAvail, origDiskTotal
+	})
 }
 
 // pinVersion fixes the build string the header shows. Without it every golden would
