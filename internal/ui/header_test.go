@@ -332,3 +332,149 @@ func TestHeaderCountsDropsCapacityWhenBandsRender(t *testing.T) {
 		t.Fatalf("headerCounts with bands shed lost the host readout entirely: %q", line)
 	}
 }
+
+// --- This task: the header's per-profile band (and the single-profile fold
+// into headerCounts) must carry a starved host as a STEADY VISUAL STATE, not
+// just a one-shot Messages line that scrolls away. The warn CONDITION is the
+// exact same host memAvail/mem, diskFree/diskTotal check hostwarn.go's
+// checkHostMemWarn/checkHostDiskWarn latch their log line on — never a
+// re-derived copy — so the band and the log can never disagree about what
+// counts as low, even though the clause DISPLAYS a different pair of numbers
+// (guest-use/total) than the ones the warn condition is computed from.
+
+// A host below the threshold on memory ONLY gets its mem clause (and only
+// its mem clause) prefixed with the single-cell "⚠ " marker.
+func TestHostCapacityClauseWarnsOnLowMemoryOnly(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, memAvail: 1 << 30, diskTotal: 500 << 30, diskFree: 400 << 30, cpus: 16} // mem 3% free, disk 80% free
+
+	line := ansi.Strip(m.hostCapacityTextFor(m.members[0]))
+	parts := strings.Split(line, ", ")
+	if len(parts) != 3 {
+		t.Fatalf("line = %q, want 3 comma-separated clauses (cpu, mem, disk)", line)
+	}
+	if !strings.HasPrefix(parts[1], "⚠ mem ") {
+		t.Fatalf("mem clause = %q, want the ⚠ marker on a starved host", parts[1])
+	}
+	if strings.Contains(parts[0], "⚠") || strings.Contains(parts[2], "⚠") {
+		t.Fatalf("line = %q, only the mem clause should be flagged", line)
+	}
+}
+
+// The disk twin: only the disk clause is flagged when disk alone is starved.
+func TestHostCapacityClauseWarnsOnLowDiskOnly(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, memAvail: 16 << 30, diskTotal: 500 << 30, diskFree: 10 << 30, cpus: 16} // mem 50% free, disk 2% free
+
+	line := ansi.Strip(m.hostCapacityTextFor(m.members[0]))
+	parts := strings.Split(line, ", ")
+	if len(parts) != 3 {
+		t.Fatalf("line = %q, want 3 comma-separated clauses (cpu, mem, disk)", line)
+	}
+	if !strings.HasPrefix(parts[2], "⚠ ") || !strings.Contains(parts[2], "disk free") {
+		t.Fatalf("disk clause = %q, want the ⚠ marker on a starved host", parts[2])
+	}
+	if strings.Contains(parts[0], "⚠") || strings.Contains(parts[1], "⚠") {
+		t.Fatalf("line = %q, only the disk clause should be flagged", line)
+	}
+}
+
+// Both clauses can warn simultaneously.
+func TestHostCapacityClauseWarnsOnBothMemoryAndDisk(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, memAvail: 1 << 30, diskTotal: 500 << 30, diskFree: 10 << 30, cpus: 16}
+
+	line := ansi.Strip(m.hostCapacityTextFor(m.members[0]))
+	parts := strings.Split(line, ", ")
+	if len(parts) != 3 {
+		t.Fatalf("line = %q, want 3 comma-separated clauses (cpu, mem, disk)", line)
+	}
+	if !strings.HasPrefix(parts[1], "⚠ mem ") {
+		t.Fatalf("mem clause = %q, want it flagged", parts[1])
+	}
+	if !strings.HasPrefix(parts[2], "⚠ ") || !strings.Contains(parts[2], "disk free") {
+		t.Fatalf("disk clause = %q, want it flagged", parts[2])
+	}
+}
+
+// No reading (memAvail/diskTotal never sampled, even though mem/diskFree —
+// the numbers actually DISPLAYED — are present) must never highlight: the
+// exact same refusal hostwarn.go's checks make.
+func TestHostCapacityClauseNoReadingNeverWarns(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, diskFree: 1 << 30, cpus: 16} // memAvail=0, diskTotal=0: never sampled
+
+	line := ansi.Strip(m.hostCapacityTextFor(m.members[0]))
+	if strings.Contains(line, "⚠") {
+		t.Fatalf("line = %q, must not warn without a memAvail/diskTotal reading", line)
+	}
+}
+
+// Exactly the threshold (10%) free is NOT "less than 10%" — the boundary
+// itself must not highlight, matching checkHostMemWarn/checkHostDiskWarn's
+// own float-safe boundary rule exactly.
+func TestHostCapacityClauseExactBoundaryDoesNotWarn(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 100, memAvail: 10, diskTotal: 100, diskFree: 10, cpus: 16}
+
+	line := ansi.Strip(m.hostCapacityTextFor(m.members[0]))
+	if strings.Contains(line, "⚠") {
+		t.Fatalf("line = %q, exactly 10%% free must not warn", line)
+	}
+}
+
+// The warnStyle/marker styling must not count toward the line's display
+// width — the same ansi.StringWidth-not-byte-length honesty
+// tileGaugeRowStyled's own fix pins for the tile's warning marker.
+func TestHostCapacityClauseWarnStylingDoesNotInflateDisplayWidth(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, memAvail: 1 << 30, diskTotal: 500 << 30, diskFree: 10 << 30, cpus: 16}
+
+	styled := m.hostCapacityTextFor(m.members[0])
+	stripped := ansi.Strip(styled)
+	if ansi.StringWidth(styled) != ansi.StringWidth(stripped) {
+		t.Fatalf("styled width = %d, stripped width = %d, want equal — ANSI codes must not count toward display width", ansi.StringWidth(styled), ansi.StringWidth(stripped))
+	}
+}
+
+// The per-profile band (memberStatusLine) must carry the same highlight —
+// the whole point being that the band, not just the one-shot Messages line,
+// is a steady visual state for a starved host.
+func TestMemberStatusLineHighlightsStarvedHost(t *testing.T) {
+	isolateHostState(t)
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, 120, 40)
+
+	mem := m.members[1]
+	mem.state = connConnected
+	mem.host = hostSample{mem: 32 << 30, memAvail: 1 << 30, diskTotal: 500 << 30, diskFree: 400 << 30, cpus: 16}
+
+	line, ok := m.memberStatusLine(mem)
+	if !ok {
+		t.Fatalf("memberStatusLine(connected) reported nothing")
+	}
+	stripped := ansi.Strip(line)
+	if !strings.Contains(stripped, "⚠ mem") {
+		t.Fatalf("line = %q, want the starved mem clause flagged", stripped)
+	}
+}
+
+// The zero-config single-profile combined line (hostCapacityText, folded
+// into headerCounts) gets the SAME treatment: a full local disk must be
+// visible to a user who never configured a second profile.
+func TestHeaderCountsHighlightsStarvedHostInSingleProfileFold(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m.members[0].host = hostSample{mem: 32 << 30, memAvail: 1 << 30, diskTotal: 500 << 30, diskFree: 400 << 30, cpus: 16}
+
+	counts := ansi.Strip(m.headerCounts(m.layout.ContentWidth))
+	if !strings.Contains(counts, "⚠ mem") {
+		t.Fatalf("headerCounts = %q, want the starved host highlighted in the folded combined line", counts)
+	}
+}

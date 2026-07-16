@@ -220,16 +220,42 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 		}
 	}
 	if hostMem > 0 {
+		var clause string
 		if haveMem {
-			parts = append(parts, fmt.Sprintf("mem %s/%s", humanizeInt(memUsed), humanizeInt(hostMem)))
+			clause = fmt.Sprintf("mem %s/%s", humanizeInt(memUsed), humanizeInt(hostMem))
 		} else {
-			parts = append(parts, fmt.Sprintf("mem —/%s", humanizeInt(hostMem)))
+			clause = fmt.Sprintf("mem —/%s", humanizeInt(hostMem))
 		}
+		parts = append(parts, capacityClause(clause, hostMemLow(am.host)))
 	}
 	if hostDisk > 0 {
-		parts = append(parts, fmt.Sprintf("%s disk free", humanizeInt(hostDisk)))
+		clause := fmt.Sprintf("%s disk free", humanizeInt(hostDisk))
+		parts = append(parts, capacityClause(clause, hostDiskLow(am.host)))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// capacityClause is hostCapacityTextFor's per-clause twin of tileWarnGaugeLine
+// (tile.go): a starved clause gets the single-cell "⚠ " marker prefixed and
+// the WHOLE clause rendered in warnStyle — the repo's one warning colour —
+// instead of the header's ordinary dim grey, so a starved host is a STEADY
+// VISUAL STATE on the band rather than a Messages-log line that scrolls away.
+// warn is computed by the caller from hostMemLow/hostDiskLow (hostwarn.go),
+// the SAME condition that latches the Messages warning, never re-derived
+// here — so the band and the log can never quietly disagree about what
+// counts as low, even though the clause DISPLAYS a different pair of numbers
+// (guest-use/total) than the ones the warn condition is computed from (host
+// memAvail/mem, diskFree/diskTotal).
+//
+// Marker + clause is a single string handed to warnStyle.Render, exactly one
+// escape-open/reset pair — ansi.StringWidth (every caller's width budget:
+// headerCounts' room calc, m.clipLine's truncation) measures its display
+// width correctly regardless, since it already ignores SGR codes.
+func capacityClause(clause string, warn bool) string {
+	if !warn {
+		return clause
+	}
+	return warnStyle.Render("⚠ " + clause)
 }
 
 // hostMemBytesFn/hostDiskFreeFn indirect the header's two host-capacity

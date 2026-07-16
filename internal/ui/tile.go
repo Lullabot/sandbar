@@ -156,7 +156,7 @@ func renderTile(in tileInput) string {
 		}
 		// Disk is real data today and always renders, running or stopped, and always
 		// on the same row.
-		lines[4] = tileDiskLine(in.VM, width)
+		lines[4] = tileDiskLine(in.VM, status, in.Sample, in.HasSample, width)
 		lines[5] = tileFooterLine(in.VM, in.Now)
 	}
 
@@ -476,12 +476,33 @@ func memFraction(s guestSample) float64 {
 	return float64(s.MemUsed) / float64(s.MemTotal)
 }
 
-// tileDiskLine renders the always-on disk gauge. v.Disk/v.DiskUsed are raw
-// byte-count strings (Lima's own reporting, with DiskUsed populated from
-// diskUsedBytes at list time — see commands.go's listCmd); DiskUsed=="" means
-// UNMEASURABLE, and the gauge renders that as an explicit "?", never a
-// fabricated zero.
-func tileDiskLine(v vm.VM, width int) string {
+// tileDiskLine renders the always-on disk gauge, GUEST-FIRST, HOST-FALLBACK.
+//
+// While the VM is RUNNING and its heartbeat sample carries a guest root-
+// filesystem reading (sample.HasDisk()), this draws the GUEST's own
+// used/total — the only honest source of "how full is this VM". ZFS
+// compression and sparse disk images both let the backing image occupy far
+// fewer host bytes than the guest has actually written, so a host-side du of
+// the instance directory (v.DiskUsed) can read comfortably under capacity —
+// say 18.5/20 GiB — while the guest's own filesystem is genuinely 100% full.
+// Only the guest itself can answer that question.
+//
+// Without a guest reading — a stopped VM (no live heartbeat to ask), an old
+// guest whose heartbeat predates this probe, or a running one whose first
+// sample hasn't landed yet — this renders EXACTLY the host-side du it always
+// has: v.Disk/v.DiskUsed, Lima's own reporting, with DiskUsed=="" meaning
+// UNMEASURABLE and drawn as an explicit "?", never a fabricated zero.
+func tileDiskLine(v vm.VM, status derivedStatus, sample guestSample, hasSample bool, width int) string {
+	if status == statusRunning && hasSample && sample.HasDisk() {
+		total := humanizeBytes(strconv.FormatUint(sample.DiskTotal, 10))
+		value := humanizeBytes(strconv.FormatUint(sample.DiskUsed, 10)) + "/" + total
+		frac := float64(sample.DiskUsed) / float64(sample.DiskTotal)
+		if frac > 1-lowFreeThreshold {
+			return tileWarnGaugeLine("disk", frac, value, width)
+		}
+		return tileGaugeLine("disk", frac, value, width)
+	}
+
 	total := humanizeBytes(v.Disk)
 	if total == "" {
 		total = "?"

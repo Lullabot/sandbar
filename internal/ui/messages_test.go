@@ -72,6 +72,126 @@ func TestRecentMessagesOrderAndCap(t *testing.T) {
 	}
 }
 
+// logWarn marks its entry with the warn flag — distinct from a plain logMsg
+// entry — which is what the render sites below key their "⚠ " + amber
+// treatment on. A warn entry is otherwise an ordinary message: it counts
+// toward the ring, appears in recentMessages/lastMessage, and is bounded by
+// maxMessages exactly like any other.
+func TestLogWarnSetsTheWarnFlagLogMsgDoesNot(t *testing.T) {
+	m := newTestModel(t)
+	m.logMsg("connected to ci-host")
+	m.logWarn("disk low")
+
+	if m.messages[0].warn {
+		t.Fatalf("a plain logMsg entry must not carry the warn flag: %+v", m.messages[0])
+	}
+	if !m.messages[1].warn {
+		t.Fatalf("a logWarn entry must carry the warn flag: %+v", m.messages[1])
+	}
+	if got := m.lastMessage(); got != "disk low" {
+		t.Fatalf("lastMessage() = %q, want the logWarn text like any other logged line", got)
+	}
+}
+
+// logWarn("") must be the same no-op logMsg("") already is: nothing to report
+// must never append a blank warning entry.
+func TestLogWarnEmptyTextIsANoOp(t *testing.T) {
+	m := newTestModel(t)
+	m.logWarn("")
+	if len(m.messages) != 0 {
+		t.Fatalf("logWarn(\"\") appended %d entries, want a no-op", len(m.messages))
+	}
+}
+
+// The docked Messages strip renders a warn entry with the ⚠ marker and in
+// warnStyle (ANSI 214, the repo's one amber) — while a PLAIN entry (like
+// "connected to ci-host", which is not a warning) renders exactly as it
+// always has: no marker, no colour change. This is the exact scenario the
+// header-band golden fixtures pin ("connected to ci-host" lines), so a plain
+// entry must never pick up the warn treatment.
+func TestMessagesStripRendersWarnEntriesWithMarkerAndAmber(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight < 1 {
+		t.Fatal("precondition: this terminal must be tall enough for the strip")
+	}
+
+	m.logMsg("connected to ci-host")
+	m.logWarn("silo disk low — 4.7 GiB free of 48 GiB (<10%)")
+
+	strip := m.messagesStripView() // NOT ansi-stripped: the marker/colour IS what's under test
+	if !strings.Contains(strip, "⚠ silo disk low") {
+		t.Fatalf("a warn entry must render with the ⚠ marker, got:\n%s", strip)
+	}
+	if !strings.Contains(strip, "214") {
+		t.Fatalf("a warn entry must render in warnStyle (ANSI 214), got:\n%s", strip)
+	}
+	if strings.Contains(ansi.Strip(strip), "⚠ connected to ci-host") {
+		t.Fatalf("a plain entry must never get the warn marker, got:\n%s", strip)
+	}
+
+	// Isolate the plain line's own rendering (a fresh model logging ONLY the
+	// plain entry) to confirm it carries no warn colour at all — the strip
+	// above legitimately contains "214" from the OTHER (warn) line, so that
+	// check alone cannot tell the two apart.
+	plainOnly := newTestModel(t)
+	plainOnly = resized(plainOnly, 120, 40)
+	plainOnly = loadManaged(t, plainOnly, vm.VM{Name: "db", Status: "Running"})
+	plainOnly.logMsg("connected to ci-host")
+	plainStrip := plainOnly.messagesStripView()
+	if strings.Contains(plainStrip, "214") {
+		t.Fatalf("a plain entry alone must render with no warn colour, got:\n%s", plainStrip)
+	}
+	if !strings.Contains(ansi.Strip(plainStrip), "connected to ci-host") {
+		t.Fatalf("the plain entry text must still render, got:\n%s", plainStrip)
+	}
+}
+
+// The single-line activity view (shown on a terminal too short for the
+// docked strip) applies the same ⚠ + amber treatment to a warn entry, and
+// renders a plain entry exactly as before.
+func TestActivityLineRendersWarnEntryWithMarkerAndAmber(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 24) // below messagesMinHeight: no strip, so activityLineView carries it
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight >= 1 {
+		t.Fatal("precondition: this terminal must be too short for the strip")
+	}
+
+	m.logWarn("silo disk low — 4.7 GiB free of 48 GiB (<10%)")
+	line := m.activityLineView()
+	if !strings.Contains(line, "⚠ silo disk low") {
+		t.Fatalf("activityLineView() = %q, want the ⚠ marker on a warn entry", line)
+	}
+	if !strings.Contains(line, "214") {
+		t.Fatalf("activityLineView() = %q, want warnStyle (ANSI 214) on a warn entry", line)
+	}
+}
+
+// A plain entry on the activity line renders exactly as it always has: no
+// marker, no amber.
+func TestActivityLineRendersPlainEntryUnchanged(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 24)
+	m = loadManaged(t, m, vm.VM{Name: "db", Status: "Running"})
+	if m.layout.MessagesHeight >= 1 {
+		t.Fatal("precondition: this terminal must be too short for the strip")
+	}
+
+	m.logMsg("connected to ci-host")
+	line := m.activityLineView()
+	if strings.Contains(ansi.Strip(line), "⚠") {
+		t.Fatalf("activityLineView() = %q, want no warn marker on a plain entry", line)
+	}
+	if strings.Contains(line, "214") {
+		t.Fatalf("activityLineView() = %q, want no warnStyle colour on a plain entry", line)
+	}
+	if !strings.Contains(ansi.Strip(line), "connected to ci-host") {
+		t.Fatalf("activityLineView() = %q, want the plain message text", line)
+	}
+}
+
 // A logged message must appear ONCE on the board, not twice. The docked strip
 // (above the grid) and the activity line (below it) were both rendering the most
 // recent message, so every message printed twice on any terminal tall enough to

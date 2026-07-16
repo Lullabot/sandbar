@@ -108,6 +108,76 @@ func TestTUIHeaderBandsTwoProfilesWide(t *testing.T) {
 	golden.RequireEqual(t, renderModel(m))
 }
 
+// starvedLocalHeaderBandGolden drives the same two-member fleet as
+// TestTUIHeaderBandsTwoProfiles80x24/Wide, except the local member's list
+// carries a host reading below lowFreeThreshold (this task's own low-capacity
+// clause highlighting, header.go's capacityClause) on memory, disk, or both —
+// pinning the "⚠ " marker and its width-safe placement into the band exactly
+// where the healthy siblings pin plain text. memAvail/diskTotal are the WARN
+// denominators (hostwarn.go); mem/diskFree (seeded at 16 GiB / 100 GiB by
+// pinHostCapacity, via New()'s local seed) are left alone, so the clause's
+// DISPLAYED numbers stay identical to the healthy goldens' — only the
+// highlight differs.
+func starvedLocalHeaderBandGolden(t *testing.T, w, h int, memAvail, diskTotal int64) []byte {
+	t.Helper()
+	isolateHostState(t)
+	pinHostCapacity(t, 16<<30, 100<<30)
+	pinVersion(t, "v1.2.3")
+	seedManagedScoped(t, registry.LocalScope, "claude")
+
+	m := New(twoMemberFleet(&providerfake.Provider{}, &providerfake.Provider{})).(model)
+	m = resized(m, w, h)
+
+	next, _ := m.Update(vmsLoadedMsg{
+		scope:         registry.LocalScope,
+		vms:           []vm.VM{{Name: "claude", Status: "Running", CPUs: 4, Memory: "4294967296", Disk: "107374182400"}},
+		hostMemAvail:  memAvail,
+		hostDiskTotal: diskTotal,
+	})
+	m = next.(model)
+	next, _ = m.Update(vmsLoadedMsg{scope: remoteScope, err: errors.New("ssh: connection refused")})
+	m = next.(model)
+
+	return renderModel(m)
+}
+
+// MEM-ONLY, 80 COLUMNS: the local member's memory alone is starved (1 GiB
+// available of 16 GiB, ~6% free) — only the mem clause of its band carries
+// the marker, the disk clause (100 GiB free of an unsampled/large total)
+// stays plain.
+func TestTUIHeaderBandWarnsMemOnly80x24(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 80, 24, 1<<30, 0))
+}
+
+// MEM-ONLY, WIDE: the same starved state at a size with room for every band
+// in full.
+func TestTUIHeaderBandWarnsMemOnlyWide(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 160, 40, 1<<30, 0))
+}
+
+// DISK-ONLY, 80 COLUMNS: memory is healthy (8 GiB available of 16 GiB, 50%
+// free) but the disk total is large enough that the unchanged 100 GiB free
+// figure is only 5% of it — only the disk clause carries the marker.
+func TestTUIHeaderBandWarnsDiskOnly80x24(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 80, 24, 8<<30, 2000<<30))
+}
+
+// DISK-ONLY, WIDE.
+func TestTUIHeaderBandWarnsDiskOnlyWide(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 160, 40, 8<<30, 2000<<30))
+}
+
+// BOTH, 80 COLUMNS: memory and disk are both starved at once — both clauses
+// of the local band carry the marker simultaneously.
+func TestTUIHeaderBandWarnsBoth80x24(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 80, 24, 1<<30, 2000<<30))
+}
+
+// BOTH, WIDE.
+func TestTUIHeaderBandWarnsBothWide(t *testing.T) {
+	golden.RequireEqual(t, starvedLocalHeaderBandGolden(t, 160, 40, 1<<30, 2000<<30))
+}
+
 // SEVERAL PROFILES, 80 COLUMNS: four members — local (connected), build-host
 // (errored), ci-host (connected), archived-host (disabled) — at the
 // narrowest supported terminal, where the header cannot show all four lines

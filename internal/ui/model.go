@@ -439,7 +439,7 @@ func New(fleet provider.Fleet) tea.Model {
 		}
 	}
 	if len(warnings) > 0 {
-		m.logMsg("warning: " + strings.Join(warnings, "; "))
+		m.logWarn(strings.Join(warnings, "; "))
 	}
 	return m
 }
@@ -958,7 +958,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		dropped, err := manage.Reconcile(m.reg, live, sc)
 		if err != nil {
-			m.logMsg("warning: could not update managed index: " + err.Error())
+			m.logWarn("could not update managed index: " + err.Error())
 		}
 		// A VM that vanished outside the TUI (and so got dropped above) also loses
 		// its host-stored secrets — there is no guest left to apply them to, and

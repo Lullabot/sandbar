@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -23,6 +24,13 @@ import (
 type message struct {
 	at   time.Time
 	text string
+
+	// warn marks a message as a warning — a host or guest crossing below
+	// lowFreeThreshold (hostwarn.go, tile.go's low-capacity-warning feature),
+	// or any other line logged through logWarn rather than logMsg. Every
+	// render site keys its "⚠ " + warnStyle treatment on this flag, so it must
+	// travel with the entry rather than be inferred from its text.
+	warn bool
 }
 
 // maxMessages bounds the ring. sand can run for hours in one session (or
@@ -45,6 +53,21 @@ func (m *model) logMsg(text string) {
 	}
 }
 
+// logWarn is logMsg's warning twin: the entry it appends renders with a "⚠ "
+// marker and the repo's one warnStyle amber, everywhere messages render (the
+// docked strip and the single-line activity view — see messagesStripView and
+// activityLineView below). text == "" is the same deliberate no-op logMsg's
+// own doc comment explains — nothing to report is simply not appending.
+func (m *model) logWarn(text string) {
+	if text == "" {
+		return
+	}
+	m.messages = append(m.messages, message{at: time.Now(), text: text, warn: true})
+	if over := len(m.messages) - maxMessages; over > 0 {
+		m.messages = m.messages[over:]
+	}
+}
+
 // lastMessage is the latest logged line, or "" if the session has logged
 // nothing yet. It is what activityLineView (below) renders as the board/VM
 // screen's single "what just happened" line, and what the acting spinner
@@ -54,6 +77,40 @@ func (m model) lastMessage() string {
 		return ""
 	}
 	return m.messages[len(m.messages)-1].text
+}
+
+// lastMessageWarn reports whether the latest logged line is a warning (see
+// logWarn) — false, never a guess, when nothing has been logged yet.
+// activityLineView's plain-message case (below) uses it to decide whether
+// that one line gets the ⚠ + warnStyle treatment.
+func (m model) lastMessageWarn() bool {
+	if len(m.messages) == 0 {
+		return false
+	}
+	return m.messages[len(m.messages)-1].warn
+}
+
+// warnPrefix prepends the single-cell "⚠ " marker for a warn entry — the same
+// U+26A0 glyph tileWarnGaugeLine uses on a tile's gauge rows, deliberately
+// NOT its two-cell emoji-presentation variant (see that function's own doc
+// comment on why the distinction matters for width math). Applied BEFORE any
+// truncation, so a warning clipped by width still shows the marker rather
+// than losing it to the tail that gets cut.
+func warnPrefix(text string, warn bool) string {
+	if warn {
+		return "⚠ " + text
+	}
+	return text
+}
+
+// messageStyleFor is the colour half of a message's warn treatment: warnStyle
+// (the repo's one amber, styles.go) for a warning, the ordinary statusStyle
+// grey otherwise — mirroring tileStyleFor's own status->style mapping.
+func messageStyleFor(warn bool) lipgloss.Style {
+	if warn {
+		return warnStyle
+	}
+	return statusStyle
 }
 
 // recentMessages returns up to n of the most recently logged lines, OLDEST
@@ -105,7 +162,8 @@ func (m model) activityLineView() string {
 			return ""
 		}
 		if text := m.lastMessage(); text != "" {
-			return m.clipLine(statusStyle.Render(text))
+			warn := m.lastMessageWarn()
+			return m.clipLine(messageStyleFor(warn).Render(warnPrefix(text, warn)))
 		}
 		return ""
 	}
@@ -186,7 +244,8 @@ func (m model) messageLines(n, width int) []string {
 		if idx < 0 {
 			continue // blank: nothing logged for this slot yet
 		}
-		lines[i] = statusStyle.Render(ansi.Truncate(recent[idx].text, width, "…"))
+		text := ansi.Truncate(warnPrefix(recent[idx].text, recent[idx].warn), width, "…")
+		lines[i] = messageStyleFor(recent[idx].warn).Render(text)
 	}
 	return lines
 }
