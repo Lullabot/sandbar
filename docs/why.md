@@ -70,7 +70,7 @@ With Sandbar, the recommended workflow is:
 1. Create an instance and check out your project in to it with the
    minimum of permissions and API keys it needs.
 2. Do work with your agent.
-3. Have it push a branch, and open the pull request as a draft.
+3. Have the agent push a branch. Open the PR yourself.
 4. Review the code there and iterate.
 5. If you need to test on your workstation, pull down the branch into a
    checkout on your IDE, but only after you've reviewed the code.
@@ -80,10 +80,11 @@ graph TD
     subgraph vm [Inside the disposable VM]
         A[Create an instance and clone the project<br>with minimal permissions and API keys]
         B[Work with your agent]
-        C[Agent pushes a branch and<br>opens a draft pull request]
+        C[Agent pushes a branch]
     end
     subgraph gh [On GitHub]
-        D[Review the code in the draft PR]
+        P[Open the pull request yourself]
+        D[Review the code in the PR]
         F[Merge when ready]
     end
     subgraph ws [On your workstation]
@@ -91,7 +92,8 @@ graph TD
     end
     A --> B
     B --> C
-    C --> D
+    C --> P
+    P --> D
     D -- needs changes --> B
     D -- approved --> F
     D -. only if you need<br>to test locally .-> E
@@ -123,8 +125,9 @@ to make it easier (and faster!) to use.
   [Security Model](reference/security-model.md#a-least-privilege-token-reasonable-agent-access)
   walks through a fine-grained GitHub token that can push code and read
   pull requests and issues but cannot merge or close them, paired with
-  branch protection, so an unattended agent can open a PR yet cannot
-  push straight to your default branch.
+  branch protection, so an unattended agent can push branches for
+  review yet cannot merge anything or push straight to your default
+  branch.
 - **Notifications come for free.** For supported agents, we enable
   Remote Control or similar features so you are alerted when the agent
   is waiting for you.
@@ -163,6 +166,28 @@ another:
 | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban), [Conductor](https://conductor.build/), Crystal, [Sculptor](https://imbue.com/sculptor/) | Host worktrees / containers | Local | Little or no isolation boundary; agent runs on the host |
 | [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), bubblewrap, Seatbelt | OS process confinement | Local | Per-process host confinement, policy-dependent, no provisioned environment |
 | [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | General-purpose remote dev, not agent-disposable |
+
+```mermaid
+quadrantChart
+    title Where the field sits
+    x-axis Cloud --> Local
+    y-axis Host exposed --> Sealed off
+    quadrant-1 Local and sealed
+    quadrant-2 Sealed but remote
+    quadrant-3 General-purpose cloud dev
+    quadrant-4 Local but host-exposed
+    Sandbar: [0.92, 0.93]
+    clawk: [0.88, 0.42]
+    agent-vm: [0.8, 0.34]
+    Worktree tools: [0.72, 0.12]
+    Dev containers: [0.68, 0.26]
+    claude-code-sandbox: [0.62, 0.55]
+    sandbox-runtime: [0.78, 0.5]
+    Self-host microVMs: [0.45, 0.8]
+    Cloud sandboxes: [0.12, 0.85]
+    CC on the Web: [0.18, 0.68]
+    Coder and Codespaces: [0.22, 0.45]
+```
 
 The tools that get the VM boundary right still mount your files into
 it, and the tools that restrict the environment do it in the cloud or
