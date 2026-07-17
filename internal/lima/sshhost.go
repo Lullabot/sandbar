@@ -491,6 +491,71 @@ func (h *SSHHost) DiskAllocBytes(path string) int64 {
 // stamp and its lock, under _sand/) live beneath it — now on the remote host.
 func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
 
+// ReadInstanceMarkers reads filename from every instance directory directly
+// under limaHome in ONE ssh round trip: a remote sh script walks limaHome's
+// immediate subdirectories and, for each one that has <name>/<filename>,
+// emits it LENGTH-FRAMED — a name line, a decimal byte-count line, then
+// exactly that many raw bytes — so arbitrary JSON content (including embedded
+// newlines) survives the trip without a delimiter collision. limaHome is used
+// exactly as given (it may be RELATIVE, e.g. the remote default ".lima" — see
+// LimaHome): `cd` on the remote login shell resolves it against $HOME, same as
+// every other HostFiles method here. A missing limaHome or a missing/unreadable
+// per-instance file is simply skipped BY THE REMOTE SCRIPT, so one bad or
+// absent marker never aborts the batch — mirroring localFiles.
+func (h *SSHHost) ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error) {
+	script := `cd "$1" 2>/dev/null || exit 0
+for d in */; do
+  [ -d "$d" ] || continue
+  n=${d%/}
+  f="$n/$2"
+  [ -f "$f" ] || continue
+  printf '%s\n' "$n"
+  wc -c < "$f" | tr -d ' '
+  printf '\n'
+  cat "$f"
+done`
+	remote := []string{"sh", "-c", script, "sand", limaHome, filename}
+	out, errb, err := h.runRemote(ctx, nil, remote...)
+	if err != nil {
+		return nil, asNotExist("read markers", limaHome, errb, err)
+	}
+	return parseMarkerStream(out)
+}
+
+// parseMarkerStream decodes ReadInstanceMarkers' length-framed wire format —
+// repeating (name line, decimal byte-count line, exactly that many raw bytes)
+// records — into instance name -> raw marker bytes. It is kept free of the
+// remote script so the framing itself can be unit-tested against canned bytes
+// without an ssh round trip.
+func parseMarkerStream(data []byte) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	r := bufio.NewReader(bytes.NewReader(data))
+	for {
+		nameLine, err := r.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) && strings.TrimSpace(nameLine) == "" {
+				break // clean end of stream between records
+			}
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading a name after %q", strings.TrimSpace(nameLine))
+		}
+		name := strings.TrimSuffix(nameLine, "\n")
+		lenLine, err := r.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading %q's length", name)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(lenLine))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("parse instance markers: bad length for %q: %q", name, strings.TrimSpace(lenLine))
+		}
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading %q's %d bytes: %w", name, n, err)
+		}
+		out[name] = buf
+	}
+	return out, nil
+}
+
 // StagePlaybook copies the local playbook fileset to a stable path under the
 // remote LimaHome and returns that path so `limactl start` on the remote host can
 // bind-mount it as /mnt/playbook. See lima.HostFiles.StagePlaybook.

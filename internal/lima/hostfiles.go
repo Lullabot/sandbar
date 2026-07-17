@@ -16,6 +16,7 @@ package lima
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -80,6 +81,14 @@ type HostFiles interface {
 	// has already ensured a parent directory for) with perm, returning a LockFile
 	// the base-image serializer flocks. See internal/provision/baselock.go.
 	OpenLock(path string, perm fs.FileMode) (LockFile, error)
+	// ReadInstanceMarkers reads filename from every instance directory directly
+	// under limaHome, in ONE host round trip, returning instance name -> raw
+	// file bytes for every instance that has it. An instance with no such file
+	// (or one that cannot be read) is simply absent from the result — never an
+	// error that aborts the whole batch — so a caller (e.g. the provenance
+	// board-wide read) sees a partial map instead of failing outright the
+	// moment one marker is missing or unreadable. See provider.Provenancer.
+	ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error)
 }
 
 // LockFile is an advisory exclusive lock on a file on the limactl host. It backs
@@ -134,6 +143,34 @@ func (localFiles) LimaHome() string {
 // bind-mounts localDir directly — nothing to copy anywhere.
 func (localFiles) StagePlaybook(_ context.Context, localDir string) (string, error) {
 	return localDir, nil
+}
+
+// ReadInstanceMarkers does a single os.ReadDir pass over limaHome, reading
+// filename out of each instance directory it finds. A missing limaHome reads
+// back as an empty map (nothing to a caller distinguishes "no instances yet"
+// from "no instance has this marker"); a missing or unreadable per-instance
+// file is skipped, matching the same "never abort the batch" contract the SSH
+// implementation keeps over its one round trip.
+func (localFiles) ReadInstanceMarkers(_ context.Context, limaHome, filename string) (map[string][]byte, error) {
+	entries, err := os.ReadDir(limaHome)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return map[string][]byte{}, nil
+		}
+		return nil, err
+	}
+	out := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(limaHome, e.Name(), filename))
+		if err != nil {
+			continue // missing or unreadable marker: skip, never abort the batch
+		}
+		out[e.Name()] = data
+	}
+	return out, nil
 }
 
 func (localFiles) OpenLock(path string, perm fs.FileMode) (LockFile, error) {

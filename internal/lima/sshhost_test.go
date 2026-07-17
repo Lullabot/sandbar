@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -923,6 +924,112 @@ func TestSSHRemoteLock(t *testing.T) {
 		ok, err := lf.TryLock()
 		if ok || err == nil {
 			t.Fatalf("TryLock(no flock) = (%v,%v), want (false, non-nil error)", ok, err)
+		}
+	})
+}
+
+// markerFrame builds one parseMarkerStream record: a name line, a decimal
+// byte-count line, then the raw payload — the exact wire shape the remote
+// ReadInstanceMarkers script emits. Shared by the pure-parser test and the
+// SSHHost integration test below.
+func markerFrame(name, payload string) string {
+	return name + "\n" + strconv.Itoa(len(payload)) + "\n" + payload
+}
+
+// TestParseMarkerStreamProvenance is the executable spec of the length-framed
+// wire format ReadInstanceMarkers' remote script produces: it proves the
+// parser decodes multiple back-to-back records (including JSON payloads that
+// carry their own quotes), that an empty stream is an empty map rather than
+// an error, and that truncation at each of the three points a malformed or
+// cut-off stream could fail (mid-name, mid-length, mid-payload) is reported as
+// an error rather than silently misparsed.
+func TestParseMarkerStreamProvenance(t *testing.T) {
+	t.Run("multiple records round-trip", func(t *testing.T) {
+		stream := markerFrame("web", `{"schema":1,"base":"base"}`) + markerFrame("api", `{"schema":1,"base":"other"}`)
+		got, err := parseMarkerStream([]byte(stream))
+		if err != nil {
+			t.Fatalf("parseMarkerStream: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("parseMarkerStream returned %d entries, want 2: %v", len(got), got)
+		}
+		if string(got["web"]) != `{"schema":1,"base":"base"}` {
+			t.Fatalf("got[web] = %q", got["web"])
+		}
+		if string(got["api"]) != `{"schema":1,"base":"other"}` {
+			t.Fatalf("got[api] = %q", got["api"])
+		}
+	})
+	t.Run("empty stream is an empty map, not an error", func(t *testing.T) {
+		got, err := parseMarkerStream(nil)
+		if err != nil {
+			t.Fatalf("parseMarkerStream(empty): %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("parseMarkerStream(empty) = %v, want empty", got)
+		}
+	})
+	t.Run("truncated mid-name is an error", func(t *testing.T) {
+		if _, err := parseMarkerStream([]byte("web\n")); err == nil {
+			t.Fatal("parseMarkerStream(name with no length line) = nil error, want an error")
+		}
+	})
+	t.Run("non-numeric length is an error", func(t *testing.T) {
+		if _, err := parseMarkerStream([]byte("web\nnotanumber\n")); err == nil {
+			t.Fatal("parseMarkerStream(bad length) = nil error, want an error")
+		}
+	})
+	t.Run("payload shorter than declared length is an error", func(t *testing.T) {
+		if _, err := parseMarkerStream([]byte("web\n100\nshort")); err == nil {
+			t.Fatal("parseMarkerStream(truncated payload) = nil error, want an error")
+		}
+	})
+}
+
+// TestSSHReadInstanceMarkersProvenance proves ReadInstanceMarkers threads
+// limaHome/filename to the remote script as positional args and decodes its
+// length-framed stdout back into instance name -> raw bytes, in the ONE ssh
+// round trip the DoD requires (exactly one recorded call). A remote script
+// that finds nothing (an empty instance directory, or none at all) must come
+// back as an empty map, not an error.
+func TestSSHReadInstanceMarkersProvenance(t *testing.T) {
+	t.Run("decodes multiple markers in one round trip", func(t *testing.T) {
+		stream := markerFrame("web", `{"schema":1,"base":"base"}`) + markerFrame("api", `{"schema":1,"base":"other"}`)
+		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+			return sh(ctx, "printf '%s' '"+stream+"'")
+		}}
+		h := hostWith(testCfg, rec)
+		got, err := h.ReadInstanceMarkers(context.Background(), "/remote/.lima", "sandbar.json")
+		if err != nil {
+			t.Fatalf("ReadInstanceMarkers: %v", err)
+		}
+		if len(rec.calls) != 1 {
+			t.Fatalf("ReadInstanceMarkers made %d ssh calls, want exactly 1: %v", len(rec.calls), rec.calls)
+		}
+		if len(got) != 2 || string(got["web"]) != `{"schema":1,"base":"base"}` || string(got["api"]) != `{"schema":1,"base":"other"}` {
+			t.Fatalf("ReadInstanceMarkers = %v, want web/api decoded", got)
+		}
+		// The remote script runs as `sh -c <script> sand <limaHome> <filename>`;
+		// limaHome and filename are shell-safe tokens here so they thread through
+		// unquoted, exactly like the WriteFile positional-arg precedent.
+		if !hasToken(rec.calls[0], "sh") {
+			t.Fatalf("ReadInstanceMarkers argv missing remote `sh`: %v", rec.calls[0])
+		}
+		if !hasToken(rec.calls[0], "/remote/.lima") || !hasToken(rec.calls[0], "sandbar.json") {
+			t.Fatalf("ReadInstanceMarkers argv missing limaHome/filename positional args: %v", rec.calls[0])
+		}
+	})
+	t.Run("no markers present is an empty map, not an error", func(t *testing.T) {
+		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+			return sh(ctx, "true") // the remote script's own not-found paths exit 0 with no stdout
+		}}
+		h := hostWith(testCfg, rec)
+		got, err := h.ReadInstanceMarkers(context.Background(), "/remote/.lima", "sandbar.json")
+		if err != nil {
+			t.Fatalf("ReadInstanceMarkers(no markers): %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("ReadInstanceMarkers(no markers) = %v, want empty", got)
 		}
 	})
 }

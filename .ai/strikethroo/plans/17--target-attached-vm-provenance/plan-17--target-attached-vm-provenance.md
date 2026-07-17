@@ -578,9 +578,9 @@ graph TD
 - ✔️ Task 001: Export LIMA_HOME to the remote limactl invocation
 - ✔️ Task 002: Define the Provenancer seam and marker payload type
 
-### Phase 2: Lima provenance implementation
+### ✅ Phase 2: Lima provenance implementation
 **Parallel Tasks:**
-- Task 003: Implement Lima marker I/O + batched read + provider exposure (depends on: 002)
+- ✔️ Task 003: Implement Lima marker I/O + batched read + provider exposure (depends on: 002)
 
 ### Phase 3: Consumer rewire + migration
 **Parallel Tasks:**
