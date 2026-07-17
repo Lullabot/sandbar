@@ -405,18 +405,24 @@ func TestCreateVM_BouncesWhenRebootRequired(t *testing.T) {
 // unset) in-guest script to never install any Ansible collection: profile_tasks
 // lives in ansible.posix, which the default Lima dependency script does not
 // install (strikethroo plan 13, task 02), so the default path must not depend
-// on it either.
+// on it either. It must also not enable the callback — an enabled-but-missing
+// profile_tasks is exactly the warning that reads to end users as a broken
+// build, which is why ansible.cfg no longer turns it on unconditionally.
 func TestDefaultGuestScriptStaysCollectionFree(t *testing.T) {
 	if strings.Contains(inGuestScript, "ansible-galaxy") || strings.Contains(inGuestScript, "collection") {
 		t.Errorf("default inGuestScript must stay collection-free:\n%s", inGuestScript)
+	}
+	if strings.Contains(inGuestScript, "profile_tasks") || strings.Contains(inGuestScript, "ANSIBLE_CALLBACK") {
+		t.Errorf("default inGuestScript must not enable the profile_tasks callback (it can't load without ansible.posix, and the warning alarms end users):\n%s", inGuestScript)
 	}
 }
 
 // TestRunProvision_SandProfileInstallsAnsiblePosix verifies the SAND_PROFILE
 // opt-in: when set, the guest script run over `limactl shell` installs the
-// ansible.posix collection on demand so the profile_tasks callback (enabled
-// unconditionally in ansible.cfg) actually loads. Unset, CreateVM must keep
-// using the default collection-free script.
+// ansible.posix collection on demand AND enables the profile_tasks callback for
+// that run (ansible.cfg no longer enables it unconditionally, so the default
+// path stays warning-free). Unset, CreateVM must keep using the default
+// collection-free script.
 func TestRunProvision_SandProfileInstallsAnsiblePosix(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
@@ -427,17 +433,23 @@ func TestRunProvision_SandProfileInstallsAnsiblePosix(t *testing.T) {
 		t.Fatalf("CreateVM: %v", err)
 	}
 
-	var sawInstall bool
+	var sawInstall, sawCallback bool
 	for _, call := range f.calls {
 		if len(call) > 0 && call[0] == "shell" {
 			script := call[len(call)-1]
 			if strings.Contains(script, "ansible-galaxy collection install ansible.posix") {
 				sawInstall = true
 			}
+			if strings.Contains(script, "ANSIBLE_CALLBACKS_ENABLED=profile_tasks") {
+				sawCallback = true
+			}
 		}
 	}
 	if !sawInstall {
 		t.Errorf("SAND_PROFILE=1 did not select a script that installs ansible.posix; calls:\n%v", f.calls)
+	}
+	if !sawCallback {
+		t.Errorf("SAND_PROFILE=1 must enable the profile_tasks callback for the run (ansible.cfg no longer does); calls:\n%v", f.calls)
 	}
 }
 
