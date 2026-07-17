@@ -283,6 +283,9 @@ func (r *jobRegistry) addOutput(key jobKey, chunk string) bool {
 	if chunk == "" {
 		return true
 	}
+	// chunk is untrusted guest output, stored verbatim (not escape-stripped).
+	// See model.setOutput for why the retained terminal control sequences are
+	// safe to render today and what would make them unsafe.
 	j.output.WriteString(chunk)
 	j.parser.feed(chunk)
 	return true

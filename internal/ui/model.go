@@ -1235,6 +1235,19 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 // paths — fully readable as the user scrolls. ansi.Wrap breaks over-long
 // unbreakable tokens (e.g. file paths) and preserves the output's ANSI colour
 // codes.
+//
+// Security note (terminal escape injection): job.Output is untrusted guest
+// output stored verbatim (see jobRegistry.addOutput) — the guest runs untrusted
+// code, so this buffer can contain arbitrary terminal control sequences, and
+// ansi.Wrap preserves them rather than stripping them. That is safe here only
+// because Bubble Tea v2 renders through a cell-diffing compositor (ultraviolet):
+// it re-emits solely printable content, SGR styling, and OSC 8 hyperlinks, and
+// discards everything else — OSC 52 (clipboard write), window-title, cursor, and
+// DCS sequences never reach the terminal. The protection is incidental to the
+// renderer, NOT a sanitization step on this path. If this buffer is ever written
+// to the terminal another way (tea.Println, a debug dump, or a non-cell
+// renderer), strip it first with ansi.Strip — as feed()'s Ansible-progress parser
+// already does in ansible.go — or a malicious guest can inject those sequences.
 func (m *model) setOutput() {
 	w := m.viewport.Width()
 	if w < 1 {
