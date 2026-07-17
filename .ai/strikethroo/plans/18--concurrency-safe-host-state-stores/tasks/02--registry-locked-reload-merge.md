@@ -2,7 +2,7 @@
 id: 2
 group: "store-conversion"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "opus"
 effort: "xhigh"

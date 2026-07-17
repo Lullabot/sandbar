@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/lullabot/sandbar/internal/filelock"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -197,18 +198,22 @@ func Load() (*Registry, error) {
 	return LoadFrom(p)
 }
 
-// LoadFrom reads the registry from an explicit path. A missing or empty file
-// yields an empty registry (not an error). A corrupt file is moved aside to
-// "<path>.corrupt" — so a later save() cannot silently clobber recoverable
-// data — and the error is returned for the caller to surface; the returned
-// registry is always non-nil and usable.
+// LoadFrom reads the registry from an explicit path at process start. A missing
+// or empty file yields an empty registry (not an error). A corrupt file is moved
+// aside to "<path>.corrupt" — so a later save() cannot silently clobber
+// recoverable data — and the error is returned for the caller to surface; the
+// returned registry is always non-nil and usable. A file written by a NEWER sand
+// (schema version > currentVersion) is refused but left exactly as found (it is
+// valid, merely unsupported), and the returned registry has NO backing path so
+// no later mutation can overwrite it.
 //
-// Three on-disk shapes must be understood here: an unversioned (v1) or v2
-// file is the legacy flat {"vms": {"<name>": {...}}} object (legacyFileSchema)
-// keyed by bare name; a v3 file is the current {"vms": [{...}, ...]} array
-// (fileSchema), already self-describing each entry's (scope, name). A
-// versionProbe reads just the version field first because the two shapes are
-// not both unmarshalable into one struct.
+// The actual decode + in-memory migration is done by the pure, side-effect-free
+// parseIndex, which this process-start path and the locked reload
+// (reloadUnlocked) both share so schema/version handling lives in exactly one
+// place and the two can never drift. LoadFrom layers the two Load()-only side
+// effects around it: it PERSISTS a migrated index (so the v1/v2 -> v3 rewrite
+// runs at most once) and QUARANTINES a corrupt file. The locked reload does
+// neither — see reloadUnlocked.
 func LoadFrom(path string) (*Registry, error) {
 	r := &Registry{path: path, vms: map[scopedKey]entry{}}
 	data, err := os.ReadFile(path)
@@ -218,92 +223,147 @@ func LoadFrom(path string) (*Registry, error) {
 		}
 		return r, err
 	}
+	vms, migrated, perr := parseIndex(data)
+	if perr != nil {
+		var unsupported unsupportedVersionError
+		if errors.As(perr, &unsupported) {
+			// A file from a newer sand: valid, just unsupported. Do NOT quarantine
+			// or clobber it — return a registry with NO backing path so no later
+			// save() can overwrite it, and surface the error for the caller.
+			return NewEmpty(), fmt.Errorf("managed index %s %w", path, perr)
+		}
+		// A genuinely unparseable file: move it aside so a later save() cannot
+		// silently clobber recoverable data, and surface the error.
+		_ = os.Rename(path, path+".corrupt")
+		return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, perr)
+	}
+	r.vms = vms
+	if migrated {
+		// Best-effort persist of the in-memory migration. The registry is already
+		// correctly migrated, so this write is only about durability — and it must
+		// NOT be fatal to a load. A read-only or full data dir would otherwise make
+		// EVERY `sand`/`sand create` invocation surface a migration error, where
+		// the old (pure-read) LoadFrom loaded the same file silently; the next
+		// successful mutating save() persists the version bump instead. This is the
+		// ONE save() that is not taken under the cross-process lock: it is the
+		// process-start path, not a concurrent mutation, and it is idempotent
+		// across peers that migrate the same legacy file to the same v3 result.
+		_ = r.save()
+	}
+	return r, nil
+}
+
+// unsupportedVersionError is returned by parseIndex when the on-disk file's
+// schema version is NEWER than this binary understands. It is distinguished from
+// an ordinary decode failure (via errors.As) because the two demand opposite
+// handling on the Load() path: a corrupt file is quarantined to .corrupt, but a
+// newer-but-valid file must be left exactly as found for the newer sand.
+type unsupportedVersionError struct {
+	have       int
+	understand int
+}
+
+func (e unsupportedVersionError) Error() string {
+	return fmt.Sprintf("has schema version %d, but this sand only understands %d; upgrade sand", e.have, e.understand)
+}
+
+// parseIndex decodes the on-disk index bytes into the in-memory (scope, name)
+// map, migrating a legacy (v1/v2) flat-object shape into the current keying IN
+// MEMORY only. It is the single place schema/version handling lives, shared by
+// both the process-start Load()/LoadFrom() path and the locked reload
+// (reloadUnlocked), so the two can never drift on how a file is interpreted.
+//
+// It is PURE: no file I/O, no save(), no lock, no .corrupt rename, no seeding.
+// The two side effects the old LoadFrom performed inline — persisting a migrated
+// index and quarantining a corrupt file — are the CALLER's responsibility now,
+// and only the process-start path (LoadFrom) does them; the locked reload does
+// neither, which is what keeps a locked read-modify-write from double-writing or
+// re-acquiring the lock while merely reloading.
+//
+// Three on-disk shapes are handled here: an unversioned (v1) or v2 file is the
+// legacy flat {"vms": {"<name>": {...}}} object (legacyFileSchema) keyed by bare
+// name; a v3 file is the current {"vms": [{...}, ...]} array (fileSchema),
+// already self-describing each entry's (scope, name). A versionProbe reads just
+// the version field first because the two shapes are not both unmarshalable into
+// one struct.
+//
+// migrated reports whether a legacy shape had to be lifted into the current
+// schema (i.e. whether persisting the result would rewrite the file); LoadFrom
+// uses it to decide whether to rewrite at process start. Empty input yields an
+// empty index and is not an error. A file whose version exceeds currentVersion
+// is refused with an unsupportedVersionError and a nil map. A decode failure
+// returns the wrapped error and a nil map so the caller can decide whether to
+// quarantine the bytes.
+func parseIndex(data []byte) (vms map[scopedKey]entry, migrated bool, err error) {
+	out := map[scopedKey]entry{}
 	if len(data) == 0 {
-		return r, nil
+		return out, false, nil
 	}
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return nil, false, fmt.Errorf("decode managed index: %w", err)
 	}
 	version := probe.Version
 	if version == 0 {
 		version = 1 // unversioned file predates the version field
 	}
 	if version > currentVersion {
-		return NewEmpty(), fmt.Errorf(
-			"managed index %s has schema version %d, but this sand only understands %d; upgrade sand",
-			path, version, currentVersion)
+		return nil, false, unsupportedVersionError{have: version, understand: currentVersion}
 	}
-
-	needsSave := false
 	if version < currentVersion {
 		// v1 or v2: the legacy flat object, keyed by bare name.
 		var legacy legacyFileSchema
 		if err := json.Unmarshal(data, &legacy); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return nil, false, fmt.Errorf("decode legacy managed index: %w", err)
 		}
-		vms := legacy.VMs
-		if vms == nil {
-			vms = map[string]entry{}
+		legacyVMs := legacy.VMs
+		if legacyVMs == nil {
+			legacyVMs = map[string]entry{}
 		}
 		// A pre-v2 file records the old base name in every entry AND carries no
 		// Provider tag (no non-local provider existed when it was written).
-		// Rewrite BOTH here, in memory, before lifting into the new (scope,
-		// name) keying: rename the legacy base to the current default so the
-		// TUI groups clones under the base the provisioner will rename their
-		// source to, and stamp every entry local.
+		// Rewrite BOTH here, in memory, before lifting into the new (scope, name)
+		// keying: rename the legacy base to the current default so the TUI groups
+		// clones under the base the provisioner will rename their source to, and
+		// stamp every entry local.
 		if version < 2 {
-			renameLegacyBase(vms, legacyBaseName, vm.DefaultCreateConfig().BaseName)
-			for name, e := range vms {
+			renameLegacyBase(legacyVMs, legacyBaseName, vm.DefaultCreateConfig().BaseName)
+			for name, e := range legacyVMs {
 				if e.Provider == "" {
 					e.Provider = LocalProviderID
-					vms[name] = e
+					legacyVMs[name] = e
 				}
 			}
 		}
 		// Lift each entry into (scope, name) keying using ITS OWN recorded
 		// Provider/RemoteTarget — every v1-migrated entry above is now tagged
-		// LocalProviderID, but a v2 file may already carry remote-scoped
-		// entries (AddScoped predates this task), and those must keep their
-		// own scope rather than collapse to local.
-		for name, e := range vms {
+		// LocalProviderID, but a v2 file may already carry remote-scoped entries
+		// (AddScoped predates this task), and those must keep their own scope
+		// rather than collapse to local.
+		for name, e := range legacyVMs {
 			scope := Scope{Provider: e.Provider, RemoteTarget: e.RemoteTarget}
 			if scope.Provider == "" {
 				scope = LocalScope
 			}
-			r.vms[scopedKey{scope: scope, name: name}] = e
+			out[scopedKey{scope: scope, name: name}] = e
 		}
-		needsSave = true
-	} else {
-		// v3: already (scope, name)-shaped, one array element per entry.
-		var parsed fileSchema
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return out, true, nil
+	}
+	// v3: already (scope, name)-shaped, one array element per entry.
+	var parsed fileSchema
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, false, fmt.Errorf("decode managed index: %w", err)
+	}
+	for _, de := range parsed.VMs {
+		scope := Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}
+		if scope.Provider == "" {
+			scope = LocalScope
 		}
-		for _, de := range parsed.VMs {
-			scope := Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}
-			if scope.Provider == "" {
-				scope = LocalScope
-			}
-			r.vms[scopedKey{scope: scope, name: de.Name}] = entry{
-				Base: de.Base, Config: de.Config, Provider: de.Provider, RemoteTarget: de.RemoteTarget,
-			}
+		out[scopedKey{scope: scope, name: de.Name}] = entry{
+			Base: de.Base, Config: de.Config, Provider: de.Provider, RemoteTarget: de.RemoteTarget,
 		}
 	}
-
-	if needsSave {
-		// Best-effort persist. The in-memory registry is already correctly
-		// migrated, so this write is only about durability — and it must NOT be
-		// fatal to a load. A read-only or full data dir would otherwise make
-		// EVERY `sand`/`sand create` invocation surface a migration error, where
-		// the old (pure-read) LoadFrom loaded the same file silently; the next
-		// successful mutating save() persists the version bump instead.
-		_ = r.save()
-	}
-	return r, nil
+	return out, false, nil
 }
 
 // renameLegacyBase rewrites every entry in vms whose base is from to to, in
@@ -414,11 +474,23 @@ func (r *Registry) Add(cfg vm.CreateConfig) error {
 // the whole point of this task's re-keying (a VM named "web" on one
 // connection profile and a "web" on another must coexist).
 func (r *Registry) AddScoped(cfg vm.CreateConfig, scope Scope) error {
-	cfg.CloneToken = ""
-	r.vms[scopedKey{scope: scope, name: cfg.Name}] = entry{
-		Base: cfg.BaseName, Config: cfg, Provider: scope.Provider, RemoteTarget: scope.RemoteTarget,
+	cfg.CloneToken = "" // secrets never touch the on-disk index
+	k := scopedKey{scope: scope, name: cfg.Name}
+	e := entry{Base: cfg.BaseName, Config: cfg, Provider: scope.Provider, RemoteTarget: scope.RemoteTarget}
+	if r.path == "" {
+		// In-memory registry (no backing file): mutate the working copy directly,
+		// exactly as before — there is nothing on disk to merge with and no
+		// concurrent process to serialize against.
+		r.vms[k] = e
+		return nil
 	}
-	return r.save()
+	// Lock-protected read-modify-write: merge THIS one (scope, name) insert onto
+	// the CURRENT on-disk index so a concurrent process's unrelated entries are
+	// never discarded — the lost-update bug this task fixes.
+	return r.mutateLocked(func(cur map[scopedKey]entry) (bool, error) {
+		cur[k] = e
+		return true, nil
+	})
 }
 
 // Remove drops name from the index under the local Lima provider and persists
@@ -435,8 +507,19 @@ func (r *Registry) Remove(name string) error {
 // change. It never touches a same-named entry recorded under a different
 // scope — the whole point of the (scope, name) keying this task introduces.
 func (r *Registry) RemoveScoped(scope Scope, name string) error {
-	delete(r.vms, scopedKey{scope: scope, name: name})
-	return r.save()
+	k := scopedKey{scope: scope, name: name}
+	if r.path == "" {
+		delete(r.vms, k)
+		return nil
+	}
+	// Lock-protected read-modify-write: delete exactly this one (scope, name) key
+	// from the CURRENT on-disk index, leaving every other entry (including ones a
+	// concurrent process added) intact. Always writes, matching the prior blind
+	// save — a remove of an absent key is a harmless idempotent rewrite.
+	return r.mutateLocked(func(cur map[scopedKey]entry) (bool, error) {
+		delete(cur, k)
+		return true, nil
+	})
 }
 
 // Reconcile drops managed entries whose VM no longer exists; present is the set
@@ -450,34 +533,91 @@ func (r *Registry) RemoveScoped(scope Scope, name string) error {
 // unrelated VM — provenance is not recoverable from limactl — which is why
 // recreate still requires an explicit confirmation.
 //
-// Equivalent to ReconcileScoped(LocalScope, present) — kept as the unscoped
-// convenience every existing (local-only) caller uses.
+// Equivalent to ReconcileScoped(LocalScope, present, <the local names it
+// currently knows>) — kept as the unscoped convenience every existing
+// (local-only) caller uses. The known set is the registry's own current view of
+// LocalScope, so this behaves exactly like the pre-concurrency Reconcile:
+// it prunes every local entry it knows of that is absent from present.
 func (r *Registry) Reconcile(present map[string]bool) ([]string, error) {
-	return r.ReconcileScoped(LocalScope, present)
+	return r.ReconcileScoped(LocalScope, present, r.NamesInScope(LocalScope))
 }
 
-// ReconcileScoped is Reconcile scoped to a single provider: only entries
-// keyed under scope are considered for pruning, and present is that SAME
-// provider's live instance list. An entry owned by a different scope (a
-// remote host's VM, or vice versa) is left untouched no matter what present
-// contains — a listing from one provider must never prune, or be mistaken
-// for, another provider's entries, since two providers (or a same-named VM
-// under two scopes) can legitimately reuse the same VM name.
-func (r *Registry) ReconcileScoped(scope Scope, present map[string]bool) ([]string, error) {
+// ReconcileScoped is Reconcile scoped to a single provider: only entries keyed
+// under scope are considered for pruning, and present is that SAME provider's
+// live instance list. An entry owned by a different scope (a remote host's VM,
+// or vice versa) is left untouched no matter what present contains — a listing
+// from one provider must never prune, or be mistaken for, another provider's
+// entries, since two providers (or a same-named VM under two scopes) can
+// legitimately reuse the same VM name.
+//
+// known is the set of names the caller last observed under scope — its
+// pre-reconcile snapshot (manage.Reconcile captures it via NamesInScope). Under
+// the cross-process lock this reloads the CURRENT on-disk index and prunes only
+// known ∩ absent: a name the caller knew about AND that is missing from present.
+// An entry that appeared on disk AFTER the caller's snapshot (e.g. one a
+// concurrent `sand create` just added) is not in known, so it is never pruned —
+// it is legitimately absent from this caller's older live list, and treating
+// "absent from my list" as "gone" for a VM this caller never knew about is
+// exactly the lost-update this task closes. As before, disk is written only when
+// something is actually pruned (save-only-when-pruning); the in-memory view is
+// still refreshed from the reloaded index either way.
+func (r *Registry) ReconcileScoped(scope Scope, present, known map[string]bool) ([]string, error) {
+	if r.path == "" {
+		// In-memory registry: prune the working copy directly. There is no disk to
+		// reload and save() is a no-op for an empty path.
+		dropped := pruneScoped(r.vms, scope, present, known)
+		if len(dropped) == 0 {
+			return nil, nil
+		}
+		return dropped, nil
+	}
 	var dropped []string
-	for key := range r.vms {
-		if key.scope != scope {
-			continue
+	err := r.mutateLocked(func(cur map[scopedKey]entry) (bool, error) {
+		dropped = pruneScoped(cur, scope, present, known)
+		return len(dropped) > 0, nil // preserve save-only-when-pruning
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dropped, nil
+}
+
+// pruneScoped removes from vms exactly the entries the caller BOTH knew about
+// (present in known) AND observed absent from its live list (not in present),
+// within scope, returning their names. This intersection is the pruning-basis
+// correction at the heart of this task: an entry that exists in vms (freshly
+// reloaded from disk) but is NOT in known — e.g. one a concurrent process added
+// after the caller took its snapshot — is never a pruning candidate, so a
+// reload-merge reconcile can never erase a peer's new entry merely because it
+// was absent from this caller's older live list.
+func pruneScoped(vms map[scopedKey]entry, scope Scope, present, known map[string]bool) []string {
+	var dropped []string
+	for name := range known {
+		if present[name] {
+			continue // still live -> keep
 		}
-		if !present[key.name] {
-			delete(r.vms, key)
-			dropped = append(dropped, key.name)
+		k := scopedKey{scope: scope, name: name}
+		if _, ok := vms[k]; ok {
+			delete(vms, k)
+			dropped = append(dropped, name)
 		}
 	}
-	if len(dropped) == 0 {
-		return nil, nil
+	return dropped
+}
+
+// NamesInScope returns the set of VM names currently recorded under scope in the
+// IN-MEMORY index — the caller's "last observed" key set. manage.Reconcile
+// captures this before reconciling so ReconcileScoped can prune only entries this
+// caller already knew about (see pruneScoped): a VM a concurrent process added
+// after this snapshot is absent from the set and therefore never pruned.
+func (r *Registry) NamesInScope(scope Scope) map[string]bool {
+	names := make(map[string]bool)
+	for k := range r.vms {
+		if k.scope == scope {
+			names[k.name] = true
+		}
 	}
-	return dropped, r.save()
+	return names
 }
 
 // BaseInScope returns the base image recorded for name, and whether name is
@@ -493,14 +633,112 @@ func (r *Registry) BaseInScope(name string, scope Scope) (base string, managed b
 	return e.Base, true
 }
 
-// save writes the index atomically (unique temp file + rename). With an empty
-// path it is a no-op, so an in-memory registry never touches disk. The temp file
-// is unique per write so two TUI processes sharing a data dir don't race on a
-// shared name. Entries are written in a stable (scope, name) sort order so two
-// saves of the same logical state produce byte-identical output — otherwise Go
-// map iteration order would make the file's array order (and therefore its
-// diff) flap on every unrelated save.
+// mutateLocked performs one lock-protected read-modify-write against the on-disk
+// index. It takes the cross-process lock (best-effort: a lock it cannot take
+// only WARNS and proceeds unserialized — a wedged or unwritable lock file must
+// never fail an otherwise-valid write), reloads the CURRENT on-disk map via
+// reloadUnlocked, hands that fresh map to apply so the caller can layer ONLY this
+// operation's delta onto it, and — when apply asks — persists the merged result
+// via the existing atomic temp+rename body (saveMap). On success it refreshes
+// the in-memory working copy from the merged map, so later reads see exactly what
+// hit disk (including entries a concurrent process added).
+//
+// The lock is taken EXACTLY ONCE, here; neither reloadUnlocked nor saveMap
+// re-acquires it, so there is no re-entrant self-deadlock (a fresh flock fd on
+// the same path is a distinct open file description and would otherwise block).
+// Callers whose path is "" (an in-memory registry) must NOT reach this — there is
+// nothing to lock, reload, or write — and mutate r.vms directly instead.
+func (r *Registry) mutateLocked(apply func(cur map[scopedKey]entry) (write bool, err error)) error {
+	// Ensure the data dir exists before taking the lock: the lock file lives
+	// beside the index, so on a first-ever write the dir may not exist yet, and a
+	// missing dir would needlessly degrade that first lock to the unserialized
+	// path. saveMap re-creates it too; both are best-effort.
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
+		r.warnf("could not create data dir for %s (%v); proceeding", r.path, err)
+	}
+	release, err := filelock.Acquire(r.path + ".lock")
+	if err != nil {
+		r.warnf("could not lock %s (%v); writing without cross-process serialization", r.path, err)
+	}
+	defer release()
+
+	cur, err := r.reloadUnlocked()
+	if err != nil {
+		return err
+	}
+	write, err := apply(cur)
+	if err != nil {
+		return err
+	}
+	if write {
+		if err := r.saveMap(cur); err != nil {
+			return err
+		}
+	}
+	r.vms = cur // refresh the working copy from the merged, on-disk-current state
+	return nil
+}
+
+// reloadUnlocked re-reads the on-disk index fresh and decodes it in memory via
+// the pure parseIndex, returning the CURRENT (scope, name) map. It is the read
+// half of every locked read-modify-write. It does NOT take the lock,
+// migrate-persist, seed, or quarantine — the caller already holds the lock (taken
+// once at the mutation boundary), so re-acquiring here would self-deadlock on a
+// fresh flock fd, and persisting/quarantining here would double-write or move a
+// file out from under a live mutation. A missing or empty file yields an empty
+// map. A migration is applied in memory but deliberately NOT written back — the
+// merged result is persisted exactly once, by the caller's single saveMap. A
+// decode failure (or a newer-sand file) is surfaced so the caller ABORTS the
+// mutation rather than clobbering an unreadable or newer on-disk file.
+func (r *Registry) reloadUnlocked() (map[scopedKey]entry, error) {
+	data, err := os.ReadFile(r.path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return map[scopedKey]entry{}, nil
+		}
+		return nil, err
+	}
+	vms, _, err := parseIndex(data)
+	if err != nil {
+		return nil, err
+	}
+	return vms, nil
+}
+
+// warnf emits a best-effort operational note about a DEGRADED write — today only
+// a failure to take the cross-process lock, after which the mutation proceeds
+// unserialized. It never affects control flow and never fails a mutation. The
+// note goes to stderr, matching the headless `sand create` path's own warnings
+// (cmd/sand/create.go); it is intentionally visible so a user can tell a write
+// was not serialized against concurrent sand processes. This is the registry's
+// warning channel; the sibling secrets/profiles stores mirror it.
+func (r *Registry) warnf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "warning: managed-VM index: "+format+"\n", args...)
+}
+
+// save persists the current in-memory index. It is used ONLY on the
+// process-start migration path (LoadFrom), which runs before any concurrent
+// mutation and is deliberately not lock-protected (see LoadFrom). Every
+// concurrent mutation writes through mutateLocked -> saveMap instead, under the
+// lock, from the freshly-reloaded map — never from this long-lived in-memory
+// snapshot.
 func (r *Registry) save() error {
+	return r.saveMap(r.vms)
+}
+
+// saveMap atomically writes vms to the backing file (unique temp file + rename)
+// in a stable (scope, name) sort order, so two saves of the same logical state
+// produce byte-identical output — otherwise Go map iteration order would make the
+// file's array order (and therefore its diff) flap on every unrelated save. With
+// an empty path it is a no-op, so an in-memory registry never touches disk.
+//
+// Writes are now lock-protected read-modify-writes: every mutation reloads the
+// current on-disk index under the cross-process lock (see mutateLocked) and calls
+// this with the MERGED map, so two sand processes sharing a data dir can no
+// longer silently discard each other's committed changes. The atomic temp+rename
+// still guarantees a reader never observes a half-written file, and the unique
+// temp name keeps two writers from colliding on a shared temp path.
+func (r *Registry) saveMap(vms map[scopedKey]entry) error {
 	if r.path == "" {
 		return nil
 	}
@@ -508,8 +746,8 @@ func (r *Registry) save() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	keys := make([]scopedKey, 0, len(r.vms))
-	for k := range r.vms {
+	keys := make([]scopedKey, 0, len(vms))
+	for k := range vms {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool {
@@ -522,18 +760,18 @@ func (r *Registry) save() error {
 		}
 		return a.name < b.name
 	})
-	vms := make([]diskEntry, 0, len(keys))
+	diskVMs := make([]diskEntry, 0, len(keys))
 	for _, k := range keys {
-		e := r.vms[k]
+		e := vms[k]
 		// Provider/RemoteTarget come from the KEY's scope, not the entry's own
 		// (redundant) copy of those fields — the key is authoritative for every
 		// lookup, so the on-disk self-description must always agree with it even
 		// if an in-memory entry's own Provider/RemoteTarget were ever left unset.
-		vms = append(vms, diskEntry{
+		diskVMs = append(diskVMs, diskEntry{
 			Name: k.name, Provider: k.scope.Provider, RemoteTarget: k.scope.RemoteTarget, Base: e.Base, Config: e.Config,
 		})
 	}
-	data, err := json.MarshalIndent(fileSchema{Version: currentVersion, VMs: vms}, "", "  ")
+	data, err := json.MarshalIndent(fileSchema{Version: currentVersion, VMs: diskVMs}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -556,3 +556,273 @@ func TestScopedAccessorsDoNotCrossProviders(t *testing.T) {
 		t.Fatalf("ConfigInScope under LocalScope = (%+v, %v), want the local entry", cfg, ok)
 	}
 }
+
+// TestConcurrentMutationsMergeOnDisk is the headline concurrency proof for this
+// task: two *Registry values backed by the SAME file — as two sand processes
+// would be — must not lose each other's committed changes. An add on one and an
+// unrelated add + remove on the other must all survive, regardless of write
+// order, because every mutation reloads the current on-disk index under the lock
+// and merges only its own delta rather than blind-overwriting its stale snapshot.
+func TestConcurrentMutationsMergeOnDisk(t *testing.T) {
+	run := func(t *testing.T, r2First bool) {
+		path := filepath.Join(t.TempDir(), "managed-vms.json")
+
+		// Seed a shared entry "c" so we can also prove a REMOVE merges, not just adds.
+		seed, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("seed load: %v", err)
+		}
+		if err := seed.Add(vm.CreateConfig{Name: "c", BaseName: "sandbar-base"}); err != nil {
+			t.Fatalf("seed add c: %v", err)
+		}
+
+		// Two independent registries, each with its own stale in-memory snapshot.
+		r1, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("load r1: %v", err)
+		}
+		r2, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("load r2: %v", err)
+		}
+
+		addA := func() {
+			if err := r1.AddScoped(vm.CreateConfig{Name: "a", BaseName: "sandbar-base"}, LocalScope); err != nil {
+				t.Fatalf("r1 add a: %v", err)
+			}
+		}
+		r2Ops := func() {
+			if err := r2.AddScoped(vm.CreateConfig{Name: "b", BaseName: "sandbar-base"}, LocalScope); err != nil {
+				t.Fatalf("r2 add b: %v", err)
+			}
+			if err := r2.RemoveScoped(LocalScope, "c"); err != nil {
+				t.Fatalf("r2 remove c: %v", err)
+			}
+		}
+		// Interleave in both orders — the result must be identical either way.
+		if r2First {
+			r2Ops()
+			addA()
+		} else {
+			addA()
+			r2Ops()
+		}
+
+		final, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("final load: %v", err)
+		}
+		if !final.IsManaged("a") {
+			t.Error("a (added by r1) was lost — blind overwrite, not a merge")
+		}
+		if !final.IsManaged("b") {
+			t.Error("b (added by r2) was lost — blind overwrite, not a merge")
+		}
+		if final.IsManaged("c") {
+			t.Error("c should have been removed by r2")
+		}
+	}
+	t.Run("r1-then-r2", func(t *testing.T) { run(t, false) })
+	t.Run("r2-then-r1", func(t *testing.T) { run(t, true) })
+}
+
+// TestReconcileScoped_KeepsEntryAbsentFromKnown pins the pruning-basis
+// correction: ReconcileScoped must prune only entries the caller KNEW about and
+// observed absent — never an entry a concurrent process added after the caller's
+// snapshot. That entry is legitimately absent from the caller's older live list,
+// but it was never in the caller's `known` set, so it must survive.
+func TestReconcileScoped_KeepsEntryAbsentFromKnown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+
+	// The TUI process knows about "web".
+	tui, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load tui: %v", err)
+	}
+	if err := tui.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, LocalScope); err != nil {
+		t.Fatalf("add web: %v", err)
+	}
+	// Capture the caller's known key set NOW (what manage.Reconcile passes).
+	known := tui.NamesInScope(LocalScope) // {"web"}
+
+	// A concurrent `sand create foo` writes "foo" to the SAME file afterward.
+	other, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load other: %v", err)
+	}
+	if err := other.AddScoped(vm.CreateConfig{Name: "foo", BaseName: "sandbar-base"}, LocalScope); err != nil {
+		t.Fatalf("add foo: %v", err)
+	}
+
+	// The TUI reconciles. Its live list (present) does not include foo, and its
+	// known set predates foo. foo must NOT be pruned.
+	present := map[string]bool{"web": true}
+	dropped, err := tui.ReconcileScoped(LocalScope, present, known)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(dropped) != 0 {
+		t.Fatalf("reconcile dropped %v, want nothing (foo was absent from known)", dropped)
+	}
+
+	final, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("final load: %v", err)
+	}
+	if !final.IsManaged("foo") {
+		t.Fatal("foo (added concurrently, absent from the caller's known set) was wrongly pruned")
+	}
+	if !final.IsManaged("web") {
+		t.Fatal("web should remain")
+	}
+
+	// Sanity: a key the caller DID know about, and that is absent from present,
+	// is still pruned — the fix narrows pruning, it does not disable it.
+	dropped, err = tui.ReconcileScoped(LocalScope, map[string]bool{}, map[string]bool{"web": true})
+	if err != nil {
+		t.Fatalf("reconcile 2: %v", err)
+	}
+	if len(dropped) != 1 || dropped[0] != "web" {
+		t.Fatalf("expected web pruned, got %v", dropped)
+	}
+}
+
+// TestSaveFormatStable pins the on-disk format so the locked read-modify-write
+// refactor cannot silently change the bytes for a given logical state. The
+// golden below is the exact output the pre-change save() produced (2-space
+// MarshalIndent, stable (scope, name) sort, v3 array, provider from the key,
+// remote_target omitted for the local scope, clone token stripped). A single
+// LocalScope entry with every CreateConfig field set makes the whole shape
+// explicit and deterministic.
+func TestSaveFormatStable(t *testing.T) {
+	const golden = `{
+  "version": 3,
+  "vms": [
+    {
+      "name": "web",
+      "provider": "lima",
+      "base": "sandbar-base",
+      "config": {
+        "Name": "web",
+        "BaseName": "sandbar-base",
+        "Hostname": "dev",
+        "User": "coder",
+        "GitName": "Ada",
+        "GitEmail": "ada@example.com",
+        "CPUs": 4,
+        "Memory": "8GiB",
+        "Disk": "50GiB",
+        "Locale": "en_US.UTF-8",
+        "Domain": "test",
+        "DockerProxyHost": "",
+        "CloneURL": "https://example.com/repo.git",
+        "CloneToken": "",
+        "WithClaude": true,
+        "WithDDEV": false,
+        "WithGo": true,
+        "WithJava": false
+      }
+    }
+  ]
+}`
+
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg := vm.CreateConfig{
+		Name: "web", BaseName: "sandbar-base", Hostname: "dev", User: "coder",
+		GitName: "Ada", GitEmail: "ada@example.com", CPUs: 4, Memory: "8GiB",
+		Disk: "50GiB", Locale: "en_US.UTF-8", Domain: "test", DockerProxyHost: "",
+		CloneURL: "https://example.com/repo.git", CloneToken: "SECRET",
+		WithClaude: true, WithDDEV: false, WithGo: true, WithJava: false,
+	}
+	if err := r.Add(cfg); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if string(raw) != golden {
+		t.Fatalf("on-disk format drifted from the pre-change bytes:\n--- got ---\n%s\n--- want ---\n%s", raw, golden)
+	}
+}
+
+// TestReloadUnlocked_MigratesInMemoryWithoutWriting proves the non-saving parse:
+// reloadUnlocked migrates a legacy file IN MEMORY but writes nothing — no
+// save(), no .corrupt quarantine — which is what keeps the locked read-modify-
+// write from double-writing or re-acquiring the lock during a migration.
+func TestReloadUnlocked_MigratesInMemoryWithoutWriting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	legacy := `{"version":1,"vms":{"old":{"base":"claude-base","config":{"Name":"old","BaseName":"claude-base","CPUs":4}}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	// A registry pointed straight at the legacy file, bypassing Load()'s
+	// migrate-persist, so reloadUnlocked's own decode is the migrating one.
+	r := &Registry{path: path, vms: map[scopedKey]entry{}}
+	cur, err := r.reloadUnlocked()
+	if err != nil {
+		t.Fatalf("reloadUnlocked: %v", err)
+	}
+	if _, ok := cur[scopedKey{scope: LocalScope, name: "old"}]; !ok {
+		t.Fatal("reloadUnlocked did not migrate the legacy entry into (scope, name) keying")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("reloadUnlocked rewrote the file (it must not save):\nbefore=%s\nafter=%s", before, after)
+	}
+	if _, statErr := os.Stat(path + ".corrupt"); statErr == nil {
+		t.Fatal("reloadUnlocked must not quarantine")
+	}
+}
+
+// TestMutationAgainstLegacyFileNoDeadlockSingleWrite proves the re-entrancy
+// safety end to end: a mutation whose reload has to migrate a legacy file
+// completes without self-deadlocking on the lock and writes the merged, migrated
+// v3 result once (legacy entry preserved, new entry added, base renamed).
+func TestMutationAgainstLegacyFileNoDeadlockSingleWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	legacy := `{"version":1,"vms":{"old":{"base":"claude-base","config":{"Name":"old","BaseName":"claude-base","CPUs":4}}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+
+	// Bypass Load()'s migrate-persist so the mutation's OWN reload migrates.
+	r := &Registry{path: path, vms: map[scopedKey]entry{}}
+	if err := r.AddScoped(vm.CreateConfig{Name: "new", BaseName: "sandbar-base"}, LocalScope); err != nil {
+		t.Fatalf("add against legacy file: %v", err)
+	}
+
+	final, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("final load: %v", err)
+	}
+	if !final.IsManaged("old") {
+		t.Fatal("legacy 'old' entry lost across the migrating mutation")
+	}
+	if !final.IsManaged("new") {
+		t.Fatal("'new' entry not written")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read final: %v", err)
+	}
+	if containsStr(string(raw), "claude-base") {
+		t.Fatalf("legacy base name still on disk after migrating mutation:\n%s", raw)
+	}
+	if !containsStr(string(raw), `"version": 3`) || !containsStr(string(raw), `"vms": [`) {
+		t.Fatalf("expected v3 array output after migrating mutation:\n%s", raw)
+	}
+}
