@@ -541,3 +541,61 @@ follow-up plan after the one-release window.
   strengthened Component 5 with the exact argv finding and the env-non-leak
   constraint; added the relative-`LimaHome()` caveat; added success criteria 7–8
   and self-validation steps 7–8; added this Decision Log.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `.ai/strikethroo/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[Task 1: LIMA_HOME fix]
+    T2[Task 2: Provenancer seam + payload]
+    T3[Task 3: Lima marker I/O + batched read]
+    T4[Task 4: Rewire manage + CLI]
+    T5[Task 5: Rewire UI roster]
+    T6[Task 6: Registry demotion + adoption]
+    T7[Task 7: Integration/e2e + tolerance guard]
+    T8[Task 8: Documentation]
+
+    T2 --> T3
+    T3 --> T4
+    T3 --> T5
+    T3 --> T6
+    T1 --> T7
+    T4 --> T7
+    T5 --> T7
+    T6 --> T7
+    T4 --> T8
+    T5 --> T8
+    T6 --> T8
+```
+
+### Phase 1: Foundations (no dependencies)
+**Parallel Tasks:**
+- Task 001: Export LIMA_HOME to the remote limactl invocation
+- Task 002: Define the Provenancer seam and marker payload type
+
+### Phase 2: Lima provenance implementation
+**Parallel Tasks:**
+- Task 003: Implement Lima marker I/O + batched read + provider exposure (depends on: 002)
+
+### Phase 3: Consumer rewire + migration
+**Parallel Tasks:**
+- Task 004: Rewire manage + CLI ownership to provenance (depends on: 003)
+- Task 005: Rewire the UI roster gate and refresh to provenance (depends on: 003)
+- Task 006: Registry demotion + idempotent adoption (depends on: 003)
+
+### Phase 4: Verification + documentation
+**Parallel Tasks:**
+- Task 007: Integration/e2e tests + limactl tolerance guard (depends on: 001, 004, 005, 006)
+- Task 008: Document the new ownership model and marker contract (depends on: 004, 005, 006)
+
+### Post-phase Actions
+- Run `POST_PHASE.md` validation after each phase; do not advance on unverified claims.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 8
