@@ -41,6 +41,9 @@ created: 2026-07-17
 | During an upgrade, an OLD sand binary (no lock) can run alongside a NEW one and still won't be serialized. How should the plan treat that cross-version window? | **Accept as a known limitation.** No format change, no migration, no version-negotiation machinery. Document that concurrent OLD+NEW binaries during an upgrade are not protected (YAGNI). |
 | Where should the shared lock helper live, given registry/secrets/profiles must not depend on the `lima` package? | **A new `internal/filelock` package** — a small, local-only flock helper the three stores import. Leave `baselock.go`/`sshhost.go` as-is (they need the remote-SSH variant). |
 | Is backwards compatibility required for the on-disk formats? | **Yes, preserved by construction.** On-disk JSON/YAML shapes, schema versions, atomic temp+rename, and `.corrupt` quarantine are all unchanged; only new sibling `*.lock` files are added. |
+| Reloading under the lock via `LoadFrom` would re-enter `save()` — `LoadFrom` writes during v1/v2→v3 migration (registry.go:297-305), `seedLocal` writes on empty/missing profiles, and a parse failure renames to `.corrupt`. Wouldn't that self-deadlock the flock (a fresh lock-file fd is a distinct open file description, so a nested `LOCK_EX` blocks) or double-write? | **Auto-resolved (codebase).** The locked read-modify-write reloads through a **non-locking, side-effect-free parse** — the pure decode portion of `LoadFrom`, factored so that under the lock it neither calls `save()`, nor migrates-with-write, nor seeds, nor quarantines. Migration / seed / corrupt-quarantine continue to happen on the normal `Load()` path at process start, not on every locked reload. The lock is acquired once at the mutation boundary and inner writes never re-acquire it, so there is no re-entrant self-deadlock. |
+| `ReconcileScoped(scope, present)` today prunes in-memory entries absent from the caller's live `present` set (registry.go:466-481). After the reload-under-lock, how does it avoid pruning an entry a concurrent process just added — which is legitimately absent from the caller's older `limactl list` snapshot? | **Auto-resolved (codebase).** Reconcile prunes only the **intersection** of *entries the caller already knew about* and *entries confirmed absent from its live list*, applied to the reloaded on-disk set. This requires the caller to pass the key set it originally knew about (its pre-reconcile registry snapshot) alongside `present`; entries that appeared on disk after that snapshot are never pruned. `manage.Reconcile` is adjusted to supply that snapshot. |
+| Should the blocking acquire wait forever behind a wedged peer, and should `fsync` be standardized across the three stores (today only `secrets` fsyncs)? | **Auto-resolved (scope).** The acquire is **bounded** by a short deadline; on expiry or any lock error it degrades to today's unserialized write and emits a visible note — it never blocks a store write indefinitely, matching the best-effort posture. `fsync` is left exactly as each store does it today; standardizing crash-durability is out of scope (YAGNI) — this plan targets cross-process lost updates, not fsync durability. |
 
 ## Executive Summary
 
@@ -175,10 +178,24 @@ implementation opens (creating if needed) the lock file and calls
   would turn a safety improvement into a regression.
 - The lock is process-scoped by the OS (`flock` releases on `Close`/exit), so a
   crashed `sand` never leaves a stale lock wedged.
-- It is a *blocking* acquire (a store write is sub-millisecond, so a brief wait
-  behind another writer is invisible), distinguishing it from `baselock`'s
-  poll-with-context loop, which exists only because the base build it guards
-  takes minutes. This primitive does not need context cancellation.
+- It is a *bounded blocking* acquire. A store write is sub-millisecond, so a
+  brief wait behind another writer is invisible; but the acquire carries a short
+  safety deadline so a wedged peer (a bug, a debugger-paused process) can never
+  block a write forever. On deadline expiry — or any error creating/opening/
+  locking the file — it degrades to today's unserialized write and emits a
+  visible note, exactly matching the best-effort posture below. This differs
+  from `baselock`, which is *not* a blocking `LOCK_EX`: `baselock` polls
+  `TryLock()` (`LOCK_EX | LOCK_NB`) every 250ms while honoring `ctx`
+  (`internal/provision/baselock.go`, `internal/lima/hostfiles.go:146-165`)
+  because the base build it guards takes minutes. This primitive guards a
+  sub-millisecond write, so a simple bounded blocking acquire is sufficient and
+  it does not need the caller's `context`.
+- **Non-re-entrant by contract.** `flock` on a second, independently-opened fd
+  of the same lock file from the same process would *self-block*. The lock is
+  therefore acquired exactly once, at the store's mutation boundary, and nothing
+  it calls while holding the lock (the reload-parse or the atomic write) may
+  re-acquire it. See Components 2–4 for the non-locking reload that makes this
+  safe.
 - Local-only: no SSH/remote variant, no `lima.HostFiles` dependency.
 
 The lock file lives beside each store file (`managed-vms.json.lock`,
@@ -196,9 +213,15 @@ concurrent process's entries survive.
 currently ends in `save()`) performs its change against the *current on-disk*
 index rather than the possibly-stale in-memory map:
 
-- Under the store lock, re-read and parse the on-disk file (reusing the
-  existing `LoadFrom` parsing/migration logic so schema handling stays in one
-  place), producing the authoritative current entry set.
+- Under the store lock, re-read and parse the on-disk file using a
+  **non-locking, side-effect-free parse** — the pure decode/migration-in-memory
+  portion of `LoadFrom`, factored out so that during a locked reload it does
+  **not** call `save()` (today `LoadFrom` writes back a migrated v3 index at
+  registry.go:297-305), does not re-acquire the lock, and does not quarantine.
+  Schema/version handling stays defined once (shared with `LoadFrom`), but the
+  disk-writing side effects (migration persistence, `.corrupt` rename) remain on
+  the process-start `Load()` path, not on every mutation. The result is the
+  authoritative current entry set.
 - Apply the specific delta: `AddScoped` inserts/overwrites exactly its one
   `(scope, name)` key; `RemoveScoped` deletes exactly its one key;
   `ReconcileScoped` removes only the `(scope, name)` keys the caller observed as
@@ -223,9 +246,11 @@ re-read the on-disk store under the secrets lock, apply their per-`(connScope,
 vm)` change to the reloaded tree, and write. The security-critical properties —
 0600 temp file created before any secret bytes, forced 0700 parent dir, `fsync`
 before rename, key/scope validation before any mutation — are all preserved;
-the lock and reload wrap around them, they are not replaced. The reload reuses
-`LoadFrom`'s version detection/migration so v1/v2/v3 handling is not
-duplicated.
+the lock and reload wrap around them, they are not replaced. The reload uses the
+same non-locking, side-effect-free parse described in Component 2 — it shares
+`LoadFrom`'s v1/v2/v3 version detection/migration-in-memory (so version handling
+is not duplicated) but does not itself `save()` or re-acquire the lock while the
+lock is held.
 
 ### Component 4 — Profiles store conversion
 
@@ -233,13 +258,26 @@ duplicated.
 
 `internal/profiles/store.go` is converted identically: `Add`, `Update`,
 `Remove`, `Enable`, `Disable`, and `SetLastUsed` re-read the on-disk profiles
-under the profiles lock, apply their change to the reloaded set, re-run
+under the profiles lock (via the same non-locking, side-effect-free parse — note
+`profiles.LoadFrom` writes through `seedLocal()` on an empty/missing file, so the
+locked reload must use the seed-free parse and let seeding stay on the
+process-start `Load()` path), apply their change to the reloaded set, re-run
 `validate()` against the merged set, and write. Preserved: the 0644 file mode,
 insertion-order stability, the seed-local-on-empty behavior, and the
-`.corrupt` quarantine. The merge must respect that `LastUsed` is a single
-scalar — a concurrent `SetLastUsed` and a concurrent profile edit must both
-survive (the edit updates its profile in the reloaded set; the last-used write
-updates only the scalar).
+`.corrupt` quarantine.
+
+The profiles store is the trickiest merge because, unlike the flat maps of
+registry/secrets, it carries two fields that do not map-union cleanly (store.go
+`order []string` at ~:31 and `lastUsed string` at ~:32):
+
+- **Insertion order.** `Add` against the *reloaded* set appends its one new
+  profile to the order as it exists on disk (which may already include a profile
+  a concurrent process added), rather than rewriting `order` from this process's
+  stale slice. `Remove` deletes exactly its one key from the reloaded order.
+- **`LastUsed` scalar.** It is last-writer-wins by nature: a `SetLastUsed`
+  updates only the scalar on the reloaded set; a concurrent profile edit updates
+  only its profile entry. Both survive because each applies its own narrow delta
+  — neither rewrites the other's field.
 
 ### Component 5 — Reconcile and headless-create call-site correctness
 
@@ -259,6 +297,19 @@ Two behaviors must change to be *merge-correct*, not just lock-protected:
   set. This prevents the headline failure (a 5-second TUI reconcile deleting a
   VM that `sand create` just recorded), and its cascade into the secrets prune
   at `model.go:970-972`.
+
+  Concretely this is an interface change. Today `ReconcileScoped(scope Scope,
+  present map[string]bool)` (registry.go:466-481) iterates the *in-memory* index
+  and drops any entry in that scope not in `present`. After the reload it must
+  iterate the *reloaded on-disk* set, but pruning only "reloaded entries not in
+  `present`" would re-introduce the bug — it would drop a concurrently-added
+  entry that is legitimately absent from the caller's older live list. So the
+  method also takes the caller's originally-known key set (the scope's keys as
+  the caller last observed them, i.e. its pre-reconcile snapshot) and prunes only
+  `known ∩ absent-from-present`, leaving any reloaded key the caller never knew
+  about untouched. `manage.Reconcile` (manage.go:24-30) is adjusted to capture
+  and pass that snapshot alongside the `present` map it already builds from
+  `p.List()`.
 
 - **Headless `sand create` merge.** `cmd/sand/create.go` captures the registry
   at load time and writes it back minutes later via `manage.RecordSuccess`. With
@@ -296,9 +347,25 @@ correctness requirement of this plan.
 - **Reload-on-every-write reintroduces a parse/migration path.** Re-reading the
   on-disk file on each mutation risks divergence from `LoadFrom` if the parsing
   is duplicated.
-    - **Mitigation**: Reuse the existing `LoadFrom` parsing/migration for the
+    - **Mitigation**: Share `LoadFrom`'s decode/version-detection logic for the
       reload rather than hand-rolling a second parser, so schema/version
-      handling lives in one place.
+      handling lives in one place — but as a *non-saving* variant (see below).
+
+- **Re-entrant self-deadlock via `LoadFrom`'s hidden writes.** `LoadFrom` is not
+  a pure read: `registry.LoadFrom` persists a migrated v3 index (registry.go:297-305),
+  `profiles.LoadFrom` writes through `seedLocal()` on an empty/missing file, and
+  all three rename a bad file to `.corrupt`. If the locked read-modify-write
+  reloaded by simply calling `LoadFrom`, that inner `save()` would re-enter the
+  write path and try to re-acquire the flock on a freshly-opened lock-file fd —
+  a distinct open file description, so `LOCK_EX` would block on the lock this
+  same process already holds, self-deadlocking (or double-writing).
+    - **Mitigation**: Factor a non-locking, side-effect-free parse (used only
+      under the lock) that decodes and migrates *in memory* without `save()`,
+      seed, quarantine, or lock re-acquire. Migration persistence, seeding, and
+      corrupt-quarantine stay on the process-start `Load()` path. The lock is
+      acquired exactly once, at the mutation boundary; nothing under it
+      re-acquires it. A test drives a mutation on a file that would trigger
+      migration/seed to prove no deadlock and no reload-time write occurs.
 </details>
 
 <details>
@@ -356,7 +423,11 @@ correctness requirement of this plan.
 5. **No new dependency direction**: `registry`, `secrets`, and `profiles` depend
    on `internal/filelock`, not on `lima`; `baselock.go`/`sshhost.go` are
    unchanged.
-6. **Full suite green**: `go build ./...`, `go vet ./...`, and `go test ./...`
+6. **No re-entrant self-deadlock and no reload-time writes**: A mutation whose
+   reload would otherwise trigger `LoadFrom`'s migration/seed/quarantine
+   completes without deadlocking and without the reload itself writing to disk
+   (the migrated/seeded write happens only on the process-start `Load()` path).
+7. **Full suite green**: `go build ./...`, `go vet ./...`, and `go test ./...`
    all pass.
 
 ## Self Validation
@@ -387,7 +458,13 @@ Execute these after all tasks are complete:
 5. **Secrets security invariants.** Confirm via a test (mirroring the existing
    secrets tests) that during a locked write the temp file is 0600, the parent
    dir is forced 0700, and `fsync` precedes the rename.
-6. **Suite.** Run `go build ./...`, `go vet ./...`, and `go test ./...` and
+6. **Re-entrancy / no reload-time write.** For each store, run a single-process
+   mutation against a file that would trigger the load-time side effect (a
+   legacy-schema registry index that migrates; an empty/missing profiles file
+   that seeds) and confirm: the mutation completes (no deadlock), and the *only*
+   disk write during the mutation is the final atomic rename of the intended
+   change — the reload step performs no `save()`/seed of its own.
+7. **Suite.** Run `go build ./...`, `go vet ./...`, and `go test ./...` and
    confirm all pass.
 
 ## Documentation
@@ -433,7 +510,9 @@ confined to how the three host-side files are persisted.
 - **Out of scope**: guest-side / `limactl` concurrency on the same instance
   (user-directed, bounded by Lima); cross-version (old+new binary) concurrency
   during an upgrade (accepted limitation); any redesign of how the TUI holds
-  state in memory.
+  state in memory; standardizing `fsync` across the stores (only `secrets` fsyncs
+  today — durability parity is a separate concern from the lost-update fix and is
+  deliberately left untouched, YAGNI).
 - **Possible ergonomic follow-on (not required here)**: after a locked write,
   the TUI could refresh its in-memory store from the merged on-disk result so
   the board immediately reflects VMs/secrets/profiles that other processes
@@ -443,3 +522,20 @@ confined to how the three host-side files are persisted.
 - Locking is necessary but not sufficient on its own — the read-modify-write
   conversion is the substantive fix. Any task breakdown must not ship the lock
   without the reload-merge, or the lost update persists.
+
+### Change Log
+
+- 2026-07-17 (refinement): Verified every file:line reference against the
+  current code and hardened the design against three implementation hazards the
+  first draft did not surface: (1) a **re-entrant self-deadlock** — `LoadFrom`
+  writes during migration/seed/quarantine, so the locked reload must use a
+  non-saving, non-locking parse (new clarification + Component 2–4 detail + new
+  Technical Risk + Success Criterion 6 + Self-Validation step 6); (2) the
+  **reconcile pruning basis** must intersect the caller's originally-known keys
+  with observed-absent, which is a concrete `ReconcileScoped`/`manage.Reconcile`
+  signature change (Component 5 detail); (3) the **profiles `order`/`lastUsed`
+  fields** do not map-union — spelled out delta-apply for insertion order and
+  last-writer-wins scalar (Component 4). Also: bounded the lock acquire with a
+  deadline that degrades to unserialized (correcting the `baselock` contrast —
+  `baselock` polls `TryLock(LOCK_NB)`+ctx, it is not a blocking `LOCK_EX`), and
+  recorded `fsync`-standardization as explicitly out of scope.
