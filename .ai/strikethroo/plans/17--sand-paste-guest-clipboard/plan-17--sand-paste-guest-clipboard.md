@@ -32,30 +32,36 @@ created: 2026-07-17
 | 4 | Real headless clipboard (Xvfb + xclip) or a shim? | **Shim (Option B).** Ship guest `xclip`/`wl-paste` shims that serve the sand-managed image file. No daemon, negligible image cost, and image-only by construction. Xvfb was rejected as heavier (standing X server per VM, larger base image). |
 | 5 | Retention policy for stored pastes? | **Moot.** A clipboard holds one item; `sand paste` overwrites a single-slot file each time, so there is nothing to accumulate or prune. |
 | 6 | Backwards compatibility? | Not applicable — purely additive (new command, new TUI verb, new guest files). No BC break. |
+| 7 | Does `sand paste` auto-target the single running VM? | **No** — it mirrors `sand shell`: exactly one explicit VM name, honoring `--profile`. `cmd/sand/resolve.go` resolves the *connection profile*, not the VM; sand has no single-running-VM shortcut, so inventing one here would be inconsistent (corrected from the initial draft). |
+| 8 | Which host platforms read the clipboard? | **macOS and Linux only** — the platforms sand/Lima run on — mirroring the `hostres_*.go` seam where `_other` is a stub. Windows/WSL is out of scope; the `other` build returns an "unsupported" sentinel (corrected from the initial draft, which overreached to PowerShell). |
+| 9 | How are the image bytes written into the guest? | One guest round trip that creates the dir and writes the file — `Client.Shell` with the image on stdin (`mkdir -p <dir> && cat > <file>`) — against the **absolute** guest home resolved via `GuestHome`, not `~` expansion and not `Copy` (which creates no parent dirs). The clipboard is always read on the machine running sand; only the written bytes cross the remote hop. |
 
-Open (defaulted, revisitable — flagged per the work order, not blocking):
+Resolved design decisions (confirmed in refinement 2026-07-17):
 
-| # | Decision | Default chosen | Alternative |
-|---|----------|----------------|-------------|
-| A | TUI keybinding for the paste verb | `v` | `i` (image) |
-| B | Board behavior after a TUI paste | Stay on board, show status-line result | Chain straight into attach |
+| # | Decision | Resolution | Alternative considered |
+|---|----------|------------|------------------------|
+| A | TUI keybinding for the paste verb | **`v`** (confirmed free of collisions) | `i` (image) |
+| B | Board behavior after a TUI paste | **Stay on board**, show a status-line result | Chain straight into attach |
+| C | Staged image lifecycle | **Persist until replaced** — real-clipboard parity, simplest, and robust to Claude Code's two-call probe (TARGETS then fetch) | One-shot: consume/clear the slot after the fetch |
 
 ## Executive Summary
 
 Claude Code's Ctrl-V image paste works by shelling out to a **local** clipboard
-reader (`xclip`/`wl-paste` on Linux, `osascript «class PNGf»` on macOS,
-PowerShell `GetImage()` on Windows/WSL) on the machine Claude Code runs on.
+reader (on the machine Claude Code runs on): `xclip`/`wl-paste` on Linux,
+`osascript «class PNGf»` on macOS, PowerShell `GetImage()` on Windows/WSL.
 Inside a sand guest there is no display server and no clipboard tool, so Ctrl-V
 finds nothing. This plan adds `sand paste` (a CLI command and a TUI tile verb)
 that makes native Ctrl-V work while categorically refusing to expose host
 clipboard **text** — the passwords a naive clipboard bridge would leak.
 
-The flow: the user copies an image on the host, triggers `sand paste` (CLI
-`sand paste [vm]` or the TUI verb), and presses Ctrl-V inside Claude Code in the
-guest — where it renders as a normal `[Image #N]` attachment. Under the hood,
-`sand paste` reads the host clipboard **image-only** (gating on an advertised
-`image/*` type before ever fetching bytes), copies the image into the guest at a
-single-slot path via sand's existing copy plumbing, and relies on a pair of
+The flow: the user copies an image on the host, triggers `sand paste <vm>` (CLI,
+mirroring `sand shell`'s argument contract, or the TUI verb), and presses Ctrl-V
+inside Claude Code in the guest — where it renders as a normal `[Image #N]`
+attachment. Under the hood, `sand paste` reads the clipboard **image-only** on
+the machine sand itself runs on (gating on an advertised `image/*` type before
+ever fetching bytes; macOS and Linux hosts only), writes the image into the guest
+at a single-slot path in one guest round trip (`Client.Shell` with the bytes on
+stdin, creating the directory and file together), and relies on a pair of
 lightweight guest **shims** named `xclip` and `wl-paste` to serve that image to
 Claude Code's own paste probe. There is no live bridge, no display server, and
 no daemon.
@@ -64,9 +70,10 @@ This approach was chosen because it delivers the native Ctrl-V gesture the user
 asked for with the strongest security posture available: nothing auto-syncs from
 the host, the host read is one-shot and structurally image-only, and the guest
 "clipboard" can only ever contain an image the user explicitly pasted. It reuses
-sand's per-platform seam pattern (host clipboard read) and its Runner/copy
-plumbing (guest delivery), so it works identically for local and remote-host
-VMs, and it touches neither tmux nor the attach path.
+sand's per-platform seam pattern (clipboard read) and its Runner plumbing (guest
+delivery over the same transport `sand shell`/transfers use), so it works
+identically for local and remote-host VMs, and it touches neither tmux nor the
+attach path.
 
 ## Context
 
@@ -104,24 +111,36 @@ not patch or depend on Claude Code's internals beyond the standard `xclip` CLI
 contract.
 
 **Relevant repo facts that constrain the implementation.**
-- The image must be read off the *host* clipboard by sand; a terminal never
+- The image must be read off the clipboard of *the machine sand runs on* (the
+  user's workstation, even when driving a remote Lima host); a terminal never
   delivers image bytes when pasting into it, so sand cannot receive an image
-  "through" its TUI.
-- Host clipboard reading is inherently per-platform and belongs behind a small
-  build-tagged seam, mirroring the existing `internal/ui/hostres_*.go`
-  (darwin/linux/other) pattern.
-- Guest file delivery must go through sand's Runner/copy plumbing
-  (`internal/lima` `Client.Copy` → `copyAcrossHop` in `sshhost.go`) so a
-  remote-host VM's two-stage hop is handled and no test requires a real
-  `limactl` (per `AGENTS.md`).
+  "through" its TUI, and it never touches the remote host's clipboard.
+- Clipboard reading is inherently per-platform and belongs behind a small
+  build-tagged seam, mirroring the existing `internal/ui/hostres_*.go` pattern:
+  `darwin` and `linux` implement it; `hostres_other.go` (`//go:build !linux &&
+  !darwin`) is a stub, so non-unix hosts return an "unsupported" sentinel rather
+  than a broken probe.
+- Guest file delivery goes through sand's Runner plumbing. `Client.Shell(ctx,
+  name, stdin, out, argv…)` runs a guest command with stdin piped, so
+  `mkdir -p <dir> && cat > <file>` writes the image and creates its directory in
+  one round trip; the remote-host two-stage hop is handled by the same transport
+  as `sand shell`, and no test requires a real `limactl` (per `AGENTS.md`).
+  `Client.Copy`/`copyAcrossHop` is the alternative but creates no parent dirs and
+  does not expand `~`, so it would need a separate `mkdir` and an absolute path.
+- The guest home is **not** reconstructable from a username (Lima puts it at
+  `/home/<user>.guest`); it is resolved via `lima.GuestHome(instanceDir)`, the
+  same source `AttachArgv`/`internal/ui.guestHome` use.
 - TUI verbs live in `internal/ui/commandreg.go` as key bindings with
   `enabledFor` guards (the same shape as `S` shell, `u` upload, `g` download);
-  long actions run as async jobs surfaced on the status line
-  (`internal/ui/jobs.go`).
-- CLI commands live under `cmd/sand/` (`shell.go` is the closest sibling) and
-  resolve their target VM/profile through `cmd/sand/resolve.go`.
-- The guest shim scripts are provisioned via an Ansible role (`roles/claude-code`
-  or `roles/dev-tools`), the same mechanism that installs the agent tooling.
+  `v` and `i` are both currently unbound. The transfer verbs open a file-browser
+  wizard (`startTransfer` → `launchCopy`); paste has no file to pick, so it is a
+  *direct* async action reporting a status-line result, not a wizard.
+- CLI commands live under `cmd/sand/`; `shell.go` is the closest sibling and the
+  contract to mirror — `runShell` requires exactly one VM name and a `--profile`
+  flag. `cmd/sand/resolve.go` resolves the connection *profile*, not the VM.
+- The guest shim scripts install to `/usr/local/bin` (mode 0755, on `PATH`; the
+  same place `roles/dev-tools` drops the `drupalorg` binary) via the
+  `roles/claude-code` provisioning role, since they exist to serve Claude Code.
 
 ## Architectural Approach
 
@@ -135,66 +154,96 @@ reuse established sand patterns.
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant H as Host (sand)
-    participant HC as Host clipboard
-    participant G as Guest (~/.sand/clip)
+    participant H as sand process (workstation)
+    participant HC as Local clipboard
+    participant G as Guest clip dir
     participant CC as Claude Code (guest)
-    U->>H: sand paste [vm]  /  TUI verb
-    H->>HC: gate: advertised image/* type?
+    U->>H: sand paste VM  /  TUI verb
+    H->>HC: gate - advertised image type? (macOS/Linux)
     alt no image type
         HC-->>H: none
         H-->>U: error (nothing read, nothing sent)
     else image present
-        HC-->>H: image bytes (image-only fetch)
-        H->>G: copy → ~/.sand/clip/latest.png (Runner/copyAcrossHop)
-        H-->>U: status: image staged on <vm> clipboard
+        HC-->>H: PNG bytes (image-only fetch)
+        H->>G: Client.Shell stdin - mkdir then write latest.png
+        H-->>U: status - image staged on VM clipboard
         U->>CC: Ctrl-V
-        CC->>G: xclip -t TARGETS -o / -t image/png -o  (shim)
+        CC->>G: xclip -t TARGETS -o then -t image/png -o (shim)
         G-->>CC: image/png bytes
-        CC-->>U: [Image #N]
+        CC-->>U: Image attached
     end
 ```
 
-### Host Clipboard-Read Seam (image-only)
-**Objective**: Read an image off the host clipboard on demand, and make it
-structurally impossible to read text.
+### Clipboard-Read Seam (image-only, local to the sand process)
+**Objective**: Read an image off the clipboard of the machine running sand, and
+make it structurally impossible to read text.
 
-A build-tagged seam (`darwin` / `linux` / other, mirroring `hostres_*.go`)
-exposes one operation: "return the current clipboard image bytes, or a sentinel
-meaning *no image*." Each platform implements it with the same probes Claude Code
-uses, but the contract is **gate-then-fetch**: first confirm an `image/*`
-representation is advertised (`osascript` coercion on macOS is itself the gate;
-`xclip -t TARGETS -o` / `wl-paste -l` on Linux; `GetImage() == null` check on
-Windows/WSL), and only then fetch the bytes. A clipboard with no image type
-yields the *no image* sentinel and **zero bytes are fetched** — there is no code
-path that returns non-image content. This is the load-bearing security property
-and must be covered by tests that assert a text-only clipboard produces the
-sentinel, never bytes.
+A build-tagged seam mirroring `hostres_*.go` exposes one operation: "return the
+current clipboard image bytes, or a sentinel meaning *no image*." `darwin` and
+`linux` implement it; `_other` (non-unix) returns an "unsupported" sentinel, so
+the feature degrades cleanly rather than mis-probing. Each platform uses the same
+probes Claude Code uses, but the contract is **gate-then-fetch**: first confirm an
+`image/*` representation is advertised (`osascript «class PNGf»` coercion on macOS
+is itself the gate; `xclip -t TARGETS -o` / `wl-paste -l` on Linux), and only then
+fetch the bytes. A clipboard with no image type yields the *no image* sentinel and
+**zero bytes are fetched** — there is no code path that returns non-image content.
+This is the load-bearing security property and must be covered by tests that
+assert a text-only clipboard produces the sentinel, never bytes.
 
-### Guest Delivery (single-slot copy)
+The read always runs on the machine sand runs on — the workstation — regardless
+of whether the target VM is local or on a remote Lima host. sand never reads the
+remote host's clipboard; only the resulting bytes are sent onward.
+
+**Format:** the seam normalizes to PNG (macOS `«class PNGf»` coerces to PNG;
+Linux fetches `image/png`), because the guest shim always presents a single PNG.
+A Linux *host* clipboard that advertises only a non-PNG image (e.g. JPEG with no
+PNG flavor) is treated as *no image* in v1 rather than pulling in an image
+converter — see Risks. macOS, the primary host platform, always coerces, so this
+edge is Linux-host-only.
+
+### Guest Delivery (single-slot write, one round trip)
 **Objective**: Place the image where the guest shim can serve it, working
 identically for local and remote-host VMs.
 
-The image bytes are written to a single-slot guest path (`~/.sand/clip/latest.png`)
-through sand's existing copy path (`Client.Copy` → `copyAcrossHop`), so the
-remote two-stage hop and all quoting/escaping are inherited unchanged. Single-slot
-overwrite mirrors real clipboard semantics (one item) and eliminates any
-retention/pruning concern. The parent directory is created if absent. No tmux and
-no attach interaction occur here.
+The image bytes are written to a single-slot guest path
+(`<guest-home>/.sand/clip/latest.png`) in one guest round trip:
+`Client.Shell(ctx, name, <image-on-stdin>, out, "sh", "-c", "mkdir -p <dir> &&
+cat > <file>")`. This runs over the same transport `sand shell` uses, so the
+remote-host two-stage hop is inherited, the directory is created together with the
+file, and no test needs a real `limactl`. The guest home is the absolute path from
+`lima.GuestHome(instanceDir)` — never a literal `~`, which the copy/shell
+destination would not expand. The directory is created `0700` and the file `0600`
+(defense in depth on a multi-user guest). Single-slot overwrite mirrors real
+clipboard semantics (one item), which is why lifecycle decision C is
+persist-until-replaced and there is nothing to prune. No tmux and no attach
+interaction occur here.
+
+`Client.Copy`/`copyAcrossHop` is the alternative delivery API but would require a
+separate `mkdir` step and pre-resolved absolute path; the stdin-shell write is
+preferred as one atomic round trip. Final API choice is left to task generation,
+but either implementation MUST create the directory and use the absolute guest
+home.
 
 ### Guest Shim Pair (`xclip` / `wl-paste`)
 **Objective**: Give Claude Code's native paste probe a clipboard to read, with no
 display server or daemon.
 
-Two small scripts named `xclip` and `wl-paste`, provisioned onto the guest `PATH`
-ahead of any real binary, answer exactly the probes Claude Code issues:
+Two small scripts named `xclip` and `wl-paste` install to `/usr/local/bin`
+(mode 0755, on `PATH`) via the `roles/claude-code` role, and answer exactly the
+probes Claude Code issues:
 - Target/type listing (`-t TARGETS -o`, `wl-paste -l`): advertise `image/png`
   **iff** the single-slot file exists; otherwise behave like an empty clipboard
   (clean exit, no output), so Ctrl-V with nothing staged correctly reports "no
   image."
 - Image fetch (`-t image/png -o`, `--type image/png`): stream the file's bytes.
 - Any non-image target (e.g. `text/plain`): behave as empty. The shim has **no**
-  text-serving path — image-only by construction, independent of the host seam.
+  text-serving path — image-only by construction, independent of the read seam.
+
+Lifecycle is persist-until-replaced (decision C): the shim serves the same
+single-slot file on every read until the next `sand paste` overwrites it, matching
+how a real clipboard retains its contents and staying robust against Claude Code's
+two-call probe (it lists TARGETS, then fetches — a consume-on-first-read shim
+would empty the slot before the fetch).
 
 The shims are permissive about *which* `image/*` target is requested (serve the
 staged PNG for any image target) so a future Claude Code tweak to its target list
@@ -208,18 +257,21 @@ behavior.
 **Objective**: One host action that runs read → deliver, for both headless and
 TUI users.
 
-- **CLI `sand paste [vm]`**: resolves its target VM/profile through the existing
-  `cmd/sand/resolve.go` (no arg ⇒ the single running VM; ambiguity is a clear
-  error listing candidates), runs the host read and guest delivery, and reports a
-  concise result (staged, or a specific reason nothing was — no image on
-  clipboard, VM not running). Requires a running VM, the same guard as
-  `sand shell`.
-- **TUI verb** (default key `v`): registered in `internal/ui/commandreg.go` beside
-  `u`/`g`/`S` with an `enabledFor` guard restricting it to running VMs. It runs
-  the same read+deliver as an async action and surfaces the outcome on the status
-  line (e.g. `staged image on <vm> — press S then Ctrl-V`), staying on the board
-  by default (decision B). It acts on the VM the command registry hands it, never
-  on an implicit `m.detail`, consistent with the transfer verbs.
+- **CLI `sand paste <vm>`**: mirrors `sand shell`'s contract exactly — exactly one
+  explicit VM name plus a `--profile` flag (there is no single-running-VM
+  shortcut; `resolve.go` resolves the profile, not the VM). It runs the clipboard
+  read and guest delivery and reports a concise result (staged, or a specific
+  reason nothing was — no image on clipboard, VM not running/unknown). Requires a
+  running VM, the same guard as `sand shell`.
+- **TUI verb** (key `v`, decision A): registered in `internal/ui/commandreg.go`
+  beside `u`/`g`/`S` with an `enabledFor` guard restricting it to running VMs.
+  Unlike the transfer verbs it opens **no** file-browser wizard (there is no file
+  to pick); it is a direct async action that surfaces its outcome on the status
+  line (e.g. `staged image on <vm> — press S then Ctrl-V`) and stays on the board
+  (decision B). The single small write does not need the job registry's
+  progress/cancel machinery — a plain async `tea.Cmd` returning a result message
+  is sufficient. It acts on the VM the command registry hands it, never on an
+  implicit `m.detail`, consistent with the transfer verbs.
 
 ## Risk Considerations and Mitigation Strategies
 
@@ -230,12 +282,13 @@ TUI users.
       and fetches zero bytes when no `image/*` type is advertised; a guest shim
       with no text-serving path at all. Two independent image-only layers. Tests
       assert a text-only clipboard yields no bytes on every platform.
-- **A guest process reading the staged image**: any guest process can read
-  `~/.sand/clip/latest.png`.
+- **A guest process reading the staged image**: any guest process could read the
+  single-slot file.
     - **Mitigation**: accepted and bounded — the file only ever contains an image
       the user explicitly pasted, never host clipboard history and never host
       text; it is no more exposed than any other file the user copies in. Nothing
-      auto-syncs from the host.
+      auto-syncs from the host. The file is written `0600` in a `0700` directory
+      as defense in depth on a multi-user guest.
 </details>
 
 <details>
@@ -244,10 +297,18 @@ TUI users.
   `xclip`/`wl-paste` fetch is not a hard refusal on a text-only clipboard.
     - **Mitigation**: make the advertised-`image/*`-type gate an explicit,
       tested precondition; never issue a typed fetch on an un-gated clipboard.
-- **Per-platform host clipboard probes are brittle across OS/tool versions**.
-    - **Mitigation**: isolate behind the build-tagged seam; degrade to a clear
-      "no image found" error rather than a crash or a wrong fetch; document the
-      probe per platform.
+- **Per-platform clipboard probes are brittle across OS/tool versions**.
+    - **Mitigation**: isolate behind the build-tagged seam (`darwin`/`linux` real,
+      `_other` stub); degrade to a clear "no image found" / "unsupported" result
+      rather than a crash or a wrong fetch; document the probe per platform.
+- **Non-PNG image on a Linux host clipboard**: the guest shim always presents PNG,
+  so the read normalizes to PNG. macOS coerces any image to PNG, but a Linux host
+  clipboard advertising only a non-PNG flavor (e.g. JPEG, no PNG) cannot be
+  fetched as `image/png`.
+    - **Mitigation**: v1 treats that case as *no image* (a clear message), rather
+      than adding an image-converter dependency. macOS — Lima's primary host
+      platform — is unaffected. Revisit only if it proves to bite real users
+      (YAGNI).
 - **Shim coupling to Claude Code's paste command shape**: a future Claude Code
   change to its target list could bypass the shim.
     - **Mitigation**: shims are permissive (serve the staged image for any
@@ -274,7 +335,7 @@ TUI users.
 ## Success Criteria
 
 ### Primary Success Criteria
-1. On a running local VM, copying an image on the host, invoking `sand paste`,
+1. On a running local VM, copying an image on the host, invoking `sand paste <vm>`,
    and pressing Ctrl-V inside Claude Code in the guest yields an `[Image #N]`
    attachment matching the copied image.
 2. The TUI paste verb performs the same staging and reports its outcome on the
@@ -326,8 +387,8 @@ After all tasks are complete, an implementer should verify by:
 
 ### Development Skills
 - Go (CLI command + Bubble Tea TUI verb wiring).
-- Cross-platform clipboard internals (macOS `osascript`/pasteboard, Linux
-  X11/Wayland selections, Windows/WSL PowerShell clipboard).
+- Clipboard internals on sand's host platforms (macOS `osascript`/pasteboard,
+  Linux X11/Wayland selections); non-unix hosts are an "unsupported" stub.
 - Ansible role authoring for guest provisioning.
 - Shell scripting for the guest shims.
 
@@ -339,19 +400,45 @@ After all tasks are complete, an implementer should verify by:
 
 ## Integration Strategy
 
-The feature slots into existing seams without new transports: host reads sit in a
-new build-tagged package mirroring `hostres_*.go`; guest delivery reuses
-`Client.Copy`/`copyAcrossHop`; the CLI command joins `cmd/sand/` and resolves via
-`resolve.go`; the TUI verb joins `commandreg.go` and runs through the jobs
-subsystem. The guest shim ships via an existing provisioning role. tmux/attach are
-untouched.
+The feature slots into existing seams without new transports: clipboard reads sit
+in a new build-tagged seam mirroring `hostres_*.go` (`darwin`/`linux` real,
+`_other` stub); guest delivery reuses the `Client.Shell` stdin path over the same
+transport as `sand shell`; the CLI command joins `cmd/sand/`, mirroring
+`shell.go`'s named-VM + `--profile` contract; the TUI verb joins `commandreg.go`
+as a direct async action (no file-browser wizard, no job-registry progress bar).
+The guest shim ships via the `roles/claude-code` provisioning role to
+`/usr/local/bin`. tmux/attach are untouched.
 
 ## Notes
 
 - Purely additive; no backwards-compatibility surface.
-- Two cosmetic decisions are defaulted and flagged (keybinding `v`; stay-on-board
-  after paste) and can be flipped during task generation without reshaping the
-  plan.
+- Decisions A (keybinding `v`), B (stay-on-board), and C (persist-until-replaced
+  lifecycle) are now **confirmed** (see the Resolved decisions table), not
+  defaulted.
 - The single-slot design intentionally omits paste history and retention; if a
   multi-item guest clipboard is ever wanted, it is a separate future work order
   (YAGNI).
+- **Known limitation:** a Linux *host* clipboard holding only a non-PNG image is
+  treated as "no image" in v1 (macOS always coerces to PNG). Documented as a
+  Technical Risk.
+
+### Change Log
+
+- **2026-07-17 (creation):** initial plan — `sand paste`, Option B shim clipboard.
+- **2026-07-17 (refinement):**
+    - Corrected VM resolution: `sand paste` requires an explicit VM name +
+      `--profile`, mirroring `sand shell`; removed the invented "single running
+      VM" auto-resolution (`resolve.go` resolves the profile, not the VM).
+    - Replaced the `Client.Copy`/`copyAcrossHop` delivery assumption with the
+      `Client.Shell` stdin write (`mkdir -p && cat >`) — one round trip that
+      creates the directory; noted the absolute-guest-home (`GuestHome`)
+      requirement and that `~` does not expand.
+    - Scoped the clipboard read to macOS/Linux hosts (`_other` = unsupported
+      stub), matching `hostres_*.go`; removed the Windows/WSL host-read overreach.
+    - Clarified the read is always local to the sand process, never the remote
+      host; only bytes cross the hop.
+    - Added the non-PNG-on-Linux-host limitation and `0600`/`0700` file perms.
+    - Specified the shim install path (`/usr/local/bin` via `roles/claude-code`)
+      and that the TUI verb is a direct action, not the transfer file-browser
+      wizard.
+    - Confirmed open decisions A/B/C with the user.
