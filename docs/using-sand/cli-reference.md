@@ -59,6 +59,16 @@ not a prompt.
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
+| `--with-claude` | bool | `true` | Install Claude Code in the base image. |
+| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — the one **opt-in** toolset flag. |
+| `--with-ddev` | bool | `true` | Install DDEV in the base image. |
+| `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
+| `--with-java` | bool | `true` | Install a headless JDK in the base image. |
+
+The `--with-*` flags configure the **shared base image**, not the individual
+VM. A flag you don't pass adopts whatever the existing base was actually
+built with (read back from its version stamp), so you only need to state a
+selection once; passing a flag explicitly always wins.
 
 ### There is no `--ref` flag
 
@@ -194,11 +204,21 @@ Flags:
   -profile string
     	Connection profile to create on (default: the last-used profile, else "local")
   -rebuild
-    	Delete and rebuild the base image first, then create
+    	Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
   -recreate
     	If the named instance exists and is sand-managed, delete and re-clone it
   -user string
     	Primary VM user
+  -with-claude
+    	Install Claude Code in the base image (default true)
+  -with-codex
+    	Install OpenAI Codex in the base image
+  -with-ddev
+    	Install DDEV in the base image (default true)
+  -with-go
+    	Install the Go toolchain in the base image (default true)
+  -with-java
+    	Install a headless JDK in the base image (default true)
 ```
 
 (`--user` has no printed default because it is resolved to the host username

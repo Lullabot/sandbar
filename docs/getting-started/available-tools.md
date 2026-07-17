@@ -27,6 +27,10 @@ covers how to reach it from your browser — locally and on a remote profile.
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git
   credential helper for HTTPS authentication
 - The [GitLab CLI (`glab`)](https://gitlab.com/gitlab-org/cli)
+- The [OpenAI Codex CLI](https://chatgpt.com/codex) — **opt-in**: pass
+  `--with-codex` to `sand create` (or enable the toggle in the TUI create
+  form). Codex is not provisioned by default; only include it if you want to
+  use it alongside Claude Code.
 
 ## Shell & utilities
 

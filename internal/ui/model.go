@@ -221,6 +221,7 @@ type model struct {
 	// would silently re-converge the SHARED base back to the full tool-set —
 	// installing a Go toolchain and a JDK the user had explicitly opted out of.
 	resetWithClaude      bool
+	resetWithCodex       bool
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
@@ -239,6 +240,7 @@ type model struct {
 	// can de-select it and install their own agent. Not to be confused with
 	// preserveClaude above, which is reset mode's keep-my-~/.claude toggle.
 	toolClaude  bool
+	toolCodex   bool
 	toolDDEV    bool
 	toolGo      bool
 	toolJava    bool
