@@ -165,7 +165,7 @@ another:
 | [container-use](https://github.com/dagger/container-use), [claude-code-sandbox](https://github.com/textcortex/claude-code-sandbox), [ClaudeBox](https://github.com/RchGrav/claudebox), [Anthropic devcontainer](https://code.claude.com/docs/en/sandbox-environments) | Container (shared kernel) | Local | Shares your kernel and bind-mounts the repo |
 | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban), [Conductor](https://conductor.build/), Crystal, [Sculptor](https://imbue.com/sculptor/) | Host worktrees / containers | Local | Little or no isolation boundary; agent runs on the host |
 | [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), bubblewrap, Seatbelt | OS process confinement | Local | Per-process host confinement, policy-dependent, no provisioned environment |
-| [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | General-purpose remote dev, not agent-disposable |
+| [Coder](https://github.com/coder/coder), Gitpod/Ona, Codespaces | Workspaces | Cloud / self-host | Now agent-first (Coder Agents, Ona), but a server-side control plane for teams; isolation is template- and policy-defined, not a sealed local VM |
 
 ```mermaid
 ---
