@@ -599,3 +599,74 @@ graph TD
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 8
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+All 8 tasks across 4 phases delivered and committed on branch
+`worktree-st-plan-provenance`:
+- **Provenancer seam** (`internal/provider/provenance.go`) + Lima implementation
+  (`internal/provider/limaprovenance.go`, `internal/lima`): markers at
+  `<LimaHome>/<name>/sandbar.json`, a batched one-round-trip read
+  (`HostFiles.ReadInstanceMarkers`), local + remote (embedding-inherited).
+- **Ownership relocated**: board roster gate, stop-all, shell routing, and
+  `RecreateBase` (reset gate + base name) now resolve from provenance, registry
+  as one-release fallback. Markers written on create (`RecordSuccess`).
+- **Idempotent adoption** (`registry.Adopt`/`manage.AdoptOnce`) stamps markers
+  onto pre-provenance managed VMs; registry demoted to cache + known-targets +
+  fallback.
+- **`LIMA_HOME` fix**: exported on the remote `limactl` argv so discovery and
+  marker reads agree on non-default Lima homes.
+- **Tests + docs**: default-suite integration tests (real local marker I/O),
+  a `limactl` tolerance CI guard, a `limae2e`-gated convergence/lifecycle/
+  two-controller e2e; AGENTS.md + package docs + connection-profiles doc.
+
+Validation gates: `go build ./...`, `go vet ./...`, `gofmt -l` all clean;
+`go test ./...` passes and stays hermetic (~11s); `go test -race` clean on the
+concurrency-touching packages.
+
+### Noteworthy Events
+- **UI hang caught and fixed (orchestrator).** Task 6 first triggered adoption
+  synchronously inside the Bubble Tea Update goroutine; its blocking SSH
+  `ProvenanceOf`/`MarkManaged` hung `TestProfileEnableRefreshDisableCycle` (30s
+  timeout). Fixed by dispatching adoption as a background `tea.Cmd`, matching
+  task 5's off-Update-goroutine pattern.
+- **Data race caught and fixed (orchestrator).** `registry.Registry` has no
+  internal mutex; the async adoption read `r.ManagedInScope` while the Update
+  goroutine mutates the registry (`Reconcile`/`AddScoped`) — a real race the
+  test suite did not exercise. Refactored `Adopt`/`AdoptOnce` to take a detached
+  `[]ManagedEntry` snapshot taken on the caller's goroutine; verified with
+  `go test -race`.
+- **Cross-controller recreate seam closed.** Task 4's file-ownership boundary
+  left the UI/CLI `RecreateBase` call sites passing no Provenancer (registry-only,
+  so a marker-only VM would be refused reset cross-controller). Folded the wiring
+  into task 6.
+- **"Prior art" correction carried from refinement.** The marker lives in the
+  instance dir (deleted-for-free) as a conscious, empirically-validated deviation
+  from sand's `_sand/`-only convention; a CI tolerance guard defends it.
+- **Live e2e not run in this environment.** Cross-mode/two-controller/lifecycle
+  convergence and the `LIMA_HOME` discovery e2e are `limae2e`-gated and require
+  `LIMA_REMOTE_E2E` + passwordless loopback SSH, absent in this sandbox — they
+  skip cleanly. The code and gated tests compile; single-machine marker I/O,
+  adoption idempotency, recreate correctness, and the real-`limactl` tolerance
+  guard were executed and pass here. The two-controller-over-SSH scenario still
+  needs a live run in CI/e2e before full sign-off.
+- **Pre-existing, unrelated defect (not fixed).** `internal/ui/lima_e2e_test.go`
+  fails to compile under `-tags limae2e` on `main` (`lastUsed(dir)` arg count) —
+  predates this plan; left untouched.
+
+### Necessary follow-ups
+- Run the `limae2e` convergence/two-controller/`LIMA_HOME` e2e in an environment
+  with loopback SSH (CI) to fully confirm success criteria 1–3, 5.
+- After the one-release window, remove the legacy registry-fallback read paths
+  and the adoption migration (grep `legacy, remove after one release`).
+- Consider tightening `RecreateBase`/`RecordSuccess`'s variadic
+  `prov ...provider.Provenancer` to a required parameter now that all callers
+  pass one (minor).
+- Optional efficiency: adoption's per-entry `ProvenanceOf` could reuse the
+  batched provenance map the refresh already fetched, avoiding N extra reads.
+- Pre-existing: fix the `-tags limae2e` compile error in
+  `internal/ui/lima_e2e_test.go` (separate change).
