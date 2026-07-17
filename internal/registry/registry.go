@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -35,11 +36,18 @@ import (
 // is empty for the local provider. Together they are what stops a remote
 // host's VM from being reconciled against, or colliding with, a local one that
 // happens to share a name — see Scope.
+//
+// TemplateSource (schema version 4) names the golden Template (see Template)
+// this VM was cloned from, or "" if it was not. It is provenance only — a
+// forward reference by name, not by identity — so DependentsOfTemplate can
+// answer "what would break if this template were deleted" without a template
+// having to track its own dependents.
 type entry struct {
-	Base         string          `json:"base"`
-	Config       vm.CreateConfig `json:"config"`
-	Provider     string          `json:"provider"`
-	RemoteTarget string          `json:"remote_target,omitempty"`
+	Base           string          `json:"base"`
+	Config         vm.CreateConfig `json:"config"`
+	Provider       string          `json:"provider"`
+	RemoteTarget   string          `json:"remote_target,omitempty"`
+	TemplateSource string          `json:"templateSource,omitempty"`
 }
 
 // LocalProviderID is the Provider tag every local-Lima-owned entry carries: the
@@ -93,7 +101,17 @@ var LocalScope = Scope{Provider: LocalProviderID}
 // is what every v1-migrated entry already carries), so a v2 file that already
 // recorded remote-scoped entries (AddScoped predates this task) keeps their
 // scope rather than collapsing everything to local.
-const currentVersion = 3
+//
+// Version 4 is purely additive on top of v3: the envelope gains a "templates"
+// JSON array (see diskTemplate, fileSchema), and each VM entry gains an
+// omitempty TemplateSource field recording which template it was cloned
+// from. A v3 file has no "templates" key at all — json.Unmarshal simply
+// leaves fileSchema.Templates nil, which LoadFrom treats identically to an
+// explicit empty array — so a v3 file loads with zero data loss and an empty
+// template set, then gets rewritten as v4 (see the version dispatch in
+// LoadFrom). The v1/v2 legacy path is unaffected; it already rewrites
+// straight to currentVersion.
+const currentVersion = 4
 
 // legacyBaseName is the base image's pre-v2 name. Entries recorded under it are
 // rewritten to the current default base (vm.DefaultCreateConfig().BaseName) on
@@ -109,22 +127,45 @@ type scopedKey struct {
 	name  string
 }
 
-// diskEntry is the v3 on-disk shape for one registry entry: a JSON array
-// element self-describing its own name and scope, since the array (unlike the
-// old flat map) does not use the name as a JSON key. See currentVersion.
+// diskEntry is the on-disk shape for one registry entry: a JSON array element
+// self-describing its own name and scope, since the array (unlike the old
+// flat map) does not use the name as a JSON key. TemplateSource is additive
+// (schema version 4; see currentVersion) and omitted entirely for an entry
+// with no template provenance, so a v3 file's entries round-trip byte-for-byte
+// identically apart from the new field being absent.
 type diskEntry struct {
-	Name         string          `json:"name"`
-	Provider     string          `json:"provider"`
-	RemoteTarget string          `json:"remote_target,omitempty"`
-	Base         string          `json:"base"`
-	Config       vm.CreateConfig `json:"config"`
+	Name           string          `json:"name"`
+	Provider       string          `json:"provider"`
+	RemoteTarget   string          `json:"remote_target,omitempty"`
+	Base           string          `json:"base"`
+	Config         vm.CreateConfig `json:"config"`
+	TemplateSource string          `json:"templateSource,omitempty"`
+}
+
+// diskTemplate is the on-disk shape for one golden template record (schema
+// version 4; see currentVersion and Template). Like diskEntry, it is a JSON
+// array element self-describing its own name and scope (Provider +
+// RemoteTarget) rather than relying on a JSON object key.
+type diskTemplate struct {
+	Name            string          `json:"name"`
+	Provider        string          `json:"provider"`
+	RemoteTarget    string          `json:"remote_target,omitempty"`
+	Source          string          `json:"source"`
+	CreatedAt       time.Time       `json:"created_at"`
+	PlaybookVersion string          `json:"playbook_version"`
+	ToolsetKey      string          `json:"toolset_key"`
+	Config          vm.CreateConfig `json:"config"`
 }
 
 // fileSchema is the on-disk JSON shape for the current version:
-// {"version": 3, "vms": [{"name": "...", ...}, ...]}.
+// {"version": 4, "vms": [{"name": "...", ...}, ...], "templates": [{"name": "...", ...}, ...]}.
+// Templates is omitempty so a registry with no templates saved (the common
+// case, and every migrated-from-v3 file until a template is added) does not
+// grow a noisy empty "templates": [] on every write.
 type fileSchema struct {
-	Version int         `json:"version"`
-	VMs     []diskEntry `json:"vms"`
+	Version   int            `json:"version"`
+	VMs       []diskEntry    `json:"vms"`
+	Templates []diskTemplate `json:"templates,omitempty"`
 }
 
 // legacyFileSchema is the pre-v3 on-disk shape (versions 1 and 2): a flat
@@ -142,16 +183,57 @@ type versionProbe struct {
 	Version int `json:"version"`
 }
 
+// Template is a saved golden VM template: a secret-free snapshot of a managed
+// VM's create configuration, plus provenance describing where it came from
+// and what it was built with, so a later clone/reset can reproduce it exactly
+// instead of re-deriving it from a live VM that may have since changed or
+// been deleted.
+//
+// Config.BaseName is set to the template's OWN instance name
+// (vm.TemplateInstanceName(Name)) rather than to Source's base — a clone or
+// reset of a VM built from this template must clone from the template's own
+// stored Lima instance, not from whatever base Source itself happened to be
+// cloned from.
+type Template struct {
+	// Name is the user-facing template name (what TemplatesInScope/
+	// TemplateInScope key on); vm.TemplateInstanceName(Name) is its reserved
+	// Lima instance name.
+	Name string
+	// Scope is the connection profile that owns this template, mirroring the
+	// same Scope every VM entry carries — a template saved from a remote
+	// profile's VM never leaks into another profile's template list.
+	Scope Scope
+	// Source is the name of the managed VM this template was captured from.
+	Source string
+	// CreatedAt is when the template was saved.
+	CreatedAt time.Time
+	// PlaybookVersion is the source VM's base image version stamp at capture
+	// time (see provision.PlaybookVersion), so a later clone can tell whether
+	// the template predates the current playbook.
+	PlaybookVersion string
+	// ToolsetKey is Config's rendered tool-set selection at capture time (see
+	// vm.CreateConfig.ToolsetKey), stored alongside Config for the same reason
+	// PlaybookVersion is: a quick, comparable snapshot without recomputing it
+	// from Config every time.
+	ToolsetKey string
+	// Config is the secret-free create configuration captured from the source
+	// VM (clone token stripped, exactly like a VM entry's own Config), with
+	// BaseName overridden to the template's own instance name — see the type
+	// doc comment.
+	Config vm.CreateConfig
+}
+
 // Registry is an in-memory index of sand-managed instances, optionally
 // backed by a JSON file. An empty path disables persistence (used in tests).
 type Registry struct {
-	path string
-	vms  map[scopedKey]entry
+	path      string
+	vms       map[scopedKey]entry
+	templates map[scopedKey]Template
 }
 
 // NewEmpty returns an in-memory registry with no backing file.
 func NewEmpty() *Registry {
-	return &Registry{vms: map[scopedKey]entry{}}
+	return &Registry{vms: map[scopedKey]entry{}, templates: map[scopedKey]Template{}}
 }
 
 // defaultPath mirrors the original bash provisioner's data dir:
@@ -208,14 +290,17 @@ func Load() (*Registry, error) {
 // data — and the error is returned for the caller to surface; the returned
 // registry is always non-nil and usable.
 //
-// Three on-disk shapes must be understood here: an unversioned (v1) or v2
-// file is the legacy flat {"vms": {"<name>": {...}}} object (legacyFileSchema)
-// keyed by bare name; a v3 file is the current {"vms": [{...}, ...]} array
-// (fileSchema), already self-describing each entry's (scope, name). A
-// versionProbe reads just the version field first because the two shapes are
-// not both unmarshalable into one struct.
+// Two on-disk SHAPES must be understood here, spanning four versions: an
+// unversioned (v1) or v2 file is the legacy flat {"vms": {"<name>": {...}}}
+// object (legacyFileSchema) keyed by bare name; a v3 OR v4 file is the
+// {"vms": [{...}, ...]} array (fileSchema), already self-describing each
+// entry's (scope, name) — v4 additionally carries a "templates" array, which
+// is simply absent (nil after unmarshal) in a v3 file, so both parse through
+// the same struct. A versionProbe reads just the version field first because
+// the legacy shape and the array shape are not both unmarshalable into one
+// struct.
 func LoadFrom(path string) (*Registry, error) {
-	r := &Registry{path: path, vms: map[scopedKey]entry{}}
+	r := &Registry{path: path, vms: map[scopedKey]entry{}, templates: map[scopedKey]Template{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -242,7 +327,7 @@ func LoadFrom(path string) (*Registry, error) {
 	}
 
 	needsSave := false
-	if version < currentVersion {
+	if version < 3 {
 		// v1 or v2: the legacy flat object, keyed by bare name.
 		var legacy legacyFileSchema
 		if err := json.Unmarshal(data, &legacy); err != nil {
@@ -272,7 +357,9 @@ func LoadFrom(path string) (*Registry, error) {
 		// Provider/RemoteTarget — every v1-migrated entry above is now tagged
 		// LocalProviderID, but a v2 file may already carry remote-scoped
 		// entries (AddScoped predates this task), and those must keep their
-		// own scope rather than collapse to local.
+		// own scope rather than collapse to local. No legacy file ever carried
+		// template data, so r.templates stays empty here — the empty map
+		// NewEmpty/LoadFrom already initialized is exactly right.
 		for name, e := range vms {
 			scope := Scope{Provider: e.Provider, RemoteTarget: e.RemoteTarget}
 			if scope.Provider == "" {
@@ -282,7 +369,11 @@ func LoadFrom(path string) (*Registry, error) {
 		}
 		needsSave = true
 	} else {
-		// v3: already (scope, name)-shaped, one array element per entry.
+		// v3 or v4: already (scope, name)-shaped, one array element per VM
+		// entry. A v3 file's Templates key is simply absent, so parsed.Templates
+		// is nil and the loop below runs zero times — the only behavioral
+		// difference from a real v4 file is whether the version bump below
+		// forces a rewrite.
 		var parsed fileSchema
 		if err := json.Unmarshal(data, &parsed); err != nil {
 			_ = os.Rename(path, path+".corrupt")
@@ -295,7 +386,21 @@ func LoadFrom(path string) (*Registry, error) {
 			}
 			r.vms[scopedKey{scope: scope, name: de.Name}] = entry{
 				Base: de.Base, Config: de.Config, Provider: de.Provider, RemoteTarget: de.RemoteTarget,
+				TemplateSource: de.TemplateSource,
 			}
+		}
+		for _, dt := range parsed.Templates {
+			scope := Scope{Provider: dt.Provider, RemoteTarget: dt.RemoteTarget}
+			if scope.Provider == "" {
+				scope = LocalScope
+			}
+			r.templates[scopedKey{scope: scope, name: dt.Name}] = Template{
+				Name: dt.Name, Scope: scope, Source: dt.Source, CreatedAt: dt.CreatedAt,
+				PlaybookVersion: dt.PlaybookVersion, ToolsetKey: dt.ToolsetKey, Config: dt.Config,
+			}
+		}
+		if version < currentVersion {
+			needsSave = true
 		}
 	}
 
@@ -498,13 +603,81 @@ func (r *Registry) BaseInScope(name string, scope Scope) (base string, managed b
 	return e.Base, true
 }
 
+// AddTemplate records t as a golden template, keyed by (t.Scope, t.Name), and
+// persists the change. Unlike Add/AddScoped for VM entries, Template already
+// carries its owning Scope as a struct field, so there is no separate
+// unscoped "defaults to LocalScope" convenience to wrap: a template's scope
+// is always explicit in the value being saved, never implied by the caller.
+// Overwrites any existing template recorded under the same (Scope, Name).
+func (r *Registry) AddTemplate(t Template) error {
+	r.templates[scopedKey{scope: t.Scope, name: t.Name}] = t
+	return r.save()
+}
+
+// RemoveTemplate drops the template named name under the local Lima provider
+// and persists the change, reporting whether a template was actually present
+// to remove. Equivalent to RemoveTemplateScoped(LocalScope, name) — kept as
+// the unscoped convenience mirroring Remove/RemoveScoped for VM entries.
+func (r *Registry) RemoveTemplate(name string) bool {
+	return r.RemoveTemplateScoped(LocalScope, name)
+}
+
+// RemoveTemplateScoped drops the (scope, name) template from the index and
+// persists the change, reporting whether a template was actually present to
+// remove. It never touches a same-named template recorded under a different
+// scope — the scoped counterpart to RemoveTemplate, mirroring RemoveScoped
+// for VM entries.
+func (r *Registry) RemoveTemplateScoped(scope Scope, name string) bool {
+	key := scopedKey{scope: scope, name: name}
+	if _, ok := r.templates[key]; !ok {
+		return false
+	}
+	delete(r.templates, key)
+	_ = r.save()
+	return true
+}
+
+// TemplatesInScope returns every template owned by scope, sorted by name.
+func (r *Registry) TemplatesInScope(scope Scope) []Template {
+	var out []Template
+	for key, t := range r.templates {
+		if key.scope == scope {
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// TemplateInScope returns the template named name under scope, and whether it
+// exists.
+func (r *Registry) TemplateInScope(name string, scope Scope) (Template, bool) {
+	t, ok := r.templates[scopedKey{scope: scope, name: name}]
+	return t, ok
+}
+
+// DependentsOfTemplate returns the names of every managed VM, under scope,
+// whose TemplateSource equals templateName — sorted, so a caller warning "N
+// VMs were cloned from this template" (before letting a delete proceed) gets
+// a stable list rather than one that reorders on every call.
+func (r *Registry) DependentsOfTemplate(scope Scope, templateName string) []string {
+	var out []string
+	for key, e := range r.vms {
+		if key.scope == scope && e.TemplateSource == templateName {
+			out = append(out, key.name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // save writes the index atomically (unique temp file + rename). With an empty
 // path it is a no-op, so an in-memory registry never touches disk. The temp file
 // is unique per write so two TUI processes sharing a data dir don't race on a
-// shared name. Entries are written in a stable (scope, name) sort order so two
-// saves of the same logical state produce byte-identical output — otherwise Go
-// map iteration order would make the file's array order (and therefore its
-// diff) flap on every unrelated save.
+// shared name. Entries and templates are each written in a stable (scope,
+// name) sort order so two saves of the same logical state produce
+// byte-identical output — otherwise Go map iteration order would make the
+// file's array order (and therefore its diff) flap on every unrelated save.
 func (r *Registry) save() error {
 	if r.path == "" {
 		return nil
@@ -513,12 +686,7 @@ func (r *Registry) save() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	keys := make([]scopedKey, 0, len(r.vms))
-	for k := range r.vms {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		a, b := keys[i], keys[j]
+	lessScopedKey := func(a, b scopedKey) bool {
 		if a.scope.Provider != b.scope.Provider {
 			return a.scope.Provider < b.scope.Provider
 		}
@@ -526,7 +694,13 @@ func (r *Registry) save() error {
 			return a.scope.RemoteTarget < b.scope.RemoteTarget
 		}
 		return a.name < b.name
-	})
+	}
+
+	keys := make([]scopedKey, 0, len(r.vms))
+	for k := range r.vms {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return lessScopedKey(keys[i], keys[j]) })
 	vms := make([]diskEntry, 0, len(keys))
 	for _, k := range keys {
 		e := r.vms[k]
@@ -536,9 +710,26 @@ func (r *Registry) save() error {
 		// if an in-memory entry's own Provider/RemoteTarget were ever left unset.
 		vms = append(vms, diskEntry{
 			Name: k.name, Provider: k.scope.Provider, RemoteTarget: k.scope.RemoteTarget, Base: e.Base, Config: e.Config,
+			TemplateSource: e.TemplateSource,
 		})
 	}
-	data, err := json.MarshalIndent(fileSchema{Version: currentVersion, VMs: vms}, "", "  ")
+
+	tkeys := make([]scopedKey, 0, len(r.templates))
+	for k := range r.templates {
+		tkeys = append(tkeys, k)
+	}
+	sort.Slice(tkeys, func(i, j int) bool { return lessScopedKey(tkeys[i], tkeys[j]) })
+	templates := make([]diskTemplate, 0, len(tkeys))
+	for _, k := range tkeys {
+		t := r.templates[k]
+		templates = append(templates, diskTemplate{
+			Name: k.name, Provider: k.scope.Provider, RemoteTarget: k.scope.RemoteTarget,
+			Source: t.Source, CreatedAt: t.CreatedAt, PlaybookVersion: t.PlaybookVersion,
+			ToolsetKey: t.ToolsetKey, Config: t.Config,
+		})
+	}
+
+	data, err := json.MarshalIndent(fileSchema{Version: currentVersion, VMs: vms, Templates: templates}, "", "  ")
 	if err != nil {
 		return err
 	}
