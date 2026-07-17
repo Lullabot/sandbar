@@ -189,6 +189,25 @@
           agents|auth|auto-mode|config|doctor|gateway|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade)
             command claude "$@"; return $? ;;
         esac
+        # One-time heads-up. Claude Code doesn't always land in bypass mode on
+        # the session right after you sign in (and toggling its full-screen
+        # renderer restarts into manual mode once) — a quick quit-and-relaunch
+        # settles it. That timing is a moving target upstream, so rather than
+        # chase it we tell the user once, then record a flag so it never shows
+        # again. Skipped when non-interactive (no tty) so `-p` never blocks.
+        sand_notice="$HOME/.config/sandbar/.claude-first-run-notice"
+        if [ ! -f "$sand_notice" ] && [ -t 0 ]; then
+          echo ""
+          echo "  Heads up: the first time you sign in to Claude Code, bypass-"
+          echo "  permissions mode may not be active yet — and Claude may prompt"
+          echo "  once about its full-screen renderer. If you land in manual"
+          echo "  mode, just quit ('/exit' or Ctrl+C twice) and run 'claude'"
+          echo "  again; it comes up in bypass mode. You'll only see this once."
+          echo ""
+          printf "  Press Enter to continue… "
+          read -r sand_reply
+          mkdir -p "$(dirname "$sand_notice")" && : > "$sand_notice"
+        fi
         if ! command claude auth status >/dev/null 2>&1; then
           echo "Not signed in to Claude Code — starting sign-in…"
           command claude auth login || return $?

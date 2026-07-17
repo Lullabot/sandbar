@@ -45,13 +45,18 @@ walks you through an interactive sign-in, then starts the session. Later
 runs go straight to the prompt.
 
 Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
-state so even the very first session starts with bypass permissions active —
-without the seed, Claude Code ignores `--dangerously-skip-permissions` until
-onboarding has completed and the CLI is relaunched. Because seeding
-onboarding also skips the wizard's login step, the provisioned `claude`
-command runs `claude auth login` for you whenever you're not signed in, so
-you're never dropped to an un-authed prompt. The one prompt you'll still see
-each new folder is the per-directory trust dialog, which is deliberate.
+state so sessions start with bypass permissions active, and the provisioned
+`claude` command runs `claude auth login` for you whenever you're not signed
+in, so you're never dropped to an un-authed prompt.
+
+Claude Code doesn't always settle into bypass mode on the very session right
+after you sign in — it can prompt once about its full-screen renderer and
+come up in manual mode. If that happens, quit (`/exit`) and run `claude`
+again; it comes up in bypass mode. The provisioned `claude` prints a one-time
+reminder about this on first use. (This is Claude Code's own first-run
+sequencing, which shifts between releases, so `sand` flags it rather than
+trying to script around it.) The per-directory trust dialog you see in each
+new folder is separate and deliberate.
 
 A full interactive login is required, rather than a headless token, because
 remote control is enabled by default (see
