@@ -673,9 +673,9 @@ Verified acyclic: every edge points from a lower phase to a higher one.
 **Parallel Tasks:**
 - ✔️ Task 07: Landing pane — PR cockpit (depends on: 01, 03, 06) — `internal/ui/landing.go`, lazy gh reconcile, job ledger, gh-absent fallback
 
-### Phase 5: Keybinding rebind
+### ✅ Phase 5: Keybinding rebind
 **Parallel Tasks:**
-- Task 08: Rebind `l` = land, `L` = log (depends on: 07)
+- ✔️ Task 08: Rebind `l` = land, `L` = log (depends on: 07) — commandreg.go, 11 goldens regenerated, enterTarget unaffected
 
 ### Phase 6: Documentation
 **Parallel Tasks:**

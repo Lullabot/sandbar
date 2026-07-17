@@ -313,9 +313,9 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	// until the build SUCCEEDS, yet it has a live tile throughout.
 	waitForText(t, tm, "Building")
 
-	// The log is not lost, it is one key away: `l` on the building tile opens the
+	// The log is not lost, it is one key away: `L` on the building tile opens the
 	// run that has been streaming the whole time.
-	tm.Send(runeKey('l'))
+	tm.Send(runeKey('L'))
 	waitForText(t, tm, "Install Docker")
 
 	// ESC — the key that used to do nothing at all here. The build keeps going and

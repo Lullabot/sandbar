@@ -262,7 +262,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 	// progress screen targets alpha, then ctrl+c: only alpha may be cancelled.
 	l.m.view = viewBoard
 	l.m.focusVM.Name = "alpha"
-	l.send(runeKey('l'))
+	l.send(runeKey('L'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, "alpha") {
 		t.Fatalf("reopening alpha's log should show it in the progress view (view=%v job=%+v)", l.m.view, l.m.progressJob)
 	}
@@ -515,9 +515,9 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Node]\n")
 	l.m.view = viewBoard
 	l.m.focusVM.Name = "web"
-	l.send(runeKey('l'))
+	l.send(runeKey('L'))
 	if l.m.view != viewProgress {
-		t.Fatalf("'l' should reopen the run's log, got view %v", l.m.view)
+		t.Fatalf("'L' should reopen the run's log, got view %v", l.m.view)
 	}
 	if !strings.Contains(l.m.viewport.View(), "Node") {
 		t.Fatalf("the reopened log should show output streamed while the user was away:\n%s", l.m.viewport.View())
@@ -571,12 +571,12 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 	}
 	l.send(tea.KeyPressMsg{Code: tea.KeyEsc})
 
-	// The log is not lost — it is one 'l' away from the tile.
+	// The log is not lost — it is one 'L' away from the tile.
 	l.m.view = viewBoard
 	l.m.focusVM.Name = "web"
-	l.send(runeKey('l'))
+	l.send(runeKey('L'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, "web") {
-		t.Fatalf("'l' should reopen the build's log (view=%v job=%+v)", l.m.view, l.m.progressJob)
+		t.Fatalf("'L' should reopen the build's log (view=%v job=%+v)", l.m.view, l.m.progressJob)
 	}
 
 	l.send(ctrlKey('c'))
@@ -584,17 +584,17 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 }
 
 // The reopen-log verb is state-gated on the VM having a run to show: a VM that
-// has never been built offers no log and pressing 'l' does nothing.
+// has never been built offers no log and pressing 'L' does nothing.
 func TestReopenLogGatedOnARetainedRun(t *testing.T) {
 	m := newTestModel(t)
 	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running"})
 
-	if strings.Contains(boardVerbs(m), "l log") {
+	if strings.Contains(boardVerbs(m), "L log") {
 		t.Fatalf("a VM with no run must not offer the log verb, got:\n%s", boardVerbs(m))
 	}
-	m, cmd := pressDispatch(t, m, runeKey('l'))
+	m, cmd := pressDispatch(t, m, runeKey('L'))
 	if m.view != viewBoard || cmd != nil {
-		t.Fatalf("'l' with no retained run should be a silent no-op (view=%v cmd=%v)", m.view, cmd)
+		t.Fatalf("'L' with no retained run should be a silent no-op (view=%v cmd=%v)", m.view, cmd)
 	}
 }
 

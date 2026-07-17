@@ -340,8 +340,17 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		id:         "land",
+		binding:    key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "land")),
+		about:      "Open the Landing pane: this VM's git checkouts, their push/PR state, and a one-key action to open or create a pull request.",
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
+			return m.openLandingPane(v)
+		},
+	},
+	{
 		id:      "log",
-		binding: key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log")),
+		binding: key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "log")),
 		about:   "Reopen the log of this VM's last build or file transfer, including one still running, and one that failed.",
 		// Reopen the VM's last run in the progress viewport. Ansible's output used
 		// to be ephemeral — it streamed into that viewport and was gone the moment
