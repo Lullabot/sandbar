@@ -1,0 +1,8 @@
+---
+# No tunable defaults: when this role runs, OpenAI Codex is installed and
+# configured for friction-free use (no approval prompts, full sandbox access).
+#
+# WHETHER it runs is a tool-set selection, toolset_codex (sand create
+# --with-codex), which gates the role from site.yml. That default lives with
+# the other toolset_* selections in roles/base/defaults/main.yml. Unlike its
+# siblings, toolset_codex defaults to false: codex is the first opt-in tool.
