@@ -1,5 +1,14 @@
 # Connection Profiles
 
+!!! note "Not to be confused with Provisioning Profiles"
+    This page is about **Connection Profiles** — *where* `sand` runs a VM
+    (locally, or on a remote host over SSH). There is a separate, unrelated
+    feature called a [**provisioning profile**](provisioning-profiles.md) —
+    *what* gets installed into a VM, via a `.sandbar/` directory committed to
+    a project repository. The two share the word "profile" but nothing else;
+    see [Provisioning Profiles](provisioning-profiles.md) if that's what you
+    were looking for.
+
 By default `sand` manages VMs with a local [Lima](https://lima-vm.io) — it runs
 `limactl` on the machine you launched `sand` from. It can also drive `limactl`
 on one or more **remote** hosts over SSH, so VMs live on a bigger box (a

@@ -548,6 +548,25 @@ comment at `shipped-profiles/roles/claude-code/tasks/main.yml`.
   bounces the VM only when the guest itself reports
   `/var/run/reboot-required` (a kernel/libc upgrade), and `Reset` warns
   instead of silently destroying a live tmux session before bouncing one.
+- **Repo-checked-in provisioning profiles (`.sandbar/`, strikethroo plan 18)
+  are guest-only and never touch the base.** `roles/repo-profile` runs in
+  `site.yml` immediately after `project` (which performs the clone), gated
+  on the clone actually containing `.sandbar/profile.yml`
+  (`roles/repo-profile/defaults/main.yml`). It validates the manifest with
+  `scripts/validate_profile.py`, then installs declared packages, reconciles
+  the declared `toolset` per-clone against the four **shipped provisioning
+  profiles** in `shipped-profiles/<tool>/profile.yml` (the restructured
+  `claude`/`ddev`/`go`/`java` optional tools — same manifest format a repo
+  uses, applicable at either the base tier via `--with-*`/TUI or the
+  finalize tier via a repo's `toolset`), includes declared repo roles read
+  *in place* from the clone via a `repo-roles` roles-path symlink, enables
+  declared services, and finally runs the repo's `seed` tasks as root (no
+  consent gate — cloning a repo already implies running its code in the
+  guest). See `roles/repo-profile/tasks/main.yml`'s header comment for the
+  full ordering rationale, and
+  `docs/using-sand/provisioning-profiles.md` for the user-facing contract.
+  Only `shipped-profiles/` participates in the embed/rsync/hash triple-pin
+  above; a repo's own `.sandbar/roles/` never does.
 
 ## Conventions
 

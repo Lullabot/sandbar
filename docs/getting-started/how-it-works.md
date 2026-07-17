@@ -11,7 +11,10 @@ graph TD
     B -- yes --> D
     D --> E[limactl clone → grow disk]
     E --> F[Finalize: hostname, git identity, apt upgrade, optional repo clone]
-    F --> G[Restart → ready]
+    F --> H{.sandbar/ in the clone?}
+    H -- no --> G[Restart → ready]
+    H -- yes --> I[Apply provisioning profile: packages, toolset, roles, services, seed]
+    I --> G
 ```
 
 ## The base image
@@ -40,6 +43,18 @@ image. A light finalize pass sets the VM's hostname, writes your git
 identity into it, runs `apt upgrade`, and optionally clones a project
 repository into it. The VM restarts once at the end of finalize and is then
 ready to use.
+
+### Repo-checked-in provisioning profiles
+
+If the repository finalize just cloned contains a committed `.sandbar/`
+directory, one more step runs before the restart: `sand` discovers and
+applies that repo's [provisioning profile](../using-sand/provisioning-profiles.md)
+— installing its declared apt packages, reconciling its declared toolset,
+including its declared Ansible roles, enabling its declared services, and
+finally running its seed tasks. This is entirely per-clone: it never touches
+the shared base image, and a repository without `.sandbar/` sees no change
+in behavior at all. See [Provisioning Profiles](../using-sand/provisioning-profiles.md)
+for the manifest format and the trust model.
 
 ## Why the split
 

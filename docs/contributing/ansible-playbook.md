@@ -13,10 +13,11 @@ both, inside the guest, on your behalf.
 ## The fileset is embedded in the binary
 
 `playbook_embed.go` at the repository root `go:embed`s the whole fileset —
-`site.yml`, `ansible.cfg`, `inventory`, `roles/`, and `group_vars/` — into
-the `sandbar` module as `PlaybookFS`. This is what lets a Homebrew-installed
-`sand` provision without a repository checkout anywhere on disk: the
-playbook travels inside the compiled binary.
+`site.yml`, `ansible.cfg`, `inventory`, `roles/`, `group_vars/`,
+`scripts/`, and `shipped-profiles/` — into the `sandbar` module as
+`PlaybookFS`. This is what lets a Homebrew-installed `sand` provision without
+a repository checkout anywhere on disk: the playbook travels inside the
+compiled binary.
 
 ## How the playbook directory is resolved
 
@@ -46,8 +47,9 @@ Inside the guest, the in-guest provisioning script (`inGuestScript` in
 `internal/provision/provision.go`) rsyncs the mounted playbook fileset into
 a guest-local working copy before each run, filtered to exactly the members
 `playbook_embed.go` declares (`site.yml`, `ansible.cfg`, `inventory`,
-`roles/***`, `group_vars/***`) — never the whole mount, which in
-working-tree mode would otherwise be an entire git checkout. Per-phase
+`roles/***`, `group_vars/***`, `scripts/***`, `shipped-profiles/***`) —
+never the whole mount, which in working-tree mode would otherwise be an
+entire git checkout. Per-phase
 extra-vars are streamed into the guest over stdin into `/dev/shm` (tmpfs)
 and removed on exit; they are never placed on argv or written to the
 persistent disk, so a clone token never appears in a process listing.
@@ -61,22 +63,87 @@ values:
 | Phase | What runs | When |
 |---|---|---|
 | `base` | Heavy setup: `base`, (conditionally) `samba`, `dev-tools`, `claude-code` | Building the shared base image once, before any clone exists |
-| `finalize` | Light, per-VM identity: `base`, `user`, `project` | Against each `limactl clone` of the base image |
+| `finalize` | Light, per-VM identity: `base`, `user`, `project`, `repo-profile` | Against each `limactl clone` of the base image |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
 This split is what lets `sand` build one expensive base image and clone it
 cheaply for every subsequent VM, running only the light identity-specific
-work (hostname, git identity, optional project clone) against each clone.
+work (hostname, git identity, optional project clone, optional repo
+provisioning profile) against each clone.
 
-## The six roles
+## The seven roles
 
-`roles/` has six roles: `base`, `user`, `samba`, `dev-tools`, `claude-code`,
-and `project`. `site.yml` runs them in that order, gated by
+`roles/` has seven roles: `base`, `user`, `samba`, `dev-tools`, `claude-code`,
+`project`, and `repo-profile`. `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
 `internal/provision/vars.go` sets `samba_enabled: false` on every `sand`
 run (Lima VMs use a bind mount or `limactl copy` instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
 does not execute on the `sand` path.
+
+## The repo-profile finalize stage
+
+`roles/repo-profile` is the guest-side implementation of user-facing
+[Provisioning Profiles](../using-sand/provisioning-profiles.md). `site.yml`
+runs it immediately after `project` (which performs the clone), gated on
+`project_clone_url` being set and `provision_phase != 'base'`. The role
+itself gates further on the clone actually containing
+`.sandbar/profile.yml` (`repo_profile_manifest_path`,
+`roles/repo-profile/defaults/main.yml`) — a repo without that file costs
+only a single `stat` and introduces no new variables.
+
+When the manifest is present, `roles/repo-profile/tasks/main.yml` runs six
+steps, in this order: validate the manifest with
+`scripts/validate_profile.py` (aborting finalize with the validator's own
+message on failure), install declared apt packages, reconcile the declared
+`toolset` per-clone (a no-op for a tool already in the base, a per-clone
+install otherwise, using the same [shipped provisioning
+profiles](#the-shipped-profiles-directory) documented below), include each
+declared role, enable/start each declared service, and finally run the
+repo's `seed` tasks file. See the role's own header comment
+(`roles/repo-profile/tasks/main.yml`) for the full rationale of that
+ordering.
+
+**This stage never touches the shared base image or its version stamp.**
+Every task in `roles/repo-profile` runs guest-side, inside the clone, during
+the finalize phase — the base's `v2:<playbook-hash>:<toolset>` stamp is
+written only by Go (`internal/provision.writeBaseVersion`), only during the
+base phase, inside the base lock. Nothing here reads `LimaHome` or mutates
+the base image.
+
+**Repo-supplied role content never enters the embedded playbook fileset.** A
+repo's `.sandbar/roles/<name>/` roles are read *in place* from the cloned
+checkout, via a runtime symlink onto a dedicated `repo-roles` roles-path
+entry (`ansible.cfg`) that `roles/repo-profile` creates at finalize time.
+They are never copied into `roles/` or `shipped-profiles/roles/`, and
+`repo-roles` is deliberately absent from all three sides of the
+embed/rsync/hash triple-pin (`playbook_embed.go`'s `go:embed` list, the
+rsync allowlist above, and `internal/provision/baseversion.go`'s
+`playbookFileset` hash) — only **shipped-profile** content (the next
+section) participates in those three lists. The symlink itself is
+rsync-excluded, so the next `Recreate`/`Reset` wipes and recreates it fresh.
+
+## The shipped-profiles directory
+
+`shipped-profiles/` holds the four dev tools `sand` has always offered —
+`claude`, `ddev`, `go`, `java` — re-expressed as **shipped provisioning
+profiles**: each is a `shipped-profiles/<tool>/profile.yml` manifest in
+exactly the same format a repo's own `.sandbar/profile.yml` uses, backed by
+Ansible role content under `shipped-profiles/roles/` (on `ansible.cfg`'s
+`roles_path`, alongside `roles/`). Unlike repo-supplied content, this
+directory *is* embedded, rsynced, and hashed like any other playbook
+content — it ships with `sand` itself, so it participates in all three
+lists documented above (`playbook_embed.go`, the rsync allowlist, and
+`playbookFileset`) and must be updated in lockstep with them, guarded by
+`TestGuestSyncCopiesOnlyThePlaybook` and the base-stamp tests.
+
+Because a shipped profile must be applicable at either tier — the base
+phase, via `--with-*` flags/TUI toggles, and the finalize phase, via a
+repo's `toolset` reconciliation (previous section) — every shipped
+profile's role content must be **idempotent and phase-agnostic**: it cannot
+assume it is only ever running once, during base build. See
+`shipped-profiles/<tool>/profile.yml` for each tool's own comment on how it
+satisfies this.
 
 ## CI coverage
 

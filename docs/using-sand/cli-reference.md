@@ -54,6 +54,10 @@ not a prompt.
 | `--locale` | string | `en_US.UTF-8` | System locale. |
 | `--domain` | string | `lan` | Domain suffix. |
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sand` also forces on `devtools_docker_registry_proxy_enabled`. |
+| `--with-claude` | bool | `true` | Install the `claude` [shipped provisioning profile](#-with-flags-are-provisioning-profile-shorthands) into the base image. |
+| `--with-ddev` | bool | `true` | Install the `ddev` shipped provisioning profile into the base image. |
+| `--with-go` | bool | `true` | Install the `go` shipped provisioning profile into the base image. |
+| `--with-java` | bool | `true` | Install the `java` shipped provisioning profile into the base image. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
@@ -78,6 +82,24 @@ the git ref of a checked-out playbook — it does not exist here, deliberately.
 registered: the playbook is embedded in the `sand` binary at build time
 (`playbook_embed.go`), so there is no separate ref left to pin. Whichever
 `sand` binary you run *is* the playbook version.
+
+### `--with-*` flags are provisioning-profile shorthands
+
+`--with-claude`, `--with-ddev`, `--with-go`, and `--with-java` are thin
+shorthands: passing one toggles the corresponding
+[shipped provisioning profile](provisioning-profiles.md#shipped-provisioning-profiles)
+on or off in the shared base image — the same mechanism a repo's own
+`.sandbar/` uses to declare its `toolset`, applied here at the base tier
+instead of per-clone. All four default `true` (an unconfigured `sand create`
+installs everything today's base does); a flag you don't pass instead
+adopts whatever the existing base was actually built with, so you don't have
+to keep repeating `--with-go=false` on every later create once you've built
+a base without Go.
+
+These flags only affect the shared base image, never an individual clone.
+To require a tool for one specific repository regardless of the base's
+tool-set, declare it in that repo's own `.sandbar/profile.yml` `toolset`
+group instead — see [Provisioning Profiles](provisioning-profiles.md#per-clone-toolset-reconciliation).
 
 ### `--git-name` / `--git-email` fall back to host `git config`
 

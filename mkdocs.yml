@@ -69,6 +69,7 @@ nav:
     - Shells and Files: using-sand/files-and-shells.md
     - Web Servers and Ports: using-sand/web-servers.md
     - Connection Profiles: using-sand/connection-profiles.md
+    - Provisioning Profiles: using-sand/provisioning-profiles.md
   - Reference:
     - Files and State: reference/files-and-state.md
     - Troubleshooting: reference/troubleshooting.md

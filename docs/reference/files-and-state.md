@@ -58,3 +58,13 @@ Source: `internal/provision/secrets.go:37` (global scope sourced from `.profile`
 
 See [Security Model](security-model.md) for why the host secrets store is
 unencrypted and what that means for you.
+
+## `.sandbar/` is an in-repo path, not a `sand` path
+
+A repository's [provisioning profile](../using-sand/provisioning-profiles.md)
+lives at `.sandbar/` **inside that repository's own checkout**, committed
+alongside the repository's other files — it is not a `sand`-managed path and
+does not appear in either table above. It introduces **no new host-side
+path at all**: `sand` never reads, writes, or caches `.sandbar/` on the host
+in any form. It is read only inside the guest, from the clone the `project`
+role already made during finalize, by `roles/repo-profile`.
