@@ -1,0 +1,149 @@
+---
+# Repo-checked-in provisioning profile (.sandbar/) — the guest-side finalize
+# stage (strikethroo plan 18, task 03).
+#
+# Ordered in site.yml immediately AFTER the `project` role, which clones the
+# repository into repo_profile_checkout_dir. This stage discovers a committed
+# `.sandbar/profile.yml` in that checkout and, when present, applies it
+# PER-CLONE during finalize, in the plan's authoritative six-step order:
+#   1. validate the manifest          4. include declared repo roles
+#   2. install declared apt packages   5. enable/start declared services
+#   3. reconcile the declared toolset   6. run the repo's seed tasks (last)
+#
+# A repo WITHOUT a .sandbar/profile.yml executes only the presence `stat` and is
+# otherwise a no-op: no packages, no roles, no new host-provided variables. The
+# host emits nothing for this stage — everything it needs (manifest, roles, seed
+# tasks) is read from the cloned checkout inside the guest.
+#
+# WHY THIS NEVER TOUCHES THE SHARED BASE OR ITS VERSION STAMP  (highest-risk invariant)
+# ------------------------------------------------------------------------------------
+# Every task here runs guest-side, inside the CLONE, during the finalize phase.
+# The shared base image's version stamp (v2:<playbook-hash>:<toolset>) is a
+# HOST-SIDE file written only by Go (internal/provision.writeBaseVersion), only
+# during the BASE phase (buildBase / reapplyBase), inside the base lock. No task
+# in this role writes that stamp, reads LimaHome, or mutates the base image — so
+# per-clone toolset reconciliation (step 3) installs a missing tool into THIS
+# clone only and can never churn the shared base for other teammates. See
+# AGENTS.md, "The base image / clone / finalize provisioner".
+#
+# WHY REPO ROLE CONTENT NEVER ENTERS THE EMBEDDED PLAYBOOK FILESET
+# ---------------------------------------------------------------
+# Declared repo roles live in the checkout at .sandbar/roles/<name>/ and are read
+# IN PLACE via a runtime symlink onto the dedicated `repo-roles` roles-path entry
+# (ansible.cfg). They are never copied into roles/ or shipped-profiles/roles/,
+# and `repo-roles` is deliberately absent from all three sides of the
+# embed/rsync/hash triple-pin: the go:embed list (playbook_embed.go), the rsync
+# allowlist (internal/provision/provision.go inGuestScript), and the content hash
+# (internal/provision/baseversion.go playbookFileset). The symlink itself sits
+# under the playbook dir but is rsync-excluded, so the next Recreate/Reset run
+# wipes and recreates it — it is scaffolding, not fileset.
+
+# --- Detection: gate the whole stage on the manifest actually being present. ---
+- name: Stat the repo provisioning manifest ({{ repo_profile_manifest_rel }})
+  ansible.builtin.stat:
+    path: "{{ repo_profile_manifest_path }}"
+  register: repo_profile_manifest_stat
+
+- name: Apply the repo provisioning profile
+  when: repo_profile_manifest_stat.stat.exists
+  block:
+    # --- 1. Validate FIRST. A malformed manifest aborts finalize with the
+    #        validator's OWN message (Task 1's scripts/validate_profile.py),
+    #        never a silent skip and never a generic Ansible failure.
+    #        check_mode:false so `ansible-playbook --check` still validates —
+    #        the validator is read-only (changed_when:false). ---
+    - name: Validate the manifest with scripts/validate_profile.py
+      ansible.builtin.command:
+        cmd: "python3 {{ playbook_dir }}/scripts/validate_profile.py {{ repo_profile_manifest_path }}"
+      register: repo_profile_validation
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Abort finalize when the repo provisioning manifest is invalid
+      ansible.builtin.fail:
+        msg: |
+          Repo provisioning profile is invalid: {{ repo_profile_manifest_path }}
+          {{ repo_profile_validation.stderr | default('') | trim }}
+      when: repo_profile_validation.rc != 0
+
+    # --- Load the validated manifest into one namespaced dict. It is the same
+    #     restricted-YAML subset the validator accepts — a strict subset of
+    #     standard YAML — so include_vars parses it natively, and validation
+    #     having already passed means include_vars only ever sees a clean file.
+    #     Groups are optional: an omitted group is undefined and an empty group
+    #     (`packages:` with no items) parses as null, so every access below uses
+    #     `default(<empty>, true)` to normalize both to the empty value. ---
+    - name: Load the validated manifest
+      ansible.builtin.include_vars:
+        file: "{{ repo_profile_manifest_path }}"
+        name: repo_profile
+
+    # --- 2. Install declared apt packages in a single transaction. Mirrors the
+    #        base role's convention (install_recommends: false; see
+    #        roles/base/tasks/main.yml). update_cache is true here — unlike the
+    #        base phase, which runs one consolidated `apt update` earlier in the
+    #        same run, finalize has refreshed no apt index of its own. ---
+    - name: Install repo-declared apt packages
+      ansible.builtin.apt:
+        name: "{{ repo_profile.packages | default([], true) }}"
+        state: present
+        update_cache: true
+        install_recommends: false
+      when: (repo_profile.packages | default([], true)) | length > 0
+
+    # --- 3. Reconcile the declared toolset per-clone using Task 2's shipped
+    #        profiles. Each declared tool's shipped profile
+    #        (shipped-profiles/<tool>/profile.yml) is applied into this clone:
+    #        a tool already present in the base converges to a no-op (its shipped
+    #        role and package are idempotent), a tool absent from the base is
+    #        installed into THIS clone only. Nothing here writes the base stamp
+    #        (see the header) — this is what makes clarification #7's per-clone
+    #        reconciliation safe. ---
+    - name: Reconcile each declared shipped toolset tool into this clone
+      ansible.builtin.include_tasks: apply_shipped_tool.yml
+      loop: "{{ repo_profile.toolset | default([], true) }}"
+      loop_control:
+        loop_var: repo_profile_tool
+
+    # --- 4. Include declared repo roles from .sandbar/roles/<name>/, read in
+    #        place. The symlink puts the checkout's roles dir onto the dedicated
+    #        `repo-roles` search-path entry WITHOUT copying any repo content into
+    #        the embedded fileset (see the header). force:true replaces a stale
+    #        symlink a previous run left, keeping the stage idempotent. ---
+    - name: Extend the roles search path to the checkout's .sandbar/roles
+      ansible.builtin.file:
+        src: "{{ repo_profile_checkout_dir }}/{{ repo_profile_roles_rel }}"
+        dest: "{{ playbook_dir }}/repo-roles"
+        state: link
+        force: true
+      when: (repo_profile.roles | default([], true)) | length > 0
+
+    - name: Include each declared repo role
+      ansible.builtin.include_role:
+        name: "{{ repo_profile_role }}"
+      loop: "{{ repo_profile.roles | default([], true) }}"
+      loop_control:
+        loop_var: repo_profile_role
+
+    # --- 5. Enable and start declared systemd services. Runs after packages and
+    #        roles so a unit shipped by either is already installed. ---
+    - name: Enable and start repo-declared services
+      ansible.builtin.systemd_service:
+        name: "{{ repo_profile_service }}"
+        enabled: true
+        state: started
+      loop: "{{ repo_profile.services | default([], true) }}"
+      loop_control:
+        loop_var: repo_profile_service
+
+    # --- 6. Seed LAST, once packages/toolset/roles/services are in place. Runs
+    #        with the play's privileges (become: true -> root); seed authors may
+    #        add become_user (e.g. {{ user_name }}) for user-level steps and can
+    #        reference repo_profile_checkout_dir for paths into the checkout.
+    #        There is NO consent gate — plan clarification #3 (cloning a repo
+    #        already implies running its code in the guest). Seed tasks MUST be
+    #        idempotent: this whole stage re-runs on Recreate/Reset. ---
+    - name: Run the repo's seed tasks
+      ansible.builtin.include_tasks: "{{ repo_profile_checkout_dir }}/{{ repo_profile.seed }}"
+      when: (repo_profile.seed | default('', true)) | length > 0

@@ -1,0 +1,39 @@
+---
+# Apply one shipped provisioning profile (shipped-profiles/<tool>/profile.yml)
+# into THIS clone — the per-clone half of the two-tier toolset model (strikethroo
+# plan 18, clarification #7). Included in a loop from tasks/main.yml with
+# `repo_profile_tool` set to the declared tool name (already validated to be one
+# of KNOWN_TOOLSETS by scripts/validate_profile.py).
+#
+# Idempotent by construction: the shipped roles and packages here are the exact
+# same idempotent, phase-agnostic content the base phase applies (Task 2), so a
+# tool the base already provides converges to a no-op, while a tool absent from
+# the base is installed into this clone only. Nothing here writes the shared
+# base image or its version stamp — see the header of tasks/main.yml.
+
+- name: Load the shipped profile for {{ repo_profile_tool }}
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/shipped-profiles/{{ repo_profile_tool }}/profile.yml"
+    name: repo_profile_shipped
+
+# Roles first: a shipped tool's role registers its apt keyring/repository (e.g.
+# ddev's), which must exist before the tool's package can be resolved from
+# anywhere but the base's default archive. These names resolve through
+# ansible.cfg's roles_path (roles:shipped-profiles/roles), so they are ordinary
+# embedded playbook content, not repo content.
+- name: Register {{ repo_profile_tool }}'s shipped roles
+  ansible.builtin.include_role:
+    name: "{{ repo_profile_shipped_role }}"
+  loop: "{{ repo_profile_shipped.roles | default([], true) }}"
+  loop_control:
+    loop_var: repo_profile_shipped_role
+
+# Then the tool's package(s). update_cache picks up any repository the role above
+# just registered; install_recommends:false mirrors the base convention.
+- name: Install {{ repo_profile_tool }}'s shipped packages
+  ansible.builtin.apt:
+    name: "{{ repo_profile_shipped.packages | default([], true) }}"
+    state: present
+    update_cache: true
+    install_recommends: false
+  when: (repo_profile_shipped.packages | default([], true)) | length > 0
