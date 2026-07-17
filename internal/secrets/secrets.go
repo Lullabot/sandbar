@@ -29,6 +29,15 @@
 // existed before this format, so anything they recorded could only ever have
 // been local), and refuses a file from a newer sand. It always returns a
 // usable, non-nil store.
+//
+// Every mutation (Set, SetAll, Remove) is a lock-protected read-modify-write:
+// it takes a cross-process advisory lock on "<path>.lock" (internal/filelock),
+// re-reads the CURRENT on-disk store fresh, applies only that one call's
+// per-(connScope, vm) delta to it, and persists the merged result — never a
+// blind overwrite of a possibly-stale in-memory snapshot. This is what lets
+// two sand processes sharing a data dir mutate different VMs (or different
+// connection scopes) concurrently without one silently discarding the
+// other's committed secrets. See mutateLocked.
 package secrets
 
 import (
@@ -42,6 +51,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/filelock"
 	"github.com/lullabot/sandbar/internal/registry"
 )
 
@@ -183,21 +193,27 @@ func ValidScope(scope string) bool {
 }
 
 // Store is an in-memory, per-VM secret store optionally backed by a JSON file.
-// An empty path disables persistence (used in tests). It holds no mutex, so it
-// is copy-safe to embed by value in the TUI model — callers hold a *Store and the
-// TUI passes that pointer through its by-value Update. Data is always held in
-// memory as v3 (connScope -> name -> dirScope -> KEY -> VALUE), regardless of
-// the on-disk version it was loaded from: the outer registry.Scope key is the
-// CONNECTION scope (which host the VM lives on); the innermost string key
-// remains the pre-existing directory scope (ValidScope) — the two are
-// orthogonal, see the package doc.
+// An empty path disables persistence (used in tests). It holds no in-process
+// mutex, so it is copy-safe to embed by value in the TUI model — callers hold
+// a *Store and the TUI passes that pointer through its by-value Update. Data
+// is always held in memory as v3 (connScope -> name -> dirScope -> KEY ->
+// VALUE), regardless of the on-disk version it was loaded from: the outer
+// registry.Scope key is the CONNECTION scope (which host the VM lives on);
+// the innermost string key remains the pre-existing directory scope
+// (ValidScope) — the two are orthogonal, see the package doc.
+//
+// Writes are lock-protected read-modify-writes (see mutateLocked): the
+// cross-process serialization is a file lock on disk, not an in-process
+// mutex, so this type remains safe to copy and there is nothing to guard
+// concurrent in-process callers beyond what already held (the TUI is
+// single-threaded).
 type Store struct {
 	path string
 	vms  map[registry.Scope]map[string]map[string]map[string]string
 }
 
-// NewEmpty returns an in-memory store with no backing file. save() is a no-op for
-// it, so it never touches disk.
+// NewEmpty returns an in-memory store with no backing file. mutate/saveTree
+// are no-ops (or bypass disk entirely) for it, so it never touches disk.
 func NewEmpty() *Store {
 	return &Store{vms: map[registry.Scope]map[string]map[string]map[string]string{}}
 }
@@ -221,16 +237,27 @@ func Load() (*Store, error) {
 	return LoadFrom(defaultPath())
 }
 
-// LoadFrom reads the store from an explicit path. A missing or empty file yields
-// an empty store (not an error). A corrupt file is moved aside to
-// "<path>.corrupt" — so a later save cannot silently clobber recoverable data —
-// and the error is returned for the caller to surface. A file stamped with a
-// version newer than this build understands is refused with an "upgrade sand"
-// error. A v1 (or unversioned) file, or a v2 file, is transparently migrated:
-// no connection scope existed before version 3, so every VM either format
-// recorded is lifted under registry.LocalScope with its secrets (and, for v2,
-// its directory scopes) intact; the next save stamps the file as version 3. In
-// every case the returned store is non-nil and usable.
+// LoadFrom reads the store from an explicit path at process start. A missing
+// or empty file yields an empty store (not an error). A corrupt file is moved
+// aside to "<path>.corrupt" — so a later save cannot silently clobber
+// recoverable data — and the error is returned for the caller to surface. A
+// file stamped with a version newer than this build understands is refused
+// with an "upgrade sand" error (the store returned still carries its path, so
+// -- unlike the registry's equivalent -- a caller that Sets afterward can
+// still record new secrets; only this ONE unreadable version's data is
+// unavailable). A v1 (or unversioned) file, or a v2 file, is transparently
+// migrated: no connection scope existed before version 3, so every VM either
+// format recorded is lifted under registry.LocalScope with its secrets (and,
+// for v2, its directory scopes) intact; the next save stamps the file as
+// version 3. In every case the returned store is non-nil and usable.
+//
+// The actual decode + in-memory migration is done by the pure, side-effect-
+// free parseTree, which this process-start path and the locked reload
+// (reloadUnlocked) both share so schema/version handling lives in exactly one
+// place and the two can never drift. LoadFrom layers the two Load()-only side
+// effects around it -- quarantining a corrupt file and reporting a
+// too-new-to-understand one -- that the locked reload deliberately does
+// neither of; see reloadUnlocked.
 func LoadFrom(path string) (*Store, error) {
 	s := &Store{path: path, vms: map[registry.Scope]map[string]map[string]map[string]string{}}
 	data, err := os.ReadFile(path)
@@ -244,14 +271,75 @@ func LoadFrom(path string) (*Store, error) {
 		return s, nil
 	}
 
+	vms, perr := parseTree(data)
+	if perr != nil {
+		var unsupported unsupportedVersionError
+		if errors.As(perr, &unsupported) {
+			// A file from a newer sand: valid, just unsupported. Do NOT
+			// quarantine or clobber it, but (unlike the registry) do not strip
+			// the store's path either -- a subsequent Set would reload this
+			// same too-new file and hit the identical refusal before ever
+			// reaching a write, so there is nothing to protect by detaching it.
+			return s, fmt.Errorf("secrets store at %s %w", path, perr)
+		}
+		// A genuinely unparseable file: move it aside so a later save cannot
+		// silently clobber recoverable data, and surface the error.
+		_ = os.Rename(path, path+".corrupt")
+		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, perr)
+	}
+	s.vms = vms
+	return s, nil
+}
+
+// unsupportedVersionError is returned by parseTree when the on-disk file's
+// schema version is NEWER than this binary understands. It is distinguished
+// from an ordinary decode failure (via errors.As) because LoadFrom's two
+// failure paths demand opposite handling: a corrupt file is quarantined to
+// .corrupt, but a newer-but-valid file must be left exactly as found for the
+// newer sand. Mirrors the registry package's identically-purposed type.
+type unsupportedVersionError struct {
+	have, understand int
+}
+
+func (e unsupportedVersionError) Error() string {
+	return fmt.Sprintf("is version %d but this build understands only version %d — upgrade sand", e.have, e.understand)
+}
+
+// parseTree decodes the on-disk store bytes into the in-memory connScope ->
+// vm -> dirScope -> key -> value tree, migrating a legacy (v1/v2) shape into
+// the current (v3) keying IN MEMORY only. It is the single place schema/
+// version handling lives, shared by both the process-start LoadFrom path and
+// the locked reload (reloadUnlocked), so the two can never drift on how a
+// file is interpreted.
+//
+// It is PURE: no file I/O, no save, no lock, no .corrupt rename, no seeding.
+// Those two side effects the old LoadFrom performed inline -- quarantining a
+// corrupt file and refusing (without stripping) a too-new one -- are the
+// CALLER's responsibility now, and only the process-start path (LoadFrom)
+// performs them; the locked reload does neither, which is what keeps a locked
+// read-modify-write from double-writing or re-acquiring the lock while merely
+// reloading.
+//
+// Empty input yields an empty tree and is not an error (callers with a
+// missing/empty file short-circuit before calling this, but it is safe to
+// call directly too). A file whose version exceeds schemaVersion is refused
+// with an unsupportedVersionError and a nil tree. Any other decode failure
+// (at the version probe, or at any of the three concrete per-version shapes)
+// returns the wrapped error and a nil tree so the caller can decide whether to
+// quarantine the bytes.
+func parseTree(data []byte) (map[registry.Scope]map[string]map[string]map[string]string, error) {
+	out := map[registry.Scope]map[string]map[string]map[string]string{}
+	if len(data) == 0 {
+		return out, nil
+	}
+
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return nil, fmt.Errorf("decode secrets store: %w", err)
 	}
 
 	if probe.Version > schemaVersion {
-		return s, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, probe.Version, schemaVersion)
+		return nil, unsupportedVersionError{have: probe.Version, understand: schemaVersion}
 	}
 
 	if probe.Version <= 1 {
@@ -260,21 +348,16 @@ func LoadFrom(path string) (*Store, error) {
 		// value where those expect a nested map would fail to unmarshal.
 		var v1 v1File
 		if err := json.Unmarshal(data, &v1); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return nil, fmt.Errorf("decode legacy (v1) secrets store: %w", err)
 		}
 		byName := make(map[string]map[string]map[string]string, len(v1.VMs))
 		for name, pairs := range v1.VMs {
-			cp := make(map[string]string, len(pairs))
-			for k, v := range pairs {
-				cp[k] = v
-			}
-			byName[name] = map[string]map[string]string{"": cp}
+			byName[name] = map[string]map[string]string{"": copyPairs(pairs)}
 		}
 		if len(byName) > 0 {
-			s.vms[registry.LocalScope] = byName
+			out[registry.LocalScope] = byName
 		}
-		return s, nil
+		return out, nil
 	}
 
 	if probe.Version == 2 {
@@ -285,26 +368,24 @@ func LoadFrom(path string) (*Store, error) {
 		// intact.
 		var parsed fileSchemaV2
 		if err := json.Unmarshal(data, &parsed); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return nil, fmt.Errorf("decode legacy (v2) secrets store: %w", err)
 		}
 		if len(parsed.VMs) > 0 {
-			s.vms[registry.LocalScope] = parsed.VMs
+			out[registry.LocalScope] = parsed.VMs
 		}
-		return s, nil
+		return out, nil
 	}
 
 	// probe.Version == 3 (the only remaining case, since >3, <=1, and ==2 are
 	// handled above): decode the full v3 shape directly.
 	var parsed fileSchema
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return nil, fmt.Errorf("decode secrets store: %w", err)
 	}
 	if parsed.Scopes != nil {
-		s.vms = fromScopeGroups(parsed.Scopes)
+		out = fromScopeGroups(parsed.Scopes)
 	}
-	return s, nil
+	return out, nil
 }
 
 // Get returns a defensive copy of the global-scope (directory scope "")
@@ -323,20 +404,34 @@ func (s *Store) Get(vm string, connScope registry.Scope) map[string]string {
 
 // Set replaces vm's global-scope (directory scope "") pairs, under connScope,
 // with a copy of pairs and persists the change, leaving any other directory
-// scope for vm (and any other connection scope entirely) untouched. It is a
-// convenience wrapper over SetAll. Every key is validated first (ValidKey); a
-// single invalid key rejects the whole call without mutating the store or
+// scope for vm (and any other connection scope entirely) untouched. Every key
+// is validated first (ValidKey), BEFORE the lock is taken or anything is
+// reloaded/mutated; a single invalid key rejects the whole call without ever
 // touching disk, so an injectable key can never be persisted. An empty pairs
 // map drops the global scope (and, if no other directory scope remains, vm's
 // entry under connScope) rather than persisting an empty object.
+//
+// The "other directory scope for vm" being preserved is read from the
+// FRESHLY RELOADED on-disk tree (inside the locked mutation below), not from
+// this Store's possibly-stale in-memory snapshot — otherwise a concurrent
+// process's directory-scoped write for the same vm could be silently
+// clobbered by this call's blind reconstruction of "everything else".
 func (s *Store) Set(vm string, connScope registry.Scope, pairs map[string]string) error {
-	scopes := s.GetAll(vm, connScope)
-	if len(pairs) == 0 {
-		delete(scopes, "")
-	} else {
-		scopes[""] = pairs
+	for k := range pairs {
+		if !ValidKey(k) {
+			return fmt.Errorf("invalid secret key %q: keys must match [A-Za-z_][A-Za-z0-9_]*", k)
+		}
 	}
-	return s.SetAll(vm, connScope, scopes)
+	cpPairs := copyPairs(pairs)
+	return s.mutate(func(cur map[registry.Scope]map[string]map[string]map[string]string) {
+		scopes := copyScopeMap(cur[connScope][vm])
+		if len(cpPairs) == 0 {
+			delete(scopes, "")
+		} else {
+			scopes[""] = cpPairs
+		}
+		applyEntry(cur, connScope, vm, pruneEmptyScopes(scopes))
+	})
 }
 
 // GetAll returns a defensive deep copy of vm's directory-scope -> KEY -> VALUE
@@ -345,26 +440,20 @@ func (s *Store) Set(vm string, connScope registry.Scope, pairs map[string]string
 // same-named vm under a DIFFERENT connScope is never visible here — that
 // isolation is the whole point of the connection scope.
 func (s *Store) GetAll(vm string, connScope registry.Scope) map[string]map[string]string {
-	src := s.vms[connScope][vm]
-	out := make(map[string]map[string]string, len(src))
-	for scope, pairs := range src {
-		cp := make(map[string]string, len(pairs))
-		for k, v := range pairs {
-			cp[k] = v
-		}
-		out[scope] = cp
-	}
-	return out
+	return copyScopeMap(s.vms[connScope][vm])
 }
 
 // SetAll replaces vm's directory scopes, under connScope, with a deep copy of
-// scopes and persists the change. Every directory scope is validated
+// scopes and persists the change — a full replacement of that one
+// (connScope, vm) subtree against the CURRENT on-disk tree, not a whole-store
+// overwrite (see mutateLocked). Every directory scope is validated
 // (ValidScope) and every key within every scope is validated (ValidKey)
-// BEFORE any mutation, so the whole call is rejected on the first invalid
-// scope or key without touching the in-memory store or disk (all-or-nothing,
-// mirroring PR 27's Set). An empty scopes map, or one whose scopes are all
-// empty, drops vm's entry under connScope entirely (pruning connScope itself
-// once it holds no VMs) rather than persisting an empty object tree.
+// BEFORE the lock is taken or anything is reloaded/mutated, so the whole call
+// is rejected on the first invalid scope or key without ever touching disk
+// (all-or-nothing, mirroring PR 27's Set). An empty scopes map, or one whose
+// scopes are all empty, drops vm's entry under connScope entirely (pruning
+// connScope itself once it holds no VMs) rather than persisting an empty
+// object tree.
 func (s *Store) SetAll(vm string, connScope registry.Scope, scopes map[string]map[string]string) error {
 	for scope, pairs := range scopes {
 		if !ValidScope(scope) {
@@ -377,53 +466,191 @@ func (s *Store) SetAll(vm string, connScope registry.Scope, scopes map[string]ma
 		}
 	}
 
-	cp := make(map[string]map[string]string, len(scopes))
-	for scope, pairs := range scopes {
-		if len(pairs) == 0 {
-			continue
-		}
-		inner := make(map[string]string, len(pairs))
-		for k, v := range pairs {
-			inner[k] = v
-		}
-		cp[scope] = inner
-	}
-
-	byName := s.vms[connScope]
-	if len(cp) == 0 {
-		if byName == nil {
-			return s.save()
-		}
-		if _, ok := byName[vm]; !ok {
-			return s.save()
-		}
-		delete(byName, vm)
-		if len(byName) == 0 {
-			delete(s.vms, connScope)
-		}
-		return s.save()
-	}
-	if byName == nil {
-		byName = map[string]map[string]map[string]string{}
-		s.vms[connScope] = byName
-	}
-	byName[vm] = cp
-	return s.save()
+	cp := pruneEmptyScopes(copyScopeMap(scopes))
+	return s.mutate(func(cur map[registry.Scope]map[string]map[string]map[string]string) {
+		applyEntry(cur, connScope, vm, cp)
+	})
 }
 
 // Remove drops vm's entry (all directory scopes) under connScope and persists
 // the change, leaving any same-named vm under a DIFFERENT connScope untouched.
 // The connScope entry itself is pruned once it holds no more VMs, so an empty
-// connection scope never lingers on disk.
+// connection scope never lingers on disk. The delete is applied to the
+// FRESHLY RELOADED on-disk tree, so a same-named vm entry a concurrent process
+// added under connScope after this Store last observed the file is still
+// found and removed (and, symmetrically, any OTHER vm a concurrent process
+// added is left untouched).
 func (s *Store) Remove(vm string, connScope registry.Scope) error {
-	byName := s.vms[connScope]
-	if byName != nil {
-		delete(byName, vm)
-		if len(byName) == 0 {
-			delete(s.vms, connScope)
+	return s.mutate(func(cur map[registry.Scope]map[string]map[string]map[string]string) {
+		byName := cur[connScope]
+		if byName != nil {
+			delete(byName, vm)
+			if len(byName) == 0 {
+				delete(cur, connScope)
+			}
+		}
+	})
+}
+
+// copyPairs returns a shallow copy of a KEY -> VALUE map.
+func copyPairs(pairs map[string]string) map[string]string {
+	out := make(map[string]string, len(pairs))
+	for k, v := range pairs {
+		out[k] = v
+	}
+	return out
+}
+
+// copyScopeMap returns a deep copy of a directory-scope -> KEY -> VALUE map.
+func copyScopeMap(src map[string]map[string]string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(src))
+	for scope, pairs := range src {
+		out[scope] = copyPairs(pairs)
+	}
+	return out
+}
+
+// pruneEmptyScopes drops any directory scope whose pairs map is empty, so
+// nothing ever persists an empty object for a scope that holds no secrets.
+func pruneEmptyScopes(scopes map[string]map[string]string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(scopes))
+	for scope, pairs := range scopes {
+		if len(pairs) > 0 {
+			out[scope] = pairs
 		}
 	}
-	return s.save()
+	return out
+}
+
+// applyEntry replaces vm's entire directory-scope subtree under connScope in
+// cur with cp (a full replacement, already pruned of empty scopes), pruning
+// vm's entry entirely when cp is empty and, in turn, connScope's own group
+// once it holds no more VMs. This is the one shared merge step Set (via its
+// own reconstructed delta) and SetAll (via the caller-supplied scopes) both
+// funnel through, always against the FRESHLY RELOADED tree handed to them by
+// mutateLocked/mutate — never against a stale in-memory snapshot — so neither
+// can discard an unrelated VM, or an unrelated connection scope, that a
+// concurrent process just committed.
+func applyEntry(cur map[registry.Scope]map[string]map[string]map[string]string, connScope registry.Scope, vm string, cp map[string]map[string]string) {
+	byName := cur[connScope]
+	if len(cp) == 0 {
+		if byName == nil {
+			return
+		}
+		if _, ok := byName[vm]; !ok {
+			return
+		}
+		delete(byName, vm)
+		if len(byName) == 0 {
+			delete(cur, connScope)
+		}
+		return
+	}
+	if byName == nil {
+		byName = map[string]map[string]map[string]string{}
+		cur[connScope] = byName
+	}
+	byName[vm] = cp
+}
+
+// mutate is the always-write convenience wrapper over mutateLocked used by
+// Set/SetAll/Remove, which — matching their pre-lock behavior — persist
+// unconditionally rather than skipping a no-op write. For an in-memory store
+// (empty path) it applies apply directly to the working copy: there is
+// nothing on disk to lock, reload, or write, so going anywhere near
+// mutateLocked/filelock would be pointless (and, for a "" lock path, wrong).
+func (s *Store) mutate(apply func(cur map[registry.Scope]map[string]map[string]map[string]string)) error {
+	if s.path == "" {
+		apply(s.vms)
+		return nil
+	}
+	return s.mutateLocked(func(cur map[registry.Scope]map[string]map[string]map[string]string) (bool, error) {
+		apply(cur)
+		return true, nil
+	})
+}
+
+// mutateLocked performs one lock-protected read-modify-write against the
+// on-disk store. It takes the cross-process lock (best-effort: a lock it
+// cannot take only WARNS and proceeds unserialized — a wedged or unwritable
+// lock file must never fail an otherwise-valid write), reloads the CURRENT
+// on-disk tree via reloadUnlocked, hands that fresh tree to apply so the
+// caller can layer ONLY this operation's delta onto it, and — when apply asks
+// — persists the merged result via the existing atomic temp+rename body
+// (saveTree). On success it refreshes the in-memory working copy from the
+// merged tree, so later reads (Get/GetAll) see exactly what hit disk,
+// including entries a concurrent process added.
+//
+// The lock is taken EXACTLY ONCE, here; neither reloadUnlocked nor saveTree
+// re-acquires it, so there is no re-entrant self-deadlock (a fresh flock fd on
+// the same path is a distinct open file description and would otherwise
+// block). Only called with s.path != "" — mutate handles the in-memory case
+// directly, since there is nothing on disk to lock or reload there.
+func (s *Store) mutateLocked(apply func(cur map[registry.Scope]map[string]map[string]map[string]string) (write bool, err error)) error {
+	// Ensure the data dir exists before taking the lock: the lock file lives
+	// beside the store, so on a first-ever write the dir may not exist yet, and
+	// a missing dir would needlessly degrade that first lock to the
+	// unserialized path. saveTree re-creates (and force-chmods) it too; both
+	// are best-effort here.
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		s.warnf("could not create data dir for %s (%v); proceeding", s.path, err)
+	}
+	release, err := filelock.Acquire(s.path + ".lock")
+	if err != nil {
+		s.warnf("could not lock %s (%v); writing without cross-process serialization", s.path, err)
+	}
+	defer release()
+
+	cur, err := s.reloadUnlocked()
+	if err != nil {
+		return err
+	}
+	write, err := apply(cur)
+	if err != nil {
+		return err
+	}
+	if write {
+		if err := s.saveTree(cur); err != nil {
+			return err
+		}
+	}
+	s.vms = cur // refresh the working copy from the merged, on-disk-current state
+	return nil
+}
+
+// reloadUnlocked re-reads the on-disk store fresh and decodes it in memory via
+// the pure parseTree, returning the CURRENT connScope -> vm -> dirScope -> key
+// -> value tree. It is the read half of every locked read-modify-write. It
+// does NOT take the lock or quarantine a corrupt file — the caller already
+// holds the lock (taken once at the mutation boundary), so re-acquiring here
+// would self-deadlock on a fresh flock fd, and quarantining here would move a
+// file out from under a live mutation. A missing or empty file yields an
+// empty tree. A v1/v2 file is migrated in memory but deliberately NOT written
+// back — the merged result is persisted exactly once, by the caller's single
+// saveTree call, already stamped at the current schema version. A decode
+// failure (or a newer-sand file) is surfaced so the caller ABORTS the
+// mutation rather than clobbering an unreadable or newer on-disk file.
+func (s *Store) reloadUnlocked() (map[registry.Scope]map[string]map[string]map[string]string, error) {
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return map[registry.Scope]map[string]map[string]map[string]string{}, nil
+		}
+		return nil, err
+	}
+	return parseTree(data)
+}
+
+// warnf emits a best-effort operational note about a DEGRADED write — today
+// only a failure to take the cross-process lock, after which the mutation
+// proceeds unserialized. It never affects control flow and never fails a
+// mutation. The note goes to stderr, matching the registry package's own
+// warning channel (internal/registry.warnf) and the headless `sand create`
+// path's warnings; it is intentionally visible so a user can tell a write was
+// not serialized against concurrent sand processes.
+func (s *Store) warnf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "warning: secrets store: "+format+"\n", args...)
 }
 
 // shellSingleQuote wraps s in single quotes for safe inclusion in a POSIX shell
@@ -460,13 +687,24 @@ func Render(pairs map[string]string) string {
 	return b.String()
 }
 
-// save writes the store atomically: a unique temp file in the same directory as
-// the target, created at 0600 BEFORE any secret bytes are written, is renamed
-// over the target. The parent directory is forced to 0700. There is therefore no
-// instant at which a world-readable file holds a secret. An empty path is a
-// no-op, so an in-memory store never touches disk. The unique temp name keeps two
-// TUI processes sharing a data dir from racing on a fixed name.
-func (s *Store) save() error {
+// saveTree atomically writes vms to the backing file: a unique temp file in
+// the same directory as the target, created at 0600 BEFORE any secret bytes
+// are written, is renamed over the target. The parent directory is forced to
+// 0700. There is therefore no instant at which a world-readable file holds a
+// secret. An empty path is a no-op, so an in-memory store never touches disk.
+// The unique temp name keeps two TUI processes sharing a data dir from racing
+// on a fixed name.
+//
+// Writes are now lock-protected read-modify-writes: every mutation reloads
+// the current on-disk tree under the cross-process lock (see mutateLocked)
+// and calls this with the MERGED tree, so two sand processes sharing a data
+// dir can no longer silently discard each other's committed secrets. The
+// atomic temp+rename still guarantees a reader never observes a half-written
+// file, and the unique temp name keeps two writers from colliding on a shared
+// temp path. This function's own bytes (mode 0600 temp, forced 0700 dir,
+// fsync before rename) are UNCHANGED from the pre-lock save() — only the
+// caller now wraps it in a lock+reload+merge.
+func (s *Store) saveTree(vms map[registry.Scope]map[string]map[string]map[string]string) error {
 	if s.path == "" {
 		return nil
 	}
@@ -480,7 +718,7 @@ func (s *Store) save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(fileSchema{Version: schemaVersion, Scopes: toScopeGroups(s.vms)}, "", "  ")
+	data, err := json.MarshalIndent(fileSchema{Version: schemaVersion, Scopes: toScopeGroups(vms)}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testPath(t *testing.T) string {
@@ -653,6 +654,170 @@ profiles:
 	explicit := Profile{Host: "example.com", User: "dev", Port: 22}
 	if p.remoteTarget() != explicit.remoteTarget() {
 		t.Fatalf("remoteTarget() = %q, want it to equal the explicit-port profile's %q", p.remoteTarget(), explicit.remoteTarget())
+	}
+}
+
+// TestConcurrentAddFromTwoStoresMergesBothWithCoherentOrder is the core
+// regression test for the locked reload-merge: two independent *Store
+// instances backed by the SAME on-disk file each Add a different remote
+// profile. Before the lock-protected read-modify-write, the second save()
+// would blindly overwrite the first process's in-memory (now stale) view of
+// the file, silently discarding the first Add. Both profiles must survive,
+// and the resulting order must be a valid interleaving (each store's own
+// addition must not be duplicated or dropped).
+func TestConcurrentAddFromTwoStoresMergesBothWithCoherentOrder(t *testing.T) {
+	path := testPath(t)
+
+	// Seed the shared file (and both stores' initial view of it) first.
+	s1, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s1) error = %v", err)
+	}
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s2) error = %v", err)
+	}
+
+	addedA, err := s1.Add(Profile{Name: "A", Type: TypeRemoteSSH, Enabled: true, Host: "a.example.com", User: "u", Port: 22})
+	if err != nil {
+		t.Fatalf("s1.Add(A) error = %v", err)
+	}
+	addedB, err := s2.Add(Profile{Name: "B", Type: TypeRemoteSSH, Enabled: true, Host: "b.example.com", User: "u", Port: 22})
+	if err != nil {
+		t.Fatalf("s2.Add(B) error = %v", err)
+	}
+
+	// Reload a fresh third view of the file: it must see the Local profile
+	// plus BOTH A and B, not just whichever save() happened last.
+	s3, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s3) error = %v", err)
+	}
+	list := s3.List()
+	if len(list) != 3 {
+		t.Fatalf("List() after concurrent adds = %d profiles, want 3 (local + A + B): %+v", len(list), list)
+	}
+	if _, ok := s3.Get(addedA.ID); !ok {
+		t.Error("reloaded store is missing profile A added via s1")
+	}
+	if _, ok := s3.Get(addedB.ID); !ok {
+		t.Error("reloaded store is missing profile B added via s2")
+	}
+
+	// The order must be a coherent (no duplicate, no drop) insertion order:
+	// each ID appears exactly once.
+	seen := map[string]int{}
+	for _, p := range list {
+		seen[p.ID]++
+	}
+	for id, count := range seen {
+		if count != 1 {
+			t.Errorf("order contains id %q %d times, want exactly 1", id, count)
+		}
+	}
+}
+
+// TestConcurrentSetLastUsedAndUpdateBothSurvive covers the other tricky
+// merge: lastUsed is a scalar (not a map) and a naive read-modify-write on a
+// stale in-memory copy would let one process's write clobber the other's.
+// One Store calls SetLastUsed while an independent Store (backed by the same
+// file) Updates an unrelated field on a different profile; both changes must
+// be visible after both complete, because each mutation applies only its own
+// narrow delta onto a freshly reloaded set.
+func TestConcurrentSetLastUsedAndUpdateBothSurvive(t *testing.T) {
+	path := testPath(t)
+
+	seed, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(seed) error = %v", err)
+	}
+	addedA, err := seed.Add(Profile{Name: "A", Type: TypeRemoteSSH, Enabled: true, Host: "a.example.com", User: "u", Port: 22})
+	if err != nil {
+		t.Fatalf("seed.Add(A) error = %v", err)
+	}
+
+	s1, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s1) error = %v", err)
+	}
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s2) error = %v", err)
+	}
+
+	if err := s1.SetLastUsed(addedA.ID); err != nil {
+		t.Fatalf("s1.SetLastUsed() error = %v", err)
+	}
+	updated := addedA
+	updated.Name = "A-renamed"
+	if _, err := s2.Update(updated); err != nil {
+		t.Fatalf("s2.Update() error = %v", err)
+	}
+
+	s3, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom(s3) error = %v", err)
+	}
+	if got := s3.LastUsed(); got != addedA.ID {
+		t.Errorf("LastUsed() after concurrent SetLastUsed+Update = %q, want %q (must not be clobbered)", got, addedA.ID)
+	}
+	p, ok := s3.Get(addedA.ID)
+	if !ok || p.Name != "A-renamed" {
+		t.Errorf("reloaded profile after concurrent SetLastUsed+Update = %+v, ok=%v, want Name %q (edit must not be lost)", p, ok, "A-renamed")
+	}
+}
+
+// TestMutationAgainstMissingFileDoesNotDeadlockOrSeedOnReload guards the
+// re-entrancy and no-seed-on-reload requirements. Add is used (rather than
+// LoadFrom, which deliberately DOES seed) against a Store constructed
+// directly with a path that does not exist yet, so the mutation's own
+// internal reload is exercised against a genuinely missing file. This must
+// complete without deadlocking (the lock must be acquired exactly once by
+// mutateLocked, never re-acquired by reloadUnlocked) and the reload must NOT
+// itself seed a Local profile and save — seeding is reserved for the
+// process-start Load()/LoadFrom() path. If the reload seeded, the persisted
+// file would contain a spurious Local profile alongside the one just added.
+func TestMutationAgainstMissingFileDoesNotDeadlockOrSeedOnReload(t *testing.T) {
+	path := testPath(t)
+
+	// Construct a Store directly, bypassing LoadFrom's seed-on-missing
+	// behavior, pointed at a path that does not exist on disk yet.
+	s := &Store{path: path, profiles: map[string]Profile{}}
+
+	type result struct {
+		added Profile
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		p, err := s.Add(Profile{Name: "r1", Type: TypeRemoteSSH, Enabled: true, Host: "h", User: "u", Port: 22})
+		done <- result{added: p, err: err}
+	}()
+
+	var res result
+	select {
+	case res = <-done:
+		if res.err != nil {
+			t.Fatalf("Add() against a missing file error = %v", res.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Add() against a missing file deadlocked (lock re-acquired on reload?)")
+	}
+
+	// The reload inside Add must have started from an EMPTY set (not seeded
+	// with Local) and merged only the new profile onto it — so the persisted
+	// file must contain exactly the one added profile, not a seeded Local
+	// profile alongside it.
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() after mutation error = %v", err)
+	}
+	list := s2.List()
+	if len(list) != 1 || list[0].ID != res.added.ID {
+		t.Fatalf("List() after mutation against a missing file = %+v, want exactly the one added profile (no seeded Local)", list)
+	}
+	if _, ok := s2.Get(LocalProfileID); ok {
+		t.Error("reloaded store unexpectedly contains a seeded Local profile: reload must not seed on an empty/missing file")
 	}
 }
 

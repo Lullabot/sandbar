@@ -563,11 +563,11 @@ No circular dependencies.
 **Parallel Tasks:**
 - ✔️ Task 001: `internal/filelock` cross-process lock primitive
 
-### Phase 2: Store conversions
+### ✅ Phase 2: Store conversions
 **Parallel Tasks:**
-- Task 002: Registry store locked reload-merge + reconcile correctness (depends on: 001)
-- Task 003: Secrets store locked reload-merge (depends on: 001)
-- Task 004: Profiles store locked reload-merge (depends on: 001)
+- ✔️ Task 002: Registry store locked reload-merge + reconcile correctness (depends on: 001)
+- ✔️ Task 003: Secrets store locked reload-merge (depends on: 001)
+- ✔️ Task 004: Profiles store locked reload-merge (depends on: 001)
 
 ### Phase 3: Validation and documentation
 **Parallel Tasks:**

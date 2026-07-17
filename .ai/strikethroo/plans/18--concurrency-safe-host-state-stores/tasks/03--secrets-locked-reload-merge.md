@@ -2,7 +2,7 @@
 id: 3
 group: "store-conversion"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "sonnet"
 effort: "high"
