@@ -23,6 +23,12 @@ tenant or a determined attacker.
   cannot modify anything on your machine, and `limactl delete <name>`
   provably removes everything the VM produced. Move files in or out
   deliberately with the TUI's Upload/Download actions instead.
+- **Guest listen ports are forwarded to loopback only.** Lima forwards a
+  guest's listening TCP ports to `127.0.0.1` on the host that runs the VM —
+  never a LAN interface — so a server inside the VM is not exposed to the
+  network. Publishing one further (a cloudflared tunnel, an SSH forward) is
+  always an explicit action; see
+  [Web Servers and Ports](../using-sand/web-servers.md).
 - **Samba is forced off** for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.
 - **`sand` does not provision a Claude Code credential.** You log in inside
@@ -37,6 +43,10 @@ tenant or a determined attacker.
 - **Remote control is on by default** (`remoteControlAtStartup: true` in the
   provisioned settings), so you can drive and monitor a session from the
   Claude app once you've logged in inside the VM.
+- **Claude Code sessions see the scoped secrets of the directory they work
+  in**, via the provisioned direnv hooks (see
+  [Secrets](../using-sand/secrets.md)). Scope your tokens accordingly — a
+  secret placed at a scope is available to any agent working under it.
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in

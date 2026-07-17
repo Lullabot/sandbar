@@ -48,6 +48,14 @@ and approved with `direnv allow`, so a repo-scoped secret shows up as an
 `.env` file direnv picks up automatically the moment your shell `cd`s into
 that repo's working directory — you don't have to source anything by hand.
 
+Claude Code sessions get the same treatment even though direnv's shell hook
+only fires at interactive prompts: the provisioned `~/.claude/settings.json`
+carries `SessionStart` and `CwdChanged` hooks that run `direnv export` for
+the session's working directory. So a session working in a repo sees that
+repo's scoped secrets, wherever it was launched from — including sessions
+dispatched via `claude agents`, which would otherwise inherit only the
+environment of the directory the supervisor was started in.
+
 ## Editing secrets
 
 Press `e` on a tile to open the secrets editor. It's a plain text buffer:

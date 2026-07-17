@@ -11,6 +11,9 @@ VM comes with the tools you normally use.
 - [cloudflared](https://github.com/cloudflare/cloudflared)
 - [mkcert](https://github.com/FiloSottile/mkcert)
 
+Running a web server with these? [Web Servers and Ports](../using-sand/web-servers.md)
+covers how to reach it from your browser — locally and on a remote profile.
+
 ## Language runtimes
 
 - Node.js
