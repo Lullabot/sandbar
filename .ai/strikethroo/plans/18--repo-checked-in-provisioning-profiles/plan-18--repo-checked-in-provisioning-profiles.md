@@ -266,9 +266,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 01: Define the `.sandbar/` manifest schema and standalone in-guest validator, with a fixture corpus and Go unit test (no VM)
 
-### Phase 2: Shipped Provisioning Profiles
+### Phase 2: Shipped Provisioning Profiles ✅
 **Parallel Tasks:**
-- Task 02: Restructure the four optional dev tools into shipped provisioning profiles, preserving base-tier behavior and the embed/rsync/hash triple-pin (depends on: 01)
+- ✔️ Task 02: Restructure the four optional dev tools into shipped provisioning profiles, preserving base-tier behavior and the embed/rsync/hash triple-pin (depends on: 01)
 
 ### Phase 3: Guest-Side Finalize Stage
 **Parallel Tasks:**
