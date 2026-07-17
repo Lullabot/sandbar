@@ -1331,6 +1331,10 @@ delete and rebuild the VM rather than trust it after the fact.</p>
 <li><strong>Remote control is on by default</strong> (<code>remoteControlAtStartup: true</code> in the
   provisioned settings), so you can drive and monitor a session from the
   Claude app once you've logged in inside the VM.</li>
+<li><strong>Claude Code sessions see the scoped secrets of the directory they work
+  in</strong>, via the provisioned direnv hooks (see
+  <a href="../../using-sand/secrets/">Secrets</a>). Scope your tokens accordingly — a
+  secret placed at a scope is available to any agent working under it.</li>
 <li><strong>Credentials never touch argv.</strong> A <code>--clone-token</code> and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in
