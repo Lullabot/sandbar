@@ -677,9 +677,9 @@ Verified acyclic: every edge points from a lower phase to a higher one.
 **Parallel Tasks:**
 - ✔️ Task 08: Rebind `l` = land, `L` = log (depends on: 07) — commandreg.go, 11 goldens regenerated, enterTarget unaffected
 
-### Phase 6: Documentation
+### ✅ Phase 6: Documentation
 **Parallel Tasks:**
-- Task 10: Docs + AGENTS.md invariants (depends on: 08, 09)
+- ✔️ Task 10: Docs + AGENTS.md invariants (depends on: 08, 09) — tui/files-and-shells/cli-reference/security-model + AGENTS.md; mkdocs --strict clean
 
 ### Post-phase Actions
 Apply `.ai/strikethroo/config/hooks/POST_PHASE.md` after each phase: confirm all
