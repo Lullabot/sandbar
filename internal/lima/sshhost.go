@@ -216,6 +216,21 @@ func (h *SSHHost) sshCommand(tty bool, remoteArgv ...string) []string {
 	return argv
 }
 
+// limactlArgv is the remote argv for a `limactl` invocation: `LIMA_HOME=<v>
+// limactl <args…>`, with LIMA_HOME assigned ON THE REMOTE PROCESS (it is just
+// another shell-quoted token in the remote argv sshCommand builds — never an
+// ssh client env/SetEnv), so the remote limactl resolves the SAME instance
+// directory h.LimaHome() (and every HostFiles read) already uses. Always
+// setting it — even at the remote default — is deliberate: it is always what
+// sand intends, and it means discovery and reads can never silently diverge
+// the moment a profile sets a non-default RemoteLimaHome. Assigning ONLY this
+// one var (never threading cmd.Env or forwarding the local environment)
+// preserves the hop's non-leak property: the laptop's own LIMA_HOME/XDG_* must
+// never cross to the remote host.
+func (h *SSHHost) limactlArgv(args ...string) []string {
+	return append([]string{"LIMA_HOME=" + h.LimaHome(), "limactl"}, args...)
+}
+
 // scpCommand builds an scp argv. Note scp's port flag is -P (capital), NOT ssh's
 // -p — getting this wrong silently ignores a non-default port. The same
 // multiplexing flags as sshBase are threaded in before the endpoints so an scp
@@ -243,7 +258,7 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 // (ErrListRacedInstanceDir), which matches the remote limactl's stderr folded into
 // the error here, still fires over the hop.
 func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdout = &stdout
@@ -263,7 +278,7 @@ func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
 // for live display. cmd.WaitDelay reaps the ssh→limactl→guest-ssh orphan chain on
 // a cancelled ctx, one generation deeper than the local case but the same hazard.
 func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
@@ -277,7 +292,7 @@ func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, ar
 // not corrupted by limactl's `cd` warning — exactly as execRunner.StreamOut does,
 // with the same stdin passthrough and WaitDelay reaping.
 func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out

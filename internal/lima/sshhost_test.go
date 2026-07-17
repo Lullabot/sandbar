@@ -170,11 +170,11 @@ func TestSSHRunnerArgv(t *testing.T) {
 		tail []string
 	}{
 		{"list", func(c *Client) { _, _ = c.List() },
-			[]string{"limactl", "list", "--format", "json"}},
+			[]string{"LIMA_HOME=.lima", "limactl", "list", "--format", "json"}},
 		{"shell-exec", func(c *Client) { _ = c.Shell(context.Background(), "web", nil, io.Discard, "ls", "-la") },
-			[]string{"limactl", "shell", "web", "ls", "-la"}},
+			[]string{"LIMA_HOME=.lima", "limactl", "shell", "web", "ls", "-la"}},
 		{"shell-stream-out", func(c *Client) { _ = c.ShellStreamOut(context.Background(), "web", nil, io.Discard, "tar", "-c") },
-			[]string{"limactl", "shell", "web", "tar", "-c"}},
+			[]string{"LIMA_HOME=.lima", "limactl", "shell", "web", "tar", "-c"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestSSHPortAndIdentityThreading(t *testing.T) {
 		h := hostWith(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}, rec)
 		c := New(h)
 		_, _ = c.List()
-		want := sshArgv(h, []string{"-p", "2222", "-i", "/k"}, "u@h", "limactl", "list", "--format", "json")
+		want := sshArgv(h, []string{"-p", "2222", "-i", "/k"}, "u@h", "LIMA_HOME=.lima", "limactl", "list", "--format", "json")
 		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("argv = %v\nwant %v", got, want)
 		}
@@ -220,7 +220,7 @@ func TestSSHPortAndIdentityThreading(t *testing.T) {
 		h := hostWith(SSHConfig{Host: "h"}, rec)
 		c := New(h)
 		_, _ = c.List()
-		want := sshArgv(h, nil, "h", "limactl", "list", "--format", "json")
+		want := sshArgv(h, nil, "h", "LIMA_HOME=.lima", "limactl", "list", "--format", "json")
 		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
 			t.Fatalf("argv = %v\nwant %v", got, want)
 		}
@@ -430,7 +430,7 @@ func TestSSHTwoStageUpload(t *testing.T) {
 	copyCall := findLimactlCopy(t, rec.calls)
 	// The limactl copy must run over ssh, pin --backend=scp, and take the STAGED
 	// remote path (temp/basename) as its host endpoint, and web:/guest/dir as guest.
-	wantCopy := sshArgv(h, nil, "dev@example.com", "limactl", "copy", "-v", "--backend=scp", tmp+"/file.txt", "web:/guest/dir")
+	wantCopy := sshArgv(h, nil, "dev@example.com", "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", tmp+"/file.txt", "web:/guest/dir")
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -458,7 +458,7 @@ func TestSSHTwoStageDownload(t *testing.T) {
 	}
 
 	copyCall := findLimactlCopy(t, rec.calls)
-	wantCopy := sshArgv(h, nil, "dev@example.com", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp)
+	wantCopy := sshArgv(h, nil, "dev@example.com", "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp)
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy (download) = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -726,6 +726,73 @@ func TestSSHLimaHome(t *testing.T) {
 	if got := NewSSHHost(SSHConfig{Host: "h"}).LimaHome(); got != defaultRemoteLimaHome {
 		t.Fatalf("LimaHome(default) = %q, want %q", got, defaultRemoteLimaHome)
 	}
+}
+
+// TestSSHLimaHomeExportedToRemoteLimactl proves the fix for the latent bug where
+// RemoteLimaHome was honored for HostFiles reads but never reached the remote
+// `limactl` process itself: the remote limactl argv sshCommand builds must carry
+// a `LIMA_HOME=<value>` assignment on the REMOTE command (a plain token in the
+// shell-quoted remote argv, positioned immediately before "limactl" — never an
+// ssh client env/SetEnv), using the SAME value LimaHome() returns for reads, so
+// discovery (`limactl list`) and sand's own file reads resolve the same instance
+// directory. It also pins the chosen default-case behavior: LIMA_HOME is set
+// ALWAYS, even when RemoteLimaHome is unconfigured (the remote default), since
+// that is always what sand intends.
+func TestSSHLimaHomeExportedToRemoteLimactl(t *testing.T) {
+	t.Run("configured RemoteLimaHome reaches the remote limactl", func(t *testing.T) {
+		rec := &recordingExec{}
+		h := hostWith(SSHConfig{Host: "h", RemoteLimaHome: "/srv/lima"}, rec)
+		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
+			t.Fatalf("Output: %v", err)
+		}
+		argv := rec.calls[0]
+		wantEnv, wantBin := "LIMA_HOME=/srv/lima", "limactl"
+		envIdx := slices.Index(argv, wantEnv)
+		binIdx := slices.Index(argv, wantBin)
+		if envIdx < 0 || binIdx < 0 || binIdx != envIdx+1 {
+			t.Fatalf("argv = %v, want %q immediately followed by %q", argv, wantEnv, wantBin)
+		}
+	})
+
+	t.Run("default RemoteLimaHome is still always exported", func(t *testing.T) {
+		rec := &recordingExec{}
+		h := hostWith(SSHConfig{Host: "h"}, rec)
+		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
+			t.Fatalf("Output: %v", err)
+		}
+		argv := rec.calls[0]
+		wantEnv := "LIMA_HOME=" + defaultRemoteLimaHome
+		envIdx := slices.Index(argv, wantEnv)
+		binIdx := slices.Index(argv, "limactl")
+		if envIdx < 0 || binIdx < 0 || binIdx != envIdx+1 {
+			t.Fatalf("argv = %v, want %q immediately followed by \"limactl\"", argv, wantEnv)
+		}
+	})
+
+	t.Run("no local env leaks across the hop", func(t *testing.T) {
+		// Set a distinctive local LIMA_HOME/XDG_* to prove they never cross: only the
+		// single resolved remote LIMA_HOME token may appear in the remote argv.
+		t.Setenv("LIMA_HOME", "/should/never/leak")
+		t.Setenv("XDG_CONFIG_HOME", "/should/never/leak/xdg")
+		rec := &recordingExec{}
+		h := hostWith(SSHConfig{Host: "h", RemoteLimaHome: "/srv/lima"}, rec)
+		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
+			t.Fatalf("Output: %v", err)
+		}
+		argv := rec.calls[0]
+		if anyContains(argv, "should/never/leak") {
+			t.Fatalf("local env leaked into the remote argv: %v", argv)
+		}
+		envTokens := 0
+		for _, a := range argv {
+			if strings.HasPrefix(a, "LIMA_HOME=") || strings.HasPrefix(a, "XDG_") {
+				envTokens++
+			}
+		}
+		if envTokens != 1 {
+			t.Fatalf("argv = %v, want exactly one env-assignment token (LIMA_HOME only)", argv)
+		}
+	})
 }
 
 // TestSSHRemoteLock covers the remote flock LockFile: a holder that prints the

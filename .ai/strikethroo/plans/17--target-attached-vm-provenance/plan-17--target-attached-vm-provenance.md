@@ -573,10 +573,10 @@ graph TD
     T6 --> T8
 ```
 
-### Phase 1: Foundations (no dependencies)
+### ✅ Phase 1: Foundations (no dependencies)
 **Parallel Tasks:**
-- Task 001: Export LIMA_HOME to the remote limactl invocation
-- Task 002: Define the Provenancer seam and marker payload type
+- ✔️ Task 001: Export LIMA_HOME to the remote limactl invocation
+- ✔️ Task 002: Define the Provenancer seam and marker payload type
 
 ### Phase 2: Lima provenance implementation
 **Parallel Tasks:**

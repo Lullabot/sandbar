@@ -2,7 +2,7 @@
 id: 2
 group: "provenance-seam"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "sonnet"
 effort: "medium"
