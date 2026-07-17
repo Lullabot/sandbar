@@ -43,6 +43,10 @@ tenant or a determined attacker.
 - **Remote control is on by default** (`remoteControlAtStartup: true` in the
   provisioned settings), so you can drive and monitor a session from the
   Claude app once you've logged in inside the VM.
+- **Claude Code sessions see the scoped secrets of the directory they work
+  in**, via the provisioned direnv hooks (see
+  [Secrets](../using-sand/secrets.md)). Scope your tokens accordingly — a
+  secret placed at a scope is available to any agent working under it.
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in
