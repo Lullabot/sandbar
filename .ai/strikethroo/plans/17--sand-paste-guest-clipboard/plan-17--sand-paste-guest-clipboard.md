@@ -462,9 +462,9 @@ graph TD
 - ✔️ Task 4: CLI `sand paste-image <vm>` (depends on: 3) — `completed`
 - ✔️ Task 5: TUI "paste image" verb, key `v` (depends on: 3) — `completed`
 
-### Phase 4: Documentation
+### ✅ Phase 4: Documentation
 **Parallel Tasks:**
-- Task 6: Documentation of command, verb, workflow, and contract (depends on: 2, 3, 4, 5)
+- ✔️ Task 6: Documentation of command, verb, workflow, and contract (depends on: 2, 3, 4, 5) — `completed`
 
 ### Post-phase Actions
 - Run `go build ./...`, `go vet ./...`, and `go test ./...` at each phase
