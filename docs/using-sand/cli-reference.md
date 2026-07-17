@@ -1,11 +1,13 @@
 # CLI Reference
 
-There are four entry points:
+There are five entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
+- [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
+  host clipboard on a running VM's guest clipboard.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
 
@@ -234,7 +236,7 @@ connection profile, --profile picks which one to attach to.
 before or after `NAME`. `sand shell` refuses a VM that does not exist or is
 not running.
 
-### Cross-profile resolution
+### Cross-profile resolution for `sand shell`
 
 Because the same VM name can exist under more than one
 [Connection Profile](connection-profiles.md), `sand shell NAME` resolves
@@ -252,6 +254,49 @@ which one you mean like this:
    (the same name exists on two profiles) is an error asking you to pass
    `--profile` to disambiguate, and lists the profile names it's ambiguous
    between.
+
+## `sand paste-image NAME`
+
+Stage the host clipboard's image on a running VM's guest clipboard, ready for
+Ctrl-V inside Claude Code in the guest.
+
+```
+Usage: sand paste-image NAME [--profile <name>]
+
+Read the host clipboard image and stage it on NAME's guest clipboard at
+<guest-home>/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
+
+The named VM must already exist and be running (see 'sand' to list instances,
+or 'sand create' to make one). If NAME is managed under more than one
+connection profile, --profile picks which one to target.
+
+If the host clipboard holds no image, nothing is staged and the command
+exits non-zero.
+```
+
+`NAME` is required (exactly one positional argument); `--profile` may appear
+before or after `NAME`. The command requires a running VM. If the host
+clipboard contains only text or is empty, it reports "no image on clipboard"
+and exits with a non-zero status.
+
+### How it works
+
+When you run `sand paste-image`, sand reads the clipboard **image only** on
+the machine running `sand` (your workstation), verifying an image type is
+advertised before fetching any bytes. The image is then written into the guest
+at a single-slot path in one step, where a pair of lightweight shims named
+`xclip` and `wl-paste` serve it to Claude Code's native paste probe.
+
+**Security:** The feature is structured to prevent clipboard **text** from
+leaking into the guest. It never reads clipboard text; it gates the clipboard
+read on an advertised `image/*` type, and the guest shims have no text-serving
+path at all.
+
+### Cross-profile resolution for `sand paste-image`
+
+Like `sand shell`, `sand paste-image NAME` resolves which connection profile
+you mean using the same logic described above under `sand shell`'s
+[Cross-profile resolution](#cross-profile-resolution-for-sand-shell).
 
 ## `sand version` / `sand --version`
 

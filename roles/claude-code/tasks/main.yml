@@ -70,3 +70,39 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+
+# Guest clipboard shims for the sand paste-image feature:
+#
+# The headless guest has no display server and no real xclip/wl-paste, so
+# Claude Code's native Ctrl-V paste probe finds nothing to talk to. These
+# lightweight shell-script shims answer the exact probes Claude Code issues:
+# they advertise "image/png" if the single-slot file exists, stream the file
+# on image-format requests, and behave as an empty clipboard otherwise.
+#
+# The shims serve a single sand-managed PNG (~/.sand/clip/latest.png),
+# written at runtime by the host-side `sand paste-image` command or TUI verb.
+# The file persists until replaced (never consumed/cleared on read), so
+# Ctrl-V can be pressed multiple times after a single paste. Installed to
+# /usr/local/bin on the guest PATH with no risk of shadowing a real tool
+# (the guest has no X server or Wayland and no real clipboard tools).
+#
+# Image-only by construction: the shims have no -i/--write path, no
+# text/plain branch, and no non-image-target case — they refuse any request
+# that is not for an image type, independent of the host-side read seam.
+# This is a load-bearing security property (see AGENTS.md "IMAGE-ONLY
+# invariant").
+- name: Install sand image-only xclip clipboard shim
+  ansible.builtin.copy:
+    src: sand-xclip
+    dest: /usr/local/bin/xclip
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install sand image-only wl-paste clipboard shim
+  ansible.builtin.copy:
+    src: sand-wl-paste
+    dest: /usr/local/bin/wl-paste
+    owner: root
+    group: root
+    mode: "0755"

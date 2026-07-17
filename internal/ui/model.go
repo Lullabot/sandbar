@@ -20,6 +20,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/paste"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -1052,6 +1053,20 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.logMsg(text)
 		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
+
+	case pasteResultMsg:
+		// A plain status-line result (task 5): no spinner to clear (pasteCmd never
+		// goes through beginAction — see its doc comment), no view change, no
+		// refresh — a clipboard write changes nothing the board's tiles render.
+		switch {
+		case msg.err != nil:
+			m.logMsg(msg.err.Error())
+		case msg.result.Status == paste.Staged:
+			m.logMsg("staged image on " + msg.name + " — press S then Ctrl-V")
+		default: // paste.NoImage
+			m.logMsg("no image on clipboard")
+		}
+		return m, nil
 
 	case provisionOutputMsg:
 		// The chunk is keyed by RUN — the VM and which of its runs — so N jobs can

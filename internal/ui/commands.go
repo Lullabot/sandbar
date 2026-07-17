@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/paste"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -91,6 +92,19 @@ type (
 	provisionDoneMsg struct {
 		job jobKey
 		err error
+	}
+	// pasteResultMsg reports the outcome of the `v` paste-image verb (task 5):
+	// PasteImage's Result, or an error if the guest write itself failed. name is
+	// the VM the verb fired on — the command-registry argument, never
+	// m.detail — so the status line always describes the tile that actually
+	// acted, not whatever VM a stale field happened to hold. This is a plain
+	// result, not routed through actionDoneMsg/beginAction: a single small
+	// clipboard write has no progress or cancel to track, so it does not need
+	// the job registry's spinner machinery.
+	pasteResultMsg struct {
+		name   string
+		result paste.Result
+		err    error
 	}
 )
 
@@ -337,6 +351,21 @@ func shellCmd(p provider.Provider, scope registry.Scope, v vm.VM) tea.Cmd {
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return actionDoneMsg{action: "shell", name: v.Name, scope: scope, err: err}
 	})
+}
+
+// pasteCmd runs the `v` paste-image verb's one guest round trip off the
+// Update goroutine: it stages the host clipboard's image on v's guest via
+// paste.PasteImage, then reports the outcome as a pasteResultMsg. v is the
+// VM the command REGISTRY handed the action (see commandreg.go's `v` entry),
+// never m.detail — the same wrong-VM fix startTransfer's doc comment
+// explains. PasteImage does not itself check v.Status == Running; that guard
+// is this verb's enabledFor, so pasteCmd is only ever dispatched against a
+// VM already known to be up.
+func pasteCmd(p provider.Provider, v vm.VM) tea.Cmd {
+	return func() tea.Msg {
+		result, err := paste.PasteImage(context.Background(), p, v)
+		return pasteResultMsg{name: v.Name, result: result, err: err}
+	}
 }
 
 // hostInTmux reports whether the TUI is itself running inside a host tmux

@@ -34,6 +34,8 @@ profile that VM runs on — useful since the same VM name can exist under two
 different profiles at once. The label is omitted while only the Local
 profile is enabled, so a single-profile setup's tiles look unchanged.
 
+Note: the paste-image verb (`v`) is only shown on running VMs.
+
 Builds stream their output into a progress pane, but **they keep running in
 the background if you navigate away**. Leaving the progress screen does not
 cancel a build in progress; the job keeps going in the registry, and you can
@@ -71,6 +73,7 @@ require the VM to be running.
 | `r` | Restart | Stop the VM and start it again, applying any secrets you've changed since it booted. |
 | `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sand created. |
 | `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. See [Files and Shells](files-and-shells.md). |
+| `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside Claude Code in the guest. |
 | `d` | Delete | Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it. **Irreversible.** |
 | `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
 | `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |

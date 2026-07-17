@@ -55,3 +55,45 @@ For the flags behind the equivalent CLI subcommands, see the
 Files are one of two things that cross the VM boundary — for the other,
 reaching a web server listening inside the guest, see
 [Web Servers and Ports](web-servers.md).
+
+## Pasting Images
+
+`v` (paste image) on a running VM's tile, and `sand paste-image NAME` from
+the command line, both stage the host clipboard's image on the guest so you
+can press Ctrl-V inside Claude Code in the guest to attach it to your message.
+
+### The workflow
+
+1. Copy an image on your host (screenshot, photo, graphic, etc.).
+2. In the `sand` TUI, press `v` on the VM's tile; or from a terminal, run
+   `sand paste-image NAME` (where `NAME` is the VM's name).
+3. You'll see a status message: **"staged image on NAME — press Ctrl-V in the
+   guest"**.
+4. In Claude Code inside the guest, press Ctrl-V to attach the image to your
+   message.
+
+The image is held in a single-slot clipboard on the guest, persisting until
+you run `sand paste-image` again (overwriting it with a new image).
+
+### How it's secure
+
+The feature is designed to prevent clipboard **text** from leaking into the
+guest. sand reads the clipboard **image-only** on your workstation, verifying
+an image type is advertised before fetching any bytes. If you have text on
+your clipboard instead, the command reports "no image on clipboard" and
+nothing is staged. Inside the guest, the shims that serve the image to
+Claude Code have no text-serving path at all — image-only by construction.
+
+The image is read on the machine running `sand` (your workstation), not the
+remote host (if you're targeting a remote Lima VM). Only the image bytes
+themselves are sent across the network.
+
+### Known limitation
+
+A Linux *host* clipboard holding only a non-PNG image (e.g., JPEG without a
+PNG variant) is treated as "no image" in v1. macOS always coerces images to
+PNG, so this edge case applies to Linux hosts only. If it causes real-world
+friction, it will be revisited.
+
+The verb is only offered on running VMs. Stop or reset a VM and the verb
+disappears from its tile until the VM runs again.
