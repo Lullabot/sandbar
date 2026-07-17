@@ -583,3 +583,61 @@ must not begin until all three stores are converted.
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 5
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+
+All five tasks executed and independently verified:
+
+- **Task 1** — new `internal/filelock` package: a local-only, best-effort,
+  bounded-blocking advisory `syscall.Flock` lock; on any lock failure it returns
+  a no-op release + error so callers proceed unserialized. No `lima` dependency.
+- **Task 2** — `internal/registry`: mutations (`AddScoped`/`RemoveScoped`/
+  `ReconcileScoped`) converted to lock-protected reload-merge via a factored,
+  side-effect-free `parseIndex`/`reloadUnlocked` (no `save()`/quarantine/lock on
+  reload). `ReconcileScoped` pruning basis corrected to `known ∩ absent` with a
+  new `known` param supplied by `manage.Reconcile`. On-disk format byte-identical
+  (golden test).
+- **Tasks 3 & 4** — `internal/secrets` and `internal/profiles` converted to the
+  same locked reload-merge. Secrets' 0600/0700/fsync write body is byte-for-byte
+  unchanged; profiles correctly merges the non-map-union `order` slice (append
+  against reloaded order) and `lastUsed` scalar (last-writer-wins). Seeding and
+  `.corrupt` quarantine remain on the `Load()` path.
+- **Task 5** — headline two-process race test (verified RED against pre-plan-18
+  code, GREEN at HEAD), lock-failure degradation test across all three stores,
+  a full call-site audit confirming no path writes a pre-operation snapshot, and
+  the `AGENTS.md` note documenting the accepted cross-version limitation.
+
+Verification (fresh, uncached): `go build ./...`, `go vet ./...`,
+`go test ./...`, and `go test -race` on all three stores + `manage` all pass;
+`gofmt` clean.
+
+### Noteworthy Events
+
+- **Intra-phase sequencing (Phase 2).** Although the blueprint groups Tasks 2–4
+  as parallel, `internal/secrets` imports `internal/registry`, so Task 2 was run
+  and committed first, then Tasks 3 & 4 ran in parallel (disjoint files) against
+  a stable registry — avoiding transient build races in the shared worktree. The
+  dependency graph was unchanged; only dispatch order within the phase was
+  refined.
+- **Registry had no warning channel.** Task 2 added a minimal unexported `warnf`
+  (stderr, matching `cmd/sand/create.go`'s style) for the best-effort lock-failure
+  note; secrets/profiles mirror it. No exported setter added (YAGNI).
+- **Reload parse-errors abort the mutation** rather than blind-overwriting — a
+  deliberate, safer behavior consistent with "disk is authority"; never triggers
+  for a valid current-version file.
+- **Profiles `Add` existence check strengthened** to test against the freshly
+  reloaded set (not the stale in-memory one), caught via TDD.
+
+### Necessary follow-ups
+
+- **Ergonomic (not required):** after a locked write the TUI could refresh its
+  in-memory stores from the merged on-disk result so the board immediately
+  reflects VMs/secrets/profiles other processes added. This plan guarantees
+  correctness of persisted data; faster live convergence is a separate UX item.
+- `fsync` remains inconsistent across stores (only `secrets` fsyncs) — left as-is
+  by design (out of scope; durability, not the lost-update fix).
