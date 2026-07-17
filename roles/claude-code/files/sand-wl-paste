@@ -1,0 +1,57 @@
+#!/bin/sh
+# sand image-only clipboard shim (wl-paste-compatible).
+#
+# Serves the single-slot PNG at ~/.sand/clip/latest.png to Claude Code's
+# native paste probe so Ctrl-V works with no display server. Persist-until-
+# replaced: this shim NEVER deletes the slot file (a consume-on-read shim
+# would empty the slot between Claude's list-types detection call and its
+# subsequent fetch call). Image-only by construction: no write path, no
+# text/plain branch.
+#
+# Invocations handled (from the installed Claude Code build):
+#   wl-paste -l                    -> detection (also accepts --list-types)
+#   wl-paste --type image/png      -> fetch
+set -eu
+
+slot="${HOME}/.sand/clip/latest.png"
+list=0
+want=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -l | --list-types)
+      list=1
+      shift
+      ;;
+    --type)
+      want="$2"
+      shift 2
+      ;;
+    --type=*)
+      want="${1#--type=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# No slot file -> behave as an empty clipboard: nothing on stdout, exit 0.
+[ -f "$slot" ] || exit 0
+
+if [ "$list" -eq 1 ]; then
+  printf 'image/png\n'
+  exit 0
+fi
+
+case "$want" in
+  image/*)
+    cat "$slot"
+    ;;
+  *)
+    : # non-image target (or no --type given) -> empty
+    ;;
+esac
+
+exit 0

@@ -448,10 +448,10 @@ graph TD
     T5 --> T6
 ```
 
-### Phase 1: Foundations (no dependencies, parallel)
+### ✅ Phase 1: Foundations (no dependencies, parallel)
 **Parallel Tasks:**
-- Task 1: Clipboard-read seam (image-only, build-tagged) + tests
-- Task 2: Guest clipboard shim scripts + Ansible provisioning
+- ✔️ Task 1: Clipboard-read seam (image-only, build-tagged) + tests — `completed`
+- ✔️ Task 2: Guest clipboard shim scripts + Ansible provisioning — `completed`
 
 ### Phase 2: Delivery core
 **Parallel Tasks:**

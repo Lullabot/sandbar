@@ -70,3 +70,27 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+
+# Guest clipboard shims: the headless guest has no display server and no real
+# xclip/wl-paste, so Claude Code's native paste probe finds nothing to talk
+# to. These shims serve a single sand-managed PNG (~/.sand/clip/latest.png,
+# written at runtime by the paste pipeline) to that probe so Ctrl-V works.
+# Image-only by construction (no -i/write path, no text/plain branch) and
+# persist-until-replaced (never deletes the slot). Installed to
+# /usr/local/bin like drupalorg above: on the default guest PATH and empty of
+# a real xclip/wl-paste, so the shim is found first with no shadowing hazard.
+- name: Install sand image-only xclip clipboard shim
+  ansible.builtin.copy:
+    src: sand-xclip
+    dest: /usr/local/bin/xclip
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install sand image-only wl-paste clipboard shim
+  ansible.builtin.copy:
+    src: sand-wl-paste
+    dest: /usr/local/bin/wl-paste
+    owner: root
+    group: root
+    mode: "0755"
