@@ -1146,7 +1146,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg, isProvision := m.jobs.config(msg.job.scope, msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
-			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope); err != nil {
+			// Pass the scope's Provenancer so a TUI-created VM gets its
+			// authoritative host-side provenance marker written, not just the
+			// local registry cache entry. Without this, TUI builds were invisible
+			// to any OTHER controller of the same host (the marker is what a
+			// second controller reads — the registry is per-controller). nil for a
+			// backend with no Provenancer; RecordSuccess treats that as
+			// registry-only, unchanged.
+			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope, provenancerFor(m, msg.job.scope)); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// A successful CREATE (never a Reset — job.Recreates is what
