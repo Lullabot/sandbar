@@ -18,6 +18,9 @@ created: 2026-07-16
 | Should Codex be selected by default in the toolset (the existing four tools all default ON)? | Default OFF, opt-in via `sand create --with-codex`. Unconfigured creates are unchanged and existing base images stay valid. |
 | Should the Codex install get the same friction-free treatment as Claude Code (approvals/sandbox bypassed inside the ephemeral VM), or stay stock? | Match Claude's setup: provision `~/.codex/config.toml` with approvals and sandboxing bypassed, documented in the security model alongside Claude's. |
 | Is backwards compatibility required anywhere for this change? | No BC work needed. Default-OFF means no observable change for existing users; the existing stamp machinery already tolerates unknown tool names. |
+| Where does the official installer put the binary, and what does it need? *(auto-resolved during refinement: verified by downloading and inspecting `chatgpt.com/codex/install.sh`)* | Default destination is `$HOME/.local/bin/codex` (a symlink to a versioned install; `CODEX_INSTALL_DIR` overrides). Linux x86_64 and aarch64 are served as static musl builds, so there is no glibc coupling. It needs only `sh`, `curl`, and `tar`+gzip; it appends its own PATH line to a shell profile and self-checks with `codex --version`. |
+| Does molecule cover the new role? *(auto-resolved during refinement: verified against `molecule/`)* | No — molecule has `base` and `samba` scenarios only, and no scenario exercises the network curl-pipe installer roles (claude-code has no molecule coverage either). Codex role verification belongs to the Go test suite and the real-VM self-validation, not molecule. |
+| Do the docs currently document the toolset toggles or `--with-*` flags anywhere? *(auto-resolved during refinement: verified by searching `docs/`)* | No — `tui.md` documents only the reset preserve-toggles, and `cli-reference.md`'s help dump predates all toolset flags. The docs work in this plan is therefore additive and definitive, not conditional. |
 
 ## Executive Summary
 
@@ -52,7 +55,7 @@ Sandbar (`sand`) provisions disposable Claude Code development VMs on Lima from 
 
 Verified facts about OpenAI Codex that shape this plan (checked against OpenAI's current docs, July 2026):
 
-- Install is a standalone official installer at `https://chatgpt.com/codex/install.sh` (curl-piped shell, macOS and Linux) — the same shape as Claude Code's `https://claude.ai/install.sh`, so the role can mirror `roles/claude-code` task-for-task.
+- Install is a standalone official installer at `https://chatgpt.com/codex/install.sh` (curl-piped shell, macOS and Linux; the URL 302-redirects to the latest GitHub release asset) — the same shape as Claude Code's `https://claude.ai/install.sh`, so the role can mirror `roles/claude-code` task-for-task. Verified against the current script: it installs a symlink at `$HOME/.local/bin/codex`, serves Linux x86_64 and aarch64 as static musl builds (no glibc coupling), requires only `sh`/`curl`/`tar`+gzip (all in the base image), appends its own PATH line to a shell profile, and self-verifies with `codex --version` before exiting.
 - Authentication is an interactive ChatGPT sign-in; sandbar's existing policy of provisioning no credential and having the user log in once inside the VM carries over directly. The login flow opens a browser callback on a localhost port, so headless sign-in needs the upstream-documented workaround (SSH port forwarding or copying an existing auth file); the docs must cover this.
 - Phone remote control ("Codex Remote") pairs the ChatGPT mobile app with the Codex **desktop app** on macOS/Windows via QR codes. OpenAI's docs state setup and device control are not available from the Codex CLI or IDE extension — so it is structurally impossible on a headless Linux VM, not merely unimplemented here.
 - The CLI's only notification mechanisms are a `notify` hook (external program invoked with a JSON payload on `agent-turn-complete` / `approval-requested`) and terminal-level TUI notifications. Reaching a phone would require routing the hook through a third-party push service; the clarification decision was to not do this.
@@ -81,7 +84,7 @@ flowchart LR
 
 **Objective**: Install and configure the Codex CLI on the base image when selected, mirroring the `claude-code` role so the two agent roles stay structurally parallel.
 
-A new `roles/codex` follows `roles/claude-code`'s task sequence: resolve the user's home via getent, create `~/.codex`, deploy `config.toml` from a template, run the official installer (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`) as the VM user with a `creates:` guard on the installed binary for idempotence, and ensure `~/.local/bin` is on the PATH with the same idempotent `lineinfile` pattern the claude-code role uses. The PATH task is duplicated rather than shared because Codex can be selected with Claude de-selected; the role must be self-sufficient. (During implementation, confirm the installer's actual install destination and use it in the `creates:` guard; the pattern does not depend on the specific path.)
+A new `roles/codex` follows `roles/claude-code`'s task sequence: resolve the user's home via getent, create `~/.codex`, deploy `config.toml` from a template, run the official installer (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`) as the VM user with a `creates:` guard on the verified install destination `{{ user_home }}/.local/bin/codex`, and ensure `~/.local/bin` is on the PATH with the same idempotent `lineinfile` pattern the claude-code role uses. The PATH task is duplicated rather than shared because Codex can be selected with Claude de-selected; the role must be self-sufficient. (The installer also appends its own PATH export to a shell profile; the role's `lineinfile` regexp pattern is idempotent against that, and keeping the explicit task makes PATH a provisioned guarantee rather than an installer side effect.)
 
 The provisioned `config.toml` sets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"` — the Codex equivalents of Claude's `skipDangerousModePermissionPrompt` — per the clarified decision to match Claude's friction-free treatment. No credential, `notify` hook, or remote-control configuration is provisioned.
 
@@ -116,10 +119,10 @@ The provisioned `config.toml` sets `approval_policy = "never"` and `sandbox_mode
 <details>
 <summary>Technical Risks</summary>
 
-- **Installer drift**: OpenAI's installer URL, install destination, or auth flow may change (the docs host already moved once).
-    - **Mitigation**: pin behavior to the official `chatgpt.com/codex/install.sh` entrypoint only; guard idempotence with `creates:` on the verified binary path; the e2e/molecule verification (below) catches destination drift.
+- **Installer drift**: OpenAI's installer URL, install destination, or auth flow may change (the docs host already moved once; the installer URL redirects to the latest GitHub release asset, so its contents change with every Codex release).
+    - **Mitigation**: pin behavior to the official `chatgpt.com/codex/install.sh` entrypoint only; guard idempotence with `creates:` on the verified destination (`~/.local/bin/codex`); the real-VM self-validation below catches destination drift.
 - **Config schema drift**: `approval_policy` / `sandbox_mode` names could change in a future Codex release.
-    - **Mitigation**: values are confined to one template file; verification includes running `codex` non-interactively enough to confirm the config parses (Codex fails loudly on unknown keys).
+    - **Mitigation**: values are confined to one template file; self-validation runs `codex --version` and starts `codex` against the provisioned config to confirm it parses cleanly.
 - **Headless login friction**: the ChatGPT sign-in callback targets localhost, which is awkward inside a VM.
     - **Mitigation**: documentation-first — the docs describe the upstream-supported headless flow; sandbar deliberately provisions no credential (same policy as Claude).
 </details>
@@ -167,9 +170,9 @@ After all tasks are complete, verify on a real host with Lima:
 - `docs/getting-started/first-vm.md`: "Logging into Codex" passage (interactive ChatGPT sign-in, no provisioned credential, headless-login caveat and workaround), plus the remote-control expectation note adjacent to the existing Claude remote-control section.
 - `docs/reference/security-model.md`: Codex bullets mirroring Claude's — approvals/sandbox off deliberately, no credential provisioned.
 - `docs/using-sand/cli-reference.md`: document `--with-codex` and regenerate the stale `sand create --help` dump so all `--with-*` flags appear.
-- `docs/using-sand/tui.md`: mention the new toggle if the create-form toggles are enumerated there.
+- `docs/using-sand/tui.md`: no change — verified it documents only the reset preserve-toggles, not the create-form toolset toggles, so there is nothing to extend (documenting the create form itself would be new scope).
 - `CHANGELOG.md` is release-please-managed; the feature lands via conventional commit messages, not manual edits.
-- `AGENTS.md`: only if it enumerates the toolset tools or roles (verify during implementation).
+- `AGENTS.md`: no change — verified it references `roles/` only generically and enumerates no tool list.
 
 ## Resource Requirements
 
@@ -182,7 +185,7 @@ After all tasks are complete, verify on a real host with Lima:
 ### Technical Infrastructure
 
 - Network access to `chatgpt.com` from the VM during provisioning (same class of dependency as the existing `claude.ai` installer fetch).
-- A Lima + KVM capable host for the e2e self-validation steps; the standard `go test ./...` suite and molecule for everything else.
+- A Lima + KVM capable host for the e2e self-validation steps; the standard `go test ./...` suite for everything else. (Molecule is deliberately not extended: its scenarios cover `base` and `samba` only, and no network curl-pipe installer role — claude-code included — is exercised there.)
 - A ChatGPT account is **not** required for validation — sign-in is only reached, not completed.
 
 ## Integration Strategy
@@ -194,3 +197,7 @@ The change rides entirely on existing integration points: the toolset extra-vars
 - Reset mode's "preserve Claude Code settings" is deliberately **not** extended to Codex logins in this plan — it was not requested, and preservation copies credentials out of the VM, which deserves its own security consideration if ever wanted.
 - No `notify` hook, ntfy/push integration, or TUI-notification configuration is provisioned, per the clarification decision; if OpenAI later ships CLI-reachable remote control, enabling it would be a new work order.
 - `toolset_codex` is the first default-false selection; the comment block in `roles/base/defaults/main.yml` (which currently says "All four default true") must be reworded as part of the change so the one-home-for-selections rule stays accurate.
+
+### Change Log
+
+- 2026-07-16: Refinement pass. Verified the official installer by inspection and baked in its facts (destination `~/.local/bin/codex`, static musl builds for both Linux arches, `sh`/`curl`/`tar` only, self-adds a PATH profile line, self-checks `codex --version`), replacing the "confirm during implementation" placeholder in the role design and the `creates:` guard. Softened an unverified "fails loudly on unknown keys" claim into a concrete parse-check validation step. Corrected the resource notes to state molecule is deliberately not extended (no installer role has molecule coverage). Made the `tui.md` and `AGENTS.md` documentation items definitive (both verified: no change needed). Recorded all four verifications as auto-resolved entries in Plan Clarifications.
