@@ -270,6 +270,63 @@ func TestBuildExtraVars_AptUpgradeEmittedOnRefresh(t *testing.T) {
 	}
 }
 
+// TestBuildExtraVars_NoSandbarRepoByteIdentity is the plan 18 regression guard
+// for Success Criteria #3 ("Repositories without .sandbar/ behave exactly as
+// today"). BuildExtraVars takes no repo path or profile input at all — it is
+// driven purely by vm.CreateConfig/phase/hostname/aptUpgrade — so a plain
+// clone with no .sandbar/ manifest is simply any ordinary call to it. Task 3
+// (roles/repo-profile, the new guest-side finalize stage) is guest-only and
+// introduced zero new host-side variables or extra-vars, and Task 2's
+// shipped-profiles restructuring touched no Go code either, so this asserts
+// the FULL byte output against a literal golden string captured before both
+// tasks landed — not a value re-derived from the current code — so a stray
+// addition, removal, or reordering of a key is caught even if a computed
+// comparison would consider it "equivalent". toolset_codex is the one key added
+// to the golden since capture: it arrived on main with the --with-codex flag,
+// independently of this plan.
+func TestBuildExtraVars_NoSandbarRepoByteIdentity(t *testing.T) {
+	cfg := fullConfig()
+
+	wantBase := `user_name: andrew
+base_hostname: sandbar-base
+base_domain: lan
+base_locale: en_US.UTF-8
+provision_phase: base
+samba_enabled: false
+toolset_claude: true
+toolset_ddev: true
+toolset_go: true
+toolset_java: true
+toolset_codex: false
+`
+	base, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars (base): %v", err)
+	}
+	if string(base) != wantBase {
+		t.Errorf("base-phase extra-vars diverged from the pre-Task-2/3 golden output.\ngot:\n%s\nwant:\n%s", base, wantBase)
+	}
+
+	wantFinalize := `user_name: andrew
+base_hostname: myhost
+base_domain: lan
+base_locale: en_US.UTF-8
+provision_phase: finalize
+samba_enabled: false
+user_git_user_name: Andrew Berry
+user_git_user_email: andrew@example.com
+project_clone_url: https://github.com/example/repo.git
+project_clone_token: tok"en\with-specials
+`
+	finalize, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars (finalize): %v", err)
+	}
+	if string(finalize) != wantFinalize {
+		t.Errorf("finalize-phase extra-vars diverged from the pre-Task-2/3 golden output.\ngot:\n%s\nwant:\n%s", finalize, wantFinalize)
+	}
+}
+
 // TestBuildExtraVars_AptUpgradeIgnoredOnFinalize: aptUpgrade must have no
 // effect outside the base phase — a clone's finalize pass never upgrades, even
 // if a caller passed aptUpgrade=true by mistake.
