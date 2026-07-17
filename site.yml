@@ -30,5 +30,13 @@
       when:
         - toolset_claude | default(true) | bool
         - provision_phase | default('full') != 'finalize'
+    # OpenAI Codex is also part of the configurable base tool-set (sand create
+    # --with-codex), but unlike its opt-out siblings above it is opt-in:
+    # toolset_codex defaults to false, so an unconfigured run does not install
+    # it.
+    - role: codex
+      when:
+        - toolset_codex | default(false) | bool
+        - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'

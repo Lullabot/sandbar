@@ -1,0 +1,44 @@
+---
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+- name: Create ~/.codex directory
+  ansible.builtin.file:
+    path: "{{ user_home }}/.codex"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+- name: Deploy ~/.codex/config.toml from template
+  ansible.builtin.template:
+    src: codex-config.toml.j2
+    dest: "{{ user_home }}/.codex/config.toml"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+
+- name: Install OpenAI Codex using the official installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -fsSL https://chatgpt.com/codex/install.sh | sh
+    executable: /bin/bash
+  become: true
+  become_user: "{{ user_name }}"
+  args:
+    creates: "{{ user_home }}/.local/bin/codex"
+
+- name: Add ~/.local/bin to PATH in ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    line: 'export PATH="$HOME/.local/bin:$PATH"'
+    regexp: '(^|^export )PATH=.*\.local/bin'
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"

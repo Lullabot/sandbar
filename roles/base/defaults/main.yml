@@ -50,20 +50,26 @@ base_packages:
   - wget
   - yq
 
-# Configurable base-image tool-set (sand create --with-claude/--with-ddev/
-# --with-go/--with-java). All four default true so an unconfigured `sand create`
-# — and a bare `ansible-playbook site.yml` run with no extra-vars — installs
-# everything base_packages used to include unconditionally. sand's own
-# BuildExtraVars (internal/provision/vars.go) normally supplies these for the
-# base phase from vm.CreateConfig; the defaults here are the fallback for a
-# direct playbook run.
+# Configurable base-image tool-set (sand create --with-claude/--with-codex/
+# --with-ddev/--with-go/--with-java). Four of the five default true so an
+# unconfigured `sand create` — and a bare `ansible-playbook site.yml` run with
+# no extra-vars — installs everything base_packages used to include
+# unconditionally. sand's own BuildExtraVars (internal/provision/vars.go)
+# normally supplies these for the base phase from vm.CreateConfig; the
+# defaults here are the fallback for a direct playbook run.
 #
 # toolset_claude gates the whole claude-code role from site.yml (it installs no
 # apt packages, so it has nothing to fold into toolset_packages below). It lives
 # here with its siblings rather than in the role it gates: role defaults are
 # play-wide, and keeping one home for the selections is what stops them drifting
 # apart.
+#
+# toolset_codex is the first opt-in selection: it defaults to false, so an
+# unconfigured run does not install it. Like claude, it gates the whole codex
+# role from site.yml and installs no apt packages, so it also has nothing to
+# fold into toolset_packages below.
 toolset_claude: true
+toolset_codex: false
 toolset_ddev: true
 toolset_go: true
 toolset_java: true

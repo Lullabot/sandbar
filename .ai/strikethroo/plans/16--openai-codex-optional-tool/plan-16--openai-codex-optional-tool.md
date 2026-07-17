@@ -201,3 +201,40 @@ The change rides entirely on existing integration points: the toolset extra-vars
 ### Change Log
 
 - 2026-07-16: Refinement pass. Verified the official installer by inspection and baked in its facts (destination `~/.local/bin/codex`, static musl builds for both Linux arches, `sh`/`curl`/`tar` only, self-adds a PATH profile line, self-checks `codex --version`), replacing the "confirm during implementation" placeholder in the role design and the `creates:` guard. Softened an unverified "fails loudly on unknown keys" claim into a concrete parse-check validation step. Corrected the resource notes to state molecule is deliberately not extended (no installer role has molecule coverage). Made the `tui.md` and `AGENTS.md` documentation items definitive (both verified: no change needed). Recorded all four verifications as auto-resolved entries in Plan Clarifications.
+- 2026-07-16: Task generation. Decomposed into 4 tasks (ansible role/gate, Go wiring, TUI toggle, docs) with tests folded into the implementation tasks; appended the Execution Blueprint below.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[Task 1: codex Ansible role + toolset gate]
+    T2[Task 2: Go WithCodex flag + extra-vars]
+    T3[Task 3: TUI create-form toggle]
+    T4[Task 4: documentation updates]
+    T2 --> T3
+    T1 --> T4
+    T2 --> T4
+```
+
+### ✅ Phase 1: Provisioning and CLI wiring
+**Parallel Tasks:**
+- ✔️ Task 1: Create the codex Ansible role and gate it as an opt-in toolset selection — `completed`
+- ✔️ Task 2: Wire WithCodex through CreateConfig, the --with-codex flag, and Ansible extra-vars — `completed`
+
+### Phase 2: TUI and documentation
+**Parallel Tasks:**
+- Task 3: Add the "Install OpenAI Codex" toggle to the TUI create form (depends on: 2)
+- Task 4: Document Codex — available tools, login, security model, CLI reference (depends on: 1, 2)
+
+### Post-phase Actions
+
+- After each phase: run the full Go test suite (`go test ./...`) and, for Phase 1, `ansible-playbook site.yml --syntax-check`; apply the verification gate before marking the phase complete.
+
+### Execution Summary
+- Total Phases: 2
+- Total Tasks: 4

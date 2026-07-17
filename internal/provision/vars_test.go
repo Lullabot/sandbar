@@ -84,6 +84,7 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 		"toolset_ddev":   true,
 		"toolset_go":     true,
 		"toolset_java":   true,
+		"toolset_codex":  false,
 	} {
 		v, ok := m[key]
 		if !ok {
@@ -153,10 +154,31 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
 	m := parseVars(t, data)
-	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java"} {
+	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex"} {
 		if _, ok := m[k]; ok {
 			t.Errorf("finalize phase unexpectedly emitted %q", k)
 		}
+	}
+}
+
+// TestBuildExtraVars_CodexCanBeSelected: the inverse of
+// TestBuildExtraVars_ClaudeCanBeDeselected — codex defaults off, so this
+// proves toolset_codex=true is emitted (and the other tools are unaffected)
+// when a user opts in, gating the codex install task on in site.yml.
+func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithCodex = true
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+
+	if v, ok := m["toolset_codex"].(bool); !ok || !v {
+		t.Errorf("toolset_codex = %v, want true", m["toolset_codex"])
+	}
+	if v, ok := m["toolset_claude"].(bool); !ok || !v {
+		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
 	}
 }
 
