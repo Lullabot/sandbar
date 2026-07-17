@@ -539,3 +539,47 @@ confined to how the three host-side files are persisted.
   deadline that degrades to unserialized (correcting the `baselock` contrast —
   `baselock` polls `TryLock(LOCK_NB)`+ctx, it is not a blocking `LOCK_EX`), and
   recorded `fsync`-standardization as explicitly out of scope.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001[Task 1: internal/filelock primitive] --> 002[Task 2: Registry reload-merge + reconcile]
+    001 --> 003[Task 3: Secrets reload-merge]
+    001 --> 004[Task 4: Profiles reload-merge]
+    002 --> 005[Task 5: E2E validation + audit + docs]
+    003 --> 005
+    004 --> 005
+```
+
+No circular dependencies.
+
+### Phase 1: Lock primitive foundation
+**Parallel Tasks:**
+- Task 001: `internal/filelock` cross-process lock primitive
+
+### Phase 2: Store conversions
+**Parallel Tasks:**
+- Task 002: Registry store locked reload-merge + reconcile correctness (depends on: 001)
+- Task 003: Secrets store locked reload-merge (depends on: 001)
+- Task 004: Profiles store locked reload-merge (depends on: 001)
+
+### Phase 3: Validation and documentation
+**Parallel Tasks:**
+- Task 005: End-to-end validation, call-site audit, and docs (depends on: 002, 003, 004)
+
+### Post-phase Actions
+
+Run the `POST_PHASE.md` validation gate after each phase: `go build ./...`,
+`go vet ./...`, and `go test ./...` must pass before advancing. Phase 2 must not
+begin until Task 001 is green (all three stores import the primitive); Phase 3
+must not begin until all three stores are converted.
+
+### Execution Summary
+- Total Phases: 3
+- Total Tasks: 5
