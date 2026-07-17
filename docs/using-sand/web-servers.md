@@ -87,19 +87,28 @@ This starts a [Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/ne
 `https://….trycloudflare.com` URL that works from any browser, anywhere,
 for as long as the process runs.
 
-ddev's router picks the project by the request's `Host` header, so for a
-ddev project point cloudflared at the router and pin the header:
+### ddev projects
+
+For a ddev project, don't build the tunnel by hand — ddev's router routes
+by the request's `Host` header, which a bare tunnel to a port doesn't
+preserve. Let [`ddev share`](https://docs.ddev.com/en/stable/users/topics/sharing/)
+do it, pointed at cloudflared:
 
 ```console
-claude@myvm$ cloudflared tunnel --url https://127.0.0.1:443 \
-    --http-host-header myproj.ddev.site --no-tls-verify
+claude@myvm$ ddev share --provider=cloudflared
 ```
 
-`--no-tls-verify` is needed because the router presents the guest-minted
-mkcert certificate, which cloudflared doesn't trust; the tunnel's public
-side still gets a real Cloudflare certificate. (ddev's built-in
-[`ddev share`](https://docs.ddev.com/en/stable/users/topics/sharing/) is an
-ngrok-based alternative.)
+This runs the same cloudflared already in the VM (no account, no
+authtoken), wires up the `Host` header and TLS to the router for you, and
+prints the public `trycloudflare.com` URL. Make it the default so plain
+`ddev share` uses it:
+
+```console
+claude@myvm$ ddev config global --share-default-provider=cloudflared
+```
+
+(ddev's out-of-the-box default provider is ngrok, which needs an ngrok.com
+account and `ngrok config add-authtoken` first; cloudflared avoids both.)
 
 !!! warning "A quick tunnel is a public URL"
     Anyone who has the URL can reach the server — there is no
