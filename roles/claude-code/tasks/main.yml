@@ -22,7 +22,10 @@
 # the scoped secrets: direnv's bash hook rides on PROMPT_COMMAND, which
 # never fires in Claude Code's non-interactive Bash tool — and sessions
 # dispatched from `claude agents` additionally inherit the environment of
-# wherever the supervisor was started, not the repo they work in.
+# wherever the supervisor was started, not the repo they work in. The hook's
+# `2>/dev/null || true` keeps a working directory whose .env was never
+# `direnv allow`ed (direnv exits non-zero there) from surfacing as a failing
+# hook on every cwd change; that directory just loads no scoped secret.
 - name: Deploy ~/.claude/settings.json from template
   ansible.builtin.template:
     src: claude-settings.json.j2
