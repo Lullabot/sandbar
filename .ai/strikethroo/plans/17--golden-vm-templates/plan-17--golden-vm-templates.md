@@ -254,9 +254,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 002: Provider seam + snapshot/delete/disk mechanics (completed)
 
-### Phase 3: Clone-from-Template
+### Phase 3: Clone-from-Template ✅
 **Parallel Tasks:**
-- Task 003: Clone-from-template create and template-aware reset (depends on: 001, 002)
+- ✔️ Task 003: Clone-from-template create and template-aware reset (completed)
 
 ### Phase 4: User Surfaces
 **Parallel Tasks:**

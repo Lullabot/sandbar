@@ -3,6 +3,7 @@ package provision
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -321,6 +322,18 @@ type CreateOptions struct {
 	// depend on internal/provider — the callback is how the marker write is
 	// injected without an import cycle.
 	OnCloned func(ctx context.Context) error
+
+	// TemplateSource is the Lima instance name of a golden template (see
+	// vm.TemplateInstanceName) to clone this create from, instead of the shared
+	// base image. When set, prepareBaseAndClone skips ensureBaseStopped
+	// entirely — no build, no in-place re-apply, no staleness/age check — and
+	// clones straight from this instance, because a template is a complete,
+	// already-provisioned instance that this create is not responsible for
+	// keeping current. Rebuild has no meaning in that mode.
+	//
+	// Left empty (the zero value, every caller before this field existed), the
+	// base-image path below runs exactly as it always has.
+	TemplateSource string
 }
 
 // CreateVM ensures a stopped base image exists, clones it into the target VM,
@@ -500,6 +513,37 @@ func (p *Provisioner) hasLiveTmux(ctx context.Context, name string) bool {
 // nobody should have to reason about while a VM's disk is being deleted underneath
 // them.
 func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
+	// A template-sourced create/reset is a completely separate, much shorter
+	// critical section: verify the template instance is actually there, take
+	// the SAME lock (keyed on the template instance rather than the base) so a
+	// concurrent snapshot/delete of that template cannot race this clone, and
+	// clone straight from it. None of ensureBaseStopped's build/converge/
+	// refresh machinery applies — a template is not a shared, mutable resource
+	// this create maintains, it is a fixed snapshot — so this branch returns
+	// before any of that code is reached, leaving the base-image path below
+	// completely untouched for every non-template call.
+	if opts.TemplateSource != "" {
+		if _, err := p.Lima.Get(opts.TemplateSource); err != nil {
+			if errors.Is(err, lima.ErrNoSuchInstance) {
+				return fmt.Errorf("template %q not found: %w", opts.TemplateSource, err)
+			}
+			return err
+		}
+		release, err := lockBase(ctx, p.hostFiles(), opts.TemplateSource, out)
+		if err != nil {
+			return err // only a cancelled context gets here
+		}
+		defer release()
+
+		step(out, "Cloning %q from template %q…", cfg.Name, opts.TemplateSource)
+		if err := timer.time("clone", func() error {
+			return p.Lima.CloneStreaming(ctx, opts.TemplateSource, cfg.Name, out)
+		}); err != nil {
+			return fmt.Errorf("clone %q -> %q: %w", opts.TemplateSource, cfg.Name, err)
+		}
+		return nil
+	}
+
 	release, err := lockBase(ctx, p.hostFiles(), cfg.BaseName, out)
 	if err != nil {
 		return err // only a cancelled context gets here
@@ -895,6 +939,19 @@ func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool 
 type ResetOptions struct {
 	PreserveClaude  bool // keep ~/.claude and ~/.claude.json (login + history)
 	PreserveProject bool // keep the per-org checkout + restored .env
+
+	// TemplateSource, when non-empty, marks this reset as template-provenanced:
+	// the caller (which reads the VM's registry entry) sets it whenever that
+	// entry's TemplateSource provenance field is non-empty. Reset never
+	// inspects the string itself — only its emptiness — because the actual
+	// clone source is cfg.BaseName, which task 1's create-from-template path
+	// already records as the template's own Lima instance name
+	// (vm.TemplateInstanceName). Setting this field makes Reset build the
+	// internal CreateOptions{TemplateSource: cfg.BaseName} that routes
+	// prepareBaseAndClone into the same skip-base branch a template create
+	// takes, instead of treating cfg.BaseName as a base image to build/
+	// converge.
+	TemplateSource string
 }
 
 // Reset recreates a managed VM from a (possibly edited) config, optionally
@@ -967,13 +1024,19 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
 	}
 
-	// 3. Recreate sized from the base image. A reset re-clones ONE VM; it never
-	// asks for a base rebuild (CreateOptions zero value), it just takes the base as
-	// the base lock finds it. Reset does not surface a per-phase timing summary
-	// (only "sand create" does; see phaseTimer's doc comment) — prepareBaseAndClone
-	// still needs a timer to share its signature with createVM, so give it one whose
-	// readings are simply discarded here.
-	if err := p.prepareBaseAndClone(ctx, cfg, CreateOptions{}, out, newPhaseTimer(out)); err != nil {
+	// 3. Recreate sized from the base image — or, when this VM's provenance is a
+	// golden template, from that template instance instead (see
+	// ResetOptions.TemplateSource). A plain reset never asks for a base rebuild
+	// (CreateOptions zero value), it just takes the base as the base lock finds
+	// it. Reset does not surface a per-phase timing summary (only "sand create"
+	// does; see phaseTimer's doc comment) — prepareBaseAndClone still needs a
+	// timer to share its signature with createVM, so give it one whose readings
+	// are simply discarded here.
+	cloneOpts := CreateOptions{}
+	if opts.TemplateSource != "" {
+		cloneOpts.TemplateSource = cfg.BaseName
+	}
+	if err := p.prepareBaseAndClone(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
 		return wrap(err)
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
