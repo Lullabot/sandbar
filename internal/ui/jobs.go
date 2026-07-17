@@ -72,6 +72,12 @@ const (
 	// VM's own state — a VM whose upload failed is a healthy running VM with a
 	// failed copy — so it never touches the tile's status word.
 	kindTransfer
+	// kindLand is a Landing-pane gh action (plan 17, task 7): "Open draft PR" or
+	// "Open in browser". Like a transfer, it says nothing about the VM's own
+	// state — it is a workstation-local gh/browser call, never a status word —
+	// and it gets its OWN slot precisely so it can run alongside (and never
+	// evict) a build or a file transfer already in flight against the same VM.
+	kindLand
 )
 
 // jobKey identifies one run: the connection scope, the VM, and which of its
@@ -91,12 +97,15 @@ func provisionKey(scope registry.Scope, name string) jobKey {
 func transferKey(scope registry.Scope, name string) jobKey {
 	return jobKey{scope: scope, vm: name, kind: kindTransfer}
 }
+func landKey(scope registry.Scope, name string) jobKey {
+	return jobKey{scope: scope, vm: name, kind: kindLand}
+}
 
-// keysFor is a VM's two possible slots, provision first. Every "does this VM have
-// a run" question is two map lookups rather than a scan, and the fixed order is
-// what makes the answers deterministic.
-func keysFor(scope registry.Scope, name string) [2]jobKey {
-	return [2]jobKey{provisionKey(scope, name), transferKey(scope, name)}
+// keysFor is a VM's possible slots, provision first. Every "does this VM have
+// a run" question is a handful of map lookups rather than a scan, and the
+// fixed order is what makes the answers deterministic.
+func keysFor(scope registry.Scope, name string) [3]jobKey {
+	return [3]jobKey{provisionKey(scope, name), transferKey(scope, name), landKey(scope, name)}
 }
 
 // jobState is a job's lifecycle state. A finished job — succeeded OR failed —

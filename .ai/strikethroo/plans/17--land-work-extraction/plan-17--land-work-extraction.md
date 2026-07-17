@@ -669,9 +669,9 @@ Verified acyclic: every edge points from a lower phase to a higher one.
 - ✔️ Task 03: Sweep shell lifecycle — 2nd limactl shell/goroutine per VM (depends on: 01, 02) — `internal/ui/sweepshell.go`, syncSweeps gated by shouldTick
 - ✔️ Task 09: `sand land NAME` CLI (depends on: 02, 06) — `cmd/sand/land.go`, `--pr`/`--web`, gh-optional
 
-### Phase 4: Landing pane
+### ✅ Phase 4: Landing pane
 **Parallel Tasks:**
-- Task 07: Landing pane — PR cockpit (depends on: 01, 03, 06)
+- ✔️ Task 07: Landing pane — PR cockpit (depends on: 01, 03, 06) — `internal/ui/landing.go`, lazy gh reconcile, job ledger, gh-absent fallback
 
 ### Phase 5: Keybinding rebind
 **Parallel Tasks:**
