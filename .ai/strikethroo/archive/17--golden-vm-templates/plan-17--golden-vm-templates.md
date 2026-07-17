@@ -275,3 +275,29 @@ graph TD
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+Golden VM templates shipped end to end across 7 tasks / 5 phases:
+- **Data model (registry v4):** `vm.TemplateInstanceName`/`ValidateTemplateName`; `registry.Template` with scoped CRUD (`AddTemplate`, `RemoveTemplateScoped`, `TemplatesInScope`, `TemplateInScope`, `DependentsOfTemplate`), a `TemplateSource` provenance field on managed VMs, and `AddScopedWithTemplate`/`TemplateSourceInScope`. Schema bumped v3→v4 with an additive migration that preserves existing state (verified live: a real v3 file rewrote to v4 with its VM intact).
+- **Snapshot mechanics:** `Provisioner.SnapshotTemplate` preserves the source's power state (running→stop/clone/restart; stopped stays stopped), restores on any failure, cleans up partial clones, and stamps the template's playbook version; plus `DeleteTemplate` and `TemplateDiskBytes`. Exposed on the `Provider` interface (local delegates, remote inherits) and the fake.
+- **Clone-from-template:** `CreateOptions.TemplateSource` clones from a template instance and skips all base-build/staleness machinery (base path unchanged when unset); reset/recreate of a template-provenanced VM re-clones from the template; missing template fails fast with a named error.
+- **Surfaces:** CLI `sand template snapshot|list|delete` + `sand create --template`; TUI `t` snapshot verb (tracked job), new-VM form source selector, template delete confirmation, and template-aware reset.
+- **e2e + docs:** `//go:build limae2e` round-trip (snapshot → create-from → delete) for local and remote scopes; new golden-templates docs page, files-and-state schema-v4 update, CLI/TUI reference, README, AGENTS.md.
+
+Final gate: `gofmt -l` clean, `go vet ./...` clean, `go build ./...` clean, full `go test ./... -race` green, aggregate coverage **87.1% ≥ 87%** floor.
+
+### Noteworthy Events
+- **Registry provenance-write wiring (task 1 → task 4).** Task 1 deliberately left the write side of `TemplateSource` provenance for "the task that clones from a template." Task 4 added `AddScopedWithTemplate`/`TemplateSourceInScope` to `internal/registry` to close that gap — a justified cross-package addition (not the UI package task 5 was editing), consumed by both surfaces.
+- **Two well-reasoned design deviations from the task sketches.** `SnapshotResult` uses `ToolsetKey string` (matching the registry field, reachable cross-package) instead of a `map[string]bool`; and the missing-template existence check uses `Lima.Get` (the only method that returns `ErrNoSuchInstance`) rather than `Status`, avoiding a dead error branch.
+- **Concurrent phase-4 execution touched shared registry state.** Tasks 4 and 5 ran in parallel; task 5 consumed task 4's new registry APIs from the shared tree. Verified by a full combined build + race suite after both landed — no conflict.
+- **Dead-code cleanup.** Removed the unused non-scoped `RemoveTemplate` wrapper introduced in task 1 (all template deletion is scope-aware) per the execution cleanup gate. The v3→v4 migration is a plan-mandated compatibility requirement, not tech debt.
+- **e2e was compile- and skip-verified, not run against live VMs.** `limactl` is installed in this environment but the e2e suite is opt-in (gated on `LIMA_E2E`/`LIMA_REMOTE_E2E`, matching the existing harness) and the sandbox cannot safely boot real VMs. The tagged tests compile, `go vet` clean under the tag, and skip cleanly. Self-Validation steps that need a live VM (snapshot/clone/reset round-trips, screenshots) are therefore exercised by these tests in CI's `lima-e2e` job, not here; the non-VM steps (unit migration test, real-binary `template --help`/`list`, live v3→v4 migration, mutual-exclusion and error-exit checks) were executed and pass.
+
+### Necessary follow-ups
+- Run the `limae2e`-tagged round-trip (`LIMA_E2E=1`, and `LIMA_REMOTE_E2E=1` for the remote leg) in the CI `lima-e2e` job to exercise the real-VM Self-Validation steps.
+- Optional: capture TUI screenshots of the snapshot verb, form source selector, and delete confirmation for the docs (golden snapshots already cover them in tests).
