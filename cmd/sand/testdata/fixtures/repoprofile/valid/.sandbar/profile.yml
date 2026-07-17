@@ -1,0 +1,13 @@
+# Fixture .sandbar/ manifest for the repo-profile lima-e2e suite (strikethroo
+# plan 18, task 05). One entry per declaration group — see this repo's
+# README.md for what each one proves in the guest. Validated by
+# scripts/validate_profile.py, same as any real repo's manifest.
+packages:
+  - cowsay
+services:
+  - sand-fixture-marker.service
+roles:
+  - marker-role
+seed: .sandbar/seed.yml
+toolset:
+  - go

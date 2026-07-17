@@ -1,0 +1,9 @@
+# Deliberately invalid .sandbar/ manifest (strikethroo plan 18, task 05): the
+# `bogus` key is not one of the five allowed top-level groups
+# (packages/services/roles/seed/toolset — see scripts/validate_profile.py).
+# Used by the malformed-manifest e2e check to prove finalize aborts with the
+# validator's own message rather than silently skipping the profile.
+packages:
+  - cowsay
+bogus:
+  - nope

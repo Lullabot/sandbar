@@ -1,0 +1,11 @@
+---
+# Fixture seed tasks file (strikethroo plan 18, task 05). Included LAST by
+# roles/repo-profile/tasks/main.yml, after packages/toolset/roles/services are
+# in place. repo_profile_checkout_dir is the repo-profile role's own default
+# var (roles/repo-profile/defaults/main.yml) and is in scope here because this
+# file is pulled in via include_tasks from within that role, not include_role.
+- name: Write seed marker into the project tree (proves seed tasks ran)
+  ansible.builtin.copy:
+    dest: "{{ repo_profile_checkout_dir }}/seed-marker.txt"
+    content: "seed ran\n"
+    mode: "0644"

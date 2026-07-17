@@ -1,0 +1,38 @@
+---
+# Fixture custom role (strikethroo plan 18, task 05). Included by
+# roles/repo-profile/tasks/main.yml (step 4) via a runtime symlink onto the
+# `repo-roles` ansible.cfg roles-path entry — read in place from the clone,
+# never copied into the embedded playbook fileset.
+#
+# Deliberately writes to fixed, absolute guest paths rather than anything
+# under repo_profile_checkout_dir: this role is included via include_role
+# (not include_tasks from within roles/repo-profile), so it must not assume
+# another role's default vars are in scope.
+- name: Write role marker file (proves the custom role ran)
+  ansible.builtin.copy:
+    dest: /etc/sand-fixture-role-marker
+    content: "marker-role ran\n"
+    mode: "0644"
+
+# Installs the systemd unit this fixture's profile.yml then declares under
+# `services:` — proving roles run BEFORE services are enabled (the finalize
+# stage's step order), since the unit must exist before it can be enabled.
+- name: Install a custom systemd service unit for the fixture
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/sand-fixture-marker.service
+    content: |
+      [Unit]
+      Description=Sand fixture marker service (test-only, installed by marker-role)
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/true
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+
+- name: Reload systemd unit files after installing the fixture service
+  ansible.builtin.systemd_service:
+    daemon_reload: true
