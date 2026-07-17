@@ -658,11 +658,11 @@ Verified acyclic: every edge points from a lower phase to a higher one.
 - ✔️ Task 01: Checkout registry model + host-persisted store — `internal/checkouts` (89.3% cov)
 - ✔️ Task 06: Host `gh` actions adapter (PR state, draft create, browser URLs) — `internal/landgh` (96.1% cov)
 
-### Phase 2: Registry consumers + shared sweep logic
+### ✅ Phase 2: Registry consumers + shared sweep logic
 **Parallel Tasks:**
-- Task 02: Sweep parser + git classification + guest command builder (depends on: 01)
-- Task 04: Unlanded-work tile badge (depends on: 01)
-- Task 05: Delete guard — zero guest contact (depends on: 01)
+- ✔️ Task 02: Sweep parser + git classification + guest command builder (depends on: 01) — `internal/checkouts/sweep.go` (93.9% cov)
+- ✔️ Task 04: Unlanded-work tile badge (depends on: 01) — `internal/ui/badge.go`
+- ✔️ Task 05: Delete guard — zero guest contact (depends on: 01) — `internal/ui/deleteguard.go` (no-guest-contact test green)
 
 ### Phase 3: Sweep runtime + headless CLI
 **Parallel Tasks:**

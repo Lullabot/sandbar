@@ -2,7 +2,7 @@
 id: 4
 group: "badge"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "sonnet"
 effort: "medium"

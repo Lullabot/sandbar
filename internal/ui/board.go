@@ -1007,7 +1007,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 	if mem, ok := m.memberByScope(v.scope); ok {
 		profileLabel = mem.profile.Name
 	}
-	return renderTile(tileInput{
+	tile := renderTile(tileInput{
 		VM:                 v.VM,
 		Job:                job,
 		HasJob:             hasJob,
@@ -1023,6 +1023,17 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		Now:                now,
 		ProfileLabel:       profileLabel,
 	})
+
+	// The unlanded-work badge is purely registry-derived
+	// (badge.go) and never grows the tile's fixed row budget — it splices into
+	// the already-rendered footer row instead. running gates the same way
+	// badge.go's freshness rule documents: the sweep only ever refreshes a
+	// running VM's entry, so a stopped VM is unconditionally stale here.
+	running := deriveStatus(v.VM, job, hasJob, !hasJob && m.remoteProvisioning(v.scope, v.Name)) == statusRunning
+	if badge := checkoutBadgeText(m.checkouts, v.scope, v.Name, running, now); badge != "" {
+		tile = spliceCheckoutBadge(tile, badge, tileInnerWidth(m.layout.TileWidth))
+	}
+	return tile
 }
 
 // traitsOf gathers one VM's exception-only field values for the fleet-uniformity
