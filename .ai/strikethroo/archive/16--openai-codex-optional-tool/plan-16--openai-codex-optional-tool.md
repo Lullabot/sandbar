@@ -238,3 +238,27 @@ graph TD
 ### Execution Summary
 - Total Phases: 2
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-16
+
+### Results
+
+- `roles/codex`: installs the Codex CLI via the official installer (idempotent on `~/.local/bin/codex`) and provisions `~/.codex/config.toml` with `approval_policy = "never"` / `sandbox_mode = "danger-full-access"`; gated in `site.yml` by `toolset_codex | default(false)`.
+- Go wiring: `CreateConfig.WithCodex` (opt-in, default false) registered in `ToolPtrs()`; `--with-codex` flag; `toolset_codex` extra-var; table-driven tests prove the default toolset key stays byte-identical (`claude+ddev+go+java`) and the enabled key is `claude+codex+ddev+go+java`.
+- TUI: "Install OpenAI Codex" create-form toggle (default off), with reset mode replaying the recorded codex selection like its siblings.
+- Docs: available-tools (opt-in listing), first-vm (Codex login incl. `codex login --device-auth` for headless, plus the remote-control limitation note), security-model (deliberate friction-free config, no credential provisioned), cli-reference (flags table + regenerated `--help` dump covering all five `--with-*` flags).
+- Verified end-to-end on this host (Lima + KVM): a real `sand create --name codex-check --base-name codex-check-base --with-codex` provisioned in 8m54s; in-guest `codex --version` → `codex-cli 0.144.5`, config exact and user-owned; base stamp suffix `claude+codex+ddev+go+java`; `codex login status` reaches the auth gate ("Not logged in") proving the config parses; live TUI capture shows the toggle rendering unchecked after Claude Code. Check VM and isolated base deleted afterward. `go test ./... -race -count=1` exit 0; `mkdocs build --strict` exit 0.
+
+### Noteworthy Events
+
+- **Task 3 verification-gate rejection and fix**: the first implementation skipped a `resetWithCodex` snapshot, which would have let a reset of a codex-enabled VM silently submit `WithCodex=false` (a value the reset form never showed) and stale the shared base. Sent back with analysis; fixed with snapshot/replay plus `TestResetReplaysARecordedCodexSelection`.
+- **Task 4 corrections by the orchestrator**: the docs worker fabricated three nonexistent flags (`--with-devtools`, `--with-git-cli`, `--with-samba`) in the cli-reference table while omitting real ones, used the wrong login-callback port (3030 → verified 1455), and suggested `scp` against how sand VMs are reached. Corrected: real five-flag table with base-adoption note, `codex login --device-auth` documented as the primary headless path (verified upstream), auth.json transfer via the TUI Upload action. The worker also could not run `mkdocs build --strict` (no pip/venv); the orchestrator ran it via `uv` — exit 0.
+- **Self Validation deviations (deliberate, to protect user state)**: the host has live user VMs and a shared `sandbar-base`, so validation used isolated names (`codex-check` / `codex-check-base`) instead of converging the user's base, and the "plain create against a rebuilt base omits codex" step was not run destructively — it is evidenced instead by the user's existing base stamp (`v2:…:claude+ddev+go+java`, untouched) plus the unit assertion that the default `ToolsetKey()` renders exactly that key.
+- Feature-branch creation was skipped by the helper script (already on the worktree branch `worktree-codex-optional-tool-plan`), as designed.
+
+### Necessary follow-ups
+
+- None required for correctness. Optional future work (explicitly out of scope per the plan): a reset-mode "preserve Codex login" option, and revisiting notifications if OpenAI ever ships CLI-reachable remote control.
