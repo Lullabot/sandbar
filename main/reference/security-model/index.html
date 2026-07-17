@@ -1335,6 +1335,15 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   in</strong>, via the provisioned direnv hooks (see
   <a href="../../using-sand/secrets/">Secrets</a>). Scope your tokens accordingly — a
   secret placed at a scope is available to any agent working under it.</li>
+<li><strong>Codex runs with approvals off and sandbox disabled</strong> (when selected). When
+  you provision the VM with <code>--with-codex</code>, Codex is installed with
+  <code>approval_policy = "never"</code> and <code>sandbox_mode = "danger-full-access"</code>, a
+  deliberate choice because the ephemeral VM is the sandbox itself. Codex is
+  opt-in; if you don't pass <code>--with-codex</code> or enable it in the TUI, it is not
+  installed.</li>
+<li><strong>No Codex credential is provisioned.</strong> You log in to Codex inside the VM
+  yourself with your ChatGPT account; no host-side token is copied in. See
+  <a href="../../getting-started/first-vm/#logging-into-codex">Logging into Codex</a>.</li>
 <li><strong>Credentials never touch argv.</strong> A <code>--clone-token</code> and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in

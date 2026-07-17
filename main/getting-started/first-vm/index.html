@@ -636,6 +636,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#logging-into-codex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging into Codex
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1312,6 +1323,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#logging-into-codex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logging into Codex
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1381,6 +1403,27 @@ supported here.</p>
 <p>Once you're logged in, notifications arrive through Claude Code's remote
 control: you're alerted in the Claude app when a session needs input or
 finishes, with no webhook or extra configuration required.</p>
+<h2 id="logging-into-codex">Logging into Codex</h2>
+<p>If you created the VM with <code>--with-codex</code> (or enabled Codex in the TUI create
+form), the Codex CLI is provisioned but no credential is included. Shell into
+the VM and run <code>codex</code> once to start an interactive login.</p>
+<p>Codex signs in with your ChatGPT account. Its default OAuth flow expects a
+browser callback on <code>localhost:1455</code> <em>inside the VM</em>, which won't work from a
+VM shell directly. The simplest path is the device-code flow, which needs no
+network plumbing at all — the CLI and your browser talk through OpenAI's
+servers:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>codex<span class="w"> </span>login<span class="w"> </span>--device-auth
+</code></pre></div>
+<p>Alternatives: forward the callback port when connecting over SSH
+(<code>ssh -L 1455:localhost:1455</code>, using the connection details from
+<code>limactl show-ssh NAME</code>), or copy an existing <code>~/.codex/auth.json</code> from a
+machine you've already signed in on — for a <code>sand</code> VM, use the TUI's Upload
+action to move the file in.</p>
+<p><strong>Important:</strong> Codex offers <strong>no CLI-reachable remote control or phone
+notifications</strong> — those features require the Codex desktop app on macOS or
+Windows, which uses QR-code device pairing. If you're choosing between Claude
+Code and Codex, do not expect phone alerts for Codex sessions from the VM; use
+Claude Code if you need Claude app notifications.</p>
 
 
 

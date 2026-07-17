@@ -1799,8 +1799,42 @@ not a prompt.</p>
 <td>the last-used <a href="../connection-profiles/">Connection Profile</a>, else <code>local</code></td>
 <td>Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error.</td>
 </tr>
+<tr>
+<td><code>--with-claude</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Install Claude Code in the base image.</td>
+</tr>
+<tr>
+<td><code>--with-codex</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Install OpenAI Codex in the base image — the one <strong>opt-in</strong> toolset flag.</td>
+</tr>
+<tr>
+<td><code>--with-ddev</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Install DDEV in the base image.</td>
+</tr>
+<tr>
+<td><code>--with-go</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Install the Go toolchain in the base image.</td>
+</tr>
+<tr>
+<td><code>--with-java</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>Install a headless JDK in the base image.</td>
+</tr>
 </tbody>
 </table>
+<p>The <code>--with-*</code> flags configure the <strong>shared base image</strong>, not the individual
+VM. A flag you don't pass adopts whatever the existing base was actually
+built with (read back from its version stamp), so you only need to state a
+selection once; passing a flag explicitly always wins.</p>
 <h3 id="there-is-no-ref-flag">There is no <code>--ref</code> flag</h3>
 <p>If you go looking for one — the original bash provisioner had <code>--ref</code> to pin
 the git ref of a checked-out playbook — it does not exist here, deliberately.
@@ -1917,11 +1951,21 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>  -profile string
 <a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>        Connection profile to create on (default: the last-used profile, else &quot;local&quot;)
 <a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>  -rebuild
-<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>        Delete and rebuild the base image first, then create
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>        Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
 <a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>  -recreate
 <a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>        If the named instance exists and is sand-managed, delete and re-clone it
 <a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>  -user string
 <a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>        Primary VM user
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  -with-claude
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>        Install Claude Code in the base image (default true)
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>  -with-codex
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>        Install OpenAI Codex in the base image
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>  -with-ddev
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>        Install DDEV in the base image (default true)
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>  -with-go
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>        Install the Go toolchain in the base image (default true)
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>  -with-java
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>        Install a headless JDK in the base image (default true)
 </code></pre></div>
 <p>(<code>--user</code> has no printed default because it is resolved to the host username
 <em>after</em> flags are parsed, not at registration time — see the flags table
