@@ -258,10 +258,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 003: Clone-from-template create and template-aware reset (completed)
 
-### Phase 4: User Surfaces
+### Phase 4: User Surfaces ✅
 **Parallel Tasks:**
-- Task 004: CLI `sand template` commands and `sand create --template` (depends on: 001, 002, 003)
-- Task 005: TUI snapshot verb, template picker, and delete (depends on: 001, 002, 003)
+- ✔️ Task 004: CLI `sand template` commands and `sand create --template` (completed)
+- ✔️ Task 005: TUI snapshot verb, template picker, and delete (completed)
 
 ### Phase 5: Verification and Docs
 **Parallel Tasks:**

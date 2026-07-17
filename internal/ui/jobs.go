@@ -72,6 +72,14 @@ const (
 	// VM's own state — a VM whose upload failed is a healthy running VM with a
 	// failed copy — so it never touches the tile's status word.
 	kindTransfer
+	// kindSnapshot is a "snapshot this VM into a golden template" run
+	// (commandreg.go's snapshot verb, snapshot.go's launchSnapshot): it acts
+	// against an EXISTING managed VM (the source being captured) without
+	// creating or replacing one, so — like kindTransfer, and unlike
+	// kindProvision — it never moves the source VM's derived status
+	// (deriveStatus only ever consults the kindProvision slot) and a snapshot
+	// running or failing says nothing about the source VM's own health.
+	kindSnapshot
 )
 
 // jobKey identifies one run: the connection scope, the VM, and which of its
@@ -91,12 +99,15 @@ func provisionKey(scope registry.Scope, name string) jobKey {
 func transferKey(scope registry.Scope, name string) jobKey {
 	return jobKey{scope: scope, vm: name, kind: kindTransfer}
 }
+func snapshotKey(scope registry.Scope, name string) jobKey {
+	return jobKey{scope: scope, vm: name, kind: kindSnapshot}
+}
 
-// keysFor is a VM's two possible slots, provision first. Every "does this VM have
-// a run" question is two map lookups rather than a scan, and the fixed order is
-// what makes the answers deterministic.
-func keysFor(scope registry.Scope, name string) [2]jobKey {
-	return [2]jobKey{provisionKey(scope, name), transferKey(scope, name)}
+// keysFor is a VM's possible slots, provision first. Every "does this VM have
+// a run" question is a handful of map lookups rather than a scan, and the fixed
+// order is what makes the answers deterministic.
+func keysFor(scope registry.Scope, name string) [3]jobKey {
+	return [3]jobKey{provisionKey(scope, name), transferKey(scope, name), snapshotKey(scope, name)}
 }
 
 // jobState is a job's lifecycle state. A finished job — succeeded OR failed —

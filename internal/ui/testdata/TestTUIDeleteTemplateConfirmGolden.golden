@@ -1,0 +1,30 @@
+                                                                                                  
+   New VM                                                                                         
+                                                                                                  
+  Profile:           local                                                                        
+  Source:            < golden · 4 GiB · 3d ago · [stale] >                                        
+  Name:              >                                                                            
+  Hostname:          >                                                                            
+  User:              > debian                                                                     
+  Git name:          > Andrew Berry                                                               
+  Git email:         > andrew@furrypaws.ca                                                        
+  CPUs:              > 8                                                                          
+  Memory:            > 8GiB                                                                       
+  Disk:              > 1GiB                                                                       
+  Docker proxy host: >                                                                            
+  GitHub repo URL:   >                                                                            
+  GitHub token:      >                                                                            
+                                                                                                  
+  [x] Install Claude Code                                                                         
+  [ ] Install OpenAI Codex                                                                        
+  [x] Install DDEV                                                                                
+  [x] Install Go                                                                                  
+  [x] Install Java                                                                                
+                                                                                                  
+  │ ←/→ to pick a clone source: the shared base image, or a saved golden template. Choosing a     
+  │ template skips the base entirely and hides the rebuild toggle below. Press d to delete the    
+  │ highlighted template.                                                                         
+                                                                                                  
+  Delete template "golden" (4 GiB)? 0 VM(s) were cloned from it: none  [y] yes   [n] cancel       
+  y confirm • n cancel                                                                            
+                                                                                                  

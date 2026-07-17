@@ -329,6 +329,19 @@ func deleteCmd(p provider.Provider, scope registry.Scope, name string) tea.Cmd {
 	}
 }
 
+// deleteTemplateCmd removes a golden template's Lima instance. Mirrors
+// deleteCmd's shape — a synchronous provider call wrapped in a tea.Cmd,
+// reported via actionDoneMsg — and, like every other command here, touches
+// nothing but the provider call: the registry removal happens where
+// actionDoneMsg is HANDLED (model.go, the Update goroutine), never inside
+// this closure, which runs on its own goroutine.
+func deleteTemplateCmd(p provider.Provider, scope registry.Scope, name, templateInstance string) tea.Cmd {
+	return func() tea.Msg {
+		err := p.DeleteTemplate(context.Background(), templateInstance, io.Discard)
+		return actionDoneMsg{action: "delete template", name: name, scope: scope, err: err}
+	}
+}
+
 // stopAllCmd stops each named VM in turn, accumulating failures. Stopping is
 // sequential rather than concurrent: the provider gives no concurrency
 // guarantees, and a serial loop yields a deterministic error report. VMs that

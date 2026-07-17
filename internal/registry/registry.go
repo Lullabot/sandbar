@@ -531,6 +531,37 @@ func (r *Registry) AddScoped(cfg vm.CreateConfig, scope Scope) error {
 	return r.save()
 }
 
+// AddScopedWithTemplate is AddScoped plus recording provenance that cfg was
+// cloned from templateSource — the user-facing name of a golden Template
+// (see Template.Name), not its Lima instance name — rather than the shared
+// base image. This is what lets DependentsOfTemplate find the VM again, and
+// what lets a later `sand create --recreate` (via TemplateSourceInScope)
+// discover that it should re-clone from the template instead of silently
+// falling back to the base image. cfg.BaseName is expected to already be the
+// template's OWN instance name (vm.TemplateInstanceName(templateSource)) by
+// the time this is called — see the `sand create --template` flow.
+func (r *Registry) AddScopedWithTemplate(cfg vm.CreateConfig, scope Scope, templateSource string) error {
+	cfg.CloneToken = ""
+	r.vms[scopedKey{scope: scope, name: cfg.Name}] = entry{
+		Base: cfg.BaseName, Config: cfg, Provider: scope.Provider, RemoteTarget: scope.RemoteTarget,
+		TemplateSource: templateSource,
+	}
+	return r.save()
+}
+
+// TemplateSourceInScope returns the golden template name (see
+// AddScopedWithTemplate) that the managed VM name under scope was cloned
+// from, and whether the VM is managed at all under that scope. A managed VM
+// that was NOT cloned from a template (the ordinary base-image path) reports
+// ("", true) — do not mistake that for "not managed".
+func (r *Registry) TemplateSourceInScope(name string, scope Scope) (string, bool) {
+	e, ok := r.vms[scopedKey{scope: scope, name: name}]
+	if !ok {
+		return "", false
+	}
+	return e.TemplateSource, true
+}
+
 // Remove drops name from the index under the local Lima provider and persists
 // the change. Equivalent to RemoveScoped(LocalScope, name) — kept as the
 // unscoped convenience every existing (local-only) caller uses. A caller

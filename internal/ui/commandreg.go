@@ -257,6 +257,21 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		id:      "snapshot",
+		binding: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "snapshot→template")),
+		about: "Capture this VM into a reusable golden template: prompts for a name, then stops it " +
+			"(if running), clones it, and restores it to how it was. Other VMs can later be created " +
+			"straight from the template instead of the shared base image.",
+		// Not while a build owns the VM, for the same reason as every other verb
+		// here: SnapshotTemplate itself briefly stops a running source to clone it
+		// consistently, and a build in progress must not have its VM stopped out
+		// from under it.
+		enabledFor: notBuilding,
+		action: func(m *model, v boardVM) tea.Cmd {
+			return m.openSnapshotPrompt(v)
+		},
+	},
+	{
 		binding: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		about:   "Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it.",
 		// Delete raises the confirm overlay unconditionally today; the job
