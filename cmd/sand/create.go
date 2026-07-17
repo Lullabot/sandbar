@@ -228,7 +228,14 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout); err != nil {
+	// p satisfies provider.Provenancer for every backend that has one today
+	// (local and remote Lima — see internal/provider/limaprovenance.go); the
+	// type assertion degrades to a nil Provenancer, not a panic, for a future
+	// backend that does not, in which case doHeadlessCreate's RecordSuccess
+	// call falls back to the registry-only behavior.
+	provenancer, _ := p.(provider.Provenancer)
+
+	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout, provenancer); err != nil {
 		return err
 	}
 
@@ -264,7 +271,16 @@ Flags:
 // it. The intent goes down to the provisioner instead, which destroys the base
 // inside ensureBaseStopped with the lock held and no clone in flight; this
 // function no longer has a lima client to delete anything with.
-func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer) error {
+// provenancer is an OPTIONAL trailing argument (Go variadic — see
+// manage.RecordSuccess) so every existing 8-arg call site (the unit/e2e
+// tests in this package, which construct doHeadlessCreate directly with a
+// stub provisioner and no real provider) keeps compiling unchanged; only
+// runCreate, which has a real provider.Provider in hand, passes one. When
+// present, it is threaded ONLY into the RecordSuccess call below (the
+// provenance write this task's boundary scopes this file's changes to) — the
+// RecreateBase call above is deliberately left registry-only here; wiring
+// --recreate's own gate to provenance is out of this file's scope.
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer, provenancer ...provider.Provenancer) error {
 	opts := provision.CreateOptions{Rebuild: rebuild}
 
 	if recreate {
@@ -282,7 +298,11 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 		}
 	}
 
-	if err := manage.RecordSuccess(reg, cfg, scope); err != nil {
+	// Writes the registry cache AND (when provenancer is non-nil) the
+	// authoritative provenance marker — see manage.RecordSuccess's doc
+	// comment. A failure here (either write) is reported but does not fail
+	// the command: the VM itself is already up either way.
+	if err := manage.RecordSuccess(reg, cfg, scope, provenancer...); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
 	return nil

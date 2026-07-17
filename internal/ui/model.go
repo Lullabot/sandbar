@@ -924,6 +924,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mem.lastErr = nil
 		mem.backoff = 0
 		mem.vms = msg.vms // DiskUsed / UpSince / LastUsed sampled in refreshCmd, off the Update goroutine
+		// The provenance map travels with vms, from the SAME refreshCmd batched
+		// read (commands.go) — never fetched here on the Update goroutine.
+		mem.provenance = msg.provenance
 		// everListed latches on the FIRST success and never clears — see its
 		// doc comment (fleet.go) and boardReady.
 		mem.everListed = true

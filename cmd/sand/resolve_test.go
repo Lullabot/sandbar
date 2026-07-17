@@ -111,11 +111,28 @@ func (f fakeOwnership) IsManagedInScope(_ string, scope registry.Scope) bool {
 	return f[scope]
 }
 
+// stubNoProvenanceOwners stubs provenanceOfForProfile to report NO marker
+// for every profile, so resolveShellProvider's new provenance-first probe
+// (task 4) never attempts a real provider construction + ProvenanceOf call —
+// which, for a profile like the "work" RemoteSSH fixture below, would
+// otherwise be a genuine SSH round trip against a host that does not exist
+// (AGENTS.md's hard rule against real limactl/SSH in tests). Every test in
+// this file that seeds a fakeOwnership registry double to drive
+// resolveShellProvider's decision needs this, so provenance falls straight
+// through to that registry double exactly as it did before this task.
+func stubNoProvenanceOwners(t *testing.T) {
+	t.Helper()
+	orig := provenanceOfForProfile
+	t.Cleanup(func() { provenanceOfForProfile = orig })
+	provenanceOfForProfile = func(profiles.Profile, string) (bool, error) { return false, nil }
+}
+
 // TestResolveShellProviderAmbiguous verifies `sand shell NAME` refuses to
 // guess when NAME is owned by more than one enabled connection profile: it
 // must list the candidate profiles by name (not just error out blindly), and
 // an explicit --profile must disambiguate.
 func TestResolveShellProviderAmbiguous(t *testing.T) {
+	stubNoProvenanceOwners(t)
 	store := newTestStore(t) // has the permanent, enabled "local" profile
 	work, err := store.Add(profiles.Profile{
 		Name: "work", Type: profiles.TypeRemoteSSH,
@@ -158,6 +175,7 @@ func TestResolveShellProviderAmbiguous(t *testing.T) {
 // no-op (never hits a real backend — see probeUnmanagedOwners' tests for the
 // fallback's own behaviour) so this stays a pure unit test.
 func TestResolveShellProviderUnknownName(t *testing.T) {
+	stubNoProvenanceOwners(t)
 	store := newTestStore(t)
 	if _, err := store.Add(profiles.Profile{
 		Name: "work", Type: profiles.TypeRemoteSSH,
@@ -230,6 +248,7 @@ func TestProviderForProfileEmptyHostErrors(t *testing.T) {
 // resolve, with local probed before remotes (stubbed here via the
 // listForProfile seam, since a real List() would need limactl/SSH).
 func TestResolveShellProviderFallsBackToUnmanagedProbeWhenRegistryEmpty(t *testing.T) {
+	stubNoProvenanceOwners(t)
 	store := newTestStore(t)
 	work, err := store.Add(profiles.Profile{
 		Name: "work", Type: profiles.TypeRemoteSSH,
@@ -268,6 +287,7 @@ func TestResolveShellProviderFallsBackToUnmanagedProbeWhenRegistryEmpty(t *testi
 // multi-hit branch behaves exactly like the registry's own ambiguous case:
 // more than one profile's List() reporting the name requires --profile.
 func TestResolveShellProviderUnmanagedProbeAmbiguous(t *testing.T) {
+	stubNoProvenanceOwners(t)
 	store := newTestStore(t)
 	if _, err := store.Add(profiles.Profile{
 		Name: "work", Type: profiles.TypeRemoteSSH,
@@ -298,6 +318,7 @@ func TestResolveShellProviderUnmanagedProbeAmbiguous(t *testing.T) {
 // command — only when every profile comes up empty (or erroring) does the
 // original "no such VM" error apply.
 func TestResolveShellProviderUnmanagedProbeToleratesListErrors(t *testing.T) {
+	stubNoProvenanceOwners(t)
 	store := newTestStore(t)
 	work, err := store.Add(profiles.Profile{
 		Name: "work", Type: profiles.TypeRemoteSSH,
@@ -349,5 +370,101 @@ func TestResolveShellProviderSingleProfileIgnoresRegistry(t *testing.T) {
 	}
 	if prov == nil {
 		t.Fatal("resolveShellProvider: want a non-nil provider")
+	}
+}
+
+// TestResolveShellProviderProvenanceOwnerWins is task 4's central shell-
+// routing regression: with more than one enabled profile, a candidate whose
+// PROVENANCE marker names NAME must resolve as the owner even though the
+// registry (fakeOwnership) reports NO owner at all for it — proving
+// provenance is consulted first and is authoritative on its own, not merely
+// a tie-breaker alongside the registry.
+func TestResolveShellProviderProvenanceOwnerWins(t *testing.T) {
+	store := newTestStore(t) // has the permanent, enabled "local" profile
+	work, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := provenanceOfForProfile
+	t.Cleanup(func() { provenanceOfForProfile = orig })
+	provenanceOfForProfile = func(p profiles.Profile, name string) (bool, error) {
+		return p.ID == work.ID && name == "claude", nil
+	}
+
+	// The registry double reports NOTHING managed anywhere — if it were
+	// consulted first (or at all), this would fall through to the (stubbed
+	// to empty) unmanaged-VM probe and fail with "no such VM".
+	prov, err := resolveShellProvider(store, fakeOwnership{}, "claude", "")
+	if err != nil {
+		t.Fatalf("resolveShellProvider: unexpected error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("resolveShellProvider: want a non-nil provider resolved from the provenance marker")
+	}
+}
+
+// TestResolveShellProviderProvenanceAmbiguous verifies provenance's ambiguous
+// case behaves exactly like the registry's: more than one candidate's marker
+// naming NAME requires --profile to disambiguate, and lists the candidates.
+func TestResolveShellProviderProvenanceAmbiguous(t *testing.T) {
+	store := newTestStore(t)
+	if _, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := provenanceOfForProfile
+	t.Cleanup(func() { provenanceOfForProfile = orig })
+	provenanceOfForProfile = func(profiles.Profile, string) (bool, error) {
+		return true, nil // every candidate's marker claims the name
+	}
+
+	_, err := resolveShellProvider(store, fakeOwnership{}, "shared", "")
+	if err == nil {
+		t.Fatal("resolveShellProvider: want an ambiguous-name error from provenance, got nil")
+	}
+	if !strings.Contains(err.Error(), "more than one") {
+		t.Errorf("resolveShellProvider provenance-ambiguous error = %q, want it to mention %q", err.Error(), "more than one")
+	}
+}
+
+// TestResolveShellProviderProvenanceErrorFallsBackToRegistry verifies the
+// best-effort contract of the provenance probe: a candidate whose provenance
+// read errors (e.g. an unreachable remote) is treated as "no marker", not a
+// hard failure — resolution still falls through to the registry (LEGACY,
+// one-release fallback) rather than aborting the whole lookup.
+func TestResolveShellProviderProvenanceErrorFallsBackToRegistry(t *testing.T) {
+	store := newTestStore(t)
+	work, err := store.Add(profiles.Profile{
+		Name: "work", Type: profiles.TypeRemoteSSH,
+		Host: "work.example.com", User: "dev", Port: 22,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	orig := provenanceOfForProfile
+	t.Cleanup(func() { provenanceOfForProfile = orig })
+	provenanceOfForProfile = func(profiles.Profile, string) (bool, error) {
+		return false, errors.New("boom: host unreachable")
+	}
+
+	owned := fakeOwnership{scopeForProfile(work): true}
+
+	prov, err := resolveShellProvider(store, owned, "claude", "")
+	if err != nil {
+		t.Fatalf("resolveShellProvider: want the provenance error tolerated via registry fallback, got: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("resolveShellProvider: want a non-nil provider from the registry fallback")
 	}
 }

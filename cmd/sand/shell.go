@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -45,6 +46,10 @@ type vmGetter interface {
 // more than one scope at once — a state the real on-disk registry (currently
 // keyed by VM name alone, one entry per name) cannot reach through its own
 // public API, but which the decision logic must still handle correctly.
+//
+// Ownership resolution is provenance-first now (see probeProvenanceOwners);
+// this interface remains the LEGACY, one-release fallback consulted only
+// when no candidate profile's provenance marker names NAME.
 type registryOwnership interface {
 	IsManagedInScope(name string, scope registry.Scope) bool
 }
@@ -262,19 +267,62 @@ func probeUnmanagedOwners(enabled []profiles.Profile, name string) []profiles.Pr
 	return hits
 }
 
+// provenanceOfForProfile constructs profile p's provider and reports whether
+// it carries a provenance marker for name — resolveShellProvider's PRIMARY,
+// authoritative ownership signal for a multi-profile lookup (see
+// probeProvenanceOwners). A provider that does not implement
+// provider.Provenancer (none exist today, but the interface makes no
+// promise) reports (false, nil) — "no marker", never a hard error, so
+// ownership resolution still has the registry and the unmanaged-VM probe to
+// fall back to. A package-level var, following listForProfile's seam
+// pattern, so a test can stub it without a real limactl/SSH backend.
+var provenanceOfForProfile = func(p profiles.Profile, name string) (bool, error) {
+	prov, _, err := providerForProfile(p)
+	if err != nil {
+		return false, err
+	}
+	pv, ok := prov.(provider.Provenancer)
+	if !ok {
+		return false, nil
+	}
+	_, found, err := pv.ProvenanceOf(context.Background(), name)
+	return found, err
+}
+
+// probeProvenanceOwners asks each enabled profile's provenance marker for
+// name — resolveShellProvider's first and authoritative ownership signal,
+// mirroring manage.RecreateBase's marker-first resolution order. Best-effort
+// like probeUnmanagedOwners: a profile whose provider fails to construct, or
+// whose provenance read errors, is treated as "no marker" rather than
+// aborting the whole lookup — the registry (LEGACY, one-release fallback)
+// and the unmanaged-VM probe still get a chance to resolve it.
+func probeProvenanceOwners(enabled []profiles.Profile, name string) []profiles.Profile {
+	var hits []profiles.Profile
+	for _, p := range enabled {
+		if found, err := provenanceOfForProfile(p, name); err == nil && found {
+			hits = append(hits, p)
+		}
+	}
+	return hits
+}
+
 // resolveShellProvider resolves which connection profile NAME lives on and
 // constructs its provider. An explicit profile name is used directly (a hard
 // error if it does not name an enabled profile). With no explicit profile:
 // a store with only one enabled profile always uses it (preserving `sand
 // shell`'s original behaviour of attaching to any VM the one configured
 // backend knows about, managed or not); with more than one enabled profile,
-// ownership is resolved from the registry's managed-VM index — the only
-// place sand records which profile's scope a VM belongs to. If the registry
-// reports zero owners, probeUnmanagedOwners is tried before giving up (an
-// UNMANAGED vm, e.g. the base image or a hand-made instance, has no registry
-// entry under any profile — see its doc comment). Zero owners (registry AND
-// probe) is "no such VM"; more than one requires --profile to disambiguate,
-// and lists the candidates by name.
+// ownership is resolved provenance-first: each candidate profile's marker is
+// consulted via probeProvenanceOwners (one ProvenanceOf per candidate). If
+// NO profile's marker names NAME, the registry's managed-VM index is
+// consulted next — LEGACY, remove after one release: it exists only so a VM
+// recorded by a pre-provenance sand (or a controller that has not upgraded
+// yet) does not lose shell routing the moment this ships. If THAT also comes
+// up empty, probeUnmanagedOwners is tried before giving up (an UNMANAGED vm,
+// e.g. the base image or a hand-made instance, has no marker or registry
+// entry under any profile — see its doc comment). Zero owners from all three
+// is "no such VM"; more than one requires --profile to disambiguate, and
+// lists the candidates by name.
 func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, profileFlag string) (provider.Provider, error) {
 	if profileFlag != "" {
 		p, ok := store.GetByName(profileFlag)
@@ -305,15 +353,20 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 		// no other profile it could possibly be on.
 		target = enabled[0]
 	default:
-		var owners []profiles.Profile
-		for _, p := range enabled {
-			if reg.IsManagedInScope(name, scopeForProfile(p)) {
-				owners = append(owners, p)
+		owners := probeProvenanceOwners(enabled, name)
+		if len(owners) == 0 {
+			// legacy, remove after one release: no candidate profile's
+			// provenance marker named NAME — consult the registry cache next
+			// (see resolveShellProvider's doc comment).
+			for _, p := range enabled {
+				if reg.IsManagedInScope(name, scopeForProfile(p)) {
+					owners = append(owners, p)
+				}
 			}
 		}
 		if len(owners) == 0 {
-			// The registry hit short-circuits above; only fall back to the
-			// (network-round-tripping) List probe when it found nothing.
+			// Neither provenance nor the registry found an owner; only now
+			// fall back to the (network-round-tripping) List probe.
 			owners = probeUnmanagedOwners(enabled, name)
 		}
 		switch len(owners) {

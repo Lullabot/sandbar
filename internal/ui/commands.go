@@ -60,6 +60,13 @@ type (
 		// must never compute a percentage from one.
 		hostMemAvail  int64
 		hostDiskTotal int64
+
+		// provenance is this member's provenance map, fetched in the SAME command
+		// as vms via the provider's batched Provenancer.Provenance — one host
+		// round trip, never one per VM (see refreshCmd). nil when the provider
+		// does not implement Provenancer or the batched read failed; either way
+		// the board falls back to the legacy registry gate for every VM.
+		provenance map[string]provider.Provenance
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -189,10 +196,25 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 		// of member, and !ok (no /proc/meminfo at all) leaves it 0, "not
 		// sampled" — never a guessed number.
 		memAvail, _ := memAvailFn(hf)
+		// Provenance is fetched HERE, in the same off-Update-goroutine command as
+		// List/HostResources above, via the provider's BATCHED read — one host
+		// round trip for the whole member, never one per VM. A provider that does
+		// not implement Provenancer (a test double, or a future backend with no
+		// marker facility) simply yields no markers, and a failed read degrades
+		// the same way rather than failing the refresh: either way every VM falls
+		// back to the legacy registry gate until it re-provisions and picks up a
+		// marker.
+		var provenance map[string]provider.Provenance
+		if pv, ok := prov.(provider.Provenancer); ok {
+			if mp, pErr := pv.Provenance(context.Background()); pErr == nil {
+				provenance = mp
+			}
+		}
 		return vmsLoadedMsg{
 			scope: sc, vms: vms, err: err,
 			hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser(),
 			hostMemAvail: memAvail, hostDiskTotal: diskTotal,
+			provenance: provenance,
 		}
 	}
 }

@@ -1,14 +1,45 @@
-// Package manage holds the managed-VM registry bookkeeping shared by the
+// Package manage holds the managed-VM ownership bookkeeping shared by the
 // interactive TUI (internal/ui) and the headless `sand create` subcommand
 // (cmd/sand), so the two entrypoints cannot drift on how a VM becomes
 // "managed", how the index is kept in sync with the live `limactl list`, or
 // when a recreate is permitted.
+//
+// Ownership truth moved to provider.Provenancer markers (see
+// internal/provider/provenance.go): a marker written on the instance itself
+// is visible to every controller that later talks to it, unlike the local
+// registry.Registry index, which only this machine's sand ever reads. Both
+// RecreateBase and RecordSuccess accept an OPTIONAL trailing
+// provider.Provenancer argument (Go variadic, not a required parameter) so
+// the exported signatures every existing caller depends on keep compiling
+// unchanged; a caller that omits it gets the pre-provenance, registry-only
+// behavior. Every caller resolving a real provider should now pass one.
 package manage
 
 import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/version"
 	"github.com/lullabot/sandbar/internal/vm"
 )
+
+// provenanceSchemaVersion is the marker schema this package writes — see
+// provider.Provenance.SchemaVersion's doc comment.
+const provenanceSchemaVersion = 1
+
+// firstProvenancer returns the sole element of an optional trailing
+// provider.Provenancer argument, or nil when the caller omitted it (or
+// passed an explicit nil) — the shared helper behind RecreateBase and
+// RecordSuccess's variadic "optional provenancer" parameter.
+func firstProvenancer(prov []provider.Provenancer) provider.Provenancer {
+	if len(prov) == 0 {
+		return nil
+	}
+	return prov[0]
+}
 
 // Reconcile drops managed entries owned by scope whose VM is no longer present
 // in live (the current `limactl list` result for THAT SAME provider/target),
@@ -38,7 +69,30 @@ func Reconcile(reg *registry.Registry, live []vm.VM, scope registry.Scope) ([]st
 // the base image to clone from: the VM's recorded base, or the default base
 // name if none was recorded (e.g. a pre-snapshot index entry). Mirrors the
 // TUI's Reset gate in internal/ui/detail.go.
-func RecreateBase(reg *registry.Registry, name string, scope registry.Scope) (base string, ok bool) {
+//
+// Resolution order, when prov is supplied (see firstProvenancer): name's
+// provenance marker is consulted FIRST via ProvenanceOf — the marker is
+// authoritative, since it is what every controller touching the instance
+// (not just this one's registry) can see. Only when prov is nil, the read
+// itself errors, or the instance carries no marker does this fall back to
+// reg.BaseInScope — LEGACY, remove after one release (see task 8's docs):
+// that fallback exists solely so a VM recorded by a pre-provenance sand (or
+// a controller that has not upgraded yet) does not spuriously lose its
+// recreate-ability the moment this ships. Refused (ok=false) only when
+// NEITHER a marker NOR a registry entry is found for name under scope —
+// recreate must never run against an unmanaged/unknown VM.
+func RecreateBase(reg *registry.Registry, name string, scope registry.Scope, prov ...provider.Provenancer) (base string, ok bool) {
+	if p := firstProvenancer(prov); p != nil {
+		if pv, found, err := p.ProvenanceOf(context.Background(), name); err == nil && found {
+			if pv.Base != "" {
+				return pv.Base, true
+			}
+			return vm.DefaultCreateConfig().BaseName, true
+		}
+	}
+
+	// legacy, remove after one release: registry fallback for a marker-less
+	// instance (see the doc comment above).
 	b, managed := reg.BaseInScope(name, scope)
 	if !managed {
 		return "", false
@@ -53,6 +107,37 @@ func RecreateBase(reg *registry.Registry, name string, scope registry.Scope) (ba
 // create/recreate so a later recreate reproduces it faithfully and the
 // list/registry flags it as sand-managed under the right provider. Mirrors
 // the TUI's provisionDoneMsg handling in internal/ui/model.go.
-func RecordSuccess(reg *registry.Registry, cfg vm.CreateConfig, scope registry.Scope) error {
-	return reg.AddScoped(cfg, scope)
+//
+// reg.AddScoped always runs, keeping the registry warm as the one-release
+// LEGACY fallback (see RecreateBase). When prov is supplied (see
+// firstProvenancer), this ALSO writes the authoritative provenance marker via
+// Provenancer.MarkManaged, carrying cfg's base name and configuration (secret
+// stripped, exactly like the registry entry) — a VM with no marker is
+// invisible to any OTHER controller that later looks at it, so a MarkManaged
+// failure is returned rather than silently swallowed; the caller decides how
+// loudly to report it (today, a printed warning — the VM itself is already
+// up either way).
+func RecordSuccess(reg *registry.Registry, cfg vm.CreateConfig, scope registry.Scope, prov ...provider.Provenancer) error {
+	if err := reg.AddScoped(cfg, scope); err != nil {
+		return err
+	}
+
+	p := firstProvenancer(prov)
+	if p == nil {
+		return nil
+	}
+
+	markedCfg := cfg
+	markedCfg.CloneToken = "" // secrets never touch the on-disk marker, exactly like the registry entry
+	pv := provider.Provenance{
+		SchemaVersion:  provenanceSchemaVersion,
+		Base:           cfg.BaseName,
+		Config:         markedCfg,
+		SandbarVersion: version.String(""),
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := p.MarkManaged(context.Background(), cfg.Name, pv); err != nil {
+		return fmt.Errorf("mark %s managed (provenance): %w", cfg.Name, err)
+	}
+	return nil
 }

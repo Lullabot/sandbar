@@ -120,6 +120,16 @@ type fleetMember struct {
 	vms  []vm.VM
 	host hostSample
 
+	// provenance is this member's last-known provenance map, fetched in the same
+	// refreshCmd as vms via the provider's batched Provenancer.Provenance — one
+	// host round trip, never one per VM. A VM present in this map (regardless of
+	// its zero-value contents) carries a marker and is sand-managed; a VM absent
+	// from it falls back to the registry's IsManagedInScope/BaseInScope (legacy,
+	// remove after one release). nil for a provider that does not implement
+	// Provenancer, or when the batched read itself failed — either way every VM
+	// simply falls through to the legacy gate.
+	provenance map[string]provider.Provenance
+
 	state   connState
 	lastErr error
 
