@@ -653,10 +653,10 @@ graph TD
 
 Verified acyclic: every edge points from a lower phase to a higher one.
 
-### Phase 1: Foundations (no dependencies)
+### ✅ Phase 1: Foundations (no dependencies)
 **Parallel Tasks:**
-- Task 01: Checkout registry model + host-persisted store
-- Task 06: Host `gh` actions adapter (PR state, draft create, browser URLs)
+- ✔️ Task 01: Checkout registry model + host-persisted store — `internal/checkouts` (89.3% cov)
+- ✔️ Task 06: Host `gh` actions adapter (PR state, draft create, browser URLs) — `internal/landgh` (96.1% cov)
 
 ### Phase 2: Registry consumers + shared sweep logic
 **Parallel Tasks:**
