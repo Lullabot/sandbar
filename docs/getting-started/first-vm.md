@@ -40,8 +40,23 @@ built this way.
 
 `sand` installs the Claude Code CLI but does **not** provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (`S`
-on its tile, or `sand shell NAME`) and run `claude` once to complete a
-normal interactive login.
+on its tile, or `sand shell NAME`) and run `claude`: the first time, it
+walks you through an interactive sign-in, then starts the session. Later
+runs go straight to the prompt.
+
+Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
+state so sessions start with bypass permissions active, and the provisioned
+`claude` command runs `claude auth login` for you whenever you're not signed
+in, so you're never dropped to an un-authed prompt.
+
+Claude Code doesn't always settle into bypass mode on the very session right
+after you sign in — it can prompt once about its full-screen renderer and
+come up in manual mode. If that happens, quit (`/exit`) and run `claude`
+again; it comes up in bypass mode. The provisioned `claude` prints a one-time
+reminder about this on first use. (This is Claude Code's own first-run
+sequencing, which shifts between releases, so `sand` flags it rather than
+trying to script around it.) The per-directory trust dialog you see in each
+new folder is separate and deliberate.
 
 A full interactive login is required, rather than a headless token, because
 remote control is enabled by default (see
@@ -53,3 +68,31 @@ supported here.
 Once you're logged in, notifications arrive through Claude Code's remote
 control: you're alerted in the Claude app when a session needs input or
 finishes, with no webhook or extra configuration required.
+
+## Logging into Codex
+
+If you created the VM with `--with-codex` (or enabled Codex in the TUI create
+form), the Codex CLI is provisioned but no credential is included. Shell into
+the VM and run `codex` once to start an interactive login.
+
+Codex signs in with your ChatGPT account. Its default OAuth flow expects a
+browser callback on `localhost:1455` *inside the VM*, which won't work from a
+VM shell directly. The simplest path is the device-code flow, which needs no
+network plumbing at all — the CLI and your browser talk through OpenAI's
+servers:
+
+```bash
+codex login --device-auth
+```
+
+Alternatives: forward the callback port when connecting over SSH
+(`ssh -L 1455:localhost:1455`, using the connection details from
+`limactl show-ssh NAME`), or copy an existing `~/.codex/auth.json` from a
+machine you've already signed in on — for a `sand` VM, use the TUI's Upload
+action to move the file in.
+
+**Important:** Codex offers **no CLI-reachable remote control or phone
+notifications** — those features require the Codex desktop app on macOS or
+Windows, which uses QR-code device pairing. If you're choosing between Claude
+Code and Codex, do not expect phone alerts for Codex sessions from the VM; use
+Claude Code if you need Claude app notifications.

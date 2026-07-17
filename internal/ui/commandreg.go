@@ -298,6 +298,18 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		binding: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "paste image")),
+		about:   "Stage the host clipboard's image on the guest's single-slot clip file, ready for `S` then Ctrl-V into whatever the guest shell is running.",
+		// Same guard as Shell/Upload/Download: writing into the guest needs it up,
+		// and not while a build or a reset owns it (see notBuilding's doc comment) —
+		// a reset deletes its instance and clones it back, so a paste mid-reset would
+		// write into a guest about to be destroyed.
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
+			return pasteCmd(m.provFor(v.scope), v.VM)
+		},
+	},
+	{
 		binding:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "secrets")),
 		about:      "Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start.",
 		enabledFor: alwaysEnabled, // secrets live on the host, editable whether or not the VM is up

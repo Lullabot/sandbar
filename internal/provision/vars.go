@@ -59,6 +59,10 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 			varItem{"toolset_ddev", cfg.WithDDEV},
 			varItem{"toolset_go", cfg.WithGo},
 			varItem{"toolset_java", cfg.WithJava},
+			// Codex defaults false (opt-in), unlike the four above, but is
+			// still emitted unconditionally so the base always receives the
+			// actual selection rather than falling back to a role default.
+			varItem{"toolset_codex", cfg.WithCodex},
 		)
 		if aptUpgrade {
 			items = append(items, varItem{"base_apt_upgrade", true})

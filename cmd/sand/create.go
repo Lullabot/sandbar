@@ -104,6 +104,10 @@ Flags:
 	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
 	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
+	// Unlike the four above, --with-codex is opt-IN (cfg.WithCodex defaults
+	// false): an unconfigured `sand create` must not start installing a tool no
+	// existing base has.
+	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")

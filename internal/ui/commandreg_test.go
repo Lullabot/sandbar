@@ -133,6 +133,34 @@ func TestShellOfferedOnlyWhenRunning(t *testing.T) {
 	}
 }
 
+// Paste (the `v` verb, task 5) is offered (and fires) only when the VM is
+// running — the same Shell/Upload/Download gate — and it must not route
+// through the file-browser wizard: pressing it should not change m.view off
+// the board (decision B: stay on board).
+func TestPasteOfferedOnlyWhenRunning(t *testing.T) {
+	m := newTestModel(t)
+	m = focusTile(t, m, vm.VM{Name: "claude", Status: "Stopped", CPUs: 2})
+
+	if strings.Contains(boardVerbs(m), "v paste image") {
+		t.Fatalf("a stopped VM's help bar must not offer paste, got:\n%s", boardVerbs(m))
+	}
+	if after, cmd := m.Update(runeKey('v')); cmd != nil || after.(model).acting {
+		t.Fatal("pressing 'v' on a stopped VM should dispatch no command and not mark acting")
+	}
+
+	m2 := focusTile(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
+	if !strings.Contains(boardVerbs(m2), "v paste image") {
+		t.Fatalf("a running VM's help bar should offer paste, got:\n%s", boardVerbs(m2))
+	}
+	after, cmd := m2.Update(runeKey('v'))
+	if cmd == nil {
+		t.Fatal("pressing 'v' on a running VM should dispatch a command")
+	}
+	if after.(model).view != viewBoard {
+		t.Fatal("pressing 'v' must not navigate off the board (no file-browser wizard)")
+	}
+}
+
 // The help bar and the dispatcher must never disagree: for every command in
 // the registry, whether it renders in the help bar and whether its key fires
 // are governed by the exact same enabledFor call. This is the structural

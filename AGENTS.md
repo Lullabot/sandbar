@@ -413,6 +413,35 @@ every bullet, not the constraint itself.
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
 
+## The `sand paste-image` feature: IMAGE-ONLY invariant (read before extending clipboard handling)
+
+The `sand paste-image` command and TUI verb (`v`) stage a host clipboard
+image on a guest's single-slot file (`~/.sand/clip/latest.png`) so Claude
+Code's native Ctrl-V paste works. **This feature is IMAGE-ONLY by contract
+and by construction.** Do not weaken or remove this guarantee:
+
+- **Host-side read (`internal/clipboard`)** gates on an advertised `image/*`
+  type before fetching any bytes. A clipboard with no image type yields a
+  sentinel and **fetches zero bytes**. Tests assert that a text-only
+  clipboard produces the sentinel, never image bytes.
+- **Guest-side shims** (`roles/claude-code` `sand-xclip` and `sand-wl-paste`)
+  have no write path, no `text/*` branch, and no fallback for non-image
+  targets — they refuse anything that is not an image. This is **independent**
+  of the host read; the shim cannot be tricked into serving text even if the
+  host seam were extended (which it should not be).
+- **Do not add a text fallback** to `internal/clipboard` or the guest shims
+  under any circumstance. The password-leak surface that makes a live
+  clipboard bridge unacceptable is the exact surface this feature closes.
+  Text is never sent. If a user wants to paste text into a guest, they attach
+  to the shell with `S` and use `cat` or the shell itself.
+
+The clipboard read is one-shot and runs on the machine executing `sand`, not
+the remote host (for remote-Lima deployments). Only the image bytes cross
+the network.
+
+For the security rationale, see the plan's Risk Considerations and the spec
+comment at `roles/claude-code/tasks/main.yml`.
+
 ## The base image / clone / finalize provisioner (read before touching `internal/provision`)
 
 - **Clones inherit the base image's `lima.yaml` — including its mounts.**

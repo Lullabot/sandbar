@@ -91,13 +91,16 @@ esac
 echo "SAND_ANSIBLE_TASK_TOTAL=$total"`
 
 // profileGuestScript is the opt-in variant of inGuestScript, selected when the
-// host has SAND_PROFILE set (see sandProfileEnabled). ansible.cfg enables the
-// profile_tasks callback unconditionally, but that callback lives in the
-// ansible.posix collection, not ansible-core (strikethroo plan 13, task 02),
-// and the default Lima dependency script installs only ansible-core. This
-// variant installs ansible.posix on demand, right before the playbook run, so
-// the callback loads and prints its timing; the default path (inGuestScript)
-// never does this and stays collection-free.
+// host has SAND_PROFILE set (see sandProfileEnabled). The profile_tasks callback
+// lives in the ansible.posix collection, not ansible-core (strikethroo plan 13,
+// task 02), and the default Lima dependency script installs only ansible-core —
+// so ansible.cfg deliberately does NOT enable the callback (leaving it on
+// unconditionally made every default build print a "cannot load profile_tasks"
+// warning that reads to end users as a broken build). This variant installs
+// ansible.posix on demand AND turns the callback on via ANSIBLE_CALLBACKS_ENABLED
+// (ANSIBLE_CALLBACK_WHITELIST is the pre-2.11 spelling; setting both is harmless)
+// for this run only, so timing prints; the default path (inGuestScript) does
+// neither and stays collection-free and warning-free.
 const profileGuestScript = `set -eu -o pipefail
 vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
@@ -109,6 +112,7 @@ rsync -a --delete --delete-excluded \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
 ansible-galaxy collection install ansible.posix
+export ANSIBLE_CALLBACKS_ENABLED=profile_tasks ANSIBLE_CALLBACK_WHITELIST=profile_tasks
 listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
 ` + taskTotalGuard + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"

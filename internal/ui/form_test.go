@@ -221,15 +221,15 @@ func TestCreateFormJavaToggleOff(t *testing.T) {
 		t.Fatalf("openForm must reset toggleFocus to -1, got %d", m.toggleFocus)
 	}
 
-	// Walk from the last text input onto the toggles: Claude (0), DDEV (1),
-	// Go (2), Java (3).
+	// Walk from the last text input onto the toggles: Claude (0), Codex (1),
+	// DDEV (2), Go (3), Java (4).
 	m.focusIdx = fCloneToken
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 3 {
-		t.Fatalf("expected focus on the Java toggle (index 3), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 4 {
+		t.Fatalf("expected focus on the Java toggle (index 4), got toggleFocus=%d", m.toggleFocus)
 	}
 
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -285,6 +285,66 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 	}
 }
 
+// TestCreateFormCodexToggleOn pins that OpenAI Codex is a de-selectable,
+// OPT-IN tool: it defaults off (unlike Claude Code) and the create form must
+// still surface it as a toggle, immediately after the Claude Code toggle, so
+// flipping it on produces WithCodex: true while leaving the other (default-on)
+// tools alone.
+func TestCreateFormCodexToggleOn(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Dev")
+	m.inputs[fGitEmail].SetValue("dev@example.com")
+
+	if m.toolCodex {
+		t.Fatalf("OpenAI Codex must default OFF (opt-in)")
+	}
+
+	// Walk from the last text input onto the toggles: Claude (0), Codex (1).
+	m.focusIdx = fCloneToken
+	for i := 0; i < 2; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+	}
+	if m.toggleFocus != 1 {
+		t.Fatalf("expected focus on the OpenAI Codex toggle (index 1), got toggleFocus=%d", m.toggleFocus)
+	}
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if !cfg.WithCodex {
+		t.Fatalf("WithCodex = false after flipping the OpenAI Codex toggle on, want true")
+	}
+	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
+		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v WithJava=%v",
+			cfg.WithClaude, cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+	}
+}
+
+// TestCreateFormCodexDefaultOff pins that an untouched create form submits
+// WithCodex: false — the opt-in default carries through buildConfig even
+// though the form shows the toggle.
+func TestCreateFormCodexDefaultOff(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.inputs[fName].SetValue("web")
+	m.inputs[fGitName].SetValue("Dev")
+	m.inputs[fGitEmail].SetValue("dev@example.com")
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if cfg.WithCodex {
+		t.Fatalf("WithCodex = true on an untouched create form, want false (opt-in default)")
+	}
+}
+
 // TestCreateFormRebuildToggle pins that the last create-mode toggle
 // ("Rebuild base image") is reachable and flips independently of the tool
 // toggles.
@@ -293,12 +353,12 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 	m.openForm()
 	m.focusIdx = fCloneToken
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 4 {
-		t.Fatalf("expected focus on the Rebuild toggle (index 4), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 5 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 5), got toggleFocus=%d", m.toggleFocus)
 	}
 	if m.toolRebuild {
 		t.Fatalf("rebuild should default off")
@@ -381,6 +441,34 @@ func deliverToolsetLoad(t *testing.T, m *model, cmd tea.Cmd) {
 			next, _ := m.Update(tm)
 			*m = next.(model)
 		}
+	}
+}
+
+// TestResetReplaysARecordedCodexSelection pins the reset-path replay in the
+// ADD direction for the opt-in tool: WithCodex defaults false, but a VM that
+// was actually created with --with-codex has WithCodex=true RECORDED, and the
+// reset form (which shows no tool toggles) must still submit true — not fall
+// back to the opt-in default — or the reset silently de-selects Codex and
+// marks the shared base stale against its stamp.
+func TestResetReplaysARecordedCodexSelection(t *testing.T) {
+	m := newTestModel(t)
+	recorded := vm.CreateConfig{
+		Name:      "vm1",
+		GitName:   "A",
+		GitEmail:  "a@example.com",
+		CPUs:      4,
+		Memory:    "8GiB",
+		Disk:      "20GiB",
+		WithCodex: true, // explicitly opted IN
+	}
+	m.openResetForm(registry.LocalScope, "vm1", recorded)
+
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatalf("buildConfig: %v", err)
+	}
+	if !cfg.WithCodex {
+		t.Errorf("reset dropped the recorded WithCodex=true selection; a reset must not silently de-select an opt-in tool the VM was actually built with")
 	}
 }
 

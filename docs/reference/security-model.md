@@ -47,6 +47,15 @@ tenant or a determined attacker.
   in**, via the provisioned direnv hooks (see
   [Secrets](../using-sand/secrets.md)). Scope your tokens accordingly — a
   secret placed at a scope is available to any agent working under it.
+- **Codex runs with approvals off and sandbox disabled** (when selected). When
+  you provision the VM with `--with-codex`, Codex is installed with
+  `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`, a
+  deliberate choice because the ephemeral VM is the sandbox itself. Codex is
+  opt-in; if you don't pass `--with-codex` or enable it in the TUI, it is not
+  installed.
+- **No Codex credential is provisioned.** You log in to Codex inside the VM
+  yourself with your ChatGPT account; no host-side token is copied in. See
+  [Logging into Codex](../getting-started/first-vm.md#logging-into-codex).
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in

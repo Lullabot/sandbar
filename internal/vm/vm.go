@@ -58,18 +58,24 @@ type CreateConfig struct {
 	CloneURL        string
 	CloneToken      string
 
-	// WithClaude, WithDDEV, WithGo, and WithJava select the configurable
-	// base-image tool-set (sand create --with-claude/--with-ddev/--with-go/
-	// --with-java). They configure the shared BASE image, not the individual
-	// clone — there is still exactly one base per user, its contents just differ
-	// by selection. All four default to true (see DefaultCreateConfig), so an
-	// unconfigured `sand create` installs everything today's base does; the flags
-	// are opt-OUT. Claude Code is one selection among the tools rather than a
-	// fixture of the image, so a user can bring their own agent instead.
+	// WithClaude, WithDDEV, WithGo, WithJava, and WithCodex select the
+	// configurable base-image tool-set (sand create --with-claude/--with-ddev/
+	// --with-go/--with-java/--with-codex). They configure the shared BASE
+	// image, not the individual clone — there is still exactly one base per
+	// user, its contents just differ by selection. The first four default to
+	// true (see DefaultCreateConfig), so an unconfigured `sand create` installs
+	// everything today's base does; those flags are opt-OUT. Claude Code is one
+	// selection among the tools rather than a fixture of the image, so a user
+	// can bring their own agent instead.
+	//
+	// WithCodex is the deliberate exception: it defaults to FALSE (opt-IN), so
+	// existing users' bases keep the exact tool-set (and stamp) they already
+	// have unless they explicitly ask for Codex too.
 	WithClaude bool
 	WithDDEV   bool
 	WithGo     bool
 	WithJava   bool
+	WithCodex  bool
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
@@ -86,6 +92,8 @@ func DefaultCreateConfig() CreateConfig {
 		WithDDEV:   true,
 		WithGo:     true,
 		WithJava:   true,
+		// WithCodex is deliberately omitted: its zero value (false) IS the
+		// default — codex is opt-in, unlike the four tools above.
 	}
 }
 
@@ -101,6 +109,7 @@ func (c *CreateConfig) ToolPtrs() map[string]*bool {
 		"ddev":   &c.WithDDEV,
 		"go":     &c.WithGo,
 		"java":   &c.WithJava,
+		"codex":  &c.WithCodex,
 	}
 }
 

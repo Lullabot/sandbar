@@ -20,6 +20,7 @@ import (
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/paste"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -220,6 +221,7 @@ type model struct {
 	// would silently re-converge the SHARED base back to the full tool-set —
 	// installing a Go toolchain and a JDK the user had explicitly opted out of.
 	resetWithClaude      bool
+	resetWithCodex       bool
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
@@ -238,6 +240,7 @@ type model struct {
 	// can de-select it and install their own agent. Not to be confused with
 	// preserveClaude above, which is reset mode's keep-my-~/.claude toggle.
 	toolClaude  bool
+	toolCodex   bool
 	toolDDEV    bool
 	toolGo      bool
 	toolJava    bool
@@ -1053,6 +1056,20 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logMsg(text)
 		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
 
+	case pasteResultMsg:
+		// A plain status-line result (task 5): no spinner to clear (pasteCmd never
+		// goes through beginAction — see its doc comment), no view change, no
+		// refresh — a clipboard write changes nothing the board's tiles render.
+		switch {
+		case msg.err != nil:
+			m.logMsg(msg.err.Error())
+		case msg.result.Status == paste.Staged:
+			m.logMsg("staged image on " + msg.name + " — press S then Ctrl-V")
+		default: // paste.NoImage
+			m.logMsg("no image on clipboard")
+		}
+		return m, nil
+
 	case provisionOutputMsg:
 		// The chunk is keyed by RUN — the VM and which of its runs — so N jobs can
 		// stream at once without their output crossing streams, including a VM's
@@ -1220,6 +1237,19 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 // paths — fully readable as the user scrolls. ansi.Wrap breaks over-long
 // unbreakable tokens (e.g. file paths) and preserves the output's ANSI colour
 // codes.
+//
+// Security note (terminal escape injection): job.Output is untrusted guest
+// output stored verbatim (see jobRegistry.addOutput) — the guest runs untrusted
+// code, so this buffer can contain arbitrary terminal control sequences, and
+// ansi.Wrap preserves them rather than stripping them. That is safe here only
+// because Bubble Tea v2 renders through a cell-diffing compositor (ultraviolet):
+// it re-emits solely printable content, SGR styling, and OSC 8 hyperlinks, and
+// discards everything else — OSC 52 (clipboard write), window-title, cursor, and
+// DCS sequences never reach the terminal. The protection is incidental to the
+// renderer, NOT a sanitization step on this path. If this buffer is ever written
+// to the terminal another way (tea.Println, a debug dump, or a non-cell
+// renderer), strip it first with ansi.Strip — as feed()'s Ansible-progress parser
+// already does in ansible.go — or a malicious guest can inject those sequences.
 func (m *model) setOutput() {
 	w := m.viewport.Width()
 	if w < 1 {

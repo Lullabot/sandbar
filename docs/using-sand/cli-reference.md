@@ -1,11 +1,13 @@
 # CLI Reference
 
-There are four entry points:
+There are five entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
+- [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
+  host clipboard on a running VM's guest clipboard.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
 
@@ -57,6 +59,16 @@ not a prompt.
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
+| `--with-claude` | bool | `true` | Install Claude Code in the base image. |
+| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — the one **opt-in** toolset flag. |
+| `--with-ddev` | bool | `true` | Install DDEV in the base image. |
+| `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
+| `--with-java` | bool | `true` | Install a headless JDK in the base image. |
+
+The `--with-*` flags configure the **shared base image**, not the individual
+VM. A flag you don't pass adopts whatever the existing base was actually
+built with (read back from its version stamp), so you only need to state a
+selection once; passing a flag explicitly always wins.
 
 ### There is no `--ref` flag
 
@@ -192,11 +204,21 @@ Flags:
   -profile string
     	Connection profile to create on (default: the last-used profile, else "local")
   -rebuild
-    	Delete and rebuild the base image first, then create
+    	Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
   -recreate
     	If the named instance exists and is sand-managed, delete and re-clone it
   -user string
     	Primary VM user
+  -with-claude
+    	Install Claude Code in the base image (default true)
+  -with-codex
+    	Install OpenAI Codex in the base image
+  -with-ddev
+    	Install DDEV in the base image (default true)
+  -with-go
+    	Install the Go toolchain in the base image (default true)
+  -with-java
+    	Install a headless JDK in the base image (default true)
 ```
 
 (`--user` has no printed default because it is resolved to the host username
@@ -234,7 +256,7 @@ connection profile, --profile picks which one to attach to.
 before or after `NAME`. `sand shell` refuses a VM that does not exist or is
 not running.
 
-### Cross-profile resolution
+### Cross-profile resolution for `sand shell`
 
 Because the same VM name can exist under more than one
 [Connection Profile](connection-profiles.md), `sand shell NAME` resolves
@@ -252,6 +274,49 @@ which one you mean like this:
    (the same name exists on two profiles) is an error asking you to pass
    `--profile` to disambiguate, and lists the profile names it's ambiguous
    between.
+
+## `sand paste-image NAME`
+
+Stage the host clipboard's image on a running VM's guest clipboard, ready for
+Ctrl-V inside Claude Code in the guest.
+
+```
+Usage: sand paste-image NAME [--profile <name>]
+
+Read the host clipboard image and stage it on NAME's guest clipboard at
+<guest-home>/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
+
+The named VM must already exist and be running (see 'sand' to list instances,
+or 'sand create' to make one). If NAME is managed under more than one
+connection profile, --profile picks which one to target.
+
+If the host clipboard holds no image, nothing is staged and the command
+exits non-zero.
+```
+
+`NAME` is required (exactly one positional argument); `--profile` may appear
+before or after `NAME`. The command requires a running VM. If the host
+clipboard contains only text or is empty, it reports "no image on clipboard"
+and exits with a non-zero status.
+
+### How it works
+
+When you run `sand paste-image`, sand reads the clipboard **image only** on
+the machine running `sand` (your workstation), verifying an image type is
+advertised before fetching any bytes. The image is then written into the guest
+at a single-slot path in one step, where a pair of lightweight shims named
+`xclip` and `wl-paste` serve it to Claude Code's native paste probe.
+
+**Security:** The feature is structured to prevent clipboard **text** from
+leaking into the guest. It never reads clipboard text; it gates the clipboard
+read on an advertised `image/*` type, and the guest shims have no text-serving
+path at all.
+
+### Cross-profile resolution for `sand paste-image`
+
+Like `sand shell`, `sand paste-image NAME` resolves which connection profile
+you mean using the same logic described above under `sand shell`'s
+[Cross-profile resolution](#cross-profile-resolution-for-sand-shell).
 
 ## `sand version` / `sand --version`
 

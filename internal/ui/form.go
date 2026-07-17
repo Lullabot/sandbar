@@ -278,6 +278,7 @@ func (m *model) openForm() tea.Cmd {
 	// blocks the keyboard.
 	cfg := vm.DefaultCreateConfig()
 	m.toolClaude = cfg.WithClaude
+	m.toolCodex = cfg.WithCodex
 	m.toolDDEV = cfg.WithDDEV
 	m.toolGo = cfg.WithGo
 	m.toolJava = cfg.WithJava
@@ -365,6 +366,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
 	m.resetWithClaude = cfg.WithClaude
+	m.resetWithCodex = cfg.WithCodex
 	m.resetWithDDEV = cfg.WithDDEV
 	m.resetWithGo = cfg.WithGo
 	m.resetWithJava = cfg.WithJava
@@ -531,6 +533,12 @@ func (m model) createToggles() []formToggle {
 			help:  baseWideHelp("Claude Code"),
 			get:   func(m *model) bool { return m.toolClaude },
 			set:   func(m *model, v bool) { m.toolClaude = v },
+		},
+		{
+			label: "Install OpenAI Codex",
+			help:  baseWideHelp("OpenAI Codex"),
+			get:   func(m *model) bool { return m.toolCodex },
+			set:   func(m *model, v bool) { m.toolCodex = v },
 		},
 		{
 			label: "Install DDEV",
@@ -731,11 +739,18 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		// Code/Go/Java the user opted out of, silently, from a form that never
 		// mentions them.
 		cfg.WithClaude = m.resetWithClaude
+		cfg.WithCodex = m.resetWithCodex
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
+		// Codex is replayed like its siblings: the RECORDED selection is the
+		// truth here, not the default. WithCodex's default-off only protects the
+		// ADD direction (an unconfigured create never installs it); a VM reset
+		// from a recorded WithCodex=true must still replay true, or the reset
+		// would silently de-select it and mark the shared base stale.
 	} else {
 		cfg.WithClaude = m.toolClaude
+		cfg.WithCodex = m.toolCodex
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava
