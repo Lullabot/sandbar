@@ -1,0 +1,42 @@
+---
+# Stage two things on the container before Converge runs the repo-profile
+# role (roles/repo-profile/tasks/main.yml, strikethroo plan 18 task 03)
+# against a fake "cloned checkout" instead of a real git clone:
+#
+#  1. A copy of THIS repo's real scripts/ and shipped-profiles/ trees, landed
+#     at {{ playbook_dir }} on the container. roles/repo-profile hard-codes
+#     paths off `playbook_dir` (scripts/validate_profile.py, each shipped
+#     tool's profile.yml under shipped-profiles/<tool>/) because in
+#     production that variable is the directory the whole embedded playbook
+#     fileset was rsynced into alongside site.yml, INSIDE the guest, where
+#     ansible-playbook itself runs (--connection=local). Under molecule's
+#     docker driver, ansible-playbook instead runs on the OUTER host, and
+#     playbook_dir resolves to this scenario's own directory
+#     (molecule/repo-profile/) rather than the project root — so scripts/
+#     and shipped-profiles/ must be copied onto the container at that same
+#     path for those hard-coded lookups to resolve, mirroring what the real
+#     rsync-into-the-guest lands.
+#
+#  2. A fake "cloned checkout" under /tmp/repo-profile-checkout, containing
+#     the committed-style .sandbar/ manifest fixture-checkout/.sandbar/
+#     (this scenario's own fixture, checked into the repo) that exercises
+#     all five declaration groups. converge.yml points
+#     repo_profile_checkout_dir at this directory instead of a real clone
+#     (see roles/repo-profile/defaults/main.yml's comment on why that
+#     variable is deliberately overridable for exactly this purpose).
+- name: Prepare
+  hosts: all
+  become: true
+  tasks:
+    - name: Stage the real scripts/ and shipped-profiles/ trees at playbook_dir
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "{{ playbook_dir }}/"
+      loop:
+        - scripts
+        - shipped-profiles
+
+    - name: Stage the fake cloned checkout's .sandbar/ manifest
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/fixture-checkout/.sandbar"
+        dest: /tmp/repo-profile-checkout/

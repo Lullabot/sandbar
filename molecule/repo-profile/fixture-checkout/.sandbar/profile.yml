@@ -1,0 +1,24 @@
+# Fixture manifest for molecule/repo-profile — a fake "committed checkout"
+# staged (not cloned) by prepare.yml at /tmp/repo-profile-checkout, with
+# repo_profile_checkout_dir pointed at it (see roles/repo-profile/defaults/
+# main.yml's comment on why that variable is overridable). Exercises all
+# five declaration groups scripts/validate_profile.py accepts:
+#
+#   packages -> cowsay (harmless marker package) and cron (so `services`
+#               below has a real unit to enable).
+#   services -> cron.service, enabled/started by the packages group above.
+#   roles    -> repo-profile-demo, a role under .sandbar/roles/ (this
+#               directory) whose only effect is a marker file.
+#   seed     -> .sandbar/seed.yml, which writes its own marker file.
+#   toolset  -> go, one of the shipped provisioning profiles
+#               (shipped-profiles/go/profile.yml is packages-only: golang).
+packages:
+  - cowsay
+  - cron
+services:
+  - cron.service
+roles:
+  - repo-profile-demo
+seed: .sandbar/seed.yml
+toolset:
+  - go

@@ -1,0 +1,14 @@
+# Fixture repo role for molecule/repo-profile, declared by profile.yml's
+# `roles` key. Read in place from .sandbar/roles/repo-profile-demo (this
+# directory) — in production via the runtime `repo-roles` symlink
+# (roles/repo-profile/tasks/main.yml step 4); under molecule's docker driver
+# this directory is instead reached directly via the scenario's
+# ANSIBLE_ROLES_PATH override (see molecule.yml's comment). Idempotent by
+# construction (ansible.builtin.copy with fixed content).
+- name: Write a marker file proving the custom repo role's effect landed
+  ansible.builtin.copy:
+    content: "repo-profile-demo role applied\n"
+    dest: /etc/repo-profile-demo.marker
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,11 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    # Point the finalize stage at prepare.yml's staged fake checkout instead
+    # of a real git clone destination — see
+    # roles/repo-profile/defaults/main.yml's comment on repo_profile_checkout_dir.
+    repo_profile_checkout_dir: /tmp/repo-profile-checkout
+  roles:
+    - role: repo-profile

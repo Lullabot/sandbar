@@ -1,0 +1,57 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Stat the custom repo role's marker file
+      ansible.builtin.stat:
+        path: /etc/repo-profile-demo.marker
+      register: _role_marker_stat
+
+    - name: Stat the seed tasks' marker file
+      ansible.builtin.stat:
+        path: /etc/repo-profile-seed.marker
+      register: _seed_marker_stat
+
+    - name: Read the custom repo role's marker file
+      ansible.builtin.slurp:
+        src: /etc/repo-profile-demo.marker
+      register: _role_marker
+      when: _role_marker_stat.stat.exists
+
+    - name: Read the seed tasks' marker file
+      ansible.builtin.slurp:
+        src: /etc/repo-profile-seed.marker
+      register: _seed_marker
+      when: _seed_marker_stat.stat.exists
+
+    # Five assertions, one per declaration group in the staged
+    # fixture-checkout/.sandbar/profile.yml manifest:
+    #   packages -> cowsay installed
+    #   services -> cron.service enabled + running (cron installed by the
+    #               packages group above, provides the unit)
+    #   roles    -> repo-profile-demo's marker file landed
+    #   toolset  -> golang (the shipped `go` profile) installed
+    #   seed     -> the seed tasks' marker file landed
+    - name: Assert every declaration group's effect landed
+      ansible.builtin.assert:
+        that:
+          - "'cowsay' in ansible_facts.packages"
+          - "'golang' in ansible_facts.packages"
+          - "'cron.service' in ansible_facts.services"
+          - ansible_facts.services['cron.service'].status == 'enabled'
+          - ansible_facts.services['cron.service'].state == 'running'
+          - _role_marker_stat.stat.exists
+          - "'repo-profile-demo role applied' in (_role_marker.content | b64decode)"
+          - _seed_marker_stat.stat.exists
+          - "'repo-profile seed executed' in (_seed_marker.content | b64decode)"
+        fail_msg: >-
+          repo-profile finalize stage did not land the expected effect for
+          one or more declaration groups (packages/services/roles/toolset/seed).
+        success_msg: "all five repo-profile declaration groups verified."

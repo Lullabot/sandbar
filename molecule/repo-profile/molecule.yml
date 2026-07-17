@@ -1,0 +1,65 @@
+---
+# Same systemd-enabled Debian 13 (trixie) image as molecule/base and
+# molecule/samba — matches the project's Debian target (README.md) so
+# cron.service actually starts under systemd during converge, and the
+# apt/service outcomes match the real Lima VM target.
+driver:
+  name: docker
+platforms:
+  - name: repo-profile-instance
+    # Pinned by digest — see molecule/base/molecule.yml. Renovate updates all
+    # three scenarios via the customManager in renovate.json.
+    image: "geerlingguy/docker-debian13-ansible:latest@sha256:9b433580e02f960ea57525e0bcfe13d7cb32188f9ebc1952f21b9dfa19d8bd47"
+    command: /sbin/init
+    privileged: true
+    pre_build_image: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+provisioner:
+  name: ansible
+  playbook:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+  env:
+    # roles/repo-profile's "declared repo roles" step (tasks/main.yml step 4)
+    # resolves repo-provided roles through ansible.cfg's roles_path
+    # `repo-roles` entry, which in PRODUCTION is a runtime symlink created on
+    # the SAME filesystem ansible-playbook itself runs on — the guest, via
+    # --connection=local (see ansible.cfg's comment on `repo-roles`). Role
+    # search-path resolution always happens on whichever filesystem
+    # ansible-playbook's own process reads from.
+    #
+    # Molecule's docker driver instead runs ansible-playbook on the OUTER
+    # host against the container over a docker connection, so a symlink the
+    # role creates ON THE CONTAINER (prepare.yml/converge.yml's `hosts: all`)
+    # is invisible to that controller-side role lookup — there is no way for
+    # this scenario to exercise the real runtime-symlink mechanism under the
+    # docker driver (task 5's lima-e2e, which runs --connection=local inside
+    # a real guest, is what proves that mechanism itself). Point
+    # ANSIBLE_ROLES_PATH directly at this scenario's fixture roles dir
+    # instead, so the declared role's tasks still execute and its effect is
+    # still verifiable — this fully REPLACES (not merges with) ansible.cfg's
+    # roles_path, so the two production entries (`roles`, `shipped-profiles/
+    # roles`) are repeated here alongside the fixture path. Relative entries
+    # resolve relative to the cwd `molecule test` is invoked from, which by
+    # convention (matching molecule/base and molecule/samba) is the repo
+    # root.
+    ANSIBLE_ROLES_PATH: "roles:shipped-profiles/roles:molecule/repo-profile/fixture-checkout/.sandbar/roles"
+verifier:
+  name: ansible
+scenario:
+  # Explicit for readability; this matches molecule's own default sequence.
+  # `idempotence` re-runs converge.yml and fails the job if anything reports
+  # changed the second time — the most direct, repeatable proof that the
+  # finalize stage (roles/repo-profile) is safe to re-run on Recreate/Reset,
+  # which it must be but cannot prove on its own without something like this.
+  test_sequence:
+    - dependency
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy
