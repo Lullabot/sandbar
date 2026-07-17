@@ -1,10 +1,10 @@
 ---
 id: 17
-summary: "Add `sand paste` — a host-initiated, image-only command that loads a host-clipboard image onto a shimmed guest clipboard so Ctrl-V works natively in Claude Code inside a sand VM"
+summary: "Add `sand paste-image` — a host-initiated, image-only command that loads a host-clipboard image onto a shimmed guest clipboard so Ctrl-V works natively in Claude Code inside a sand VM"
 created: 2026-07-17
 ---
 
-# Plan: `sand paste` — Native Ctrl-V Image Paste Into Guest Agent Sessions
+# Plan: `sand paste-image` — Native Ctrl-V Image Paste Into Guest Agent Sessions
 
 ## Original Work Order
 
@@ -30,17 +30,18 @@ created: 2026-07-17
 | 2 | Is the design *truly* image-only on every platform? | Only if made explicit. macOS (`«class PNGf»` coercion) and Windows (`GetImage()` returns null) are image-or-nothing by construction; **Linux is not** — a bare typed `xclip`/`wl-paste` fetch is not a hard refusal on a text-only clipboard. Resolution: the host read MUST gate on an advertised `image/*` type first and fetch bytes only then; no image type ⇒ hard error, zero fetch. |
 | 3 | How does the pasted image reach the agent — inject a path into tmux, or a real guest clipboard? | Enable a **clipboard inside the guest** so Ctrl-V works natively. Chosen over tmux path-injection; this also removes any need to touch tmux. |
 | 4 | Real headless clipboard (Xvfb + xclip) or a shim? | **Shim (Option B).** Ship guest `xclip`/`wl-paste` shims that serve the sand-managed image file. No daemon, negligible image cost, and image-only by construction. Xvfb was rejected as heavier (standing X server per VM, larger base image). |
-| 5 | Retention policy for stored pastes? | **Moot.** A clipboard holds one item; `sand paste` overwrites a single-slot file each time, so there is nothing to accumulate or prune. |
+| 5 | Retention policy for stored pastes? | **Moot.** A clipboard holds one item; `sand paste-image` overwrites a single-slot file each time, so there is nothing to accumulate or prune. |
 | 6 | Backwards compatibility? | Not applicable — purely additive (new command, new TUI verb, new guest files). No BC break. |
-| 7 | Does `sand paste` auto-target the single running VM? | **No** — it mirrors `sand shell`: exactly one explicit VM name, honoring `--profile`. `cmd/sand/resolve.go` resolves the *connection profile*, not the VM; sand has no single-running-VM shortcut, so inventing one here would be inconsistent (corrected from the initial draft). |
+| 7 | Does `sand paste-image` auto-target the single running VM? | **No** — it mirrors `sand shell`: exactly one explicit VM name, honoring `--profile`. `cmd/sand/resolve.go` resolves the *connection profile*, not the VM; sand has no single-running-VM shortcut, so inventing one here would be inconsistent (corrected from the initial draft). |
 | 8 | Which host platforms read the clipboard? | **macOS and Linux only** — the platforms sand/Lima run on — mirroring the `hostres_*.go` seam where `_other` is a stub. Windows/WSL is out of scope; the `other` build returns an "unsupported" sentinel (corrected from the initial draft, which overreached to PowerShell). |
 | 9 | How are the image bytes written into the guest? | One guest round trip that creates the dir and writes the file — `Client.Shell` with the image on stdin (`mkdir -p <dir> && cat > <file>`) — against the **absolute** guest home resolved via `GuestHome`, not `~` expansion and not `Copy` (which creates no parent dirs). The clipboard is always read on the machine running sand; only the written bytes cross the remote hop. |
+| 10 | Command/verb wording: "paste" or "paste image"? | **"paste image"** — the CLI command is `sand paste-image <vm>` and the TUI verb's help label is "paste image". The feature is image-only by design (text can never transit), so the name states the contract and forecloses the wrong expectation of a generic paste. |
 
 Resolved design decisions (confirmed in refinement 2026-07-17):
 
 | # | Decision | Resolution | Alternative considered |
 |---|----------|------------|------------------------|
-| A | TUI keybinding for the paste verb | **`v`** (confirmed free of collisions) | `i` (image) |
+| A | TUI keybinding for the paste-image verb | **`v`** (confirmed free of collisions) | `i` (image) |
 | B | Board behavior after a TUI paste | **Stay on board**, show a status-line result | Chain straight into attach |
 | C | Staged image lifecycle | **Persist until replaced** — real-clipboard parity, simplest, and robust to Claude Code's two-call probe (TARGETS then fetch) | One-shot: consume/clear the slot after the fetch |
 
@@ -50,14 +51,14 @@ Claude Code's Ctrl-V image paste works by shelling out to a **local** clipboard
 reader (on the machine Claude Code runs on): `xclip`/`wl-paste` on Linux,
 `osascript «class PNGf»` on macOS, PowerShell `GetImage()` on Windows/WSL.
 Inside a sand guest there is no display server and no clipboard tool, so Ctrl-V
-finds nothing. This plan adds `sand paste` (a CLI command and a TUI tile verb)
+finds nothing. This plan adds `sand paste-image` (a CLI command and a TUI tile verb)
 that makes native Ctrl-V work while categorically refusing to expose host
 clipboard **text** — the passwords a naive clipboard bridge would leak.
 
-The flow: the user copies an image on the host, triggers `sand paste <vm>` (CLI,
+The flow: the user copies an image on the host, triggers `sand paste-image <vm>` (CLI,
 mirroring `sand shell`'s argument contract, or the TUI verb), and presses Ctrl-V
 inside Claude Code in the guest — where it renders as a normal `[Image #N]`
-attachment. Under the hood, `sand paste` reads the clipboard **image-only** on
+attachment. Under the hood, `sand paste-image` reads the clipboard **image-only** on
 the machine sand itself runs on (gating on an advertised `image/*` type before
 ever fetching bytes; macOS and Linux hosts only), writes the image into the guest
 at a single-slot path in one guest round trip (`Client.Shell` with the bytes on
@@ -81,8 +82,8 @@ attach path.
 
 | Current State | Target State | Why? |
 |---------------|--------------|------|
-| Ctrl-V in Claude Code inside a guest finds no clipboard tool and no display server; image paste silently does nothing. | `sand paste` loads a host-clipboard image onto a shimmed guest clipboard; Ctrl-V in Claude renders `[Image #N]`. | Restore the paste gesture users expect, inside the sandbox. |
-| The only way to get an image to a guest agent is a manual file copy plus typing the path. | One action (`v` in the TUI or `sand paste`) then a native Ctrl-V. | Remove friction; match muscle memory. |
+| Ctrl-V in Claude Code inside a guest finds no clipboard tool and no display server; image paste silently does nothing. | `sand paste-image` loads a host-clipboard image onto a shimmed guest clipboard; Ctrl-V in Claude renders `[Image #N]`. | Restore the paste gesture users expect, inside the sandbox. |
+| The only way to get an image to a guest agent is a manual file copy plus typing the path. | One action (`v` in the TUI or `sand paste-image`) then a native Ctrl-V. | Remove friction; match muscle memory. |
 | A host↔guest clipboard bridge would expose all host clipboard content (including passwords) to every guest process. | Host clipboard is read one-shot, image-only, on explicit user action; text can never transit. | Eliminate the credential-leak surface that made a bridge unacceptable. |
 | No guest clipboard exists (headless: no `DISPLAY`, no `xclip`/`wl-paste`). | Guest ships `xclip`/`wl-paste` shims that serve a sand-managed image file. | Give Claude Code's native paste probe something to read without a display server. |
 | sand knows about tmux in exactly one place (`internal/lima/attach.go`). | Unchanged — paste delivery uses a guest clipboard, not tmux injection. | Keep tmux knowledge centralized; avoid a second tmux touchpoint. |
@@ -158,7 +159,7 @@ sequenceDiagram
     participant HC as Local clipboard
     participant G as Guest clip dir
     participant CC as Claude Code (guest)
-    U->>H: sand paste VM  /  TUI verb
+    U->>H: sand paste-image VM  /  TUI verb
     H->>HC: gate - advertised image type? (macOS/Linux)
     alt no image type
         HC-->>H: none
@@ -240,7 +241,7 @@ probes Claude Code issues:
   text-serving path — image-only by construction, independent of the read seam.
 
 Lifecycle is persist-until-replaced (decision C): the shim serves the same
-single-slot file on every read until the next `sand paste` overwrites it, matching
+single-slot file on every read until the next `sand paste-image` overwrites it, matching
 how a real clipboard retains its contents and staying robust against Claude Code's
 two-call probe (it lists TARGETS, then fetches — a consume-on-first-read shim
 would empty the slot before the fetch).
@@ -257,14 +258,15 @@ behavior.
 **Objective**: One host action that runs read → deliver, for both headless and
 TUI users.
 
-- **CLI `sand paste <vm>`**: mirrors `sand shell`'s contract exactly — exactly one
+- **CLI `sand paste-image <vm>`**: mirrors `sand shell`'s contract exactly — exactly one
   explicit VM name plus a `--profile` flag (there is no single-running-VM
   shortcut; `resolve.go` resolves the profile, not the VM). It runs the clipboard
   read and guest delivery and reports a concise result (staged, or a specific
   reason nothing was — no image on clipboard, VM not running/unknown). Requires a
   running VM, the same guard as `sand shell`.
-- **TUI verb** (key `v`, decision A): registered in `internal/ui/commandreg.go`
-  beside `u`/`g`/`S` with an `enabledFor` guard restricting it to running VMs.
+- **TUI verb** (key `v`, help label **"paste image"**, decision A): registered in
+  `internal/ui/commandreg.go` beside `u`/`g`/`S` with an `enabledFor` guard
+  restricting it to running VMs.
   Unlike the transfer verbs it opens **no** file-browser wizard (there is no file
   to pick); it is a direct async action that surfaces its outcome on the status
   line (e.g. `staged image on <vm> — press S then Ctrl-V`) and stays on the board
@@ -335,10 +337,10 @@ TUI users.
 ## Success Criteria
 
 ### Primary Success Criteria
-1. On a running local VM, copying an image on the host, invoking `sand paste <vm>`,
+1. On a running local VM, copying an image on the host, invoking `sand paste-image <vm>`,
    and pressing Ctrl-V inside Claude Code in the guest yields an `[Image #N]`
    attachment matching the copied image.
-2. The TUI paste verb performs the same staging and reports its outcome on the
+2. The TUI paste-image verb performs the same staging and reports its outcome on the
    status line, enabled only for running VMs.
 3. With **text** (not an image) on the host clipboard, both entrypoints report
    "no image found" and provably fetch/transfer zero clipboard bytes — verified
@@ -355,14 +357,14 @@ TUI users.
 After all tasks are complete, an implementer should verify by:
 
 1. Start a local VM, attach, and launch Claude Code. From a second host terminal,
-   copy a known PNG to the host clipboard, run `sand paste <vm>`, then in the
+   copy a known PNG to the host clipboard, run `sand paste-image <vm>`, then in the
    attached Claude Code press Ctrl-V; confirm the `[Image #N]` chip appears and
    the image is the one copied. Capture the terminal output as evidence.
 2. Put plain text (a fake password string) on the host clipboard, run
-   `sand paste <vm>`, and confirm it reports "no image found" and stages nothing
+   `sand paste-image <vm>`, and confirm it reports "no image found" and stages nothing
    (`ls ~/.sand/clip/` in the guest shows no new/updated file, or the prior slot
    is untouched). Repeat on macOS and Linux hosts.
-3. In the TUI, focus a running VM's tile, press the paste verb, and confirm the
+3. In the TUI, focus a running VM's tile, press the paste-image verb, and confirm the
    status line reports the staged result; press it on a stopped VM and confirm the
    verb is disabled/absent.
 4. With the single-slot file absent, press Ctrl-V in guest Claude Code and confirm
@@ -374,8 +376,8 @@ After all tasks are complete, an implementer should verify by:
 
 ## Documentation
 
-- Update user-facing docs (README / `docs/`) with the `sand paste` command, the
-  TUI verb and its key, and the copy-image → `sand paste` → Ctrl-V workflow,
+- Update user-facing docs (README / `docs/`) with the `sand paste-image` command, the
+  TUI verb and its key, and the copy-image → `sand paste-image` → Ctrl-V workflow,
   explicitly stating it is image-only and never transmits clipboard text.
 - Note the guest shim and single-slot path in the provisioning role's
   documentation so the headless-clipboard mechanism is discoverable.
@@ -424,9 +426,9 @@ The guest shim ships via the `roles/claude-code` provisioning role to
 
 ### Change Log
 
-- **2026-07-17 (creation):** initial plan — `sand paste`, Option B shim clipboard.
+- **2026-07-17 (creation):** initial plan — `sand paste-image`, Option B shim clipboard.
 - **2026-07-17 (refinement):**
-    - Corrected VM resolution: `sand paste` requires an explicit VM name +
+    - Corrected VM resolution: `sand paste-image` requires an explicit VM name +
       `--profile`, mirroring `sand shell`; removed the invented "single running
       VM" auto-resolution (`resolve.go` resolves the profile, not the VM).
     - Replaced the `Client.Copy`/`copyAcrossHop` delivery assumption with the
@@ -442,3 +444,5 @@ The guest shim ships via the `roles/claude-code` provisioning role to
       and that the TUI verb is a direct action, not the transfer file-browser
       wizard.
     - Confirmed open decisions A/B/C with the user.
+    - Renamed the command/verb to state the image-only contract: CLI
+      `sand paste-image <vm>`, TUI verb label "paste image" (clarification 10).
