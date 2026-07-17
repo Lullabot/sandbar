@@ -111,6 +111,13 @@ func TestTUIFormSourceSelectorGolden(t *testing.T) {
 	// A tiny requested size keeps it well under whatever any test box actually
 	// has free, so this golden's line count stays fixed everywhere.
 	m.inputs[fDisk].SetValue("1GiB")
+	// Pin the host-derived identity fields (fUser/fGitName/fGitEmail come from
+	// hostUser()/hostGit(), which isolateHostState does not control) so the
+	// golden is portable across machines and CI — same convention as the other
+	// form golden tests.
+	m.inputs[fUser].SetValue("ada")
+	m.inputs[fGitName].SetValue("Ada Lovelace")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
 	m.focusIdx = fSourceSelector
 	m.cycleFormSource(1) // "" (base) -> "golden", the only saved template
 
@@ -152,6 +159,13 @@ func TestTUIDeleteTemplateConfirmGolden(t *testing.T) {
 	// See TestTUIFormSourceSelectorGolden: keeps the disk-overflow warning
 	// (compared against the REAL host's free space) from appearing.
 	m.inputs[fDisk].SetValue("1GiB")
+	// Pin the host-derived identity fields (fUser/fGitName/fGitEmail come from
+	// hostUser()/hostGit(), which isolateHostState does not control) so the
+	// golden is portable across machines and CI — same convention as the other
+	// form golden tests.
+	m.inputs[fUser].SetValue("ada")
+	m.inputs[fGitName].SetValue("Ada Lovelace")
+	m.inputs[fGitEmail].SetValue("ada@example.com")
 	m.focusIdx = fSourceSelector
 	m.cycleFormSource(1)
 

@@ -5,9 +5,9 @@
   Source:            < golden · 4 GiB · 3d ago · [stale] >                                        
   Name:              >                                                                            
   Hostname:          >                                                                            
-  User:              > debian                                                                     
-  Git name:          > Andrew Berry                                                               
-  Git email:         > andrew@furrypaws.ca                                                        
+  User:              > ada                                                                        
+  Git name:          > Ada Lovelace                                                               
+  Git email:         > ada@example.com                                                            
   CPUs:              > 8                                                                          
   Memory:            > 8GiB                                                                       
   Disk:              > 1GiB                                                                       
