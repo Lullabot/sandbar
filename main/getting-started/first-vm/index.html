@@ -1357,8 +1357,21 @@ built this way.</p>
 <h2 id="logging-into-claude-code">Logging into Claude Code</h2>
 <p><code>sand</code> installs the Claude Code CLI but does <strong>not</strong> provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (<code>S</code>
-on its tile, or <code>sand shell NAME</code>) and run <code>claude</code> once to complete a
-normal interactive login.</p>
+on its tile, or <code>sand shell NAME</code>) and run <code>claude</code>: the first time, it
+walks you through an interactive sign-in, then starts the session. Later
+runs go straight to the prompt.</p>
+<p>Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
+state so sessions start with bypass permissions active, and the provisioned
+<code>claude</code> command runs <code>claude auth login</code> for you whenever you're not signed
+in, so you're never dropped to an un-authed prompt.</p>
+<p>Claude Code doesn't always settle into bypass mode on the very session right
+after you sign in — it can prompt once about its full-screen renderer and
+come up in manual mode. If that happens, quit (<code>/exit</code>) and run <code>claude</code>
+again; it comes up in bypass mode. The provisioned <code>claude</code> prints a one-time
+reminder about this on first use. (This is Claude Code's own first-run
+sequencing, which shifts between releases, so <code>sand</code> flags it rather than
+trying to script around it.) The per-directory trust dialog you see in each
+new folder is separate and deliberate.</p>
 <p>A full interactive login is required, rather than a headless token, because
 remote control is enabled by default (see
 <a href="../../reference/security-model/">Security Model</a>) and remote control
