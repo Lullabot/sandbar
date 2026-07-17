@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/browse"
+	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/paste"
@@ -164,6 +165,14 @@ type model struct {
 	// `limactl shell` per RUNNING VM, streaming real cpu and memory out of the guest.
 	// A POINTER for the same reason jobs is, and nil-safe for the same reason.
 	heartbeats *heartbeatRegistry
+
+	// checkouts is the per-VM git checkout registry (internal/checkouts): the
+	// host-persisted spine the "land" feature reads — the sweep (sweep.go) is its
+	// single writer, applied via a message in Update exactly like heartbeat
+	// samples; the unlanded-work badge, the delete guard and the Landing pane are
+	// pure readers. A POINTER for the same reason reg/jobs are (the model is
+	// copied by value), and nil-safe: a model built by hand reports "no checkouts".
+	checkouts *checkouts.Registry
 
 	// lastInput is when the user last touched a key. Together with the active view
 	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
@@ -354,6 +363,14 @@ func New(fleet provider.Fleet) tea.Model {
 		sec = secrets.NewEmpty()
 	}
 
+	// The checkout registry (land feature) gets the same tolerant posture: a
+	// corrupt/unreadable file surfaces as a warning rather than crashing, and the
+	// badge/guard/pane simply see no checkouts until the next sweep repopulates it.
+	checkoutReg, checkoutErr := checkouts.Load()
+	if checkoutReg == nil {
+		checkoutReg = checkouts.NewEmpty()
+	}
+
 	// The profiles store gets the same tolerant posture: a corrupt file is
 	// quarantined and reseeded (profiles.LoadFrom's doc comment) rather than
 	// failing New outright. This is a SEPARATE load from whatever main.go
@@ -411,6 +428,7 @@ func New(fleet provider.Fleet) tea.Model {
 		profileStore: profileStore,
 		jobs:         newJobRegistry(),
 		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
+		checkouts:    checkoutReg,
 		keys:         newKeyMap(),
 		help:         help.New(),
 		view:         viewBoard,
@@ -439,7 +457,7 @@ func New(fleet provider.Fleet) tea.Model {
 	m.applySize(80, 24)
 	// No one load failure may silently shadow another.
 	var warnings []string
-	for _, err := range []error{loadErr, secErr, profErr} {
+	for _, err := range []error{loadErr, secErr, profErr, checkoutErr} {
 		if err != nil {
 			warnings = append(warnings, err.Error())
 		}
