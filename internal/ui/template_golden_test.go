@@ -118,6 +118,10 @@ func TestTUIFormSourceSelectorGolden(t *testing.T) {
 	m.inputs[fUser].SetValue("ada")
 	m.inputs[fGitName].SetValue("Ada Lovelace")
 	m.inputs[fGitEmail].SetValue("ada@example.com")
+	// The CPUs suggestion is half the host's core count (defaultCPUs → the
+	// provider's HostResources, falling back to runtime.NumCPU) — not portable
+	// across machines/CI. Pin it so the golden's value is fixed everywhere.
+	m.inputs[fCPUs].SetValue("8")
 	m.focusIdx = fSourceSelector
 	m.cycleFormSource(1) // "" (base) -> "golden", the only saved template
 
@@ -166,6 +170,10 @@ func TestTUIDeleteTemplateConfirmGolden(t *testing.T) {
 	m.inputs[fUser].SetValue("ada")
 	m.inputs[fGitName].SetValue("Ada Lovelace")
 	m.inputs[fGitEmail].SetValue("ada@example.com")
+	// The CPUs suggestion is half the host's core count (defaultCPUs → the
+	// provider's HostResources, falling back to runtime.NumCPU) — not portable
+	// across machines/CI. Pin it so the golden's value is fixed everywhere.
+	m.inputs[fCPUs].SetValue("8")
 	m.focusIdx = fSourceSelector
 	m.cycleFormSource(1)
 
