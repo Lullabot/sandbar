@@ -64,6 +64,22 @@ it is not where prose belongs.
   now also keyed by connection scope — distinct from its pre-existing
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
+- `filelock` — the small, local-only, best-effort cross-process advisory lock
+  (`syscall.Flock`) that `registry`, `secrets`, and `profiles` each take
+  around a read-modify-write of their backing file, so two `sand` processes
+  sharing a data dir (the TUI plus a headless `sand create`, or two TUIs)
+  cannot silently lose each other's committed changes — every mutation
+  reloads the current on-disk state under the lock and merges only its own
+  delta, never blind-overwrites a possibly-stale in-memory snapshot. A lock
+  that cannot be acquired (or created) only warns and degrades to today's
+  unserialized write; it never fails the operation. **Known, accepted
+  limitation**: this only protects same-version concurrency. An OLD
+  pre-`filelock` `sand` binary running alongside a NEW one during an
+  upgrade is not serialized against it — the old binary has no idea the
+  lock file exists — so a lost update is still possible across that narrow
+  version-mismatch window. No format change or version negotiation is
+  planned to close it (YAGNI); just don't run two different `sand` builds
+  against the same data dir at once mid-upgrade.
 
 Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
 (`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);

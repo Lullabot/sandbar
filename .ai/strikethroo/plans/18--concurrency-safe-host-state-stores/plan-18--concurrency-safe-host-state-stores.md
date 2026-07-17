@@ -569,9 +569,9 @@ No circular dependencies.
 - ✔️ Task 003: Secrets store locked reload-merge (depends on: 001)
 - ✔️ Task 004: Profiles store locked reload-merge (depends on: 001)
 
-### Phase 3: Validation and documentation
+### ✅ Phase 3: Validation and documentation
 **Parallel Tasks:**
-- Task 005: End-to-end validation, call-site audit, and docs (depends on: 002, 003, 004)
+- ✔️ Task 005: End-to-end validation, call-site audit, and docs (depends on: 002, 003, 004)
 
 ### Post-phase Actions
 
