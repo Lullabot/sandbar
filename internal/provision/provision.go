@@ -310,6 +310,17 @@ type CreateOptions struct {
 	// being removed. That is the race baselock.go exists to close, and `sand
 	// create --rebuild` used to be the hole in it.
 	Rebuild bool
+
+	// OnCloned, if set, is called ONCE the clone has booted and `limactl list`
+	// accepts it — i.e. at the point past which a failure no longer deletes the
+	// instance — and BEFORE the long finalize/provision step. The provider uses
+	// it to write an in-flight provenance marker so other controllers see the
+	// VM building. It is best-effort: an error is reported to out and ignored,
+	// never failing the build (a missing in-flight marker only delays
+	// cross-controller visibility until completion). This package does not
+	// depend on internal/provider — the callback is how the marker write is
+	// injected without an import cycle.
+	OnCloned func(ctx context.Context) error
 }
 
 // CreateVM ensures a stopped base image exists, clones it into the target VM,
@@ -372,6 +383,17 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	// and `limactl list` is happy with it — so a failed or cancelled PLAYBOOK leaves
 	// a VM the user can shell into and a retained log they can read, which is the
 	// point of keeping a failed run. Deleting it here would throw away the evidence.
+	//
+	// This is exactly the moment to stamp the in-flight provenance marker: the
+	// instance dir exists and is durable (a marker written earlier could be
+	// deleted by the clone-failure cleanup above; one written here survives with
+	// the VM), and the finalize step below is the long window during which
+	// another controller should already see this VM building. Best-effort.
+	if opts.OnCloned != nil {
+		if err := opts.OnCloned(ctx); err != nil {
+			step(out, "Note: could not write in-flight provenance marker for %q (%v); it will appear to other clients once the build finishes.", cfg.Name, err)
+		}
+	}
 	if err := timer.time("finalize playbook", func() error {
 		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
 	}); err != nil {

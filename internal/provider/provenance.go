@@ -16,7 +16,9 @@ package provider
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/lullabot/sandbar/internal/version"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -25,6 +27,17 @@ import (
 // consumer that gets this back should degrade to "provenance unknown" rather
 // than treating it as an I/O failure.
 var ErrUnsupported = errors.New("provider does not support provenance")
+
+// MarkerSchemaVersion is the schema version this build writes into every new
+// marker. It is the single source of truth for the marker shape; manage
+// references it (see manage.RecordSuccess), and registry.adoptSchemaVersion is
+// a package-local mirror kept in step for the import-cycle reason documented
+// there.
+//
+// v2 added the Provisioning field (in-flight/"building" markers). It is a
+// purely additive change: a v1 marker has no `provisioning` key, so it decodes
+// with Provisioning=false, i.e. "ready" — exactly what every v1 marker was.
+const MarkerSchemaVersion = 2
 
 // Provenance is the marker payload a provider attaches to an instance it
 // created, mirroring the provenance-relevant subset of registry.Entry (Base,
@@ -47,6 +60,32 @@ type Provenance struct {
 	SandbarVersion string `json:"sandbar_version"`
 	// CreatedAt is the marker's creation time, RFC3339-formatted.
 	CreatedAt string `json:"created_at"`
+	// Provisioning is true while the instance is still being built — the marker
+	// was written EARLY, at clone time, before the (long) finalize/provision
+	// step, so that OTHER controllers of the same host see the in-flight VM as a
+	// managed, building tile rather than not at all. It is flipped to false
+	// ("ready") when the build succeeds (manage.RecordSuccess). omitempty +
+	// the bool zero value keep older (v1) markers, which lack the key,
+	// decoding as ready.
+	Provisioning bool `json:"provisioning,omitempty"`
+}
+
+// NewProvenance builds a marker payload from a create config. It stamps the
+// current MarkerSchemaVersion, sandbar version, and time, and strips secrets
+// that must never reach the on-disk marker (exactly as the registry entry does
+// with CloneToken). provisioning=true produces an in-flight/"building" marker
+// written at clone time; false produces a "ready" marker written on success.
+func NewProvenance(cfg vm.CreateConfig, provisioning bool) Provenance {
+	marked := cfg
+	marked.CloneToken = ""
+	return Provenance{
+		SchemaVersion:  MarkerSchemaVersion,
+		Base:           cfg.BaseName,
+		Config:         marked,
+		SandbarVersion: version.String(""),
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		Provisioning:   provisioning,
+	}
 }
 
 // Provenancer is the seam a Provider backend implements (or inherits) to

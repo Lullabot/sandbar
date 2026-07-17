@@ -743,7 +743,7 @@ func (s derivedStatus) String() string {
 // state: a VM whose upload failed is a healthy running VM with a failed copy, and
 // painting its tile red would be its own small lie. The transfer's failure
 // surfaces where it belongs — on the status line, and in its reopenable log.
-func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
+func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool, remoteProvisioning bool) derivedStatus {
 	if hasJob && job.Provision {
 		switch {
 		case job.Running():
@@ -751,6 +751,15 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 		case job.Failed():
 			return statusFailed
 		}
+	}
+	// remoteProvisioning is the SAME "this VM is building" signal for a VM being
+	// built by ANOTHER controller: there is no local job here, but the instance
+	// carries an in-flight (Provisioning) provenance marker written by whoever is
+	// building it. Without this, a mid-build VM read over the wire would show the
+	// reassuring "Running" that deriveStatus exists to prevent. A local job (the
+	// controller doing the build) takes precedence above.
+	if remoteProvisioning {
+		return statusBuilding
 	}
 	if v.Status == limaRunning {
 		return statusRunning
@@ -764,5 +773,17 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 // to become one by standing in the same slot.
 func (m model) statusOf(scope registry.Scope, v vm.VM) derivedStatus {
 	job, ok := m.jobs.snapshot(provisionKey(scope, v.Name))
-	return deriveStatus(v, job, ok)
+	return deriveStatus(v, job, ok, m.remoteProvisioning(scope, v.Name))
+}
+
+// remoteProvisioning reports whether name carries an in-flight (Provisioning)
+// provenance marker in its owning member's scope — i.e. some controller is
+// building it — WITHOUT this controller having a local build job for it. It is
+// how a VM another machine is provisioning shows as "Building" here.
+func (m model) remoteProvisioning(scope registry.Scope, name string) bool {
+	mem, ok := m.memberByScope(scope)
+	if !ok {
+		return false
+	}
+	return mem.provenance[name].Provisioning
 }

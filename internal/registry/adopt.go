@@ -32,7 +32,11 @@ import (
 // with provider.Provenance.SchemaVersion / manage's provenanceSchemaVersion
 // (today both 1) — duplicated here, not imported, for the reason in this
 // file's package comment.
-const adoptSchemaVersion = 1
+// adoptSchemaVersion mirrors provider.MarkerSchemaVersion (kept in step for the
+// import-cycle reason in this file's package comment). Adoption always writes a
+// READY marker (a VM already in the registry finished building long ago), so it
+// never sets the v2 Provisioning field — it just stamps the current version.
+const adoptSchemaVersion = 2
 
 // AdoptProvenance is the marker payload Adopt writes, mirroring the
 // provenance-relevant fields of provider.Provenance without this package

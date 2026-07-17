@@ -218,7 +218,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 			default:
 				for _, n := range []string{"alpha", "beta"} {
 					s, ok := reg.snapshot(provisionKey(registry.LocalScope, n))
-					_ = deriveStatus(vm.VM{Name: n, Status: "Running"}, s, ok)
+					_ = deriveStatus(vm.VM{Name: n, Status: "Running"}, s, ok, false)
 				}
 			}
 		}
@@ -449,24 +449,28 @@ func TestDeriveStatus(t *testing.T) {
 		return jobSnapshot{State: state, Canceled: canceled, Provision: true}
 	}
 	cases := []struct {
-		name   string
-		v      vm.VM
-		job    jobSnapshot
-		hasJob bool
-		want   derivedStatus
+		name               string
+		v                  vm.VM
+		job                jobSnapshot
+		hasJob             bool
+		remoteProvisioning bool
+		want               derivedStatus
 	}{
-		{"lima running, no job", vm.VM{Status: "Running"}, jobSnapshot{}, false, statusRunning},
-		{"lima stopped, no job", vm.VM{Status: "Stopped"}, jobSnapshot{}, false, statusStopped},
-		{"building: lima says Running, ansible is still inside it", vm.VM{Status: "Running"}, provision(jobRunning, false), true, statusBuilding},
-		{"failed provision must NOT read as a green Running", vm.VM{Status: "Running"}, provision(jobFailed, false), true, statusFailed},
-		{"a succeeded run falls back to Lima", vm.VM{Status: "Running"}, provision(jobSucceeded, false), true, statusRunning},
-		{"a cancelled run is not a failure", vm.VM{Status: "Stopped"}, provision(jobFailed, true), true, statusStopped},
-		{"a running transfer is not a build", vm.VM{Status: "Running"}, jobSnapshot{State: jobRunning}, true, statusRunning},
-		{"a failed transfer does not make the VM broken", vm.VM{Status: "Running"}, jobSnapshot{State: jobFailed}, true, statusRunning},
+		{"lima running, no job", vm.VM{Status: "Running"}, jobSnapshot{}, false, false, statusRunning},
+		{"lima stopped, no job", vm.VM{Status: "Stopped"}, jobSnapshot{}, false, false, statusStopped},
+		{"building: lima says Running, ansible is still inside it", vm.VM{Status: "Running"}, provision(jobRunning, false), true, false, statusBuilding},
+		{"failed provision must NOT read as a green Running", vm.VM{Status: "Running"}, provision(jobFailed, false), true, false, statusFailed},
+		{"a succeeded run falls back to Lima", vm.VM{Status: "Running"}, provision(jobSucceeded, false), true, false, statusRunning},
+		{"a cancelled run is not a failure", vm.VM{Status: "Stopped"}, provision(jobFailed, true), true, false, statusStopped},
+		{"a running transfer is not a build", vm.VM{Status: "Running"}, jobSnapshot{State: jobRunning}, true, false, statusRunning},
+		{"a failed transfer does not make the VM broken", vm.VM{Status: "Running"}, jobSnapshot{State: jobFailed}, true, false, statusRunning},
+		{"no local job, remote provisioning marker: Running reads as Building", vm.VM{Status: "Running"}, jobSnapshot{}, false, true, statusBuilding},
+		{"no local job, no remote provisioning: Running stays Running", vm.VM{Status: "Running"}, jobSnapshot{}, false, false, statusRunning},
+		{"a running local provision job takes precedence over a remote provisioning marker", vm.VM{Status: "Running"}, provision(jobRunning, false), true, true, statusBuilding},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deriveStatus(c.v, c.job, c.hasJob); got != c.want {
+			if got := deriveStatus(c.v, c.job, c.hasJob, c.remoteProvisioning); got != c.want {
 				t.Fatalf("deriveStatus = %v, want %v", got, c.want)
 			}
 		})

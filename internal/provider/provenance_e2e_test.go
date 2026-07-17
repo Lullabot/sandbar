@@ -208,3 +208,66 @@ func TestE2EProvenanceConvergenceLifecycleAndTwoController(t *testing.T) {
 		t.Fatalf("re-created instance ProvenanceOf = (ok=%v, err=%v), want (false, nil) — unmanaged until marked", ok, err)
 	}
 }
+
+// TestE2EInFlightProvisioningMarkerVisibleRemotely proves FIX A over the real
+// ssh transport: a PROVISIONAL marker (Provisioning=true) — the one the local
+// provider writes at clone time, before the long finalize step (see
+// local.go Create / provision OnCloned) — is visible to a REMOTE controller
+// while the build is still in flight, so that controller shows the VM as a
+// building tile rather than not at all. Then, on success, RecordSuccess flips
+// the same marker to ready (Provisioning=false), which the remote controller
+// also sees. This is the "in-flight builds converge" scenario, end to end.
+func TestE2EInFlightProvisioningMarkerVisibleRemotely(t *testing.T) {
+	cfg := skipUnlessRemoteE2EConfigured(t)
+
+	limaHome := t.TempDir()
+	cfg.RemoteLimaHome = limaHome
+	t.Setenv("LIMA_HOME", limaHome)
+
+	const name = "sand-inflight-e2e"
+	const base = "sand-inflight-e2e-base"
+	instDir := filepath.Join(limaHome, name)
+	writeProvenanceFixtureInstance(t, instDir)
+	t.Cleanup(func() { _ = os.RemoveAll(instDir) })
+
+	local := provider.NewLocalLima(lima.New(lima.NewExecRunner()), nil)
+	localProv := local.(provider.Provenancer)
+	remote, err := provider.NewRemoteLima(cfg)
+	if err != nil {
+		t.Fatalf("NewRemoteLima: %v", err)
+	}
+	remoteProv := remote.(provider.Provenancer)
+	ctx := context.Background()
+
+	vmCfg := vm.CreateConfig{Name: name, BaseName: base, User: vm.HostUser(), CPUs: 2, Memory: "2GiB", Disk: vm.BaseDiskFloor}
+
+	// --- clone time: the provider writes an IN-FLIGHT marker (Provisioning=true).
+	if err := localProv.MarkManaged(ctx, name, provider.NewProvenance(vmCfg, true)); err != nil {
+		t.Fatalf("write in-flight marker: %v", err)
+	}
+	got, ok, err := remoteProv.ProvenanceOf(ctx, name)
+	if err != nil {
+		t.Fatalf("remote ProvenanceOf (in-flight): %v", err)
+	}
+	if !ok {
+		t.Fatal("a remote controller did not see the in-flight (building) VM over ssh")
+	}
+	if !got.Provisioning {
+		t.Fatalf("remote-read in-flight marker Provisioning = false, want true (so the remote board shows it Building)")
+	}
+	if got.Base != base {
+		t.Fatalf("in-flight marker Base = %q, want %q", got.Base, base)
+	}
+
+	// --- build succeeds: RecordSuccess flips the SAME marker to ready.
+	if err := manage.RecordSuccess(registry.NewEmpty(), vmCfg, registry.LocalScope, localProv); err != nil {
+		t.Fatalf("RecordSuccess (flip to ready): %v", err)
+	}
+	got, ok, err = remoteProv.ProvenanceOf(ctx, name)
+	if err != nil || !ok {
+		t.Fatalf("remote ProvenanceOf (ready) = (ok=%v, err=%v), want (true, nil)", ok, err)
+	}
+	if got.Provisioning {
+		t.Fatal("marker still Provisioning=true after RecordSuccess; the ready flip is not visible remotely")
+	}
+}

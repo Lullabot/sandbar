@@ -155,7 +155,7 @@ func TestE2ESecretsSaveOnRunningVMReachesGuestWithoutRestart(t *testing.T) {
 	// save path's guest-apply gate reads (m.lookupVM); nothing else about the
 	// dispatch is faked.
 	prov := &provision.Provisioner{Lima: cli}
-	m, ok := New(provider.NewLocalLima(cli, prov), registry.LocalScope).(model)
+	m, ok := New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model)
 	if !ok {
 		t.Fatalf("New did not return a model")
 	}

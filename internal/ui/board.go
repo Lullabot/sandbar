@@ -1008,18 +1008,19 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		profileLabel = mem.profile.Name
 	}
 	return renderTile(tileInput{
-		VM:           v.VM,
-		Job:          job,
-		HasJob:       hasJob,
-		Sample:       sample,
-		HasSample:    hasSample,
-		Traits:       traits[i],
-		Uniform:      uniform,
-		Focused:      focusMatches(v, m.focusVM),
-		Width:        m.layout.TileWidth,
-		Spinner:      frame,
-		Now:          now,
-		ProfileLabel: profileLabel,
+		VM:                 v.VM,
+		Job:                job,
+		HasJob:             hasJob,
+		RemoteProvisioning: !hasJob && m.remoteProvisioning(v.scope, v.Name),
+		Sample:             sample,
+		HasSample:          hasSample,
+		Traits:             traits[i],
+		Uniform:            uniform,
+		Focused:            focusMatches(v, m.focusVM),
+		Width:              m.layout.TileWidth,
+		Spinner:            frame,
+		Now:                now,
+		ProfileLabel:       profileLabel,
 	})
 }
 

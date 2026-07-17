@@ -18,17 +18,11 @@ package manage
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
-	"github.com/lullabot/sandbar/internal/version"
 	"github.com/lullabot/sandbar/internal/vm"
 )
-
-// provenanceSchemaVersion is the marker schema this package writes — see
-// provider.Provenance.SchemaVersion's doc comment.
-const provenanceSchemaVersion = 1
 
 // firstProvenancer returns the sole element of an optional trailing
 // provider.Provenancer argument, or nil when the caller omitted it (or
@@ -127,15 +121,11 @@ func RecordSuccess(reg *registry.Registry, cfg vm.CreateConfig, scope registry.S
 		return nil
 	}
 
-	markedCfg := cfg
-	markedCfg.CloneToken = "" // secrets never touch the on-disk marker, exactly like the registry entry
-	pv := provider.Provenance{
-		SchemaVersion:  provenanceSchemaVersion,
-		Base:           cfg.BaseName,
-		Config:         markedCfg,
-		SandbarVersion: version.String(""),
-		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
-	}
+	// A READY marker (Provisioning=false): the build succeeded. This overwrites
+	// any in-flight marker the provider wrote at clone time (see local.go
+	// Create / provision OnCloned), flipping the VM from "building" to "ready"
+	// for every controller that reads it.
+	pv := provider.NewProvenance(cfg, false)
 	if err := p.MarkManaged(context.Background(), cfg.Name, pv); err != nil {
 		return fmt.Errorf("mark %s managed (provenance): %w", cfg.Name, err)
 	}

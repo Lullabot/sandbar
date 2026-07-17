@@ -401,7 +401,7 @@ func TestE2ELastUsedAfterRealStopAndNeverStarted(t *testing.T) {
 	after := time.Now()
 
 	dir := e2eInstanceDir(t, cli, name)
-	got, ok := lastUsed(dir)
+	got, ok := lastUsed(lima.LocalFiles(), dir)
 	if !ok {
 		t.Fatalf("lastUsed(%q) reported no reading for a VM that was just stopped", dir)
 	}
@@ -428,7 +428,7 @@ func TestE2ELastUsedAfterRealStopAndNeverStarted(t *testing.T) {
 		t.Fatalf("limactl create (no start): %v\n%s", err, out)
 	}
 	neverDir := e2eInstanceDir(t, cli, neverName)
-	if _, ok := lastUsed(neverDir); ok {
+	if _, ok := lastUsed(lima.LocalFiles(), neverDir); ok {
 		t.Fatalf("a never-started VM should report NO last-used reading, got one for dir %s", neverDir)
 	}
 }
@@ -633,7 +633,7 @@ func TestE2EFailedProvisionRendersFailedStatusAndKeepsLogReopenable(t *testing.T
 		t.Fatalf("ASSUMPTION CHECK FAILED: expected Lima to report the VM Running (finalize fails AFTER a successful boot), got %q — "+
 			"if Lima's real behaviour has changed, this test's premise needs revisiting, not a loosened assertion", v.Status)
 	}
-	if got := deriveStatus(v, snap, ok); got != statusFailed {
+	if got := deriveStatus(v, snap, ok, false); got != statusFailed {
 		t.Fatalf("Lima reports %q for a VM whose provision failed, and the derived tile status = %v — want Failed. "+
 			"A failed provision must never render as a healthy Running tile.", v.Status, got)
 	}

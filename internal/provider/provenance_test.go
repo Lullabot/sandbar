@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -155,5 +156,121 @@ func TestLimaProviderProvenanceBatchedRead(t *testing.T) {
 	}
 	if _, present := got["unmanaged"]; present {
 		t.Fatalf("Provenance included an instance with no marker at all: %+v", got)
+	}
+}
+
+// TestNewProvenance covers both marker shapes NewProvenance can produce: a
+// provisional (in-flight) marker written at clone time, and a ready marker
+// written on success. Both stamp the CURRENT MarkerSchemaVersion and strip
+// CloneToken — the marker must never carry the secret used to clone it.
+func TestNewProvenance(t *testing.T) {
+	cases := []struct {
+		name         string
+		provisioning bool
+	}{
+		{"ready", false},
+		{"provisioning", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 4, CloneToken: "super-secret"}
+			got := provider.NewProvenance(cfg, c.provisioning)
+
+			if got.SchemaVersion != provider.MarkerSchemaVersion {
+				t.Fatalf("SchemaVersion = %d, want %d (provider.MarkerSchemaVersion)", got.SchemaVersion, provider.MarkerSchemaVersion)
+			}
+			if got.Base != cfg.BaseName {
+				t.Fatalf("Base = %q, want %q (cfg.BaseName)", got.Base, cfg.BaseName)
+			}
+			if got.Provisioning != c.provisioning {
+				t.Fatalf("Provisioning = %v, want %v", got.Provisioning, c.provisioning)
+			}
+			if got.Config.CloneToken != "" {
+				t.Fatalf("Config.CloneToken = %q, want stripped (empty) — the marker must never carry the clone secret", got.Config.CloneToken)
+			}
+		})
+	}
+}
+
+// TestLimaProviderProvenanceRoundTripProvisioningFlag proves the Provisioning
+// bit survives a real write/read/batched-read round trip through the local
+// provider's HostFiles seam, exactly like
+// TestLimaProviderProvenanceRoundTrip — just for both marker states rather
+// than the schema-1 zero value.
+func TestLimaProviderProvenanceRoundTripProvisioningFlag(t *testing.T) {
+	t.Setenv("LIMA_HOME", t.TempDir())
+	p := asProvenancer(t, newLocal(&fakeRunner{}))
+	ctx := context.Background()
+
+	building := provider.Provenance{SchemaVersion: provider.MarkerSchemaVersion, Base: "sandbar-base", Config: vm.CreateConfig{Name: "building"}, Provisioning: true}
+	ready := provider.Provenance{SchemaVersion: provider.MarkerSchemaVersion, Base: "sandbar-base", Config: vm.CreateConfig{Name: "ready"}, Provisioning: false}
+
+	if err := p.MarkManaged(ctx, "building", building); err != nil {
+		t.Fatalf("MarkManaged(building): %v", err)
+	}
+	if err := p.MarkManaged(ctx, "ready", ready); err != nil {
+		t.Fatalf("MarkManaged(ready): %v", err)
+	}
+
+	gotBuilding, ok, err := p.ProvenanceOf(ctx, "building")
+	if err != nil || !ok {
+		t.Fatalf("ProvenanceOf(building) = (ok=%v, err=%v), want (true, nil)", ok, err)
+	}
+	if !gotBuilding.Provisioning {
+		t.Fatalf("ProvenanceOf(building).Provisioning = false, want true")
+	}
+
+	gotReady, ok, err := p.ProvenanceOf(ctx, "ready")
+	if err != nil || !ok {
+		t.Fatalf("ProvenanceOf(ready) = (ok=%v, err=%v), want (true, nil)", ok, err)
+	}
+	if gotReady.Provisioning {
+		t.Fatalf("ProvenanceOf(ready).Provisioning = true, want false")
+	}
+
+	// Same check through the batched read.
+	all, err := p.Provenance(ctx)
+	if err != nil {
+		t.Fatalf("Provenance: %v", err)
+	}
+	if !all["building"].Provisioning {
+		t.Fatalf("Provenance()[building].Provisioning = false, want true")
+	}
+	if all["ready"].Provisioning {
+		t.Fatalf("Provenance()[ready].Provisioning = true, want false")
+	}
+}
+
+// TestLimaProviderProvenanceOfDecodesV1MarkerAsReady proves backward
+// compatibility: a v1 marker on disk (written before Provisioning existed, so
+// it has no "provisioning" key at all) decodes with Provisioning=false — every
+// pre-existing marker on a user's machine reads back as "ready", never as a
+// phantom in-flight build.
+func TestLimaProviderProvenanceOfDecodesV1MarkerAsReady(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	p := asProvenancer(t, newLocal(&fakeRunner{}))
+
+	markerPath := filepath.Join(home, "web", lima.MarkerFilename)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("mkdir instance dir: %v", err)
+	}
+	rawV1 := `{"schema":1,"base":"sandbar-base","config":{"Name":"web","BaseName":"sandbar-base"},"sandbar_version":"0.5.0","created_at":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(markerPath, []byte(rawV1), 0o600); err != nil {
+		t.Fatalf("write raw v1 marker: %v", err)
+	}
+
+	got, ok, err := p.ProvenanceOf(context.Background(), "web")
+	if err != nil {
+		t.Fatalf("ProvenanceOf: %v", err)
+	}
+	if !ok {
+		t.Fatal("ProvenanceOf ok = false for a v1 marker, want true")
+	}
+	if got.Provisioning {
+		t.Fatalf("a v1 marker (no provisioning key) decoded with Provisioning=true, want false (ready)")
+	}
+	if got.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1 (the marker as written, not migrated)", got.SchemaVersion)
 	}
 }

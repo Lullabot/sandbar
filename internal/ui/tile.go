@@ -70,6 +70,10 @@ type tileInput struct {
 	VM     vm.VM
 	Job    jobSnapshot
 	HasJob bool
+	// RemoteProvisioning is set when the VM carries an in-flight provenance
+	// marker but has no local build job — another controller is building it, and
+	// this tile must show Building, not Running. See deriveStatus.
+	RemoteProvisioning bool
 
 	Sample    guestSample
 	HasSample bool
@@ -103,7 +107,7 @@ type tileInput struct {
 // renderTile draws one VM's card.
 func renderTile(in tileInput) string {
 	width := tileInnerWidth(in.Width)
-	status := deriveStatus(in.VM, in.Job, in.HasJob)
+	status := deriveStatus(in.VM, in.Job, in.HasJob, in.RemoteProvisioning)
 
 	lines := make([]string, tileContentRows)
 	lines[0] = tileTitleLine(in.VM.Name, in.ProfileLabel, width)
