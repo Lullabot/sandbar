@@ -60,6 +60,10 @@ guest-side push exec) was removed.
 | Is land a code-extraction tool? *(pivot)* | **No.** Bundle/patch export and any guest→host code copy are removed. `u`/`g` (upload/download) remain, reframed for **non-executable data** (SQL dumps in, test screenshots/videos out) — never code. Code reaches the host only through the user's normal `gh pr checkout`/pull *after* reviewing the PR on GitHub. |
 | Where do land's actions run, and with which token? *(pivot)* | **Host-side, with the workstation's `gh` token.** Opening a PR is a metadata API call against a branch already on GitHub — no code touches the host. This also sidesteps the deliberately least-privilege *guest* token, which often lacks `pull_requests: write`. The guest pushes (guest token, in the shell/agent); the host opens the PR (host token). |
 | PR creation: form or one-shot? *(pivot)* | **One-shot draft.** Title/body auto-filled from the pushed branch's commits, base = repo default branch, `--draft`. The user refines on GitHub, where they were headed anyway. No in-TUI form. |
+| What if the workstation has no `gh` / isn't authed? *(refinement)* | **Graceful browser fallback.** Detection + badge always work (guest git via the sweep — no gh). "Open in browser" is gh-free (construct the GitHub URL from `org/repo`+branch, open with the OS opener). One-key draft-create uses host `gh`; if gh is missing/unauthed it falls back to opening the **compare URL** in the browser, where the user clicks *Create*. |
+| Where does host `gh` run, in a remote-profile fleet? *(auto-resolved)* | On the **workstation running `sand`** — not the VM's profile host, not the guest. The PR action needs only `(org/repo, branch)`, which the sweep already extracted; it runs workstation-local `os/exec`. Detection still crosses to the (possibly remote) profile host via the sweep. |
+| How is "pushed" detected reliably? *(auto-resolved)* | Off the **remote-tracking ref** `refs/remotes/<remote>/<branch>` (a push updates it even without `git push -u`), not the *configured upstream* (which `-u`-less pushes never set). This is a cheap local heuristic; the host `gh pr list --head` check at pane-open is **authoritative** for branch/PR existence and corrects a stale ref. |
+| Does land require the VM running? *(assumption)* | **Yes**, matching the existing `shell`/`u`/`g` gating — the pane needs a fresh sweep. Acting on a *stopped* VM's cached pushed-branch (gh doesn't need the VM) is a deferred enhancement, not in this plan. |
 
 ## Executive Summary
 
@@ -88,13 +92,21 @@ same logic backs a headless `sand land NAME`.
 
 The decisive design choice is that **land moves decisions, not code.** Its only
 guest interaction is the read-only sweep; every *action* is a host-side GitHub
-API call (`gh`, with your workstation credential) against branches that already
-live on GitHub. No bundle, no patch, no guest→host code copy. This resolves the
-"landed code auto-executes when I open it in my IDE" hazard by construction — the
-only bytes crossing to your host are PR metadata; the code arrives later, through
+API call (`gh`, run on the **workstation** with your own credential — not on the
+VM's profile host, not in the guest) against branches that already live on
+GitHub. No bundle, no patch, no guest→host code copy. This resolves the "landed
+code auto-executes when I open it in my IDE" hazard by construction — the only
+bytes crossing to your host are PR metadata; the code arrives later, through
 review, by your own hand. It also cleanly splits the two credentials already in
 play: the least-privilege **guest** token pushes; your broad **host** token opens
 the PR — each doing exactly the job it's scoped for.
+
+Because `gh` is not a dependency sand has today, land **degrades gracefully**:
+detection, the badge, and "open in browser" all work with no host `gh` at all
+(the browser action just constructs the GitHub URL and hands it to the OS
+opener). Only the one-key headless draft-create uses `gh`; without it, land opens
+the compare URL in the browser so the user can create the PR there — the safe
+review surface either way.
 
 ## Context
 
@@ -191,12 +203,18 @@ matching both directories (normal checkouts) and files (worktree pointers),
 pruning noise directories (`node_modules`, caches) and honoring a depth cap and a
 total-checkout cap (~50). For each checkout it reads a fixed set of
 `git --no-optional-locks` porcelain values — current branch; the branch's
-configured **remote and upstream** (read, not assumed to be `origin`), parsed to
-`(forge host, org/repo)`; **push state** (has upstream and `rev-list --count`
-ahead==0 ⇒ pushed and current; ahead>0 ⇒ unpushed commits); and dirty-file count
-(`status --porcelain`). Everything is read-only and each repo's reads are wrapped
-in `timeout` so one pathological repo cannot stall the sweep. When caps truncate
-the result, that fact is emitted and surfaced, not silently dropped.
+configured **remote** (read, not assumed to be `origin`), parsed to
+`(forge host, org/repo)`; **push state** computed against the **remote-tracking
+ref** `refs/remotes/<remote>/<branch>` — `rev-list --count <tracking>..HEAD`
+== 0 ⇒ pushed and current; > 0 ⇒ unpushed commits; no tracking ref ⇒ never
+pushed. The tracking ref (not the *configured upstream*) is the correct signal,
+because a `git push origin HEAD` without `-u` updates the tracking ref but sets
+no upstream config, so keying off upstream would miss branches the agent pushed.
+Also read the dirty-file count (`status --porcelain`). Everything is read-only,
+and there is **no network call from the guest** (no `ls-remote`) — remote truth
+is confirmed host-side (Component 4). Each repo's reads are wrapped in `timeout`
+so one pathological repo cannot stall the sweep. When caps truncate the result,
+that fact is emitted and surfaced, not silently dropped.
 
 The host parses the sweep shell's stream (its own delimiter, distinct from the
 stats stream) into a **per-VM checkout registry**: pointer-held, mutex-guarded,
@@ -259,30 +277,47 @@ without the web UI — and jump to the PR once it exists.
 
 `l` on a focused, running VM opens the **Landing pane**, listing the VM's
 checkouts (worktrees grouped under their parent) with each one's branch and
-state. On pane open, a **lazy host-side check** resolves PR state for each
-pushed branch — `gh pr list -R <org/repo> --head <branch> --json
-number,url,state,isDraft`, using the **workstation's** `gh` token. Each checkout
-then falls into one obvious state with one obvious action (the `enabledFor`
-idiom):
+state. The sweep's push-state is a cheap local heuristic; on pane open a **lazy,
+authoritative host-side check** resolves branch/PR truth for each pushed branch —
+`gh pr list -R <org/repo> --head <branch> --json number,url,state,isDraft`, run
+on the **workstation** with its own `gh` token (see "where gh runs" below). Each
+checkout then falls into one obvious state with one obvious action (the
+`enabledFor` idiom):
 
 | Registry + gh say | Pane row | Action (key) |
 | --- | --- | --- |
-| branch pushed, **no** PR | "pushed · no PR" (amber) | **Open draft PR** |
-| branch pushed, PR #N open | "PR #N (draft)" + status | **Open in browser** (`gh pr view --web`) |
+| branch pushed, **no** PR | "pushed · no PR" (amber) | **Open draft PR** (gh) — or, without gh, open the **compare URL** in the browser |
+| branch pushed, PR #N open | "PR #N (draft)" + status | **Open in browser** (gh-free: constructed PR URL) |
 | unpushed commits / dirty | "↑N unpushed" (at-risk) | none — *push in the shell first* |
 | no remote at all | "local only" | none |
 
+**Where gh runs:** on the machine running `sand` (the workstation), via
+`os/exec` — *not* on the VM's connection-profile host and *not* in the guest. The
+action needs only `(org/repo, branch)`, which the sweep already put in the
+registry, so a PR for a remote-profile VM's branch is opened workstation-locally
+just like a local one. sand has no host `gh` dependency today, so this is new
+surface and must degrade (below).
+
 **Open draft PR is one-shot** (per clarification): title and body auto-filled
 from the pushed branch's commits, base = the repo's default branch, `--draft`.
-The reliable host-side mechanism is `gh` with the workstation token and **no
-local checkout** — `gh pr create -R <org/repo> --head <branch> --base <default>
---fill --draft` where gh supports it headlessly, falling back to a direct
-`gh api --method POST /repos/<org/repo>/pulls` with title/body read from the
-branch's head commit via `gh api` (the exact invocation is a task-time detail to
-pin against gh's headless behavior; both are pure API calls). All inputs
-(branch, title, body) pass as **arguments, never shell-interpolated**, so an
+The host-side mechanism is `gh` with the workstation token and **no local
+checkout** — `gh pr create -R <org/repo> --head <branch> --base <default> --fill
+--draft` where gh supports it headlessly, falling back to a direct `gh api
+--method POST /repos/<org/repo>/pulls` with title/body read from the branch's
+head commit via `gh api` (the exact invocation is a task-time detail to pin
+against gh's headless behavior; both are pure API calls). All inputs (branch,
+title, body) pass as **arguments, never shell-interpolated**, so an
 attacker-chosen branch name cannot inject — it can only become PR text, which no
 more executes than any PR description.
+
+**Graceful degradation (no host gh / not authed):** detection, the badge, and
+"open in browser" need no `gh` — the browser action constructs the GitHub URL
+(`https://github.com/<org/repo>/pull/new/<branch>` to create, the PR URL to view)
+and hands it to the OS opener. Only the one-key headless create uses `gh`; when
+gh is absent or unauthenticated, that action falls back to opening the compare
+URL in the browser, where the user clicks *Create* — the same safe review
+surface, one extra click. The pane surfaces which mode it's in rather than
+failing silently.
 
 **land performs no guest execution on any action and copies no code to the host.**
 Opening a PR references a branch already on GitHub; the only bytes crossing to
@@ -314,6 +349,11 @@ sand land NAME <path> --pr     # open a one-shot draft PR for that checkout's pu
 sand land NAME <path> --web    # open the branch's PR (or the branch) in a browser
 ```
 
+`--web` is gh-free (constructed URL + OS opener). `--pr` uses host `gh`; without
+gh it prints the compare URL (and, on a TTY, offers to open it) rather than
+failing. In a script/pipe with no gh, `--pr` exits non-zero with the URL on
+stderr so automation can react.
+
 Documentation updates cover the TUI keybinding tables (`docs/using-sand/tui.md`),
 a "Landing" section (the pane, its states, the ledger), `sand land` in the CLI
 reference, the `u`/`g` reframe (data, not code) in files-and-shells, and a
@@ -342,6 +382,21 @@ reaches the host only via the user's own reviewed `gh pr checkout`/pull.
     - **Mitigation**: prefer the deterministic `gh api POST /pulls` path (title/
       body from the branch head commit via `gh api`); verify the exact invocation
       at task time against a real remote. Both are pure API, no local checkout.
+- **No host `gh` / not authed** (a brand-new host dependency sand lacks today):
+  the create action can't run.
+    - **Mitigation**: graceful fallback — detection/badge/"open in browser" need
+      no gh; create falls back to opening the compare URL in the browser. The pane
+      shows which mode it's in. `gh` is never *required* for land to be useful.
+- **Remote-profile confusion**: host `gh` could be mistaken for running on the
+  VM's profile host.
+    - **Mitigation**: PR actions run on the workstation (`os/exec`) over
+      `(org/repo, branch)` from the registry, independent of the VM's profile;
+      documented and covered so the fleet case doesn't reach for the wrong host.
+- **Stale push-state heuristic**: the guest's remote-tracking ref can lag actual
+  remote truth (e.g. someone pushed from elsewhere).
+    - **Mitigation**: treat the sweep's push-state as a hint only; the host
+      `gh pr list --head` at pane-open is authoritative for branch/PR existence
+      and reconciles the row before any action is offered.
 - **Concurrency corruption of the registry**: Bubble Tea passes the model by
   value.
     - **Mitigation**: mirror the heartbeat contract — pointer-held, mutex-guarded,
@@ -412,7 +467,11 @@ reaches the host only via the user's own reviewed `gh pr checkout`/pull.
    a branch that already has a PR, the action opens it in the browser instead.
 5. A GitLab/drupal.org checkout is detected and its state shown, but offers no
    one-key MR action (deferred), confirming the gh-only action scope.
-6. Review confirms land has **no** code-copy/bundle/guest-exec action path, and
+6. With `gh` absent/unauthed on the workstation, detection, the badge, and "open
+   in browser" still work, and **Open draft PR** falls back to opening the compare
+   URL — land is never dead without gh.
+7. Review confirms land has **no** code-copy/bundle/guest-exec action path, that
+   host `gh` runs workstation-local (not on the profile host / guest), and that
    delete performs no landing and no guest contact.
 
 ## Self Validation
@@ -439,8 +498,14 @@ unit tests, with the host's `gh` authenticated:
    `--web` and confirm it targets the PR.
 4. Re-open the pane on the branch that now has a PR; confirm the action becomes
    "open in browser," not a duplicate create.
-5. Confirm the `?` keys screen and tile footer show `l` = land and `L` = log.
-6. `go test ./... -race` passes (incl. registry concurrency tests); a repo grep
+5. Push a branch **without** `-u` (`git push origin HEAD`) and confirm the sweep
+   still classifies it "pushed" (tracking-ref based), so the actionable badge and
+   the PR action appear.
+6. Temporarily remove `gh` from PATH (or deauth) and confirm: detection/badge
+   intact; "open in browser" works; **Open draft PR** opens the compare URL
+   instead of erroring. Restore gh.
+7. Confirm the `?` keys screen and tile footer show `l` = land and `L` = log.
+8. `go test ./... -race` passes (incl. registry concurrency tests); a repo grep
    confirms no bundle/patch/guest-exec/code-copy path exists in the land surface
    and no delete-time guest contact.
 
@@ -453,7 +518,8 @@ This plan updates documentation:
 - `docs/using-sand/files-and-shells.md` — a "Landing" section (pane states,
   one-shot draft PR, ledger); and the **`u`/`g` reframe: data, not code** (SQL
   dumps in; screenshots/videos/artifacts out).
-- `docs/using-sand/cli-reference.md` — `sand land` and its `--pr`/`--web` flags.
+- `docs/using-sand/cli-reference.md` — `sand land` and its `--pr`/`--web` flags,
+  including the gh-optional behavior (browser-URL fallback; `--web` is gh-free).
 - `docs/reference/security-model.md` — land as the audited counterpart to the
   no-host-mount boundary: **it moves PR metadata, not code**, so landed work never
   auto-executes on the host; the two-token split (guest pushes, host opens PR);
@@ -478,7 +544,9 @@ This plan updates documentation:
 
 - Existing: heartbeat channel, job/log registry, provider delete API, CLI
   dispatch — reused, not replaced.
-- The workstation's `gh` authentication (host token) for PR actions.
+- The workstation's `gh` (host token) for one-key PR creation — **optional**, with
+  a browser-URL fallback; sand gains no hard `gh` dependency.
+- An OS URL opener (`xdg-open`/`open`/`start`) for the gh-free browser actions.
 - A `limae2e`-capable host (Lima + KVM) plus a real GitHub repo for end-to-end
   validation.
 
@@ -514,6 +582,10 @@ change and is contained to the keybinding surface.
 | **land is a PR/MR cockpit, not a code-extraction tool.** Bundle, patch, and any guest→host code copy removed. | The canonical, safe way work leaves a VM is push→GitHub, where review happens off-host and nothing auto-executes. A local-code path re-creates the "open it in an IDE and it runs" hazard that push avoids. |
 | **All land actions run host-side via the workstation `gh` token.** Guest interaction is the read-only sweep only. | Opening a PR is a metadata call against a branch already on GitHub — no code touches the host. It also sidesteps the least-privilege *guest* token, which often lacks `pull_requests: write`. Guest pushes; host opens the PR. |
 | **Open PR is one-shot draft** (commit-filled title/body, default base, `--draft`); no in-TUI form. | Least friction; the user refines on GitHub, where they were going anyway. |
+| **Graceful browser fallback**; sand gains no hard `gh` dependency. Detection/badge/browser-open are gh-free; only one-key create uses gh, else opens the compare URL. | `gh` isn't a sand dependency today; land must be useful without it, and the browser is the safe review surface regardless. |
+| **Host `gh` runs on the workstation** (`os/exec`), not the VM's profile host or guest. | The action needs only `(org/repo, branch)` from the registry; PR creation is workstation-local and profile-independent. |
+| **Push-state via the remote-tracking ref**, not the configured upstream; host `gh` is authoritative. | A `git push` without `-u` sets no upstream but updates the tracking ref; keying off upstream would misclassify agent-pushed branches. |
+| **land requires a running VM** (matches `shell`/`u`/`g` gating). | The pane needs a fresh sweep; acting on a stopped VM's cached branch is a deferred enhancement (YAGNI). |
 | **`u`/`g` reframed as data-only** (dumps in, artifacts out). | Keeps an accidental code-exfil path from existing; code leaves only via push→PR→review. |
 | Sweep runs in its **own** `limactl shell` + goroutine, not inside the heartbeat loop. | The heartbeat's guest side is a single sequential loop; injecting the sweep would freeze the 2s gauges. A sibling shell keeps gauges live at negligible cost. |
 | `sand land NAME` does its **own one-shot sweep**; detection + PR logic shared with the pane. | A headless CLI has no running TUI registry; a one-shot sweep makes it self-contained behind one shared implementation. |
@@ -535,3 +607,11 @@ change and is contained to the keybinding surface.
   (unpushed/dirty); delete guard distinguishes "lost on delete" from "safe on
   GitHub." `u`/`g` documented as **data, not code**. gh/GitHub-only for the PR
   action; glab deferred.
+- 2026-07-17 (refinement 2): closed pivot gaps against the code. Added **graceful
+  browser fallback** (no hard `gh` dependency; detection/badge/browser-open are
+  gh-free; create falls back to the compare URL). Specified host `gh` runs
+  **workstation-local** (`os/exec`), profile-independent. Fixed push-state to use
+  the **remote-tracking ref** (not upstream config) so `-u`-less pushes register,
+  with host `gh` authoritative. Scoped land to **running VMs** (cached-stopped
+  actions deferred). Added an OS URL opener to infrastructure and matching
+  risks/criteria/validation.
