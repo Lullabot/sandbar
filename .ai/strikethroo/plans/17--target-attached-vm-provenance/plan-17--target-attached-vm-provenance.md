@@ -36,6 +36,7 @@ created: 2026-07-17
 | Should local (non-SSH) Lima also switch to instance-dir markers, or keep the local registry as its ownership truth? | **Unify — local uses markers too.** Local mode reads/writes `~/.lima/<name>/sandbar.json` exactly as remote does. This is what makes "run sandbar on the mini" and "connect to the mini from a laptop" converge on the same managed set. |
 | What is the provider-abstraction scope for this plan? | **Seam + Lima only.** Define the provenance provider interface and implement it for Lima. No Proxmox/cloud implementation is built now; the interface must merely be shaped so those providers can implement it later (YAGNI). |
 | Is backwards compatibility required? | Yes, for one release, via the adopt-and-fallback path above. There is no requirement to preserve the on-disk `managed-vms.json` schema beyond keeping it readable as a legacy fallback; new writes may extend it as a cache. |
+| Where should the marker live — inside the Lima instance dir, or in the `_sand/` sibling namespace sand already uses for host metadata? | **Instance dir (`~/.lima/<name>/sandbar.json`).** Chosen for the "deleted for free" lifecycle (`limactl delete` removes the whole instance dir, so no orphan and no stale-marker aliasing on name reuse) even though it deliberately deviates from sand's existing `_sand/`-only convention. This deviation is accepted knowingly — see the corrected Background note and the new tolerance risk/mitigation. *(Refinement 2026-07-17.)* |
 
 ## Executive Summary
 
@@ -99,12 +100,31 @@ to "managed" happens only at the UI/registry layer.
 The registry already stores everything needed for a marker: an `Entry` holds
 `Base`, `Config` (`vm.CreateConfig`), `Provider`, and `RemoteTarget`
 (`internal/registry/registry.go`). The provisioner already demonstrates the
-host-side-metadata pattern this plan generalizes: it writes and reads version
-**stamps** on the base image through the `HostFiles` seam
-(`internal/provision/provision.go`), and `SSHHost` already implements
-`ReadFile`/`WriteFile` over SSH (`internal/lima/sshhost.go`). So the target-side
-marker has direct prior art and existing transport; this plan does not invent a
-new I/O mechanism, it introduces a new record and a seam to address it.
+host-side-metadata *mechanism* this plan reuses: it writes and reads version
+**stamps** and base overlays through the `HostFiles` seam
+(`internal/provision/baseversion.go`, `internal/provision/provision.go`), and
+`SSHHost` already implements `ReadFile`/`WriteFile`/`Stat` and compound `sh -c`
+reads over SSH (`internal/lima/sshhost.go`). So the target-side marker reuses an
+existing I/O mechanism and transport; this plan introduces a new record and a
+seam to address it, not a new way to touch the host.
+
+**Correction to a prior assumption (validated against the code):** an earlier
+draft claimed the version stamp is "prior art for writing *into the instance
+dir*." That is not accurate. Every existing sand host-file write deliberately
+targets a sibling namespace, `~/.lima/_sand/` — the base version stamp lives at
+`filepath.Join(hf.LimaHome(), "_sand", baseName+".playbook-version")`
+(`internal/provision/baseversion.go`), and the overlay and base lock are
+likewise under `_sand/`, "namespaced to avoid colliding with Lima's own state."
+Sand has never written inside `~/.lima/<name>/`. This plan therefore makes a
+*conscious, tested* deviation from that convention (see Plan Clarifications): the
+marker goes inside the instance dir specifically to inherit the VM's lifecycle
+(deleted for free, no name-reuse aliasing). The deviation was de-risked
+empirically — with `limactl` 2.1.3, dropping a stray `sandbar.json` into an
+instance directory left `limactl list` fully functional (all instances still
+enumerated and parsed, targeted inspect unaffected). That tolerance is not a
+documented Lima guarantee, so the plan carries an explicit tolerance risk and a
+guard (see Risks and Self Validation) rather than assuming it holds for future
+Lima versions.
 
 The reported symptom — different VMs shown when running sandbar on a host vs.
 connecting to it remotely — is, in its intentional part, a direct consequence of
@@ -154,9 +174,29 @@ Lima provider; the remote provider inherits it through the same embedding that
 already gives it `List`. Providers that cannot support provenance would return a
 well-defined "unsupported" signal, but Lima (local and remote) fully supports it.
 
+**The marker must be authoritative for correctness, not just display.** The
+`base` field is load-bearing: `manage.RecreateBase`
+(`internal/manage/manage.go`) uses `reg.BaseInScope(name, scope)` both to *gate*
+whether a VM may be reset/recreated (an unmanaged VM is refused) and to supply
+the base image to clone from. So the marker payload must carry the base name, and
+provenance reads must be able to answer "is this managed, and from what base?"
+The `ReconcileScoped` semantic — a VM deleted outside sand stops being
+recreatable — is preserved for free by the instance-dir location: when the
+instance dir is gone, so is the marker, so the answer becomes "unmanaged"
+automatically.
+
 Design the batched read as the primary entry point so the board's per-refresh
 cost is one host round-trip, not N. The single-instance read exists for CLI
-paths that already target one VM.
+paths that already target one VM (e.g. `sand shell` routing, recreate).
+
+**Note — a layer shift.** Today provenance is recorded one layer above the
+provider, in the caller: `manage.RecordSuccess` → `reg.AddScoped`, invoked from
+`cmd/sand/create.go` and the TUI `provisionDoneMsg` handler. Writing the marker
+through the provider seam moves the *authoritative* provenance write down into
+the provider/provisioner layer (which already holds `HostFiles` write access and
+the resolved base name). The caller's registry write is retained but demoted to
+a cache update. The plan should make this ownership shift explicit when wiring
+`RecordSuccess`.
 
 ### Component 2 — Lima instance-dir marker implementation
 
@@ -166,22 +206,40 @@ seam so it works identically for local (`LocalFiles`) and remote (`SSHHost`)
 hosts.
 
 The marker path is resolved against the same Lima home the provider uses for
-discovery, so that after the `LIMA_HOME` fix (Component 5) discovery and marker
-I/O always agree. Writing happens at create time, after the instance directory
-exists, using `WriteFile` with restrictive perms consistent with the existing
+discovery — `hf.LimaHome()` — so that after the `LIMA_HOME` fix (Component 5)
+discovery and marker I/O always agree. Note `LimaHome()` may be **relative** on
+the remote host (`SSHHost` returns the profile's `RemoteLimaHome`, default
+`".lima"`, resolved against the remote `$HOME` at command time); this is fine for
+the `cat`/`stat`/`mkdir` operations the marker uses and does not require an
+absolute path, but the implementation must not assume `LimaHome()` is absolute.
+
+Writing happens at create time, after the instance directory exists (inside
+`Provisioner.createVM`, which already holds the `HostFiles` seam and the resolved
+base name), using `WriteFile` with restrictive perms consistent with the existing
 stamp writes. The single read is `ReadFile` with a not-exist result meaning
-"unmanaged." The batched read is the performance-critical piece: implement it as
-one command over the (already-multiplexed) SSH connection that emits every
-instance's marker in a single response — for example a single remote invocation
-that concatenates or archives the per-instance marker files with their instance
-names — parsed controller-side into a `name -> provenance` map. Local mode
-performs the equivalent single-pass directory read. Missing/parse-failed markers
-are treated as unmanaged, never as errors that abort a listing.
+"unmanaged."
+
+**The batched read requires extending the `HostFiles` seam.** The interface
+currently exposes only per-path `ReadFile`/`Stat` — there is no batch primitive,
+so a one-round-trip read of all markers is *not* free through the existing seam.
+The plan adds a batch-read method implemented for both `localFiles` (a
+single-pass directory walk) and `SSHHost` (one compound `sh -c 'for d in
+<LimaHome>/*/sandbar.json; do …; done'` over the already-multiplexed connection),
+returning a `name -> provenance` map. This mirrors the existing `HostResources`
+precedent (a multi-line `sh -c` script executed in one round trip). Falling back
+to N per-path `ReadFile` calls is possible (mux/ControlMaster makes each cheap)
+but is explicitly the non-goal; the batch method is the primary path.
+Missing/parse-failed markers are treated as unmanaged, never as errors that abort
+a listing.
 
 Because the marker lives inside the instance directory, `limactl delete` removes
-it with the VM, so no explicit cleanup is required on delete and no stale marker
-can be inherited by a later VM that reuses the name. Explicit unmark is only for
-flows that intentionally relinquish management without deleting the VM.
+it with the VM (verified: `limactl delete` tears down the whole instance dir), so
+no explicit cleanup is required on delete and no stale marker can be inherited by
+a later VM that reuses the name. Explicit unmark is only for flows that
+intentionally relinquish management without deleting the VM. This is the concrete
+payoff of choosing the instance dir over `_sand/`: the `_sand/` alternative would
+have required a reconcile pass to prune orphaned markers and to prevent name
+reuse from inheriting a stale claim.
 
 ### Component 3 — Rewire the roster gate and CLI ownership to the provider
 
@@ -193,14 +251,32 @@ The board's `boardVMs` roster gate (`internal/ui/board.go:142`) changes from
 "tile iff `reg.IsManagedInScope(name, scope)`" to "tile iff the instance carries
 a provenance marker, OR (legacy fallback) the local registry records it as
 managed, OR it has an active provision job." The provenance map is fetched once
-per refresh (Component 2's batched read) alongside the existing `List`. The CLI
-ownership paths that consult the registry — creation recording
-(`cmd/sand/create.go`), shell target resolution and unmanaged-owner probing
-(`cmd/sand/shell.go`), and provider/scope selection
-(`internal/provider/select.go`, `fleet.go`) — are updated to write markers on
-create and to resolve ownership from provenance, keeping the registry read only
-as fallback. `Scope` is retained for UI grouping and for keying the known-targets
-list, but it stops being the ownership discriminator.
+per refresh (Component 2's batched read) inside the existing async `refreshCmd`
+closure (`internal/ui/commands.go`), which already runs `List` and a blocking
+remote `HostResources` round trip off the Update goroutine — so the extra fetch
+fits the existing async model and does not block the UI thread.
+
+**Full blast radius (every non-test scoped-provenance call site to rewire):**
+
+| Call | Site | Role |
+| --- | --- | --- |
+| `IsManagedInScope` | `internal/ui/board.go:142` | roster gate (display) |
+| `IsManagedInScope` | `internal/ui/board.go:494` | `stopAllTargets` gate (correctness) |
+| `IsManagedInScope` | `cmd/sand/shell.go:310` (+ iface decl `:49`) | multi-profile `sand shell` owner routing (correctness) |
+| `BaseInScope` | `internal/ui/board.go:1027` | `traitsOf` base for tile render (display) |
+| `BaseInScope` | `internal/manage/manage.go:42` | `RecreateBase` — reset gate + base to clone (correctness) |
+| `AddScoped` | `internal/manage/manage.go:57` | `RecordSuccess` — record provenance after create |
+| `ReconcileScoped` | `internal/manage/manage.go:29` | `Reconcile` — prune entries for VMs deleted outside sand |
+
+`manage.*` reaches further through its callers: `RecreateBase` ←
+`cmd/sand/create.go` and the TUI reset gate; `RecordSuccess` ←
+`cmd/sand/create.go` + TUI `provisionDoneMsg`; `Reconcile` ← `cmd/sand/create.go`
++ `internal/ui/model.go`. Each site resolves ownership/base from provenance
+(marker first, registry fallback for one release) and, at create, writes the
+marker. `Scope` is retained for UI grouping and for keying the known-targets
+list, but it stops being the ownership discriminator. Because several of these
+sites are correctness gates (stop-all, shell routing, recreate), the marker — not
+a display hint — must be the source they trust.
 
 ### Component 4 — Demote the registry to cache + adoption source
 
@@ -227,25 +303,51 @@ home that sandbar uses for host file reads, so discovery and marker I/O agree on
 hosts with a non-default Lima home.
 
 The profile's `RemoteLimaHome` (`internal/lima/sshhost.go`, from profile
-`lima_home`) is currently consumed only by the `LimaHome()` file-reading seam and
-never reaches the remote command. Update the SSH command construction
-(`sshBase`/`sshCommand` argv building in `internal/lima/sshhost.go`) so the
-remote `limactl` runs with `LIMA_HOME` set to the resolved remote Lima home when
-that value is non-default/configured. This is independently correct regardless of
-the provenance change, but it is prerequisite to markers being read from the same
-directory `limactl list` enumerates. Take care that the env is applied to the
-remote process (not the local ssh client env) and does not re-introduce the kind
-of env leakage previously fixed for the loopback ssh session.
+`lima_home`) is currently consumed only by the `LimaHome()` file-reading seam
+(and `HostResources`/`StagePlaybook` path building) and never reaches the remote
+command. Verified: the argv builders `sshBase` and `sshCommand`
+(`internal/lima/sshhost.go`) emit only `ssh` flags (`-t`, `-p`, `-i`, mux `-o`
+flags), the target, and the shell-quoted remote argv (`limactl …` for `Output`) —
+there is **no** `LIMA_HOME=` token anywhere, and no `cmd.Env`/`Setenv` threading.
+So the remote `limactl` runs with whatever `LIMA_HOME` the remote login shell
+happens to have, while sand's own reads use `h.cfg.RemoteLimaHome`; if the two
+differ, discovery and marker/stamp reads silently diverge.
+
+The fix prepends `LIMA_HOME=<resolved remote Lima home>` to the remote `limactl`
+invocation in `sshCommand` (as a remote-process env assignment in the quoted
+remote command, not the local ssh client env). This is independently correct
+regardless of the provenance change, but it is prerequisite to markers being read
+from the same directory `limactl list` enumerates. Note the env is *entirely
+unmanaged across the hop today* — the ssh command passes no env at all, which is
+why the laptop's local `LIMA_HOME`/`XDG_*` correctly does not leak to the host,
+but also why the intended remote home is never asserted. The change must keep
+that non-leak property (assign only the one intended var on the remote side) and
+be verified against the existing loopback/second-user e2e.
 
 ## Risk Considerations and Mitigation Strategies
 
 <details>
 <summary>Technical Risks</summary>
-- **Per-VM SSH round-trips on every board refresh**: A naive single-instance
-  marker read per listed VM would add N SSH invocations to every refresh.
-    - **Mitigation**: Make the batched, single-round-trip read (Component 2) the
-      primary path used by the board; reserve single reads for already-targeted
-      CLI operations. Reuse the existing SSH multiplexing.
+- **`limactl` intolerance of an unknown file in the instance dir**: The marker
+  lives inside `~/.lima/<name>/`, a directory Lima owns; a stricter future
+  `limactl` could reject or mishandle a stray `sandbar.json`, and `limactl list`
+  is already known to be fragile about instance-dir contents (it fails fatally
+  when it "cannot load instance"). Sand's own convention has always avoided this
+  by writing to `_sand/`.
+    - **Mitigation**: Empirically validated on `limactl` 2.1.3 — a stray
+      `sandbar.json` in an instance dir left `list` fully functional (all
+      instances enumerated/parsed, targeted inspect unaffected). Add a guard test
+      in the Lima e2e that creates a marker and asserts `limactl list`/inspect
+      still succeed, so a Lima upgrade that breaks this tolerance fails CI rather
+      than users. Keep the marker payload minimal and never named like a Lima
+      artifact. If a future Lima version breaks tolerance, the `_sand/<name>`
+      fallback (with a reconcile pass) remains the escape hatch.
+- **`HostFiles` seam has no batch primitive**: A one-round-trip read is not
+  available through the existing per-path `ReadFile`/`Stat` interface, so a naive
+  implementation would do N SSH invocations per refresh.
+    - **Mitigation**: Extend the seam with a batch-read method implemented for
+      both `localFiles` (directory walk) and `SSHHost` (single compound `sh -c`,
+      per the `HostResources` precedent). Reuse the existing SSH multiplexing.
 - **Host can forge or corrupt a marker**: A compromised or buggy host could
   present false provenance.
     - **Mitigation**: The controller already trusts the host completely (it runs
@@ -306,6 +408,12 @@ of env leakage previously fixed for the loopback ssh session.
    fix), and the managed set is correct.
 6. Board refresh performs a bounded number of host round-trips for provenance
    (batched), not one per VM.
+7. `RecreateBase` (reset/recreate) is gated and sourced from the marker: a marked
+   VM can be recreated against its recorded base; a VM whose marker is absent
+   (e.g. deleted outside sand) is refused — exercising the correctness paths, not
+   only display.
+8. A CI guard asserts `limactl list`/inspect still succeed with a marker present
+   in an instance dir, so a Lima upgrade that breaks that tolerance fails CI.
 
 ## Self Validation
 
@@ -338,6 +446,14 @@ by exercising the real system, not only running unit tests:
    returning the expected instance).
 6. **Round-trip bound**: Instrument or trace a board refresh over SSH and confirm
    provenance is fetched in a single batched call rather than one per VM.
+7. **`limactl` tolerance guard**: With a marker present in a real instance dir,
+   run `limactl list --format json` and a targeted `limactl list <name>` and
+   assert both succeed and enumerate/parse the instance (the check performed
+   during refinement on 2.1.3), wired as a CI assertion.
+8. **Recreate correctness**: Drive `sand` reset/recreate against a marked VM and
+   confirm it clones from the marker's recorded base; remove the marker (or
+   delete + recreate the instance unmarked) and confirm recreate is refused —
+   verifying the marker drives the correctness gate, not just tiles.
 
 ## Documentation
 
@@ -391,3 +507,37 @@ follow-up plan after the one-release window.
 - The retained `Scope` type still matters for grouping and for keying the list of
   known targets/profiles; only its role as the ownership discriminator is
   removed.
+
+### Decision Log
+
+- **Marker location = instance dir, not `_sand/`.** Deliberately deviates from
+  sand's established "write host metadata only under `~/.lima/_sand/`" convention
+  (base stamps/overlay/lock all live there). Chosen for deleted-for-free
+  lifecycle and no name-reuse aliasing. De-risked empirically on `limactl` 2.1.3
+  and guarded by a CI tolerance test; `_sand/<name>` + reconcile is the documented
+  fallback if a future Lima version breaks tolerance.
+- **Batched marker read requires a new `HostFiles` seam method** (both `localFiles`
+  and `SSHHost`); it is not available through the existing per-path `ReadFile`.
+- **Provenance is load-bearing for correctness** (recreate gate + base name via
+  `RecreateBase`, stop-all, shell routing), so the marker — not the registry — is
+  the trusted source; the marker payload must carry the base name.
+- **Authoritative provenance write moves down** into the provisioner/provider
+  layer (where `HostFiles` + resolved base already are); the caller's registry
+  write is demoted to a cache update.
+- **`LIMA_HOME` fix** = prepend `LIMA_HOME=<remote home>` to the remote `limactl`
+  argv in `sshCommand`; today no env crosses the hop, so the intended remote home
+  is never asserted. Keep the non-leak property (assign only that one var).
+
+### Change Log
+
+- 2026-07-17: Refinement pass. Corrected the false "prior art for writing into
+  the instance dir" claim (sand actually uses `_sand/`); recorded the marker
+  location decision (instance dir) with empirical `limactl` 2.1.3 tolerance
+  validation and a new tolerance risk + CI guard; expanded Component 3 with the
+  full scoped-provenance call-site inventory and flagged the correctness (not
+  display-only) gates; made the marker payload carry the base name for
+  `RecreateBase`; noted the batched read needs a new `HostFiles` seam method and
+  fits the existing async `refreshCmd`; added the provenance-write layer shift;
+  strengthened Component 5 with the exact argv finding and the env-non-leak
+  constraint; added the relative-`LimaHome()` caveat; added success criteria 7–8
+  and self-validation steps 7–8; added this Decision Log.
