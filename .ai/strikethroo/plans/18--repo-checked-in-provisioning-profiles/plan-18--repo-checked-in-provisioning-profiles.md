@@ -262,9 +262,9 @@ graph TD
     003 --> 007
 ```
 
-### Phase 1: Profile Schema and Validator
+### Phase 1: Profile Schema and Validator ✅
 **Parallel Tasks:**
-- Task 01: Define the `.sandbar/` manifest schema and standalone in-guest validator, with a fixture corpus and Go unit test (no VM)
+- ✔️ Task 01: Define the `.sandbar/` manifest schema and standalone in-guest validator, with a fixture corpus and Go unit test (no VM)
 
 ### Phase 2: Shipped Provisioning Profiles
 **Parallel Tasks:**
