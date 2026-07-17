@@ -424,6 +424,57 @@ The guest shim ships via the `roles/claude-code` provisioning role to
   treated as "no image" in v1 (macOS always coerces to PNG). Documented as a
   Technical Risk.
 
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[Task 1: clipboard-read seam - image-only]
+    T2[Task 2: guest shim + provisioning]
+    T3[Task 3: guest delivery + paste core]
+    T4[Task 4: CLI sand paste-image]
+    T5[Task 5: TUI paste image verb]
+    T6[Task 6: documentation]
+    T1 --> T3
+    T3 --> T4
+    T3 --> T5
+    T2 --> T6
+    T3 --> T6
+    T4 --> T6
+    T5 --> T6
+```
+
+### Phase 1: Foundations (no dependencies, parallel)
+**Parallel Tasks:**
+- Task 1: Clipboard-read seam (image-only, build-tagged) + tests
+- Task 2: Guest clipboard shim scripts + Ansible provisioning
+
+### Phase 2: Delivery core
+**Parallel Tasks:**
+- Task 3: Guest delivery + paste orchestration core (depends on: 1)
+
+### Phase 3: Entrypoints (parallel)
+**Parallel Tasks:**
+- Task 4: CLI `sand paste-image <vm>` (depends on: 3)
+- Task 5: TUI "paste image" verb, key `v` (depends on: 3)
+
+### Phase 4: Documentation
+**Parallel Tasks:**
+- Task 6: Documentation of command, verb, workflow, and contract (depends on: 2, 3, 4, 5)
+
+### Post-phase Actions
+- Run `go build ./...`, `go vet ./...`, and `go test ./...` at each phase
+  boundary; the image-only clipboard test (Task 1) and the delivery argv test
+  (Task 3) are the load-bearing gates.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 6
+
 ### Change Log
 
 - **2026-07-17 (creation):** initial plan — `sand paste-image`, Option B shim clipboard.
