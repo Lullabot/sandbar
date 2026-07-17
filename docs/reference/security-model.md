@@ -23,6 +23,12 @@ tenant or a determined attacker.
   cannot modify anything on your machine, and `limactl delete <name>`
   provably removes everything the VM produced. Move files in or out
   deliberately with the TUI's Upload/Download actions instead.
+- **Guest listen ports are forwarded to loopback only.** Lima forwards a
+  guest's listening TCP ports to `127.0.0.1` on the host that runs the VM —
+  never a LAN interface — so a server inside the VM is not exposed to the
+  network. Publishing one further (a cloudflared tunnel, an SSH forward) is
+  always an explicit action; see
+  [Web Servers and Ports](../using-sand/web-servers.md).
 - **Samba is forced off** for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.
 - **`sand` does not provision a Claude Code credential.** You log in inside

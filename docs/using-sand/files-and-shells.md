@@ -51,3 +51,7 @@ destroyed.
 
 For the flags behind the equivalent CLI subcommands, see the
 [CLI Reference](cli-reference.md).
+
+Files are one of two things that cross the VM boundary — for the other,
+reaching a web server listening inside the guest, see
+[Web Servers and Ports](web-servers.md).
