@@ -645,19 +645,11 @@ func (r *Registry) AddTemplate(t Template) error {
 	return r.save()
 }
 
-// RemoveTemplate drops the template named name under the local Lima provider
-// and persists the change, reporting whether a template was actually present
-// to remove. Equivalent to RemoveTemplateScoped(LocalScope, name) — kept as
-// the unscoped convenience mirroring Remove/RemoveScoped for VM entries.
-func (r *Registry) RemoveTemplate(name string) bool {
-	return r.RemoveTemplateScoped(LocalScope, name)
-}
-
 // RemoveTemplateScoped drops the (scope, name) template from the index and
 // persists the change, reporting whether a template was actually present to
 // remove. It never touches a same-named template recorded under a different
-// scope — the scoped counterpart to RemoveTemplate, mirroring RemoveScoped
-// for VM entries.
+// scope — mirroring RemoveScoped for VM entries. All template deletion is
+// scope-aware, so no unscoped convenience wrapper is provided.
 func (r *Registry) RemoveTemplateScoped(scope Scope, name string) bool {
 	key := scopedKey{scope: scope, name: name}
 	if _, ok := r.templates[key]; !ok {
