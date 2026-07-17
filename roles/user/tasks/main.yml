@@ -177,7 +177,24 @@
     block: |
       export PATH="$HOME/.local/bin:$PATH"
       export IS_SANDBOX=1
-      alias claude="claude --dangerously-skip-permissions"
+      # Launch Claude Code with bypass permissions, but sign in first when
+      # needed: seeding hasCompletedOnboarding makes the first REPL start in
+      # bypass mode, at the cost of the onboarding wizard's login step — so an
+      # un-authed first run would otherwise drop straight to the prompt with
+      # "Not logged in". This runs `claude auth login` (full-scope interactive
+      # OAuth) when logged out, then launches. Real subcommands (auth, mcp,
+      # doctor, update, ...) pass through untouched.
+      claude() {
+        case "$1" in
+          agents|auth|auto-mode|config|doctor|gateway|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade)
+            command claude "$@"; return $? ;;
+        esac
+        if ! command claude auth status >/dev/null 2>&1; then
+          echo "Not signed in to Claude Code — starting sign-in…"
+          command claude auth login || return $?
+        fi
+        command claude --dangerously-skip-permissions "$@"
+      }
       export VISUAL=vim
       export EDITOR=vim
       eval "$(direnv hook bash)"
