@@ -23,6 +23,10 @@ A profile has:
 - A **type** — `local` or `remote-ssh`.
 - **Connection details** — for `remote-ssh` only: host, SSH user, port, an
   optional path to a private key file, and an optional remote `LIMA_HOME`.
+  Setting a profile's `lima_home` scopes both the remote instance discovery
+  (determining which instances `limactl list` returns) and file-based state reads
+  (base version stamp, provenance markers). Different profiles can point at the
+  same remote host but use different `LIMA_HOME` paths, isolating their instances.
 - An **enabled** flag.
 
 There is always exactly one **Local** profile — permanent, created
@@ -68,6 +72,14 @@ it's how `sand` tracks "the last profile you used" and which managed VMs
 belong to which profile without losing track when you rename one. `name` is
 the label you see and address the profile by from the CLI (`--profile`) and
 in the TUI.
+
+`lima_home` (optional, remote profiles only) is the remote host's `LIMA_HOME`
+directory (where Lima stores instance state). If unset, it defaults to `.lima`
+(Lima's own default, relative to the remote user's home directory). **Setting
+`lima_home` affects both discovery and file reads:** every `limactl` command
+and provenance marker lookup on the remote host uses this directory. This lets
+you isolate instances on a shared host by pointing different profiles at
+different `LIMA_HOME` paths.
 
 Two enabled `remote-ssh` profiles may not point at the same
 `user@host:port` — `sand` refuses to save that, so the same physical target

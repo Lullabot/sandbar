@@ -588,10 +588,10 @@ graph TD
 - ✔️ Task 005: Rewire the UI roster gate and refresh to provenance (depends on: 003)
 - ✔️ Task 006: Registry demotion + idempotent adoption (depends on: 003)
 
-### Phase 4: Verification + documentation
+### ✅ Phase 4: Verification + documentation
 **Parallel Tasks:**
-- Task 007: Integration/e2e tests + limactl tolerance guard (depends on: 001, 004, 005, 006)
-- Task 008: Document the new ownership model and marker contract (depends on: 004, 005, 006)
+- ✔️ Task 007: Integration/e2e tests + limactl tolerance guard (depends on: 001, 004, 005, 006)
+- ✔️ Task 008: Document the new ownership model and marker contract (depends on: 004, 005, 006)
 
 ### Post-phase Actions
 - Run `POST_PHASE.md` validation after each phase; do not advance on unverified claims.

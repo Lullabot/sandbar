@@ -1,3 +1,16 @@
+// Package provider's provenance submodule: Provenancer is the backend-agnostic seam
+// that persists and reads back provenance markers on instances, making ownership
+// decisions source-of-truth at the provider level rather than the registry. A marker
+// is a small JSON file at <LimaHome>/<name>/sandbar.json (for Lima backends) or a VM
+// tag/label (for cloud/Proxmox backends). Implementations read and write markers through
+// their own HostFiles handle (local filesystem for local Lima, SSH for remote Lima over
+// SSH), so the transport is provider-specific but the interface is uniform.
+//
+// The Provenance payload mirrors the registry-relevant subset of registry.Entry (Base,
+// Config) plus observability fields (SandbarVersion, CreatedAt) and a SchemaVersion
+// for forward compatibility. It is a standalone type so a future backend can serialize
+// it directly into a VM tag without importing internal/registry (which itself imports
+// internal/provider — see internal/registry/adopt.go for how the import cycle is broken).
 package provider
 
 import (

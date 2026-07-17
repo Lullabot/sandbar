@@ -426,6 +426,53 @@ the network.
 For the security rationale, see the plan's Risk Considerations and the spec
 comment at `roles/claude-code/tasks/main.yml`.
 
+## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
+
+**Ownership model:** A VM is **managed** (sand-owned) iff it carries a provenance marker on its
+host. The local `managed-vms.json` registry (`~/.local/share/sandbar/managed-vms.json`) is
+now a **cache + known-targets list + one-release legacy fallback**, NOT the source of truth.
+`Scope` (profile identity, e.g. `user@host:22`) groups the UI and keys known targets; it
+no longer decides ownership. The authority is the marker.
+
+**Marker contract** (for future Proxmox/cloud implementers):
+- **Location:** `<LimaHome>/<name>/sandbar.json` on the host (Lima home directory).
+- **JSON schema** — `internal/provider/provenance.go`'s `Provenance` struct:
+  ```json
+  {
+    "schema": 1,
+    "base": "sandbar-base",
+    "config": { /* vm.CreateConfig: name, BaseName, CPUs, Memory, Disk, etc. */ },
+    "sandbar_version": "0.6.0",
+    "created_at": "2026-07-17T12:34:56Z"
+  }
+  ```
+- **Lifecycle:**
+  - **Written on create:** `manage.RecordSuccess` calls `provider.Provenancer.MarkManaged` after
+    a successful build, stamping the marker onto the instance.
+  - **Removed on delete:** The marker file is deleted with the instance directory when
+    `provider.Delete` removes the instance. No separate marker cleanup needed.
+  - **Adopted on upgrade (one-time, one-release fallback):** The `manage.AdoptOnce` function
+    runs at most once per process per scope (profile). On first load or create, it calls
+    `registry.Adopt` to scan registry entries and stamp a marker onto any managed-but-unmarked
+    instance, so upgrading controllers do not lose track of pre-provenance VMs. This adoption
+    is idempotent: repeated calls are cheap (a map lookup). After one release in the wild,
+    the fallback path (`manage.RecreateBase`'s registry query and `board.go`'s legacy gate)
+    can be removed; see "legacy, remove after one release" comments in those files for the
+    exact locations.
+
+**The provider seam:** `provider.Provenancer` (`internal/provider/provenance.go`) is the
+interface a backend implements (or inherits) to read and write markers. Today's Lima
+implementations (local and remote-over-SSH) satisfy it with `limaprovenance.go`, which
+reads/writes the `sandbar.json` sidecar file via the provider's own `HostFiles` handle
+(local filesystem or SSH). A future Proxmox/cloud backend would implement the same interface
+using VM tags/labels instead of files, with no redesign.
+
+**Batched read:** Both local and remote providers read all instance markers in one host
+round trip via `lima.HostFiles.ReadInstanceMarkers` — no per-instance syscall. The local
+implementation scans the filesystem directly; the remote implementation (SSH) walks the
+remote Lima home with a shell script and length-frames the results over stdin so JSON
+with embedded newlines survives intact (see `internal/lima/sshhost.go`'s `ReadInstanceMarkers`).
+
 ## The base image / clone / finalize provisioner (read before touching `internal/provision`)
 
 - **Clones inherit the base image's `lima.yaml` — including its mounts.**
