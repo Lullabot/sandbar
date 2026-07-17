@@ -615,3 +615,77 @@ change and is contained to the keybinding surface.
   with host `gh` authoritative. Scoped land to **running VMs** (cached-stopped
   actions deferred). Added an OS URL opener to infrastructure and matching
   risks/criteria/validation.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `.ai/strikethroo/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[Task 01: Checkout registry model + persistence]
+    T2[Task 02: Sweep parser + git classification]
+    T3[Task 03: Sweep shell lifecycle]
+    T4[Task 04: Unlanded-work badge]
+    T5[Task 05: Delete guard - zero guest contact]
+    T6[Task 06: Host gh actions adapter]
+    T7[Task 07: Landing pane]
+    T8[Task 08: Rebind l=land / L=log]
+    T9[Task 09: sand land CLI]
+    T10[Task 10: Docs + AGENTS invariants]
+
+    T1 --> T2
+    T1 --> T3
+    T1 --> T4
+    T1 --> T5
+    T1 --> T7
+    T2 --> T3
+    T2 --> T9
+    T3 --> T7
+    T6 --> T7
+    T6 --> T9
+    T7 --> T8
+    T8 --> T10
+    T9 --> T10
+```
+
+Verified acyclic: every edge points from a lower phase to a higher one.
+
+### Phase 1: Foundations (no dependencies)
+**Parallel Tasks:**
+- Task 01: Checkout registry model + host-persisted store
+- Task 06: Host `gh` actions adapter (PR state, draft create, browser URLs)
+
+### Phase 2: Registry consumers + shared sweep logic
+**Parallel Tasks:**
+- Task 02: Sweep parser + git classification + guest command builder (depends on: 01)
+- Task 04: Unlanded-work tile badge (depends on: 01)
+- Task 05: Delete guard — zero guest contact (depends on: 01)
+
+### Phase 3: Sweep runtime + headless CLI
+**Parallel Tasks:**
+- Task 03: Sweep shell lifecycle — 2nd limactl shell/goroutine per VM (depends on: 01, 02)
+- Task 09: `sand land NAME` CLI (depends on: 02, 06)
+
+### Phase 4: Landing pane
+**Parallel Tasks:**
+- Task 07: Landing pane — PR cockpit (depends on: 01, 03, 06)
+
+### Phase 5: Keybinding rebind
+**Parallel Tasks:**
+- Task 08: Rebind `l` = land, `L` = log (depends on: 07)
+
+### Phase 6: Documentation
+**Parallel Tasks:**
+- Task 10: Docs + AGENTS.md invariants (depends on: 08, 09)
+
+### Post-phase Actions
+Apply `.ai/strikethroo/config/hooks/POST_PHASE.md` after each phase: confirm all
+tasks in the phase are `completed`, run `go build ./...` and `go test ./... -race`
+for touched packages, and only then advance.
+
+### Execution Summary
+- Total Phases: 6
+- Total Tasks: 10
