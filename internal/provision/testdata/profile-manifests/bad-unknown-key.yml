@@ -1,0 +1,6 @@
+# Malformed fixture: an unrecognized top-level key (typo of "packages").
+# The validator must reject this by name, not with a generic parse error.
+packages:
+  - cowsay
+toolz:
+  - claude

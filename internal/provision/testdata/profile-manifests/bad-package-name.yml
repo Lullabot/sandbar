@@ -1,0 +1,7 @@
+# Malformed fixture: a package name violating Debian's naming rules
+# (uppercase letters and an underscore are not permitted).
+packages:
+  - cowsay
+  - Bad_Package
+services:
+  - cowsay.service

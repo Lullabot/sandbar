@@ -59,7 +59,7 @@ install -m 600 /dev/null "$vars"
 cat > "$vars"
 rsync -a --delete --delete-excluded \
   --include=/site.yml --include=/ansible.cfg --include=/inventory \
-  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
+  --include='/roles/***' --include='/group_vars/***' --include='/scripts/***' --exclude='*' \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
 listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
@@ -108,7 +108,7 @@ install -m 600 /dev/null "$vars"
 cat > "$vars"
 rsync -a --delete --delete-excluded \
   --include=/site.yml --include=/ansible.cfg --include=/inventory \
-  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
+  --include='/roles/***' --include='/group_vars/***' --include='/scripts/***' --exclude='*' \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
 ansible-galaxy collection install ansible.posix

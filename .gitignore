@@ -10,3 +10,6 @@ dist/
 
 # MkDocs build output
 site/
+
+# Python bytecode cache from running scripts/validate_profile.py locally
+__pycache__/

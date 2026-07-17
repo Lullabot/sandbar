@@ -1,0 +1,5 @@
+# Malformed fixture: a systemd unit name missing its unit-type suffix.
+packages:
+  - cowsay
+services:
+  - not-a-unit

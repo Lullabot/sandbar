@@ -1,0 +1,4 @@
+# Malformed fixture: a role name containing a path-traversal segment, which
+# would let a declared role escape .sandbar/roles/ if left unchecked.
+roles:
+  - ../../etc/evil

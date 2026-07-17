@@ -17,5 +17,5 @@ import "embed"
 // checkout, and the guest must get the same tree either way). Change one, change
 // the other; TestGuestSyncCopiesOnlyThePlaybook fails if they drift.
 //
-//go:embed site.yml ansible.cfg inventory all:roles all:group_vars
+//go:embed site.yml ansible.cfg inventory all:roles all:group_vars all:scripts
 var PlaybookFS embed.FS
