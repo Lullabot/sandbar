@@ -2,7 +2,7 @@
 id: 7
 group: "documentation"
 dependencies: [4, 5]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "haiku"
 effort: "low"

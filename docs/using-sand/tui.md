@@ -78,6 +78,7 @@ require the VM to be running.
 | `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
 | `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |
 | `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |
+| `t` | Snapshot | Capture this VM as a golden template. Opens a one-field prompt for the template's user-facing name, then runs the snapshot in the background. The VM's power state is preserved. See [Golden Templates](golden-templates.md). |
 | `l` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
 
 `d` is always delete, on every screen — the most destructive key never
@@ -99,6 +100,20 @@ The create form (`n`, or `enter` on a ghost tile) also has a profile
 selector when more than one profile is enabled, so you pick which profile a
 new VM is created on without leaving the TUI. See
 [Connection Profiles](connection-profiles.md) for the full model.
+
+## Creating a VM
+
+Pressing `n` (or `enter` on the ghost tile) opens the create form. With more
+than one [Connection Profile](connection-profiles.md) enabled, a **Profile**
+selector appears first, letting you pick which profile the VM is created on.
+Below that, a **Source** selector (space or enter to open) picks the clone
+source: the shared base image, or one of your named golden templates (if you
+have any). The rest of the form is the same fields as `sand create`'s flags:
+Name, Hostname, User, Git identity, CPUs, Memory, Disk, Docker proxy host,
+Clone URL, and Clone token. Fill them in, then press `ctrl+s` to create.
+
+See [Golden Templates](golden-templates.md) for what a template is and how to
+snapshot one from an existing VM.
 
 ## Resetting a VM
 

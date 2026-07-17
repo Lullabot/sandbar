@@ -263,10 +263,10 @@ graph TD
 - ✔️ Task 004: CLI `sand template` commands and `sand create --template` (completed)
 - ✔️ Task 005: TUI snapshot verb, template picker, and delete (completed)
 
-### Phase 5: Verification and Docs
+### Phase 5: Verification and Docs ✅
 **Parallel Tasks:**
-- Task 006: E2E snapshot → clone-from → delete round-trip, local + remote (depends on: 001, 002, 003, 004)
-- Task 007: Documentation of the shipped feature (depends on: 004, 005)
+- ✔️ Task 006: E2E snapshot → clone-from → delete round-trip, local + remote (completed)
+- ✔️ Task 007: Documentation of the shipped feature (completed)
 
 ### Post-phase Actions
 - Run `gofmt -l .` (must be empty), `go vet ./...`, and `go build ./cmd/sand` after each code phase.

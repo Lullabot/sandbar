@@ -65,6 +65,7 @@ nav:
   - Using sand:
     - The Board (TUI): using-sand/tui.md
     - CLI Reference: using-sand/cli-reference.md
+    - Golden Templates: using-sand/golden-templates.md
     - Secrets: using-sand/secrets.md
     - Shells and Files: using-sand/files-and-shells.md
     - Web Servers and Ports: using-sand/web-servers.md

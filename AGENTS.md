@@ -53,11 +53,17 @@ it is not where prose belongs.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
   not directly on `Provider`.
 - `registry` — managed-VM index, now `(connection scope, name)`-keyed
-  (schema v3, auto-migrated on read). Each entry's connection `Scope` is
+  (schema v4, auto-migrated on read from v3). Each entry's connection `Scope` is
   derived from which profile's provider created it (`LocalScope` for local
   Lima, a remote identity like `user@host:port` for remote), so the same VM
   name can exist independently under two different profiles and a remote
-  profile's VMs never mix with the local list.
+  profile's VMs never mix with the local list. Schema v4 adds golden templates:
+  a `templates` array indexed by (scope, name), with provenance metadata
+  (source VM, creation time, playbook version, toolset key) and the saved
+  create config. Each VM entry gains an optional `templateSource` field naming
+  which template (if any) it was cloned from, so `sand template delete` can
+  warn about dependents. A v3 file loads with zero data loss (templates is
+  empty, templateSource fields absent); it is auto-upgraded to v4 on write.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
