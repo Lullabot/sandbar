@@ -167,12 +167,20 @@ type model struct {
 	heartbeats *heartbeatRegistry
 
 	// checkouts is the per-VM git checkout registry (internal/checkouts): the
-	// host-persisted spine the "land" feature reads — the sweep (sweep.go) is its
-	// single writer, applied via a message in Update exactly like heartbeat
-	// samples; the unlanded-work badge, the delete guard and the Landing pane are
-	// pure readers. A POINTER for the same reason reg/jobs are (the model is
-	// copied by value), and nil-safe: a model built by hand reports "no checkouts".
+	// host-persisted spine the "land" feature reads — the sweep (sweeps below,
+	// sweepshell.go) is its single writer, applied via a message in Update
+	// exactly like heartbeat samples; the unlanded-work badge, the delete guard
+	// and the Landing pane are pure readers. A POINTER for the same reason
+	// reg/jobs are (the model is copied by value), and nil-safe: a model built
+	// by hand reports "no checkouts".
 	checkouts *checkouts.Registry
+
+	// sweeps is the VM-keyed checkout-sweep registry (sweepshell.go): one live
+	// `limactl shell` per RUNNING VM, a SIBLING of heartbeats above (its own
+	// connection, goroutine, and ~60s cadence) that discovers git checkouts and
+	// feeds them into checkouts via a sweepResultMsg. A POINTER for the same
+	// reason heartbeats is, and nil-safe for the same reason.
+	sweeps *sweepRegistry
 
 	// lastInput is when the user last touched a key. Together with the active view
 	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
@@ -429,6 +437,7 @@ func New(fleet provider.Fleet) tea.Model {
 		jobs:         newJobRegistry(),
 		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
 		checkouts:    checkoutReg,
+		sweeps:       newSweepsResolver(fleetShellResolver(members)),
 		keys:         newKeyMap(),
 		help:         help.New(),
 		view:         viewBoard,
@@ -743,7 +752,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// would arm another, stacking refresh loops until the list call rate ran away.
 	// gc happens to copy last today. This is the same hazard updateBoard already
 	// hoists around (see the note under Quit there); not leaning on it is free.
-	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.tickRefresh())
+	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.syncSweeps(), nm.tickRefresh())
 	return nm, cmds
 }
 
@@ -783,6 +792,31 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// one. Routed by the sample's own scope, so a fleet's same-named VMs never
 		// cross streams.
 		return m, heartbeatReadCmd(msg.scope, msg.vm, msg.epoch, m.heartbeats.fold(msg.scope, msg.vm, msg.epoch, msg.sample))
+
+	case sweepResultMsg:
+		// The channel closed: this VM's sweep stream ended — most commonly a
+		// `limactl stop` underneath it, exactly like a heartbeat's stream
+		// ending (see heartbeatSampleMsg above). ended() drops the connection
+		// and starts a cooldown so a VM sand cannot shell into does not get a
+		// fresh `limactl shell` thrown at it by every single message.
+		if !msg.ok {
+			m.sweeps.ended(msg.scope, msg.vm, msg.epoch)
+			return m, nil
+		}
+		// This is the ONLY place the checkout registry is written — a
+		// completed pass arrives as a message and is recorded here, under
+		// checkouts.Registry's own mutex, never by a direct write from the
+		// sweeping goroutine. Mirrors the heartbeat's sample-recording
+		// contract exactly.
+		if m.checkouts != nil {
+			if err := m.checkouts.Set(msg.scope, msg.vm, msg.result); err != nil {
+				m.logWarn("checkout registry: " + err.Error())
+			}
+		}
+		// fold returns nil for a pass from a connection that has since been
+		// replaced, which ends that stale read loop rather than letting it
+		// double up on the live one.
+		return m, sweepReadCmd(msg.scope, msg.vm, msg.epoch, m.sweeps.fold(msg.scope, msg.vm, msg.epoch))
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after

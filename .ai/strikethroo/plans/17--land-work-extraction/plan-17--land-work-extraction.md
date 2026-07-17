@@ -664,10 +664,10 @@ Verified acyclic: every edge points from a lower phase to a higher one.
 - ✔️ Task 04: Unlanded-work tile badge (depends on: 01) — `internal/ui/badge.go`
 - ✔️ Task 05: Delete guard — zero guest contact (depends on: 01) — `internal/ui/deleteguard.go` (no-guest-contact test green)
 
-### Phase 3: Sweep runtime + headless CLI
+### ✅ Phase 3: Sweep runtime + headless CLI
 **Parallel Tasks:**
-- Task 03: Sweep shell lifecycle — 2nd limactl shell/goroutine per VM (depends on: 01, 02)
-- Task 09: `sand land NAME` CLI (depends on: 02, 06)
+- ✔️ Task 03: Sweep shell lifecycle — 2nd limactl shell/goroutine per VM (depends on: 01, 02) — `internal/ui/sweepshell.go`, syncSweeps gated by shouldTick
+- ✔️ Task 09: `sand land NAME` CLI (depends on: 02, 06) — `cmd/sand/land.go`, `--pr`/`--web`, gh-optional
 
 ### Phase 4: Landing pane
 **Parallel Tasks:**
