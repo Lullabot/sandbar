@@ -20,6 +20,8 @@ created: 2026-07-16
 | Include template listing and deletion, or strictly snapshot + clone-from? | Include list + delete. Templates are full disk copies; users need to see sizes/dates and reclaim space. |
 | Is backwards compatibility required for the managed-VMs registry (`managed-vms.json`, schema v3)? | Yes — migrate existing state. Schema changes must be additive; current VMs load unchanged with no manual cleanup. |
 | When a clone is made from a template whose embedded-playbook version has gone stale, converge or preserve? | Use the template as-is. Golden-template fidelity is the point: only the per-VM finalize phase runs; staleness is surfaced as info, never auto-converged. |
+| Deleting a template that existing VMs were cloned from — block or warn? | Warn and allow by default. Deletion lists the affected VMs and proceeds; those VMs keep running and only a future reset of them would fail. No `--force` gate. _(Refinement 2026-07-17)_ |
+| Snapshotting a VM that is already stopped — what power state afterward? | Leave as found. The snapshot restores the source to its pre-snapshot power state: a running VM is restarted, an already-stopped VM stays stopped (and its stop step is skipped). Snapshot never changes the VM's power state. _(Refinement 2026-07-17)_ |
 
 ## Executive Summary
 
@@ -85,7 +87,7 @@ A template is represented on the Lima host as a stopped Lima instance with a res
 
 **Objective**: Turn a configured VM into a named template safely and atomically enough to trust.
 
-The provisioning layer gains a snapshot operation: gracefully stop the source VM (flushing guest disk state), clone its disk into the template's reserved instance name, restart the source VM, stamp the template with the playbook version and toolset recorded for the source, and register the template. The clone is performed under the same host-side lock discipline the base image uses, extended to cover template mutation, so concurrent creates/snapshots on one host cannot interleave. The known Lima listing race during clones is already handled by the existing retry machinery and applies unchanged. A snapshot into an existing template name is an error directing the user to delete first — no implicit overwrite. Failure handling is explicit: if the clone fails, the partial template instance is cleaned up and the source VM is restarted regardless; the source VM is never left stopped silently.
+The provisioning layer gains a snapshot operation: record the source VM's current power state, gracefully stop it if it is running (flushing guest disk state — an already-stopped source skips this step), clone its disk into the template's reserved instance name, **restore the source to its recorded power state** (restart a formerly-running VM; leave a formerly-stopped VM stopped), stamp the template with the playbook version and toolset recorded for the source, and register the template (_snapshot never changes the source's power state — clarification 2026-07-17_). The clone is performed under the same host-side lock discipline the base image uses, extended to cover template mutation, so concurrent creates/snapshots on one host cannot interleave. The known Lima listing race during clones is already handled by the existing retry machinery and applies unchanged. A snapshot into an existing template name is an error directing the user to delete first — no implicit overwrite. Failure handling is explicit: if the clone fails, the partial template instance is cleaned up and the source VM is restored to its recorded power state regardless; a source that was running is never left stopped silently.
 
 ### Clone-from-Template Create
 
@@ -97,7 +99,7 @@ The create path accepts an optional template reference. When present, the base-e
 
 **Objective**: Make template disk consumption visible and reclaimable.
 
-Listing enumerates templates in scope from the registry, joined with host-side facts fetched through the host seams: disk size on the Lima host, creation date, source VM, toolset, and whether the template's playbook version is stale relative to the current binary. Delete removes the template's Lima instance (and its disk) and its registry record, under the same lock as snapshot. Deleting a template that existing VMs were cloned from is allowed but warns and lists the affected VMs, since their reset provenance will dangle; those VMs keep running and can still be deleted or recreated from the base explicitly.
+Listing enumerates templates in scope from the registry, joined with host-side facts fetched through the host seams: disk size on the Lima host, creation date, source VM, toolset, and whether the template's playbook version is stale relative to the current binary. Delete removes the template's Lima instance (and its disk) and its registry record, under the same lock as snapshot. Deleting a template that existing VMs were cloned from is allowed but warns and lists the affected VMs, since their reset provenance will dangle; those VMs keep running and can still be deleted or recreated from the base explicitly. This warn-and-allow behavior is the default with no `--force` gate — the warning is informational, not a block (_clarification 2026-07-17_).
 
 ### CLI Surface
 
@@ -109,7 +111,7 @@ A new `template` command group in the `sand` binary covers snapshot (source VM +
 
 **Objective**: First-class board integration matching existing verb and form patterns.
 
-The per-VM command registry gains a "snapshot to template" verb, enabled for VMs in states where a clean stop is possible; it prompts for a template name and runs the snapshot as a tracked job with progress (stopping → cloning → restarting), consistent with existing long-running verbs. The new-VM form gains a source selector offering the base plus the templates available in the selected profile's scope, showing size/age/staleness info inline. Template rows (or a lightweight template listing view) expose delete with a confirmation that includes the disk size being reclaimed and any dependent VMs. All TUI additions follow the existing job-registry and golden-snapshot-test patterns.
+The per-VM command registry gains a "snapshot to template" verb, enabled for VMs in states where a clean clone is possible (running or already-stopped); it prompts for a template name and runs the snapshot as a tracked job with progress (stopping if needed → cloning → restoring prior state), consistent with existing long-running verbs. The new-VM form gains a source selector offering the base plus the templates available in the selected profile's scope, showing size/age/staleness info inline. Template rows (or a lightweight template listing view) expose delete with a confirmation that includes the disk size being reclaimed and any dependent VMs. All TUI additions follow the existing job-registry and golden-snapshot-test patterns.
 
 ### Remote Parity
 
@@ -122,8 +124,8 @@ No component above talks to the host directly: stop/clone/start/delete and disk-
 <details>
 <summary>Technical Risks</summary>
 
-- **Source VM left stopped after a failed snapshot**: a crash between stop and restart strands the user's VM offline.
-    - **Mitigation**: restart the source in a deferred/always path regardless of clone outcome; surface any restart failure loudly; snapshot job reports each phase so a stall is visible.
+- **Source VM left stopped after a failed snapshot**: a crash between stop and restart strands a formerly-running VM offline.
+    - **Mitigation**: restore the source to its recorded pre-snapshot power state in a deferred/always path regardless of clone outcome; surface any restart failure loudly; snapshot job reports each phase so a stall is visible. A source that was already stopped is deliberately left stopped.
 - **Partial template instance on clone failure**: an aborted clone can leave a half-written instance directory that later name-collides.
     - **Mitigation**: clean up the target instance on failure before returning; registry registration happens only after a successful clone and stamp, so the registry never references a broken template.
 - **Lima clone/list race (lima#5236)**: listing while another instance is mid-clone can fail.
@@ -161,11 +163,11 @@ No component above talks to the host directly: stop/clone/start/delete and disk-
 
 ### Primary Success Criteria
 
-1. A user can snapshot a managed, running VM into a named template; afterwards the source VM is running again and the template appears in the template list with its size, creation date, source VM, and playbook-version info — on both local and remote profiles.
+1. A user can snapshot a managed VM into a named template; afterwards the source VM is restored to its pre-snapshot power state (a running source is running again; an already-stopped source stays stopped) and the template appears in the template list with its size, creation date, source VM, and playbook-version info — on both local and remote profiles.
 2. A user can create a new VM from a named template (via TUI form or CLI flag); the new VM contains the template's guest state (e.g. seeded database present), has its own hostname/git identity, and its registry entry records the template as provenance so reset re-clones from the template.
 3. Templates can be listed and deleted from both surfaces; deletion reclaims the disk on the owning host and warns when dependent VMs exist.
 4. A pre-existing schema-v3 `managed-vms.json` loads unchanged after the upgrade: existing VMs remain visible and operable with no manual intervention.
-5. Snapshot failure paths never leave the source VM stopped or a half-built template registered.
+5. Snapshot failure paths never leave a formerly-running source VM stopped or a half-built template registered.
 
 ## Self Validation
 
@@ -180,7 +182,8 @@ After all tasks are complete, verify against a real local Lima host (and the rem
 7. Launch the TUI, snapshot a VM through the new verb, and create a VM through the form's template picker; capture screenshots of the verb prompt, the job progress tile, and the picker showing template size/age.
 8. Delete `golden-test` via the CLI while the templated VM still exists; confirm the warning lists the dependent VM, the Lima instance directory is gone, and a subsequent reset of the dependent VM fails with the clear missing-template error.
 9. On a remote profile (or the remote e2e suite), run the snapshot → create-from → delete round-trip and confirm the template disk only ever existed on the remote host.
-10. Simulate a snapshot failure (e.g. interrupt or force a clone error) and confirm the source VM is restarted and no template registry entry or instance remains.
+10. Simulate a snapshot failure (e.g. interrupt or force a clone error) and confirm a formerly-running source VM is restarted and no template registry entry or instance remains.
+11. Snapshot an already-stopped VM and confirm it stays stopped afterward (its power state is unchanged) while the template is still produced correctly.
 
 ## Documentation
 
@@ -212,3 +215,7 @@ The feature integrates by extension, not parallel construction: the registry sch
 
 - Explicitly out of scope: live/zero-downtime snapshots, template export/import or cross-host transfer, converge-on-clone, and implicit template overwrite.
 - Template freshness is intentionally the user's responsibility: the design surfaces staleness but never mutates a template after creation. Re-snapshotting from an updated VM (after deleting the old template name) is the refresh path.
+
+### Refinement Change Log
+
+- 2026-07-17: Refined snapshot power-state semantics — the flow now records and **restores** the source's pre-snapshot power state (already-stopped sources skip the stop and stay stopped) rather than unconditionally restarting; propagated the wording through the Snapshot Operation, the "left stopped" technical risk, success criteria 1 & 5, and the TUI verb enablement, and added self-validation step 11. Confirmed template deletion stays **warn-and-allow with no `--force` gate**. Recorded both decisions in the Plan Clarifications table.
