@@ -20,7 +20,7 @@ package ui
 
 import (
 	"context"
-	"fmt"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/provider"
@@ -265,13 +265,21 @@ var vmCommands = []vmCommand{
 		enabledFor: func(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) },
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
+			// The delete guard (plan 17, task 5): a PURE, host-only read of the
+			// checkout registry's cached entry for this VM — never anything that
+			// reaches the guest. m.checkouts.Get takes a mutex and hands back a
+			// value copy; deleteGuardPrompt only formats strings from it. See
+			// deleteguard.go's doc and deleteguard_test.go's
+			// TestDeleteGuardNoGuestContact for the invariant this preserves:
+			// deleting a VM you believe is compromised must never execute in it.
+			vc, found := m.checkouts.Get(v.scope, name)
 			// Delete's action RAISES the confirm; it never deletes directly — the
 			// actual deleteCmd only runs once the user presses 'y' (updateConfirm
 			// in model.go). deleteCmd carries the owning scope so the actionDoneMsg
 			// handler prunes THIS profile's job/secrets, never a same-named VM's
 			// under another.
 			m.confirm = &confirmState{
-				prompt:  fmt.Sprintf("Delete %q?", name),
+				prompt:  deleteGuardPrompt(name, vc, found, v.Status == limaRunning, time.Now()),
 				run:     deleteCmd(m.provFor(v.scope), v.scope, name),
 				working: "deleting " + name + "…",
 			}
