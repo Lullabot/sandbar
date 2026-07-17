@@ -41,7 +41,13 @@ built this way.
 `sand` installs the Claude Code CLI but does **not** provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (`S`
 on its tile, or `sand shell NAME`) and run `claude` once to complete a
-normal interactive login.
+normal interactive login (`/login`).
+
+Provisioning pre-seeds Claude Code's first-run onboarding state, so even the
+very first session starts with bypass permissions active — without the seed,
+Claude Code ignores `--dangerously-skip-permissions` until onboarding has
+completed and the CLI is relaunched. The one prompt you'll still see is the
+per-folder trust dialog, which is deliberate.
 
 A full interactive login is required, rather than a headless token, because
 remote control is enabled by default (see

@@ -24,6 +24,24 @@
     group: "{{ user_name }}"
     mode: "0644"
 
+# Claude Code only honors --dangerously-skip-permissions after its first-run
+# onboarding has completed: with a fresh ~/.claude.json the very first
+# interactive session runs the theme/login wizard and comes up WITHOUT bypass
+# permissions until the user quits and relaunches
+# (anthropics/claude-code#25503, #52501). Seeding hasCompletedOnboarding makes
+# the first launch start in bypass mode immediately; the user still runs
+# /login in-session. create-only (force: false) so a re-provision never
+# clobbers a real config holding the OAuth account.
+- name: Seed ~/.claude.json so the first launch honors bypass permissions
+  ansible.builtin.copy:
+    content: |
+      {"hasCompletedOnboarding": true}
+    dest: "{{ user_home }}/.claude.json"
+    force: false
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0600"
+
 - name: Install Claude Code using the official installer
   ansible.builtin.shell:
     cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash
