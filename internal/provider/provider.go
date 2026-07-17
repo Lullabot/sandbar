@@ -84,6 +84,23 @@ type Provider interface {
 	// destroy/recreate (opts). Streams progress to out.
 	Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error
 
+	// --- Golden VM templates ---
+
+	// SnapshotTemplate captures source (a managed VM) into templateInstance (the
+	// reserved Lima instance name a golden template is stored under — see
+	// vm.TemplateInstanceName), preserving source's power state exactly (a
+	// running source ends running, an already-stopped source stays stopped,
+	// even if the clone itself fails). Streams progress to out and honours ctx.
+	// The returned SnapshotResult carries what the caller needs to build the
+	// registry.Template record.
+	SnapshotTemplate(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error)
+	// DeleteTemplate removes a template's Lima instance (force). Streams
+	// progress to out and honours ctx.
+	DeleteTemplate(ctx context.Context, templateInstance string, out io.Writer) error
+	// TemplateDiskBytes returns the allocated on-disk size of a template's qcow2
+	// image, or -1 when it cannot be measured.
+	TemplateDiskBytes(templateInstance string) int64
+
 	// --- Guest transport ---
 
 	// Shell runs argv (or an interactive shell when argv is empty) inside an

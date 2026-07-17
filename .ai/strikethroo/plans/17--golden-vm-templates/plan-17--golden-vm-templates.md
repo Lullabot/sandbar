@@ -250,9 +250,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: Template data model and registry v4 migration (completed)
 
-### Phase 2: Snapshot Mechanics
+### Phase 2: Snapshot Mechanics ✅
 **Parallel Tasks:**
-- Task 002: Provider seam + snapshot/delete/disk mechanics (depends on: 001)
+- ✔️ Task 002: Provider seam + snapshot/delete/disk mechanics (completed)
 
 ### Phase 3: Clone-from-Template
 **Parallel Tasks:**
