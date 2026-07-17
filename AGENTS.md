@@ -396,6 +396,35 @@ every bullet, not the constraint itself.
 - **Naming prohibition: no nautical metaphor anywhere.** No harbour/harbor,
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
+- **The checkout registry (`internal/checkouts`) is populated ONLY by a
+  sweep of a RUNNING guest, and is otherwise a passive, host-side cache.**
+  The unlanded-work badge, the delete guard, and `sand land`'s listing all
+  read this same cached data; none of them re-sweeps or otherwise contacts
+  the guest on their own. A stopped or never-swept VM's entry can only get
+  staler, never fresher — do not "improve" any of these three surfaces by
+  having them refresh state directly; that reintroduces guest contact into
+  paths deliberately built to avoid it (see the next bullet).
+- **The delete guard (`internal/ui/deleteguard.go`) makes ZERO guest
+  contact — this is load-bearing, not incidental.** Its confirmation names
+  work that would be "lost on delete" vs. "safe on GitHub" using only the
+  registry's already-cached data (last-seen labeled with `(as of <ago>)` on
+  a stopped VM). A "smarter" guard that refreshed state at delete time would
+  have to execute inside the very VM the user is choosing to delete —
+  possibly because they suspect it's compromised — which defeats the point
+  of deleting it. `deleteguard_test.go`'s `TestDeleteGuardNoGuestContact`
+  enforces this with a Runner that fails the test if any of its methods are
+  called; do not weaken that test to "fix" a feature request here.
+- **Landing (`l` / `sand land`) never copies code to the host.** It moves PR
+  metadata only — branch name, compare URL, PR number/state — via the
+  workstation's own `gh` (a two-token split: the guest pushes with its own
+  least-privilege token, the host opens the PR with the workstation's `gh`
+  and credentials). `--web` never calls `gh` at all. Do not add a code path
+  here that fetches a diff, a patch, or the checkout's working tree onto the
+  host — that would break the "the only guest mount is read-only, nothing
+  leaves the VM except through the TUI's Upload/Download" property this
+  feature was deliberately built alongside without becoming a silent
+  third exception to it. See `docs/reference/security-model.md`'s "Landing"
+  section for the precise, non-overreaching claim this makes.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 

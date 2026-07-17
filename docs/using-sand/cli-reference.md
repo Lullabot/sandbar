@@ -8,6 +8,9 @@ There are five entry points:
   tmux session.
 - [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
   host clipboard on a running VM's guest clipboard.
+
+- [`sand land NAME`](#sand-land-name) — list a VM's git checkouts, or open a
+  draft PR / browser for one of them.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
 
@@ -317,6 +320,56 @@ path at all.
 Like `sand shell`, `sand paste-image NAME` resolves which connection profile
 you mean using the same logic described above under `sand shell`'s
 [Cross-profile resolution](#cross-profile-resolution-for-sand-shell).
+
+## `sand land NAME`
+
+List `NAME`'s git checkouts and their branch/push/PR state, or act on one.
+This is the same detection and the same `gh` actions the TUI's `l` (Land)
+key uses — see [Landing](files-and-shells.md#landing).
+
+```
+Usage: sand land NAME [PATH] [--pr | --web] [--profile <name>]
+
+List NAME's git checkouts and their branch/push/PR state, or act on one:
+
+  sand land NAME                list checkouts + branch/push/PR state
+  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
+  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
+
+--pr uses the workstation's own 'gh' (never the guest's token). Without gh
+it prints the compare URL and, on a terminal, offers to open it; piped or
+scripted, it exits non-zero with the URL on stderr so automation can react.
+--web never needs gh: it opens a constructed GitHub URL, which redirects to
+an existing PR for the branch on its own.
+
+The named VM must already exist and be running (see 'sand' to list
+instances, or 'sand create' to make one). If NAME is managed under more than
+one connection profile, --profile picks which one to act on.
+```
+
+With no `PATH` or flags, `sand land NAME` prints a table (`PATH KIND BRANCH
+PUSH PR`) of every checkout the sweep found, including an ahead count for an
+unpushed branch (`unpushed (+3)`) and the PR's number/state when one exists
+(`#42 open (draft)`).
+
+`--pr PATH` and `--web PATH` require a `PATH` from that listing, and are
+mutually exclusive. Both refuse a checkout that isn't pushed or has no
+recognized remote — there's nothing to open a PR or browser page against
+yet.
+
+- **`--pr`** opens a one-shot **draft PR** via the workstation's own `gh`.
+  Without `gh` installed, it instead prints the branch's compare URL: on a
+  real terminal it offers to open that URL in a browser (`y`/`N` prompt); in
+  a script or pipe (no terminal) it does not prompt — it exits non-zero with
+  the compare URL as the only text on stderr, so automation can capture and
+  act on it.
+- **`--web`** is **gh-free by construction**: it never calls `gh` at all. It
+  opens a constructed GitHub compare URL in a browser, which GitHub's own
+  routing redirects to an existing open PR for that branch when one exists.
+
+`sand land` never pushes, commits, or otherwise touches the checkout's
+working state — it only reads what the guest already has and, for `--pr`,
+calls `gh` on the workstation.
 
 ## `sand version` / `sand --version`
 

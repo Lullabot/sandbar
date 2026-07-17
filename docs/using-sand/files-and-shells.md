@@ -31,18 +31,26 @@ The VM must be running before you can shell into it; a stopped VM won't
 offer `S` on its tile, and `sand shell` refuses cleanly with an error
 telling you to start it first.
 
-## Uploading and downloading files
+## Uploading and downloading files: data, not code
 
 `u` (upload) and `g` (download) on a focused tile open a file-transfer pane.
 Download is bound to `g`, not `d` — `d` is always delete; see the
 [Board](tui.md#keybindings) page for the full keybinding table.
 
+These move **data**, not code — think a SQL dump going in, or a screenshot,
+video, or build artifact coming out. They are not a way to get code changes
+onto or off of a VM; that path is git, and it's what [Landing](#landing)
+below is for.
+
 - **Upload (`u`)** copies a file or directory from this machine into the
-  guest. You browse the host for a source starting at your current working
-  directory, then pick a destination directory in the guest.
+  guest — for example, seeding a database dump or a fixtures file the guest
+  needs but shouldn't fetch itself. You browse the host for a source
+  starting at your current working directory, then pick a destination
+  directory in the guest.
 - **Download (`g`)** copies a file or directory out of the guest onto this
-  machine. You browse the guest for a source, then pick a destination on
-  the host.
+  machine — for example, pulling a screenshot, a recorded video, or a build
+  artifact Claude Code produced, to look at on the host. You browse the
+  guest for a source, then pick a destination on the host.
 
 Both directions require the VM to be running, and neither is offered while
 a build or a reset is in progress on that VM — starting a transfer against
@@ -97,3 +105,35 @@ friction, it will be revisited.
 
 The verb is only offered on running VMs. Stop or reset a VM and the verb
 disappears from its tile until the VM runs again.
+
+## Landing
+
+`l` on a focused tile (or `sand land NAME [<path>]` from the command line)
+opens the **Landing pane**: a listing of that VM's git checkouts, swept live
+from the guest, with each one's branch, push state, and PR state. This is
+how code — as opposed to the data `u`/`g` move above — leaves the VM: not by
+copying files, but by pushing a branch and opening a PR against it, exactly
+as you would from your own machine.
+
+Each checkout lands in one of a few states, and the pane offers the action
+that state calls for:
+
+- **Pushed, no PR** — open a one-shot **draft PR** for that checkout's
+  pushed branch.
+- **PR already open** — open it in a browser.
+- **Unpushed or dirty** — nothing to land yet; push (or commit) inside the
+  VM first.
+- **Local-only** (no recognized remote) — nothing Landing can act on.
+
+Opening a draft PR uses the **workstation's own `gh`** — never the guest's
+own push token — so the PR is created by you, not by whatever ran inside
+the VM. See [Security Model](../reference/security-model.md) for why that
+split matters. Without `gh` on the workstation, Landing falls back to
+printing the branch's compare URL instead.
+
+The pane's own ledger of what it did (which PR it opened, when) is
+reopenable later with `L` (Log), the same key that reopens a build's or
+transfer's log.
+
+For `sand land`'s full CLI flags (`--pr`, `--web`), see the
+[CLI Reference](cli-reference.md#sand-land-name).

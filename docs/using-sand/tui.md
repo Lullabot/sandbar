@@ -78,11 +78,40 @@ require the VM to be running.
 | `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
 | `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |
 | `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |
-| `l` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
+| `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR or the branch's page in a browser. See [Landing](files-and-shells.md#landing). |
+| `L` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
 
 `d` is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does **not** use
 `d`; it's bound to `g` instead.
+
+### The unlanded-work badge
+
+A tile whose checkouts have been swept recently carries a small badge on its
+footer row naming git work that has not yet reached a PR:
+
+- **Actionable** (amber, `⚠ actionable`) — at least one checkout has a pushed
+  branch, so a PR is one `l` (Land) away.
+- **At-risk** (`↑N`, `unpushed`, and/or `dirty`, in dim chrome) — commits or
+  uncommitted changes that exist only in the VM: `↑N` is the number of
+  commits ahead of the remote-tracking branch, `unpushed` marks a branch
+  that's never been pushed at all, and `dirty` marks uncommitted changes.
+  This is exactly the work the delete guard (below) calls out.
+
+The badge shows nothing for a VM that has never been swept, is stopped, or
+whose last sweep is stale — it never guesses.
+
+### The delete guard
+
+Pressing `d` on a VM whose checkouts hold work the registry has seen adds a
+line to the confirmation naming what's at stake: unpushed commits and
+uncommitted changes as **"lost on delete"**, and pushed-but-PR-less branches
+as **"safe on GitHub"**. This reads only the host's own cached checkout
+registry (the same data the badge above uses) — it never contacts the guest
+to refresh it, so confirming delete on a VM you suspect is compromised never
+triggers a round-trip into it. On a stopped VM the warning is labeled with
+how long ago that data was last seen (`as of 3d ago`), since a stopped guest
+cannot be re-swept.
 
 For the full set of `sand` subcommands and flags (including `sand shell`),
 see the [CLI Reference](cli-reference.md).
