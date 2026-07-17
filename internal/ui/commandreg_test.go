@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"github.com/charmbracelet/x/ansi"
@@ -159,6 +160,48 @@ func TestPasteOfferedOnlyWhenRunning(t *testing.T) {
 	if after.(model).view != viewBoard {
 		t.Fatal("pressing 'v' must not navigate off the board (no file-browser wizard)")
 	}
+}
+
+// The plan-17 rebind (task 8): 'l' opens the Landing pane and 'L' reopens the
+// log, with no transitional overlap — the old 'l'-for-log binding must be
+// gone entirely.
+func TestLandLogKeysRebound(t *testing.T) {
+	m := newTestModel(t)
+	m = focusTile(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
+	// A retained run so the log verb is enabled too, letting this test see both
+	// verbs advertised at once.
+	key := provisionKey(registry.LocalScope, "claude")
+	if m.jobs == nil {
+		m.jobs = newJobRegistry()
+	}
+	m.jobs.begin(&job{key: key, title: "Creating claude", state: jobRunning, cancel: func() {}})
+	m.jobs.finish(key, nil)
+
+	rendered := boardVerbs(m)
+	if !strings.Contains(rendered, "l land") {
+		t.Fatalf("running VM's help bar should offer 'l land', got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "L log") {
+		t.Fatalf("running VM's help bar should offer 'L log', got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "l log") {
+		t.Fatalf("the old 'l'=log binding must be gone, got:\n%s", rendered)
+	}
+
+	after, cmd := m.Update(runeKey('l'))
+	m2 := after.(model)
+	if m2.view != viewLanding {
+		t.Fatalf("'l' should open the Landing pane, got view %v", m2.view)
+	}
+	if cmd == nil {
+		t.Fatal("'l' opening the Landing pane should return the availability-check command")
+	}
+
+	m3, cmd3 := m.Update(runeKey('L'))
+	if m3.(model).view != viewProgress {
+		t.Fatalf("'L' should reopen the log, got view %v", m3.(model).view)
+	}
+	_ = cmd3
 }
 
 // The help bar and the dispatcher must never disagree: for every command in
