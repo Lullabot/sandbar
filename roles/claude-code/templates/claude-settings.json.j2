@@ -1,5 +1,27 @@
 {
   "theme": "auto",
   "skipDangerousModePermissionPrompt": true,
-  "remoteControlAtStartup": true
+  "remoteControlAtStartup": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "direnv export bash > \"$CLAUDE_ENV_FILE\""
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "direnv export bash > \"$CLAUDE_ENV_FILE\""
+          }
+        ]
+      }
+    ]
+  }
 }
