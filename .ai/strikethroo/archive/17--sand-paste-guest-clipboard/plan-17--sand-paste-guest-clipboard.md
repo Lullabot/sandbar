@@ -497,3 +497,63 @@ graph TD
     - Confirmed open decisions A/B/C with the user.
     - Renamed the command/verb to state the image-only contract: CLI
       `sand paste-image <vm>`, TUI verb label "paste image" (clarification 10).
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+All 6 tasks across 4 phases implemented, verified, and committed on branch
+`worktree-sand-paste-plan`:
+- `internal/clipboard` — build-tagged (`darwin`/`linux`/`other`), image-only,
+  gate-then-fetch clipboard read with `ErrNoImage`/`ErrUnsupported` and an
+  injectable exec seam. Unit test proves a text-only clipboard yields `ErrNoImage`
+  with zero fetch.
+- `internal/paste.PasteImage` — reads the host image and writes it to
+  `<guest-home>/.sand/clip/latest.png` in one guest round trip via
+  `provider.Provider` `Shell` (stdin, `mkdir`+`chmod` 0700/0600), resolving the
+  absolute guest home via `GuestHome`. No-image short-circuits without touching
+  the guest.
+- `cmd/sand` — `sand paste-image <vm>` subcommand mirroring `sand shell` (one VM
+  name + `--profile`, Running guard), prints staged / exits 1 on no-image.
+- `internal/ui` — TUI verb `v` "paste image" (running-VMs only), async stage with
+  a status-line result, stays on the board; golden footers regenerated.
+- `roles/claude-code` — POSIX-sh `xclip`/`wl-paste` shims installed to
+  `/usr/local/bin` serving the single-slot PNG to Claude Code's Ctrl-V probe.
+- Docs: README, `docs/using-sand/*`, role install comment, and an AGENTS.md
+  IMAGE-ONLY invariant.
+
+Verification gates run at each phase boundary and at completion: `go build ./...`,
+`go vet ./...`, and `go test ./...` all green; `gofmt` clean; no new `tmux`
+references introduced.
+
+### Noteworthy Events
+- **Plan wording vs. reality (tmux):** the plan asserted `internal/lima/attach.go`
+  is the *sole* tmux touchpoint. `internal/ui/commands.go` already contains
+  host-tmux window handling for the `shell` verb (pre-existing). The feature added
+  **zero** new tmux references (verified by diff), so criterion 6's intent holds;
+  the plan's phrasing was imprecise (attach.go is the sole *guest* tmux seam).
+- **Delivery API:** the orchestration core uses the existing `provider.Provider`
+  `Shell`/`GuestHome` methods (already present) rather than adding a new provider
+  method — no new transport, as intended.
+- **Golden files:** 12 `internal/ui` golden files changed — all solely the new
+  `v paste image` entry reflowing the help footer (truncation at 80 cols, wrap in
+  wide mode); confirmed no other rendering change.
+- **Deferred manual validation:** Self Validation steps that require a live VM +
+  real host clipboard + interactive Claude Code — SV#1 (end-to-end Ctrl-V paste),
+  the macOS half of SV#2, and SV#5 (remote-host hop) — were **not** executed in
+  this headless environment and remain to be confirmed manually. The executable
+  portions (image-only unit test, TUI running-only guard, CLI arg guard, shim
+  empty-when-absent) all passed.
+
+### Necessary follow-ups
+- Run the deferred manual Self Validation on a real VM: copy an image on the host,
+  `sand paste-image <vm>` (and the `v` verb), press Ctrl-V in Claude Code, confirm
+  `[Image #N]`; repeat against a remote-host VM; confirm the macOS host read.
+- The draft PR still needs opening: the `GH_TOKEN` used to push lacks
+  pull-request scope. Open via
+  https://github.com/Lullabot/sandbar/pull/new/worktree-sand-paste-plan or supply
+  a PR-scoped token.
+- Consider a `--clear`/eviction path for the guest slot if persist-until-replaced
+  proves surprising in practice (explicitly out of scope for v1).
