@@ -240,3 +240,51 @@ The feature integrates through existing seams only: `site.yml` gains one new gat
 
 - 2026-07-16: Refinement — removed the `resources` declaration group and the host-side data fetch; the profile is now discovered, validated, and applied entirely guest-side after the clone. Repo-declared toolset tools are reconciled per-clone in finalize (no-op if in base, installed into the clone otherwise). Host-side loader package, extra-vars additions, and registry changes dropped; architecture reduced from five components to four (clarifications #6–#7).
 - 2026-07-16: Refinement (CI adequacy) — added an explicit test-placement table (job + per-PR status) to the Verification Surface; specified the full-path e2e fixture mechanism (checked-in fixture served as a local `git://localhost/...` remote, chosen around the `project` role's `scheme://host/org/repo` URL parsing); made manifest validation a standalone unit-testable validator so the malformed-manifest negative path is a per-PR guard; recorded that `lima-e2e` (not the weekly molecule job) is the finalize stage's blocking guard. Self Validation split into per-PR validator-corpus and VM-level malformed-manifest checks (clarification #9).
+- 2026-07-17: Renumbered from plan 17 to plan 18 after a rebase onto `origin/main` revealed plan ID 17 had already been claimed by an unrelated, merged-and-archived plan (`17--sand-paste-guest-clipboard`).
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+```mermaid
+graph TD
+    001[Task 01: Manifest schema and validator] --> 002[Task 02: Shipped provisioning profiles]
+    001 --> 003[Task 03: Guest-side finalize stage]
+    002 --> 003
+    002 --> 004[Task 04: Extra-vars and toolset seam tests]
+    003 --> 004
+    002 --> 005[Task 05: Fixture repo and lima-e2e]
+    003 --> 005
+    003 --> 006[Task 06: Molecule scenario]
+    001 --> 007[Task 07: Documentation]
+    002 --> 007
+    003 --> 007
+```
+
+### Phase 1: Profile Schema and Validator
+**Parallel Tasks:**
+- Task 01: Define the `.sandbar/` manifest schema and standalone in-guest validator, with a fixture corpus and Go unit test (no VM)
+
+### Phase 2: Shipped Provisioning Profiles
+**Parallel Tasks:**
+- Task 02: Restructure the four optional dev tools into shipped provisioning profiles, preserving base-tier behavior and the embed/rsync/hash triple-pin (depends on: 01)
+
+### Phase 3: Guest-Side Finalize Stage
+**Parallel Tasks:**
+- Task 03: Wire the guest-side repo-profile finalize stage after the `project` role clone (depends on: 01, 02)
+
+### Phase 4: Verification, Fixture E2E, Molecule, and Documentation
+**Parallel Tasks:**
+- Task 04: Extra-vars byte-identity and restructured-toolset-defaults seam tests (depends on: 02, 03)
+- Task 05: Fixture repo, local git remote serving, and extended `lima-e2e` full-path/reconciliation/malformed-manifest checks (depends on: 02, 03)
+- Task 06: Molecule scenario for the finalize stage, wired into the weekly non-blocking `molecule` job matrix (depends on: 03)
+- Task 07: Documentation — new provisioning-profiles page plus updates to seven existing docs and `AGENTS.md` (depends on: 01, 02, 03)
+
+### Post-phase Actions
+
+After Phase 4 completes, run the plan's full Self Validation sequence (fixture e2e, toolset reconciliation check, no-profile regression check, shorthand check, validator corpus, malformed-manifest e2e, static/unit layers, docs check) before archiving.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 7
