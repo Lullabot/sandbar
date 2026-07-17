@@ -218,4 +218,60 @@ The feature integrates by extension, not parallel construction: the registry sch
 
 ### Refinement Change Log
 
+- 2026-07-17: Generated the task blueprint (7 tasks, 5 phases) and appended the Execution Blueprint section below.
 - 2026-07-17: Refined snapshot power-state semantics — the flow now records and **restores** the source's pre-snapshot power state (already-stopped sources skip the stop and stay stopped) rather than unconditionally restarting; propagated the wording through the Snapshot Operation, the "left stopped" technical risk, success criteria 1 & 5, and the TUI verb enablement, and added self-validation step 11. Confirmed template deletion stays **warn-and-allow with no `--force` gate**. Recorded both decisions in the Plan Clarifications table.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+Tasks are executed as parallel subagents in a single working tree, so tasks that mutate the same Go package are serialized to avoid write conflicts. Tasks 1→2→3 all touch `internal/registry`/`internal/provision` and run one phase at a time; the CLI (task 4) and TUI (task 5) touch disjoint packages and run in parallel, as do the e2e (task 6) and docs (task 7).
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001[Task 001: Template model + registry v4] --> 002[Task 002: Provider seam + snapshot mechanics]
+    002 --> 003[Task 003: Clone-from-template create + reset]
+    001 --> 003
+    003 --> 004[Task 004: CLI template commands + create flag]
+    003 --> 005[Task 005: TUI verb + picker + delete]
+    001 --> 004
+    001 --> 005
+    002 --> 004
+    002 --> 005
+    004 --> 006[Task 006: E2E round-trip]
+    004 --> 007[Task 007: Documentation]
+    005 --> 007
+```
+
+### Phase 1: Data Model Foundation
+**Parallel Tasks:**
+- Task 001: Template data model and registry v4 migration
+
+### Phase 2: Snapshot Mechanics
+**Parallel Tasks:**
+- Task 002: Provider seam + snapshot/delete/disk mechanics (depends on: 001)
+
+### Phase 3: Clone-from-Template
+**Parallel Tasks:**
+- Task 003: Clone-from-template create and template-aware reset (depends on: 001, 002)
+
+### Phase 4: User Surfaces
+**Parallel Tasks:**
+- Task 004: CLI `sand template` commands and `sand create --template` (depends on: 001, 002, 003)
+- Task 005: TUI snapshot verb, template picker, and delete (depends on: 001, 002, 003)
+
+### Phase 5: Verification and Docs
+**Parallel Tasks:**
+- Task 006: E2E snapshot → clone-from → delete round-trip, local + remote (depends on: 001, 002, 003, 004)
+- Task 007: Documentation of the shipped feature (depends on: 004, 005)
+
+### Post-phase Actions
+- Run `gofmt -l .` (must be empty), `go vet ./...`, and `go build ./cmd/sand` after each code phase.
+- Create a descriptive conventional commit per phase.
+
+### Execution Summary
+- Total Phases: 5
+- Total Tasks: 7
