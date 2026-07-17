@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/registry"
 )
@@ -156,13 +157,15 @@ func TestSet_FilePermissions(t *testing.T) {
 		t.Errorf("parent dir mode = %04o, want 0700", got)
 	}
 
-	// The atomic write must leave no temp files behind.
+	// The atomic write must leave no temp files behind -- only the store itself
+	// and the cross-process lock file this task introduces
+	// ("<datadir>/secrets.json.lock") are expected.
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("readdir: %v", err)
 	}
 	for _, e := range ents {
-		if e.Name() != "secrets.json" {
+		if e.Name() != "secrets.json" && e.Name() != "secrets.json.lock" {
 			t.Errorf("unexpected leftover file in secrets dir: %q", e.Name())
 		}
 	}
@@ -592,18 +595,27 @@ func TestSave_RenameFailure_LeavesNoPartialFile(t *testing.T) {
 		t.Fatalf("target path must still be a directory, not a file (got mode %v)", fi.Mode())
 	}
 
-	// No leftover temp file (or anything else) beside the original
-	// directory entry: the failed save must have cleaned up after itself.
+	// No leftover temp file (or anything else) beside the original directory
+	// entry: the failed save must have cleaned up after itself. The lock file
+	// this task introduces ("secrets.json.lock") IS expected -- it is created
+	// and released (not removed) before the reload/save ever runs.
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("readdir: %v", err)
 	}
-	if len(ents) != 1 || ents[0].Name() != "secrets.json" || !ents[0].IsDir() {
-		names := make([]string, len(ents))
-		for i, e := range ents {
-			names[i] = e.Name()
+	sawSecretsDir := false
+	for _, e := range ents {
+		switch {
+		case e.Name() == "secrets.json" && e.IsDir():
+			sawSecretsDir = true
+		case e.Name() == "secrets.json.lock":
+			// expected: the lock file, not the target.
+		default:
+			t.Errorf("unexpected leftover entry in %s: %q", dir, e.Name())
 		}
-		t.Fatalf("expected only the original secrets.json directory left in %s, got %v", dir, names)
+	}
+	if !sawSecretsDir {
+		t.Fatalf("expected the original secrets.json directory to survive in %s, got %v", dir, ents)
 	}
 }
 
@@ -731,5 +743,164 @@ func TestConnectionScope_IsolatesSameNamedVM(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"version": 3`) {
 		t.Fatalf("expected version 3, got: %s", raw)
+	}
+}
+
+// TestConcurrentMutations_DifferentVMsBothSurvive is the lost-update
+// regression test this task fixes: two *Store instances loaded from the SAME
+// file (as two separate `sand` processes sharing a data dir would) must not
+// clobber each other's writes to DIFFERENT VMs. s2 loads the file BEFORE s1's
+// Set(vm-a) commits, so s2's own in-memory view has no idea vm-a exists; if
+// Remove(vm-b) persisted from that stale snapshot (the pre-task blind
+// save-of-s.vms behavior), it would silently erase vm-a along with vm-b. The
+// locked reload-merge must instead re-read the CURRENT on-disk state before
+// applying its own (connScope, vm) delta, so vm-a survives.
+func TestConcurrentMutations_DifferentVMsBothSurvive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+
+	seed, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("seed load: %v", err)
+	}
+	if err := seed.Set("vm-b", registry.LocalScope, map[string]string{"B": "orig"}); err != nil {
+		t.Fatalf("seed vm-b: %v", err)
+	}
+
+	// Two independent Store instances, both loaded from the file as it stood
+	// right after the seed -- neither has yet observed the other's write.
+	s1, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("s1 load: %v", err)
+	}
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("s2 load: %v", err)
+	}
+
+	if err := s1.Set("vm-a", registry.LocalScope, map[string]string{"A": "1"}); err != nil {
+		t.Fatalf("s1 set vm-a: %v", err)
+	}
+	// s2's in-memory snapshot predates s1's write and knows nothing of vm-a.
+	if err := s2.Remove("vm-b", registry.LocalScope); err != nil {
+		t.Fatalf("s2 remove vm-b: %v", err)
+	}
+
+	final, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("final load: %v", err)
+	}
+	if got := final.Get("vm-a", registry.LocalScope); got["A"] != "1" {
+		t.Fatalf("s1's Set(vm-a) was lost by a concurrent Remove(vm-b) against a stale snapshot: %v", got)
+	}
+	if got := final.Get("vm-b", registry.LocalScope); len(got) != 0 {
+		t.Fatalf("vm-b should have been removed, got %v", got)
+	}
+}
+
+// TestLockedWrite_SecurityInvariantsAndLockFile extends TestSet_FilePermissions
+// to the new locked write path: the secrets file is still 0600, the parent
+// directory is still forced 0700, and the cross-process lock file this task
+// introduces lives at exactly "<datadir>/secrets.json.lock" (per the
+// acceptance criteria) at mode 0600 -- it must never itself be a
+// world-readable artifact beside the secrets it protects. No other stray file
+// is left behind.
+func TestLockedWrite_SecurityInvariantsAndLockFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sandbar")
+	path := filepath.Join(dir, "secrets.json")
+	lockPath := path + ".lock"
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := s.Set("claude", registry.LocalScope, map[string]string{"TOK": "s3cr3t"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat secrets file: %v", err)
+	}
+	if got := fi.Mode().Perm(); got != 0o600 {
+		t.Errorf("secrets.json mode = %04o, want 0600", got)
+	}
+
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if got := di.Mode().Perm(); got != 0o700 {
+		t.Errorf("parent dir mode = %04o, want 0700", got)
+	}
+
+	li, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("expected a lock file at %s: %v", lockPath, err)
+	}
+	if got := li.Mode().Perm(); got != 0o600 {
+		t.Errorf("lock file mode = %04o, want 0600", got)
+	}
+
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range ents {
+		if e.Name() != "secrets.json" && e.Name() != "secrets.json.lock" {
+			t.Errorf("unexpected leftover file in secrets dir: %q", e.Name())
+		}
+	}
+}
+
+// TestSet_MigratingV1File_NoDeadlockNoDoubleSave is the re-entrancy test: a
+// mutation against a v1 file that must migrate in memory has to reload the
+// current on-disk bytes and re-run the SAME version detection/migration used
+// at process start, ALL while still holding the one lock taken at the
+// mutation boundary. If the reload path (reloadUnlocked/parseTree) ever tried
+// to acquire the lock again, or called save() itself, this would either
+// self-deadlock (a second flock on the same path from the same process blocks
+// exactly as it would against a different process) or double-write the file.
+// Running the call on a goroutine with a bounded timeout turns a deadlock into
+// a fast, deterministic test failure instead of an indefinite hang.
+func TestSet_MigratingV1File_NoDeadlockNoDoubleSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	v1 := `{"version":1,"vms":{"x":{"A":"1"}}}`
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatalf("seed v1 file: %v", err)
+	}
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v1: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Set("x", registry.LocalScope, map[string]string{"A": "1", "B": "2"})
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("set against a migrating v1 file: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Set deadlocked while reloading/migrating a v1 file under its own lock")
+	}
+
+	// The migration must have completed correctly (both keys present) and the
+	// merged result persisted exactly once, stamped at the current version --
+	// not left at v1, and not corrupted by a double write.
+	got := s.Get("x", registry.LocalScope)
+	want := map[string]string{"A": "1", "B": "2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Get after migrating Set = %v, want %v", got, want)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(raw), `"version": 3`) {
+		t.Fatalf("expected version 3 after migrating Set, got: %s", raw)
 	}
 }

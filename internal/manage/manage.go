@@ -26,7 +26,14 @@ func Reconcile(reg *registry.Registry, live []vm.VM, scope registry.Scope) ([]st
 	for _, v := range live {
 		present[v.Name] = true
 	}
-	return reg.ReconcileScoped(scope, present)
+	// known is the caller's LAST-OBSERVED key set for this scope — the registry's
+	// current in-memory view, captured BEFORE ReconcileScoped reloads the on-disk
+	// index under the lock. ReconcileScoped prunes only known ∩ absent, so a VM a
+	// concurrent process added after this snapshot (absent from known) is never
+	// pruned even though it is equally absent from this caller's `present` live
+	// list — the lost-update this plan closes. See registry.ReconcileScoped.
+	known := reg.NamesInScope(scope)
+	return reg.ReconcileScoped(scope, present, known)
 }
 
 // RecreateBase reports whether name may be recreated within scope — recreate
