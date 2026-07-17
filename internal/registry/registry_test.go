@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -688,44 +689,15 @@ func TestReconcileScoped_KeepsEntryAbsentFromKnown(t *testing.T) {
 }
 
 // TestSaveFormatStable pins the on-disk format so the locked read-modify-write
-// refactor cannot silently change the bytes for a given logical state. The
-// golden below is the exact output the pre-change save() produced (2-space
-// MarshalIndent, stable (scope, name) sort, v3 array, provider from the key,
-// remote_target omitted for the local scope, clone token stripped). A single
-// LocalScope entry with every CreateConfig field set makes the whole shape
-// explicit and deterministic.
+// refactor cannot silently change the bytes for a given logical state. It pins
+// exactly what that refactor could regress — 2-space MarshalIndent, "version"
+// first = v3, the vms array, the per-entry provider/base derived from the
+// scoped key, remote_target omitted for the local scope, and the clone token
+// stripped — WITHOUT enumerating the full CreateConfig field list. The config
+// sub-object is derived from the struct itself (token cleared, same encoder),
+// so an unrelated new CreateConfig field added elsewhere in the codebase flows
+// through both sides identically instead of breaking this format guard.
 func TestSaveFormatStable(t *testing.T) {
-	const golden = `{
-  "version": 3,
-  "vms": [
-    {
-      "name": "web",
-      "provider": "lima",
-      "base": "sandbar-base",
-      "config": {
-        "Name": "web",
-        "BaseName": "sandbar-base",
-        "Hostname": "dev",
-        "User": "coder",
-        "GitName": "Ada",
-        "GitEmail": "ada@example.com",
-        "CPUs": 4,
-        "Memory": "8GiB",
-        "Disk": "50GiB",
-        "Locale": "en_US.UTF-8",
-        "Domain": "test",
-        "DockerProxyHost": "",
-        "CloneURL": "https://example.com/repo.git",
-        "CloneToken": "",
-        "WithClaude": true,
-        "WithDDEV": false,
-        "WithGo": true,
-        "WithJava": false
-      }
-    }
-  ]
-}`
-
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	r, err := LoadFrom(path)
 	if err != nil {
@@ -745,8 +717,41 @@ func TestSaveFormatStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if string(raw) != golden {
-		t.Fatalf("on-disk format drifted from the pre-change bytes:\n--- got ---\n%s\n--- want ---\n%s", raw, golden)
+	got := string(raw)
+
+	// Envelope: 2-space indent, version-first v3, vms array, provider+base
+	// derived from the (scope, name) key, and NO remote_target for the local
+	// scope (the prefix runs "base" straight into "config").
+	const envelope = "{\n" +
+		"  \"version\": 3,\n" +
+		"  \"vms\": [\n" +
+		"    {\n" +
+		"      \"name\": \"web\",\n" +
+		"      \"provider\": \"lima\",\n" +
+		"      \"base\": \"sandbar-base\",\n" +
+		"      \"config\": {\n"
+	if !strings.HasPrefix(got, envelope) {
+		t.Fatalf("on-disk envelope drifted:\n--- got ---\n%s\n--- want prefix ---\n%s", got, envelope)
+	}
+	// Outer closings (config → entry → vms → root), no trailing newline.
+	if !strings.HasSuffix(got, "\n      }\n    }\n  ]\n}") {
+		t.Fatalf("on-disk closing shape drifted:\n--- got ---\n%s", got)
+	}
+	// The clone token is never persisted.
+	if strings.Contains(got, "SECRET") || !strings.Contains(got, "\"CloneToken\": \"\"") {
+		t.Fatalf("clone token was not stripped on disk:\n--- got ---\n%s", got)
+	}
+	// The config block itself: the struct marshaled at the nested indent with
+	// the token cleared, exactly as save() stores it. Pins field order and
+	// indentation without hardcoding the field set.
+	stripped := cfg
+	stripped.CloneToken = ""
+	inner, err := json.MarshalIndent(stripped, "      ", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if !strings.Contains(got, string(inner)) {
+		t.Fatalf("config block indentation/ordering drifted:\n--- got ---\n%s\n--- want to contain ---\n%s", got, inner)
 	}
 }
 
