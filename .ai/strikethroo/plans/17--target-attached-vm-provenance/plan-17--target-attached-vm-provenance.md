@@ -582,11 +582,11 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 003: Implement Lima marker I/O + batched read + provider exposure (depends on: 002)
 
-### Phase 3: Consumer rewire + migration
+### ✅ Phase 3: Consumer rewire + migration
 **Parallel Tasks:**
-- Task 004: Rewire manage + CLI ownership to provenance (depends on: 003)
-- Task 005: Rewire the UI roster gate and refresh to provenance (depends on: 003)
-- Task 006: Registry demotion + idempotent adoption (depends on: 003)
+- ✔️ Task 004: Rewire manage + CLI ownership to provenance (depends on: 003)
+- ✔️ Task 005: Rewire the UI roster gate and refresh to provenance (depends on: 003)
+- ✔️ Task 006: Registry demotion + idempotent adoption (depends on: 003)
 
 ### Phase 4: Verification + documentation
 **Parallel Tasks:**

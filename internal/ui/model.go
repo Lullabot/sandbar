@@ -13,6 +13,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -978,6 +979,31 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range dropped {
 			_ = m.sec.Remove(name, sc)
 		}
+		// One-time (per process, per scope) provenance-adoption migration: stamp
+		// markers onto VMs the registry already recorded as managed under sc but
+		// that have not picked one up yet (e.g. created by a pre-provenance
+		// sand). This is the "first board load" trigger AdoptOnce's own doc
+		// comment calls for — it is a cheap map lookup after the first
+		// successful run for this scope. `live` already includes protected
+		// mid-build names, matching the Reconcile call above.
+		//
+		// Dispatched as a BACKGROUND command, never run inline here:
+		// AdoptOnce -> registry.Adopt -> Provenancer.ProvenanceOf/MarkManaged is a
+		// blocking ssh round trip for a remote member, and this branch runs on the
+		// Update goroutine (the batched provenance fetch lives off it in refreshCmd
+		// for exactly this reason). The once-per-scope guard keeps later ticks cheap.
+		var adoptCmd tea.Cmd
+		if pv, ok := m.provFor(sc).(provider.Provenancer); ok {
+			// Snapshot the registry's managed set HERE, on the Update goroutine,
+			// so the background command below touches no *Registry state (which
+			// this same loop mutates via Reconcile/AddScoped) — only the detached
+			// snapshot, the live slice, and the provider's ssh-backed marker I/O.
+			entries := m.reg.ManagedInScope(sc)
+			adoptCmd = func() tea.Msg {
+				manage.AdoptOnce(context.Background(), entries, live, sc, pv)
+				return nil
+			}
+		}
 		// The board's tiles come straight off the members' vms + the registry + the
 		// job registry, so there is nothing to rebuild — only the focus ring has to
 		// be re-pinned against a fleet that may have gained or lost VMs, which Update
@@ -988,7 +1014,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// budgeting a resize would, so the fleet's FIRST successful list already
 		// gets its band without waiting on a resize.
 		m.applySize(m.width, m.height)
-		return m, nil
+		return m, adoptCmd
 
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner

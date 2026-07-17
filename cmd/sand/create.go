@@ -235,6 +235,14 @@ Flags:
 	// call falls back to the registry-only behavior.
 	provenancer, _ := p.(provider.Provenancer)
 
+	// One-time (per process, per target) migration: stamp provenance markers
+	// onto VMs this registry already recorded as managed but that predate
+	// provenance — see manage.AdoptOnce. `live` is the same listing Reconcile
+	// just used above, so this costs no extra round trip. A no-op after the
+	// first successful run for this scope (or if the backend has no
+	// Provenancer).
+	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
+
 	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout, provenancer); err != nil {
 		return err
 	}
@@ -275,16 +283,17 @@ Flags:
 // manage.RecordSuccess) so every existing 8-arg call site (the unit/e2e
 // tests in this package, which construct doHeadlessCreate directly with a
 // stub provisioner and no real provider) keeps compiling unchanged; only
-// runCreate, which has a real provider.Provider in hand, passes one. When
-// present, it is threaded ONLY into the RecordSuccess call below (the
-// provenance write this task's boundary scopes this file's changes to) — the
-// RecreateBase call above is deliberately left registry-only here; wiring
-// --recreate's own gate to provenance is out of this file's scope.
+// runCreate, which has a real provider.Provider in hand, passes one. It is
+// threaded into BOTH the RecreateBase gate below (a marker-only VM — created
+// on another controller, so absent from this machine's registry — can still
+// be reset here) and the RecordSuccess call (the provenance write proper);
+// omitted (nil), both fall back to their pre-provenance, registry-only
+// behavior exactly as before.
 func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer, provenancer ...provider.Provenancer) error {
 	opts := provision.CreateOptions{Rebuild: rebuild}
 
 	if recreate {
-		base, ok := manage.RecreateBase(reg, cfg.Name, scope)
+		base, ok := manage.RecreateBase(reg, cfg.Name, scope, provenancer...)
 		if !ok {
 			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}

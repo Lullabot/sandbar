@@ -2,7 +2,7 @@
 id: 6
 group: "migration"
 dependencies: [3]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "sonnet"
 effort: "high"

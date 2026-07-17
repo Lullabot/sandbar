@@ -22,12 +22,25 @@ import (
 	"fmt"
 
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
+
+// provenancerFor returns the provider.Provenancer for scope's fleet member,
+// or nil when that member's provider does not implement one (or the member
+// is absent) — manage.RecreateBase treats a nil Provenancer exactly like an
+// omitted one (falling back to the registry), so this never changes behavior
+// for a backend that has no marker facility.
+func provenancerFor(m model, sc registry.Scope) provider.Provenancer {
+	if pv, ok := m.provFor(sc).(provider.Provenancer); ok {
+		return pv
+	}
+	return nil
+}
 
 // vmCommand is one per-VM verb on the detail screen. enabledFor is handed the
 // model (not just the VM) so a predicate can consult state the VM record
@@ -185,12 +198,12 @@ var vmCommands = []vmCommand{
 			if !notBuilding(m, v) {
 				return false
 			}
-			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope)
+			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope, provenancerFor(m, v.scope))
 			return ok
 		},
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			base, ok := manage.RecreateBase(m.reg, name, v.scope)
+			base, ok := manage.RecreateBase(m.reg, name, v.scope, provenancerFor(*m, v.scope))
 			if !ok {
 				// Unreachable via normal dispatch — enabledFor above already excludes
 				// this VM. Guarded anyway so a direct call never opens a form with a
