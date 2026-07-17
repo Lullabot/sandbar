@@ -26,6 +26,7 @@ created: 2026-07-16
 | 6 | Refinement (2026-07-16, user directive) | **Remove `resources` and the host-side data fetch.** Resources are host-specific ("I only have 16GB of RAM"), not repo-specific, so the manifest no longer declares them — and with resources gone, nothing needs the profile before VM start, so the profile is discovered and applied entirely guest-side. |
 | 7 | With guest-only discovery, the profile is first seen after clone — too late to influence the shared base. What does the repo's `toolset` declaration become? | **Install per-clone.** The declaration stays. During finalize, a declared tool already present in the base is a no-op; a missing one is installed into that clone (shipped profiles are manifests, reusable at either tier). The base is never touched by repo profiles. |
 | 8 | Related initiative (2026-07-16, user-provided context) | **Golden Templates** are being added on another branch: a user can make a template of a repo's VM after per-repo provisioning has run. Informational for this plan — see Notes for the composition considerations. |
+| 9 | Refinement (2026-07-16, CI adequacy review) | **Tighten test placement.** (a) The full-path e2e uses a checked-in fixture served as a local git remote (`git://localhost/...`), because the current create e2e never clones and the `project` role parses the clone URL as `scheme://host/org/repo` (a raw `file://` path breaks host/org derivation). (b) Manifest validation is a standalone, unit-testable validator invoked in-guest, so the malformed-manifest negative path is a fast **per-PR** guard rather than depending on the weekly molecule job. (c) The stage's per-PR blocking guard is `lima-e2e`; molecule is supplementary/weekly. |
 
 ## Executive Summary
 
@@ -86,6 +87,8 @@ The `.sandbar/` directory contains a manifest file (YAML) plus optional Ansible 
 
 Validation happens at the start of the repo-profile finalize stage, in-guest: unknown keys are errors, values are shape-checked (package-name shape, unit-name shape, known toolset names), and a malformed manifest fails finalize with a clear message rather than being silently ignored. The host never reads, templates, or executes any profile content — the repository's only path into the system is the clone inside the guest.
 
+To keep this the fast, per-PR guard for the most common authoring mistake (a typo'd key), validation is implemented as a **small standalone validator shipped in the playbook** — a self-contained script the finalize stage invokes against the cloned `.sandbar/` manifest — rather than as inline Jinja. Because it is a discrete artifact with a defined input (a manifest file) and output (exit code + message), its logic is exercised directly in a fast CI job by running it against a corpus of good and deliberately-malformed sample manifests, with no VM required. This does not reintroduce a host-side loader: in production the validator only ever runs inside the guest against the cloned checkout; the corpus test simply runs the same artifact against static fixtures on the runner.
+
 ### Guest-Side Finalize Stage
 
 **Objective**: Execute the repo profile inside the guest, after the project clone, without disturbing the embedded-playbook invariants or the shared base stamp.
@@ -119,7 +122,20 @@ Documentation presents the shipped profiles as the canonical examples for repo a
 
 Host-side changes are limited to the shorthand rewiring in CLI (`create`) and the TUI create form — no new flags, form fields, extra-vars, or registry fields are added. `BuildExtraVars` output for repos without `.sandbar/` is byte-for-byte identical to today, and the repo-profile stage keys off the cloned checkout rather than any host-provided variable.
 
-The existing verification layers are extended rather than replaced: seam tests for the restructured toolset defaults (`toolset_packages_test.go` conventions), `ansible-playbook --syntax-check` in lint, molecule coverage for the new stage where feasible, and the `limae2e` end-to-end path gains a fixture repository with a committed `.sandbar/` profile exercising packages, services, roles, toolset reconciliation, and seed tasks.
+The existing verification layers are extended rather than replaced, and each new test is deliberately placed against a real CI job with its per-PR vs. advisory status made explicit:
+
+| New coverage | Test target | CI job | Per-PR? |
+|---|---|---|---|
+| Extra-vars byte-identical for no-profile repos; restructured toolset defaults | Go seam tests (`vars_test.go`, `toolset_packages_test.go` conventions) | `unit` | ✅ blocking |
+| Manifest validation — accepts the good corpus, rejects each malformed sample with a clear message | Run the standalone validator artifact against static good/bad manifest fixtures | `unit` (or `lint`) — no VM | ✅ blocking |
+| Playbook still syntactically valid with the new stage and shipped profiles | `ansible-playbook --syntax-check` | `lint` | ✅ blocking |
+| Embed/rsync/hash triple-pin holds after shipped-profile files are added | `TestGuestSyncCopiesOnlyThePlaybook` + base-stamp tests | `unit` | ✅ blocking |
+| **Full path**: `sand create --clone-url <fixture>` → clone → discovery → stage applies packages/services/roles/toolset-reconciliation/seed | `limae2e` fixture-repo e2e (see below) | `lima-e2e` | ✅ blocking (runs per-PR, not just weekly) |
+| Profile stage against a staged checkout (finer-grained assertions on individual declaration groups) | molecule scenario | `molecule` | ⚠️ **weekly + dispatch only, non-blocking** — supplementary depth, not the PR gate |
+
+The finalize stage's authoritative per-PR guard is therefore `lima-e2e`; molecule adds depth on the weekly cadence but is explicitly not relied upon to block regressions.
+
+**Fixture mechanism for the full-path e2e.** The current `cmd/sand` e2e performs a headless create without cloning, so the clone-URL path is new machinery for this suite. The `project` role parses `project_clone_url` strictly as `scheme://host/org/repo` (`roles/project/tasks/main.yml`) to derive the guest directory layout, so a raw `file:///path` clone URL does not fit. The fixture is instead a directory checked into the sandbar repo under a test-fixtures path, containing a committed `.sandbar/` profile that exercises one non-base apt package, one systemd service, one custom role, one shipped toolset tool absent from the base, and a seed tasks file that writes a marker into the project tree. At test time the e2e initializes a bare repo from that fixture and publishes it as a **local git remote** — `git daemon` over `git://localhost/<org>/<repo>` (or git-http-backend) — whose URL matches the `project` role's expected shape; using `localhost` rather than `github.com` also keeps the fixture off the token-injection branch. That served URL is passed as `--clone-url`.
 
 ## Risk Considerations and Mitigation Strategies
 
@@ -153,7 +169,9 @@ The existing verification layers are extended rather than replaced: seam tests f
 <summary>Quality Risks</summary>
 
 - **E2E coverage gap**: the full path (clone → discovery → validation → apply) only proves out on a real VM.
-    - **Mitigation**: extend the `limae2e` suite with a fixture repo containing a committed `.sandbar/`; assert on guest state (installed package, enabled unit, reconciled tool, seed marker).
+    - **Mitigation**: extend the per-PR `lima-e2e` suite with the checked-in fixture repo served as a local git remote (see Verification Surface); assert on guest state (installed package, enabled unit, reconciled tool, seed marker). Fast per-PR jobs cover the pieces that don't need a VM (validator corpus, extra-vars seam, triple-pin), so the VM-only surface is minimized rather than the sole guard.
+- **Advisory-layer misplacement**: relying on molecule (weekly, non-blocking) to guard the new finalize stage would leave PRs unprotected.
+    - **Mitigation**: the stage's blocking guard is `lima-e2e` (per-PR); molecule is documented as supplementary depth only. The placement table in the Verification Surface records each test's job and per-PR status explicitly.
 - **"Byte-identical" overpromise**: users may read the work order's phrase literally while apt versions drift.
     - **Mitigation**: documentation states the actual guarantee — identical declared configuration, reproducible provisioning — and this plan's Notes section records that package pinning is out of scope.
 
@@ -166,19 +184,20 @@ The existing verification layers are extended rather than replaced: seam tests f
 1. A repository containing a committed `.sandbar/` profile, created via `sand create --clone-url`, yields a VM where every declared item is observably applied: apt packages installed, systemd services enabled and running, repo roles executed, declared toolset tools present (installed per-clone when absent from the base), and seed tasks completed.
 2. The four optional dev tools exist as shipped provisioning profiles in the same declarative format, still installing into the shared base with unchanged staleness/stamping behavior when selected via flags/TUI, and the `--with-*` flags and TUI toggles keep working as shorthands with their current defaults.
 3. Repositories without `.sandbar/` behave exactly as today — identical extra-vars, identical base stamp, no new prompts or failures — and no repository content is ever read or executed on the host.
-4. All existing test layers pass (unit with race + coverage floor, ansible syntax lint, molecule, lima e2e), and new coverage exists for the manifest validation, the finalize stage, the dual-tier shipped profiles, and the end-to-end fixture-repo path.
+4. All existing test layers pass (unit with race + coverage floor, ansible syntax lint, molecule, lima e2e), and new coverage exists at the right cadence: **per-PR blocking** — validator good/bad corpus, no-profile extra-vars seam, triple-pin guard, restructured toolset defaults (`unit`/`lint`), and the full fixture-repo `create --clone-url` path (`lima-e2e`); **weekly supplementary** — the molecule stage scenario. No new behavior relies solely on the weekly, non-blocking molecule job to catch regressions.
 
 ## Self Validation
 
 Concrete steps to execute after all tasks are complete:
 
-1. **Fixture repo end-to-end (real VM)**: Create a local git fixture repository containing a `.sandbar/` profile that declares one apt package not in the base (e.g. `cowsay`), one systemd service, one custom role, one shipped toolset tool, and a seed tasks file that writes a marker file into the project directory. Run the `limae2e`-tagged suite (`LIMA_E2E=1`) or drive `sand create --clone-url <fixture>` directly, then verify inside the guest via `limactl shell`: `dpkg -l <package>` shows it installed, `systemctl is-enabled <service>` reports enabled, the role's effect is present, and the seed marker file exists in the project tree.
+1. **Fixture repo end-to-end (real VM)**: Using the checked-in fixture (a `.sandbar/` profile declaring one apt package not in the base, e.g. `cowsay`; one systemd service; one custom role; one shipped toolset tool; and a seed tasks file that writes a marker into the project directory), served as a local git remote (`git daemon` over `git://localhost/<org>/<repo>`), run the `limae2e`-tagged suite (`LIMA_E2E=1`) or drive `sand create --clone-url <served-fixture-url>` directly. Then verify inside the guest via `limactl shell`: `dpkg -l <package>` shows it installed, `systemctl is-enabled <service>` reports enabled, the role's effect is present, and the seed marker file exists in the project tree.
 2. **Toolset reconciliation check**: Create the fixture VM with `--with-go=false` while the fixture's `.sandbar/` declares `go` in its toolset; verify the Go toolchain is present in the clone (`go version` in the guest) while the base version stamp still renders the flag-driven toolset key without `go` — proving per-clone install without base churn.
 3. **No-profile regression check**: Create a VM from a repo without `.sandbar/` and diff the generated extra-vars (via the seam tests and, on the real VM, guest state) against pre-change expectations — no new variables in either phase, no behavior change.
 4. **Shorthand check**: Run `sand create --with-java=false ...` on a profile-less repo and verify in the guest that the JDK is absent while default-on tools are present; confirm the base version stamp still renders the `v2:<hash>:<toolset>` form with the expected toolset key.
-5. **Malformed-manifest check**: Point the fixture's manifest at an unknown key and re-create; verify finalize fails with a clear validation message naming the offending key, not a silent skip.
-6. **Static and unit layers**: Run `go test ./... -race` and `ansible-playbook -i inventory --syntax-check site.yml`; both must pass. Confirm the guard test for the embed/rsync/hash triple-pin passes.
-7. **Docs check**: Open the new repo-profile documentation page and confirm it documents the manifest schema, the two-tier model, the per-clone toolset reconciliation, the idempotency/root execution contract, and links to the shipped profiles as examples.
+5. **Validator corpus (per-PR, no VM)**: Run the standalone validator against the fixture corpus of valid and deliberately-malformed manifests; confirm every valid sample passes and each malformed sample fails with a clear message naming the offending key/field. This is the fast per-PR guard for the most common authoring error and must not require a VM.
+6. **Malformed-manifest end-to-end (real VM)**: Point the served fixture's manifest at an unknown key and re-create; verify finalize aborts with the validator's clear message rather than silently skipping — confirming the guest-side invocation wiring, not just the validator logic.
+7. **Static and unit layers**: Run `go test ./... -race` and `ansible-playbook -i inventory --syntax-check site.yml`; both must pass. Confirm the guard test for the embed/rsync/hash triple-pin passes.
+8. **Docs check**: Open the new repo-profile documentation page and confirm it documents the manifest schema, the two-tier model, the per-clone toolset reconciliation, the idempotency/root execution contract, and links to the shipped profiles as examples.
 
 ## Documentation
 
@@ -220,3 +239,4 @@ The feature integrates through existing seams only: `site.yml` gains one new gat
 ### Change Log
 
 - 2026-07-16: Refinement — removed the `resources` declaration group and the host-side data fetch; the profile is now discovered, validated, and applied entirely guest-side after the clone. Repo-declared toolset tools are reconciled per-clone in finalize (no-op if in base, installed into the clone otherwise). Host-side loader package, extra-vars additions, and registry changes dropped; architecture reduced from five components to four (clarifications #6–#7).
+- 2026-07-16: Refinement (CI adequacy) — added an explicit test-placement table (job + per-PR status) to the Verification Surface; specified the full-path e2e fixture mechanism (checked-in fixture served as a local `git://localhost/...` remote, chosen around the `project` role's `scheme://host/org/repo` URL parsing); made manifest validation a standalone unit-testable validator so the malformed-manifest negative path is a per-PR guard; recorded that `lima-e2e` (not the weekly molecule job) is the finalize stage's blocking guard. Self Validation split into per-PR validator-corpus and VM-level malformed-manifest checks (clarification #9).
