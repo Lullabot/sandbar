@@ -559,9 +559,9 @@ graph TD
 
 No circular dependencies.
 
-### Phase 1: Lock primitive foundation
+### ✅ Phase 1: Lock primitive foundation
 **Parallel Tasks:**
-- Task 001: `internal/filelock` cross-process lock primitive
+- ✔️ Task 001: `internal/filelock` cross-process lock primitive
 
 ### Phase 2: Store conversions
 **Parallel Tasks:**
