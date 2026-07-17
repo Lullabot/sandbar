@@ -68,3 +68,31 @@ supported here.
 Once you're logged in, notifications arrive through Claude Code's remote
 control: you're alerted in the Claude app when a session needs input or
 finishes, with no webhook or extra configuration required.
+
+## Logging into Codex
+
+If you created the VM with `--with-codex` (or enabled Codex in the TUI create
+form), the Codex CLI is provisioned but no credential is included. Shell into
+the VM and run `codex` once to start an interactive login.
+
+Codex signs in with your ChatGPT account. Its default OAuth flow expects a
+browser callback on `localhost:1455` *inside the VM*, which won't work from a
+VM shell directly. The simplest path is the device-code flow, which needs no
+network plumbing at all — the CLI and your browser talk through OpenAI's
+servers:
+
+```bash
+codex login --device-auth
+```
+
+Alternatives: forward the callback port when connecting over SSH
+(`ssh -L 1455:localhost:1455`, using the connection details from
+`limactl show-ssh NAME`), or copy an existing `~/.codex/auth.json` from a
+machine you've already signed in on — for a `sand` VM, use the TUI's Upload
+action to move the file in.
+
+**Important:** Codex offers **no CLI-reachable remote control or phone
+notifications** — those features require the Codex desktop app on macOS or
+Windows, which uses QR-code device pairing. If you're choosing between Claude
+Code and Codex, do not expect phone alerts for Codex sessions from the VM; use
+Claude Code if you need Claude app notifications.

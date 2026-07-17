@@ -226,10 +226,10 @@ graph TD
 - ✔️ Task 1: Create the codex Ansible role and gate it as an opt-in toolset selection — `completed`
 - ✔️ Task 2: Wire WithCodex through CreateConfig, the --with-codex flag, and Ansible extra-vars — `completed`
 
-### Phase 2: TUI and documentation
+### ✅ Phase 2: TUI and documentation
 **Parallel Tasks:**
-- Task 3: Add the "Install OpenAI Codex" toggle to the TUI create form (depends on: 2)
-- Task 4: Document Codex — available tools, login, security model, CLI reference (depends on: 1, 2)
+- ✔️ Task 3: Add the "Install OpenAI Codex" toggle to the TUI create form (depends on: 2) — `completed`
+- ✔️ Task 4: Document Codex — available tools, login, security model, CLI reference (depends on: 1, 2) — `completed`
 
 ### Post-phase Actions
 

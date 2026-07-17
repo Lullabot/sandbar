@@ -2,7 +2,7 @@
 id: 4
 group: "docs"
 dependencies: [1, 2]
-status: "pending"
+status: "completed"
 created: 2026-07-16
 model: "haiku"
 effort: "low"
@@ -21,13 +21,13 @@ Update the four documentation surfaces the plan names so users can discover the 
 
 ## Acceptance Criteria
 
-- [ ] `docs/getting-started/available-tools.md`: the "Claude Code & git" section (or a sensibly renamed equivalent) lists the OpenAI Codex CLI as **opt-in** (`sand create --with-codex` or the TUI toggle), contrasting with the default-on tools.
-- [ ] `docs/getting-started/first-vm.md`: a "Logging into Codex" passage parallel to "Logging into Claude Code": no credential is provisioned; run `codex` once and sign in with a ChatGPT account; note the sign-in callback targets a localhost port so headless login needs the upstream-documented workaround (SSH port forwarding, or copying an existing `~/.codex/auth.json`); adjacent to the existing remote-control paragraph, state that Codex offers **no** CLI-reachable remote control or phone notifications (its phone pairing requires the Codex desktop app on macOS/Windows), so users choosing Codex should not expect Claude-style phone alerts from the VM.
-- [ ] `docs/reference/security-model.md`: bullets mirroring Claude's — Codex (when selected) runs with approvals and its own sandbox off (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"` in the provisioned config), deliberate because the ephemeral VM is the sandbox; and no Codex credential is provisioned.
-- [ ] `docs/using-sand/cli-reference.md`: the `sand create` flags table documents `--with-codex` (default false, opt-in) — and the stale `sand create --help` dump is regenerated from the built binary so ALL five `--with-*` flags appear (the four existing ones are currently missing too).
-- [ ] Verification: `go run ./cmd/sand create --help 2>&1 | grep -c "with-"` prints `5`, and the same five lines appear verbatim in the cli-reference help dump.
-- [ ] Verification: `grep -ri "codex" docs/ | grep -iv "remote control\|desktop\|phone\|notification" | wc -l` returns non-zero (content landed) AND `grep -ri "codex" docs/getting-started/first-vm.md | grep -ci "remote"` returns non-zero (the limitation is stated).
-- [ ] Verification: `pip install -r docs/requirements.txt && mkdocs build --strict` exits 0 (or, if the strict build already fails on main for unrelated reasons, document that baseline and show the new pages introduce no NEW warnings).
+- [x] `docs/getting-started/available-tools.md`: the "Claude Code & git" section (or a sensibly renamed equivalent) lists the OpenAI Codex CLI as **opt-in** (`sand create --with-codex` or the TUI toggle), contrasting with the default-on tools.
+- [x] `docs/getting-started/first-vm.md`: a "Logging into Codex" passage parallel to "Logging into Claude Code": no credential is provisioned; run `codex` once and sign in with a ChatGPT account; note the sign-in callback targets a localhost port so headless login needs the upstream-documented workaround (SSH port forwarding, or copying an existing `~/.codex/auth.json`); adjacent to the existing remote-control paragraph, state that Codex offers **no** CLI-reachable remote control or phone notifications (its phone pairing requires the Codex desktop app on macOS/Windows), so users choosing Codex should not expect Claude-style phone alerts from the VM.
+- [x] `docs/reference/security-model.md`: bullets mirroring Claude's — Codex (when selected) runs with approvals and its own sandbox off (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"` in the provisioned config), deliberate because the ephemeral VM is the sandbox; and no Codex credential is provisioned.
+- [x] `docs/using-sand/cli-reference.md`: the `sand create` flags table documents `--with-codex` (default false, opt-in) — and the stale `sand create --help` dump is regenerated from the built binary so ALL five `--with-*` flags appear (the four existing ones are currently missing too).
+- [x] Verification: `go run ./cmd/sand create --help 2>&1 | grep -c "with-"` prints `5`, and the same five lines appear verbatim in the cli-reference help dump.
+- [x] Verification: `grep -ri "codex" docs/ | grep -iv "remote control\|desktop\|phone\|notification" | wc -l` returns non-zero (content landed) AND `grep -ri "codex" docs/getting-started/first-vm.md | grep -ci "remote"` returns non-zero (the limitation is stated).
+- [x] Verification: `pip install -r docs/requirements.txt && mkdocs build --strict` exits 0 (or, if the strict build already fails on main for unrelated reasons, document that baseline and show the new pages introduce no NEW warnings).
 
 Use your internal Todo tool to track these and keep on track.
 

@@ -2,7 +2,7 @@
 id: 3
 group: "tui"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-07-16
 model: "sonnet"
 effort: "medium"
@@ -22,13 +22,13 @@ Surface the `WithCodex` selection in the TUI create form as a toggle structurall
 
 ## Acceptance Criteria
 
-- [ ] `internal/ui/model.go` gains a `toolCodex` field alongside `toolClaude` (same type/placement).
-- [ ] `internal/ui/form.go`: create-form initialization sets `m.toolCodex = cfg.WithCodex` next to the `toolClaude` line (after the `ApplyToolset` base-adoption block, so an existing base's selection is what the form shows); the toolset toggle list gains an entry labeled "Install OpenAI Codex" with `baseWideHelp("OpenAI Codex")` and get/set closures on `toolCodex`; the submit path writes `cfg.WithCodex = m.toolCodex` next to the existing `cfg.WithClaude = m.toolClaude` write-back.
-- [ ] Reset mode is untouched: no `resetWithCodex`, no "Preserve" toggle for codex (explicitly out of scope per the plan).
-- [ ] The reset-path write-back block (which restores `cfg.WithClaude = m.resetWithClaude` etc.) is left consistent — verify whether that block restores all toolset fields or only claude's, and mirror its existing structure for codex ONLY if omitting it would let the form submit a codex value the reset flow never showed; document the choice in a short comment.
-- [ ] `internal/ui/form_test.go` extended in the existing pattern: the codex toggle round-trips (toggle on → submitted config has `WithCodex: true`; default off → false).
-- [ ] Verification: `go test ./internal/ui/...` exits 0.
-- [ ] Verification: `go build ./...` exits 0.
+- [x] `internal/ui/model.go` gains a `toolCodex` field alongside `toolClaude` (same type/placement).
+- [x] `internal/ui/form.go`: create-form initialization sets `m.toolCodex = cfg.WithCodex` next to the `toolClaude` line (after the `ApplyToolset` base-adoption block, so an existing base's selection is what the form shows); the toolset toggle list gains an entry labeled "Install OpenAI Codex" with `baseWideHelp("OpenAI Codex")` and get/set closures on `toolCodex`; the submit path writes `cfg.WithCodex = m.toolCodex` next to the existing `cfg.WithClaude = m.toolClaude` write-back.
+- [x] Reset mode is untouched: no `resetWithCodex`, no "Preserve" toggle for codex (explicitly out of scope per the plan).
+- [x] The reset-path write-back block (which restores `cfg.WithClaude = m.resetWithClaude` etc.) is left consistent — verify whether that block restores all toolset fields or only claude's, and mirror its existing structure for codex ONLY if omitting it would let the form submit a codex value the reset flow never showed; document the choice in a short comment.
+- [x] `internal/ui/form_test.go` extended in the existing pattern: the codex toggle round-trips (toggle on → submitted config has `WithCodex: true`; default off → false).
+- [x] Verification: `go test ./internal/ui/...` exits 0.
+- [x] Verification: `go build ./...` exits 0.
 
 Use your internal Todo tool to track these and keep on track.
 
