@@ -883,6 +883,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/web-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Servers and Ports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/connection-profiles/" class="md-nav__link">
         
   
@@ -1283,6 +1311,12 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   cannot modify anything on your machine, and <code>limactl delete &lt;name&gt;</code>
   provably removes everything the VM produced. Move files in or out
   deliberately with the TUI's Upload/Download actions instead.</li>
+<li><strong>Guest listen ports are forwarded to loopback only.</strong> Lima forwards a
+  guest's listening TCP ports to <code>127.0.0.1</code> on the host that runs the VM —
+  never a LAN interface — so a server inside the VM is not exposed to the
+  network. Publishing one further (a cloudflared tunnel, an SSH forward) is
+  always an explicit action; see
+  <a href="../../using-sand/web-servers/">Web Servers and Ports</a>.</li>
 <li><strong>Samba is forced off</strong> for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.</li>
 <li><strong><code>sand</code> does not provision a Claude Code credential.</strong> You log in inside

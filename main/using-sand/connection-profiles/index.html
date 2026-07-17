@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/connection-profiles/">
       
       
-        <link rel="prev" href="../files-and-shells/">
+        <link rel="prev" href="../web-servers/">
       
       
         <link rel="next" href="../../reference/files-and-state/">
@@ -794,6 +794,34 @@
     
   
     Shells and Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Servers and Ports
   
 
     
@@ -1604,6 +1632,10 @@ too:</p>
 <li><strong>File transfer</strong> to and from a guest is staged through the remote host
   transparently — the remote <code>limactl copy</code> cannot see your local filesystem, so
   <code>sand</code> copies via the remote host and preserves where files land in the guest.</li>
+<li><strong>Web servers</strong> running in a remote VM's guest are <em>not</em> reachable from
+  your machine: their ports forward to the remote host's loopback, not
+  yours. See <a href="../web-servers/">Web Servers and Ports</a> for the cloudflared
+  and SSH-forwarding options.</li>
 <li><strong>Isolation</strong>: VMs created on a profile are tagged with that profile's
   connection in the <a href="../../reference/files-and-state/">managed-VM index</a>, so
   they never mix with VMs from another profile — a local <code>limactl list</code> and a

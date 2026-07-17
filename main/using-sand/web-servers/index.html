@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/files-and-shells/">
+        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/web-servers/">
       
       
-        <link rel="prev" href="../secrets/">
+        <link rel="prev" href="../files-and-shells/">
       
       
-        <link rel="next" href="../web-servers/">
+        <link rel="next" href="../connection-profiles/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Shells and Files - sandbar</title>
+        <title>Web Servers and Ports - sandbar</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#shells-and-files" class="md-skip">
+        <a href="#web-servers-and-ports" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Shells and Files
+              Web Servers and Ports
             
           </span>
         </div>
@@ -783,6 +783,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../files-and-shells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shells and Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -802,7 +830,7 @@
   <span class="md-ellipsis">
     
   
-    Shells and Files
+    Web Servers and Ports
   
 
     
@@ -820,7 +848,7 @@
   <span class="md-ellipsis">
     
   
-    Shells and Files
+    Web Servers and Ports
   
 
     
@@ -846,21 +874,66 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#shells" class="md-nav__link">
+  <a href="#local-vms-ports-appear-on-localhost" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Shells
+        Local VMs: ports appear on localhost
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local VMs: ports appear on localhost">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ddev-urls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ddev URLs
       
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#uploading-and-downloading-files" class="md-nav__link">
+  <a href="#remote-vms-tunnel-out-with-cloudflared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Uploading and downloading files
+        Remote VMs: tunnel out with cloudflared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote VMs: tunnel out with cloudflared">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ddev-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ddev projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-about-ssh-port-forwarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What about SSH port forwarding?
       
     </span>
   </a>
@@ -871,34 +944,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../web-servers/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1247,21 +1292,66 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#shells" class="md-nav__link">
+  <a href="#local-vms-ports-appear-on-localhost" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Shells
+        Local VMs: ports appear on localhost
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Local VMs: ports appear on localhost">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ddev-urls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ddev URLs
       
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#uploading-and-downloading-files" class="md-nav__link">
+  <a href="#remote-vms-tunnel-out-with-cloudflared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Uploading and downloading files
+        Remote VMs: tunnel out with cloudflared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote VMs: tunnel out with cloudflared">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ddev-projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ddev projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-about-ssh-port-forwarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What about SSH port forwarding?
       
     </span>
   </a>
@@ -1288,72 +1378,131 @@
   
 
 
-<h1 id="shells-and-files">Shells and Files</h1>
-<h2 id="shells">Shells</h2>
-<p><code>S</code> on a tile in the <a href="../tui/">Board</a>, and <code>sand shell NAME</code> from the command
-line, both attach you to the same thing: the VM's <strong>persistent tmux
-session</strong> inside the guest, prefixed with <code>C-a</code>. They share the same attach
-path (<code>internal/lima.AttachArgv</code>), so they are two doors onto one session,
-not two different mechanisms.</p>
-<p>Because the session is persistent, detaching — with <code>C-a d</code>, or by just
-closing your terminal — does <strong>not</strong> kill what's running in it. Attach
-again later with either <code>S</code> or <code>sand shell NAME</code> and it's all still there.</p>
-<p>Useful bindings once you're attached (tmux's own, with <code>sand</code>'s default
-<code>C-a</code> prefix):</p>
-<table>
-<thead>
-<tr>
-<th>Keys</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>C-a d</code></td>
-<td>Detach (leaves the session running)</td>
-</tr>
-<tr>
-<td><code>C-a c</code></td>
-<td>Open a new window</td>
-</tr>
-<tr>
-<td><code>C-a \|</code></td>
-<td>Split vertically</td>
-</tr>
-<tr>
-<td><code>C-a S</code></td>
-<td>Split horizontally</td>
-</tr>
-</tbody>
-</table>
-<p>A second terminal attaching to the same VM gets its own session grouped
-against the first, sharing the same windows but tracking its own current
-one — so two terminals can look at two different windows of the same VM at
-once.</p>
-<p>The VM must be running before you can shell into it; a stopped VM won't
-offer <code>S</code> on its tile, and <code>sand shell</code> refuses cleanly with an error
-telling you to start it first.</p>
-<h2 id="uploading-and-downloading-files">Uploading and downloading files</h2>
-<p><code>u</code> (upload) and <code>g</code> (download) on a focused tile open a file-transfer pane.
-Download is bound to <code>g</code>, not <code>d</code> — <code>d</code> is always delete; see the
-<a href="../tui/#keybindings">Board</a> page for the full keybinding table.</p>
+<h1 id="web-servers-and-ports">Web Servers and Ports</h1>
+<p>How to reach a web server running inside a <code>sand</code> VM — a ddev project,
+<code>npm run dev</code>, <code>python3 -m http.server</code>, anything listening on a TCP port.
+The answer depends on where the VM lives: on the machine you're sitting at
+(the <strong>Local</strong> profile), or on a remote host (a <code>remote-ssh</code>
+<a href="../connection-profiles/">Connection Profile</a>).</p>
+<h2 id="local-vms-ports-appear-on-localhost">Local VMs: ports appear on localhost</h2>
+<p>Lima automatically forwards every TCP port that starts listening inside the
+guest to <code>127.0.0.1</code> on your machine, same port number. <code>sand</code> doesn't add
+or restrict anything here — it inherits Lima's default behavior — so a
+server started in the guest:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">claude@myvm$ </span>python3<span class="w"> </span>-m<span class="w"> </span>http.server<span class="w"> </span><span class="m">8000</span>
+</code></pre></div>
+<p>is immediately reachable at <code>http://localhost:8000</code> on your machine. No
+configuration, no flags: forwarding follows the guest's listening sockets
+automatically and goes away when the server stops.</p>
+<p>Two properties worth knowing:</p>
 <ul>
-<li><strong>Upload (<code>u</code>)</strong> copies a file or directory from this machine into the
-  guest. You browse the host for a source starting at your current working
-  directory, then pick a destination directory in the guest.</li>
-<li><strong>Download (<code>g</code>)</strong> copies a file or directory out of the guest onto this
-  machine. You browse the guest for a source, then pick a destination on
-  the host.</li>
+<li><strong>Loopback only.</strong> Forwarded ports bind <code>127.0.0.1</code>, never a LAN
+  interface. Running a server in a VM does not expose it to your network —
+  see the <a href="../../reference/security-model/">security model</a>.</li>
+<li><strong>Privileged ports on Linux hosts.</strong> Lima runs unprivileged, and on a
+  Linux host an unprivileged process cannot bind ports below 1024 — a guest
+  server on port 80 or 443 is silently skipped (Lima logs a warning in the
+  instance's <code>ha.stderr.log</code>). macOS hosts don't have this restriction.</li>
 </ul>
-<p>Both directions require the VM to be running, and neither is offered while
-a build or a reset is in progress on that VM — starting a transfer against
-a VM mid-reset would stream files into an instance that's about to be
-destroyed.</p>
-<p>For the flags behind the equivalent CLI subcommands, see the
-<a href="../cli-reference/">CLI Reference</a>.</p>
-<p>Files are one of two things that cross the VM boundary — for the other,
-reaching a web server listening inside the guest, see
-<a href="../web-servers/">Web Servers and Ports</a>.</p>
+<h3 id="ddev-urls">ddev URLs</h3>
+<p><a href="https://ddev.com/">ddev</a> project URLs work from your host browser as-is on
+a macOS host: <code>*.ddev.site</code> resolves to <code>127.0.0.1</code> in public DNS, ddev's
+router listens on ports 80/443 in the guest, and Lima forwards them to your
+loopback — so <code>https://myproj.ddev.site</code> just works.</p>
+<p>On a <strong>Linux host</strong>, ports 80/443 hit the privileged-port rule above.
+Either allow unprivileged binds on the host:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>sudo<span class="w"> </span>sysctl<span class="w"> </span>net.ipv4.ip_unprivileged_port_start<span class="o">=</span><span class="m">80</span><span class="w">   </span><span class="c1"># persist in /etc/sysctl.d/</span>
+</code></pre></div>
+<p>or move ddev's router to high ports inside the guest and keep everything
+unprivileged:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>config<span class="w"> </span>global<span class="w"> </span>--router-http-port<span class="o">=</span><span class="m">8080</span><span class="w"> </span>--router-https-port<span class="o">=</span><span class="m">8443</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>restart
+</code></pre></div>
+<p>after which the project URL is <code>https://myproj.ddev.site:8443</code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Expect a certificate warning</p>
+<p>HTTPS certificates are minted by <code>mkcert</code> <strong>inside the guest</strong>, so the
+guest trusts them (Claude's own requests succeed) but your host browser
+does not. Either click through the warning, or trust the guest's root
+CA on your machine: <code>mkcert -CAROOT</code> in the guest names the directory
+holding <code>rootCA.pem</code>; copy it out (the <code>g</code> verb, or the download CLI —
+see <a href="../files-and-shells/">Shells and Files</a>) and add it to your OS or
+browser trust store.</p>
+</div>
+<h2 id="remote-vms-tunnel-out-with-cloudflared">Remote VMs: tunnel out with cloudflared</h2>
+<p>On a remote profile the same Lima forwarding happens — but to <code>127.0.0.1</code>
+<strong>on the remote host</strong>. That's a machine you can SSH into, not the one your
+browser runs on, so a guest web server is reachable from nowhere except the
+remote host itself. <code>sand</code> adds no port forwarding of its own over the
+profile's SSH connection, and the
+<a href="../../reference/security-model/">security model</a> assumes remote hosts sit
+on an isolated network behind whatever firewalling you already have.</p>
+<p>The supported way in is outward: run
+<a href="https://github.com/cloudflare/cloudflared">cloudflared</a> — preinstalled in
+every VM — <strong>inside the guest</strong>, and let it hand you a URL:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">claude@myvm$ </span>cloudflared<span class="w"> </span>tunnel<span class="w"> </span>--url<span class="w"> </span>http://localhost:3000
+</code></pre></div>
+<p>This starts a <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/">Quick Tunnel</a>
+— no Cloudflare account, no configuration — and prints a random
+<code>https://….trycloudflare.com</code> URL that works from any browser, anywhere,
+for as long as the process runs.</p>
+<h3 id="ddev-projects">ddev projects</h3>
+<p>For a ddev project, don't build the tunnel by hand — ddev's router routes
+by the request's <code>Host</code> header, which a bare tunnel to a port doesn't
+preserve. Let <a href="https://docs.ddev.com/en/stable/users/topics/sharing/"><code>ddev share</code></a>
+do it, pointed at cloudflared:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>share<span class="w"> </span>--provider<span class="o">=</span>cloudflared
+</code></pre></div>
+<p>This runs the same cloudflared already in the VM (no account, no
+authtoken), wires up the <code>Host</code> header and TLS to the router for you, and
+prints the public <code>trycloudflare.com</code> URL. Make it the default so plain
+<code>ddev share</code> uses it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>config<span class="w"> </span>global<span class="w"> </span>--share-default-provider<span class="o">=</span>cloudflared
+</code></pre></div>
+<p>(ddev's out-of-the-box default provider is ngrok, which needs an ngrok.com
+account and <code>ngrok config add-authtoken</code> first; cloudflared avoids both.)</p>
+<div class="admonition warning">
+<p class="admonition-title">A quick tunnel is a public URL</p>
+<p>Anyone who has the URL can reach the server — there is no
+authentication in front of it. The URL is random and unlisted, but
+treat it as public: don't leave a tunnel running unattended, and
+remember that everything a <code>sand</code> VM serves may be agent-written.
+Quick Tunnels are also rate-limited and intended for testing, not
+hosting.</p>
+</div>
+<p>Nothing stops you from using cloudflared on a local VM too — it's the
+easiest way to show in-progress work to someone who isn't at your desk.</p>
+<h2 id="what-about-ssh-port-forwarding">What about SSH port forwarding?</h2>
+<p>For a private path to a remote VM — no public URL — plain OpenSSH
+forwarding works today, using the connection details already in your
+<a href="../connection-profiles/#profilesyaml">profile</a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>ssh<span class="w"> </span>-N<span class="w"> </span>-L<span class="w"> </span><span class="m">8443</span>:127.0.0.1:8443<span class="w"> </span>-p<span class="w"> </span>&lt;port&gt;<span class="w"> </span>-i<span class="w"> </span>&lt;identity_path&gt;<span class="w"> </span>&lt;user&gt;@&lt;host&gt;
+</code></pre></div>
+<p>While that runs, <code>localhost:8443</code> on your machine reaches the remote host's
+loopback port 8443 — that is, a guest port Lima forwarded there. For the
+high-ports ddev configuration above, <code>https://myproj.ddev.site:8443</code> then
+works from your browser: <code>*.ddev.site</code> still resolves to <code>127.0.0.1</code>, where
+the tunnel now listens, and the router still sees the project's name in the
+<code>Host</code> header. The mkcert certificate warning applies exactly as with a
+local VM.</p>
+<p>The catches, and why this recipe is manual:</p>
+<ul>
+<li><strong>The remote end must exist.</strong> The remote hosts <code>sand</code> targets are Linux,
+  so the privileged-port rule applies <em>there</em>: out of the box Lima has not
+  forwarded a guest's port 80/443 to the remote loopback at all. Move ddev
+  to high router ports (easiest), or raise
+  <code>net.ipv4.ip_unprivileged_port_start</code> on the remote host.</li>
+<li><strong>The local end has the same rule.</strong> Binding your <em>local</em> port 443 (to
+  make a bare <code>https://myproj.ddev.site</code> work) needs root on a Linux
+  laptop; macOS allows it unprivileged. A high local port with the <code>:8443</code>
+  URL suffix avoids the question entirely.</li>
+<li><strong>One <code>-L</code> per port, one process to babysit.</strong> The forward lives and dies
+  with that <code>ssh</code> process.</li>
+</ul>
+<p>Connection profiles have no field for declaring port forwards — <code>sand</code>
+neither creates nor manages SSH tunnels. If a guest port matters to your
+workflow, script the <code>ssh -L</code> invocation yourself, or prefer cloudflared,
+which needs nothing from the machine you're browsing on.</p>
 
 
 
