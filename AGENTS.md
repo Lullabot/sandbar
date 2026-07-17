@@ -472,7 +472,7 @@ and by construction.** Do not weaken or remove this guarantee:
   type before fetching any bytes. A clipboard with no image type yields a
   sentinel and **fetches zero bytes**. Tests assert that a text-only
   clipboard produces the sentinel, never image bytes.
-- **Guest-side shims** (`roles/claude-code` `sand-xclip` and `sand-wl-paste`)
+- **Guest-side shims** (`shipped-profiles/roles/claude-code` `sand-xclip` and `sand-wl-paste`)
   have no write path, no `text/*` branch, and no fallback for non-image
   targets — they refuse anything that is not an image. This is **independent**
   of the host read; the shim cannot be tricked into serving text even if the
@@ -488,7 +488,7 @@ the remote host (for remote-Lima deployments). Only the image bytes cross
 the network.
 
 For the security rationale, see the plan's Risk Considerations and the spec
-comment at `roles/claude-code/tasks/main.yml`.
+comment at `shipped-profiles/roles/claude-code/tasks/main.yml`.
 
 ## The base image / clone / finalize provisioner (read before touching `internal/provision`)
 
@@ -513,13 +513,17 @@ comment at `roles/claude-code/tasks/main.yml`.
 - **`playbook_embed.go`'s `go:embed` set and the rsync filter in
   `internal/provision/provision.go` (`inGuestScript`) must stay in step.**
   Both spell out the same fileset — `site.yml`, `ansible.cfg`, `inventory`,
-  `roles/`, `group_vars/` — and the base version stamp
-  (`internal/provision/baseversion.go`, `playbookFileset`) now hashes exactly
-  that fileset too, so a test pinning the embed set to the rsync filter
-  (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's correctness as
-  well. Add a file to one and forget the other two, and either the guest gets
-  content the stamp never sees, or the stamp churns on content the guest
-  never gets.
+  `roles/`, `group_vars/`, `scripts/`, `shipped-profiles/` — and the base
+  version stamp (`internal/provision/baseversion.go`, `playbookFileset`)
+  hashes the subset of that fileset which actually executes at base-build
+  time (`site.yml`, `ansible.cfg`, `inventory`, `roles/`, `group_vars/`,
+  `shipped-profiles/` — not `scripts/`, which today is consumed only at
+  finalize, a phase that always re-syncs the playbook fresh from the host
+  mount regardless of the base's age), so a test pinning the embed set to the
+  rsync filter (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's
+  correctness for that subset too. Add a file to the embed set or rsync
+  filter and forget `playbookFileset`, and content that affects the base
+  build can change without the stamp noticing.
 - **Every base mutation belongs inside the base lock held by
   `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
   refresh, and `--rebuild`'s destroy are all reached through

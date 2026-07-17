@@ -1,0 +1,19 @@
+# Shipped provisioning profile: ddev
+#
+# Same manifest format a repo-checked-in `.sandbar/` profile uses
+# (scripts/validate_profile.py; strikethroo plan 18, task 01) — this is one of
+# the four tools formerly hard-coded as `toolset_ddev` in
+# roles/base/defaults/main.yml, re-expressed as a shipped example.
+#
+# `roles` registers the ddev apt keyring and repository
+# (shipped-profiles/roles/ddev) — required before `ddev` the package can be
+# installed from anywhere but Debian's default archive. `packages` names the
+# package itself. Both are idempotent and phase-agnostic: the base phase
+# still installs `ddev` in its single consolidated apt transaction (via
+# devtools_ddev_packages, roles/dev-tools/defaults/main.yml) rather than
+# through this manifest's `packages` group — that base-phase mechanism is
+# unchanged by this profile's existence.
+packages:
+  - ddev
+roles:
+  - ddev
