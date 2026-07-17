@@ -453,9 +453,9 @@ graph TD
 - ✔️ Task 1: Clipboard-read seam (image-only, build-tagged) + tests — `completed`
 - ✔️ Task 2: Guest clipboard shim scripts + Ansible provisioning — `completed`
 
-### Phase 2: Delivery core
+### ✅ Phase 2: Delivery core
 **Parallel Tasks:**
-- Task 3: Guest delivery + paste orchestration core (depends on: 1)
+- ✔️ Task 3: Guest delivery + paste orchestration core (depends on: 1) — `completed` (`internal/paste`)
 
 ### Phase 3: Entrypoints (parallel)
 **Parallel Tasks:**
