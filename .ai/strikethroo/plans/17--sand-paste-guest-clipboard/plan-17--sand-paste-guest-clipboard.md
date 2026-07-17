@@ -457,10 +457,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 3: Guest delivery + paste orchestration core (depends on: 1) — `completed` (`internal/paste`)
 
-### Phase 3: Entrypoints (parallel)
+### ✅ Phase 3: Entrypoints (parallel)
 **Parallel Tasks:**
-- Task 4: CLI `sand paste-image <vm>` (depends on: 3)
-- Task 5: TUI "paste image" verb, key `v` (depends on: 3)
+- ✔️ Task 4: CLI `sand paste-image <vm>` (depends on: 3) — `completed`
+- ✔️ Task 5: TUI "paste image" verb, key `v` (depends on: 3) — `completed`
 
 ### Phase 4: Documentation
 **Parallel Tasks:**
