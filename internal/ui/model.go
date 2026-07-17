@@ -20,6 +20,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/browse"
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/landgh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/paste"
@@ -86,6 +87,10 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
+	// viewLanding is the Landing pane (landing.go, plan 17 task 7): a per-VM
+	// pull-request cockpit opened for a focused, running VM, following the
+	// same view-enum + sub-model pattern as viewSecrets above.
+	viewLanding
 	// viewProfiles and viewProfileForm are the profile management screen
 	// (profilesview.go): a list of every connection profile, and a
 	// sub-form over one profile's fields (create/edit), following the same
@@ -181,6 +186,21 @@ type model struct {
 	// feeds them into checkouts via a sweepResultMsg. A POINTER for the same
 	// reason heartbeats is, and nil-safe for the same reason.
 	sweeps *sweepRegistry
+
+	// ghActions is the Landing pane's seam (landing.go) over internal/landgh's
+	// host-side gh/browser actions: Available, PRState, CreateDraftPR,
+	// OpenInBrowser. Defaulted to landgh.New() in New(); tests fake it so no
+	// test spawns a real gh binary or launches a real browser. A plain
+	// interface value (not a pointer to shared state), so a value-passed model
+	// copy carries it for free exactly like every other seam here.
+	ghActions ghActions
+
+	// landing is the Landing pane's own state (landing.go): the focused VM
+	// identity it was opened for, its grouped/flattened rows, the resolved
+	// per-checkout PR results, and which gh mode it is in. Plain value state —
+	// nothing here outlives one Update call the way a job's log does — so,
+	// unlike jobs/heartbeats/checkouts/sweeps above, this is not a pointer.
+	landing landingPane
 
 	// lastInput is when the user last touched a key. Together with the active view
 	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
@@ -438,6 +458,7 @@ func New(fleet provider.Fleet) tea.Model {
 		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
 		checkouts:    checkoutReg,
 		sweeps:       newSweepsResolver(fleetShellResolver(members)),
+		ghActions:    landgh.New(),
 		keys:         newKeyMap(),
 		help:         help.New(),
 		view:         viewBoard,
@@ -817,6 +838,18 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// replaced, which ends that stale read loop rather than letting it
 		// double up on the live one.
 		return m, sweepReadCmd(msg.scope, msg.vm, msg.epoch, m.sweeps.fold(msg.scope, msg.vm, msg.epoch))
+
+	case landingAvailableMsg:
+		// The Landing pane's lazy host-gh-availability check (landing.go),
+		// fired once when the pane opens. Folding it in may itself fire the
+		// per-checkout PRState lookups (only once gh is known usable).
+		return m, m.handleLandingAvailable(msg)
+
+	case landingPRStateMsg:
+		// One checkout's AUTHORITATIVE gh PR-state result (landing.go). Purely
+		// a model-state fold — nothing further to dispatch.
+		m.handleLandingPRState(msg)
+		return m, nil
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after
@@ -1350,6 +1383,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDest(msg)
 		case viewSecrets:
 			return m.updateSecrets(msg)
+		case viewLanding:
+			return m.updateLanding(msg)
 		case viewProfiles:
 			return m.updateProfiles(msg)
 		case viewProfileForm:
@@ -1483,6 +1518,8 @@ func (m model) View() tea.View {
 		content = m.destView()
 	case viewSecrets:
 		content = m.secretsView()
+	case viewLanding:
+		content = m.landingView()
 	case viewProfiles:
 		content = m.profilesView()
 	case viewProfileForm:

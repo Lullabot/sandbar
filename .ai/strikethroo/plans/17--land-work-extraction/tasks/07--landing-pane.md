@@ -2,7 +2,7 @@
 id: 7
 group: "landing-pane"
 dependencies: [1, 3, 6]
-status: "pending"
+status: "completed"
 created: 2026-07-17
 model: "sonnet"
 effort: "high"
