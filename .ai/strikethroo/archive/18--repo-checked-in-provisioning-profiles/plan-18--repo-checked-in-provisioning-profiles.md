@@ -274,12 +274,12 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 03: Wire the guest-side repo-profile finalize stage after the `project` role clone (depends on: 01, 02)
 
-### Phase 4: Verification, Fixture E2E, Molecule, and Documentation
+### Phase 4: Verification, Fixture E2E, Molecule, and Documentation ✅
 **Parallel Tasks:**
-- Task 04: Extra-vars byte-identity and restructured-toolset-defaults seam tests (depends on: 02, 03)
-- Task 05: Fixture repo, local git remote serving, and extended `lima-e2e` full-path/reconciliation/malformed-manifest checks (depends on: 02, 03)
-- Task 06: Molecule scenario for the finalize stage, wired into the weekly non-blocking `molecule` job matrix (depends on: 03)
-- Task 07: Documentation — new provisioning-profiles page plus updates to seven existing docs and `AGENTS.md` (depends on: 01, 02, 03)
+- ✔️ Task 04: Extra-vars byte-identity and restructured-toolset-defaults seam tests (depends on: 02, 03)
+- ✔️ Task 05: Fixture repo, local git remote serving, and extended `lima-e2e` full-path/reconciliation/malformed-manifest checks (depends on: 02, 03)
+- ✔️ Task 06: Molecule scenario for the finalize stage, wired into the weekly non-blocking `molecule` job matrix (depends on: 03)
+- ✔️ Task 07: Documentation — new provisioning-profiles page plus updates to seven existing docs and `AGENTS.md` (depends on: 01, 02, 03)
 
 ### Post-phase Actions
 
@@ -288,3 +288,27 @@ After Phase 4 completes, run the plan's full Self Validation sequence (fixture e
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+
+All 7 tasks across 4 phases landed on branch `worktree-plan-17-provisioning-profiles` (PR #68): a standalone `.sandbar/` manifest validator (`scripts/validate_profile.py`) with a good/bad fixture corpus and Go unit test; the four optional dev tools (`claude`, `ddev`, `go`, `java`) restructured into shipped provisioning profiles under `shipped-profiles/`, preserving exact base-tier behavior; a new guest-side finalize stage (`roles/repo-profile`) that discovers, validates, and applies a repo's `.sandbar/profile.yml` per-clone (packages, toolset reconciliation, repo roles, services, seed) without ever touching the shared base image or its version stamp; Go seam tests locking in byte-identical `BuildExtraVars` for no-profile repos and toolset-default parity; a real-VM `lima-e2e` test proving the full `--clone-url` path end to end (including per-clone toolset reconciliation without base churn, and a malformed-manifest abort); a weekly non-blocking `molecule/repo-profile` scenario with an idempotence pass; and a new documentation page (`docs/using-sand/provisioning-profiles.md`) plus updates to seven existing docs and `AGENTS.md`.
+
+All Success Criteria and Self Validation steps from the plan were exercised: unit tests (`go test ./... -race`, coverage 87.7% against an 87% floor), `ansible-playbook --syntax-check`, the embed/rsync/hash triple-pin guard, the validator corpus, and — critically — real Lima VM runs proving the fixture-repo full path, per-clone toolset reconciliation (tool present in the clone while the base's own toolset stamp excludes it), and the malformed-manifest abort message.
+
+### Noteworthy Events
+
+- **Plan renumbered 17 → 18 before execution.** A rebase onto `origin/main` revealed plan ID 17 had already been claimed by an unrelated, separately merged and archived plan (`17--sand-paste-guest-clipboard`); the plan directory, file, and frontmatter `id` were renumbered before task generation began.
+- **A real, previously-latent test-helper bug was found and fixed during Task 5**, not introduced by this plan: the new git-daemon-backed e2e fixture's cleanup (`cmd.Wait()` on a `bytes.Buffer`-backed `Stdout`/`Stderr`) could hang indefinitely because `git daemon` forks a per-connection child that inherits those descriptors, and `Wait()` blocks until every holder of the pipe's write end closes it. Fixed by switching to a real `*os.File` plus `Setpgid` + a process-group kill in cleanup — a correctness fix that would also have intermittently hung CI, caught only because this session had real Lima/KVM access to exercise it.
+- **Task 2 made one deliberate trade-off**: ddev's apt-repository registration moved from a static `import_role` to a dynamic `include_role`, because molecule's docker provisioner generates its own `ansible.cfg` that does not see this repo's `roles_path` addition — a static import would attempt to resolve the `ddev` role even when `toolset_ddev` is false and could break the (non-blocking, weekly) `molecule/base` scenario. Documented cost: `--list-tasks` (and so the progress-bar's task-total denominator) undercounts by 4 tasks specifically when `ddev` is enabled — cosmetic, no existing test coverage depended on the exact count.
+- **This execution environment lacked GitHub push/`gh` credentials throughout** (`git credential fill`, `gh auth status`, and `git push` all failed with no username/token available). All 14 commits for this plan were made and verified locally but could not be pushed to `origin/worktree-plan-17-provisioning-profiles` / PR #68 from within this session — see Necessary follow-ups.
+
+### Necessary follow-ups
+
+- **Push this branch and let CI run.** Every acceptance criterion was verified locally (including real Lima VM runs for the `lima-e2e`-tagged tests), but the actual `lima-e2e`, `unit`, `lint`, and (on the next scheduled/dispatched run) `molecule` CI jobs on GitHub Actions have not yet observed this code — push and confirm PR #68's checks go green.
+- **`molecule test -s repo-profile` was never executed** in this environment (no `docker`/`molecule` binary available) — only statically reasoned through and syntax-checked. It will run for real for the first time on the next weekly schedule or `workflow_dispatch` once merged.
+- No scope was deferred from the plan; all four architectural components (manifest schema/validator, shipped-profile restructuring, guest-side finalize stage, verification surface) and all listed documentation targets were completed as scoped.
