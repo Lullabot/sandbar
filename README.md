@@ -33,15 +33,6 @@ sand create
 sand shell claude
 ```
 
-You can also paste an image from your clipboard into a running VM:
-
-```bash
-sand paste-image claude
-```
-
-This stages the host clipboard's image on the guest so you can press Ctrl-V in
-Claude Code and attach it to your message.
-
 See [Getting Started](https://lullabot.github.io/sandbar/latest/getting-started/)
 for the full walkthrough, or the
 [CLI Reference](https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/)
