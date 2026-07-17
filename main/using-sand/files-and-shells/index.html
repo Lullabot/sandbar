@@ -867,6 +867,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#pasting-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pasting Images
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pasting Images">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-its-secure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it's secure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1268,6 +1318,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#pasting-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pasting Images
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pasting Images">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-its-secure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it's secure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1354,6 +1454,39 @@ destroyed.</p>
 <p>Files are one of two things that cross the VM boundary — for the other,
 reaching a web server listening inside the guest, see
 <a href="../web-servers/">Web Servers and Ports</a>.</p>
+<h2 id="pasting-images">Pasting Images</h2>
+<p><code>v</code> (paste image) on a running VM's tile, and <code>sand paste-image NAME</code> from
+the command line, both stage the host clipboard's image on the guest so you
+can press Ctrl-V inside Claude Code in the guest to attach it to your message.</p>
+<h3 id="the-workflow">The workflow</h3>
+<ol>
+<li>Copy an image on your host (screenshot, photo, graphic, etc.).</li>
+<li>In the <code>sand</code> TUI, press <code>v</code> on the VM's tile; or from a terminal, run
+   <code>sand paste-image NAME</code> (where <code>NAME</code> is the VM's name).</li>
+<li>You'll see a status message: <strong>"staged image on NAME — press Ctrl-V in the
+   guest"</strong>.</li>
+<li>In Claude Code inside the guest, press Ctrl-V to attach the image to your
+   message.</li>
+</ol>
+<p>The image is held in a single-slot clipboard on the guest, persisting until
+you run <code>sand paste-image</code> again (overwriting it with a new image).</p>
+<h3 id="how-its-secure">How it's secure</h3>
+<p>The feature is designed to prevent clipboard <strong>text</strong> from leaking into the
+guest. sand reads the clipboard <strong>image-only</strong> on your workstation, verifying
+an image type is advertised before fetching any bytes. If you have text on
+your clipboard instead, the command reports "no image on clipboard" and
+nothing is staged. Inside the guest, the shims that serve the image to
+Claude Code have no text-serving path at all — image-only by construction.</p>
+<p>The image is read on the machine running <code>sand</code> (your workstation), not the
+remote host (if you're targeting a remote Lima VM). Only the image bytes
+themselves are sent across the network.</p>
+<h3 id="known-limitation">Known limitation</h3>
+<p>A Linux <em>host</em> clipboard holding only a non-PNG image (e.g., JPEG without a
+PNG variant) is treated as "no image" in v1. macOS always coerces images to
+PNG, so this edge case applies to Linux hosts only. If it causes real-world
+friction, it will be revisited.</p>
+<p>The verb is only offered on running VMs. Stop or reset a VM and the verb
+disappears from its tile until the VM runs again.</p>
 
 
 

@@ -929,10 +929,49 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#cross-profile-resolution" class="md-nav__link">
+  <a href="#cross-profile-resolution-for-sand-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cross-profile resolution
+        Cross-profile resolution for sand shell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sand-paste-image-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand paste-image NAME
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="sand paste-image NAME">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-profile-resolution-for-sand-paste-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-profile resolution for sand paste-image
       
     </span>
   </a>
@@ -1530,10 +1569,49 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#cross-profile-resolution" class="md-nav__link">
+  <a href="#cross-profile-resolution-for-sand-shell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cross-profile resolution
+        Cross-profile resolution for sand shell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sand-paste-image-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand paste-image NAME
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="sand paste-image NAME">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cross-profile-resolution-for-sand-paste-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-profile resolution for sand paste-image
       
     </span>
   </a>
@@ -1577,12 +1655,14 @@
 
 
 <h1 id="cli-reference">CLI Reference</h1>
-<p>There are four entry points:</p>
+<p>There are five entry points:</p>
 <ul>
 <li><a href="#sand"><code>sand</code></a> — no arguments — launches the interactive TUI.</li>
 <li><a href="#sand-create"><code>sand create</code></a> — headless, non-interactive VM provisioning.</li>
 <li><a href="#sand-shell-name"><code>sand shell NAME</code></a> — attach to a running VM's persistent
   tmux session.</li>
+<li><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
+  host clipboard on a running VM's guest clipboard.</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
   the build identity.</li>
 </ul>
@@ -1872,7 +1952,7 @@ same attach path the TUI's <code>S</code> key uses, so the two entrypoints never
 <p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> may appear
 before or after <code>NAME</code>. <code>sand shell</code> refuses a VM that does not exist or is
 not running.</p>
-<h3 id="cross-profile-resolution">Cross-profile resolution</h3>
+<h3 id="cross-profile-resolution-for-sand-shell">Cross-profile resolution for <code>sand shell</code></h3>
 <p>Because the same VM name can exist under more than one
 <a href="../connection-profiles/">Connection Profile</a>, <code>sand shell NAME</code> resolves
 which one you mean like this:</p>
@@ -1890,6 +1970,39 @@ which one you mean like this:</p>
    <code>--profile</code> to disambiguate, and lists the profile names it's ambiguous
    between.</li>
 </ol>
+<h2 id="sand-paste-image-name"><code>sand paste-image NAME</code></h2>
+<p>Stage the host clipboard's image on a running VM's guest clipboard, ready for
+Ctrl-V inside Claude Code in the guest.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Usage: sand paste-image NAME [--profile &lt;name&gt;]
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Read the host clipboard image and stage it on NAME&#39;s guest clipboard at
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>&lt;guest-home&gt;/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>The named VM must already exist and be running (see &#39;sand&#39; to list instances,
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>or &#39;sand create&#39; to make one). If NAME is managed under more than one
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>connection profile, --profile picks which one to target.
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>If the host clipboard holds no image, nothing is staged and the command
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>exits non-zero.
+</code></pre></div>
+<p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> may appear
+before or after <code>NAME</code>. The command requires a running VM. If the host
+clipboard contains only text or is empty, it reports "no image on clipboard"
+and exits with a non-zero status.</p>
+<h3 id="how-it-works">How it works</h3>
+<p>When you run <code>sand paste-image</code>, sand reads the clipboard <strong>image only</strong> on
+the machine running <code>sand</code> (your workstation), verifying an image type is
+advertised before fetching any bytes. The image is then written into the guest
+at a single-slot path in one step, where a pair of lightweight shims named
+<code>xclip</code> and <code>wl-paste</code> serve it to Claude Code's native paste probe.</p>
+<p><strong>Security:</strong> The feature is structured to prevent clipboard <strong>text</strong> from
+leaking into the guest. It never reads clipboard text; it gates the clipboard
+read on an advertised <code>image/*</code> type, and the guest shims have no text-serving
+path at all.</p>
+<h3 id="cross-profile-resolution-for-sand-paste-image">Cross-profile resolution for <code>sand paste-image</code></h3>
+<p>Like <code>sand shell</code>, <code>sand paste-image NAME</code> resolves which connection profile
+you mean using the same logic described above under <code>sand shell</code>'s
+<a href="#cross-profile-resolution-for-sand-shell">Cross-profile resolution</a>.</p>
 <h2 id="sand-version-sand-version"><code>sand version</code> / <code>sand --version</code></h2>
 <p>Prints the build identity and exits. Both spellings do the same thing, and
 <code>--version</code> is checked before anything else in <code>sand</code>'s argument dispatch, so
@@ -1898,8 +2011,8 @@ it works even without <code>limactl</code> installed.</p>
 (<code>-ldflags "-X main.version=..."</code>). A binary built from source instead prints
 the git revision Go's toolchain embeds automatically, with a <code>-dirty</code> suffix
 if the working tree had uncommitted changes at build time — for example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$ sand --version
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>07bae1a-dirty
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>$ sand --version
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>07bae1a-dirty
 </code></pre></div>
 
 

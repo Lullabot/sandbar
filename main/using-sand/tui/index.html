@@ -1438,6 +1438,7 @@ tile's title row also carries a small <code>[profile]</code> label naming which
 profile that VM runs on — useful since the same VM name can exist under two
 different profiles at once. The label is omitted while only the Local
 profile is enabled, so a single-profile setup's tiles look unchanged.</p>
+<p>Note: the paste-image verb (<code>v</code>) is only shown on running VMs.</p>
 <p>Builds stream their output into a progress pane, but <strong>they keep running in
 the background if you navigate away</strong>. Leaving the progress screen does not
 cancel a build in progress; the job keeps going in the registry, and you can
@@ -1526,6 +1527,11 @@ require the VM to be running.</p>
 <td><code>S</code></td>
 <td>Shell</td>
 <td>Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (<code>C-a d</code>) or close the terminal. See <a href="../files-and-shells/">Files and Shells</a>.</td>
+</tr>
+<tr>
+<td><code>v</code></td>
+<td>Paste Image</td>
+<td>Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside Claude Code in the guest.</td>
 </tr>
 <tr>
 <td><code>d</code></td>
