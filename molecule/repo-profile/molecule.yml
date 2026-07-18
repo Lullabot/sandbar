@@ -43,10 +43,18 @@ provisioner:
     # still verifiable — this fully REPLACES (not merges with) ansible.cfg's
     # roles_path, so the two production entries (`roles`, `shipped-profiles/
     # roles`) are repeated here alongside the fixture path. Relative entries
-    # resolve relative to the cwd `molecule test` is invoked from, which by
-    # convention (matching molecule/base and molecule/samba) is the repo
-    # root.
-    ANSIBLE_ROLES_PATH: "roles:shipped-profiles/roles:molecule/repo-profile/fixture-checkout/.sandbar/roles"
+    # resolve relative to the CWD `ansible-playbook` itself runs from, which
+    # molecule sets to THIS SCENARIO DIRECTORY (molecule/repo-profile/), not
+    # the repo root or wherever `molecule test`/`--scenario-name` was
+    # invoked from — confirmed against a real CI failure where a
+    # repo-root-relative guess (`roles`, `shipped-profiles/roles`,
+    # `molecule/repo-profile/fixture-checkout/.sandbar/roles`) resolved to
+    # `molecule/repo-profile/roles`, `molecule/repo-profile/shipped-profiles/
+    # roles`, and a doubly-nested `molecule/repo-profile/molecule/repo-
+    # profile/fixture-checkout/.sandbar/roles`. `../../` reaches the repo
+    # root from here; the fixture path needs no prefix since it already
+    # lives directly under this scenario directory.
+    ANSIBLE_ROLES_PATH: "../../roles:../../shipped-profiles/roles:fixture-checkout/.sandbar/roles"
 verifier:
   name: ansible
 scenario:
