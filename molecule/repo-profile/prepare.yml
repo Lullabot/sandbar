@@ -4,18 +4,23 @@
 # against a fake "cloned checkout" instead of a real git clone:
 #
 #  1. A copy of THIS repo's real scripts/ and shipped-profiles/ trees, landed
-#     at {{ playbook_dir }} on the container. roles/repo-profile hard-codes
-#     paths off `playbook_dir` (scripts/validate_profile.py, each shipped
-#     tool's profile.yml under shipped-profiles/<tool>/) because in
-#     production that variable is the directory the whole embedded playbook
-#     fileset was rsynced into alongside site.yml, INSIDE the guest, where
-#     ansible-playbook itself runs (--connection=local). Under molecule's
-#     docker driver, ansible-playbook instead runs on the OUTER host, and
-#     playbook_dir resolves to this scenario's own directory
-#     (molecule/repo-profile/) rather than the project root — so scripts/
-#     and shipped-profiles/ must be copied onto the container at that same
-#     path for those hard-coded lookups to resolve, mirroring what the real
-#     rsync-into-the-guest lands.
+#     at {{ playbook_dir }} on BOTH the container and the controller.
+#     roles/repo-profile hard-codes paths off `playbook_dir`
+#     (scripts/validate_profile.py invoked via `command`, and each shipped
+#     tool's profile.yml under shipped-profiles/<tool>/ loaded via
+#     `include_vars`) because in production that variable is the directory
+#     the whole embedded playbook fileset was rsynced into alongside
+#     site.yml, INSIDE the guest, where ansible-playbook itself runs
+#     (--connection=local) — controller and target are the same machine
+#     there. Under molecule's docker driver they are NOT: `command` runs on
+#     the remote target (the container), but `include_vars` is a
+#     controller-side action that reads from wherever ansible-playbook
+#     itself runs (the outer GitHub Actions host). Confirmed against two
+#     separate real CI failures ("Could not find or access ... on the
+#     Ansible Controller") — first for the checkout's own .sandbar/
+#     manifest (see the note on the checkout copy below), then again here
+#     for shipped-profiles/<tool>/profile.yml once that first one was
+#     fixed — so both copies need both destinations.
 #
 #  2. A fake "cloned checkout" under /tmp/repo-profile-checkout, containing
 #     the committed-style .sandbar/ manifest fixture-checkout/.sandbar/
@@ -42,13 +47,23 @@
   hosts: all
   become: true
   tasks:
-    - name: Stage the real scripts/ and shipped-profiles/ trees at playbook_dir
+    - name: Stage the real scripts/ and shipped-profiles/ trees at playbook_dir (container)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../../{{ item }}"
         dest: "{{ playbook_dir }}/"
       loop:
         - scripts
         - shipped-profiles
+
+    - name: Also stage scripts/ and shipped-profiles/ on the controller (for include_vars)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../{{ item }}"
+        dest: "{{ playbook_dir }}/"
+      loop:
+        - scripts
+        - shipped-profiles
+      delegate_to: localhost
+      run_once: true
 
     - name: Stage the fake cloned checkout's .sandbar/ manifest (container)
       ansible.builtin.copy:
