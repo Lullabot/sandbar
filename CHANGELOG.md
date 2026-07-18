@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/Lullabot/sandbar/compare/v0.6.0...v0.7.0) (2026-07-17)
+
+
+### Features
+
+* **codex:** add opt-in OpenAI Codex toolset tool (provisioning + CLI) ([a578e04](https://github.com/Lullabot/sandbar/commit/a578e04e7678bb8ea9cf6bb8d3ef5661d0311caa))
+* **codex:** surface the Codex toolset in the TUI and docs ([e76aafd](https://github.com/Lullabot/sandbar/commit/e76aafdb70e716752e7f0d898f95b6e43394bc5d))
+* support image pasting ([#80](https://github.com/Lullabot/sandbar/issues/80)) ([46ff575](https://github.com/Lullabot/sandbar/commit/46ff5753708818ba76b2d688072a58b1a5830abd))
+* **user:** enable tmux focus-events in the guest ~/.tmux.conf ([#79](https://github.com/Lullabot/sandbar/issues/79)) ([229cce5](https://github.com/Lullabot/sandbar/commit/229cce5f321dfdc7f0a15292b40ec5cab14efb15))
+
+
+### Bug Fixes
+
+* **claude-code:** load direnv exports into Claude Code sessions ([#71](https://github.com/Lullabot/sandbar/issues/71)) ([c10a84d](https://github.com/Lullabot/sandbar/commit/c10a84ddfd07fad1218fd9e2321f27d4f6fcac4d))
+* **provision:** seed hasCompletedOnboarding so first claude launch honors bypass permissions ([#73](https://github.com/Lullabot/sandbar/issues/73)) ([2cf6884](https://github.com/Lullabot/sandbar/commit/2cf688441d5a8c6a017218fa0247216d568a7823))
+* **provision:** stop the profile_tasks warning on default base builds ([0d8244e](https://github.com/Lullabot/sandbar/commit/0d8244e0513c1e9d111815133be3b861e4a69c74))
+
 ## [0.6.0](https://github.com/Lullabot/sandbar/compare/v0.5.0...v0.6.0) (2026-07-16)
 
 
