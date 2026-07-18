@@ -24,6 +24,20 @@
 #     repo_profile_checkout_dir at this directory instead of a real clone
 #     (see roles/repo-profile/defaults/main.yml's comment on why that
 #     variable is deliberately overridable for exactly this purpose).
+#
+#     This checkout must exist in BOTH places, not just the container:
+#     roles/repo-profile's `stat`/`command` tasks run on the remote target
+#     (the container) as normal, but its `include_vars` task (loading the
+#     manifest into the `repo_profile` var) is a CONTROLLER-side action —
+#     it reads from the machine running `ansible-playbook` itself, not the
+#     managed node. In production this distinction never surfaces because
+#     finalize runs `--connection=local` INSIDE the guest, so controller and
+#     target are the same machine; molecule's docker driver runs
+#     ansible-playbook on the OUTER host against the container over a
+#     docker connection, splitting them. Confirmed against a real CI
+#     failure ("Could not find or access '/tmp/repo-profile-checkout/
+#     .sandbar/profile.yml' on the Ansible Controller") once the earlier
+#     role-path bug was fixed and this became the next thing to break.
 - name: Prepare
   hosts: all
   become: true
@@ -36,7 +50,14 @@
         - scripts
         - shipped-profiles
 
-    - name: Stage the fake cloned checkout's .sandbar/ manifest
+    - name: Stage the fake cloned checkout's .sandbar/ manifest (container)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/fixture-checkout/.sandbar"
         dest: /tmp/repo-profile-checkout/
+
+    - name: Also stage the fake checkout on the controller (for include_vars)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/fixture-checkout/.sandbar"
+        dest: /tmp/repo-profile-checkout/
+      delegate_to: localhost
+      run_once: true
