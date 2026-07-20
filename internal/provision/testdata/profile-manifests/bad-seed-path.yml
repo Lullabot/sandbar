@@ -1,0 +1,5 @@
+# Malformed fixture: an absolute seed path escaping the repo checkout,
+# rather than a relative .sandbar/-scoped Ansible tasks file.
+packages:
+  - cowsay
+seed: /etc/passwd

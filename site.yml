@@ -40,3 +40,14 @@
         - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'
+    # Repo-checked-in provisioning profile (.sandbar/), applied per-clone after
+    # the project clone. Runs in the same phases as `project` (it needs the
+    # checkout) and only when a repo was actually cloned. Everything the stage
+    # does is further gated INSIDE the role on the manifest being present, so a
+    # repo without .sandbar/ executes only a stat and introduces no new
+    # variables. See roles/repo-profile/tasks/main.yml for why it never touches
+    # the shared base image, its version stamp, or the embedded playbook fileset.
+    - role: repo-profile
+      when:
+        - provision_phase | default('full') != 'base'
+        - project_clone_url | default('') | length > 0

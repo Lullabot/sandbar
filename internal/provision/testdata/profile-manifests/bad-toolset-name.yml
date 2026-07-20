@@ -1,0 +1,5 @@
+# Malformed fixture: a toolset entry that is not one of the known shipped
+# provisioning-profile names.
+toolset:
+  - claude
+  - docker

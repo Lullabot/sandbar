@@ -64,6 +64,17 @@ tenant or a determined attacker.
   [Files and State](files-and-state.md) for the path and what deleting it
   costs. Treat that file as sensitive: anyone who can read your user
   account's files can read every VM's secrets.
+- **A cloned repository's [provisioning profile](../using-sand/provisioning-profiles.md)
+  runs automatically, with no consent gate.** If a repository you clone with
+  `--clone-url` carries a committed `.sandbar/`, `sand` installs its declared
+  packages, roles, and services, and runs its seed tasks, inside the guest —
+  as root by default — with no prompt asking you to approve any of it first.
+  This is a deliberate trust decision, not an oversight: cloning a repository
+  into the VM already implies running its code inside the guest, and the VM
+  is the sandbox that decision is made safe by. Repository content is never
+  fetched to, parsed on, or executed by the **host** in any form — the
+  repository's only path into the system is the clone that happens inside
+  the guest itself, so nothing it declares ever reaches your machine.
 - **The TUI's reset "preserve" options are a deliberate, opt-in exception**
   to "nothing leaves the VM": when enabled, the selected data (your Claude
   Code login, and/or a cloned project's checkout with its `.env`) is copied

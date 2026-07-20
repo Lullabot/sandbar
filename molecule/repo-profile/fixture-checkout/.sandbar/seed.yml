@@ -1,0 +1,13 @@
+# Fixture seed tasks file for molecule/repo-profile (declared by profile.yml's
+# `seed` key). Runs last in the finalize stage's six-step order
+# (roles/repo-profile/tasks/main.yml, step 6). Idempotent by construction
+# (ansible.builtin.copy with fixed content), matching the "seed tasks MUST be
+# idempotent" requirement — this whole stage re-runs on Recreate/Reset, and
+# molecule's idempotence step re-runs converge.yml to prove it.
+- name: Write a marker file proving the repo's seed tasks ran
+  ansible.builtin.copy:
+    content: "repo-profile seed executed\n"
+    dest: /etc/repo-profile-seed.marker
+    owner: root
+    group: root
+    mode: "0644"

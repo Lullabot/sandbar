@@ -1,0 +1,17 @@
+# Shipped provisioning profile: claude
+#
+# Same manifest format a repo-checked-in `.sandbar/` profile uses
+# (scripts/validate_profile.py; strikethroo plan 18, task 01) — this is one of
+# the four tools formerly hard-coded as `toolset_claude` in
+# roles/base/defaults/main.yml, re-expressed as a shipped example.
+#
+# Claude Code has nothing to add to the base-phase apt transaction (it's
+# installed via its own installer script, not apt), so `packages` is omitted.
+# All of its setup lives in the `claude-code` role
+# (shipped-profiles/roles/claude-code), already idempotent and phase-agnostic:
+# no task in it checks `provision_phase`.
+#
+# No `toolset` group here: that field is how a REPO profile requests one of
+# the shipped tools; a shipped tool's own manifest does not reference itself.
+roles:
+  - claude-code

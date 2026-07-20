@@ -161,47 +161,29 @@
 # ddev — part of the configurable base tool-set (sand create --with-ddev);
 # registering this repo/keyring at all is pointless when the package won't be
 # installed (see devtools_ddev_packages in roles/dev-tools/defaults/main.yml).
-- name: Download ddev GPG key
-  ansible.builtin.get_url:
-    url: https://pkg.ddev.com/apt/gpg.key
-    dest: /tmp/ddev-gpg.key
-    mode: "0644"
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - toolset_ddev | bool
-
-- name: Dearmor ddev GPG key
-  ansible.builtin.command:
-    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/ddev.gpg /tmp/ddev-gpg.key
-  args:
-    creates: /etc/apt/keyrings/ddev.gpg
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - toolset_ddev | bool
-
-- name: Make the ddev keyring readable by _apt
-  ansible.builtin.file:
-    path: /etc/apt/keyrings/ddev.gpg
-    mode: "0644" # MUST be readable by the _apt sandbox user
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - toolset_ddev | bool
-
-- name: Remove temporary ddev GPG key file
-  ansible.builtin.file:
-    path: /tmp/ddev-gpg.key
-    state: absent
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - toolset_ddev | bool
-
-- name: Deploy ddev APT repository
-  ansible.builtin.copy:
-    content: "deb [signed-by=/etc/apt/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *\n"
-    dest: /etc/apt/sources.list.d/ddev.list
-    owner: root
-    group: root
-    mode: "0644"
+#
+# The actual key/repo registration is the `ddev` role (shipped-profiles/roles/ddev),
+# a shipped provisioning profile's reusable artifact (shipped-profiles/ddev/profile.yml,
+# strikethroo plan 18). Included here, at the exact point in the base-phase task
+# list it always ran, with the exact same `when:` — so base-phase behavior
+# (what gets registered/installed, and when) is unchanged.
+#
+# include_role (dynamic), not import_role (static): a dynamic include with a
+# false `when:` is skipped at RUN time without ever resolving the role's
+# path, whereas a static import resolves it at PARSE time regardless of
+# `when:`. That matters here because ansible.cfg's roles_path addition for
+# shipped-profiles/roles is this repo's own config; molecule's ansible
+# provisioner generates its own ephemeral ansible.cfg (ANSIBLE_CONFIG points
+# there, not at this file) and does not carry that roles_path forward. The
+# molecule/base scenario always sets toolset_ddev: false, so a dynamic
+# include is never even attempted there — a static import would try to
+# resolve the role anyway and could fail. The one cost: --list-tasks (and so
+# SAND_ANSIBLE_TASK_TOTAL, provision.go's progress-bar denominator) shows
+# this as a single task rather than the role's five, undercounting slightly
+# only when toolset_ddev is actually enabled.
+- name: Register the ddev apt keyring and repository (shipped ddev profile)
+  ansible.builtin.include_role:
+    name: ddev
   when:
     - provision_phase | default('full') != 'finalize'
     - toolset_ddev | bool

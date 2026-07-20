@@ -60,12 +60,22 @@ const playbookVersionPrefix = "v2:"
 // rsync filter in provision.go's inGuestScript. TestGuestSyncCopiesOnlyThePlaybook
 // already pins those two together, so it now guards this hash too: change one,
 // change all three.
+//
+// shipped-profiles is included because its role content
+// (shipped-profiles/roles/claude-code, shipped-profiles/roles/ddev) is
+// imported into roles/base and roles/claude-code and actually executes
+// during the base phase — an edit there must invalidate existing bases the
+// same way an edit to roles/ itself does. (scripts/ is deliberately absent:
+// it is consumed only at finalize, which always re-syncs the playbook fresh
+// from the host mount regardless of the base's age, so it never needs to
+// participate in base-staleness detection.)
 var playbookFileset = map[string]bool{
-	"site.yml":    true,
-	"ansible.cfg": true,
-	"inventory":   true,
-	"roles":       true,
-	"group_vars":  true,
+	"site.yml":         true,
+	"ansible.cfg":      true,
+	"inventory":        true,
+	"roles":            true,
+	"group_vars":       true,
+	"shipped-profiles": true,
 }
 
 // playbookContentHash hashes exactly the fileset that reaches the guest,

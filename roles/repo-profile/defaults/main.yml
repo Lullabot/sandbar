@@ -1,0 +1,28 @@
+---
+# Defaults for the repo-checked-in provisioning-profile finalize stage
+# (strikethroo plan 18, task 03). See roles/repo-profile/tasks/main.yml for the
+# stage's contract and the invariants it must not break.
+
+# Root of the freshly cloned checkout to look inside. Defaults to the `project`
+# role's clone destination (_clone_dest, set as a host fact by roles/project,
+# which runs immediately before this stage in site.yml). It is overridable
+# directly so a molecule / staged-checkout scenario (plan 18, task 06) can point
+# this stage at a prepared checkout without going through the project clone.
+repo_profile_checkout_dir: "{{ _clone_dest | default('') }}"
+
+# The well-known, committed manifest path inside a repo's .sandbar/ directory.
+# Same filename the shipped profiles use (shipped-profiles/<tool>/profile.yml),
+# so repo authors and the shipped examples share one convention. This is the
+# single source of truth for the manifest location; the fixture e2e (task 05)
+# and molecule scenario (task 06) reference it.
+repo_profile_manifest_rel: ".sandbar/profile.yml"
+
+# Directory inside the checkout holding repo-shipped Ansible roles that the
+# manifest's `roles` group may reference by bare name. Never copied into the
+# playbook — read in place via a runtime symlink onto the `repo-roles`
+# roles-path entry (see tasks/main.yml and ansible.cfg).
+repo_profile_roles_rel: ".sandbar/roles"
+
+# Absolute manifest path, composed from the two above. Statting this is the
+# gate for the entire stage.
+repo_profile_manifest_path: "{{ repo_profile_checkout_dir }}/{{ repo_profile_manifest_rel }}"

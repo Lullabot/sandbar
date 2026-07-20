@@ -1,0 +1,13 @@
+# Shipped provisioning profile: go
+#
+# Same manifest format a repo-checked-in `.sandbar/` profile uses
+# (scripts/validate_profile.py; strikethroo plan 18, task 01) — this is one of
+# the four tools formerly hard-coded as `toolset_go` in
+# roles/base/defaults/main.yml, re-expressed as a shipped example.
+#
+# Installing the Go toolchain is exactly one apt package with no keyring, no
+# repository, and no other setup — so this profile is `packages` only, no
+# `roles`. The base phase still installs it via toolset_packages
+# (roles/base/defaults/main.yml), unchanged by this profile's existence.
+packages:
+  - golang

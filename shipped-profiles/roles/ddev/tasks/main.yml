@@ -1,0 +1,45 @@
+---
+# Registers the ddev apt keyring + repository. Extracted out of
+# roles/base/tasks/main.yml (strikethroo plan 18, task 02) into its own role
+# so this content is a shipped provisioning profile's reusable artifact (see
+# shipped-profiles/ddev/profile.yml), not a fragment inlined in the base
+# role's task list.
+#
+# Deliberately phase- and toolset-selection-agnostic: every task here is
+# idempotent (get_url without force reports changed only when bytes differ,
+# `creates:` guards the dearmor step, `copy`/`file` are naturally idempotent)
+# and none of them checks `provision_phase` or `toolset_ddev` — those are
+# call-site decisions. Today roles/base/tasks/main.yml includes this role
+# gated on `provision_phase != finalize` and `toolset_ddev`, preserving the
+# base-phase behavior exactly. A later per-clone finalize include (a
+# different phase, a different reason to run) works unchanged because
+# nothing in here assumes base-build-only context.
+- name: Download ddev GPG key
+  ansible.builtin.get_url:
+    url: https://pkg.ddev.com/apt/gpg.key
+    dest: /tmp/ddev-gpg.key
+    mode: "0644"
+
+- name: Dearmor ddev GPG key
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o /etc/apt/keyrings/ddev.gpg /tmp/ddev-gpg.key
+  args:
+    creates: /etc/apt/keyrings/ddev.gpg
+
+- name: Make the ddev keyring readable by _apt
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/ddev.gpg
+    mode: "0644" # MUST be readable by the _apt sandbox user
+
+- name: Remove temporary ddev GPG key file
+  ansible.builtin.file:
+    path: /tmp/ddev-gpg.key
+    state: absent
+
+- name: Deploy ddev APT repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/etc/apt/keyrings/ddev.gpg] https://pkg.ddev.com/apt/ * *\n"
+    dest: /etc/apt/sources.list.d/ddev.list
+    owner: root
+    group: root
+    mode: "0644"

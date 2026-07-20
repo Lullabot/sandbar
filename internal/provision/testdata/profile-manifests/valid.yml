@@ -1,0 +1,13 @@
+# Fully valid fixture: exercises all five groups with well-formed values.
+packages:
+  - cowsay
+  - jq
+services:
+  - cowsay.service
+  - foo@bar.timer
+roles:
+  - my-custom-role
+seed: .sandbar/seed.yml
+toolset:
+  - claude
+  - go

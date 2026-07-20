@@ -463,13 +463,18 @@ jobs:
 
   # Ansible role behaviour, not just YAML validity: molecule converges each role
   # in a systemd-capable Debian container (so services actually start), re-runs
-  # for idempotence, and verifies concrete outcomes. Scoped to base + samba;
-  # the other roles are documented as follow-up. Weekly + on demand, not per-PR.
+  # for idempotence, and verifies concrete outcomes. Scoped to base + samba +
+  # repo-profile (the repo-checked-in provisioning-profile finalize stage,
+  # strikethroo plan 18 task 06 — supplementary depth on individual
+  # declaration groups; lima-e2e above is the finalize stage's authoritative
+  # per-PR guard, not this job); the other roles are documented as follow-up.
+  # Weekly + on demand, not per-PR.
   molecule:
     # No custom `name:` — GitHub derives `molecule (base)` / `molecule (samba)`
-    # from the matrix when the job runs, and shows a single clean `molecule`
-    # check when it is skipped on a PR. An explicit templated name would render
-    # the raw `${{ matrix.scenario }}` on skipped runs (matrix never expands).
+    # / `molecule (repo-profile)` from the matrix when the job runs, and shows
+    # a single clean `molecule` check when it is skipped on a PR. An explicit
+    # templated name would render the raw `${{ matrix.scenario }}` on skipped
+    # runs (matrix never expands).
     runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # Advisory: KNOWN idempotence failure on the samba scenario — roles/samba's
@@ -484,7 +489,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [base, samba]
+        scenario: [base, samba, repo-profile]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 

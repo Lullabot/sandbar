@@ -113,3 +113,64 @@ func TestBaseToolsetPackages_DeselectingOmitsThePackage(t *testing.T) {
 		}
 	}
 }
+
+// TestBaseToolsetPackages_EachToolIsolated is the plan 18 regression guard for
+// the restructured shipped-profile toolset defaults (strikethroo plan 18,
+// task 02 moved claude-code under shipped-profiles/roles/ and extracted
+// ddev's apt key/repo registration into its own role) producing templated
+// output identical to the pre-restructuring baseline. Unlike
+// TestBaseToolsetPackages_DefaultSelectionMatchesToday and
+// ...DeselectingOmitsThePackage above, which only cover "everything on" and
+// "everything off", this isolates each of the four shipped tools in turn, so
+// a package incorrectly folded into (or dropped from) one tool's own
+// selection — rather than the aggregate — would be caught: claude-code
+// installs via its own script, not apt, so it contributes no package to
+// toolset_packages/devtools_ddev_packages; ddev contributes exactly "ddev";
+// go contributes exactly "golang"; java contributes exactly
+// "default-jdk-headless" — the same four facts that were true before the
+// restructuring.
+func TestBaseToolsetPackages_EachToolIsolated(t *testing.T) {
+	toolsetVar := map[string]string{
+		"claude": "toolset_claude",
+		"ddev":   "toolset_ddev",
+		"go":     "toolset_go",
+		"java":   "toolset_java",
+	}
+	// The package each tool contributes to the resolved install list, pre- and
+	// post-restructuring alike. claude-code has no entry: it contributes no
+	// apt package.
+	toolPackage := map[string]string{
+		"ddev": "ddev",
+		"go":   "golang",
+		"java": "default-jdk-headless",
+	}
+
+	for _, tool := range shippedProfileTools {
+		t.Run(tool, func(t *testing.T) {
+			extraVars := map[string]string{
+				"toolset_claude": "false",
+				"toolset_ddev":   "false",
+				"toolset_go":     "false",
+				"toolset_java":   "false",
+			}
+			extraVars[toolsetVar[tool]] = "true"
+
+			pkgs := resolveBasePackages(t, extraVars)
+
+			if want, ok := toolPackage[tool]; ok {
+				if !slices.Contains(pkgs, want) {
+					t.Errorf("toolset %q enabled alone: resolved package list missing %q: %v", tool, want, pkgs)
+				}
+			}
+
+			for other, pkg := range toolPackage {
+				if other == tool {
+					continue
+				}
+				if slices.Contains(pkgs, pkg) {
+					t.Errorf("toolset %q enabled alone: resolved package list unexpectedly contains %q (belongs to %q): %v", tool, pkg, other, pkgs)
+				}
+			}
+		})
+	}
+}
