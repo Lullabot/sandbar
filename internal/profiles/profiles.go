@@ -70,7 +70,7 @@ type Profile struct {
 // remoteTarget returns the stable, secret-free "user@host:port" identity for
 // a RemoteSSH profile, used to detect two profiles that resolve to the same
 // connection. This intentionally duplicates the trivial formatting in
-// provider.TargetConfig.Scope() (internal/provider/select.go:86) rather than
+// provider.TargetConfig.Scope() (internal/provider/select.go:101) rather than
 // importing internal/provider, which would create an import cycle (provider
 // converts a Profile into a TargetConfig, not the reverse). Keep the two
 // formats in agreement if either changes.
@@ -83,6 +83,11 @@ func (p Profile) remoteTarget() string {
 // pool on the same node — mirroring remoteTarget above. TokenFile is
 // deliberately excluded: two profiles pointing at the same pool via
 // different token files are still the same target and must still collide.
+//
+// Like remoteTarget, this duplicates the formatting in
+// provider.TargetConfig.Scope() (internal/provider/select.go:96) rather than
+// importing internal/provider, which would create an import cycle. Keep the two
+// formats in agreement if either changes.
 func (p Profile) proxmoxTarget() string {
 	return fmt.Sprintf("%s:%s/%s", p.Host, p.Node, p.Pool)
 }

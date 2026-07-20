@@ -137,7 +137,28 @@ func AttachArgv(name, guestHome, colorterm string) []string {
 	if guestHome != "" {
 		argv = append(argv, "--workdir", guestHome)
 	}
-	return append(argv, name, "bash", "-c", guestAttachExpr(colortermFlag(colorterm)))
+	return append(append(argv, name), GuestAttachArgv(colorterm)...)
+}
+
+// GuestAttachArgv returns the IN-GUEST half of the attach command — `bash -c
+// <expr>`, the three argv elements documented in AttachArgv — without any
+// host-side wrapper around it.
+//
+// It is exported for a provider whose guest transport is NOT limactl: a backend
+// that reaches the guest over plain ssh (internal/provider's Proxmox provider)
+// wraps these same three elements in `ssh -t <target> …` instead of `limactl
+// shell <name> …`. Splitting the guest half out is what stops that provider from
+// retyping guestAttachExpr — the duplication this file's header opens by calling
+// the single most destructive thing in the package to get wrong, because a copy
+// that drifts into setting destroy-unattached on `main` silently destroys the
+// user's long-running work on detach.
+//
+// The workdir has no counterpart here on purpose: `limactl shell` injects a `cd
+// <host-cwd>` that --workdir exists to override, while sshd starts the login
+// shell in the guest user's own $HOME already, so an ssh-transport provider has
+// nothing to correct.
+func GuestAttachArgv(colorterm string) []string {
+	return []string{"bash", "-c", guestAttachExpr(colortermFlag(colorterm))}
 }
 
 // colortermValue is the full set of shell-safe COLORTERM strings. Every real

@@ -426,9 +426,9 @@ No circular dependencies; every task appears in exactly one phase below.
 - ✔️ Task 003: Typed VM lifecycle and guest-agent endpoints (depends on: 001)
 - ✔️ Task 004: Node and storage statistics endpoints (depends on: 001)
 
-### Phase 3: Provider Core
+### ✅ Phase 3: Provider Core
 **Parallel Tasks:**
-- Task 005: `proxmoxProvider` — discovery, power, guest transport, IP discovery, `HostFiles` (depends on: 001, 002, 003)
+- ✔️ Task 005: `proxmoxProvider` — discovery, power, guest transport, IP discovery, `HostFiles` (depends on: 001, 002, 003)
 
 ### Phase 4: Lifecycle, Stats, Provenance, Wiring
 **Parallel Tasks:**
