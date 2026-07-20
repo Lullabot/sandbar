@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.8.0](https://github.com/Lullabot/sandbar/compare/v0.7.0...v0.8.0) (2026-07-20)
+
+
+### Features
+
+* **land:** add checkout registry and host gh adapter ([61660ea](https://github.com/Lullabot/sandbar/commit/61660eabe4834e975a6f52b1af46f25a0a1aef27))
+* **land:** commit and push an at-risk checkout from the Landing pane ([1d7cb7d](https://github.com/Lullabot/sandbar/commit/1d7cb7d6b1fc53b4764852a727001ab8364a6c82))
+* **land:** Landing pane PR cockpit ([484dc10](https://github.com/Lullabot/sandbar/commit/484dc106d0d1406e6692d791324a9d04ccb6fa6a))
+* **land:** re-read a running VM's checkouts before confirming delete ([874460e](https://github.com/Lullabot/sandbar/commit/874460e3646fc634479303210ece85e9cd3126d1))
+* **land:** rebind l=land, L=log ([d6127c2](https://github.com/Lullabot/sandbar/commit/d6127c2dbbb0c5a17f2e5126ab51fb595983470d))
+* **land:** show scan age, add r to rescan, and stop the pane overstating what it knows ([5fd34ab](https://github.com/Lullabot/sandbar/commit/5fd34abce5d65f919c4aed0fc7687535ad0661f8))
+* **land:** support the 1Password gh shell plugin ([1a26be6](https://github.com/Lullabot/sandbar/commit/1a26be6a856ed1748244e8c2730740e46f6271fd))
+* **land:** sweep parser, unlanded-work badge, delete guard ([ec91c03](https://github.com/Lullabot/sandbar/commit/ec91c03dc90f9fc45fde3614dec8d8747fe483bc))
+* **land:** sweep runtime + sand land CLI ([08e7778](https://github.com/Lullabot/sandbar/commit/08e7778aa8af8b8566b3365322f4db95d4bc6618))
+* **land:** wire checkout registry into the TUI model ([82f8480](https://github.com/Lullabot/sandbar/commit/82f84807d836e9fe3195d653050a79fbf467e9cf))
+* support a single managed fleet of VMs ([#81](https://github.com/Lullabot/sandbar/issues/81)) ([8f84dc8](https://github.com/Lullabot/sandbar/commit/8f84dc8fbaed813bc7508a0e52990d45a3d5479d))
+
+
+### Bug Fixes
+
+* **land:** correct tile footer border, right-align badge, stop false actionable ([e11a6df](https://github.com/Lullabot/sandbar/commit/e11a6df6a59f0a0d25db0a0e574d06a1dc6a6671))
+* **land:** warn on never-pushed branches at delete; test the sweep for real ([2d17020](https://github.com/Lullabot/sandbar/commit/2d17020e91739d2f0f0d9043534a943adf4f4331))
+
 ## [0.7.0](https://github.com/Lullabot/sandbar/compare/v0.6.0...v0.7.0) (2026-07-17)
 
 
