@@ -6,13 +6,27 @@ import (
 	"runtime"
 )
 
-// execRunner is the real Runner: it shells out to the gh binary on PATH.
-// This is the thin, deliberately untested-beyond-fakes wrapper the package
-// doc describes — every behavioral test fakes Runner instead.
-type execRunner struct{}
+// execLookPath is exec.LookPath, named so opplugin.go can inject a fake.
+var execLookPath = exec.LookPath
 
-func (execRunner) Output(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "gh", args...).Output()
+// execRunner is the real Runner: it runs the gh binary on PATH — or, when the
+// 1Password gh shell plugin holds this user's token, `op plugin run -- gh`
+// (see opplugin.go). cmd carries whichever prefix was resolved when the Client
+// was built; either way this is still a plain argv exec with no shell.
+//
+// The child gets NO stdin (exec leaves it as /dev/null) and its stdout is
+// captured, never inherited, so it cannot draw on — or block against — the
+// terminal a full-screen TUI is holding. That matters most on the op path,
+// where a credential prompt would otherwise have somewhere to appear.
+type execRunner struct{ cmd []string }
+
+func (r execRunner) Output(ctx context.Context, args ...string) ([]byte, error) {
+	argv := r.cmd
+	if len(argv) == 0 {
+		argv = []string{"gh"}
+	}
+	full := append(append([]string{}, argv[1:]...), args...)
+	return exec.CommandContext(ctx, argv[0], full...).Output()
 }
 
 // openerCommand picks the OS-appropriate browser-open command for goos. It is

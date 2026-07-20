@@ -537,6 +537,11 @@ func (p landingPane) ghModeLabel() string {
 		return "gh: available — Open draft PR creates it directly"
 	case !p.ghAvailability.Installed:
 		return "gh: not installed — Open draft PR opens the compare URL in your browser"
+	case p.ghAvailability.ViaOnePassword:
+		// Their gh is fine and their token is in 1Password — telling them to
+		// run `gh auth login` would send them to fix the wrong thing.
+		return "gh: 1Password did not authorize (unlock 1Password, or export GH_TOKEN) — " +
+			"Open draft PR opens the compare URL in your browser"
 	default:
 		return "gh: not authenticated (run `gh auth login`, or export GH_TOKEN) — " +
 			"Open draft PR opens the compare URL in your browser"

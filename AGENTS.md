@@ -442,8 +442,16 @@ every bullet, not the constraint itself.
   similar injectors) is invisible to sand, which reports `gh: not
   authenticated` even though the same command works at the user's prompt.
   That is the documented trade, not a bug: do NOT "fix" it by re-invoking
-  `gh` through `sh -c` or the user's login shell. The supported fixes are
-  `gh auth login` or `GH_TOKEN` in sand's own environment.
+  `gh` through `sh -c` or the user's login shell.
+  The 1Password shell plugin specifically IS supported (`internal/landgh/
+  opplugin.go`), and supporting it cost nothing here: `op plugin run -- gh
+  <args...>` is an ordinary argv invocation, so sand simply prepends those
+  elements — no shell is introduced and every argument still arrives as its
+  own element. Detection is FILE-ONLY (`~/.config/op/plugins.sh` plus `op` on
+  PATH): probing by running `op` could raise an authorization prompt
+  underneath the full-screen TUI, so it must stay a pure filesystem read. An
+  explicit `GH_TOKEN`/`GITHUB_TOKEN` in sand's environment bypasses the
+  plugin path entirely.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 

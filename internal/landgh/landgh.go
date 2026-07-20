@@ -64,14 +64,27 @@ type Client struct {
 	run      Runner
 	open     Opener
 	lookPath func(file string) (string, error)
+
+	// ghBinary is the executable Availability should look for on PATH: "gh"
+	// normally, or "op" when the 1Password plugin is what carries the token
+	// (opplugin.go). Without this the probe would hunt for a bare gh that a
+	// plugin user may not even have, and report "not installed" for a setup
+	// that works. Empty means "gh", so a zero-value Client (every test that
+	// builds one by hand) behaves exactly as it did before.
+	ghBinary string
 }
 
 // New returns a Client backed by the real gh binary on PATH and the host
 // OS's browser opener.
 func New() *Client {
+	// Resolved once per Client: whether this user's gh token lives behind the
+	// 1Password shell plugin cannot change mid-session without them editing
+	// their shell config. See opplugin.go.
+	cmd := resolveGhCommand()
 	return &Client{
-		run:      execRunner{},
+		run:      execRunner{cmd: cmd},
 		open:     osOpen,
 		lookPath: exec.LookPath,
+		ghBinary: cmd[0],
 	}
 }

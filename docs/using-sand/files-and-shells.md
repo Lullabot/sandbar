@@ -140,17 +140,40 @@ problems:
 
 - **`gh: not installed`** — no `gh` on your `PATH`.
 - **`gh: not authenticated`** — `gh` is there, but `gh auth status` failed.
+  Run `gh auth login`, or export `GH_TOKEN` in the environment you start
+  `sand` from.
+- **`gh: 1Password did not authorize`** — you use the 1Password `gh` shell
+  plugin (below) and the vault did not hand over the token. Unlock 1Password
+  and reopen the pane.
 
-The second one catches people out when `gh` clearly works at their prompt.
-sand runs `gh` **directly, never through a shell**, so a credential that only
-exists as a shell alias or wrapper function — the shape the 1Password shell
-plugin and similar credential injectors use — is invisible to it. The same
-applies to every `gh` call Landing would make afterwards, so this isn't a
-false alarm: creating the PR would fail too.
+### 1Password shell plugin
 
-To fix it, make the credential visible to a plain process launch: either run
-`gh auth login`, or export `GH_TOKEN` in the environment you start `sand`
-from.
+The [1Password `gh` shell plugin](https://developer.1password.com/docs/cli/shell-plugins/github/)
+is supported directly — no configuration needed. If you have it set up, sand
+runs `op plugin run -- gh …` instead of bare `gh`, so your token comes from
+the vault exactly as it does at your own prompt.
+
+sand detects it by reading `~/.config/op/plugins.sh` (the file `op plugin init`
+generates) and checking for `op` on your `PATH`. Detection is **file-only** —
+sand never runs `op` to find out, precisely because that could pop an
+authorization prompt underneath the full-screen UI.
+
+Two things worth knowing:
+
+- **`GH_TOKEN` wins.** If `GH_TOKEN` or `GITHUB_TOKEN` is set in sand's
+  environment, sand uses plain `gh` and ignores the plugin entirely. That is
+  the escape hatch if you would rather sand not touch `op`.
+- **1Password may need to authorize.** The first Landing action in a while can
+  require unlocking 1Password. sand gives the `op` process no terminal, so a
+  prompt can never corrupt the display — but it does mean an authorization
+  that can only be answered in the terminal will time out. Unlock 1Password
+  first and reopen the pane.
+
+Why any of this is needed: sand runs `gh` **directly, never through a shell**,
+because the branch names and repo slugs it passes come from inside the VM and
+must not be able to reach a shell interpreter. The plugin's usual `gh` alias
+is therefore invisible to sand — but `op plugin run -- gh …` is a plain
+command, not a shell trick, so supporting it costs nothing in safety.
 
 The token needs **`Pull requests: write`** (fine-grained), or `repo` /
 `public_repo` (classic) — sand resolves the base branch and the head commit's
