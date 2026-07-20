@@ -59,12 +59,23 @@ func deleteGuardExtra(vc checkouts.VMCheckouts, found bool) string {
 	}
 
 	var unpushedCommits int
+	var neverPushed int
 	var dirty bool
 	var pushedCount int
 	for _, c := range vc.Checkouts {
 		switch c.PushState {
-		case checkouts.PushStateUnpushed, checkouts.PushStateNever:
+		case checkouts.PushStateUnpushed:
 			unpushedCommits += c.Ahead
+		case checkouts.PushStateNever:
+			// Counted as BRANCHES, not commits, and deliberately separately
+			// from the unpushed case above. Checkout.Ahead is defined 0 for a
+			// never-pushed branch — there is no tracking ref to count against
+			// — so adding it to a commit total contributed exactly nothing,
+			// and a clean, committed, never-pushed branch produced an EMPTY
+			// guard: deleting the VM destroyed those commits with no warning
+			// at all. It only ever appeared to work because such a checkout is
+			// usually dirty too, and the dirty clause masked the miscount.
+			neverPushed++
 		case checkouts.PushStatePushed:
 			// DELIBERATELY not filtered through Checkout.NothingToLand, unlike
 			// the tile badge and the Landing pane. Those two answer "is there
@@ -83,6 +94,10 @@ func deleteGuardExtra(vc checkouts.VMCheckouts, found bool) string {
 	var lost []string
 	if unpushedCommits > 0 {
 		lost = append(lost, fmt.Sprintf("%d unpushed %s", unpushedCommits, pluralize(unpushedCommits, "commit", "commits")))
+	}
+	if neverPushed > 0 {
+		lost = append(lost, fmt.Sprintf("%d never-pushed %s",
+			neverPushed, pluralize(neverPushed, "branch", "branches")))
 	}
 	if dirty {
 		lost = append(lost, "uncommitted changes")
