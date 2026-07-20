@@ -430,12 +430,12 @@ No circular dependencies; every task appears in exactly one phase below.
 **Parallel Tasks:**
 - ✔️ Task 005: `proxmoxProvider` — discovery, power, guest transport, IP discovery, `HostFiles` (depends on: 001, 002, 003)
 
-### Phase 4: Lifecycle, Stats, Provenance, Wiring
+### ✅ Phase 4: Lifecycle, Stats, Provenance, Wiring
 **Parallel Tasks:**
-- Task 006: Base template build and Create/Recreate/Reset (depends on: 003, 005)
-- Task 007: `HostResources` and honest per-VM disk usage (depends on: 004, 005)
-- Task 008: `Provenancer` via PVE tags and description (depends on: 003, 005)
-- Task 009: Fleet builder and CLI profile wiring (depends on: 002, 005)
+- ✔️ Task 006: Base template build and Create/Recreate/Reset (depends on: 003, 005)
+- ✔️ Task 007: `HostResources` and honest per-VM disk usage (depends on: 004, 005)
+- ✔️ Task 008: `Provenancer` via PVE tags and description (depends on: 003, 005)
+- ✔️ Task 009: Fleet builder and CLI profile wiring (depends on: 002, 005)
 
 ### Phase 5: Templates and End-to-End Verification
 **Parallel Tasks:**
