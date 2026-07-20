@@ -293,6 +293,11 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 	index := p.indexOf(resources)
 	p.setIndex(index)
 
+	// Fetched ONCE for the whole listing (see diskUsedByVMID) rather than once
+	// per VM, so a fleet listing costs one extra round trip total, not one per
+	// tile.
+	diskUsed := p.diskUsedIndex(ctx)
+
 	out := make([]vm.VM, 0, len(index))
 	for _, r := range resources {
 		// Emit exactly the resource the index chose for each name, so a listing
@@ -300,7 +305,7 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 		if id, ok := index[r.Name]; !ok || id != r.VMID {
 			continue
 		}
-		out = append(out, p.resourceVM(r))
+		out = append(out, p.resourceVM(r, diskUsed))
 	}
 	return out, nil
 }
@@ -341,7 +346,7 @@ func (p *proxmoxProvider) Get(name string) (vm.VM, error) {
 	if err != nil {
 		return vm.VM{}, err
 	}
-	return p.statusVM(name, st), nil
+	return p.statusVM(name, st, p.diskUsedIndex(ctx)), nil
 }
 
 // Status reports one instance's status in the vocabulary the UI and provisioner
@@ -419,28 +424,75 @@ func (p *proxmoxProvider) lookupVMID(ctx context.Context, name string) (int, err
 	return vmid, nil
 }
 
-// resourceVM converts a cluster-listing entry into sand's VM record.
-func (p *proxmoxProvider) resourceVM(r pve.VMResource) vm.VM {
+// resourceVM converts a cluster-listing entry into sand's VM record. diskUsed
+// is this call's storage-content index (see diskUsedIndex); a VM absent from
+// it (the fetch failed, or it simply owns no volume yet) gets DiskUsed=="",
+// the same "unknown" byteString already uses for Memory/Disk.
+func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64) vm.VM {
 	return vm.VM{
-		Name:   r.Name,
-		Status: limaStatus(r.Status),
-		CPUs:   int(r.CPUs),
-		Memory: byteString(r.MaxMem),
-		Disk:   byteString(r.MaxDisk),
-		Dir:    p.instanceDir(r.Name),
+		Name:     r.Name,
+		Status:   limaStatus(r.Status),
+		CPUs:     int(r.CPUs),
+		Memory:   byteString(r.MaxMem),
+		Disk:     byteString(r.MaxDisk),
+		DiskUsed: byteString(diskUsed[r.VMID]),
+		Dir:      p.instanceDir(r.Name),
 	}
 }
 
 // statusVM converts a single-VM status reading into sand's VM record.
-func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus) vm.VM {
+// diskUsed is this call's storage-content index (see diskUsedIndex).
+func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64) vm.VM {
 	return vm.VM{
-		Name:   name,
-		Status: limaStatus(st.Status),
-		CPUs:   int(st.CPUs),
-		Memory: byteString(st.MaxMem),
-		Disk:   byteString(st.MaxDisk),
-		Dir:    p.instanceDir(name),
+		Name:     name,
+		Status:   limaStatus(st.Status),
+		CPUs:     int(st.CPUs),
+		Memory:   byteString(st.MaxMem),
+		Disk:     byteString(st.MaxDisk),
+		DiskUsed: byteString(diskUsed[st.VMID]),
+		Dir:      p.instanceDir(name),
 	}
+}
+
+// diskUsedIndex fetches this provider's configured storage's content listing
+// ONCE and reduces it to each owning VM's disk usage (diskUsedByVMID). PVE
+// hardcodes a running QEMU guest's own `disk` field to 0 in status/current —
+// upstream literally writes `$d->{disk} = 0; # no info available` — and
+// `maxdisk` is the boot disk's configured size, not actual allocation, so this
+// listing is the only honest source. A failed fetch (storage down, a token
+// without Datastore.Audit) degrades to a nil map — every VM's DiskUsed falls
+// back to byteString's "" ("unknown") — rather than failing the whole List/Get
+// over a reading the UI already treats as optional.
+func (p *proxmoxProvider) diskUsedIndex(ctx context.Context) map[int]int64 {
+	if p.storage == "" {
+		return nil
+	}
+	items, err := p.client.StorageContent(ctx, p.storage)
+	if err != nil {
+		return nil
+	}
+	return diskUsedByVMID(items)
+}
+
+// diskUsedByVMID sums each owning VMID's "images"-content volumes (the boot
+// disk and, where present, the cloud-init drive — both classified "images" by
+// PVE) into a per-VM total allocated size. ISO/vztmpl/backup content and any
+// volume with no owning VMID (a shared, unattached resource) are excluded.
+//
+// Indexed by owning VMID — which StorageContentItem reports directly — rather
+// than by matching each volume's volid string: the volid's own shape
+// ("vm-<vmid>-disk-N" for LVM-thin, "<vmid>/vm-<vmid>-disk-N.qcow2" for a
+// dir-backed store, …) varies by storage plugin, so parsing it would be
+// strictly more fragile than the field PVE already hands over.
+func diskUsedByVMID(items []pve.StorageContentItem) map[int]int64 {
+	out := make(map[int]int64, len(items))
+	for _, it := range items {
+		if it.VMID == 0 || it.Content != "images" {
+			continue
+		}
+		out[it.VMID] += it.Size
+	}
+	return out
 }
 
 // instanceDir is the per-VM state directory, and it is the whole of what
@@ -1094,13 +1146,43 @@ func (p *proxmoxProvider) GuestHome(vm.VM) string {
 // into the same account.
 func (p *proxmoxProvider) HostUser() string { return p.ciUser }
 
-// HostResources reports the zero value: every field is "unknown", which the
-// board header treats as a missing clause and the low-capacity warning refuses
-// to compute a percentage from. The node's real CPU/memory/storage figures are
-// available from the API and are wired up separately; until then a fabricated
-// zero would read as a node with no capacity at all and fire a false low-disk
-// warning. See Provider.HostResources.
-func (p *proxmoxProvider) HostResources() HostResources { return HostResources{} }
+// HostResources reports node capacity from the Proxmox API: CPU count and
+// total memory from GET /nodes/{node}/status, and disk free/total from the
+// CONFIGURED VM STORAGE's own status — the meaningful denominator for "how
+// much room is left for sandboxes" — never the node's own rootfs.
+//
+// Every field the API does not supply is left 0 ("unknown"): the board header
+// treats 0 as a missing clause and drops it, and the low-capacity warning
+// refuses to compute a percentage from it. A fabricated real-looking zero
+// would instead read as "0 bytes free" and fire a false low-disk warning —
+// this is the single most important correctness property of this method.
+//
+// The interface has no error return, so a failed sample (a node this token
+// cannot Sys.Audit, an unreachable storage) degrades to zeros rather than
+// propagating. This runs on the TUI's refresh timer, so it does not log on
+// every call.
+func (p *proxmoxProvider) HostResources() HostResources {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
+
+	var hr HostResources
+	if ns, err := p.client.NodeStatus(ctx); err == nil {
+		hr.CPUs = ns.CPUInfo.CPUs
+		hr.MemBytes = ns.Memory.Total
+	}
+	// Do NOT compute headroom as total-used: PVE defines
+	// memused = memtotal - memavailable, so used+free != total. Memory
+	// headroom is deliberately not surfaced here at all (see ns.Memory.
+	// Available if a future caller wants it) — HostResources only ever
+	// carries the total.
+	if p.storage != "" {
+		if ss, err := p.client.StorageStatus(ctx, p.storage); err == nil && ss.HasSizeReading() {
+			hr.DiskFreeBytes = ss.Avail
+			hr.DiskTotalBytes = ss.Total
+		}
+	}
+	return hr
+}
 
 // HostFiles returns the local, per-endpoint state directory that stands in for
 // "the host where limactl runs" — see proxmoxfiles.go, which explains why that
