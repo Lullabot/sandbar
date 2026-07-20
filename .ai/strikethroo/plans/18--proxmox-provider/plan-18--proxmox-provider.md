@@ -437,10 +437,10 @@ No circular dependencies; every task appears in exactly one phase below.
 - ✔️ Task 008: `Provenancer` via PVE tags and description (depends on: 003, 005)
 - ✔️ Task 009: Fleet builder and CLI profile wiring (depends on: 002, 005)
 
-### Phase 5: Templates and End-to-End Verification
+### ✅ Phase 5: Templates and End-to-End Verification
 **Parallel Tasks:**
-- Task 010: PR #70 golden-template methods (depends on: 006)
-- Task 011: Opt-in e2e suite including the pool-isolation proof (depends on: 006, 007, 008, 009)
+- ✔️ Task 010: PR #70 golden-template methods (depends on: 006)
+- ✔️ Task 011: Opt-in e2e suite including the pool-isolation proof (depends on: 006, 007, 008, 009)
 
 ### Phase 6: Documentation
 **Parallel Tasks:**
