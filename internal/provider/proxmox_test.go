@@ -268,13 +268,55 @@ func TestProxmoxHostUserIsGuestLoginUser(t *testing.T) {
 	}
 }
 
-// TestProxmoxHostResourcesIsUnknown pins the zero value while the real sampling
-// is unimplemented: every field is "unknown", which the header drops, rather
-// than a fabricated zero that would read as no capacity at all.
-func TestProxmoxHostResourcesIsUnknown(t *testing.T) {
-	p := newProxmoxForTest(t, newPVEMock(t))
+// TestProxmoxHostResourcesReadsNodeAndConfiguredStorage pins the happy path:
+// CPUs/MemBytes come from /nodes/{node}/status (cpuinfo.cpus, memory.total —
+// NOT a computed total-used headroom), and disk free/total come from the
+// CONFIGURED VM storage's own status endpoint, never the node's rootfs.
+func TestProxmoxHostResourcesReadsNodeAndConfiguredStorage(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/nodes/pve1/status", `{"cpuinfo":{"cpus":8},"memory":{"total":34359738368,"used":30000000000,"free":1000000000,"available":4359738368}}`)
+	m.data("/nodes/pve1/storage/local-lvm/status", `{"total":1000000000000,"avail":400000000000,"active":1,"enabled":1,"content":"images"}`)
+	p := newProxmoxForTest(t, m)
+
+	got := p.HostResources()
+	want := HostResources{CPUs: 8, MemBytes: 34359738368, DiskFreeBytes: 400000000000, DiskTotalBytes: 1000000000000}
+	if got != want {
+		t.Fatalf("HostResources() = %+v; want %+v", got, want)
+	}
+}
+
+// TestProxmoxHostResourcesInactiveStorageLeavesDiskUnknown pins the single
+// most important correctness property of this method: an enabled-but-
+// unreachable storage OMITS its size fields (decoding to the Go zero value),
+// and that must render as "unknown" (0), never as a fabricated "0 bytes free"
+// that would trip the low-capacity warning falsely.
+func TestProxmoxHostResourcesInactiveStorageLeavesDiskUnknown(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/nodes/pve1/status", `{"cpuinfo":{"cpus":8},"memory":{"total":34359738368}}`)
+	m.data("/nodes/pve1/storage/local-lvm/status", `{"active":0,"enabled":1,"content":"images"}`)
+	p := newProxmoxForTest(t, m)
+
+	got := p.HostResources()
+	if got.DiskFreeBytes != 0 || got.DiskTotalBytes != 0 {
+		t.Fatalf("HostResources() = %+v; want DiskFreeBytes/DiskTotalBytes 0 for an inactive storage, not a fabricated zero", got)
+	}
+	if got.CPUs != 8 || got.MemBytes != 34359738368 {
+		t.Fatalf("HostResources() = %+v; want CPUs/MemBytes still populated from the node", got)
+	}
+}
+
+// TestProxmoxHostResourcesDegradesToZeroOnAPIFailure proves the interface's
+// no-error contract: a node this token cannot Sys.Audit (or an unreachable
+// storage endpoint) yields zeroed stats, never a propagated error that would
+// break the whole refresh — this runs on the TUI's refresh timer.
+func TestProxmoxHostResourcesDegradesToZeroOnAPIFailure(t *testing.T) {
+	m := newPVEMock(t)
+	m.fail("/nodes/pve1/status", http.StatusForbidden, "")
+	m.fail("/nodes/pve1/storage/local-lvm/status", http.StatusForbidden, "")
+	p := newProxmoxForTest(t, m)
+
 	if got := p.HostResources(); got != (HostResources{}) {
-		t.Fatalf("HostResources() = %+v; want the zero value", got)
+		t.Fatalf("HostResources() = %+v; want the zero value on API failure", got)
 	}
 }
 
@@ -327,6 +369,101 @@ func TestProxmoxListReturnsOnlyPoolQemuOnThisNode(t *testing.T) {
 	}
 	if want := filepath.Join(p.files.LimaHome(), "web"); web.Dir != want {
 		t.Errorf("Dir = %q; want the per-VM state dir %q", web.Dir, want)
+	}
+}
+
+// storageContentFixture is the fixture StorageContent returns for the
+// configured "local-lvm" storage: web's (VMID 100) boot disk and cloud-init
+// drive, api's (VMID 101) boot disk, an ISO with no owning VMID at all (a
+// shared, unattached resource), and a backup of web's disk (content "backup",
+// not "images") — the two entries that must NOT be folded into any VM's
+// DiskUsed.
+const storageContentFixture = `[
+  {"volid":"local-lvm:vm-100-disk-0","content":"images","format":"raw","size":53687091200,"vmid":100},
+  {"volid":"local-lvm:vm-100-cloudinit","content":"images","format":"raw","size":4194304,"vmid":100},
+  {"volid":"local-lvm:vm-101-disk-0","content":"images","format":"raw","size":10737418240,"vmid":101},
+  {"volid":"local-lvm:iso/debian-12.iso","content":"iso","format":"iso","size":700000000},
+  {"volid":"local-lvm:backup/vzdump-qemu-100.vma.zst","content":"backup","format":"vma.zst","size":999999999,"vmid":100}
+]`
+
+// TestProxmoxListPopulatesDiskUsedFromStorageContent is the acceptance
+// criterion's mock-server test: PVE hardcodes a running QEMU guest's own
+// `disk` field to 0 (status/current), so DiskUsed must come from the
+// storage's content listing instead — summed per owning VMID over "images"
+// content only, which is why web's DiskUsed is boot-disk + cloud-init while
+// the unowned ISO and the "backup"-content entry never contribute to anyone's
+// total.
+func TestProxmoxListPopulatesDiskUsedFromStorageContent(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	m.data("/nodes/pve1/storage/local-lvm/content", storageContentFixture)
+	p := newProxmoxForTest(t, m)
+
+	vms, err := p.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var web, api vm.VM
+	for _, v := range vms {
+		switch v.Name {
+		case "web":
+			web = v
+		case "api":
+			api = v
+		}
+	}
+	if want := "53691285504"; web.DiskUsed != want { // 53687091200 + 4194304
+		t.Fatalf("web.DiskUsed = %q; want %q (boot disk + cloud-init, backup and ISO excluded)", web.DiskUsed, want)
+	}
+	if want := "10737418240"; api.DiskUsed != want {
+		t.Fatalf("api.DiskUsed = %q; want %q", api.DiskUsed, want)
+	}
+	if n := m.count("/nodes/pve1/storage/local-lvm/content"); n != 1 {
+		t.Errorf("storage content fetched %d times for a 2-VM listing; want exactly 1 (fetched once per List, not once per VM)", n)
+	}
+}
+
+// TestProxmoxListDiskUsedUnknownWhenStorageContentFails proves a failed
+// storage-content read degrades every VM's DiskUsed to "" (unknown) rather
+// than failing the whole listing or fabricating a zero.
+func TestProxmoxListDiskUsedUnknownWhenStorageContentFails(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	m.fail("/nodes/pve1/storage/local-lvm/content", http.StatusInternalServerError, "storage unavailable")
+	p := newProxmoxForTest(t, m)
+
+	vms, err := p.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, v := range vms {
+		if v.DiskUsed != "" {
+			t.Errorf("%s.DiskUsed = %q; want \"\" (unknown) when storage content cannot be read", v.Name, v.DiskUsed)
+		}
+	}
+}
+
+// TestProxmoxGetPopulatesDiskUsed proves the single-VM lookup path gets the
+// same treatment as List, per the task's explicit requirement that both fill
+// in DiskUsed.
+func TestProxmoxGetPopulatesDiskUsed(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	m.data("/nodes/pve1/qemu/100/status/current",
+		`{"vmid":100,"name":"web","status":"running","maxmem":8589934592,"maxdisk":107374182400,"cpus":4}`)
+	m.data("/nodes/pve1/storage/local-lvm/content", storageContentFixture)
+	p := newProxmoxForTest(t, m)
+
+	if _, err := p.List(); err != nil { // warm the name->VMID index
+		t.Fatalf("List: %v", err)
+	}
+	got, err := p.Get("web")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if want := "53691285504"; got.DiskUsed != want {
+		t.Fatalf("Get(web).DiskUsed = %q; want %q", got.DiskUsed, want)
 	}
 }
 

@@ -465,3 +465,34 @@ func TestRefreshCmdNoMemAvailReadingLeavesFieldZero(t *testing.T) {
 		t.Fatalf("hostMemAvail = %d, want 0 when the host has no /proc/meminfo", msg.hostMemAvail)
 	}
 }
+
+// TestRefreshCmdDoesNotClobberProviderPopulatedDiskUsed proves the per-VM
+// disk-usage guard a non-Lima provider needs: the Proxmox provider's own
+// List() fills in DiskUsed from the storage's content listing (task 7), but
+// this loop ALSO runs its ordinary host-side probe (diskUsedBytes, backed by
+// hf.DiskAllocBytes) over every listed VM's Dir looking for a Lima-shaped
+// `<dir>/disk` file — which does not exist for a Proxmox VM (proxmoxFiles.
+// DiskAllocBytes always answers -1, "cannot be measured"). That probe must
+// never overwrite an already-honest reading with a fabricated absence: the
+// existing `n > 0` guard here already treats -1 (and 0) as "no reading,
+// leave DiskUsed alone", so a Proxmox-populated DiskUsed survives untouched.
+// This pins that behaviour with a test rather than changing any code — see
+// the diskUsedBytes call in refreshCmd, which is exactly this guard.
+func TestRefreshCmdDoesNotClobberProviderPopulatedDiskUsed(t *testing.T) {
+	prov := &providerfake.Provider{
+		ListFunc: func() ([]vm.VM, error) {
+			// Dir is empty, exactly like a backend with no local qcow2 file to
+			// stat — diskUsedBytes short-circuits to -1 for this VM regardless
+			// of HostFiles, the same as proxmoxFiles.DiskAllocBytes always does.
+			return []vm.VM{{Name: "web", DiskUsed: "53691285504", Dir: ""}}, nil
+		},
+	}
+
+	msg := refreshCmd(registry.LocalScope, prov, lima.LocalFiles(), false)().(vmsLoadedMsg)
+	if len(msg.vms) != 1 {
+		t.Fatalf("vms = %v; want exactly one", msg.vms)
+	}
+	if got := msg.vms[0].DiskUsed; got != "53691285504" {
+		t.Fatalf("DiskUsed = %q; want the provider-populated reading preserved, not overwritten by the absent host-side probe", got)
+	}
+}
