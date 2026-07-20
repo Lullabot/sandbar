@@ -1496,7 +1496,11 @@ environment variables for this; those are <strong>removed</strong> — see
   not an identifier.</li>
 <li>A <strong>type</strong> — <code>local</code> or <code>remote-ssh</code>.</li>
 <li><strong>Connection details</strong> — for <code>remote-ssh</code> only: host, SSH user, port, an
-  optional path to a private key file, and an optional remote <code>LIMA_HOME</code>.</li>
+  optional path to a private key file, and an optional remote <code>LIMA_HOME</code>.
+  Setting a profile's <code>lima_home</code> scopes both the remote instance discovery
+  (determining which instances <code>limactl list</code> returns) and file-based state reads
+  (base version stamp, provenance markers). Different profiles can point at the
+  same remote host but use different <code>LIMA_HOME</code> paths, isolating their instances.</li>
 <li>An <strong>enabled</strong> flag.</li>
 </ul>
 <p>There is always exactly one <strong>Local</strong> profile — permanent, created
@@ -1534,6 +1538,13 @@ it's how <code>sand</code> tracks "the last profile you used" and which managed 
 belong to which profile without losing track when you rename one. <code>name</code> is
 the label you see and address the profile by from the CLI (<code>--profile</code>) and
 in the TUI.</p>
+<p><code>lima_home</code> (optional, remote profiles only) is the remote host's <code>LIMA_HOME</code>
+directory (where Lima stores instance state). If unset, it defaults to <code>.lima</code>
+(Lima's own default, relative to the remote user's home directory). <strong>Setting
+<code>lima_home</code> affects both discovery and file reads:</strong> every <code>limactl</code> command
+and provenance marker lookup on the remote host uses this directory. This lets
+you isolate instances on a shared host by pointing different profiles at
+different <code>LIMA_HOME</code> paths.</p>
 <p>Two enabled <code>remote-ssh</code> profiles may not point at the same
 <code>user@host:port</code> — <code>sand</code> refuses to save that, so the same physical target
 is never double-counted as two separate fleet members. There can also only
