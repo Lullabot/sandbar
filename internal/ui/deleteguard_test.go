@@ -2,11 +2,13 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -179,18 +181,20 @@ func (r fatalOnGuestContact) StreamOut(context.Context, io.Reader, io.Writer, ..
 	return nil
 }
 
-// TestDeleteGuardNoGuestContact drives the REAL 'd' verb (commandreg.go),
-// over a VM whose cached checkout registry has plenty to warn about (so the
-// guard's copy-composition path actually runs, not a no-op early return),
-// and asserts the confirmation is raised with the expected warning — all
-// while every guest-reaching Runner method would fail the test if invoked.
-// The test passing IS the proof: had the guard done anything but read
-// m.checkouts (a mutex-guarded, host-only, in-memory value), one of
-// fatalOnGuestContact's methods would have fired.
-func TestDeleteGuardNoGuestContact(t *testing.T) {
-	cli := lima.New(fatalOnGuestContact{t: t})
-	m := newTestModelWithCli(t, cli)
-
+// TestDeleteGuardRefreshesARunningVM drives the REAL 'd' verb (commandreg.go)
+// over a RUNNING VM whose cached checkout registry has plenty to warn about,
+// and pins the freshness behaviour: the overlay is raised immediately from
+// cache (so the UI never stalls), a re-read is dispatched, and Confirm is HELD
+// until that re-read lands.
+//
+// The re-read exists because a running VM's cached entry can be a whole
+// sweepInterval stale — precisely the window in which someone edits a file and
+// then reaches for delete. It runs the same read-only pass that VM's own sweep
+// loop is already running, and only ever against a VM that is already up; see
+// TestDeleteGuardNeverSweepsAStoppedVM for the half of the invariant that did
+// NOT change.
+func TestDeleteGuardRefreshesARunningVM(t *testing.T) {
+	m := newTestModel(t)
 	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 
 	if err := m.checkouts.Set(registry.LocalScope, "claude", checkouts.VMCheckouts{
@@ -205,16 +209,118 @@ func TestDeleteGuardNoGuestContact(t *testing.T) {
 	if m.confirm == nil {
 		t.Fatal("pressing 'd' should raise the confirm overlay")
 	}
-	if cmd != nil {
-		// Raising the overlay must not itself dispatch anything — the actual
-		// delete only runs once the user confirms with 'y'. This also means
-		// deleteCmd's closure (which WOULD call the provider's Delete) is
-		// never invoked by this test either.
-		t.Fatal("raising the delete confirm overlay must not itself dispatch a command")
+	if cmd == nil {
+		t.Fatal("a running VM's delete confirm should dispatch the freshness re-read")
 	}
+	if !m.confirm.checking {
+		t.Fatal("the confirm should be marked as still checking while the re-read is in flight")
+	}
+	// The overlay is populated from cache straight away rather than waiting.
 	want := `Delete "claude"? 3 unpushed commits + uncommitted changes (only in this VM — lost on delete).`
 	if m.confirm.prompt != want {
 		t.Fatalf("confirm prompt = %q, want %q", m.confirm.prompt, want)
+	}
+	// ...and it says so, instead of looking like a dead 'y' key.
+	wide := resized(m, 160, 40)
+	if !strings.Contains(ansi.Strip(wide.confirmView()), "checking for recent changes") {
+		t.Fatalf("confirm overlay should say it is still checking, got %q", ansi.Strip(wide.confirmView()))
+	}
+
+	// Confirm is REFUSED while the check is in flight: answering now would be
+	// answering a question that is about to change.
+	after, cmd2 := m.Update(runeKey('y'))
+	m2 := after.(model)
+	if m2.confirm == nil {
+		t.Fatal("'y' during the freshness check must not dismiss the overlay")
+	}
+	if cmd2 != nil {
+		t.Fatal("'y' during the freshness check must not dispatch the delete")
+	}
+	// Cancel still works throughout — the hold must never trap the user.
+	after, _ = m2.Update(runeKey('n'))
+	if after.(model).confirm != nil {
+		t.Fatal("'n' must cancel even while the freshness check is in flight")
+	}
+}
+
+// TestDeleteGuardRefreshFolds pins what the landed re-read does: it rewrites
+// the prompt from the FRESH data and releases Confirm. The seeded cache says
+// there is nothing at risk; the refresh finds uncommitted work — exactly the
+// stale-cache case the re-read exists for.
+func TestDeleteGuardRefreshFolds(t *testing.T) {
+	m := newTestModel(t)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
+	if err := m.checkouts.Set(registry.LocalScope, "claude", checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{{Path: "/home/user/repo", PushState: checkouts.PushStatePushed}},
+	}); err != nil {
+		t.Fatalf("seed checkout registry: %v", err)
+	}
+	m, _ = pressDispatch(t, m, runeKey('d'))
+
+	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{
+		scope: registry.LocalScope, vm: "claude",
+		vc: checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 5},
+		}},
+	})
+	if m.confirm.checking {
+		t.Fatal("the landed re-read must release the Confirm hold")
+	}
+	if !strings.Contains(m.confirm.prompt, "2 unpushed") {
+		t.Fatalf("prompt = %q, want it rewritten from the FRESH data", m.confirm.prompt)
+	}
+	// The refresh is a real sweep result, so it lands in the shared registry
+	// rather than being a private read only the prompt saw.
+	vc, _ := m.checkouts.Get(registry.LocalScope, "claude")
+	if len(vc.Checkouts) != 1 || vc.Checkouts[0].Dirty != 5 {
+		t.Fatalf("registry not updated from the refresh: %+v", vc)
+	}
+}
+
+// TestDeleteGuardRefreshFailureKeepsCacheAndSaysSo pins the degradation path:
+// a guest that will not answer a read-only sweep is exactly the one whose
+// cached picture deserves suspicion, so the guard keeps what it had but must
+// not present it as a live answer.
+func TestDeleteGuardRefreshFailureKeepsCacheAndSaysSo(t *testing.T) {
+	m := newTestModel(t)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
+	m, _ = pressDispatch(t, m, runeKey('d'))
+	before := m.confirm.prompt
+
+	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{
+		scope: registry.LocalScope, vm: "claude", err: errors.New("guest went away"),
+	})
+	if m.confirm.checking {
+		t.Fatal("a failed re-read must still release the Confirm hold, or the overlay traps the user")
+	}
+	if !strings.Contains(m.confirm.prompt, "could not re-check") {
+		t.Fatalf("prompt = %q, want it to admit the re-check did not land", m.confirm.prompt)
+	}
+	if !strings.HasPrefix(m.confirm.prompt, before) {
+		t.Fatalf("prompt = %q, want the cached answer retained ahead of the caveat", m.confirm.prompt)
+	}
+}
+
+// TestDeleteGuardRefreshIgnoresStaleResults pins the (scope, vm) guard: a
+// re-read landing after the user moved on must not rewrite whatever
+// confirmation is on screen now.
+func TestDeleteGuardRefreshIgnoresStaleResults(t *testing.T) {
+	m := newTestModel(t)
+	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
+	m, _ = pressDispatch(t, m, runeKey('d'))
+	before := m.confirm.prompt
+
+	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{
+		scope: registry.LocalScope, vm: "some-other-vm",
+		vc: checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+			{Path: "/x", PushState: checkouts.PushStateUnpushed, Ahead: 99},
+		}},
+	})
+	if m.confirm.prompt != before {
+		t.Fatalf("a result for another VM rewrote this prompt: %q", m.confirm.prompt)
+	}
+	if !m.confirm.checking {
+		t.Fatal("a stale result must not release this confirmation's hold")
 	}
 }
 
@@ -272,4 +378,16 @@ func TestDeleteGuardCountsDefaultBranchCheckouts(t *testing.T) {
 	if !strings.Contains(got, "uncommitted") {
 		t.Fatalf("guard = %q, want it to name the uncommitted changes on the default branch", got)
 	}
+}
+
+// settleDeleteGuard completes a running VM's in-flight delete-guard re-read
+// using whatever the registry already holds, for tests whose subject is the
+// settled overlay rather than the check itself.
+func settleDeleteGuard(m model) model {
+	if m.confirm == nil || !m.confirm.checking {
+		return m
+	}
+	vc, _ := m.checkouts.Get(m.confirm.scope, m.confirm.vmName)
+	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{scope: m.confirm.scope, vm: m.confirm.vmName, vc: vc})
+	return m
 }

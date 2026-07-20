@@ -59,6 +59,7 @@ package ui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
@@ -516,4 +517,51 @@ func (m model) syncSweeps() tea.Cmd {
 		m.sweeps.forget(sc, want)
 	}
 	return tea.Batch(cmds...)
+}
+
+// sweepOnceTimeout bounds the delete-time refresh (sweepOnce). The guard must
+// never become a way for a wedged guest to freeze the confirmation the user is
+// trying to answer: past this, the guard falls back to the cached entry and
+// says so. It is deliberately short — the sweep is a bounded, read-only pass
+// that a healthy guest finishes well inside it.
+const sweepOnceTimeout = 2 * time.Second
+
+// sweepOnce runs ONE sweep pass against a running VM and returns the parsed
+// result, for the delete guard's "is this cached picture still true" refresh.
+//
+// It runs the SAME read-only BuildSweepCommand the VM's live sweep loop is
+// already executing every sweepInterval — this is deliberately not a new
+// capability, just an early instance of an existing one, which is why it is
+// gated on the VM being CURRENTLY RUNNING. A stopped VM is never swept here:
+// starting one to inspect it is exactly the guest contact the delete guard
+// exists to avoid (see deleteguard.go and AGENTS.md's Landing invariants).
+//
+// Unlike start, this opens and closes its own short-lived shell rather than
+// borrowing the loop's: the loop is asleep between passes, and there is no
+// portable way to wake it (the guest's /bin/sh is often dash, whose `read`
+// has no timeout flag, so the sleep cannot be made interruptible without
+// giving up the "dumbest possible guest script" rule this file is built on).
+func (r *sweepRegistry) sweepOnce(ctx context.Context, scope registry.Scope, name string) (checkouts.VMCheckouts, error) {
+	if r == nil {
+		return checkouts.VMCheckouts{}, errors.New("no sweep registry")
+	}
+	r.mu.Lock()
+	resolve := r.shell
+	r.mu.Unlock()
+	if resolve == nil {
+		return checkouts.VMCheckouts{}, errors.New("no shell resolver")
+	}
+	shell := resolve(scope)
+	if shell == nil {
+		return checkouts.VMCheckouts{}, errors.New("no shell for scope")
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, sweepOnceTimeout)
+	defer cancel()
+
+	var buf bytes.Buffer
+	if err := shell.ShellStreamOut(ctx, name, nil, &buf, "sh", "-c", checkouts.BuildSweepCommand()); err != nil {
+		return checkouts.VMCheckouts{}, err
+	}
+	return checkouts.ParseSweep(buf.String()), nil
 }

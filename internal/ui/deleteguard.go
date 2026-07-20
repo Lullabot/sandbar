@@ -17,11 +17,15 @@ package ui
 // (commandreg.go's delete verb) with a Runner that fails the test the moment
 // any of its methods are called, and proves it is never invoked.
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/registry"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // deleteGuardExtra composes the confirmation-copy fragment naming any work in
@@ -132,4 +136,52 @@ func deleteGuardPrompt(name string, vc checkouts.VMCheckouts, found, running boo
 		extra += fmt.Sprintf(" (as of %s)", formatAgo(now.Sub(vc.SweptAt)))
 	}
 	return base + " " + extra
+}
+
+// deleteGuardRefreshMsg carries the delete-time freshness re-read back to
+// Update. Scoped by (scope, vm) so a result landing after the user cancelled,
+// or after they raised a different confirmation, is dropped rather than
+// rewriting the wrong prompt. err non-nil means the refresh did not land (the
+// guest was slow, wedged, or went away mid-check) — the guard then keeps its
+// cached answer and says so, rather than silently claiming a live read.
+type deleteGuardRefreshMsg struct {
+	scope registry.Scope
+	vm    string
+	vc    checkouts.VMCheckouts
+	err   error
+}
+
+// deleteGuardRefreshCmd re-reads a RUNNING VM's checkouts before its delete
+// confirmation is answered. See sweepOnce for why this is not new guest
+// contact in kind, and commandreg.go's delete verb for why it only ever fires
+// for a running VM.
+func deleteGuardRefreshCmd(sweeps *sweepRegistry, scope registry.Scope, name string) tea.Cmd {
+	return func() tea.Msg {
+		vc, err := sweeps.sweepOnce(context.Background(), scope, name)
+		return deleteGuardRefreshMsg{scope: scope, vm: name, vc: vc, err: err}
+	}
+}
+
+// handleDeleteGuardRefresh folds the re-read into the registry and rewrites the
+// pending confirmation's prompt with it. A stale result — the confirmation is
+// gone, or is now about a different VM — is dropped.
+func (m *model) handleDeleteGuardRefresh(msg deleteGuardRefreshMsg) {
+	if m.confirm == nil || !m.confirm.checking ||
+		m.confirm.scope != msg.scope || m.confirm.vmName != msg.vm {
+		return
+	}
+	m.confirm.checking = false
+
+	if msg.err != nil {
+		// The guard falls back to what it already had, but must not present
+		// that as a live answer: a VM that would not answer a read-only sweep
+		// is exactly the one whose cached picture deserves suspicion.
+		m.confirm.prompt += " (could not re-check just now)"
+		return
+	}
+
+	// Record it: the refresh is a real sweep result, so the badge and the
+	// Landing pane should see it too rather than this being a private read.
+	_ = m.checkouts.Set(msg.scope, msg.vm, msg.vc)
+	m.confirm.prompt = deleteGuardPrompt(msg.vm, msg.vc, true, true, time.Now())
 }

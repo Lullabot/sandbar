@@ -73,6 +73,22 @@ type confirmState struct {
 	prompt  string  // e.g. `Delete "web"?`
 	run     tea.Cmd // dispatched (via beginAction) when the user presses Confirm
 	working string  // status shown (with the live spinner) while run is in flight; "" leaves the status line untouched
+
+	// checking marks a confirmation whose prompt is still being refined by an
+	// in-flight read — today only the delete guard's freshness check
+	// (deleteguard.go). Confirm is REFUSED while it is set, so a user cannot
+	// answer "yes" against a picture that is about to change under them; the
+	// refresh is hard-bounded (sweepOnceTimeout) so this can never wedge the
+	// overlay. Cancel is always accepted, checking or not.
+	checking bool
+
+	// scope/vmName identify the VM this confirmation is about, so a refresh
+	// result that arrives after the user cancelled — or moved on and raised a
+	// DIFFERENT confirmation — is recognized as stale and dropped rather than
+	// rewriting the wrong prompt. Same epoch-style guard the sweep and
+	// Landing panes use.
+	scope  registry.Scope
+	vmName string
 }
 
 // view is the active screen the model renders and routes keys to. viewBoard is
@@ -839,6 +855,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// double up on the live one.
 		return m, sweepReadCmd(msg.scope, msg.vm, msg.epoch, m.sweeps.fold(msg.scope, msg.vm, msg.epoch))
 
+	case deleteGuardRefreshMsg:
+		// The delete guard's freshness re-read landed (deleteguard.go). It
+		// rewrites the pending confirmation's prompt and releases the Confirm
+		// key, which was held while the check was in flight.
+		m.handleDeleteGuardRefresh(msg)
+		return m, nil
+
 	case landingAvailableMsg:
 		// The Landing pane's lazy host-gh-availability check (landing.go),
 		// fired once when the pane opens. Folding it in may itself fire the
@@ -1478,6 +1501,14 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Confirm): // y
+		if m.confirm.checking {
+			// A freshness check is still in flight (today: the delete guard's
+			// re-read). Answering now would be answering a question that is
+			// about to change, so the key is swallowed rather than acted on.
+			// Bounded by sweepOnceTimeout, so this is never a long wait, and
+			// Cancel below stays available throughout.
+			return m, nil
+		}
 		run := m.confirm.run
 		// Log the in-flight label so the spinner (raised by beginAction) has a
 		// message to sit beside — otherwise a confirmed stop-all/delete would spin
@@ -1499,6 +1530,11 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // clipped to ContentWidth like every other line, since a prompt that wrapped
 // would cost the screen a row it never budgeted.
 func (m model) confirmView() string {
+	if m.confirm.checking {
+		// Confirm is held while a freshness check runs, so the overlay must
+		// say why rather than looking like a dead key. Cancel still works.
+		return m.clipLine(errStyle.Render(m.confirm.prompt + "  checking for recent changes…   [n] cancel"))
+	}
 	return m.clipLine(errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel"))
 }
 
