@@ -1012,6 +1012,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		Job:                job,
 		HasJob:             hasJob,
 		RemoteProvisioning: !hasJob && m.remoteProvisioning(v.scope, v.Name),
+		RemoteProgress:     m.remoteProgress(v.scope, v.Name),
 		Sample:             sample,
 		HasSample:          hasSample,
 		Traits:             traits[i],

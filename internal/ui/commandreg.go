@@ -19,6 +19,7 @@ package ui
 // framework — see the task's scope note before adding to it.
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/lullabot/sandbar/internal/manage"
@@ -346,4 +347,35 @@ var vmCommands = []vmCommand{
 			return m.showJobLog(v.scope, v.Name)
 		},
 	},
+}
+
+// publishProgressMsg reports the outcome of a marker progress republish. It
+// carries only the job and an error: the write is fire-and-forget as far as the
+// build is concerned, and this message exists so a FAILING write can be said
+// once (see model's handler) rather than degrading silently — the observing
+// controller would otherwise just see a bar that never moves, which is exactly
+// the symptom this whole feature set out to remove.
+type publishProgressMsg struct {
+	job jobKey
+	err error
+}
+
+// publishProgressCmd writes the build's current position into the VM's
+// provenance marker, off the Update goroutine — for a remote member this is an
+// ssh round trip, and it is called from the streamed-output handler, so doing it
+// inline would stall the UI on every role boundary.
+//
+// It rewrites the WHOLE marker (NewProvenance from the job's own config, with
+// Provisioning still true) rather than reading, patching and writing back: the
+// builder already holds the authoritative config, so a read-modify-write would
+// double the round trips to re-learn something it knows.
+func publishProgressCmd(pv provider.Provenancer, key jobKey, cfg vm.CreateConfig, prog provider.BuildProgress) tea.Cmd {
+	if pv == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		p := provider.NewProvenance(cfg, true)
+		p.Progress = prog
+		return publishProgressMsg{job: key, err: pv.MarkManaged(context.Background(), key.vm, p)}
+	}
 }

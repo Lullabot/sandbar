@@ -165,3 +165,43 @@ func TestRecreateBaseWithRealProvenancer_MarkerAloneDrivesItAndRefusalOnUnmark(t
 		t.Fatalf("RecreateBase after Unmark (and no registry entry) = ok (base=%q), want refused", base)
 	}
 }
+
+// TestAdoptStampsTheCurrentMarkerSchema is the guard the two hand-maintained
+// schema constants need. registry.adoptSchemaVersion is a package-local mirror
+// of provider.MarkerSchemaVersion — duplicated rather than imported, to avoid an
+// import cycle — and a mirror kept in step by a comment is a mirror that drifts
+// the first time someone bumps one constant and not the other. A drifted
+// adoption would stamp markers claiming a schema version that no longer
+// describes their shape.
+//
+// This package imports both, so it is the natural place to compare them, and it
+// compares them THROUGH a real adoption rather than by reading the constants:
+// what matters is the version that actually lands in the marker.
+func TestAdoptStampsTheCurrentMarkerSchema(t *testing.T) {
+	prov := realLocalProvenancer(t)
+	reg := registry.NewEmpty()
+	scope := registry.Scope{Provider: "lima-remote", RemoteTarget: "adopt-schema-test@example.invalid:22"}
+	if err := reg.AddScoped(vm.CreateConfig{Name: "schema-check", BaseName: "sandbar-base"}, scope); err != nil {
+		t.Fatalf("seed registry entry: %v", err)
+	}
+	ctx := context.Background()
+
+	AdoptOnce(ctx, reg.ManagedInScope(scope), []vm.VM{{Name: "schema-check", Status: "Running"}}, scope, prov)
+
+	got, ok, err := prov.ProvenanceOf(ctx, "schema-check")
+	if err != nil || !ok {
+		t.Fatalf("ProvenanceOf after AdoptOnce = (ok=%v, err=%v), want a marker", ok, err)
+	}
+	if got.SchemaVersion != provider.MarkerSchemaVersion {
+		t.Fatalf("adoption stamped schema %d, but this build writes %d — registry.adoptSchemaVersion has drifted from provider.MarkerSchemaVersion",
+			got.SchemaVersion, provider.MarkerSchemaVersion)
+	}
+	// Adoption is always a READY marker: the VM it adopts finished building long
+	// before this controller ever heard of it.
+	if got.Provisioning {
+		t.Error("adoption wrote an in-flight marker; an adopted VM is already built")
+	}
+	if got.Progress != (provider.BuildProgress{}) {
+		t.Errorf("adoption wrote build progress %+v; an adopted VM has no build in flight", got.Progress)
+	}
+}

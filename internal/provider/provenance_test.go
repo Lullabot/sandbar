@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
@@ -272,5 +273,69 @@ func TestLimaProviderProvenanceOfDecodesV1MarkerAsReady(t *testing.T) {
 	}
 	if got.SchemaVersion != 1 {
 		t.Fatalf("SchemaVersion = %d, want 1 (the marker as written, not migrated)", got.SchemaVersion)
+	}
+}
+
+// TestProvenanceProgressRoundTripAndV2Compat covers the v3 addition from both
+// directions: a marker carrying build progress survives the write/read cycle
+// intact, and a v2 marker — one written by any sand built before progress
+// existed — decodes with a zero BuildProgress rather than failing. The latter is
+// what keeps a mixed-version fleet working: an older controller's in-flight
+// marker still says "building", it just cannot say how far.
+func TestProvenanceProgressRoundTripAndV2Compat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	p := asProvenancer(t, newLocal(&fakeRunner{}))
+	ctx := context.Background()
+
+	want := provider.NewProvenance(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, true)
+	want.Progress = provider.BuildProgress{Role: "claude-code", Index: 30, Total: 120}
+	if err := p.MarkManaged(ctx, "web", want); err != nil {
+		t.Fatalf("MarkManaged: %v", err)
+	}
+	got, ok, err := p.ProvenanceOf(ctx, "web")
+	if err != nil || !ok {
+		t.Fatalf("ProvenanceOf = (ok=%v, err=%v), want a marker", ok, err)
+	}
+	if got.Progress != want.Progress {
+		t.Fatalf("Progress = %+v, want %+v", got.Progress, want.Progress)
+	}
+	if got != want {
+		t.Fatalf("marker did not round-trip:\n got %+v\nwant %+v", got, want)
+	}
+
+	// A READY marker must not carry a progress key at all — that is what
+	// `omitzero` buys, and it keeps the common marker (every finished VM) free of
+	// a meaningless `"progress":{}`.
+	ready := provider.NewProvenance(vm.CreateConfig{Name: "done", BaseName: "sandbar-base"}, false)
+	if err := p.MarkManaged(ctx, "done", ready); err != nil {
+		t.Fatalf("MarkManaged(ready): %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "done", lima.MarkerFilename))
+	if err != nil {
+		t.Fatalf("read ready marker: %v", err)
+	}
+	if strings.Contains(string(raw), "progress") {
+		t.Errorf("a ready marker carries a progress key:\n%s", raw)
+	}
+
+	// A v2 marker (in-flight, but from before progress existed) still decodes.
+	markerPath := filepath.Join(home, "old", lima.MarkerFilename)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("mkdir instance dir: %v", err)
+	}
+	rawV2 := `{"schema":2,"base":"sandbar-base","config":{"Name":"old"},"sandbar_version":"0.6.0","created_at":"2026-01-01T00:00:00Z","provisioning":true}`
+	if err := os.WriteFile(markerPath, []byte(rawV2), 0o600); err != nil {
+		t.Fatalf("write raw v2 marker: %v", err)
+	}
+	oldGot, ok, err := p.ProvenanceOf(ctx, "old")
+	if err != nil || !ok {
+		t.Fatalf("ProvenanceOf(v2) = (ok=%v, err=%v), want a marker", ok, err)
+	}
+	if !oldGot.Provisioning {
+		t.Error("a v2 in-flight marker lost its Provisioning flag")
+	}
+	if oldGot.Progress != (provider.BuildProgress{}) {
+		t.Errorf("a v2 marker decoded with progress %+v, want the zero value", oldGot.Progress)
 	}
 }

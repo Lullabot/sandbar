@@ -1129,7 +1129,29 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
-		return m, readNextCmd(msg.job, m.jobs.reader(msg.job))
+		// If this chunk moved the build into a new phase/role, republish its
+		// position to the VM's provenance marker so OTHER controllers' tiles get a
+		// bar that moves. Throttled to role boundaries by the registry (see
+		// progressToPublish) — a per-task write would be an ssh round trip per
+		// Ansible task on a remote build.
+		next := readNextCmd(msg.job, m.jobs.reader(msg.job))
+		if cfg, prog, due := m.jobs.progressToPublish(msg.job); due {
+			if pub := publishProgressCmd(provenancerFor(m, msg.job.scope), msg.job, cfg, prog); pub != nil {
+				return m, tea.Batch(next, pub)
+			}
+		}
+		return m, next
+
+	case publishProgressMsg:
+		// A republish that failed costs other controllers a moving bar, nothing
+		// more — the build is unaffected and the marker still says Building. Say it
+		// ONCE per build (the registry latches it) so a broken transport is
+		// visible without a line per role.
+		if msg.err != nil && m.jobs.noteProgressWriteFailed(msg.job) {
+			m.logMsg("could not publish build progress for " + msg.job.vm +
+				" — other clients will show it building without a progress bar: " + msg.err.Error())
+		}
+		return m, nil
 
 	case provisionDoneMsg:
 		// finish retains the job — with its log — whether it succeeded or failed:

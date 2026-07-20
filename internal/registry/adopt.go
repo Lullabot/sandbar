@@ -28,15 +28,17 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// adoptSchemaVersion is the marker schema Adopt writes. It must stay in step
-// with provider.Provenance.SchemaVersion / manage's provenanceSchemaVersion
-// (today both 1) — duplicated here, not imported, for the reason in this
-// file's package comment.
-// adoptSchemaVersion mirrors provider.MarkerSchemaVersion (kept in step for the
-// import-cycle reason in this file's package comment). Adoption always writes a
-// READY marker (a VM already in the registry finished building long ago), so it
-// never sets the v2 Provisioning field — it just stamps the current version.
-const adoptSchemaVersion = 2
+// adoptSchemaVersion mirrors provider.MarkerSchemaVersion (duplicated, not
+// imported, for the import-cycle reason in this file's package comment).
+// Adoption always writes a READY marker — a VM already in the registry finished
+// building long ago — so it sets neither the v2 Provisioning field nor the v3
+// Progress one; it just stamps the current version.
+//
+// The two constants are kept in step by TestAdoptStampsTheCurrentMarkerSchema
+// (internal/manage), which decodes an adopted marker as a provider.Provenance
+// and compares — a hand-maintained mirror needs a test that fails when the hand
+// forgets, not a comment asking it not to.
+const adoptSchemaVersion = 3
 
 // AdoptProvenance is the marker payload Adopt writes, mirroring the
 // provenance-relevant fields of provider.Provenance without this package

@@ -361,6 +361,30 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		p.cleanupInstance(cfg.Name, out)
 		return err
 	}
+	// STAMP THE IN-FLIGHT MARKER THE MOMENT THE CLONE LANDS — not after the boot
+	// below. The instance directory now exists with a valid lima.yaml, which is
+	// everything the marker write and a remote reader need, and the boot plus the
+	// finalize playbook that follow are the long window during which another
+	// controller should already see this VM building.
+	//
+	// This used to run after StartStreaming, on the reasoning that a marker
+	// written earlier "could be deleted by the clone-failure cleanup above". It
+	// can be — and that is the DESIRED outcome, not the hazard it reads as:
+	// cleanupInstance removes the whole instance directory, taking the marker
+	// with it, so a failed clone leaves no claim behind. That is the same
+	// lifecycle-for-free property that put the marker inside the instance dir in
+	// the first place. What is genuinely unsafe is writing BEFORE the clone
+	// returns, since the write would create the instance directory itself and
+	// hand `limactl` a directory it did not build; that is why this sits here and
+	// not earlier still.
+	//
+	// Best-effort: a marker that cannot be written costs other controllers their
+	// tile, not this build.
+	if opts.OnCloned != nil {
+		if err := opts.OnCloned(ctx); err != nil {
+			step(out, "Note: could not write in-flight provenance marker for %q (%v); it will appear to other clients once the build finishes.", cfg.Name, err)
+		}
+	}
 	step(out, "Starting %q…", cfg.Name)
 	if err := timer.time("clone start", func() error {
 		// Size the clone before its first start: the base is built at a small
@@ -384,16 +408,8 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	// a VM the user can shell into and a retained log they can read, which is the
 	// point of keeping a failed run. Deleting it here would throw away the evidence.
 	//
-	// This is exactly the moment to stamp the in-flight provenance marker: the
-	// instance dir exists and is durable (a marker written earlier could be
-	// deleted by the clone-failure cleanup above; one written here survives with
-	// the VM), and the finalize step below is the long window during which
-	// another controller should already see this VM building. Best-effort.
-	if opts.OnCloned != nil {
-		if err := opts.OnCloned(ctx); err != nil {
-			step(out, "Note: could not write in-flight provenance marker for %q (%v); it will appear to other clients once the build finishes.", cfg.Name, err)
-		}
-	}
+	// (The in-flight provenance marker was stamped earlier, the moment the clone
+	// landed — see prepareBaseAndClone's caller above.)
 	if err := timer.time("finalize playbook", func() error {
 		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
 	}); err != nil {

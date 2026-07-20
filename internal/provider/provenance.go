@@ -37,7 +37,12 @@ var ErrUnsupported = errors.New("provider does not support provenance")
 // v2 added the Provisioning field (in-flight/"building" markers). It is a
 // purely additive change: a v1 marker has no `provisioning` key, so it decodes
 // with Provisioning=false, i.e. "ready" — exactly what every v1 marker was.
-const MarkerSchemaVersion = 2
+//
+// v3 added Progress, so an in-flight marker carries HOW FAR ALONG the build is
+// and not merely that it is running. Additive in the same way: an older marker
+// has no `progress` key and decodes with the zero BuildProgress, which renders
+// as an empty bar — exactly what an observer showed for a v2 marker anyway.
+const MarkerSchemaVersion = 3
 
 // Provenance is the marker payload a provider attaches to an instance it
 // created, mirroring the provenance-relevant subset of registry.Entry (Base,
@@ -68,6 +73,37 @@ type Provenance struct {
 	// the bool zero value keep older (v1) markers, which lack the key,
 	// decoding as ready.
 	Provisioning bool `json:"provisioning,omitempty"`
+	// Progress is how far the in-flight build has got, republished by the
+	// BUILDING controller at role boundaries. It is meaningful only while
+	// Provisioning is true, and is the ONLY channel by which build progress
+	// reaches another controller: the progress bar on the building controller's
+	// own tile is parsed from the provisioner's streamed stdout (internal/ui's
+	// ansibleParser), a byte stream that exists solely in the process running
+	// the build. Without this field an observer can know a VM is Building and
+	// nothing more, so its bar sits at zero for the whole build.
+	//
+	// omitzero (not omitempty — encoding/json omits an empty STRUCT only for the
+	// former) keeps ready markers free of a `"progress":{}` key. The struct is a
+	// VALUE, not a pointer, so Provenance stays comparable with == , which its
+	// tests and callers rely on.
+	Progress BuildProgress `json:"progress,omitzero"`
+}
+
+// BuildProgress is a coarse position within an in-flight build: which role is
+// running, and how many of the run's tasks are done. It deliberately mirrors
+// only the fields a remote tile can render (a bar and a role name) rather than
+// the builder's full parsed state — Task and Step stay local, since they change
+// per task and would make every republish a wire write.
+type BuildProgress struct {
+	// Role is the Ansible role currently running, e.g. "claude-code".
+	Role string `json:"role,omitempty"`
+	// Index is how many tasks of the current run have started, and Total how
+	// many it declared. A bar is drawn only when both are positive — see
+	// ui.ansibleProgress.Fraction, whose guard this mirrors — so a marker that
+	// carries a role but no counts renders a name and an empty bar rather than a
+	// misleading full one.
+	Index int `json:"index,omitempty"`
+	Total int `json:"total,omitempty"`
 }
 
 // NewProvenance builds a marker payload from a create config. It stamps the

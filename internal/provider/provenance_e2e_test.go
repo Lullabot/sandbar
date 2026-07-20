@@ -209,6 +209,32 @@ func TestE2EInFlightProvisioningMarkerVisibleRemotely(t *testing.T) {
 		t.Fatalf("in-flight marker Base = %q, want %q", got.Base, base)
 	}
 
+	// --- mid-build: the builder republishes its position at a role boundary, and
+	// the observer's BATCHED read (what its board actually calls) picks it up.
+	// This is the only channel build progress has across controllers — the bar on
+	// the builder's own tile is parsed from a stdout stream that exists solely in
+	// that process — so proving it over real ssh is proving the observer's bar
+	// can move at all.
+	inFlight := provider.NewProvenance(vmCfg, true)
+	inFlight.Progress = provider.BuildProgress{Role: "claude-code", Index: 30, Total: 120}
+	if err := builderProv.MarkManaged(ctx, name, inFlight); err != nil {
+		t.Fatalf("republish progress over ssh: %v", err)
+	}
+	batch, err := observerProv.Provenance(ctx)
+	if err != nil {
+		t.Fatalf("observer batched Provenance (mid-build): %v", err)
+	}
+	seen, ok := batch[name]
+	if !ok {
+		t.Fatalf("the batched read did not return the in-flight VM %q; got %d markers", name, len(batch))
+	}
+	if !seen.Provisioning {
+		t.Error("the republished marker lost its Provisioning flag — the observer would show it Running mid-build")
+	}
+	if seen.Progress != inFlight.Progress {
+		t.Fatalf("observed progress = %+v, want %+v — the observer's bar would not move", seen.Progress, inFlight.Progress)
+	}
+
 	// --- build succeeds: RecordSuccess flips the same marker to ready.
 	if err := manage.RecordSuccess(registry.NewEmpty(), vmCfg, cfg.Scope(), builderProv); err != nil {
 		t.Fatalf("RecordSuccess (flip to ready): %v", err)
