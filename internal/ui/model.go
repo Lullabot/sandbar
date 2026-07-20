@@ -862,6 +862,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleDeleteGuardRefresh(msg)
 		return m, nil
 
+	case landCommitPushDoneMsg:
+		// The interactive commit/push finished and the TUI is back; re-read the
+		// checkout it just changed (landing.go).
+		return m, m.handleLandCommitPushDone(msg)
+
+	case landRefreshMsg:
+		m.handleLandRefresh(msg)
+		return m, nil
+
 	case landingAvailableMsg:
 		// The Landing pane's lazy host-gh-availability check (landing.go),
 		// fired once when the pane opens. Folding it in may itself fire the

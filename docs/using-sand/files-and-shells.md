@@ -121,11 +121,26 @@ that state calls for:
 - **Pushed, no PR** — open a one-shot **draft PR** for that checkout's
   pushed branch.
 - **PR already open** — open it in a browser.
-- **Unpushed or dirty** — nothing to land yet; push (or commit) inside the
-  VM first.
+- **Never pushed, unpushed, or dirty** — work that exists only in this VM:
+  a branch you created in the guest and haven't pushed, commits ahead of the
+  remote, uncommitted changes, or any combination. Acting on this row
+  **commits and pushes it**: sand drops you into the guest with your editor
+  open on `git commit -a`, and pushes the branch when you save (setting its
+  upstream if it has none). Quit the editor without saving and nothing is
+  committed or pushed.
 - **Nothing to land** — the checkout is on its repo's default branch with
   nothing of its own on top. Every fresh clone starts here.
-- **Local-only** (no recognized remote) — nothing Landing can act on.
+- **Local-only** — the checkout has no remote configured, so there is
+  nowhere for Landing to push. This is the only state with nothing to offer.
+  If such a checkout holds uncommitted or unpushed work, the row still says
+  so (`local only · 2 uncommitted`) — there is nothing sand can do about it,
+  but you should know it is there before deleting the VM.
+
+The commit-and-push action is the only Landing action that runs inside the
+VM, and it stays there: the commit and the push both happen in the guest,
+using the guest's own least-privilege push token. No diff, patch, or working
+tree ever reaches your machine — see
+[Security Model](../reference/security-model.md).
 
 Opening a draft PR uses the **workstation's own `gh`** — never the guest's
 own push token — so the PR is created by you, not by whatever ran inside

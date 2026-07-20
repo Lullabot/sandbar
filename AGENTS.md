@@ -428,7 +428,18 @@ every bullet, not the constraint itself.
   least-privilege token, the host opens the PR with the workstation's `gh`
   and credentials). `--web` never calls `gh` at all. Do not add a code path
   here that fetches a diff, a patch, or the checkout's working tree onto the
-  host — that would break the "the only guest mount is read-only, nothing
+  host. That specifically rules out "just stream the changes to `gh api`" —
+  GitHub's Git Data API CAN build a commit with no clone, but every byte
+  would pass through the host to get there, which is the thing this forbids;
+  it would also need the HOST token to gain `Contents: write`, inverting the
+  two-token split. Committing and pushing belongs IN the guest, which is what
+  the Landing pane's commit-and-push action does (`landCommitPushCmd` +
+  `commitAndPushExpr`): it suspends the TUI, runs `git commit`/`git push`
+  inside the VM against the user's real terminal, and brings back nothing but
+  an exit code. `commitAndPushExpr` must stay a LITERAL string — the checkout
+  is selected by `Provider.RunArgv`'s `--workdir` argv element, because the
+  path/branch/remote all come from sweeping the guest and must never reach a
+  guest `bash -c` as text — that would break the "the only guest mount is read-only, nothing
   leaves the VM except through the TUI's Upload/Download" property this
   feature was deliberately built alongside without becoming a silent
   third exception to it. See `docs/reference/security-model.md`'s "Landing"

@@ -269,3 +269,44 @@ func TestAttachArgvColorterm(t *testing.T) {
 		t.Errorf("a valid COLORTERM=24bit was not forwarded:\n\t%s", e)
 	}
 }
+
+// TestRunArgvKeepsWorkdirOutOfTheExpression is the injection guard for the
+// interactive one-command path: the checkout directory comes from sweeping the
+// GUEST, so it must travel as its own argv element and never appear inside the
+// `bash -c` expression the guest parses.
+func TestRunArgvKeepsWorkdirOutOfTheExpression(t *testing.T) {
+	nasty := "/home/u/repo; rm -rf ~; echo $(whoami)"
+	argv := RunArgv("web", nasty, "git status", "truecolor")
+
+	var sawAsOwnElement bool
+	for i, a := range argv {
+		if a == nasty {
+			sawAsOwnElement = true
+			if i == 0 || argv[i-1] != "--workdir" {
+				t.Fatalf("workdir must follow --workdir, got argv %q", argv)
+			}
+		}
+	}
+	if !sawAsOwnElement {
+		t.Fatalf("workdir did not reach argv as its own element: %q", argv)
+	}
+	// The expression the guest parses must not contain it anywhere.
+	expr := argv[len(argv)-1]
+	if strings.Contains(expr, nasty) || strings.Contains(expr, "rm -rf") {
+		t.Fatalf("workdir leaked into the guest expression: %q", expr)
+	}
+}
+
+// TestRunArgvDropsAnUnsafeColorterm mirrors AttachArgv's rule: COLORTERM is
+// baked into a shell expression, so an unrecognised value is dropped rather
+// than escaped.
+func TestRunArgvDropsAnUnsafeColorterm(t *testing.T) {
+	argv := RunArgv("web", "/home/u/repo", "git status", "truecolor; rm -rf ~")
+	expr := argv[len(argv)-1]
+	if strings.Contains(expr, "rm -rf") {
+		t.Fatalf("an unsafe COLORTERM reached the guest expression: %q", expr)
+	}
+	if expr != "git status" {
+		t.Fatalf("expression = %q, want the caller's literal command alone", expr)
+	}
+}

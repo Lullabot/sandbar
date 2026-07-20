@@ -113,6 +113,13 @@ type Provider interface {
 	// this is a `limactl shell …` form; a remote provider returns an `ssh -t …`
 	// wrapper of the same guest expression.
 	AttachArgv(v vm.VM) []string
+	// RunArgv returns the full argv that runs ONE interactive guest command in
+	// workdir with the caller's real TTY attached — the Landing pane's
+	// commit-and-push action, where `git commit` must be able to open the
+	// user's editor. expr MUST be a fixed, literal command: workdir travels as
+	// its own argv element precisely so a sweep-discovered checkout path never
+	// reaches the guest shell as text. See lima.RunArgv.
+	RunArgv(v vm.VM, workdir, expr string) []string
 	// GuestHome returns v's guest login-user home directory, read from the backend's
 	// instance files (for local Lima, Lima's generated cloud-config.yaml). Returns
 	// "" when it cannot be determined so the caller can fall back.
