@@ -47,7 +47,7 @@ package ui
 // cannot live on it. The registry is a POINTER field and guards everything with a
 // mutex, so every model copy shares one registry. Samples travel from the sampler
 // goroutine into Update as a message — not by writing the model — and it is Update,
-// under the lock, that records them. Readers (the tile renderer, task 07) call
+// under the lock, that records them. Readers (the tile renderer, tile.go) call
 // latest() and get a value copy.
 
 import (
@@ -127,7 +127,7 @@ func guestScript(every time.Duration) string {
 }
 
 // guestSample is ONE utilization reading from inside a running guest, and it is the
-// type the tile renderer (task 07) draws its gauges from.
+// type the tile renderer (tile.go) draws its gauges from.
 //
 // Every "Has" here earns its keep. A tile must be able to tell "this VM is idle"
 // from "sand does not know yet", because they look identical if the second one is
@@ -692,7 +692,7 @@ func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint6
 	}
 }
 
-// latest is the reader's entry point — the one the tile renderer (task 07) calls.
+// latest is the reader's entry point — the one the tile renderer (tile.go) calls.
 // It returns a value copy, safe to render from any goroutine, and reports false when
 // there is NOTHING TO SHOW: no heartbeat (the VM is stopped, or the board is not on
 // screen) or one that has not produced its first record yet.
@@ -777,8 +777,8 @@ func heartbeatReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan
 
 // shouldTick IS THE IDLE GATE: the single predicate deciding whether sand's
 // recurring background work may run at all. Today that is the guest heartbeat.
-// Task 09's poller wants exactly this predicate — it is deliberately named for the
-// general question, not the specific caller.
+// The background list poller wants exactly this predicate too — it is deliberately
+// named for the general question, not one specific caller.
 //
 // This is a hard requirement, not a polish item. Every heartbeat is an open SSH
 // connection into a guest. sand left running in a backgrounded terminal, over SSH,
@@ -823,7 +823,7 @@ func (m model) shouldTick() bool {
 // shell into", which is the only question this asks.
 //
 // THE ROSTER CHECK IS THE SECOND HALF OF THE GATE, and it earns its keep the
-// same way shouldTick does: task 08 filtered the board to managed clones
+// same way shouldTick does: the board (board.go) shows managed clones
 // only, so an unmanaged VM Lima reports Running now has NO TILE to show a
 // gauge on — and "gauges nobody can see are not worth an SSH connection" is
 // exactly shouldTick's own rationale, restated for a VM instead of a screen.
@@ -880,7 +880,7 @@ func (m model) syncHeartbeats() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// sampleOf is the tile/header renderer's accessor (task 07): the live reading for
+// sampleOf is the tile/header renderer's accessor: the live reading for
 // a VM in scope, or false if there is none to show. The caller passes the owning
 // member's scope so two same-named VMs read from their own guests.
 func (m model) sampleOf(scope registry.Scope, name string) (guestSample, bool) {

@@ -158,8 +158,8 @@ func seedManagedIndex(t *testing.T, names ...string) {
 // screen reads "Secrets: claude", but those two words are never adjacent in the
 // stream: "claude" was emitted for the PREVIOUS screen. Waiting on the full title
 // therefore hangs until the timeout, and whether it does depends on how frames
-// happen to coalesce on the machine — it passed on this developer's host for the
-// whole of plan 12 and failed on the first CI run.
+// happen to coalesce on the machine — it passed on this developer's host
+// throughout development and failed on the first CI run.
 //
 // So: `want` names the SCREEN, not its content. Use a marker unique to the
 // destination screen that cannot be carried over from the one before it, and let
@@ -269,7 +269,7 @@ func (r *buildingRunner) Stream(ctx context.Context, _ io.Reader, out io.Writer,
 	}
 }
 
-// THE SIGNATURE BEHAVIOUR OF THIS PLAN, driven through the REAL Bubble Tea
+// THE CORE BEHAVIOUR OF THE BOARD, driven through the REAL Bubble Tea
 // runtime rather than a hand-rolled update loop: a user starts a VM, and instead
 // of the screen going dark with a full-screen Ansible dump for minutes, they can
 // walk away from the build — which keeps running — and start a SECOND VM. The
@@ -343,9 +343,9 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	}
 }
 
-// GOLDEN 1 of 2 PINNING THE RESPONSIVE RANGE (the plan's own requirement):
-// 80x24, the classic terminal default and the narrowest realistic size. This
-// is the regression net for every magic offset task 03 deleted, proven here
+// GOLDEN 1 of 2 PINNING THE RESPONSIVE RANGE: 80x24, the classic terminal
+// default, the narrowest realistic size, and the minimum supported one. This
+// is the regression net for every magic offset classify replaced, proven here
 // against the board's REAL chrome — the header band, the messages strip, the
 // grid, the footer — not just classify's pure budgets (layout_test.go covers
 // those in isolation). The host-capacity probe is pinned (pinHostCapacity)

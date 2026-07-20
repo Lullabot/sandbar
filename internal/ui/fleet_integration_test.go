@@ -1,9 +1,9 @@
 package ui
 
-// fleet_integration_test.go is task 12's cross-cutting gate: the plan's
-// success criteria that only make sense with the WHOLE fleet assembled (board
-// + header + profile management + registry + secrets + heartbeats together),
-// which is why they cannot live inside any single implementation task.
+// fleet_integration_test.go is the cross-cutting gate: the guarantees that
+// only make sense with the WHOLE fleet assembled (board + header + profile
+// management + registry + secrets + heartbeats together), which is why they
+// cannot live inside any single component's unit tests.
 // Everything here is driven with providerfake (or a hand-built fixture on
 // disk) — NO real limactl/ssh target.
 //
@@ -11,8 +11,8 @@ package ui
 //     board/header/create-form behave exactly like the pre-profiles path.
 //   - Two-profile aggregation: both members' tiles render, each labelled,
 //     and the header grows a stats band per connected profile.
-//   - Same-name coexistence & secrets isolation: the plan's HIGH-severity
-//     regression, now exercised through the real profile-delete mutation
+//   - Same-name coexistence & secrets isolation: the HIGH-severity data-loss
+//     regression, exercised through the real profile-delete mutation
 //     rather than a lower-level registry/secrets/heartbeat unit test.
 //   - A pre-fleet (v2) secrets file loads intact as local-scoped, through
 //     the model's own boot path (New), not just secrets.LoadFrom directly.
@@ -30,8 +30,8 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// TestZeroConfigParityBoardHeaderFormMatchPreProfiles pins the plan's
-// backward-compatibility promise: booting with no profiles.yaml on disk
+// TestZeroConfigParityBoardHeaderFormMatchPreProfiles pins the
+// backward-compatibility guarantee: booting with no profiles.yaml on disk
 // seeds exactly one enabled Local profile, and the board/create-form behave
 // bit-identically to the pre-profiles single-provider model (the goldens in
 // teatest_test.go already pin the RENDERED board pixel-for-pixel; this test
@@ -134,8 +134,8 @@ func TestTwoProfileAggregationBothConnectedTilesAndBands(t *testing.T) {
 }
 
 // TestSameNameCoexistenceAcrossProfilesSecretsHeartbeatsSurviveProfileDelete
-// is the plan's HIGH-severity regression, exercised at the level this task
-// owns: through the ACTUAL profile-delete mutation (deleteProfile,
+// is the HIGH-severity data-loss regression, exercised at the fleet level:
+// through the ACTUAL profile-delete mutation (deleteProfile,
 // profilesview.go), not just the lower-level registry/secrets/heartbeat unit
 // tests scope_safety_test.go already covers. Two enabled profiles each run a
 // same-NAMED VM with distinct secrets and a live heartbeat; deleting one
@@ -162,7 +162,7 @@ func TestSameNameCoexistenceAcrossProfilesSecretsHeartbeatsSurviveProfileDelete(
 	const name = "shared-vm"
 
 	// Same VM name, managed under BOTH connection scopes, with distinct
-	// secrets — the exact shape the plan's risk log warns about.
+	// secrets — the exact shape that risks one profile clobbering another's.
 	if err := m.reg.AddScoped(vm.CreateConfig{Name: name, BaseName: "sandbar-base"}, registry.LocalScope); err != nil {
 		t.Fatalf("seed local %s: %v", name, err)
 	}

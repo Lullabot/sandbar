@@ -199,7 +199,7 @@ func TestTwoJobsInFlight(t *testing.T) {
 		t.Fatalf("the registry should list both jobs (a building VM has no Lima record yet), got %v", got)
 	}
 
-	// A concurrent reader models the tile renderer (task 07), which reads the
+	// A concurrent reader models the tile renderer, which reads the
 	// registry from whatever goroutine the render happens on while Update is
 	// mutating it. It holds the REGISTRY POINTER, not the model — that is exactly
 	// what a renderer gets: a by-value copy of the model whose jobs field aims at
@@ -442,7 +442,7 @@ func TestResetJobSurvivesItsOwnDelete(t *testing.T) {
 	l.pump("web to finish", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
 }
 
-// deriveStatus is the pure function the tile renderer (task 07) consumes: the
+// deriveStatus is the pure function the tile renderer consumes: the
 // job registry is consulted FIRST, Lima's Running/Stopped is the fallback.
 func TestDeriveStatus(t *testing.T) {
 	provision := func(state jobState, canceled bool) jobSnapshot {
@@ -525,7 +525,7 @@ func TestKeyboardStaysLiveWhileBuilding(t *testing.T) {
 
 // Submitting the create form lands on the BOARD, not on a full-screen Ansible log.
 //
-// This is the plan's signature moment, and the one the demo is built around: the
+// This is the board's signature moment, and the one the demo is built around: the
 // screen does not go dark with a full-screen dump — a tile appears, already
 // building, and the board stays live enough to start a second VM. It shipped
 // broken past this very suite, because beginStream flipped the view for EVERY
@@ -921,8 +921,8 @@ func TestARefreshDuringAResetDoesNotWipeTheVMsSecrets(t *testing.T) {
 //
 // Only Delete consulted the job registry. The rest were protected by ACCIDENT: the
 // old full-screen progress view froze the keyboard for the whole build, so no key
-// could reach them. This plan removed that freeze on purpose — it is the headline
-// feature — and these gates are what replaces it.
+// could reach them. That freeze was removed on purpose — a keyboard that stays
+// live during builds is the point — and these gates are what replaces it.
 func TestNoVerbCanDisruptABuild(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 200, 40)

@@ -50,7 +50,7 @@ import (
 // terminal: at 80 columns a running VM's verbs wrap to exactly two rows and all of
 // them are visible. Budgeting for the union of every verb instead would reserve three
 // (it counts `s start` AND `x stop`, which can never both apply) and cost the board a
-// whole tile row at the one size the plan requires to work. A footer that needs more
+// whole tile row at the minimum supported size, 80x24. A footer that needs more
 // rows than this is cut, and the cut is marked — see footerView.
 const maxFooterHelpLines = 2
 
@@ -85,7 +85,7 @@ const (
 	viewDest
 	viewSecrets
 	// viewProfiles and viewProfileForm are the profile management screen
-	// (profilesview.go, task 8): a list of every connection profile, and a
+	// (profilesview.go): a list of every connection profile, and a
 	// sub-form over one profile's fields (create/edit), following the same
 	// view-enum + sub-model pattern as viewForm/viewSecrets above.
 	viewProfiles
@@ -112,8 +112,9 @@ type model struct {
 	// returning copies from Update handlers exactly like m.vms was.
 	members []fleetMember
 	// active is the index of the member the single-band header reports and a NEW
-	// create targets (task 10 makes the header per-profile; task 9 lets the
-	// create form pick). Pinned by New to the Local member, or the first.
+	// create targets (the header is per-profile once the fleet has bands, and
+	// the create form lets the user pick). Pinned by New to the Local member,
+	// or the first.
 	active int
 
 	reg  *registry.Registry
@@ -138,7 +139,7 @@ type model struct {
 	// would silently slide onto a different VM and hand the next destructive key to
 	// it. It is a vmHandle (scope + name), not a bare name, so the ring's identity
 	// can never be mistaken for "whatever VM has this name" once more than one
-	// scope is in play (task 7) — renamed from focusName for exactly that reason.
+	// scope is in play — renamed from focusName for exactly that reason.
 	// scrollRow is the first tile ROW the grid viewport shows, and only
 	// ensureFocusVisible moves it — so the viewport cannot drift away from the ring.
 	focusVM   vmHandle
@@ -203,8 +204,8 @@ type model struct {
 	formScope    registry.Scope
 	hostDiskFree int64 // free bytes on the Lima volume, sampled when the form opens (0 = unknown)
 	// formProfileIdx indexes the create form's profile selector into
-	// formProfiles() (the ENABLED profiles, store order) — task 9's Component 4
-	// create-time half. setDefaultFormProfile picks it (last-used, else Local)
+	// formProfiles() (the ENABLED profiles, store order): the create-time half
+	// of profile selection. setDefaultFormProfile picks it (last-used, else Local)
 	// when the form opens; cycleFormProfile moves it (and formScope with it) as
 	// the user picks a different destination. Reset mode never touches it — a
 	// reset always targets its own VM's already-fixed member.
@@ -287,9 +288,9 @@ type model struct {
 	secretsScope registry.Scope // the owning member's scope, captured when the editor opens
 	secretsErr   error
 
-	// profileStore is the persisted connection-profiles store (task 1),
+	// profileStore is the persisted connection-profiles store (profiles.Store),
 	// loaded exactly like reg/sec above (see New). The profile management
-	// screen (profilesview.go, task 8) creates/edits/enables/disables/deletes
+	// screen (profilesview.go) creates/edits/enables/disables/deletes
 	// profiles through it and applies the change LIVE, without a restart: a
 	// pointer, like reg/sec, so a mutation persists across the value-passed
 	// model.
@@ -393,8 +394,9 @@ func New(fleet provider.Fleet) tea.Model {
 		}
 		members = append(members, mem)
 		// The single-band header and a new create target the Local member when
-		// the fleet has one; otherwise the first member. Task 9 lets the create
-		// form pick; task 10 makes the header per-profile.
+		// the fleet has one; otherwise the first member. The create form lets
+		// the user pick another, and the header goes per-profile once the
+		// fleet has more than one member.
 		if b.Scope == registry.LocalScope {
 			active = i
 		}
@@ -509,7 +511,7 @@ func (m *model) applySize(w, h int) {
 	// than a running one, so tiles jumped as the user arrowed between them — and the
 	// panes went on rendering at a height from a footer budget that no longer existed.
 	// A row of slack in the band is a cheap price for a layout that holds still.
-	// Header bands (task 10) are threaded through exactly like the help bar's
+	// Header bands are threaded through exactly like the help bar's
 	// line count: desiredHeaderBands reads the CURRENT fleet state (members is
 	// always populated before applySize runs, both at New and at every resize),
 	// so classifyWithHeaderBands can budget the right number of extra header
@@ -662,7 +664,7 @@ func (m model) clipLine(s string) string {
 // keys on, in place of a bare name.
 //
 // Why this exists: a bare name is not a VM's identity, it is a VM's LABEL —
-// and two profiles (task 7's fleet) can label two entirely different VMs
+// and two profiles in a fleet can label two entirely different VMs
 // "web". Keying (or pruning) by name alone means a reconcile or delete
 // running against one profile can silently act on another profile's VM that
 // happens to share the name: stop its heartbeat, evict its retained job, or —
@@ -670,7 +672,7 @@ func (m model) clipLine(s string) string {
 // comparable struct (Provider + RemoteTarget), so vmHandle is itself a valid
 // map key.
 //
-// With the fleet (task 7) a model holds one scope PER MEMBER, so a running board
+// With a fleet, a model holds one scope PER MEMBER, so a running board
 // genuinely carries vmHandles under several scopes at once — which is exactly
 // what makes these composite keys load-bearing rather than a type-safety
 // harness: a reconcile, a heartbeat teardown, or a delete for one profile's
@@ -809,7 +811,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mem := &m.members[mi]
 		sc := mem.scope
 
-		// A member the user just DISABLED (task 8's live mutation) has no live
+		// A member the user just DISABLED (live profile mutation, profilesview.go) has no live
 		// binding any more — its provider is nil'd out precisely so nothing new
 		// gets kicked, but a refresh that was ALREADY in flight when the disable
 		// landed can still deliver its result afterward. That stale result — success
@@ -898,7 +900,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mem.backoff++
 			m.logMsg("list failed: " + msg.err.Error())
 			// A member turning errored can change how many header bands the fleet
-			// wants (task 10) — re-run the same budgeting a resize would, at the
+			// wants — re-run the same budgeting a resize would, at the
 			// terminal's CURRENT size, so the errored banner gets a row without
 			// waiting for the user to resize the terminal.
 			m.applySize(m.width, m.height)
@@ -979,7 +981,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// does centrally (syncBoard) after this returns.
 		//
 		// A member turning connected can also change how many header bands the
-		// fleet wants (task 10's per-profile stats bands) — re-run the same
+		// fleet wants (the per-profile stats bands) — re-run the same
 		// budgeting a resize would, so the fleet's FIRST successful list already
 		// gets its band without waiting on a resize.
 		m.applySize(m.width, m.height)
@@ -1057,7 +1059,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
 
 	case pasteResultMsg:
-		// A plain status-line result (task 5): no spinner to clear (pasteCmd never
+		// A plain status-line result: no spinner to clear (pasteCmd never
 		// goes through beginAction — see its doc comment), no view change, no
 		// refresh — a clipboard write changes nothing the board's tiles render.
 		switch {
@@ -1118,7 +1120,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
-			// Task 9: a successful CREATE (never a Reset — job.Recreates is what
+			// A successful CREATE (never a Reset — job.Recreates is what
 			// tells the two apart; a reset targets its VM's own already-fixed
 			// member, not a profile the user picked from the create form's
 			// selector) persists the profile it targeted as last-used, so the

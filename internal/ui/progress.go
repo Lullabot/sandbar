@@ -151,7 +151,7 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 	// The signature moment: submitting the create form drops the user back on the
 	// BOARD, where a new tile is already showing a building badge and a filling
 	// progress bar, and where they can arrow away and start a second VM. Landing on
-	// the full-screen Ansible dump instead is the screen-takeover this whole plan
+	// the full-screen Ansible dump instead is exactly the screen-takeover the board
 	// exists to remove; the log is still one `l` away from the tile.
 	//
 	// The ring goes to the VM the user just asked for. Focus is otherwise pinned to

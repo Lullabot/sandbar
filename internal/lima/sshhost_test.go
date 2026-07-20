@@ -20,7 +20,8 @@ import (
 // implementation. They assert on the ARGV the ssh command-runner builds (and the
 // stdin/stdout wiring) over a FAKE exec seam — no test spawns a real ssh or needs
 // a remote host, exactly as no test may spawn a real limactl (AGENTS.md). The
-// genuine loopback end-to-end is the limae2e-gated job (plan 15 task 6).
+// genuine loopback end-to-end is the limae2e-gated remote e2e test
+// (internal/provider/remote_e2e_test.go).
 
 // recordingExec is the fake newCmd seam: it records every ssh/scp argv the
 // SSHHost builds (the assertion target) and returns a stand-in *exec.Cmd — by

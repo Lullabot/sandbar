@@ -1,7 +1,7 @@
 package ui
 
-// profilesview_test.go covers task 8's live fleet mutation: enabling a
-// profile spins up its binding and starts its async connect/refresh,
+// profilesview_test.go covers live fleet mutation: enabling a profile spins
+// up its binding and starts its async connect/refresh,
 // disabling tears it down and hides its tiles, disable/delete are refused
 // while a job is in flight on that profile's scope, and a pure rename is
 // live but NOT gated. Everything here is driven with providerfake — NO real
@@ -104,8 +104,8 @@ func TestProfileEnableRefreshDisableCycle(t *testing.T) {
 	}
 }
 
-// TestHeartbeatResolverReflectsLiveEnabledProfile pins finding 5 from the
-// plan-16 code review: the heartbeat registry's scope->shell resolver used to
+// TestHeartbeatResolverReflectsLiveEnabledProfile pins a stale-resolver bug:
+// the heartbeat registry's scope->shell resolver used to
 // be a SNAPSHOT of m.members captured once in New() (fleetShellResolver). A
 // profile enabled — or created — AFTER startup could never be resolved to a
 // shell, because start()'s resolve(scope) call kept consulting that frozen

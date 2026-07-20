@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// tileTitleLine (task 10): the profile label rides the title row instead of
+// tileTitleLine: the profile label rides the title row instead of
 // growing the tile's fixed six-line budget. The name stays exactly where it
 // was, and the label appears only when there is genuine room for it.
 func TestTileTitleLineFoldsProfileLabelInWithoutGrowingTheRow(t *testing.T) {
@@ -73,7 +73,7 @@ func TestTileNeverReadsVMStatusDirectly(t *testing.T) {
 	}
 }
 
-// The single most dangerous failure mode in the plan: Lima calls a mid-build
+// The single most dangerous failure mode here: Lima calls a mid-build
 // VM "Running" (Ansible is just a process inside it), so a tile that trusted
 // vm.Status would show a build in flight — or worse, a FAILED provision — as
 // a healthy green "Running" tile. Rendering must go through deriveStatus and
@@ -332,7 +332,7 @@ func TestFleetUniformityBaseImageBothDirections(t *testing.T) {
 // The managed/external badge goes through the exact same generic rule as
 // arch and base image — it is never special-cased away. A fleet of all
 // managed (or all external) VMs hides it; a mixed fleet shows each tile's
-// own value. (The board, task 08, is what makes this uniform in practice by
+// own value. (The board is what makes this uniform in practice by
 // filtering to managed clones only — nothing here needs to know that.)
 func TestFleetUniformityManagedBothDirections(t *testing.T) {
 	uniform := computeFleetUniformity([]vmTraits{{Managed: true}, {Managed: true}})

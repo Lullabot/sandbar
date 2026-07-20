@@ -130,7 +130,7 @@ func (m model) boardVMs() []boardVM {
 	var out []boardVM
 	for i := range m.members {
 		mem := m.members[i]
-		// A disabled member's tiles are hidden (task 10) — its binding is torn
+		// A disabled member's tiles are hidden — its binding is torn
 		// down and its last-known vms are stale, not a live roster to show.
 		if mem.state == connDisabled {
 			continue
@@ -765,7 +765,7 @@ func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // boardHelp is the board's footer, derived from THE SAME command registry
 // (commandreg.go) the VM screen's footer (detailHelp, detail.go) is, filtered
 // by the SAME enabledFor(model, vm.VM) predicate against the tile under the
-// focus ring. That is the whole payoff of task 02's registry: the footer
+// focus ring. That is the whole payoff of the command registry: the footer
 // cannot advertise a verb that would do nothing to the focused tile, and it
 // cannot drift from updateBoard's own dispatch loop above (both walk
 // vmCommands), because there is exactly one list to walk.
@@ -818,8 +818,8 @@ func (m model) boardHelp() []key.Binding {
 // EVERY ROW IT SPENDS IS A ROW CLASSIFY BUDGETED. That is not a nicety: this view
 // used to emit two blank separator rows nobody had budgeted for, so at 80x24 it
 // rendered 26 lines into a 24-row terminal, bubbletea's alt-screen clipped the
-// bottom two, and the entire help bar was invisible at the one size the plan calls
-// out as must-work. Each band below renders EXACTLY its budget — HeaderHeight,
+// bottom two, and the entire help bar was invisible at the minimum supported
+// size, 80x24. Each band below renders EXACTLY its budget — HeaderHeight,
 // MessagesHeight, GridHeight, FooterHeight — or fewer rows, never more.
 func (m model) boardView() string {
 	var b strings.Builder
@@ -900,7 +900,7 @@ func (m model) gridView() string {
 		return clipBlock(m.fleetConnectingBanner(), m.layout.GridHeight, m.layout.ContentWidth)
 	}
 
-	// The exception-only badge rule (task 07) is a genuine equality test across the
+	// The exception-only badge rule (tile.go) is a genuine equality test across the
 	// fleet ON THE BOARD: a badge answers "is this VM the odd one out", and the
 	// tiles beside it are what it is odd against.
 	//
@@ -921,7 +921,7 @@ func (m model) gridView() string {
 	uniform := computeFleetUniformity(voters)
 
 	// ONLY THE CELLS ON SCREEN ARE RENDERED. The grid used to build every tile and
-	// then slice the off-screen rows away: at the plan's must-work 80x24 (one column,
+	// then slice the off-screen rows away: at the minimum supported 80x24 (one column,
 	// two visible rows) a ten-VM board rendered eleven tiles to show two, ten times a
 	// second while a build spinner ran — border, padding and ansi.Truncate work for
 	// nine tiles nobody could see, plus a job-registry and a heartbeat lock for each.
@@ -985,7 +985,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 	// so a same-named VM under another profile never lends this one its build/gauge.
 	job, hasJob := m.jobs.snapshot(provisionKey(v.scope, v.Name))
 	sample, hasSample := m.sampleOf(v.scope, v.Name)
-	// The tile's provenance label (task 10) names the OWNING member's profile —
+	// The tile's provenance label names the OWNING member's profile —
 	// which profile this VM actually runs through — never guessed from the VM
 	// itself, since two profiles can share a name.
 	var profileLabel string
@@ -1009,7 +1009,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 }
 
 // traitsOf gathers one VM's exception-only field values for the fleet-uniformity
-// rule (task 07).
+// rule (tile.go).
 //
 // Base and Managed are resolved the same way the ROSTER resolves them, not
 // straight off the registry, because a VM mid-create is not in the registry yet —

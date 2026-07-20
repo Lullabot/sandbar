@@ -1,7 +1,7 @@
 package ui
 
-// tile.go renders ONE VM as a bordered card: the board's (task 08) atomic
-// unit. Everything on it is derived, never a struct field rendered straight
+// tile.go renders ONE VM as a bordered card: the board's atomic unit.
+// Everything on it is derived, never a struct field rendered straight
 // through that would let it lie:
 //
 //   - Status is ALWAYS reached through deriveStatus (jobs.go) — never
@@ -20,7 +20,7 @@ package ui
 // Six content lines, always, regardless of what is known: title, status, up
 // to three gauge/badge rows (cpu, mem, disk — or a building VM's progress bar
 // and role/task line), and a closing `up <duration>` / `last used <duration>
-// ago` line. A fixed line count is what lets the board (task 08) lay tiles
+// ago` line. A fixed line count is what lets the board (board.go) lay tiles
 // out in a grid without measuring each one (see layout.go's tileHeight).
 
 import (
@@ -60,9 +60,10 @@ const (
 // floating point (1-0.9 = 0.0999…8 < 0.10), and the boundary must not warn.
 const lowFreeThreshold = 0.10
 
-// tileInput bundles a single VM's rendering material: task 03's tile-width
-// budget, task 04's job snapshot, task 05's heartbeat sample, and this VM's
-// resolved place in the exception-only-field rule below. Now is threaded
+// tileInput bundles a single VM's rendering material: the tile-width budget
+// (layout.go), the job snapshot (jobs.go), the heartbeat sample
+// (heartbeat.go), and this VM's resolved place in the exception-only-field
+// rule below. Now is threaded
 // through explicitly (rather than read from time.Now() inside) so the
 // up/last-used duration math is deterministic in tests.
 type tileInput struct {
@@ -77,14 +78,14 @@ type tileInput struct {
 	// fleet-wide verdict on whether each one is uniform. Gathering Traits for
 	// every VM on the board (Arch off vm.VM, Base/Managed off the registry)
 	// and calling computeFleetUniformity once over all of them is the board's
-	// job (task 08); this file only defines the shape and the rule.
+	// job (board.go); this file only defines the shape and the rule.
 	Traits  vmTraits
 	Uniform fleetUniformity
 
 	Focused bool
 	Width   int // layoutMode.TileWidth
 
-	// ProfileLabel is task 10's tile provenance: the name of the profile this
+	// ProfileLabel is the tile's provenance: the name of the profile this
 	// VM runs through (its owning member's profile.Name). It folds into the
 	// title row (line 0) rather than growing the tile's fixed six-line budget
 	// — see tileTitleLine. Empty renders no label at all (never a bracket
@@ -174,9 +175,9 @@ func renderTile(in tileInput) string {
 	return style.Render(strings.Join(lines, "\n"))
 }
 
-// tileTitleLine folds task 10's profile-provenance label into the title row
+// tileTitleLine folds the profile-provenance label into the title row
 // (line 0) instead of growing the tile's fixed six-line budget: the VM's name
-// stays LEFT exactly as before this task (that is the identity a reader scans
+// stays LEFT, unchanged (that is the identity a reader scans
 // for first), and the profile label rides the same row, right-aligned,
 // whenever there is room next to it. The label shrinks (truncates, then
 // disappears entirely) before the name ever would — the name is the tile's
@@ -278,7 +279,7 @@ func tileStyleFor(status derivedStatus) lipgloss.Style {
 // shows THIS VM's own value the moment it does not. The managed/external
 // field goes through the identical, un-special-cased rule — it is not
 // deleted, it is simply never exceptional once the board filters to managed
-// clones only (task 08), which makes it uniform by construction.
+// clones only (board.go), which makes it uniform by construction.
 func tileBadges(t vmTraits, u fleetUniformity) []string {
 	var badges []string
 	if u.ShowArch {
@@ -304,7 +305,7 @@ func tileBadges(t vmTraits, u fleetUniformity) []string {
 // vmTraits are the exception-only field values for ONE VM — the raw material
 // the fleet-uniformity rule (below) compares across every VM the caller
 // includes. Gathering these for a whole board (Arch off vm.VM, Base/Managed
-// off the registry) is the board's job (task 08); this file only defines the
+// off the registry) is the board's job (board.go); this file only defines the
 // shape and the rule that consumes it.
 type vmTraits struct {
 	Arch    string
@@ -625,8 +626,7 @@ func upSince(hf lima.HostFiles, dir string) (time.Time, bool) {
 }
 
 // formatUptime renders a running VM's closing line: hours+minutes below a
-// day, days+hours at or above one — matching the "up 2h14m" style set out in
-// the plan mockup.
+// day, days+hours at or above one — the "up 2h14m" style.
 func formatUptime(d time.Duration) string {
 	if d < 0 {
 		d = 0
@@ -647,8 +647,7 @@ func formatUptime(d time.Duration) string {
 }
 
 // formatAgo renders a stopped VM's closing line in the coarsest unit that
-// keeps it readable, matching the "last used 3d ago" / "6 weeks ago" style
-// from the plan.
+// keeps it readable — the "last used 3d ago" / "6 weeks ago" style.
 func formatAgo(d time.Duration) string {
 	if d < 0 {
 		d = 0

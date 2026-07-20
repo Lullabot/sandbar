@@ -48,7 +48,7 @@ package ui
 //
 // The LAST RUN OF EACH KIND, PER VM, IN MEMORY. Deliberately not: persistence
 // across restarts, a multi-run history, a storage format, pruning, or schema
-// versioning. The plan's decision log draws that line.
+// versioning. Those were considered and deliberately ruled out.
 
 import (
 	"context"
@@ -76,7 +76,7 @@ const (
 // jobKey identifies one run: the connection scope, the VM, and which of its
 // runs. Scope is part of the identity — not decoration — so a job for "web"
 // under one profile can never be looked up, retained-run-checked, or reaped
-// as if it were "web" under another (task 7's fleet). Every constructor below
+// as if it were "web" under another member of the fleet. Every constructor below
 // takes scope explicitly for exactly that reason.
 type jobKey struct {
 	scope registry.Scope
@@ -589,7 +589,7 @@ func (r *jobRegistry) runningKey(scope registry.Scope, name string) (jobKey, boo
 // runningInScope reports the key of ANY job in flight anywhere under scope —
 // a build or a file transfer, on any VM — and whether one was found. It is
 // the profile-level counterpart of Building/isRunning above (both per-VM):
-// the profile management screen (task 8) gates a whole profile's
+// the profile management screen (profilesview.go) gates a whole profile's
 // disable/delete/connection-field-edit on it being IDLE, which means no run
 // in flight ACROSS ITS ENTIRE SCOPE, not just on one particular VM name —
 // mirroring the existing per-VM Delete gate (commandreg.go's notBuilding) one
@@ -675,11 +675,11 @@ func (r *jobRegistry) running(key jobKey) bool {
 }
 
 // names lists every VM IN scope that has a run — once each, however many kinds it
-// has — in no order. The board (task 08) needs it because a VM being CREATED does
+// has — in no order. The board (board.go) needs it because a VM being CREATED does
 // not appear in `limactl list` until its clone lands — minutes into its own build
 // — so a board that walked only the Lima list would show nothing at all for
 // exactly the span the user is waiting on, and the signature moment of the whole
-// plan (press n, a building tile appears) would not happen.
+// flow (press n, a building tile appears) would not happen.
 //
 // Scoped to scope: a board built from one profile's roster must never gain a
 // tile for another profile's same-named build.
@@ -732,7 +732,7 @@ func (s derivedStatus) String() string {
 // deriveStatus is THE status function — pure, and the only way a VM's status may
 // reach a tile. THE JOB REGISTRY IS CONSULTED FIRST; Lima is the fallback.
 //
-// Rendering v.Status directly is the plan's top-billed failure: a build in flight
+// Rendering v.Status directly is the failure this exists to prevent: a build in flight
 // would look identical to a healthy idle VM, and — far worse — a FAILED provision
 // would leave a reassuring green "Running" tile, failing quietly at the exact
 // moment the user most needs to be told.

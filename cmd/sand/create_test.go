@@ -38,8 +38,8 @@ func (s *stubProvisioner) RecreateWithOptions(_ context.Context, _ vm.CreateConf
 	return nil
 }
 
-// TestHeadlessCreateRecordsManagedVM is the load-bearing parity guarantee
-// called out in task 3: a headless `sand create` must record the VM as
+// TestHeadlessCreateRecordsManagedVM is the load-bearing parity
+// guarantee: a headless `sand create` must record the VM as
 // managed with its CreateConfig, exactly like the interactive TUI does on a
 // successful provision (internal/ui/model.go's provisionDoneMsg handling,
 // shared via internal/manage), so a headless-created VM is flagged managed
@@ -73,8 +73,8 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 	}
 }
 
-// TestHeadlessCreatePassesRebuildDownToTheProvisioner is the CLI half of the race
-// this task closes.
+// TestHeadlessCreatePassesRebuildDownToTheProvisioner is the CLI half of the
+// --rebuild base-deletion race fix.
 //
 // doHeadlessCreate used to force-delete the base image ITSELF, before calling the
 // provisioner — and therefore before the base lock (internal/provision/baselock.go)

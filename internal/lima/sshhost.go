@@ -1,6 +1,6 @@
 package lima
 
-// sshhost.go is the SSH implementation of the task-1 host-access seam (Host =
+// sshhost.go is the SSH implementation of the host-access seam (Host =
 // Runner + HostFiles). It drives the SAME limactl the local execRunner drives —
 // it reuses Client's argv-building wholesale — and changes only HOW those args
 // are executed (over `ssh <host> …` instead of a local fork) and WHERE the Lima

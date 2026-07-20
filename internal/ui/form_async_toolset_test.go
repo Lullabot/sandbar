@@ -1,12 +1,12 @@
 package ui
 
-// form_async_toolset_test.go is the regression suite for finding 4 in the
-// plan-16 code review: openForm used to read the shared base image's
-// recorded tool-set stamp SYNCHRONOUSLY, on the Update goroutine
+// form_async_toolset_test.go is the regression suite for a form-open stall:
+// openForm used to read the shared base image's recorded tool-set stamp
+// SYNCHRONOUSLY, on the Update goroutine
 // (provision.BaseToolset(p.HostFiles(), ...)). For a remote profile that read
 // goes over ssh (HostFiles.ReadFile), so a slow or dead remote host froze the
 // WHOLE TUI the instant 'n' was pressed — the exact never-block guarantee the
-// rest of the fleet (async connect/list per member, task 7) exists to
+// rest of the fleet (async connect/list per member) exists to
 // provide. The fix moves the read into a tea.Cmd (formToolsetCmd, kicked by
 // kickFormToolsetLoad) whose result — toolsetLoadedMsg, form.go — is applied
 // only if the form is still open and still targeting the scope it was read

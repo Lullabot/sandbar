@@ -1,7 +1,7 @@
 package ui
 
-// formprofile_test.go covers task 9: the create form's profile selector —
-// defaulting to the last-used profile (else Local), retargeting a create at
+// formprofile_test.go covers the create form's profile selector — defaulting
+// to the last-used profile (else Local), retargeting a create at
 // the SELECTED profile's provider/scope/host sample, and persisting the
 // selection as last-used on a successful create. Driven with providerfake —
 // NO real backend.

@@ -49,7 +49,7 @@ func TestAttachArgv(t *testing.T) {
 			instance:  "claude",
 			guestHome: "/home/debian.guest",
 			// --workdir comes BEFORE the instance name and there is NO `--` separator:
-			// both were learned against a real VM (task 01) and both are load-bearing.
+			// both were learned against a real VM and both are load-bearing.
 			wantHead: []string{"limactl", "shell", "--workdir", "/home/debian.guest", "claude", "bash", "-c"},
 		},
 		{
@@ -87,7 +87,7 @@ func TestAttachArgv(t *testing.T) {
 				}
 			}
 			// `--` gets forwarded to the guest's bash, which dies with
-			// `/bin/bash: --: invalid option` (task 01, verified on a real VM).
+			// `/bin/bash: --: invalid option` (verified on a real VM).
 			if i := slices.Index(argv, "--"); i >= 0 {
 				t.Errorf("argv[%d] is a `--` separator; limactl forwards it to the guest bash, which fails with"+
 					" `/bin/bash: --: invalid option`. The guest command follows the instance name directly: %q", i, argv)
@@ -99,7 +99,7 @@ func TestAttachArgv(t *testing.T) {
 // TestAttachArgvWorkdirPrecedesInstanceName pins an ordering that looks cosmetic and
 // is not: `limactl shell <name> --workdir <dir>` forwards --workdir to the GUEST's
 // bash (`/bin/bash: --: invalid option`) instead of consuming it. Verified against a
-// real VM in task 01.
+// real VM.
 func TestAttachArgvWorkdirPrecedesInstanceName(t *testing.T) {
 	argv := AttachArgv("claude", "/home/debian.guest", "")
 

@@ -161,8 +161,8 @@ connection profile, --profile picks which one to attach to.
 // actionable error for an unknown instance or one that is not running, rather
 // than letting a raw limactl error or a stack trace reach the user. Factored
 // out from runShell so it can be tested with a stub vmLister; the exec
-// hand-off above needs a real TTY and a real VM (task 6's job) and is
-// deliberately left untested here.
+// hand-off above needs a real TTY and a real VM and is deliberately left
+// untested here.
 func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 	found, err := l.Get(name)
 	if err != nil {

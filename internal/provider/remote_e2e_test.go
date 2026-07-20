@@ -2,9 +2,9 @@
 
 // remote_e2e_test.go is the remote-Lima-over-SSH counterpart to
 // cmd/sand/create_e2e_test.go and internal/lima/copy_e2e_test.go: it drives the
-// REAL remote provider (plan 15 task 5, internal/provider/remote.go) against a
-// REAL SSH target end to end — create, the recorded-managed/remote-scope claim,
-// the attach argv, a copy-and-read-back, list, stop, delete — and confirms a
+// REAL remote provider (remote.go) against a REAL SSH target end to end —
+// create, the recorded-managed/remote-scope claim, the attach argv, a
+// copy-and-read-back, list, stop, delete — and confirms a
 // LOCAL `limactl list` and the REMOTE provider's List() never show each other's
 // instances. It is gated behind the `limae2e` build tag exactly like every other
 // test in that family (AGENTS.md's hard rule: no test may require a real
@@ -20,8 +20,8 @@
 // configured through this test's OWN env vars (LIMA_REMOTE_E2E_HOST/USER/
 // PORT/IDENTITY/LIMA_HOME) plus LIMA_REMOTE_E2E=1 — this test builds a
 // provider.TargetConfig directly. `sand` itself no longer has an env-var
-// selection surface at all (plan 16 task 4 retired it in favor of
-// internal/profiles's persisted connection profiles), so this test's env vars
+// selection surface at all — it was retired in favor of internal/profiles's
+// persisted connection profiles — so this test's env vars
 // are private to this suite and were never something pointing `sand` itself
 // anywhere.
 //
@@ -56,9 +56,9 @@ import (
 )
 
 // This test's own, private env-var surface for naming a live SSH target —
-// `sand` itself has no env-var selection surface at all any more (plan 16
-// task 4 retired it in favor of internal/profiles's persisted connection
-// profiles), so this suite's configuration cannot be confused with the
+// `sand` itself has no env-var selection surface at all any more (it was
+// retired in favor of internal/profiles's persisted connection profiles),
+// so this suite's configuration cannot be confused with the
 // product's.
 const (
 	remoteE2EHostEnv     = "LIMA_REMOTE_E2E_HOST"
@@ -102,14 +102,13 @@ func sshTarget(cfg provider.TargetConfig) string {
 }
 
 // skipUnlessRemoteE2EConfigured is the clean-skip path this test MUST take on a
-// box (like this dev box, task 06's own scope note) with no passwordless SSH
-// set up: it checks the opt-in gate and a configured host first (cheapest,
-// least surprising reasons to skip), then a bounded, non-interactive
-// reachability probe — a TCP dial, then `ssh -o BatchMode=yes limactl
-// --version` — so a target that is configured but not actually reachable (or
-// whose auth needs a password/host-key prompt this test has no tty to answer)
-// is reported as a clean skip rather than a multi-minute hang or a wall of ssh
-// auth noise.
+// box with no passwordless SSH set up: it checks the opt-in gate and a
+// configured host first (cheapest, least surprising reasons to skip), then a
+// bounded, non-interactive reachability probe — a TCP dial, then
+// `ssh -o BatchMode=yes limactl --version` — so a target that is configured but
+// not actually reachable (or whose auth needs a password/host-key prompt this
+// test has no tty to answer) is reported as a clean skip rather than a
+// multi-minute hang or a wall of ssh auth noise.
 func skipUnlessRemoteE2EConfigured(t *testing.T) provider.TargetConfig {
 	t.Helper()
 	if os.Getenv("LIMA_REMOTE_E2E") == "" {
@@ -145,7 +144,7 @@ func skipUnlessRemoteE2EConfigured(t *testing.T) provider.TargetConfig {
 	return cfg
 }
 
-// TestE2ERemoteLima is this task's one cohesive integration test: create over
+// TestE2ERemoteLima is one cohesive integration test: create over
 // SSH, the managed/remote-scope bookkeeping, the exec-ready ssh-wrapped attach
 // argv (with a best-effort live corroboration that the guest `main` tmux
 // session survives detach, when a host tmux binary is available to drive it),

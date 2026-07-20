@@ -3,10 +3,10 @@ package provision
 // aptcache.go caches apt archives fetched during a base build on the HOST,
 // across rebuilds, so a `--rebuild` is CPU-bound (unpacking/configuring
 // already-fetched .deb files) rather than network-bound (re-downloading
-// them). It exists because strikethroo plan 13 task 1 measured the base
-// build's phases and found that on a fast link, the network fetch was not
-// dominant — but re-fetching public .deb files on every rebuild is still
-// pure waste, and a `--rebuild` used for local development can happen often.
+// them). It exists because profiling the base build's phases showed that on a
+// fast link, the network fetch was not dominant — but re-fetching public .deb
+// files on every rebuild is still pure waste, and a `--rebuild` used for local
+// development can happen often.
 //
 // THE ROAD NOT TAKEN — a writable host mount. The obvious design is a writable
 // Lima mount on the base overlay pointing apt's Dir::Cache::archives at a host
@@ -15,14 +15,14 @@ package provision
 // instance and rejected: Lima's mount type falls back to reverse-sshfs
 // whenever virtiofsd is not installed on the host (virtiofsd is a SEPARATE
 // system package, not bundled with Lima, and is not a safe assumption on an
-// arbitrary Linux host — exactly the same restriction the task's own notes
-// flagged for Lima's reverse-sshfs default on macOS). Reverse-sshfs does not
-// honour a guest `chown` of the mounted directory: `chown _apt
+// arbitrary Linux host — and Lima's reverse-sshfs default on macOS carries
+// exactly the same restriction). Reverse-sshfs does not honour a guest
+// `chown` of the mounted directory: `chown _apt
 // /mnt/apt-cache/partial` fails with EPERM, which apt needs to succeed to use
 // that directory as its archive cache. That failure was reproduced against a
 // real `limactl` instance, not assumed.
 //
-// So this file takes the pre-approved fallback instead: `limactl copy` moves
+// So this file takes the fallback approach instead: `limactl copy` moves
 // the guest's OWN default apt cache (/var/cache/apt/archives — Debian keeps
 // fetched .deb files there until `apt-get clean` runs, no config needed) out
 // to the host after a successful base build, and back in before the next one.

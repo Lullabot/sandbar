@@ -147,11 +147,12 @@ func baseVersionPath(hf lima.HostFiles, baseName string) string {
 	return filepath.Join(hf.LimaHome(), "_sand", baseName+".playbook-version")
 }
 
-// baseStamp is a base image's on-disk stamp: the content-hash version (task 4)
-// on line 1, and the moment it was written (BuiltAt, RFC3339) on line 2 — the
-// signal ensureBaseStopped's age check (baseMaxAge) compares against so a base
-// is refreshed with a single in-place `apt upgrade` at most once every 30 days,
-// instead of every clone re-paying for it in the finalize phase.
+// baseStamp is a base image's on-disk stamp: the content-hash version (see
+// PlaybookVersion) on line 1, and the moment it was written (BuiltAt, RFC3339)
+// on line 2 — the signal ensureBaseStopped's age check (baseMaxAge) compares
+// against so a base is refreshed with a single in-place `apt upgrade` at most
+// once every 30 days, instead of every clone re-paying for it in the finalize
+// phase.
 type baseStamp struct {
 	Version string
 	BuiltAt time.Time
@@ -159,8 +160,8 @@ type baseStamp struct {
 
 // parseBaseStamp parses a stamp file's raw content. ok is true only when BOTH
 // lines are present and BuiltAt parses as RFC3339 — an older stamp (written
-// before this task, or by the pre-v2 git-HEAD scheme) has no usable line 2, and
-// a corrupt one does not parse as RFC3339 either way. Both cases return
+// before BuiltAt was recorded, or by the pre-v2 git-HEAD scheme) has no usable
+// line 2, and a corrupt one does not parse as RFC3339 either way. Both cases return
 // ok=false: NEVER GUESS a build time. Callers that need "is this base older
 // than N days" treat ok=false as "cannot prove freshness", the same posture
 // baseStale already takes for an unparseable/missing version.
@@ -196,7 +197,7 @@ func readBaseVersion(hf lima.HostFiles, baseName string) string {
 
 // readBaseBuiltAt returns the BUILT-AT timestamp recorded in a base's stamp, or
 // ok=false when the stamp is missing, unreadable, or does not carry a usable
-// timestamp (an older stamp written before this task, or a corrupt one). The
+// timestamp (a pre-timestamp stamp, or a corrupt one). The
 // caller (ensureBaseStopped's age check) reads ok=false as "cannot prove this
 // base is fresh" and refreshes it once rather than assuming it is new.
 func readBaseBuiltAt(hf lima.HostFiles, baseName string) (time.Time, bool) {

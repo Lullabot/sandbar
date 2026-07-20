@@ -416,9 +416,8 @@ func TestResetReplaysTheRecordedToolset(t *testing.T) {
 
 // deliverToolsetLoad runs cmd (openForm/cycleFormProfile's returned command,
 // a tea.Batch of the input focus blink plus kickFormToolsetLoad's async
-// tool-set read — see finding 4 in the plan-16 code review) and feeds the
-// toolsetLoadedMsg it produces into *m, exactly as the real Update loop would
-// once the read comes back. Tests that assert on the form's tool toggles
+// tool-set read) and feeds the toolsetLoadedMsg it produces into *m, exactly
+// as the real Update loop would once the read comes back. Tests that assert on the form's tool toggles
 // need this now that reading the base's tool-set stamp is no longer
 // synchronous inside openForm (it would otherwise be a blocking ssh round
 // trip for a remote profile) — mirrors board_test.go's actionDone, which

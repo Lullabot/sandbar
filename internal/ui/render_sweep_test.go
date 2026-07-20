@@ -15,15 +15,15 @@ import (
 // GOLDENS PIN THE RESPONSIVE RANGE; THIS SWEEP IS ITS COMPLEMENT: it proves
 // there is no terminal size — however cramped, however vast — at which the
 // board fails to render at all, AND that what it renders FITS. layout_test.go
-// already pins the first half at the pure classify(w, h) level (task 03:
-// TestClassifyNoSizeIsUnrenderable); this asserts it end to end, through the
+// already pins the first half at the pure classify(w, h) level
+// (TestClassifyNoSizeIsUnrenderable); this asserts it end to end, through the
 // REAL board renderer, over a fleet that actually has tiles to draw and a hidden
-// VM to disclose — the surfaces this task added on top of classify's budgets.
+// VM to disclose — the surfaces layered on top of classify's budgets.
 //
 // THE FIT ASSERTION IS THE ONE THAT MATTERS, and its absence is what let the
 // board ship two rows taller than classify budgeted for: at 80x24 the rendered
 // view came to 26 lines, so bubbletea's alt-screen clipped rows 25–26 and the
-// ENTIRE help bar was invisible at the one size the plan calls out as must-work.
+// ENTIRE help bar was invisible at the minimum supported size.
 // "It rendered something, and didn't say 'too small'" stayed true the whole time.
 // Assert the extent, or the footer walks off the bottom again.
 func TestBoardRendersAtEverySizeInTheSweep(t *testing.T) {
@@ -208,7 +208,7 @@ func TestEveryScreensFooterIsClippedToTheTerminal(t *testing.T) {
 // The rows come out of the grid, which has them to spare at 1-3 VMs.
 func TestFooterWrapsInsteadOfTruncating(t *testing.T) {
 	m := newTestModel(t)
-	m = resized(m, 80, 24) // the plan's must-work size, and too narrow for one line
+	m = resized(m, 80, 24) // the minimum supported size, and too narrow for one line
 	m = putOnBoard(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 2})
 
 	lines := m.footerLines(m.boardHelp())

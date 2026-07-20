@@ -92,8 +92,8 @@ echo "SAND_ANSIBLE_TASK_TOTAL=$total"`
 
 // profileGuestScript is the opt-in variant of inGuestScript, selected when the
 // host has SAND_PROFILE set (see sandProfileEnabled). The profile_tasks callback
-// lives in the ansible.posix collection, not ansible-core (strikethroo plan 13,
-// task 02), and the default Lima dependency script installs only ansible-core —
+// lives in the ansible.posix collection, not ansible-core, and the default Lima
+// dependency script installs only ansible-core —
 // so ansible.cfg deliberately does NOT enable the callback (leaving it on
 // unconditionally made every default build print a "cannot load profile_tasks"
 // warning that reads to end users as a broken build). This variant installs
@@ -379,7 +379,7 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	}
 
 	// The bounce used to be unconditional. Its two stated reasons are both gone:
-	//   - the finalize apt upgrade (removed in task 8), and
+	//   - the finalize apt upgrade, which no longer exists, and
 	//   - docker-group membership, which is granted in the BASE phase
 	//     (roles/dev-tools, gated `when: provision_phase != 'finalize'` in
 	//     site.yml) and therefore baked into the image — a clone has the group

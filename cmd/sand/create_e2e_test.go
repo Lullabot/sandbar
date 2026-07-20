@@ -71,7 +71,7 @@ var cmdE2ESharedBase struct {
 // Every tool-set flag is explicitly off: these tests only exercise the
 // create/recreate + managed-registry bookkeeping, never the base's installed
 // tooling, so there is nothing to gain from paying for Claude/DDEV/Go/Java
-// installs here — this is the "tiny resources" the task calls for.
+// installs here — the shared base is kept deliberately small and cheap to build.
 func ensureCmdE2EBase(t *testing.T) (*lima.Client, *provision.Provisioner, vm.CreateConfig) {
 	t.Helper()
 	cmdE2ESharedBase.once.Do(func() {
@@ -121,7 +121,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// TestE2EHeadlessCreateRecordsManaged is the create half of this task: driving
+// TestE2EHeadlessCreateRecordsManaged is the create half of the e2e coverage: driving
 // doHeadlessCreate — the exact function runCreate (sand create's real entry
 // point) calls — against a real Lima client and a real, file-backed registry
 // must leave the new VM both listed by `limactl list` AND recorded managed,
@@ -184,7 +184,7 @@ func TestE2EHeadlessCreateRecordsManaged(t *testing.T) {
 	}
 }
 
-// TestE2ERecreateRoundTrip is the recreate half of this task: (a) a
+// TestE2ERecreateRoundTrip is the recreate half of the e2e coverage: (a) a
 // sand-created VM can be recreated via --recreate, and the recreate really
 // replaces the instance rather than no-op'ing; (b) --recreate against a VM
 // sand did not create is refused with the "recreate refused" error, and the

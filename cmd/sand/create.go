@@ -115,7 +115,7 @@ Flags:
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
 	// sand's playbook is
 	// embedded in the binary at build time (see playbook_embed.go), so there is
-	// no ref left to pin at create time. This is not a gap — see task 3 notes.
+	// no ref left to pin at create time. This is deliberate, not a gap.
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

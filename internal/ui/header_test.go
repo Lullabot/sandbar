@@ -127,7 +127,7 @@ func TestHiddenVMsGetNoTileAndAreNoLongerCounted(t *testing.T) {
 	}
 }
 
-// The live readout must survive the plan's narrowest supported terminal — it is
+// The live readout must survive the narrowest supported terminal, 80x24 — it is
 // the header's whole payload now, and headerCounts drops it only if it genuinely
 // cannot fit.
 func TestHeaderReadoutSurvivesAt80x24(t *testing.T) {
@@ -165,12 +165,12 @@ func TestHeaderAndTileAgreeOnTheSameSample(t *testing.T) {
 	}
 }
 
-// --- Task 10: per-profile header bands and banners ---
+// --- Per-profile header bands and banners ---
 
 // The zero-config single-member fleet must want ZERO extra header bands —
 // its one capacity clause stays folded into headerCounts (hostCapacityText),
-// exactly as before this task. This is the single-profile parity the task
-// promises: nothing about the header's shape changes for the common case.
+// exactly as before per-profile bands existed. This is single-profile parity:
+// nothing about the header's shape changes for the common case.
 func TestDesiredHeaderBandsSingleMemberIsZero(t *testing.T) {
 	m := newTestModel(t)
 	if got := m.desiredHeaderBands(); got != 0 {

@@ -45,10 +45,10 @@ func newKeyMap() keyMap {
 		// a base image is not a workspace.
 		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		StopAll: key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
-		// Profiles opens the connection-profiles management screen (task 8,
-		// profilesview.go) from the board. Deliberately NOT added to
+		// Profiles opens the connection-profiles management screen
+		// (profilesview.go) from the board. Deliberately NOT added to
 		// boardHelp's footer bindings: every existing board golden pins that
-		// footer's exact text, and this task adds a new screen without
+		// footer's exact text, and the profiles screen was added without
 		// altering the board's own rendered output. It is still reachable
 		// (this binding fires from updateBoard) and documented on the `?`
 		// screen (help.go's boardKeys) — just not advertised in the footer.
