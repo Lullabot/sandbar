@@ -53,30 +53,56 @@ func TestDeleteGuardExtraSingleUnpushedCommitIsSingular(t *testing.T) {
 }
 
 func TestDeleteGuardExtraDirtyOnly(t *testing.T) {
-	// A checkout that has never been pushed (Ahead is always 0 for
-	// PushStateNever, per the Checkout doc) but has uncommitted changes:
-	// only the dirty half of the "lost" clause should appear, and — because
-	// this row is not PushStatePushed — no "safe on GitHub" clause either.
+	// A checkout whose commits are all safely on the forge but whose working
+	// tree is dirty: the ONLY thing at risk is the uncommitted work, so that
+	// is the only thing in the "lost" clause — with the pushed branch reported
+	// separately as safe.
+	//
+	// This case used to be written with PushStateNever, and asserted that a
+	// never-pushed branch contributed NOTHING to the lost clause. That was
+	// reasoning from the implementation rather than from what is true: such a
+	// branch's commits exist nowhere but the VM. See
+	// TestDeleteGuardExtraNeverPushedCleanIsWarned.
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-		{Path: "/home/user/repo", PushState: checkouts.PushStateNever, Dirty: 2},
+		{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStatePushed, Dirty: 2},
 	}}
 	got := deleteGuardExtra(vc, true)
-	want := "uncommitted changes (only in this VM — lost on delete)."
+	want := "uncommitted changes (only in this VM — lost on delete); 1 branch pushed without a PR (safe on GitHub)."
 	if got != want {
 		t.Fatalf("deleteGuardExtra(dirty-only) = %q, want %q", got, want)
 	}
 }
 
+// TestDeleteGuardExtraNeverPushedAndDirtyNamesBoth is the case the old
+// dirty-only test actually held: a never-pushed branch WITH uncommitted
+// changes has two distinct things at risk, and must name both.
+func TestDeleteGuardExtraNeverPushedAndDirtyNamesBoth(t *testing.T) {
+	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+		{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever, Dirty: 2},
+	}}
+	got := deleteGuardExtra(vc, true)
+	want := "1 never-pushed branch + uncommitted changes (only in this VM — lost on delete)."
+	if got != want {
+		t.Fatalf("deleteGuardExtra() = %q, want %q", got, want)
+	}
+}
+
 func TestDeleteGuardExtraBoth(t *testing.T) {
-	// Aggregated across two checkouts: one with unpushed commits, one with
-	// uncommitted changes only. Both fold into the single "lost on delete"
-	// clause.
+	// Aggregated across two checkouts: one with unpushed commits, one that is
+	// never-pushed AND dirty. All three quantities fold into the single "lost
+	// on delete" clause.
+	//
+	// This expectation used to omit the never-pushed branch entirely — it read
+	// "3 unpushed commits + uncommitted changes" — which is exactly the bug
+	// TestDeleteGuardExtraNeverPushedCleanIsWarned covers: repo-b's branch was
+	// invisible to the guard and only its dirtiness showed. The fixture pairs
+	// the two states precisely because that pairing is what hid the miscount.
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
 		{Path: "/home/user/repo-a", PushState: checkouts.PushStateUnpushed, Ahead: 3},
 		{Path: "/home/user/repo-b", PushState: checkouts.PushStateNever, Dirty: 1},
 	}}
 	got := deleteGuardExtra(vc, true)
-	want := "3 unpushed commits + uncommitted changes (only in this VM — lost on delete)."
+	want := "3 unpushed commits + 1 never-pushed branch + uncommitted changes (only in this VM — lost on delete)."
 	if got != want {
 		t.Fatalf("deleteGuardExtra(both) = %q, want %q", got, want)
 	}
@@ -390,4 +416,60 @@ func settleDeleteGuard(m model) model {
 	vc, _ := m.checkouts.Get(m.confirm.scope, m.confirm.vmName)
 	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{scope: m.confirm.scope, vm: m.confirm.vmName, vc: vc})
 	return m
+}
+
+// TestDeleteGuardExtraNeverPushedCleanIsWarned is the regression for a guard
+// that stayed SILENT about the work it exists to protect.
+//
+// PushStateNever used to be summed into the unpushed-COMMIT total via
+// Checkout.Ahead — which is defined 0 for a never-pushed branch, since there
+// is no tracking ref to count against. So a clean, committed, never-pushed
+// branch contributed nothing to any counter, every clause came out empty, and
+// deleteGuardExtra returned "": deleting that VM destroyed the commits with no
+// warning whatsoever. It looked fine in testing only because such a checkout
+// is usually dirty too, and the dirty clause masked the miscount — so this
+// test deliberately keeps Dirty at 0.
+func TestDeleteGuardExtraNeverPushedCleanIsWarned(t *testing.T) {
+	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+		{Path: "/home/u/repo", Branch: "feature", PushState: checkouts.PushStateNever},
+	}}
+	got := deleteGuardExtra(vc, true)
+	if got == "" {
+		t.Fatal("a committed, never-pushed branch must be named by the delete guard — it exists nowhere else")
+	}
+	if !strings.Contains(got, "never-pushed") {
+		t.Fatalf("guard = %q, want it to name the never-pushed branch", got)
+	}
+	if !strings.Contains(got, "lost on delete") {
+		t.Fatalf("guard = %q, want it in the lost-on-delete clause, not the safe-on-GitHub one", got)
+	}
+	// Counted as branches, not commits: there is no honest commit count.
+	if strings.Contains(got, "0 ") {
+		t.Fatalf("guard = %q, must not report a fabricated zero count", got)
+	}
+}
+
+// TestDeleteGuardExtraNeverPushedCountsBranches pins the pluralization and
+// that never-pushed branches and unpushed commits are reported as the separate
+// quantities they are, rather than being added together.
+func TestDeleteGuardExtraNeverPushedCountsBranches(t *testing.T) {
+	two := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+		{Path: "/a", PushState: checkouts.PushStateNever},
+		{Path: "/b", PushState: checkouts.PushStateNever},
+	}}
+	if got := deleteGuardExtra(two, true); !strings.Contains(got, "2 never-pushed branches") {
+		t.Fatalf("guard = %q, want %q", got, "2 never-pushed branches")
+	}
+
+	mixed := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+		{Path: "/a", PushState: checkouts.PushStateNever},
+		{Path: "/b", PushState: checkouts.PushStateUnpushed, Ahead: 3},
+	}}
+	got := deleteGuardExtra(mixed, true)
+	if !strings.Contains(got, "3 unpushed commits") {
+		t.Fatalf("guard = %q, want the unpushed commit count preserved", got)
+	}
+	if !strings.Contains(got, "1 never-pushed branch") {
+		t.Fatalf("guard = %q, want the never-pushed branch named alongside it", got)
+	}
 }
