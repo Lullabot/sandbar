@@ -1,10 +1,10 @@
 package ui
 
-// landing.go is the Landing pane (plan 17, Component 4 / task 7): a per-VM
-// pull-request cockpit opened for a focused, RUNNING VM. It reads the
-// checkout registry's cached rows (task 1's sweep), groups worktrees under
-// their parent repo, and — lazily, on open — reconciles each pushed GitHub
-// branch's row against the AUTHORITATIVE host-side gh check (task 6's
+// landing.go is the Landing pane: a per-VM pull-request cockpit opened for a
+// focused, RUNNING VM. It reads the checkout registry's cached rows
+// (populated by the sweep, internal/checkouts), groups worktrees under their
+// parent repo, and — lazily, on open — reconciles each pushed GitHub branch's
+// row against the AUTHORITATIVE host-side gh check (internal/landgh's
 // PRState), since the sweep's own push-state is a cheap local heuristic (see
 // checkouts.PushState's doc). Exactly one action is offered per row,
 // mirroring vmCommands' enabledFor idiom (commandreg.go): "Open draft PR" for
@@ -15,16 +15,17 @@ package ui
 //
 // Every action — including "Open draft PR" — runs through the SAME job
 // registry every other sand action does (jobs.go/progress.go): it streams
-// into the viewport and is retained as a reopenable ledger entry (task 8
-// binds 'L' to reopen it; the retention mechanism itself is job-registry
+// into the viewport and is retained as a reopenable ledger entry ('L' reopens
+// it — see commandreg.go; the retention mechanism itself is job-registry
 // native and needs no change here). No guest execution happens on ANY of
 // these actions — every one of them is a workstation-local gh call or an OS
 // browser-open; the guest is touched only by the read-only sweep that
 // populated the registry this pane reads.
 //
 // Wiring the 'l' key to open this pane (with the shell/u/g running-VM gating
-// idiom) is task 8's job; this file exposes openLandingPane so it — and this
-// file's own tests — can drive the pane directly.
+// idiom) is commandreg.go's land verb's job; this file exposes
+// openLandingPane so that verb — and this file's own tests — can drive the
+// pane directly.
 
 import (
 	"context"
@@ -57,7 +58,9 @@ type ghActions interface {
 	OpenInBrowser(ctx context.Context, target string) error
 }
 
-// landRowKind is the row-state half of the plan's Component 4 table.
+// landRowKind is the row-state half of the pane's state/action table: the
+// classification a checkout falls into, which in turn decides the one
+// landAction (below) its row offers.
 type landRowKind int
 
 const (
@@ -277,8 +280,8 @@ func prLabel(pr *landgh.PR) string {
 }
 
 // landGroup is one repo checkout plus the worktrees the sweep found linked to
-// it (task 1's Kind/Parent), or — for an orphaned worktree whose parent
-// wasn't itself in the swept list (e.g. cut by the sweep's cap) — a
+// it (checkouts.Checkout's Kind/Parent), or — for an orphaned worktree whose
+// parent wasn't itself in the swept list (e.g. cut by the sweep's cap) — a
 // standalone group holding just that worktree.
 type landGroup struct {
 	Repo      checkouts.Checkout
@@ -419,9 +422,9 @@ type landingPRStateMsg struct {
 // gh is usable would be pointless work on every gh-absent open.
 //
 // Gating this to a focused, RUNNING VM (matching shell/u/g's enabledFor
-// idiom) is the CALLER's job — commandreg.go's future land verb (task 8) —
-// not this method's: it opens the pane for whatever v it is given, so tests
-// (and, later, that verb) can drive it directly.
+// idiom) is the CALLER's job — commandreg.go's land verb — not this method's:
+// it opens the pane for whatever v it is given, so tests (and, later, that
+// verb) can drive it directly.
 func (m *model) openLandingPane(v boardVM) tea.Cmd {
 	vc, _ := m.checkouts.Get(v.scope, v.Name)
 	groups := groupCheckouts(vc.Checkouts)
@@ -546,11 +549,11 @@ func (m *model) handleLandingPRState(msg landingPRStateMsg) {
 }
 
 // landDraftPRRun builds the streamFunc for "Open draft PR": CreateDraftPR
-// when host gh is available, or — the graceful-degradation fallback (plan
-// Component 4) — opening the compare URL in the browser when it is not, so
-// the action is never simply dead without gh. Both branches are gh-token-
-// scoped, workstation-local calls; neither touches a guest or writes
-// repository code to the host (only the returned PR's metadata/URL).
+// when host gh is available, or — the graceful-degradation fallback — opening
+// the compare URL in the browser when it is not, so the action is never
+// simply dead without gh. Both branches are gh-token-scoped,
+// workstation-local calls; neither touches a guest or writes repository code
+// to the host (only the returned PR's metadata/URL).
 func landDraftPRRun(gh ghActions, available bool, orgRepo, branch string) streamFunc {
 	return func(ctx context.Context, out io.Writer) error {
 		if !available {
@@ -759,8 +762,9 @@ func (p landingPane) scanLabel(now time.Time) string {
 	return "scanned " + formatAgo(now.Sub(p.sweptAt)) + " · r to rescan"
 }
 
-// ghModeLabel is the pane header's gh-mode line — the plan's "the pane
-// surfaces which mode it's in" requirement for graceful degradation.
+// ghModeLabel is the pane header's gh-mode line: graceful degradation is only
+// honest if the pane surfaces which mode it is actually in, so this line
+// always says so rather than letting a degraded pane look like a full one.
 //
 // The two degraded modes are named SEPARATELY and each carries its own fix.
 // They used to share one "gh: unavailable" line, which read as "you don't have

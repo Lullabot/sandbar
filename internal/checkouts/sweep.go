@@ -1,11 +1,11 @@
-// sweep.go is the pure, host-side half of the detection sweep (plan 17,
-// Component 1): it builds the guest command a sweep shell runs, and it parses
-// that command's output back into checkout rows. It knows nothing about how
-// the command actually gets to a guest — no limactl, no Bubble Tea, no
-// goroutines or timers. That wiring belongs to task 3 (the long-lived sweep
-// shell, a sibling of the heartbeat) and task 9 (the headless `sand land`
-// one-shot sweep); both call BuildSweepCommand and ParseSweep so the
-// detection and classification logic is written, and tested, exactly once.
+// sweep.go is the pure, host-side half of the detection sweep: it builds the
+// guest command a sweep shell runs, and it parses that command's output back
+// into checkout rows. It knows nothing about how the command actually gets to
+// a guest — no limactl, no Bubble Tea, no goroutines or timers. That wiring
+// belongs to internal/ui/sweepshell.go (the long-lived sweep shell, a sibling
+// of the heartbeat) and cmd/sand/land.go (the headless `sand land` one-shot
+// sweep); both call BuildSweepCommand and ParseSweep so the detection and
+// classification logic is written, and tested, exactly once.
 //
 // # Mirroring the heartbeat's "deliberately dumb guest side"
 //
@@ -33,7 +33,8 @@
 // None of them contacts the forge. Push state is derived from the LOCAL
 // remote-tracking ref, which a prior `git push` already updated — never from
 // `git ls-remote` or any other network round-trip. Remote truth is confirmed
-// host-side, later, by the `gh pr list` check (task 6/7), not by the guest.
+// host-side, later, by the `gh pr list` check (internal/landgh, driven by the
+// Landing pane), not by the guest.
 package checkouts
 
 import (
@@ -149,9 +150,9 @@ done
 // BuildSweepCommand returns the single shell command a sweep shell runs
 // against a guest: a bounded, read-only `find` + per-checkout `git` reads,
 // exactly as documented on sweepScriptTemplate. It takes no arguments and
-// performs no I/O itself — task 3 wraps it in its own long-lived
-// `limactl shell` + ~60s loop, and task 9 runs it once for a headless
-// one-shot sweep; both feed its stdout to ParseSweep.
+// performs no I/O itself — the TUI's sweep shell wraps it in its own
+// long-lived `limactl shell` + ~60s loop, and `sand land` runs it once for a
+// headless one-shot sweep; both feed its stdout to ParseSweep.
 func BuildSweepCommand() string {
 	r := strings.NewReplacer(
 		"__DEPTH__", strconv.Itoa(sweepMaxDepth),
@@ -236,14 +237,14 @@ func checkoutFromRecord(rec map[string]string, now time.Time) Checkout {
 	ahead := atoiOr(rec["ahead"], 0)
 	behind := atoiOr(rec["behind"], 0)
 
-	// The tracking-ref rule is load-bearing (plan 17, Component 1): pushed vs
-	// unpushed vs never is decided ENTIRELY by whether a remote-tracking ref
-	// exists and how far HEAD is ahead of it — never by the branch's
-	// configured upstream (branch.<b>.merge), which a `git push origin HEAD`
-	// without `-u` never sets even though it updates the tracking ref. This
-	// function never even looks at upstream config; it only sees what the
-	// guest already resolved from the tracking ref, so a -u-less push is
-	// indistinguishable here from an -u'd one, which is the point.
+	// The tracking-ref rule is load-bearing: pushed vs unpushed vs never is
+	// decided ENTIRELY by whether a remote-tracking ref exists and how far
+	// HEAD is ahead of it — never by the branch's configured upstream
+	// (branch.<b>.merge), which a `git push origin HEAD` without `-u` never
+	// sets even though it updates the tracking ref. This function never even
+	// looks at upstream config; it only sees what the guest already resolved
+	// from the tracking ref, so a -u-less push is indistinguishable here from
+	// an -u'd one, which is the point.
 	var state PushState
 	switch {
 	case tracking == 0:

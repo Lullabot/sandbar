@@ -1,6 +1,6 @@
 package ui
 
-// badge_test.go covers task 04's unlanded-work badge two ways, mirroring the
+// badge_test.go covers the unlanded-work badge two ways, mirroring the
 // split badge.go itself keeps: computeCheckoutBadge is a pure mapping and
 // gets ordinary table-driven unit tests (no rendering involved at all); the
 // text renderCheckoutBadge produces is pinned with golden.RequireEqual,

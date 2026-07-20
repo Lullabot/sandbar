@@ -1,12 +1,12 @@
 package ui
 
-// badge.go computes and renders plan 17 Component 2's unlanded-work tile
-// badge: a small, PURELY registry-derived signal for which VMs hold git work
-// that has not yet become a PR (actionable) and which hold work that lives
-// nowhere but the VM (at-risk). It follows the heartbeat/gauge philosophy
-// tile.go already established: it shows only what was actually observed
-// (checkouts.Registry.Get, the sweep-populated, host-persisted store from
-// Component 1), and a VM with no fresh entry shows NOTHING — never a
+// badge.go computes and renders the unlanded-work tile badge: a small,
+// PURELY registry-derived signal for which VMs hold git work that has not yet
+// become a PR (actionable) and which hold work that lives nowhere but the VM
+// (at-risk). It follows the heartbeat/gauge philosophy tile.go already
+// established: it shows only what was actually observed
+// (checkouts.Registry.Get, the sweep-populated, host-persisted store in
+// internal/checkouts), and a VM with no fresh entry shows NOTHING — never a
 // fabricated state. It issues no guest or network call of its own; every bit
 // it reads already lives in memory by the time a render happens.
 //
@@ -28,15 +28,15 @@ import (
 
 // badgeFreshnessWindow is how long a RUNNING VM's last sweep may age before
 // its registry entry is treated as stale rather than current — generous
-// headroom over the sweep's ~60s cadence (Component 1) so a couple of missed
-// cycles do not flap the badge on and off.
+// headroom over the sweep's ~60s cadence (sweepshell.go) so a couple of
+// missed cycles do not flap the badge on and off.
 //
 // A STOPPED VM is unconditionally stale for this badge's purposes: the sweep
-// only ever updates a running VM's entry (Component 1), so a stopped VM's
-// registry row can only get older, never fresher, for however long it stays
-// down. That is a deliberate difference from the delete guard (Component 3),
-// which deliberately still SHOWS that same last-seen data, labeled rather
-// than hidden, because a stopped VM is exactly when the guard matters most.
+// only ever updates a running VM's entry, so a stopped VM's registry row can
+// only get older, never fresher, for however long it stays down. That is a
+// deliberate difference from the delete guard (deleteguard.go), which
+// deliberately still SHOWS that same last-seen data, labeled rather than
+// hidden, because a stopped VM is exactly when the guard matters most.
 // This badge's job is different — an at-a-glance CURRENT-state cue, not a
 // historical record — so it suppresses rather than labels.
 const badgeFreshnessWindow = 10 * time.Minute
@@ -46,17 +46,18 @@ const badgeFreshnessWindow = 10 * time.Minute
 // actually recorded; nothing here is guessed.
 type checkoutBadge struct {
 	// Actionable is true when at least one checkout's branch has reached the
-	// forge (PushState pushed). PR-existence (Component 4, task 7) is not
-	// wired in yet: until it is, "pushed" alone drives this, per the plan's
-	// own call that the badge "reflects push/dirty state alone" until PR
-	// state resolves. This field therefore claims only "pushed", never "no
-	// open PR" — the stronger claim a later task will layer on top.
+	// forge (PushState pushed). PR-existence — the authoritative host-side
+	// `gh pr list` check the Landing pane performs (landing.go) — is not
+	// wired in here: this badge deliberately reflects push/dirty state alone,
+	// because that is all the registry can know without a network call. This
+	// field therefore claims only "pushed", never "no open PR" — the stronger
+	// claim only a live forge check can make.
 	Actionable bool
 
 	// AtRisk is true when at least one checkout has commits that have not
 	// reached any remote-tracking ref, or uncommitted changes — work that
 	// would be lost if the VM were deleted right now. This is what the
-	// delete guard (Component 3) keys on.
+	// delete guard (deleteguard.go) keys on.
 	AtRisk bool
 
 	// Ahead is the total unpushed-commit count across every checkout whose

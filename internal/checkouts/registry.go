@@ -1,9 +1,9 @@
 // Package checkouts is the host-persisted "what git work lives inside this
-// VM" spine for the land feature (plan 17): a per-VM registry of every git
-// checkout (and worktree) a slow-cadence guest sweep discovers, recording
-// each one's branch, forge, push state, and dirty state. It is the single
-// source of truth every land consumer reads: the unlanded-work tile badge,
-// the zero-guest-contact delete guard, the Landing pane, and the headless
+// VM" spine for the land feature: a per-VM registry of every git checkout
+// (and worktree) a slow-cadence guest sweep discovers, recording each one's
+// branch, forge, push state, and dirty state. It is the single source of
+// truth every land consumer reads: the unlanded-work tile badge, the
+// zero-guest-contact delete guard, the Landing pane, and the headless
 // `sand land` CLI.
 //
 // This package is a pure data layer. It knows nothing about Bubble Tea, the
@@ -220,7 +220,7 @@ type VMCheckouts struct {
 // named "web" on one connection profile and a same-named "web" on another
 // can never collide here either. Deliberately unexported and redefined here
 // (rather than imported from internal/ui) to keep this package free of any
-// dependency on the TUI package, which is itself the point of Component 1
+// dependency on the TUI package, which is itself the point of this package
 // being a pure data layer.
 type vmHandle struct {
 	scope registry.Scope

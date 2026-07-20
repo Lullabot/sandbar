@@ -265,7 +265,7 @@ var vmCommands = []vmCommand{
 		enabledFor: func(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) },
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			// The delete guard (plan 17, task 5): a host-only read of the
+			// The delete guard (deleteguard.go): a host-only read of the
 			// checkout registry's cached entry for this VM. m.checkouts.Get
 			// takes a mutex and hands back a value copy; deleteGuardPrompt only
 			// formats strings from it. See deleteguard.go's doc and

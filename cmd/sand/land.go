@@ -40,7 +40,7 @@ type ghActions interface {
 
 // vmRunningChecker is the narrow provider surface runLand needs to confirm
 // the target VM exists and is running before doing anything else — a sweep
-// (task 2's BuildSweepCommand) needs a live guest to run against, matching
+// (checkouts.BuildSweepCommand) needs a live guest to run against, matching
 // the pane's own running-VM gating. Narrower than shell.go's vmGetter (no
 // AttachArgv): land never attaches an interactive session.
 type vmRunningChecker interface {
@@ -109,11 +109,12 @@ func confirmOpenPrompt() bool {
 // GitHub's own redirect for an existing PR, its PR) in a browser — gh-free by
 // construction.
 //
-// Detection is entirely task 2's shared code (BuildSweepCommand/ParseSweep):
-// runLand runs it ONCE via a single `limactl shell` (ShellOut), never the
-// long-lived loop the TUI's own sweep uses — a headless CLI invocation has no
-// reason to keep a guest connection open past its one answer. Every gh action
-// is task 6's landgh.Client, unmodified.
+// Detection is entirely internal/checkouts' shared code
+// (BuildSweepCommand/ParseSweep): runLand runs it ONCE via a single
+// `limactl shell` (ShellOut), never the long-lived loop the TUI's own sweep
+// uses — a headless CLI invocation has no reason to keep a guest connection
+// open past its one answer. Every gh action is internal/landgh's Client,
+// unmodified.
 func runLand(args []string) error {
 	fs := flag.NewFlagSet("land", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
@@ -297,7 +298,7 @@ func pushLabel(co checkouts.Checkout) string {
 // listCheckouts is the no-PATH/no-flag action: it prints a table of vc's
 // checkouts (path, kind, branch, push state, PR state) to w, calling
 // gh.PRState per pushed-with-a-known-remote checkout to annotate PR
-// existence — the lazy, authoritative check the plan's Landing pane also
+// existence — the same lazy, authoritative check the TUI's Landing pane
 // performs at open. A gh.PRState error for one row is reported inline
 // ("? (gh error)") rather than aborting the whole listing, so one bad
 // lookup (a rate limit, an unreachable network) does not hide every other
@@ -398,13 +399,14 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 	return nil
 }
 
-// landWeb implements the --web action: gh-free by construction, exactly as
-// the plan requires. It never calls gh.Available/PRState — it only
-// constructs the branch's compare URL (landgh.CompareURL) and hands it to
-// the OS opener (gh.OpenInBrowser, which itself makes no gh call). This
-// still satisfies "opens the branch's PR (or the branch)": GitHub's own
-// /pull/new/<branch> route redirects to an existing open PR for that branch
-// when one exists, so no local PR lookup is needed to get the right result.
+// landWeb implements the --web action: gh-free by construction, so it keeps
+// working on a workstation with no gh at all. It never calls
+// gh.Available/PRState — it only constructs the branch's compare URL
+// (landgh.CompareURL) and hands it to the OS opener (gh.OpenInBrowser, which
+// itself makes no gh call). This still satisfies "opens the branch's PR (or
+// the branch)": GitHub's own /pull/new/<branch> route redirects to an
+// existing open PR for that branch when one exists, so no local PR lookup is
+// needed to get the right result.
 func landWeb(ctx context.Context, gh ghActions, co checkouts.Checkout) error {
 	if co.PushState != checkouts.PushStatePushed {
 		return fmt.Errorf("sand land: checkout %q has no pushed branch to open (state: %s)", co.Path, co.PushState)

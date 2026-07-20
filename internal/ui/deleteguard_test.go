@@ -184,9 +184,9 @@ func TestDeleteGuardPromptStoppedVMLabelsAsOfLastSeen(t *testing.T) {
 // just by code inspection — that raising the delete confirmation (pressing
 // 'd') never executes anything inside the guest: if it did, one of these
 // methods would fire and the test would fail loudly rather than silently
-// pass. This is the primary acceptance signal for this task (plan 17,
-// Component 3's "hard boundary" and the "Delete guard drifting into guest
-// contact" security risk).
+// pass. This is the primary acceptance signal for the delete guard's hard
+// boundary (deleteguard.go) and for the "delete guard drifting into guest
+// contact" security risk it exists to close.
 type fatalOnGuestContact struct{ t *testing.T }
 
 func (r fatalOnGuestContact) Output(context.Context, ...string) ([]byte, error) {
