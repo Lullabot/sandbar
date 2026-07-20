@@ -100,6 +100,16 @@ type tileInput struct {
 	// pair around nothing).
 	ProfileLabel string
 
+	// Badge is the unlanded-work marker (badge.go) for this VM: "" when there
+	// is nothing to show. It rides the footer row, RIGHT-aligned, the same way
+	// ProfileLabel rides the title row — see tileFooterLine. It is passed in
+	// (rather than spliced onto the rendered tile afterwards) so the footer's
+	// width arithmetic happens on plain, pre-border text: splicing into the
+	// already-bordered string meant diffing rows byte-wise to re-find the
+	// border, which could cut an ANSI escape in half and corrupt the row's
+	// measured width.
+	Badge string
+
 	// Spinner is the current animation frame for a Building tile's glyph. ""
 	// falls back to a static glyph — what every test not driving a real
 	// spinner gets, and a safe default if the board omits one entirely.
@@ -174,7 +184,7 @@ func renderTile(in tileInput) string {
 		// Disk is real data today and always renders, running or stopped, and always
 		// on the same row.
 		lines[4] = tileDiskLine(in.VM, status, in.Sample, in.HasSample, width)
-		lines[5] = tileFooterLine(in.VM, in.Now)
+		lines[5] = tileFooterLine(in.VM, in.Now, in.Badge, width)
 	}
 
 	for i, l := range lines {
@@ -573,7 +583,48 @@ func tileRoleLine(p ansibleProgress) string {
 // independent question from the status line above ("what real state is this
 // actual entity in, and since when") — a Failed tile still has some real
 // underlying Lima state, which is exactly what this answers.
-func tileFooterLine(v vm.VM, now time.Time) string {
+//
+// badge is the unlanded-work marker (badge.go), RIGHT-aligned on this same row
+// — the uptime clause is what a reader scans for on the left, so the git note
+// hangs off the opposite margin rather than trailing two spaces behind a
+// variable-width duration, where it never landed in the same column twice.
+// It follows tileTitleLine's rule for a secondary right-aligned label: the
+// badge yields (truncating, then disappearing) before the uptime clause ever
+// does, so a narrow tile degrades exactly as it did before the badge existed.
+func tileFooterLine(v vm.VM, now time.Time, badge string, width int) string {
+	return tileFooterAlign(tileUptimeClause(v, now), badge, width)
+}
+
+// tileFooterAlign lays the uptime clause left and the badge right on one row
+// of exactly width cells, or returns the clause alone when the badge cannot
+// fit beside it. Both inputs arrive already styled, so every measurement here
+// goes through ansi.StringWidth rather than len: the styles carry escape
+// bytes that occupy no cells.
+func tileFooterAlign(clause, badge string, width int) string {
+	if badge == "" {
+		return clause
+	}
+	clauseW := ansi.StringWidth(clause)
+	gap := width - clauseW - ansi.StringWidth(badge)
+	if gap < 1 {
+		// No room for the badge as given — shrink IT (never the clause), and
+		// drop it entirely rather than crowd the uptime it sits beside.
+		avail := width - clauseW - 1
+		if avail < 1 {
+			return clause
+		}
+		badge = ansi.Truncate(badge, avail, "…")
+		gap = width - clauseW - ansi.StringWidth(badge)
+		if gap < 1 {
+			return clause
+		}
+	}
+	return clause + strings.Repeat(" ", gap) + badge
+}
+
+// tileUptimeClause is the footer's left half: the `up <duration>` / `last used
+// <duration> ago` / `never used` text, with no badge and no padding.
+func tileUptimeClause(v vm.VM, now time.Time) string {
 	// These times are SAMPLED IN listCmd (commands.go), off the Bubble Tea goroutine,
 	// and only read here. They used to be stat'd right in this function — up to three
 	// os.Stat calls per tile, on every frame, and a building board redraws ~10x a

@@ -11,11 +11,11 @@ package ui
 // it reads already lives in memory by the time a render happens.
 //
 // The computation (computeCheckoutBadge) and the text it produces
-// (renderCheckoutBadge) are kept separate from HOW that text reaches the
-// tile (spliceCheckoutBadge), because the first two are pure and trivially
-// unit-testable, while the splice is the one piece that has to reckon with
-// tile.go's already-bordered, already-fixed-width render output without
-// editing tile.go itself (see spliceCheckoutBadge's doc for why, and how).
+// (renderCheckoutBadge) live here; HOW that text reaches the tile is
+// tile.go's business — renderCell hands the rendered marker to renderTile as
+// tileInput.Badge and tileFooterLine lays it out right-aligned on the footer
+// row. This file therefore stays pure and trivially unit-testable, with no
+// knowledge of borders, padding, or ANSI at all.
 
 import (
 	"strconv"
@@ -96,7 +96,15 @@ func computeCheckoutBadge(vc checkouts.VMCheckouts, known, running bool, now tim
 	for _, c := range vc.Checkouts {
 		switch c.PushState {
 		case checkouts.PushStatePushed:
-			b.Actionable = true
+			// A checkout parked on the repo's default branch is "pushed" in the
+			// literal sense but holds nothing to turn into a PR — the state
+			// every pristine clone is in the moment it lands in the VM. Without
+			// this, a freshly provisioned VM that had only ever cloned a repo
+			// showed the amber "actionable" badge with no work behind it. See
+			// checkouts.Checkout.NothingToLand.
+			if !c.NothingToLand() {
+				b.Actionable = true
+			}
 		case checkouts.PushStateUnpushed:
 			b.AtRisk = true
 			b.Ahead += c.Ahead
@@ -161,96 +169,4 @@ func renderCheckoutBadge(b checkoutBadge) string {
 func checkoutBadgeText(reg *checkouts.Registry, scope registry.Scope, name string, running bool, now time.Time) string {
 	vc, known := reg.Get(scope, name)
 	return renderCheckoutBadge(computeCheckoutBadge(vc, known, running, now))
-}
-
-// spliceCheckoutBadge appends badge text onto a fully-rendered tile's footer
-// row — the same "up <duration>" / "never used" line every tile already ends
-// with (tile.go's tileFooterLine) — rather than growing the tile's fixed
-// six-content-row/eight-total-row budget that layout.go's tileHeight bakes
-// into every scroll/clip calculation on the board (visibleTileRows,
-// classify's GridHeight arithmetic). Growing that budget here would need a
-// layout.go change this task does not own and risks silently breaking every
-// other row-count assumption on the board.
-//
-// It never touches tile.go: it works purely on the STRING renderTile already
-// returned, by finding the border+padding wrapper every content row shares —
-// the longest common prefix and the longest common suffix across the tile's
-// six content rows, which is exactly the border-colour escape, the box-
-// drawing character, and the one-cell padding lipgloss's Border+Padding(0,1)
-// prepends/appends to every line uniformly, whatever that line's own content
-// is. Diffing the rows finds it without decoding a single lipgloss/ANSI
-// detail, and stays correct across a focused/unfocused border swap (a
-// different colour, and rounded vs thick box-drawing characters) with no
-// extra code. Rewriting only the row's own interior — which renderTile
-// already padded to an exact, fixed cell width via tile.go's tilePad — means
-// the substitution can never change the tile's rendered width or row count.
-//
-// Anything that does not look exactly like a bordered, eight-row tile (a
-// ghost tile, a pathologically narrow one) is returned UNCHANGED rather than
-// risking a malformed splice: degrading cleanly — no panic, no layout break
-// — matters more here than showing the badge on a tile shape this function
-// does not recognize.
-func spliceCheckoutBadge(tile, badge string, innerWidth int) string {
-	if badge == "" {
-		return tile
-	}
-	lines := strings.Split(tile, "\n")
-	// tileContentRows content lines, plus one top and one bottom border row.
-	if len(lines) != tileContentRows+2 {
-		return tile
-	}
-	content := lines[1 : len(lines)-1]
-	prefix := commonAffix(content, false)
-	suffix := commonAffix(content, true)
-
-	footerIdx := len(lines) - 2 // the last content row: tile.go's tileFooterLine
-	footer := lines[footerIdx]
-	if len(footer) < len(prefix)+len(suffix) {
-		return tile
-	}
-	inner := footer[len(prefix) : len(footer)-len(suffix)]
-
-	trimmed := strings.TrimRight(inner, " ")
-	combined := trimmed + "  " + badge
-	newInner := tilePad(combined, innerWidth)
-
-	lines[footerIdx] = prefix + newInner + suffix
-	return strings.Join(lines, "\n")
-}
-
-// commonAffix returns the longest common prefix (suffix=false) or suffix
-// (suffix=true) shared by every string in lines. An empty slice yields "".
-func commonAffix(lines []string, suffix bool) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	acc := lines[0]
-	for _, l := range lines[1:] {
-		n := len(acc)
-		if len(l) < n {
-			n = len(l)
-		}
-		i := 0
-		for i < n {
-			var a, b byte
-			if suffix {
-				a, b = acc[len(acc)-1-i], l[len(l)-1-i]
-			} else {
-				a, b = acc[i], l[i]
-			}
-			if a != b {
-				break
-			}
-			i++
-		}
-		if suffix {
-			acc = acc[len(acc)-i:]
-		} else {
-			acc = acc[:i]
-		}
-		if acc == "" {
-			return ""
-		}
-	}
-	return acc
 }

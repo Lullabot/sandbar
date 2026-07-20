@@ -143,8 +143,57 @@ type Checkout struct {
 	// untracked files) `git status --porcelain` reports for the checkout.
 	Dirty int
 
+	// DefaultBranch is the remote's own default branch, read from the
+	// checkout's `refs/remotes/<remote>/HEAD` — "main" for most clones. It is
+	// empty when there is no remote, or when that ref is absent (a clone made
+	// with `--no-checkout`, or one whose origin/HEAD was never set); see
+	// NothingToLand for what that absence falls back to.
+	DefaultBranch string
+
 	// LastSeen is when the sweep last observed this checkout.
 	LastSeen time.Time
+}
+
+// fallbackDefaultBranches are the branch names treated as a repo's trunk when
+// the sweep could not read an authoritative `refs/remotes/<remote>/HEAD`. It
+// exists only so a clone with no origin/HEAD still suppresses the badge; a
+// repo whose real default branch is something else entirely just falls back to
+// the pre-existing behaviour of showing it, which is the safe direction to
+// err (a spurious "you have work here" beats silently hiding real work).
+var fallbackDefaultBranches = map[string]bool{"main": true, "master": true}
+
+// NothingToLand reports whether this checkout holds no work worth landing: it
+// sits on the repo's default branch with nothing of its own to turn into a PR.
+//
+// This is the discriminator the raw PushState cannot make on its own.
+// PushStatePushed means only "HEAD is reachable on the forge", which is
+// trivially true of a PRISTINE CLONE — a fresh `git clone` puts HEAD exactly
+// at origin/main with a tracking ref, so it classified as "pushed" and lit the
+// amber "⚠ actionable" badge on a VM where nobody had done any work at all.
+// The pane, reading the same state, offered to open a draft PR for main — a
+// request GitHub would reject outright, since head and base would be the same
+// branch.
+//
+// Being level with upstream is NOT on its own enough to say "nothing to land":
+// a feature branch that has been fully pushed is level with its tracking ref
+// too, and that is precisely the case the whole land feature exists to serve.
+// The distinction is the BRANCH, not the commit count — so a checkout is only
+// dismissed here when it is on the default branch. Someone who commits and
+// pushes directly to main also lands here, correctly: there is no PR to open
+// for work that is already on the trunk.
+//
+// A dirty or unpushed default-branch checkout is deliberately NOT covered:
+// that work exists nowhere but the VM, so the at-risk half of the badge (and
+// the delete guard) must still see it. This answers only the actionable
+// half — "is there something here to turn into a PR".
+func (c Checkout) NothingToLand() bool {
+	if c.PushState != PushStatePushed || c.Branch == "" {
+		return false
+	}
+	if c.DefaultBranch != "" {
+		return c.Branch == c.DefaultBranch
+	}
+	return fallbackDefaultBranches[c.Branch]
 }
 
 // VMCheckouts is one VM's full set of discovered checkouts, as recorded by

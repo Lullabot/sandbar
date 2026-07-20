@@ -123,13 +123,41 @@ that state calls for:
 - **PR already open** — open it in a browser.
 - **Unpushed or dirty** — nothing to land yet; push (or commit) inside the
   VM first.
+- **Nothing to land** — the checkout is on its repo's default branch with
+  nothing of its own on top. Every fresh clone starts here.
 - **Local-only** (no recognized remote) — nothing Landing can act on.
 
 Opening a draft PR uses the **workstation's own `gh`** — never the guest's
 own push token — so the PR is created by you, not by whatever ran inside
 the VM. See [Security Model](../reference/security-model.md) for why that
-split matters. Without `gh` on the workstation, Landing falls back to
+split matters. Without a usable `gh` on the workstation, Landing falls back to
 printing the branch's compare URL instead.
+
+### When Landing says `gh` isn't usable
+
+The pane's header names which mode it's in, and distinguishes two different
+problems:
+
+- **`gh: not installed`** — no `gh` on your `PATH`.
+- **`gh: not authenticated`** — `gh` is there, but `gh auth status` failed.
+
+The second one catches people out when `gh` clearly works at their prompt.
+sand runs `gh` **directly, never through a shell**, so a credential that only
+exists as a shell alias or wrapper function — the shape the 1Password shell
+plugin and similar credential injectors use — is invisible to it. The same
+applies to every `gh` call Landing would make afterwards, so this isn't a
+false alarm: creating the PR would fail too.
+
+To fix it, make the credential visible to a plain process launch: either run
+`gh auth login`, or export `GH_TOKEN` in the environment you start `sand`
+from.
+
+The token needs **`Pull requests: write`** (fine-grained), or `repo` /
+`public_repo` (classic) — sand resolves the base branch and the head commit's
+message, then POSTs the draft PR. Note this is the **workstation's** token,
+which is a different thing from the token you provisioned into the VM: the
+guest's token only ever pushes branches and never needs pull-request
+permission at all.
 
 The pane's own ledger of what it did (which PR it opened, when) is
 reopenable later with `L` (Log), the same key that reopens a build's or

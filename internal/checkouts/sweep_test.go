@@ -471,3 +471,66 @@ func TestBuildSweepCommand_Deterministic(t *testing.T) {
 		t.Error("BuildSweepCommand() is not deterministic across calls")
 	}
 }
+
+// TestSweepRecordsDefaultBranch pins that the sweep carries the remote's
+// default branch through to the parsed Checkout — the field NothingToLand
+// needs to tell a pristine clone apart from a fully-pushed feature branch.
+func TestSweepRecordsDefaultBranch(t *testing.T) {
+	raw := "path=/home/u/repo\nkind=repo\nbranch=main\nremote=origin\n" +
+		"url=https://github.com/acme/repo.git\ntracking=1\nahead=0\nbehind=0\ndirty=0\n" +
+		"defbranch=main\n" + sweepRecordDelim + "\n"
+	got := ParseSweep(raw)
+	if len(got.Checkouts) != 1 {
+		t.Fatalf("Checkouts = %d, want 1", len(got.Checkouts))
+	}
+	if got.Checkouts[0].DefaultBranch != "main" {
+		t.Fatalf("DefaultBranch = %q, want %q", got.Checkouts[0].DefaultBranch, "main")
+	}
+}
+
+// TestBuildSweepCommandReadsDefaultBranch pins that the guest script actually
+// asks for the remote's HEAD — the read NothingToLand depends on — and that it
+// stays a purely LOCAL ref read (no ls-remote, no network), per the package's
+// "no network, ever" rule.
+func TestBuildSweepCommandReadsDefaultBranch(t *testing.T) {
+	cmd := BuildSweepCommand()
+	if !strings.Contains(cmd, `symbolic-ref --short "refs/remotes/$remote/HEAD"`) {
+		t.Fatalf("sweep command does not read the remote's default branch:\n%s", cmd)
+	}
+	if !strings.Contains(cmd, "defbranch=%s") {
+		t.Fatalf("sweep command does not emit a defbranch field:\n%s", cmd)
+	}
+	if strings.Contains(cmd, "ls-remote") {
+		t.Fatalf("sweep command must not contact the forge:\n%s", cmd)
+	}
+}
+
+// TestNothingToLand covers the discriminator that keeps a pristine clone from
+// reading as work worth landing — the bug where a freshly provisioned VM whose
+// only content was a clone showed the amber "actionable" badge.
+func TestNothingToLand(t *testing.T) {
+	cases := []struct {
+		name string
+		c    Checkout
+		want bool
+	}{
+		{"pristine clone on main", Checkout{Branch: "main", DefaultBranch: "main", PushState: PushStatePushed}, true},
+		{"default branch is not main", Checkout{Branch: "trunk", DefaultBranch: "trunk", PushState: PushStatePushed}, true},
+		{"fully pushed feature branch", Checkout{Branch: "feature", DefaultBranch: "main", PushState: PushStatePushed}, false},
+		{"feature branch named like a trunk elsewhere", Checkout{Branch: "master", DefaultBranch: "main", PushState: PushStatePushed}, false},
+		{"unpushed work on main", Checkout{Branch: "main", DefaultBranch: "main", PushState: PushStateUnpushed, Ahead: 2}, false},
+		{"never pushed", Checkout{Branch: "main", DefaultBranch: "main", PushState: PushStateNever}, false},
+		{"detached HEAD", Checkout{Branch: "", DefaultBranch: "main", PushState: PushStatePushed}, false},
+		// No origin/HEAD to read: fall back to the conventional trunk names.
+		{"no default branch known, on main", Checkout{Branch: "main", PushState: PushStatePushed}, true},
+		{"no default branch known, on master", Checkout{Branch: "master", PushState: PushStatePushed}, true},
+		{"no default branch known, on a feature", Checkout{Branch: "feature", PushState: PushStatePushed}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.c.NothingToLand(); got != tc.want {
+				t.Errorf("NothingToLand() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
