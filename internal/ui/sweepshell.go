@@ -14,8 +14,9 @@ package ui
 // walk. Injecting that into the heartbeat's sequential loop would stall the
 // cat/df/sleep cycle behind it, and the 2s gauges would freeze for exactly as
 // long as the sweep takes. So the sweep gets its OWN shell, its OWN goroutine,
-// its OWN connection, and its OWN cadence (sweepInterval, ~60s) — the plan's
-// central constraint (plan 17, Component 1).
+// its OWN connection, and its OWN cadence (sweepInterval, ~60s). Keeping the
+// two streams fully independent is the central constraint this file exists to
+// honour.
 //
 // # Sharing the heartbeat's hard-won lessons
 //
@@ -54,7 +55,8 @@ package ui
 // delimiter mismatch instead of silently interleaving records. This file's
 // parser accumulates raw text between sweepEndMarker lines and hands that
 // whole blob to checkouts.ParseSweep unmodified — the per-record delimiter
-// inside it is task 2's concern entirely; this file never inspects it.
+// inside it is checkouts.ParseSweep's concern entirely; this file never
+// inspects it.
 
 import (
 	"bytes"
@@ -147,10 +149,10 @@ func (p *sweepParser) feed(chunk []byte) []checkouts.VMCheckouts {
 		buf = buf[i+1:]
 
 		if string(bytes.TrimSpace(bytes.TrimRight(line, "\r"))) == sweepEndMarker {
-			// Hand the WHOLE accumulated pass to task 2's parser unmodified —
-			// this file does no classification of its own, and never
-			// inspects sweepRecordDelim; that is entirely ParseSweep's
-			// concern.
+			// Hand the WHOLE accumulated pass to checkouts.ParseSweep
+			// unmodified — this file does no classification of its own,
+			// and never inspects sweepRecordDelim; that is entirely
+			// ParseSweep's concern.
 			out = append(out, checkouts.ParseSweep(p.buf.String()))
 			p.buf.Reset()
 			continue

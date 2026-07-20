@@ -131,9 +131,9 @@ func TestSweepNeverOpensForAnUnmanagedVM(t *testing.T) {
 }
 
 // The sweep reuses the SAME shouldTick idle gate as the heartbeat (see
-// syncSweeps' doc comment for why the plan's "always, for every running VM"
-// reading was rejected in favor of this): leaving the board closes it, and
-// coming back reopens it — an idle-aware second SSH connection, never an
+// syncSweeps' doc comment for why an "always, for every running VM" sweep
+// was rejected in favor of this): leaving the board closes it, and coming
+// back reopens it — an idle-aware second SSH connection, never an
 // unconditional one.
 func TestSweepIsIdleGatedLikeTheHeartbeat(t *testing.T) {
 	sh := newFakeShell()
@@ -172,7 +172,7 @@ func TestSweepIsIdleGatedLikeTheHeartbeat(t *testing.T) {
 // The core message-plumbing contract: a completed sweep pass reaches the
 // checkout registry ONLY via Update handling sweepResultMsg — never a direct
 // write from the sweeping goroutine — and Set is what a reader (the badge,
-// the delete guard, task 4/5/7) will see.
+// the delete guard, the Landing pane) will see.
 func TestSweepResultFlowsIntoCheckoutRegistryOnlyViaUpdate(t *testing.T) {
 	sh := newFakeShell()
 	l := newTeaLoop(t, sweepModel(t, sh, "web"))

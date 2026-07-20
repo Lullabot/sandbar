@@ -103,9 +103,9 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
-	// viewLanding is the Landing pane (landing.go, plan 17 task 7): a per-VM
-	// pull-request cockpit opened for a focused, running VM, following the
-	// same view-enum + sub-model pattern as viewSecrets above.
+	// viewLanding is the Landing pane (landing.go): a per-VM pull-request
+	// cockpit opened for a focused, running VM, following the same view-enum
+	// + sub-model pattern as viewSecrets above.
 	viewLanding
 	// viewProfiles and viewProfileForm are the profile management screen
 	// (profilesview.go): a list of every connection profile, and a

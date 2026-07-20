@@ -1,12 +1,12 @@
 package ui
 
 // deleteguard.go extends the `d` (delete) confirmation copy with a warning
-// about work the target VM's CACHED checkout registry (internal/checkouts,
-// plan 17 task 1) shows living only inside that VM — without ever touching
-// the guest to check. See plan 17, Component 3 and the "Delete guard
-// drifting into guest contact" security risk: a "smarter" guard that
-// refreshed state at delete time would execute in a possibly-compromised
-// VM, which is exactly the thing deleting it is meant to let you avoid.
+// about work the target VM's CACHED checkout registry (internal/checkouts)
+// shows living only inside that VM — without ever touching the guest to
+// check. That hard boundary exists because of the "delete guard drifting into
+// guest contact" risk: a "smarter" guard that refreshed state at delete time
+// would execute in a possibly-compromised VM, which is exactly the thing
+// deleting it is meant to let you avoid.
 //
 // The functions below are therefore deliberately PURE: every one of them
 // takes only data the caller already read out of *checkouts.Registry (a
@@ -39,11 +39,12 @@ import (
 //     uncommitted, so they are "only in this VM" regardless of whether that
 //     checkout's own branch has otherwise been pushed.
 //   - "safe on GitHub": checkouts whose PushState is Pushed. This registry
-//     (task 1) carries no PR-existence field — that lazy, authoritative check
-//     is Component 4/task 6-7, out of scope here — so, matching task 4's
-//     badge ("until PR state resolves, reflect push state alone"), every
-//     pushed checkout is counted here: it cannot be lost, whether or not a PR
-//     already exists for it.
+//     carries no PR-existence field — that lazy, authoritative check belongs
+//     to the Landing pane's host-side `gh` lookup (landing.go), out of scope
+//     here — so, matching the unlanded-work badge (badge.go), which reflects
+//     push state alone until PR state resolves, every pushed checkout is
+//     counted here: it cannot be lost, whether or not a PR already exists for
+//     it.
 //
 // found is the registry's own "do we have an entry at all" bool (Registry.Get's
 // second return) — kept separate from an empty Checkouts slice so a never-swept

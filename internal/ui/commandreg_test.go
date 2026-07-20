@@ -162,7 +162,7 @@ func TestPasteOfferedOnlyWhenRunning(t *testing.T) {
 	}
 }
 
-// The plan-17 rebind (task 8): 'l' opens the Landing pane and 'L' reopens the
+// The land-feature rebind: 'l' opens the Landing pane and 'L' reopens the
 // log, with no transitional overlap — the old 'l'-for-log binding must be
 // gone entirely.
 func TestLandLogKeysRebound(t *testing.T) {

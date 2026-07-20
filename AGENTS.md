@@ -617,6 +617,18 @@ comment at `roles/claude-code/tasks/main.yml`.
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
   (`feat:`, `fix:`, `test:`, `ci:`, `docs:`, `chore:`, scopes like
   `fix(reset):`). Releases are automated by release-please, which parses them.
+- **A commit message must not reference a plan, phase, or task** — no "plan 17
+  phase 3", no "task 04". The one exception is a commit whose changes are
+  confined to `.ai/strikethroo/`, where the plan *is* the subject. Commit
+  messages are read years later by people who have no access to the planning
+  artefact and no reason to want one; the message has to stand on its own, and
+  release-please copies the subject line verbatim into `CHANGELOG.md`, where a
+  phase number is pure noise. Say what changed and why instead. The same rule
+  applies to code comments (see below).
+- **Code comments must not reference plan documents either.** A comment
+  pointing at "plan 17, Component 2" is a dangling link the moment the plan is
+  archived, and it substitutes a pointer for the reason the reader actually
+  needs. Inline the rationale.
 - Match the surrounding code's comment density and idiom — this codebase favours
   explanatory comments on the *why*, not the *what*.
 - When you change TUI rendering, update the affected goldens (`-update`) and

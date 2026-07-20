@@ -72,7 +72,7 @@ const (
 	// VM's own state — a VM whose upload failed is a healthy running VM with a
 	// failed copy — so it never touches the tile's status word.
 	kindTransfer
-	// kindLand is a Landing-pane gh action (plan 17, task 7): "Open draft PR" or
+	// kindLand is a Landing-pane gh action (landing.go): "Open draft PR" or
 	// "Open in browser". Like a transfer, it says nothing about the VM's own
 	// state — it is a workstation-local gh/browser call, never a status word —
 	// and it gets its OWN slot precisely so it can run alongside (and never
