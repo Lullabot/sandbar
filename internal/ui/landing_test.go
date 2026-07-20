@@ -781,3 +781,20 @@ func TestNothingToLandRowsSkipTheGhLookup(t *testing.T) {
 		}
 	}
 }
+
+// TestGhModeLabelOnePasswordPath pins that a 1Password-plugin user gets advice
+// that fits their setup: their gh works and their token is in the vault, so
+// "run gh auth login" would send them to fix the wrong thing.
+func TestGhModeLabelOnePasswordPath(t *testing.T) {
+	p := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true, ViaOnePassword: true}}
+	got := p.ghModeLabel()
+	if !strings.Contains(got, "1Password") {
+		t.Fatalf("ghModeLabel = %q, want it to name 1Password", got)
+	}
+	if strings.Contains(got, "gh auth login") {
+		t.Fatalf("ghModeLabel = %q, must not tell a 1Password user to re-auth gh itself", got)
+	}
+	if !strings.Contains(got, "compare URL") {
+		t.Fatalf("ghModeLabel = %q, want it to name the browser fallback", got)
+	}
+}

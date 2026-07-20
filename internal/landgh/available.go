@@ -40,6 +40,13 @@ type Availability struct {
 	// Authenticated is whether `gh auth status` then exited zero. It is only
 	// meaningful when Installed is true.
 	Authenticated bool
+
+	// ViaOnePassword is whether the probe went through the 1Password shell
+	// plugin (`op plugin run -- gh`) rather than a bare gh. It changes what a
+	// caller should tell the user to DO about a failed probe: `gh auth login`
+	// is the wrong advice for someone whose token lives in 1Password — their
+	// gh is fine and the vault is simply locked.
+	ViaOnePassword bool
 }
 
 // OK reports whether host gh is usable for the one-key draft-create action.
@@ -51,8 +58,13 @@ func (a Availability) OK() bool { return a.Installed && a.Authenticated }
 // one-key draft-create action or fall back to the gh-free browser URL helpers
 // (CompareURL/PRURL/OpenInBrowser), and to explain which of the two it is.
 func (c *Client) Availability(ctx context.Context) Availability {
-	if _, err := c.lookPath("gh"); err != nil {
-		return Availability{}
+	bin := c.ghBinary
+	if bin == "" {
+		bin = "gh"
+	}
+	viaOp := bin == "op"
+	if _, err := c.lookPath(bin); err != nil {
+		return Availability{ViaOnePassword: viaOp}
 	}
 	ctx, cancel := context.WithTimeout(ctx, availabilityTimeout)
 	defer cancel()
@@ -60,7 +72,7 @@ func (c *Client) Availability(ctx context.Context) Availability {
 	// the entire signal here; Output discards stderr and returns a non-nil
 	// error for any non-zero exit, which is exactly the bit needed.
 	if _, err := c.run.Output(ctx, "auth", "status"); err != nil {
-		return Availability{Installed: true}
+		return Availability{Installed: true, ViaOnePassword: viaOp}
 	}
-	return Availability{Installed: true, Authenticated: true}
+	return Availability{Installed: true, Authenticated: true, ViaOnePassword: viaOp}
 }
