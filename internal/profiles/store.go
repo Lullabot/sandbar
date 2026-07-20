@@ -313,9 +313,11 @@ func (s *Store) cloneProfiles() map[string]Profile {
 // Type, e.g. a hand-edited "remote_ssh" typo, must be a hard error here
 // rather than silently falling through to LOCAL behaviour elsewhere), a
 // RemoteSSH profile has a non-empty Host (finding 9 — an empty host produces
-// a cryptic `ssh user@` failure far from here otherwise), at most one Local
-// profile, and no two enabled RemoteSSH profiles resolving to the same
-// "user@host:port" target.
+// a cryptic `ssh user@` failure far from here otherwise), a Proxmox profile
+// has non-empty Host, Node, Pool, and TokenFile, at most one Local profile,
+// and no two enabled RemoteSSH profiles resolving to the same
+// "user@host:port" target, nor two enabled Proxmox profiles resolving to the
+// same "host:node/pool" target.
 //
 // LoadFrom deliberately does NOT call validate — a bad hand-edited entry
 // must not lock the user out of the rest of the file; it is the store's
@@ -335,11 +337,31 @@ func validate(profiles map[string]Profile) error {
 			if p.Host == "" {
 				return fmt.Errorf("profile %q: remote-ssh profile requires a host", p.ID)
 			}
+		case TypeProxmox:
+			if p.Host == "" {
+				return fmt.Errorf("profile %q: proxmox profile requires a host", p.ID)
+			}
+			if p.Node == "" {
+				return fmt.Errorf("profile %q: proxmox profile requires a node", p.ID)
+			}
+			if p.Pool == "" {
+				return fmt.Errorf("profile %q: proxmox profile requires a pool", p.ID)
+			}
+			if p.TokenFile == "" {
+				return fmt.Errorf("profile %q: proxmox profile requires a token_file", p.ID)
+			}
 		default:
 			return fmt.Errorf("profile %q: unknown profile type %q", p.ID, p.Type)
 		}
 		if p.Type == TypeRemoteSSH && p.Enabled {
 			t := p.remoteTarget()
+			if otherID, exists := seenTargets[t]; exists && otherID != p.ID {
+				return fmt.Errorf("profile %q: target %q is already used by an enabled profile", p.ID, t)
+			}
+			seenTargets[t] = p.ID
+		}
+		if p.Type == TypeProxmox && p.Enabled {
+			t := p.proxmoxTarget()
 			if otherID, exists := seenTargets[t]; exists && otherID != p.ID {
 				return fmt.Errorf("profile %q: target %q is already used by an enabled profile", p.ID, t)
 			}
