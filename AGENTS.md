@@ -425,6 +425,17 @@ every bullet, not the constraint itself.
   feature was deliberately built alongside without becoming a silent
   third exception to it. See `docs/reference/security-model.md`'s "Landing"
   section for the precise, non-overreaching claim this makes.
+- **`gh` is invoked argv-only, NEVER through a shell.** Every argument
+  reaches `gh` as its own argv element (`internal/landgh`'s `Runner`), so a
+  branch name or `org/repo` containing `;`, backticks, or `$(...)` is inert
+  — and those values come from a sweep of the GUEST, the lowest-trust
+  source in the system. The visible consequence is that a credential held
+  only in a shell alias or wrapper function (the 1Password `gh` plugin and
+  similar injectors) is invisible to sand, which reports `gh: not
+  authenticated` even though the same command works at the user's prompt.
+  That is the documented trade, not a bug: do NOT "fix" it by re-invoking
+  `gh` through `sh -c` or the user's login shell. The supported fixes are
+  `gh auth login` or `GH_TOKEN` in sand's own environment.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 

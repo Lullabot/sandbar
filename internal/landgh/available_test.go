@@ -6,24 +6,33 @@ import (
 	"testing"
 )
 
-func TestAvailable(t *testing.T) {
+// TestAvailability covers the probe's three outcomes in one place. The two
+// FAILURE modes are the point: they need different fixes — install gh, versus
+// authenticate the gh you already have — and the Landing pane's header text is
+// built directly from the distinction, so collapsing them would put the user
+// on the wrong trail. The unauthenticated case is what a shell-alias
+// credential injector (the 1Password gh plugin, say) produces, since gh is
+// exec'd argv-only and never through a shell.
+func TestAvailability(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("gh on PATH and authed", func(t *testing.T) {
-		run := &fakeRunner{
-			outputs: map[string][]byte{argvKey([]string{"auth", "status"}): []byte("Logged in\n")},
+		c := &Client{
+			run:      &fakeRunner{outputs: map[string][]byte{argvKey([]string{"auth", "status"}): []byte("Logged in\n")}},
+			lookPath: func(string) (string, error) { return "/usr/bin/gh", nil },
 		}
-		c := &Client{run: run, lookPath: func(string) (string, error) { return "/usr/bin/gh", nil }}
-		if !c.Available(ctx) {
-			t.Fatal("Available() = false, want true")
+		got := c.Availability(ctx)
+		if !got.OK() || !got.Installed || !got.Authenticated {
+			t.Fatalf("Availability() = %+v, want fully OK", got)
 		}
 	})
 
 	t.Run("gh missing from PATH", func(t *testing.T) {
 		run := &fakeRunner{}
 		c := &Client{run: run, lookPath: func(string) (string, error) { return "", errGhMissing }}
-		if c.Available(ctx) {
-			t.Fatal("Available() = true, want false when gh is not on PATH")
+		got := c.Availability(ctx)
+		if got.OK() || got.Installed {
+			t.Fatalf("Availability() = %+v, want not-installed", got)
 		}
 		// Must not fall through to running gh at all once LookPath fails.
 		if len(run.calls) != 0 {
@@ -32,59 +41,18 @@ func TestAvailable(t *testing.T) {
 	})
 
 	t.Run("gh on PATH but not authenticated", func(t *testing.T) {
-		run := &fakeRunner{err: errors.New("not logged in to any GitHub hosts")}
-		c := &Client{run: run, lookPath: func(string) (string, error) { return "/usr/bin/gh", nil }}
-		if c.Available(ctx) {
-			t.Fatal("Available() = true, want false when gh auth status fails")
+		c := &Client{
+			run:      &fakeRunner{err: errors.New("not logged in to any GitHub hosts")},
+			lookPath: func(string) (string, error) { return "/usr/bin/gh", nil },
+		}
+		got := c.Availability(ctx)
+		if got.OK() || got.Authenticated {
+			t.Fatalf("Availability() = %+v, want not-OK", got)
+		}
+		// The load-bearing half: gh IS installed, and the result must say so
+		// rather than collapsing into the same verdict as a missing binary.
+		if !got.Installed {
+			t.Fatalf("Availability() = %+v, want Installed true — gh resolved on PATH", got)
 		}
 	})
-}
-
-// TestAvailabilityDistinguishesTheTwoFailures pins that the probe reports WHY
-// it failed, not just that it did. The two modes need different fixes —
-// install gh, versus authenticate the gh you already have — and the Landing
-// pane's header text is built directly from this distinction. The
-// unauthenticated case is what a shell-alias credential injector (the
-// 1Password gh plugin, say) produces, since gh is exec'd argv-only and never
-// through a shell.
-func TestAvailabilityDistinguishesTheTwoFailures(t *testing.T) {
-	ctx := context.Background()
-
-	authed := (&Client{
-		run:      &fakeRunner{outputs: map[string][]byte{argvKey([]string{"auth", "status"}): []byte("Logged in\n")}},
-		lookPath: func(string) (string, error) { return "/usr/bin/gh", nil },
-	}).Availability(ctx)
-	if !authed.OK() || !authed.Installed || !authed.Authenticated {
-		t.Fatalf("Availability() = %+v, want fully OK", authed)
-	}
-	if authed.Reason() != "" {
-		t.Fatalf("Reason() = %q, want \"\" for a usable gh", authed.Reason())
-	}
-
-	missing := (&Client{
-		run:      &fakeRunner{},
-		lookPath: func(string) (string, error) { return "", errGhMissing },
-	}).Availability(ctx)
-	if missing.OK() || missing.Installed {
-		t.Fatalf("Availability() = %+v, want not-installed", missing)
-	}
-	if missing.Reason() != "not installed" {
-		t.Fatalf("Reason() = %q, want %q", missing.Reason(), "not installed")
-	}
-
-	unauthed := (&Client{
-		run:      &fakeRunner{err: errors.New("not logged in to any GitHub hosts")},
-		lookPath: func(string) (string, error) { return "/usr/bin/gh", nil },
-	}).Availability(ctx)
-	if unauthed.OK() {
-		t.Fatalf("Availability() = %+v, want not-OK", unauthed)
-	}
-	// The load-bearing half: gh IS installed, and the result must say so
-	// rather than collapsing into the same verdict as a missing binary.
-	if !unauthed.Installed {
-		t.Fatalf("Availability() = %+v, want Installed true — gh resolved on PATH", unauthed)
-	}
-	if unauthed.Reason() != "not authenticated" {
-		t.Fatalf("Reason() = %q, want %q", unauthed.Reason(), "not authenticated")
-	}
 }

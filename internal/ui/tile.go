@@ -214,23 +214,50 @@ func tileTitleLine(name, profile string, width int) string {
 	if profile == "" {
 		return title
 	}
-	nameW := ansi.StringWidth(name)
-	label := "[" + profile + "]"
-	gap := width - nameW - ansi.StringWidth(label)
-	if gap < 1 {
-		// Not enough room for the label as given — try shrinking IT (never the
-		// name) to whatever fits after one gap column and the brackets.
-		avail := width - nameW - 1 - 2
-		if avail < 1 {
-			return title // no room at all: drop the label rather than crowd the name
-		}
-		label = "[" + ansi.Truncate(profile, avail, "…") + "]"
-		gap = width - nameW - ansi.StringWidth(label)
-		if gap < 1 {
-			return title
-		}
+	return tileRowSplit(title, ansi.StringWidth(name), profile, width, 2, func(s string) string {
+		return tileChromeStyle.Render("[" + s + "]")
+	})
+}
+
+// tileRowSplit lays a tile row out as "primary at the left margin, secondary
+// flush against the right", padded to exactly width cells — the layout BOTH
+// the title row (name + profile label) and the footer row (uptime + unlanded-
+// work badge) use. It exists so that yield rule lives in one place: the two
+// rows had grown separate copies of the same arithmetic, each with its own
+// off-by-one surface, and a fix to one would not have reached the other.
+//
+// The rule: the secondary yields, the primary never does. If both do not fit,
+// the secondary is truncated to whatever is left after a single gap column,
+// and if even that does not fit it is dropped entirely rather than crowd the
+// primary. A tile's identity (its name) and its uptime are what a reader scans
+// for; provenance and git state are the details that give way.
+//
+// primary is already styled, so primaryW is passed separately: the caller
+// knows the unstyled width, and re-measuring a styled string here would be
+// both redundant and a trap if a style ever occupied cells. secondary is the
+// RAW text — decorate re-applies whatever wrapper and style the caller wants
+// AFTER truncation, so a truncated label still gets its brackets. decorCols is
+// how many cells that wrapper itself costs (2 for a bracket pair, 0 for none),
+// which is what keeps the truncation budget honest.
+func tileRowSplit(primary string, primaryW int, secondary string, width, decorCols int, decorate func(string) string) string {
+	if secondary == "" {
+		return primary
 	}
-	return title + strings.Repeat(" ", gap) + tileChromeStyle.Render(label)
+	label := decorate(secondary)
+	gap := width - primaryW - ansi.StringWidth(label)
+	if gap < 1 {
+		// No room as given: shrink the secondary to what is left after one gap
+		// column and the decoration's own cells.
+		avail := width - primaryW - 1 - decorCols
+		if avail < 1 {
+			return primary
+		}
+		label = decorate(ansi.Truncate(secondary, avail, "…"))
+		// Truncate guarantees the result fits avail, so a gap of at least one
+		// column now exists by construction — no second retreat is reachable.
+		gap = width - primaryW - ansi.StringWidth(label)
+	}
+	return primary + strings.Repeat(" ", gap) + label
 }
 
 // tileInnerWidth is the text budget inside the border and padding.
@@ -592,34 +619,10 @@ func tileRoleLine(p ansibleProgress) string {
 // badge yields (truncating, then disappearing) before the uptime clause ever
 // does, so a narrow tile degrades exactly as it did before the badge existed.
 func tileFooterLine(v vm.VM, now time.Time, badge string, width int) string {
-	return tileFooterAlign(tileUptimeClause(v, now), badge, width)
-}
-
-// tileFooterAlign lays the uptime clause left and the badge right on one row
-// of exactly width cells, or returns the clause alone when the badge cannot
-// fit beside it. Both inputs arrive already styled, so every measurement here
-// goes through ansi.StringWidth rather than len: the styles carry escape
-// bytes that occupy no cells.
-func tileFooterAlign(clause, badge string, width int) string {
-	if badge == "" {
-		return clause
-	}
-	clauseW := ansi.StringWidth(clause)
-	gap := width - clauseW - ansi.StringWidth(badge)
-	if gap < 1 {
-		// No room for the badge as given — shrink IT (never the clause), and
-		// drop it entirely rather than crowd the uptime it sits beside.
-		avail := width - clauseW - 1
-		if avail < 1 {
-			return clause
-		}
-		badge = ansi.Truncate(badge, avail, "…")
-		gap = width - clauseW - ansi.StringWidth(badge)
-		if gap < 1 {
-			return clause
-		}
-	}
-	return clause + strings.Repeat(" ", gap) + badge
+	clause := tileUptimeClause(v, now)
+	// The badge arrives already styled (badge.go owns its colour vocabulary),
+	// so it needs no decoration here and costs no decoration cells.
+	return tileRowSplit(clause, ansi.StringWidth(clause), badge, width, 0, func(s string) string { return s })
 }
 
 // tileUptimeClause is the footer's left half: the `up <duration>` / `last used

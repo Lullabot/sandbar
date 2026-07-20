@@ -214,8 +214,9 @@ func TestTileFooterBadgeRendersRightAligned(t *testing.T) {
 func TestTileFooterBadgeDegradesOnNarrowTiles(t *testing.T) {
 	clause := tileChromeStyle.Render("up 3d")
 	badge := renderCheckoutBadge(checkoutBadge{Actionable: true, AtRisk: true, Ahead: 2, Dirty: true})
+	identity := func(s string) string { return s }
 	for width := 1; width <= 60; width++ {
-		got := tileFooterAlign(clause, badge, width)
+		got := tileRowSplit(clause, ansi.StringWidth(clause), badge, width, 0, identity)
 		if w := ansi.StringWidth(got); w > width && w > ansi.StringWidth(clause) {
 			t.Fatalf("width %d: footer overflowed to %d cells: %q", width, w, ansi.Strip(got))
 		}
@@ -224,7 +225,7 @@ func TestTileFooterBadgeDegradesOnNarrowTiles(t *testing.T) {
 		}
 	}
 	// An empty badge is a no-op, byte for byte.
-	if got := tileFooterAlign(clause, "", 40); got != clause {
+	if got := tileRowSplit(clause, ansi.StringWidth(clause), "", 40, 0, identity); got != clause {
 		t.Errorf("an empty badge must return the clause unchanged, got %q", got)
 	}
 }
