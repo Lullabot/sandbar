@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/pve"
 )
 
 // proxmoxtemplate_test.go exercises the golden-template methods
@@ -255,6 +258,184 @@ func TestProxmoxTemplateDiskBytesUnknownIsMinusOne(t *testing.T) {
 	if got := p.TemplateDiskBytes("web-golden"); got != -1 {
 		t.Errorf("TemplateDiskBytes = %d; want -1 when the volid is absent", got)
 	}
+}
+
+// TestProxmoxTemplateDiskBytesUnknownOnErrorPaths pins that every way the size
+// cannot be determined returns -1 rather than a guess: an unresolvable name, a
+// config with no boot device, and a boot device whose disk config has no volid.
+func TestProxmoxTemplateDiskBytesUnknownOnErrorPaths(t *testing.T) {
+	t.Run("unresolvable name", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		// No index entry and an empty pool listing: the name cannot resolve.
+		m.data("/cluster/resources", `[]`)
+		if got := p.TemplateDiskBytes("ghost"); got != -1 {
+			t.Errorf("TemplateDiskBytes(unresolvable) = %d; want -1", got)
+		}
+	})
+	t.Run("no boot device in config", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.data("/nodes/pve1/qemu/900/config", `{"name":"web-golden"}`)
+		if got := p.TemplateDiskBytes("web-golden"); got != -1 {
+			t.Errorf("TemplateDiskBytes(no boot) = %d; want -1", got)
+		}
+	})
+	t.Run("boot device absent from config", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		// boot names scsi0 but scsi0 itself is missing → no volid.
+		m.data("/nodes/pve1/qemu/900/config", `{"boot":"order=scsi0"}`)
+		if got := p.TemplateDiskBytes("web-golden"); got != -1 {
+			t.Errorf("TemplateDiskBytes(missing device) = %d; want -1", got)
+		}
+	})
+	t.Run("storage listing fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.data("/nodes/pve1/qemu/900/config",
+			`{"boot":"order=scsi0","scsi0":"local-lvm:vm-900-disk-0,size=32G"}`)
+		m.fail("/nodes/pve1/storage/local-lvm/content", http.StatusInternalServerError, "boom")
+		if got := p.TemplateDiskBytes("web-golden"); got != -1 {
+			t.Errorf("TemplateDiskBytes(storage error) = %d; want -1", got)
+		}
+	})
+}
+
+// TestProxmoxDeleteTemplateReportsResolveAndConfigErrors pins the two failure
+// paths before the guard: a name that will not resolve, and a config read that
+// fails. Neither must issue a DELETE.
+func TestProxmoxDeleteTemplateReportsResolveAndConfigErrors(t *testing.T) {
+	t.Run("unresolvable name", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		m.data("/cluster/resources", `[]`)
+		if err := p.DeleteTemplate(context.Background(), "ghost"); err == nil {
+			t.Fatal("DeleteTemplate(unresolvable) returned nil")
+		}
+	})
+	t.Run("config read fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.fail("/nodes/pve1/qemu/900/config", http.StatusInternalServerError, "boom")
+		if err := p.DeleteTemplate(context.Background(), "web-golden"); err == nil {
+			t.Fatal("DeleteTemplate(config error) returned nil")
+		}
+		if m.sawPath("/nodes/pve1/qemu/900") {
+			t.Error("issued a DELETE despite failing to read the config")
+		}
+	})
+}
+
+// TestProxmoxSnapshotCloneFailureCleansUpAndRestarts covers the clone-POST
+// failure path (distinct from the conversion failure above): the source's power
+// state is still restored and no template is left behind.
+func TestProxmoxSnapshotCloneFailureCleansUpAndRestarts(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+	shortAgentPolling(t, 2)
+	primeStatefulName(m, p, "web", 101)
+
+	stopUPID := "UPID:pve1:0:0:0:qmstop:101:u:"
+	startUPID := "UPID:pve1:0:0:0:qmstart:101:u:"
+	m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.okTask(stopUPID)
+	m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", startUPID))
+	m.okTask(startUPID)
+
+	m.data("/cluster/nextid", `"900"`)
+	// The clone POST itself fails (no task ever starts).
+	m.fail("/nodes/pve1/qemu/101/clone", http.StatusInternalServerError, "clone boom")
+	// cleanupVM still issues a best-effort purge of the would-be id.
+	delUPID := "UPID:pve1:0:0:0:qmdestroy:900:u:"
+	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
+	m.okTask(delUPID)
+
+	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+		t.Fatal("SnapshotTemplate succeeded despite a clone failure")
+	}
+	if !m.sawPath("/nodes/pve1/qemu/101/status/start") {
+		t.Error("a clone failure left the running source stopped")
+	}
+}
+
+// TestProxmoxStopStreaming pins the streaming stop form, which shares stop()
+// with the buffered Stop but writes progress to the caller's writer.
+func TestProxmoxStopStreaming(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+	primeName(m, p, "web", 101, "running")
+	stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
+	m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
+	m.okTask(stopUPID)
+
+	var buf bytes.Buffer
+	if err := p.StopStreaming(context.Background(), "web", &buf); err != nil {
+		t.Fatalf("StopStreaming: %v", err)
+	}
+	if !m.sawPath("/nodes/pve1/qemu/101/status/shutdown") {
+		t.Error("StopStreaming never issued the shutdown")
+	}
+}
+
+// TestProxmoxTemplateHelpers table-tests the pure config-parsing helpers, whose
+// branches (a non-template config value, a boot field with no order, a
+// non-string disk value) are the guard between a mistyped name and a destroyed
+// VM, or a wrong disk size.
+func TestProxmoxTemplateHelpers(t *testing.T) {
+	t.Run("isTemplateConfig", func(t *testing.T) {
+		cases := []struct {
+			name string
+			cfg  pve.VMConfig
+			want bool
+		}{
+			{"number 1", pve.VMConfig{"template": float64(1)}, true},
+			{"number 0", pve.VMConfig{"template": float64(0)}, false},
+			{"string 1", pve.VMConfig{"template": "1"}, true},
+			{"bool true", pve.VMConfig{"template": true}, true},
+			{"absent", pve.VMConfig{"name": "web"}, false},
+			{"unexpected type", pve.VMConfig{"template": []any{}}, false},
+		}
+		for _, c := range cases {
+			if got := isTemplateConfig(c.cfg); got != c.want {
+				t.Errorf("isTemplateConfig(%s) = %v; want %v", c.name, got, c.want)
+			}
+		}
+	})
+	t.Run("bootDiskDevice", func(t *testing.T) {
+		cases := []struct{ boot, want string }{
+			{"order=scsi0", "scsi0"},
+			{"order=scsi0;ide2", "scsi0"},
+			{"", ""},
+			// The deprecated non-order= form is never written by this provider;
+			// bootDiskDevice passes it through unparsed, which is harmless — the
+			// caller then finds no such device in the config and returns -1.
+			{"legacy=cdn", "legacy=cdn"},
+		}
+		for _, c := range cases {
+			if got := bootDiskDevice(pve.VMConfig{"boot": c.boot}); got != c.want {
+				t.Errorf("bootDiskDevice(%q) = %q; want %q", c.boot, got, c.want)
+			}
+		}
+		if got := bootDiskDevice(pve.VMConfig{}); got != "" {
+			t.Errorf("bootDiskDevice(absent) = %q; want empty", got)
+		}
+	})
+	t.Run("volidFromDiskConfig", func(t *testing.T) {
+		if got := volidFromDiskConfig("local-lvm:vm-1-disk-0,size=32G"); got != "local-lvm:vm-1-disk-0" {
+			t.Errorf("volidFromDiskConfig = %q; want the volid before the comma", got)
+		}
+		if got := volidFromDiskConfig(""); got != "" {
+			t.Errorf("volidFromDiskConfig(empty) = %q; want empty", got)
+		}
+		if got := volidFromDiskConfig(42); got != "" {
+			t.Errorf("volidFromDiskConfig(non-string) = %q; want empty", got)
+		}
+	})
 }
 
 // TestProxmoxTemplateMethodsAreNotOnTheInterface documents that these methods
