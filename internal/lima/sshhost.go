@@ -250,6 +250,31 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	return append(a, from, to)
 }
 
+// SSHArgv builds the full ssh argv that runs remoteArgv on this connection's
+// host, with every remote token shell-quoted (see the file header: the quoting
+// is the one genuinely new hazard the transport introduces) and the port,
+// identity, and connection-multiplexing flags threaded in. tty adds -t.
+//
+// It is the argv-only half of Output/Stream — those two prepend `LIMA_HOME=…
+// limactl` and then run the result, while this returns the command for a caller
+// that runs it itself and whose remote command is not limactl at all. That
+// caller is the Proxmox provider (internal/provider), whose guest transport is
+// direct ssh to the VM: it reuses this so the quoting, the identity flag, and
+// the ControlMaster socket sharing are spelled once for every ssh sand runs,
+// rather than re-derived against a different backend.
+func (h *SSHHost) SSHArgv(tty bool, remoteArgv ...string) []string {
+	return h.sshCommand(tty, remoteArgv...)
+}
+
+// SCPArgv builds the scp argv for a transfer between from and to (either of
+// which may be a `user@host:path` endpoint), with the same port/identity/
+// multiplexing flags SSHArgv threads in — including scp's capital -P port flag,
+// which is the detail scpCommand exists to get right in one place. Exported for
+// the same non-limactl caller SSHArgv serves.
+func (h *SSHHost) SCPArgv(recursive bool, from, to string) []string {
+	return h.scpCommand(recursive, from, to)
+}
+
 // --- Runner: run limactl over ssh -----------------------------------------------
 
 // Output runs `ssh … limactl args…`, capturing stdout and stderr SEPARATELY —

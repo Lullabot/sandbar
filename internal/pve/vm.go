@@ -412,6 +412,14 @@ type VMStatus struct {
 	MaxDisk   int64   `json:"maxdisk"`
 	CPU       float64 `json:"cpu"`
 	Lock      string  `json:"lock"`
+	// CPUs is the number of CONFIGURED virtual CPUs, not a usage figure —
+	// unlike CPU above, which is a 0..1 utilisation fraction. The two are one
+	// character apart in the JSON ("cpus"/"cpu") and mean entirely different
+	// things, so a caller wanting a core count must take this one. It is a
+	// float64 because PVE publishes it as a JSON number that some versions
+	// render fractionally (a cpulimit-shaped value), which would fail to decode
+	// into an int.
+	CPUs float64 `json:"cpus"`
 }
 
 // GetStatus reads vmid's current runtime status via GET .../qemu/{vmid}/status/current.
