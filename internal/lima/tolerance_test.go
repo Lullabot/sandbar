@@ -25,9 +25,8 @@ memory: "2GiB"
 disk: "20GiB"
 `
 
-// TestLimactlToleratesProvenanceMarkerAgainstRealLimactl is the plan 17
-// "limactl tolerance" guard (strikethroo plan
-// 17--target-attached-vm-provenance, task 07's DoD): sand writes its
+// TestLimactlToleratesProvenanceMarkerAgainstRealLimactl is the standing
+// "limactl tolerance" guard: sand writes its
 // provenance marker (MarkerFilename, "sandbar.json") directly INSIDE the
 // Lima instance directory, alongside lima.yaml and the other files limactl
 // itself manages there. Nothing in Lima's own contract promises it will

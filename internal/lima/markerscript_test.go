@@ -24,8 +24,8 @@ import (
 // host, a stream the parser misframed by one byte — corrupting the first
 // marker and then failing the whole batch. A failed batch degrades silently to
 // the legacy per-controller registry (internal/ui/commands.go), which is
-// exactly the divergence plan 17 set out to remove: each controller saw only
-// the VMs it had created itself.
+// exactly the divergence target-attached provenance set out to remove: each
+// controller saw only the VMs it had created itself.
 //
 // Comparing against localFiles is the point: local and remote are two
 // implementations of one HostFiles contract, so the batched read must produce

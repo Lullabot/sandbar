@@ -6,9 +6,7 @@ package manage
 // AdoptOnce, RecordSuccess and RecreateBase to a REAL provider.Provenancer —
 // the local Lima provider's marker read/write over the real filesystem
 // (LIMA_HOME pointed at a fresh temp dir per test), never an in-memory
-// double — so the plan's "adoption test wired at integration level" and
-// "recreate correctness" acceptance criteria (strikethroo plan
-// 17--target-attached-vm-provenance, task 07) are proven against the actual
+// double — so adoption and recreate correctness are proven against the actual
 // on-disk marker format, not just an algorithm exercised against a fake.
 //
 // No limactl subprocess and no SSH are invoked anywhere in this file:

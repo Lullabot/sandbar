@@ -1,6 +1,6 @@
 //go:build limae2e
 
-// provenance_e2e_test.go proves plan 17's target-attached provenance over the
+// provenance_e2e_test.go proves target-attached provenance over the
 // REAL SSH host-access transport (internal/lima.SSHHost), gated exactly like
 // remote_e2e_test.go: build tag limae2e, the LIMA_REMOTE_E2E opt-in, and the
 // same clean-skip reachability probe (skipUnlessRemoteE2EConfigured, shared
