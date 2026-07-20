@@ -421,10 +421,10 @@ No circular dependencies; every task appears in exactly one phase below.
 - ✔️ Task 001: `internal/pve` HTTP transport, token auth, error shaping, UPID task waiter
 - ✔️ Task 002: `proxmox` profile type and secret-free token-file loading
 
-### Phase 2: API Surface
+### ✅ Phase 2: API Surface
 **Parallel Tasks:**
-- Task 003: Typed VM lifecycle and guest-agent endpoints (depends on: 001)
-- Task 004: Node and storage statistics endpoints (depends on: 001)
+- ✔️ Task 003: Typed VM lifecycle and guest-agent endpoints (depends on: 001)
+- ✔️ Task 004: Node and storage statistics endpoints (depends on: 001)
 
 ### Phase 3: Provider Core
 **Parallel Tasks:**
