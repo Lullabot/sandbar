@@ -43,6 +43,10 @@ type Provider struct {
 	RecreateFunc func(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error
 	ResetFunc    func(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error
 
+	SnapshotTemplateFunc  func(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error)
+	DeleteTemplateFunc    func(ctx context.Context, templateInstance string, out io.Writer) error
+	TemplateDiskBytesFunc func(templateInstance string) int64
+
 	ShellFunc          func(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
 	ShellStreamOutFunc func(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error
 	ShellOutFunc       func(ctx context.Context, name string, argv ...string) ([]byte, error)
@@ -143,6 +147,29 @@ func (f *Provider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provisio
 		return f.ResetFunc(ctx, cfg, opts, out)
 	}
 	return nil
+}
+
+// --- Golden VM templates ---
+
+func (f *Provider) SnapshotTemplate(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error) {
+	if f.SnapshotTemplateFunc != nil {
+		return f.SnapshotTemplateFunc(ctx, source, templateInstance, out)
+	}
+	return provision.SnapshotResult{}, nil
+}
+
+func (f *Provider) DeleteTemplate(ctx context.Context, templateInstance string, out io.Writer) error {
+	if f.DeleteTemplateFunc != nil {
+		return f.DeleteTemplateFunc(ctx, templateInstance, out)
+	}
+	return nil
+}
+
+func (f *Provider) TemplateDiskBytes(templateInstance string) int64 {
+	if f.TemplateDiskBytesFunc != nil {
+		return f.TemplateDiskBytesFunc(templateInstance)
+	}
+	return 0
 }
 
 // --- Guest transport ---

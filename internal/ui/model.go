@@ -91,6 +91,10 @@ const (
 	// view-enum + sub-model pattern as viewForm/viewSecrets above.
 	viewProfiles
 	viewProfileForm
+	// viewSnapshotPrompt is the one-field "name this template" prompt the
+	// snapshot verb opens (snapshot.go) — the same small-prompt pattern as
+	// viewDest, ahead of the tracked job it starts on submit.
+	viewSnapshotPrompt
 	viewHelp
 )
 
@@ -212,6 +216,21 @@ type model struct {
 	// reset always targets its own VM's already-fixed member.
 	formProfileIdx int
 
+	// formTemplateName is the create form's selected clone SOURCE: "" (the
+	// default) means the shared base image — the pre-existing behaviour — and
+	// a non-empty value names a golden template in TemplatesInScope(formScope)
+	// picked via the source selector (form.go's sourceSelectorRow/
+	// cycleFormSource). Reset mode never touches this: a reset always targets
+	// its own VM's already-fixed base/template, not one the user picks fresh.
+	formTemplateName string
+	// formSourceRows caches the create form's template rows (size/age/
+	// staleness) for whichever profile is CURRENTLY targeted, computed once
+	// when the form opens or the profile selector cycles
+	// (computeFormSourceRows, form.go) rather than on every render: staleness
+	// re-hashes the whole playbook fileset, and doing that on every keystroke
+	// while the form sits open would be wasteful.
+	formSourceRows []templateRow
+
 	// Reset mode reuses the create form to reset a managed VM: the Name is locked
 	// to the target and two preserve toggles follow the inputs.
 	resetMode     bool
@@ -260,6 +279,22 @@ type model struct {
 	// runs, because a VM can have both a build and a file copy in flight (jobs.go).
 	// A zero-value vm name means none.
 	progressJob jobKey
+
+	// Snapshot-to-template prompt (snapshot.go). snapshotSrcVM/Scope identify the
+	// VM being captured (fixed when the prompt opens); snapshotInput is the
+	// template-name field; snapshotErr is the last validation/collision error.
+	snapshotSrcVM    string
+	snapshotSrcScope registry.Scope
+	snapshotInput    textinput.Model
+	snapshotErr      error
+	// pendingSnapshots carries a kindSnapshot job's template metadata between
+	// launchSnapshot (which starts it) and the provisionDoneMsg that ends it
+	// (finishSnapshot, snapshot.go). A plain map, not a pointer-guarded registry
+	// like jobs/heartbeats: every touch happens on the Update goroutine alone
+	// (set in launchSnapshot, a key handler; read and deleted in
+	// finishSnapshot, the provisionDoneMsg handler) — see pendingSnapshot's own
+	// doc comment for the one exception (outcome) and why it is still race-free.
+	pendingSnapshots map[jobKey]pendingSnapshot
 
 	// spinning is true while exactly one spinner.Tick loop is in flight. Jobs and
 	// quick actions can now overlap (they could not while the old model-wide
@@ -404,18 +439,19 @@ func New(fleet provider.Fleet) tea.Model {
 	}
 
 	m := model{
-		members:      members,
-		active:       active,
-		reg:          reg,
-		sec:          sec,
-		profileStore: profileStore,
-		jobs:         newJobRegistry(),
-		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
-		keys:         newKeyMap(),
-		help:         help.New(),
-		view:         viewBoard,
-		viewport:     viewport.New(),
-		spinner:      sp,
+		members:          members,
+		active:           active,
+		reg:              reg,
+		sec:              sec,
+		profileStore:     profileStore,
+		jobs:             newJobRegistry(),
+		pendingSnapshots: make(map[jobKey]pendingSnapshot),
+		heartbeats:       newHeartbeatsResolver(fleetShellResolver(members)),
+		keys:             newKeyMap(),
+		help:             help.New(),
+		view:             viewBoard,
+		viewport:         viewport.New(),
+		spinner:          sp,
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
@@ -1091,6 +1127,24 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				text = label + " ok"
 			}
+		case msg.action == "delete template":
+			// The registry record goes only once the instance itself is actually
+			// gone (msg.err == nil, already excluded by the first case above) —
+			// mirroring the VM-delete case, this is where the mutation happens,
+			// never inside deleteTemplateCmd's own goroutine.
+			m.reg.RemoveTemplateScoped(sc, msg.name)
+			// The create form may be open on this exact profile with the
+			// just-deleted template highlighted (confirmDeleteFormSource can only
+			// raise this confirmation from there): recompute its cached rows so a
+			// stale row never lingers on screen, and fall back to "base" if that
+			// was the selection.
+			if m.view == viewForm && !m.resetMode && m.formScope == sc {
+				m.formSourceRows = m.computeFormSourceRows(m.provFor(sc), sc)
+				if m.formTemplateName == msg.name {
+					m.formTemplateName = ""
+				}
+			}
+			text = label + " ok"
 		default:
 			text = label + " ok"
 		}
@@ -1170,6 +1224,16 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
+		// A kindSnapshot job's completion is handled entirely here — cleaning up
+		// its pending template metadata regardless of outcome, and recording the
+		// registry.Template only on a real success — because it is a template
+		// capture, not a VM build: none of the provision-only bookkeeping below
+		// (managed-index recording, last-used-profile, GH_TOKEN seeding) applies
+		// to it, and it does not own a VM's lifecycle the way kindProvision does.
+		if msg.job.kind == kindSnapshot {
+			m.finishSnapshot(msg.job, job.Canceled, msg.err)
+			return m, m.refreshMemberCmd(msg.job.scope)
+		}
 		// A user-canceled run leaves partial state behind; don't record it as
 		// managed and don't surface its (kill-induced) error as a failure. Refresh
 		// the OWNING member (the build's scope), not the active one.
@@ -1189,14 +1253,26 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg, isProvision := m.jobs.config(msg.job.scope, msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
-			// Pass the scope's Provenancer so a TUI-created VM gets its
-			// authoritative host-side provenance marker written, not just the
-			// local registry cache entry. Without this, TUI builds were invisible
-			// to any OTHER controller of the same host (the marker is what a
-			// second controller reads — the registry is per-controller). nil for a
-			// backend with no Provenancer; RecordSuccess treats that as
+			// A CREATE cloned from a golden template (the form's source selector;
+			// see buildConfig/submitForm) records the template's user-facing name
+			// as provenance, not just cfg.BaseName — that provenance is what a
+			// later Reset detects (submitReset, form.go) and what
+			// registry.DependentsOfTemplate warns a template delete with.
+			// Reversing cfg.BaseName (the template's reserved Lima instance name)
+			// back to its user-facing name costs one scan of this scope's
+			// templates; not found (the template may have been deleted while the
+			// build ran) falls back to the ordinary record, same as any other
+			// create.
+			//
+			// Either way this passes the scope's Provenancer, so a TUI-created VM
+			// gets its authoritative host-side provenance marker written, not just
+			// the local registry cache entry. Without this, TUI builds were
+			// invisible to any OTHER controller of the same host (the marker is
+			// what a second controller reads — the registry is per-controller).
+			// nil for a backend with no Provenancer; RecordSuccess treats that as
 			// registry-only, unchanged.
-			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope, provenancerFor(m, msg.job.scope)); err != nil {
+			tname, _ := templateNameForInstance(m.reg, msg.job.scope, cfg.BaseName)
+			if err := manage.RecordSuccessWithTemplate(m.reg, cfg, msg.job.scope, tname, provenancerFor(m, msg.job.scope)); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// A successful CREATE (never a Reset — job.Recreates is what
@@ -1302,6 +1378,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateProfiles(msg)
 		case viewProfileForm:
 			return m.updateProfileForm(msg)
+		case viewSnapshotPrompt:
+			return m.updateSnapshotPrompt(msg)
 		case viewHelp:
 			return m.updateHelp(msg)
 		}
@@ -1377,6 +1455,9 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileInputs[i], cmds[i] = m.profileInputs[i].Update(msg)
 		}
 		return m, tea.Batch(cmds...)
+	case viewSnapshotPrompt:
+		m.snapshotInput, cmd = m.snapshotInput.Update(msg)
+		return m, cmd
 	default:
 		return m, nil
 	}
@@ -1435,6 +1516,8 @@ func (m model) View() tea.View {
 		content = m.profilesView()
 	case viewProfileForm:
 		content = m.profileFormView()
+	case viewSnapshotPrompt:
+		content = m.snapshotPromptView()
 	case viewHelp:
 		content = m.helpView()
 	default:

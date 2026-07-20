@@ -98,6 +98,27 @@ func (p *limaProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts prov
 	return p.prov.Reset(ctx, cfg, opts, out)
 }
 
+// --- Golden VM templates ---
+//
+// These three delegate straight to the shared *provision.Provisioner exactly
+// like Create/Recreate/Reset above — and remoteLimaProvider inherits them
+// unchanged by embedding *limaProvider (see remote.go's doc comment), since a
+// template snapshot/delete/disk-size lookup is driven entirely through
+// p.prov.Lima and p.prov.HostFiles, both already pointed at the right host by
+// NewRemoteLima.
+
+func (p *limaProvider) SnapshotTemplate(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error) {
+	return p.prov.SnapshotTemplate(ctx, source, templateInstance, out)
+}
+
+func (p *limaProvider) DeleteTemplate(ctx context.Context, templateInstance string, out io.Writer) error {
+	return p.prov.DeleteTemplate(ctx, templateInstance, out)
+}
+
+func (p *limaProvider) TemplateDiskBytes(templateInstance string) int64 {
+	return p.prov.TemplateDiskBytes(templateInstance)
+}
+
 // --- Guest transport ---
 
 func (p *limaProvider) Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {

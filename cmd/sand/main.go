@@ -48,8 +48,10 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "template":
+			os.Exit(runTemplate(os.Args[2:]))
 		default:
-			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n  sand template ... manage golden VM templates (see 'sand template -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}

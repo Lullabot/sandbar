@@ -4,6 +4,7 @@ There are five entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
+- [`sand template`](#sand-template) — manage golden templates (snapshot, list, delete).
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
 - [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
@@ -58,6 +59,7 @@ not a prompt.
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
 | `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
+| `--template` | string | *(empty — use the shared base)* | Clone from a named golden template instead of the shared base image. Mutually exclusive with `--rebuild` and `--base-name`. See [Golden Templates](golden-templates.md) for details. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | `true` | Install Claude Code in the base image. |
 | `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — the one **opt-in** toolset flag. |
@@ -224,6 +226,79 @@ Flags:
 (`--user` has no printed default because it is resolved to the host username
 *after* flags are parsed, not at registration time — see the flags table
 above.)
+
+## `sand template`
+
+Manage golden VM templates: named, reusable clone sources captured from an existing sand-managed VM. Run with no arguments or `-h` for the subcommand list.
+
+### Subcommands
+
+#### `sand template snapshot <source-vm> <name>`
+
+Capture `<source-vm>` (a running or stopped sand-managed VM) into a new golden template named `<name>`. The source VM's power state is preserved exactly.
+
+```sh
+sand template snapshot dev golden
+sand template snapshot dev golden --profile work
+```
+
+The template name must be a slug: lowercase alphanumeric with hyphens, no spaces or special characters (e.g., `golden`, `next-gen`, `ai-tools`). It cannot collide with an existing template or managed VM in the same scope.
+
+#### `sand template list`
+
+List golden templates in the current scope:
+
+```sh
+sand template list
+sand template list --profile work
+```
+
+Output columns: NAME, SIZE, CREATED, SOURCE, STATUS.
+
+- **NAME:** the template's user-facing name.
+- **SIZE:** disk size of the template's reserved Lima instance.
+- **CREATED:** when the template was saved (format: YYYY-MM-DD).
+- **SOURCE:** the managed VM it was snapshotted from.
+- **STATUS:** `current` (matches this binary's playbook), `stale` (older playbook), or `unknown` (playbook not found).
+
+#### `sand template delete <name>`
+
+Delete a golden template. If any managed VMs were cloned from it, a warning lists them (they keep working, but can no longer be recreated from this template afterward). The delete proceeds anyway; there is no `--force` gate.
+
+```sh
+sand template delete golden
+sand template delete golden --profile work
+```
+
+### Flags
+
+All three subcommands accept:
+
+| Flag | Description |
+|---|---|
+| `--profile` | Connection profile to act on (default: the last-used profile, else `local`). |
+
+### Verified `--help` output
+
+```
+$ sand template --help
+Usage: sand template <command> [flags]
+
+Manage golden VM templates: named, reusable clone sources captured from an
+existing sand-managed VM, so 'sand create --template NAME' can skip the
+shared base image (and its provisioning) entirely.
+
+Commands:
+  snapshot <source-vm> <name>   capture source-vm into a new template named name
+  list                          list templates in scope
+  delete <name>                 delete a template
+
+Every command accepts --profile to select a connection profile (default: the
+last-used profile, else "local"). Run 'sand template <command> -h' for
+command-specific flags.
+```
+
+See [Golden Templates](golden-templates.md) for a full how-to guide covering concept, snapshot, create-from-template, list, delete, and the secrets-propagation caveat.
 
 ## `sand shell NAME`
 

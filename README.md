@@ -48,6 +48,15 @@ for the model. (Earlier, unreleased builds selected a single remote target
 via `SAND_PROVIDER` / `SAND_REMOTE_*` environment variables; that surface has
 been removed in favor of profiles.)
 
+`sand` also supports **golden templates** — named, reusable clone sources you
+can snapshot from an existing VM. Once you've set up a VM with project-specific
+or team-specific tools and configuration, press `t` on its tile to save it as a
+template, then create new VMs from that template with `sand create --template <name>`
+or via the TUI's Source selector. Every clone starts from your saved setup instead
+of running provisioning from scratch. See
+[Golden Templates](https://lullabot.github.io/sandbar/latest/using-sand/golden-templates/)
+for details.
+
 ## Development
 
 Building from a checkout, running tests, and how `sand` embeds and runs
