@@ -121,6 +121,9 @@ that state calls for:
 - **Pushed, no PR** — open a one-shot **draft PR** for that checkout's
   pushed branch.
 - **PR already open** — open it in a browser.
+- **PR state unknown** — the branch is pushed, but sand could not confirm
+  whether a PR exists, because host `gh` is unusable or the lookup failed.
+  Opening a draft PR still works (it falls back to the compare URL).
 - **Never pushed, unpushed, or dirty** — work that exists only in this VM:
   a branch you created in the guest and haven't pushed, commits ahead of the
   remote, uncommitted changes, or any combination. Acting on this row
@@ -196,6 +199,16 @@ message, then POSTs the draft PR. Note this is the **workstation's** token,
 which is a different thing from the token you provisioned into the VM: the
 guest's token only ever pushes branches and never needs pull-request
 permission at all.
+
+The footer names the action for the checkout you have selected — `commit +
+push`, `push`, `open draft PR`, `open in browser` — rather than a generic
+"act", so you can see what `enter` will do before pressing it. A row with
+nothing to do offers no key at all.
+
+The header shows how old the listing is (`scanned 2m ago`). The rows come from
+a background sweep that runs about every 60 seconds, so after committing or
+pushing inside the VM's own shell the pane can briefly be out of date. Press
+**`r`** to rescan immediately.
 
 The pane's own ledger of what it did (which PR it opened, when) is
 reopenable later with `L` (Log), the same key that reopens a build's or

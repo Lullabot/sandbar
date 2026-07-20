@@ -32,6 +32,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landgh"
@@ -101,14 +102,34 @@ type landRow struct {
 	Label      string
 }
 
-// resolvedPR is one checkout's authoritative gh PRState result, keyed by
-// Checkout.Path in landingPane.resolved. ok distinguishes "resolved: no PR"
-// (pr == nil, ok == true) from "not yet resolved" (ok == false) — the pane
-// must never mistake the latter for the former, or an amber "checking…" row
-// would flash to a false "no PR, create one" the instant the pane opens.
+// prCheck is the state of one checkout's authoritative `gh pr list` lookup.
+//
+// It replaced a plain "resolved bool", which could only say yes-or-no and so
+// forced every not-yet-answered row to render as "(checking…)". That was a lie
+// in two of the three ways a row can lack an answer: when host gh is unusable
+// no lookup is ever fired, and when a lookup FAILS its result is dropped. Both
+// left a row claiming to be checking, forever, with nothing checking. A row
+// that cannot know must say it does not know.
+type prCheck int
+
+const (
+	// prCheckPending: a lookup is genuinely in flight. This is the ONLY state
+	// that may render "(checking…)".
+	prCheckPending prCheck = iota
+	// prCheckDone: gh answered authoritatively. A nil PR here means a
+	// confirmed "there is no PR", not "not known yet".
+	prCheckDone
+	// prCheckSkipped: no usable host gh, so nothing will ever check.
+	prCheckSkipped
+	// prCheckFailed: a lookup ran and errored.
+	prCheckFailed
+)
+
+// resolvedPR is one checkout's gh PRState outcome, keyed by Checkout.Path in
+// landingPane.resolved.
 type resolvedPR struct {
-	pr *landgh.PR
-	ok bool
+	pr    *landgh.PR
+	state prCheck
 }
 
 // hasRemote reports whether a checkout has any remote configured at all — the
@@ -152,8 +173,8 @@ func isGitHubForge(forge string) bool {
 //  4. A non-GitHub forge: state shown, no one-key action (deferred: glab).
 //  5. Pushed on GitHub: "no PR" (offer Open draft PR) or "PR #N" (offer Open
 //     in browser), depending on the authoritative check.
-func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, resolved bool) landRow {
-	row := landRow{Checkout: c, PR: pr, PRResolved: resolved}
+func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck) landRow {
+	row := landRow{Checkout: c, PR: pr, PRResolved: check == prCheckDone}
 
 	switch {
 	case !hasRemote(c):
@@ -197,20 +218,27 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, resolved bool) landRow
 		row.Kind = landRowOtherForge
 		row.Action = landActionNone
 		row.Label = fmt.Sprintf("pushed on %s (no landing action)", c.Forge)
-	case resolved && pr != nil:
+	case check == prCheckDone && pr != nil:
 		row.Kind = landRowPushedHasPR
 		row.Action = landActionOpenInBrowser
 		row.Label = prLabel(pr)
 	default:
-		// Not yet resolved, or authoritatively resolved with no PR: both show
-		// as the same actionable row, "Open draft PR" being safe either way
-		// (gh itself refuses/no-ops a genuine duplicate far more cheaply than
-		// this pane could re-derive that here).
+		// No PR to open in a browser — whether that is confirmed or merely
+		// unknown, the offered action is the same, and "Open draft PR" is safe
+		// either way (gh itself refuses a genuine duplicate far more cheaply
+		// than this pane could re-derive it). What DIFFERS is how confidently
+		// the row may state it.
 		row.Kind = landRowPushedNoPR
 		row.Action = landActionOpenDraftPR
-		row.Label = "pushed · no PR"
-		if !resolved {
-			row.Label += " (checking…)"
+		switch check {
+		case prCheckDone:
+			row.Label = "pushed · no PR"
+		case prCheckPending:
+			row.Label = "pushed · no PR (checking…)"
+		case prCheckFailed:
+			row.Label = "pushed · PR state unknown (check failed)"
+		default: // prCheckSkipped
+			row.Label = "pushed · PR state unknown (no usable gh)"
 		}
 	}
 	return row
@@ -298,16 +326,25 @@ func groupCheckouts(cs []checkouts.Checkout) []landGroup {
 // buildLandRows flattens groups into the pane's display/cursor order — each
 // repo row followed immediately by its worktrees — resolving every
 // checkout's row state against resolved (keyed by Checkout.Path).
-func buildLandRows(groups []landGroup, resolved map[string]resolvedPR) []landRow {
+// dflt is the state a checkout with no recorded outcome takes — prCheckPending
+// while the pane still expects lookups to fire, prCheckSkipped once host gh is
+// known to be unusable and none ever will.
+func buildLandRows(groups []landGroup, resolved map[string]resolvedPR, dflt prCheck) []landRow {
+	at := func(path string) resolvedPR {
+		if rp, ok := resolved[path]; ok {
+			return rp
+		}
+		return resolvedPR{state: dflt}
+	}
 	var rows []landRow
 	for _, g := range groups {
 		if g.HasRepo {
-			rp := resolved[g.Repo.Path]
-			rows = append(rows, classifyLandRow(g.Repo, rp.pr, rp.ok))
+			rp := at(g.Repo.Path)
+			rows = append(rows, classifyLandRow(g.Repo, rp.pr, rp.state))
 		}
 		for _, wt := range g.Worktrees {
-			rp := resolved[wt.Path]
-			r := classifyLandRow(wt, rp.pr, rp.ok)
+			rp := at(wt.Path)
+			r := classifyLandRow(wt, rp.pr, rp.state)
 			r.Indent = true
 			rows = append(rows, r)
 		}
@@ -340,6 +377,17 @@ type landingPane struct {
 	// from not-installed, and the pane is where the user reads about it.
 	ghAvailability landgh.Availability
 	ghChecked      bool
+
+	// sweptAt is when the data on screen was collected, carried from the
+	// registry entry the pane was built from, and shown in the header — the
+	// rows are a CACHE refreshed roughly every 60s, and a pane that looked
+	// equally confident whether its data was 3 seconds or 3 minutes old
+	// invited the user to act on a picture the VM had already moved past.
+	sweptAt time.Time
+
+	// scanning is true while an on-demand rescan (the `r` key) is in flight,
+	// so the header can say so and a second press cannot race the first.
+	scanning bool
 }
 
 // landingAvailableMsg carries the result of the lazy host-gh-availability
@@ -381,10 +429,14 @@ func (m *model) openLandingPane(v boardVM) tea.Cmd {
 		scope:    v.scope,
 		vm:       v.VM,
 		vmName:   v.Name,
+		sweptAt:  vc.SweptAt,
 		groups:   groups,
 		resolved: map[string]resolvedPR{},
 	}
-	m.landing.rows = buildLandRows(groups, m.landing.resolved)
+	// Pending: the availability probe is about to fire, and will fire lookups
+	// if gh turns out to be usable. handleLandingAvailable downgrades these to
+	// prCheckSkipped if it is not.
+	m.landing.rows = buildLandRows(groups, m.landing.resolved, prCheckPending)
 	m.view = viewLanding
 	return checkLandingAvailableCmd(m.ghActions, v.scope, v.Name)
 }
@@ -408,12 +460,40 @@ func (m *model) handleLandingAvailable(msg landingAvailableMsg) tea.Cmd {
 	m.landing.ghChecked = true
 	if !msg.availability.OK() {
 		// Graceful degradation: with no usable host gh there is nothing
-		// authoritative to check. Every pushed GitHub row stays on
-		// classifyLandRow's provisional "pushed · no PR" default, and "Open
-		// draft PR" itself falls back to the compare URL (landDraftPRRun).
+		// authoritative to check, and — the part that used to be wrong —
+		// nothing ever WILL be. Rebuild the rows as skipped so they say the PR
+		// state is unknown, rather than sitting on "(checking…)" forever with
+		// no lookup in flight. "Open draft PR" still works, falling back to
+		// the compare URL (landDraftPRRun).
+		m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, prCheckSkipped)
 		return nil
 	}
 
+	cmds := m.prStateCmdsFor(msg.scope, msg.vm)
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+// defaultPRCheck is the state a checkout with no recorded outcome should take,
+// given what the pane currently knows about host gh. Before the availability
+// probe answers, a lookup may still be coming; once gh is known unusable, none
+// ever will.
+func (p landingPane) defaultPRCheck() prCheck {
+	if p.ghChecked && !p.ghAvailability.OK() {
+		return prCheckSkipped
+	}
+	return prCheckPending
+}
+
+// prStateCmdsFor returns a lookup command for every row that still needs an
+// authoritative answer, skipping the ones already resolved and the ones with
+// no branch-vs-trunk PR to look for. It is shared by the pane's initial
+// availability handler and its post-rescan refresh: a rescan can surface a
+// checkout that did not exist when the pane opened, and without this that row
+// would sit on "(checking…)" with no lookup ever dispatched for it.
+func (m *model) prStateCmdsFor(scope registry.Scope, name string) []tea.Cmd {
 	var cmds []tea.Cmd
 	for _, row := range m.landing.rows {
 		c := row.Checkout
@@ -422,15 +502,16 @@ func (m *model) handleLandingAvailable(msg landingAvailableMsg) tea.Cmd {
 		// branch-vs-trunk PR to look up, so querying gh for one would spend a
 		// network round trip per pristine clone to answer a question that is
 		// already settled.
-		if c.PushState != checkouts.PushStatePushed || c.OrgRepo == "" || !isGitHubForge(c.Forge) || c.NothingToLand() {
+		if c.PushState != checkouts.PushStatePushed || c.OrgRepo == "" ||
+			!isGitHubForge(c.Forge) || c.NothingToLand() {
 			continue
 		}
-		cmds = append(cmds, prStateCmd(m.ghActions, msg.scope, msg.vm, c.Path, c.OrgRepo, c.Branch))
+		if _, done := m.landing.resolved[c.Path]; done {
+			continue
+		}
+		cmds = append(cmds, prStateCmd(m.ghActions, scope, name, c.Path, c.OrgRepo, c.Branch))
 	}
-	if len(cmds) == 0 {
-		return nil
-	}
-	return tea.Batch(cmds...)
+	return cmds
 }
 
 // prStateCmd fires one checkout's authoritative gh PRState lookup.
@@ -450,14 +531,18 @@ func (m *model) handleLandingPRState(msg landingPRStateMsg) {
 	if msg.scope != m.landing.scope || msg.vm != m.landing.vmName {
 		return // stale: the pane has since moved on
 	}
-	if msg.err != nil {
-		return
-	}
 	if m.landing.resolved == nil {
 		m.landing.resolved = map[string]resolvedPR{}
 	}
-	m.landing.resolved[msg.path] = resolvedPR{pr: msg.pr, ok: true}
-	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved)
+	if msg.err != nil {
+		// RECORDED, not dropped. A dropped failure left the row on
+		// "(checking…)" permanently, which reads as "any moment now" for a
+		// lookup that already finished and lost.
+		m.landing.resolved[msg.path] = resolvedPR{state: prCheckFailed}
+	} else {
+		m.landing.resolved[msg.path] = resolvedPR{pr: msg.pr, state: prCheckDone}
+	}
+	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck())
 }
 
 // landDraftPRRun builds the streamFunc for "Open draft PR": CreateDraftPR
@@ -549,6 +634,65 @@ func (m *model) runLandingAction() tea.Cmd {
 // row).
 var landingActKey = key.NewBinding(key.WithKeys("enter", "o"), key.WithHelp("enter", "act"))
 
+// landingRefreshKey re-sweeps the VM on demand. The pane's rows come from a
+// cache the background sweep refreshes about every 60s, so after committing or
+// pushing inside the VM's own shell there is a window where the pane is
+// confidently out of date. This is the way to close it without waiting.
+var landingRefreshKey = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rescan"))
+
+// landingMoveKey describes the pane's row cursor in the footer. It is a
+// pane-local binding rather than the shared form keys (m.keys.Up/Down) for two
+// reasons: those are labelled "prev field"/"next field", which is the wrong
+// vocabulary for a list of checkouts, and m.keys.Down BINDS ENTER — so the
+// footer claimed enter moved the cursor down while enter actually runs the
+// row's action (see updateLanding, which dispatches on msg.Code before it ever
+// reaches the act key).
+var landingMoveKey = key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑↓", "move"))
+
+// actionVerb names what the act key would actually DO to the row under the
+// cursor, for the footer to show instead of a generic "act".
+//
+// The pane already decided one action per row (classifyLandRow); the footer
+// was the last place still describing that as an abstraction. "enter act" made
+// the user select a row to find out what would happen — and the actions differ
+// enough (one opens an editor and pushes, one creates a PR, one opens a
+// browser) that the difference is worth knowing BEFORE pressing the key.
+//
+// The commit-and-push verb further splits on whether there is anything to
+// commit, because "commit + push" on a checkout with a clean tree would
+// promise an editor that never opens.
+func actionVerb(row landRow) string {
+	switch row.Action {
+	case landActionCommitAndPush:
+		if row.Checkout.Dirty > 0 {
+			return "commit + push"
+		}
+		return "push"
+	case landActionOpenDraftPR:
+		return "open draft PR"
+	case landActionOpenInBrowser:
+		return "open in browser"
+	default:
+		return ""
+	}
+}
+
+// landingActBinding is landingActKey relabelled with the focused row's actual
+// verb, or disabled entirely when that row has no action — so the footer never
+// advertises a key that would do nothing.
+func (p landingPane) landingActBinding() key.Binding {
+	if p.cursor < 0 || p.cursor >= len(p.rows) {
+		return landingActKey
+	}
+	verb := actionVerb(p.rows[p.cursor])
+	if verb == "" {
+		b := key.NewBinding(key.WithKeys("enter", "o"), key.WithHelp("enter", "act"))
+		b.SetEnabled(false)
+		return b
+	}
+	return key.NewBinding(key.WithKeys("enter", "o"), key.WithHelp("enter", verb))
+}
+
 // updateLanding handles keys on the Landing pane: up/down move the row
 // cursor, the act key runs the row's action (if any), and Back returns to
 // the board without disturbing anything in flight (a dispatched action
@@ -573,13 +717,46 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, landingActKey):
 		cmd := m.runLandingAction()
 		return m, cmd
+	case key.Matches(msg, landingRefreshKey):
+		if m.landing.scanning {
+			return m, nil // one in flight already; a second would race it
+		}
+		m.landing.scanning = true
+		return m, landRefreshCmd(m.sweeps, m.landing.scope, m.landing.vmName)
 	}
 	return m, nil
 }
 
-// landingHelp is the Landing pane's footer.
+// landingHelp is the Landing pane's footer. The act key carries the focused
+// row's REAL verb (see landingActBinding), so the footer answers "what happens
+// if I press enter" without the user having to press it.
 func (m model) landingHelp() []key.Binding {
-	return []key.Binding{m.keys.Up, m.keys.Down, landingActKey, m.keys.Back}
+	return []key.Binding{
+		landingMoveKey,
+		m.landing.landingActBinding(),
+		landingRefreshKey,
+		m.keys.Back,
+	}
+}
+
+// scanLabel is the pane header's freshness line: how old the rows on screen
+// are, and how to replace them.
+//
+// The pane reads a cache the background sweep refreshes about every 60s. With
+// no age shown, three-second-old and three-minute-old data looked identical —
+// which matters most right after the user has committed or pushed inside the
+// VM's own shell, exactly when they are most likely to be looking at the pane
+// and least likely to be seeing the truth.
+func (p landingPane) scanLabel(now time.Time) string {
+	if p.scanning {
+		return "rescanning…"
+	}
+	if p.sweptAt.IsZero() {
+		// No sweep has ever completed for this VM: say so rather than
+		// rendering a nonsense age off a zero time.
+		return "not scanned yet · r to scan"
+	}
+	return "scanned " + formatAgo(now.Sub(p.sweptAt)) + " · r to rescan"
 }
 
 // ghModeLabel is the pane header's gh-mode line — the plan's "the pane
@@ -639,6 +816,8 @@ func (m model) landingView() string {
 	b.WriteString(titleStyle.Render("Landing: " + m.landing.vmName))
 	b.WriteString("\n\n")
 	b.WriteString(hintStyle.Width(cw).Render(m.landing.ghModeLabel()))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Width(cw).Render(m.landing.scanLabel(time.Now())))
 	b.WriteString("\n\n")
 
 	if len(m.landing.rows) == 0 {
@@ -750,6 +929,10 @@ func (m *model) handleLandCommitPushDone(msg landCommitPushDoneMsg) tea.Cmd {
 	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
 		return nil
 	}
+	// The checkout just changed, so any PR answer recorded for it is stale —
+	// a push that created the branch may now have a PR to find.
+	delete(m.landing.resolved, msg.path)
+	m.landing.scanning = true
 	return landRefreshCmd(m.sweeps, msg.scope, msg.vm)
 }
 
@@ -773,17 +956,37 @@ type landRefreshMsg struct {
 
 // handleLandRefresh rebuilds the pane's rows from a fresh sweep, keeping the
 // cursor where the user left it (clamped, since the row count can change).
-func (m *model) handleLandRefresh(msg landRefreshMsg) {
-	if msg.err != nil || m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
-		return
+func (m *model) handleLandRefresh(msg landRefreshMsg) tea.Cmd {
+	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
+		return nil // stale: the pane has moved on
+	}
+	// Cleared on BOTH paths: a failed rescan must not leave the header saying
+	// "rescanning…" forever, or the key appears dead from then on.
+	m.landing.scanning = false
+	if msg.err != nil {
+		m.logMsg("rescan of " + msg.vm + " did not complete")
+		return nil
 	}
 	_ = m.checkouts.Set(msg.scope, msg.vm, msg.vc)
+	m.landing.sweptAt = msg.vc.SweptAt
 	m.landing.groups = groupCheckouts(msg.vc.Checkouts)
-	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved)
+	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck())
 	if m.landing.cursor >= len(m.landing.rows) {
 		m.landing.cursor = len(m.landing.rows) - 1
 	}
 	if m.landing.cursor < 0 {
 		m.landing.cursor = 0
 	}
+	// A rescan can surface a checkout that did not exist when the pane opened
+	// — the user just created a branch, or cloned another repo. Those rows
+	// have no recorded outcome and no lookup in flight, so without this they
+	// would sit on "(checking…)" with nothing ever checking them.
+	if !m.landing.ghAvailability.OK() {
+		return nil
+	}
+	cmds := m.prStateCmdsFor(msg.scope, msg.vm)
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
 }
