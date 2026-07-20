@@ -198,11 +198,11 @@
         sand_notice="$HOME/.config/sandbar/.claude-first-run-notice"
         if [ ! -f "$sand_notice" ] && [ -t 0 ]; then
           echo ""
-          echo "  Heads up: the first time you sign in to Claude Code, bypass-"
-          echo "  permissions mode may not be active yet — and Claude may prompt"
-          echo "  once about its full-screen renderer. If you land in manual"
-          echo "  mode, just quit ('/exit' or Ctrl+C twice) and run 'claude'"
-          echo "  again; it comes up in bypass mode. You'll only see this once."
+          echo "  ⚠ Heads up: the first time you sign in to Claude Code,"
+          echo "  --dangerously-skip-permissions and /remote-control may not be"
+          echo "  active yet — and Claude may prompt once about its full-screen"
+          echo "  renderer. If you land in manual mode, just quit ('/exit' or"
+          echo "  Ctrl+C twice) and run 'claude' again. You'll only see this once."
           echo ""
           printf "  Press Enter to continue… "
           read -r sand_reply
