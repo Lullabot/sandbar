@@ -689,3 +689,68 @@ for touched packages, and only then advance.
 ### Execution Summary
 - Total Phases: 6
 - Total Tasks: 10
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-17
+
+### Results
+All 10 tasks across 6 phases delivered the "land" PR/MR cockpit:
+
+- **`internal/checkouts`** — per-VM checkout registry (host-persisted JSON,
+  atomic 0600, connection-scoped, mutex-guarded, nil-safe) and the read-only
+  sweep parser/classifier (`BuildSweepCommand`/`ParseSweep`): worktree-aware,
+  forge+org/repo from the configured remote (GitHub + nested GitLab, SSH/HTTPS),
+  push state via the remote-tracking ref so `-u`-less pushes register. 93.9% cov.
+- **`internal/landgh`** — workstation-local host gh adapter: `Available`,
+  `PRState`, one-shot draft `CreateDraftPR` (`gh api POST /pulls`, no local
+  checkout), `CompareURL`/`PRURL`, `OpenInBrowser`. All inputs argv (injection-
+  safe), injectable runner/opener. 96.1% cov.
+- **`internal/ui`** — the sweep runtime (a second `limactl shell`/goroutine per
+  running VM, sibling of the heartbeat, single writer of the registry via an
+  Update message); the unlanded-work tile badge (amber actionable / at-risk
+  `↑N`); the zero-guest-contact delete guard; and the Landing pane (`l`) with
+  lazy authoritative gh reconciliation, the per-row state→action table, job/
+  ledger integration (`kindLand`, reopen via `L`), and graceful gh-absent
+  browser fallback. `l`=land / `L`=log rebind (enterTarget by-id, unaffected).
+- **`cmd/sand/land.go`** — `sand land NAME [<path>] [--pr|--web]` headless parity
+  (own one-shot sweep; gh-optional with compare-URL fallback; `--web` gh-free).
+- **Docs** — tui, files-and-shells (u/g reframed as data-not-code), cli-reference,
+  security-model (land moves PR metadata, not code; two-token split), and three
+  AGENTS.md invariants.
+
+Gates at completion: `go build ./...`, `go vet ./...`, `gofmt` clean;
+`go test ./... -race` green; aggregate `./internal/...` coverage **88.4%**
+(CI floor 87); `mkdocs build --strict` clean. Static security review confirms
+the land surface has no bundle/patch/guest-exec/code-copy path and the delete
+path makes no guest contact.
+
+### Noteworthy Events
+- **Parallel-edit contention in `internal/ui`.** Phase-2 workers on the shared
+  package briefly saw each other's mid-write states (one used a single-file
+  `git stash`); the final working tree was verified intact at the gate (both
+  edits present, stash stack clean) before committing.
+- **Sweep gating (disclosed design choice).** The plan's "sweep always runs"
+  wording was narrowed to reuse the heartbeat's `shouldTick` idle gate, because
+  running unconditionally opened guest connections off-board and regressed an
+  existing secrets test. The host-persisted registry keeps the badge/guard
+  accurate across screens, so behavior is preserved.
+- **`CreateDraftPR` mechanism.** Implemented via the deterministic
+  `gh api POST /repos/{orgRepo}/pulls` (title/body from the branch head commit)
+  rather than `gh pr create --fill`, which needs a local checkout land never has.
+- **Tech-debt fixed in cleanup.** `profileBlockingJob` was mislabeling a
+  `kindLand` job as "build"; corrected to "landing action".
+
+### Necessary follow-ups
+- **Live-VM Self Validation (manual/CI).** The plan's Self Validation steps that
+  require a real `limae2e` VM with the host `gh` authenticated (tile-badge and
+  Landing-pane screenshots, a real draft-PR create + `gh pr view`, host-FS/
+  process trace confirming no code written to host, delete-path guest-contact
+  tracing, gh-removed fallback) were NOT executed in the unattended run
+  environment (no running Lima VM). Their automated equivalents (unit +
+  integration tests, `-race`, coverage, static security greps) pass; CI runs the
+  `LIMA_E2E` suite on push. These manual TUI observations remain to be done by a
+  human against a real VM before release.
+- **Deferred (out of scope, per plan):** the `glab` one-key MR action for
+  GitLab/drupal.org; acting on a *stopped* VM's cached pushed branch.
