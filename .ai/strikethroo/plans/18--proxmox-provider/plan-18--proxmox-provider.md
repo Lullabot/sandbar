@@ -442,9 +442,9 @@ No circular dependencies; every task appears in exactly one phase below.
 - ✔️ Task 010: PR #70 golden-template methods (depends on: 006)
 - ✔️ Task 011: Opt-in e2e suite including the pool-isolation proof (depends on: 006, 007, 008, 009)
 
-### Phase 6: Documentation
+### ✅ Phase 6: Documentation
 **Parallel Tasks:**
-- Task 012: Proxmox setup guide, nav, security model, files-and-state, AGENTS.md (depends on: 009, 011)
+- ✔️ Task 012: Proxmox setup guide, nav, security model, files-and-state, AGENTS.md (depends on: 009, 011)
 
 ### Post-phase Actions
 
