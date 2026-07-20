@@ -455,3 +455,65 @@ before proceeding. Phases 5 and 6 additionally require `mkdocs build --strict`.
 ### Execution Summary
 - Total Phases: 6
 - Total Tasks: 12
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-20
+
+### Results
+
+A third VM backend — Proxmox VE over its REST API — was added alongside the
+local and remote-Lima providers, satisfying the existing `Provider` (and
+`Provenancer`) interface with no interface change. Delivered across 12 tasks in
+6 phases:
+
+- `internal/pve`: a dependency-free `net/http` client encoding the PVE semantics
+  that matter (tri-state task `exitstatus`, reason-phrase-only 403s, async POST /
+  sync PUT config, node/VM stat fields that lie). **No new Go module dependency.**
+- `internal/provider/proxmox*.go`: discovery, power, guest transport (SSH to the
+  VM IP discovered via the guest agent, matched by `net0` MAC), a base built from
+  a cloud image as a PVE template, clone/reset/recreate, host+per-VM stats,
+  provenance via PVE tags + a fenced description block, and the PR #70
+  golden-template methods (on the concrete type, interface left untouched so
+  #70's rebase stays additive).
+- Profile wiring: a secret-free `proxmox` profile type whose `token_file` is a
+  path (never the token), scoped to a dedicated pool.
+- Docs: a full step-by-step Proxmox setup guide (dedicated pool, minimum-privilege
+  role, privilege-separated token, the three non-pool-scopable grants named
+  explicitly, a verification step, and a separate isolated test pool), plus
+  security-model, files-and-state, connection-profiles, and AGENTS.md updates.
+- An opt-in, build-tagged (`proxmoxe2e`) e2e suite including an adversarial
+  pool-isolation proof.
+
+### Noteworthy Events
+
+- **Session limit interrupted two Phase 5 subagents.** Tasks 010 and 011 were
+  finished directly by the orchestrator (template tests written and debugged; the
+  full e2e suite authored), which is why they are complete despite the subagent
+  failures.
+- **Two subagent corrections were accepted as improvements.** The storage-status
+  endpoint is `/storage/{id}/status` (not the bare path, which returns config),
+  and per-VM disk is indexed by the owning VMID PVE reports directly (not by
+  parsing volid strings, whose shape varies by storage plugin). Both are recorded
+  in the task files.
+- **Coverage floor.** The new backend added substantial orchestration/error-
+  handling code; a final commit restored the repo's 87% coverage floor with tests
+  that each pin a real correctness property (cleanup-on-failure, stale-base
+  rebuild, power-state preservation), not padding. Final coverage: **87.0%**.
+- No significant issues otherwise; `go build`, `go vet` (both tag states), the
+  full `-race` suite (16 packages), and `mkdocs build --strict` all pass, with
+  `go.mod`/`go.sum` unchanged.
+
+### Necessary follow-ups
+
+- **Live validation is the user's to run** against their Proxmox host: the plan's
+  Self Validation steps 3–6 (privilege-minimality proof, live CRUD, the isolation
+  proof, and stats cross-check) require a real host and the documented
+  `PROXMOX_E2E_*` env vars. CI cannot run them; the opt-in suite and the docs'
+  verification step are in place for the user to execute.
+- **PR #70 (golden templates) rebase**: when it lands, add its three template
+  methods to the `Provider` interface — the Proxmox implementations already exist
+  in `proxmoxtemplate.go`, so it is a three-line interface addition.
+- The repo coverage sits exactly at the 87% floor; a future contributor bumping
+  the floor upward should add a little more provisioning-path coverage first.
