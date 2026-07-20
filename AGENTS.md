@@ -22,9 +22,16 @@ it is not where prose belongs.
 
 - `provider` — the backend-agnostic seam (`Provider` interface) that owns the
   whole VM lifecycle (discovery, power, provisioning), guest transport, and
-  interactive attach. Two implementations: local Lima (`NewLocalLima`) and
-  remote-Lima-over-SSH (`NewRemoteLima`, plan 15 task 5). There is no
-  process-global "the provider" anymore: `provider.BuildFleet` (plan 16)
+  interactive attach. Three implementations: local Lima (`NewLocalLima`),
+  remote-Lima-over-SSH (`NewRemoteLima`), and Proxmox VE over its REST API
+  (`NewProxmox`). **Do not assume the transport is always Lima/SSH** — the
+  Proxmox provider (`proxmox*.go`) drives an HTTP API (`internal/pve`), builds
+  its base as a PVE *template*, discovers each VM's IP from the guest agent and
+  then reuses the SSH transport for shells/copy, satisfies `HostFiles` with a
+  local per-endpoint state dir (no "host where limactl runs" exists), and
+  implements `Provenancer` via PVE tags + the description field rather than a
+  sidecar marker. There is no
+  process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
   headless command binds to exactly the one profile it's told to act on
@@ -39,9 +46,18 @@ it is not where prose belongs.
   (`profiles.yaml`) that is now the single source of truth for every
   location `sand` can run VMs on: a permanent Local profile plus any number
   of named `remote-ssh` profiles (host/user/port/key-path/Lima-home, no
-  secrets). Deliberately does not import `provider` (to avoid an import
+  secrets) or `proxmox` profiles (host/node/pool/storage/bridge + a
+  `token_file` **path**, still no secrets — the token value lives in the file,
+  loaded by `profiles.LoadToken`, which refuses one readable by group/other).
+  Deliberately does not import `provider` (to avoid an import
   cycle) — `provider.BuildFleet` is what converts a `Profile` into a
   `Binding`.
+- `pve` — a small, dependency-free (`net/http`) client for the Proxmox VE REST
+  API used only by the Proxmox provider. Encodes the PVE semantics that matter:
+  tri-state task `exitstatus` (`WARNINGS: n` is **success**), a 403's detail
+  living in the HTTP reason phrase (not the body), async `POST`/sync `PUT`
+  config, and node/VM stat fields that lie (QEMU `disk` is hardcoded 0). Adds
+  **no** module dependency — keep it that way.
 - `lima` — typed wrapper over the `limactl` CLI. All subprocess execution goes
   through the `Host` interface (a union of `Runner` and `HostFiles` seams),
   and `Runner` is the gateway for subprocess execution — both implement it
@@ -446,8 +462,10 @@ no sync protocol.
 interface a backend implements (or inherits) to read and write markers. Today's Lima
 implementations (local and remote-over-SSH) satisfy it with `limaprovenance.go`, which
 reads/writes the `sandbar.json` sidecar file via the provider's own `HostFiles` handle
-(local filesystem or SSH). A future Proxmox/cloud backend would implement the same interface
-using VM tags/labels instead of files, with no redesign.
+(local filesystem or SSH). The Proxmox backend implements the same interface a different
+way — `proxmoxprovenance.go` stores a `sandbar` tag plus a fenced JSON block in the VM's
+description (no sidecar file), reads the whole fleet's provenance from one tag-filtered
+`/cluster/resources` call, and never clobbers operator-authored tags or description text.
 
 **Board status:** a VM carrying an in-flight (`provisioning:true`) marker but no local build
 job — i.e. one another controller is building — renders as **Building**, not Running

@@ -113,3 +113,33 @@ them only if your workflow needs an agent to manage them directly.
     must. Add a **branch protection rule** (or ruleset) on `main` and every
     other protected branch that **requires a pull request before merging**.
     Without it, nothing prevents an agent from pushing straight to `main`.
+
+## Proxmox: a pool-scoped API token
+
+The [Proxmox](../using-sand/proxmox.md) backend applies the same
+least-privilege idea to a different boundary: the API token `sand` uses to
+drive a Proxmox host. The concern there is not an agent inside a VM — it's
+`sand` itself, on a host that may run VMs you care about and never want `sand`
+to touch.
+
+The guarantee is **structural, not behavioural**. `sand` places every VM it
+creates into a dedicated resource pool, and the token is granted a custom role
+scoped to `/pool/<pool>`. Proxmox enforces pool permissions by *projecting* the
+role onto the pool's member VMs and storage only — a VM outside the pool has no
+projection, so the token is denied on it, with no wildcard or path that escapes.
+This is not `sand` choosing to leave other VMs alone; it is Proxmox refusing the
+token if it tried. The setup guide's
+[verification step](../using-sand/proxmox.md#verify-the-scope) is how you confirm
+the token really did end up confined — if any grant lands at `/`, it hasn't.
+
+Three privileges (`SDN.Use` for the bridge, `Sys.AccessNetwork` for the image
+download, `Sys.Audit` for node stats) cannot be pool-scoped, because a pool
+holds only VMs and storage. The guide grants each at the narrowest path that
+works and names them explicitly rather than papering over the gap with a broad
+role — none of the three grants any access to another VM.
+
+The token is a secret, and `sand` handles it the way it handles every secret:
+the [`profiles.yaml`](files-and-state.md#host-paths) file records only a **path**
+to the token file (`token_file`), never the value, and `sand` refuses to read a
+token file that is readable by group or other. The credential stays outside the
+config that's safe to share.
