@@ -265,25 +265,38 @@ var vmCommands = []vmCommand{
 		enabledFor: func(m model, v boardVM) bool { return !m.vmBuilding(v.scope, v.Name) },
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			// The delete guard (plan 17, task 5): a PURE, host-only read of the
-			// checkout registry's cached entry for this VM — never anything that
-			// reaches the guest. m.checkouts.Get takes a mutex and hands back a
-			// value copy; deleteGuardPrompt only formats strings from it. See
-			// deleteguard.go's doc and deleteguard_test.go's
-			// TestDeleteGuardNoGuestContact for the invariant this preserves:
-			// deleting a VM you believe is compromised must never execute in it.
+			// The delete guard (plan 17, task 5): a host-only read of the
+			// checkout registry's cached entry for this VM. m.checkouts.Get
+			// takes a mutex and hands back a value copy; deleteGuardPrompt only
+			// formats strings from it. See deleteguard.go's doc and
+			// deleteguard_test.go's TestDeleteGuardNeverSweepsAStoppedVM for
+			// the invariant this preserves: deleting a VM you believe is
+			// compromised must never START it to look inside.
 			vc, found := m.checkouts.Get(v.scope, name)
+			running := v.Status == limaRunning
 			// Delete's action RAISES the confirm; it never deletes directly — the
 			// actual deleteCmd only runs once the user presses 'y' (updateConfirm
 			// in model.go). deleteCmd carries the owning scope so the actionDoneMsg
 			// handler prunes THIS profile's job/secrets, never a same-named VM's
 			// under another.
 			m.confirm = &confirmState{
-				prompt:  deleteGuardPrompt(name, vc, found, v.Status == limaRunning, time.Now()),
+				prompt:  deleteGuardPrompt(name, vc, found, running, time.Now()),
 				run:     deleteCmd(m.provFor(v.scope), v.scope, name),
 				working: "deleting " + name + "…",
+				scope:   v.scope,
+				vmName:  name,
 			}
-			return nil
+			if !running {
+				return nil
+			}
+			// A RUNNING VM's cached entry can be up to one sweepInterval stale,
+			// which is exactly the window in which someone edits a file and then
+			// reaches for delete — the moment the guard most needs to be right.
+			// Re-read it before accepting the answer. This runs the same
+			// read-only pass the VM's own sweep loop is already running, and
+			// only ever against a VM that is already up.
+			m.confirm.checking = true
+			return deleteGuardRefreshCmd(m.sweeps, v.scope, name)
 		},
 	},
 	{

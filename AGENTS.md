@@ -398,22 +398,30 @@ every bullet, not the constraint itself.
   user-visible string, in this subsystem or elsewhere in the repo.
 - **The checkout registry (`internal/checkouts`) is populated ONLY by a
   sweep of a RUNNING guest, and is otherwise a passive, host-side cache.**
-  The unlanded-work badge, the delete guard, and `sand land`'s listing all
-  read this same cached data; none of them re-sweeps or otherwise contacts
-  the guest on their own. A stopped or never-swept VM's entry can only get
-  staler, never fresher — do not "improve" any of these three surfaces by
-  having them refresh state directly; that reintroduces guest contact into
-  paths deliberately built to avoid it (see the next bullet).
-- **The delete guard (`internal/ui/deleteguard.go`) makes ZERO guest
-  contact — this is load-bearing, not incidental.** Its confirmation names
-  work that would be "lost on delete" vs. "safe on GitHub" using only the
-  registry's already-cached data (last-seen labeled with `(as of <ago>)` on
-  a stopped VM). A "smarter" guard that refreshed state at delete time would
-  have to execute inside the very VM the user is choosing to delete —
-  possibly because they suspect it's compromised — which defeats the point
-  of deleting it. `deleteguard_test.go`'s `TestDeleteGuardNoGuestContact`
-  enforces this with a Runner that fails the test if any of its methods are
-  called; do not weaken that test to "fix" a feature request here.
+  The unlanded-work badge and `sand land`'s listing read this cached data and
+  never re-sweep on their own — the badge in particular runs on the render
+  path, where any guest contact is forbidden outright. A stopped or
+  never-swept VM's entry can only get staler, never fresher.
+  The ONE exception is the delete guard's freshness re-read (see the next
+  bullet), which is bounded, running-VM-only, and user-initiated.
+- **The delete guard (`internal/ui/deleteguard.go`) NEVER starts a stopped
+  VM to inspect it — this is load-bearing, not incidental.** A user deleting
+  a VM may be doing so precisely because they suspect it is compromised;
+  booting it to look inside defeats the point. A stopped VM's confirmation is
+  therefore composed from the registry's already-cached data alone, labeled
+  `(as of <ago>)` so it is never mistaken for a live read.
+  `deleteguard_test.go`'s `TestDeleteGuardNoGuestContactStoppedVM` enforces
+  this with a Runner that fails the test if any of its methods are called; do
+  not weaken that test to "fix" a feature request here.
+  A RUNNING VM is different, and deliberately so: its cached entry can be a
+  full `sweepInterval` stale, which is exactly the window in which someone
+  edits a file and then reaches for delete. Raising the confirmation for a
+  running VM therefore fires ONE re-read (`sweepRegistry.sweepOnce`) and holds
+  the Confirm key until it lands. That is not a new capability — it is the
+  same read-only pass that VM's own sweep loop is already running, against a
+  VM that is already up — and it is hard-bounded by `sweepOnceTimeout` so a
+  wedged guest degrades to the cached answer plus "(could not re-check just
+  now)" rather than freezing the overlay. Cancel is always accepted.
 - **Landing (`l` / `sand land`) never copies code to the host.** It moves PR
   metadata only — branch name, compare URL, PR number/state — via the
   workstation's own `gh` (a two-token split: the guest pushes with its own
