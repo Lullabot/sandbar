@@ -62,6 +62,13 @@ func deleteGuardExtra(vc checkouts.VMCheckouts, found bool) string {
 		case checkouts.PushStateUnpushed, checkouts.PushStateNever:
 			unpushedCommits += c.Ahead
 		case checkouts.PushStatePushed:
+			// DELIBERATELY not filtered through Checkout.NothingToLand, unlike
+			// the tile badge and the Landing pane. Those two answer "is there
+			// something here worth turning into a PR", so a pristine clone is
+			// noise to them. This guard answers a different question — "what is
+			// about to be destroyed" — and a checkout on the default branch is
+			// still a real checkout the user may not expect to lose. Applying
+			// the predicate here would quietly weaken the guard.
 			pushedCount++
 		}
 		if c.Dirty > 0 {

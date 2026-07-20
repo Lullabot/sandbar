@@ -120,7 +120,7 @@ func computeCheckoutBadge(vc checkouts.VMCheckouts, known, running bool, now tim
 }
 
 // renderCheckoutBadge turns a verdict into the short marker text
-// spliceCheckoutBadge slots into the tile's footer row, styled — or "" for
+// tile.go's tileFooterLine lays out on the tile's footer row, styled — or "" for
 // nothing to show (stale, or a genuinely clean VM with no checkouts at
 // all). Actionable reuses the EXACT amber "worth your attention" vocabulary
 // header.go's capacityClause already established (warnStyle plus a leading

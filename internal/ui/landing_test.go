@@ -21,8 +21,7 @@ import (
 // real gh binary or opening a real browser — mirroring landgh's own
 // fakeRunner/fakeOpener test doubles (internal/landgh/fakes_test.go).
 type fakeGhActions struct {
-	available    bool
-	availability *landgh.Availability
+	availability landgh.Availability
 
 	prStateCalls []struct{ orgRepo, branch string }
 	prState      *landgh.PR
@@ -36,15 +35,15 @@ type fakeGhActions struct {
 	openErr error
 }
 
-// Availability maps the fake's single `available` knob onto the real result
-// type: available means installed AND authenticated, unavailable means gh was
-// never found. Tests that need the third state (installed but unauthenticated)
-// set availability explicitly, which takes precedence.
 func (f *fakeGhActions) Availability(context.Context) landgh.Availability {
-	if f.availability != nil {
-		return *f.availability
-	}
-	return landgh.Availability{Installed: f.available, Authenticated: f.available}
+	return f.availability
+}
+
+// ghUp is the "host gh is installed and authenticated" fixture, named because
+// most tests only care that the one-key path is open. Its zero-value opposite
+// (a bare landgh.Availability{}) is gh missing from PATH entirely.
+func ghUp() landgh.Availability {
+	return landgh.Availability{Installed: true, Authenticated: true}
 }
 
 func (f *fakeGhActions) PRState(_ context.Context, orgRepo, branch string) (*landgh.PR, error) {
@@ -320,7 +319,7 @@ func TestLandDraftPRRunCreatesWhenGhAvailable(t *testing.T) {
 // falls back to opening the gh-free compare URL in the browser instead, so
 // the action is never simply dead without gh.
 func TestLandDraftPRRunOpensCompareURLWhenGhUnavailable(t *testing.T) {
-	fake := &fakeGhActions{available: false}
+	fake := &fakeGhActions{availability: landgh.Availability{}}
 	run := landDraftPRRun(fake, false, "acme/repo", "feature")
 	var out strings.Builder
 	if err := run(context.Background(), &out); err != nil {
@@ -390,7 +389,7 @@ func TestOpenLandingPaneGroupsAndSwitchesView(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
 	}
-	m.ghActions = &fakeGhActions{available: false}
+	m.ghActions = &fakeGhActions{availability: landgh.Availability{}}
 
 	cmd := m.openLandingPane(v)
 	if m.view != viewLanding {
@@ -423,7 +422,7 @@ func TestLandingAvailableFiresPRStateOnlyForPushedGitHubRows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
 	}
-	fake := &fakeGhActions{available: true, prState: &landgh.PR{Number: 11, URL: "https://github.com/acme/repo/pull/11"}}
+	fake := &fakeGhActions{availability: ghUp(), prState: &landgh.PR{Number: 11, URL: "https://github.com/acme/repo/pull/11"}}
 	m.ghActions = fake
 	cmd := m.openLandingPane(v)
 
@@ -456,11 +455,11 @@ func TestLandingAvailableFiresPRStateOnlyForPushedGitHubRows(t *testing.T) {
 // state.
 func TestHandleLandingAvailableDropsStaleResult(t *testing.T) {
 	m, v := landingTestVM(t, "web")
-	m.ghActions = &fakeGhActions{available: true}
+	m.ghActions = &fakeGhActions{availability: ghUp()}
 	m.openLandingPane(v)
 
 	// A result for a DIFFERENT vm name — as if the pane had moved on.
-	cmd := m.handleLandingAvailable(landingAvailableMsg{scope: v.scope, vm: "some-other-vm", availability: landgh.Availability{Installed: true, Authenticated: true}})
+	cmd := m.handleLandingAvailable(landingAvailableMsg{scope: v.scope, vm: "some-other-vm", availability: ghUp()})
 	if cmd != nil {
 		t.Fatal("a stale availability result must not fire any further commands")
 	}
@@ -567,11 +566,11 @@ func TestUpdateLandingActKeyRunsTheRowsActionAsAJob(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
 	}
-	fake := &fakeGhActions{available: true, createPR: &landgh.PR{Number: 21, URL: "https://github.com/acme/repo/pull/21"}}
+	fake := &fakeGhActions{availability: ghUp(), createPR: &landgh.PR{Number: 21, URL: "https://github.com/acme/repo/pull/21"}}
 	m.ghActions = fake
 	m.openLandingPane(v)
 	// simulate the availability check having already resolved
-	m.landing.ghAvailability = landgh.Availability{Installed: true, Authenticated: true}
+	m.landing.ghAvailability = ghUp()
 	m.landing.ghChecked = true
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'o', Text: "o"})
@@ -621,7 +620,7 @@ func TestLandingViewShowsWorktreeIndentedAfterItsRepo(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
 	}
-	m.ghActions = &fakeGhActions{available: false}
+	m.ghActions = &fakeGhActions{availability: landgh.Availability{}}
 	m.openLandingPane(v)
 	m.landing.ghChecked = true
 
@@ -644,10 +643,10 @@ func TestLandingViewShowsWorktreeIndentedAfterItsRepo(t *testing.T) {
 
 func TestLandingViewNoCheckoutsYet(t *testing.T) {
 	m, v := landingTestVM(t, "web")
-	m.ghActions = &fakeGhActions{available: true}
+	m.ghActions = &fakeGhActions{availability: ghUp()}
 	m.openLandingPane(v)
 	m.landing.ghChecked = true
-	m.landing.ghAvailability = landgh.Availability{Installed: true, Authenticated: true}
+	m.landing.ghAvailability = ghUp()
 
 	rendered := ansi.Strip(m.landingView())
 	if !strings.Contains(rendered, "No git checkouts discovered yet") {
@@ -681,7 +680,7 @@ func TestGhModeLabelAllModes(t *testing.T) {
 	if got := checking.ghModeLabel(); !strings.Contains(got, "checking") {
 		t.Fatalf("ghModeLabel(unchecked) = %q, want it to say it is still checking", got)
 	}
-	available := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true, Authenticated: true}}
+	available := landingPane{ghChecked: true, ghAvailability: ghUp()}
 	if got := available.ghModeLabel(); !strings.Contains(got, "available") {
 		t.Fatalf("ghModeLabel(available) = %q, want it to say gh is available", got)
 	}
@@ -738,9 +737,9 @@ func TestClassifyLandRowNothingToLand(t *testing.T) {
 	if row.Action != landActionNone {
 		t.Fatalf("Action = %v, want landActionNone", row.Action)
 	}
-	if strings.Contains(row.Label, "checking") {
-		t.Fatalf("Label = %q: this row needs no gh lookup, so it must not claim to be waiting on one", row.Label)
-	}
+	// Exact equality, which also pins that the row never picks up the
+	// "(checking…)" suffix: it needs no gh lookup, so it must not claim to be
+	// waiting on one.
 	if row.Label != "nothing to land" {
 		t.Fatalf("Label = %q, want %q", row.Label, "nothing to land")
 	}
@@ -765,13 +764,13 @@ func TestNothingToLandRowsSkipTheGhLookup(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
 	}
-	fake := &fakeGhActions{available: true}
+	fake := &fakeGhActions{availability: ghUp()}
 	m.ghActions = fake
 	m.openLandingPane(v)
 
 	cmd := m.handleLandingAvailable(landingAvailableMsg{
 		scope: v.scope, vm: v.Name,
-		availability: landgh.Availability{Installed: true, Authenticated: true},
+		availability: ghUp(),
 	})
 	if cmd != nil {
 		cmd() // drain the batch so the fake records its calls

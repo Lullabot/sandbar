@@ -248,3 +248,28 @@ func TestDeleteGuardNoGuestContactStoppedVM(t *testing.T) {
 		t.Fatalf("confirm prompt = %q, want a stopped-VM \"as of\" label", m.confirm.prompt)
 	}
 }
+
+// TestDeleteGuardCountsDefaultBranchCheckouts pins the deliberate asymmetry
+// between this guard and the tile badge / Landing pane. Those two suppress a
+// checkout sitting on its repo's default branch (checkouts.NothingToLand) —
+// there is nothing to turn into a PR. The guard must NOT: it answers "what is
+// about to be destroyed", and a pristine clone with uncommitted work in it is
+// exactly the case a user would not expect to lose silently.
+func TestDeleteGuardCountsDefaultBranchCheckouts(t *testing.T) {
+	vc := checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/u/clone", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed},
+		},
+	}
+	if got := deleteGuardExtra(vc, true); got == "" {
+		t.Fatal("a default-branch checkout must still be named by the delete guard")
+	}
+
+	// And uncommitted work on that same default branch must still be called
+	// out as lost — NothingToLand answers only the actionable question.
+	vc.Checkouts[0].Dirty = 4
+	got := deleteGuardExtra(vc, true)
+	if !strings.Contains(got, "uncommitted") {
+		t.Fatalf("guard = %q, want it to name the uncommitted changes on the default branch", got)
+	}
+}

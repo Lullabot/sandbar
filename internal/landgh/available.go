@@ -45,20 +45,6 @@ type Availability struct {
 // OK reports whether host gh is usable for the one-key draft-create action.
 func (a Availability) OK() bool { return a.Installed && a.Authenticated }
 
-// Reason is a short human-readable explanation of a not-OK Availability,
-// phrased as the state it found (never as an instruction), for a caller to
-// embed in whatever sentence it is building. It returns "" when OK.
-func (a Availability) Reason() string {
-	switch {
-	case !a.Installed:
-		return "not installed"
-	case !a.Authenticated:
-		return "not authenticated"
-	default:
-		return ""
-	}
-}
-
 // Availability probes host gh: present on PATH, and authenticated (`gh auth
 // status` succeeds). It never touches a VM or the guest — this is a purely
 // workstation-local check. Callers use it to decide whether to offer the
@@ -77,10 +63,4 @@ func (c *Client) Availability(ctx context.Context) Availability {
 		return Availability{Installed: true}
 	}
 	return Availability{Installed: true, Authenticated: true}
-}
-
-// Available is the boolean shorthand for Availability().OK(), for callers that
-// only branch on usable/not and have no message to explain.
-func (c *Client) Available(ctx context.Context) bool {
-	return c.Availability(ctx).OK()
 }
