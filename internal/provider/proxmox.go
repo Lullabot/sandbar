@@ -190,6 +190,16 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		ciUser = vm.HostUser()
 	}
 
+	// Expand a leading ~ in identity_path exactly as LoadToken does for the token
+	// file. This one value is used three ways — read as "<path>.pub" for cloud-init
+	// and passed as ssh -i for the transport — none of which goes through a shell,
+	// so a literal "~/.ssh/id_ed25519" would never resolve. Empty stays empty;
+	// Preflight and readPublicKey report a missing key.
+	identityPath, err := profiles.ExpandHome(cfg.IdentityPath)
+	if err != nil {
+		return nil, fmt.Errorf("proxmox: identity_path: %w", err)
+	}
+
 	return &proxmoxProvider{
 		client:       client,
 		host:         cfg.Host,
@@ -198,7 +208,7 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		storage:      cfg.Storage,
 		bridge:       cfg.Bridge,
 		ciUser:       ciUser,
-		identityPath: cfg.IdentityPath,
+		identityPath: identityPath,
 		files:        newProxmoxFiles(proxmoxStateRoot(cfg)),
 		runSSH:       execSSH,
 		vmids:        map[string]int{},
@@ -1118,6 +1128,16 @@ func (p *proxmoxProvider) HostFiles() lima.HostFiles { return p.files }
 // the node exists, that the version is supported, that the pool exists, and that
 // the storage exists and can hold VM images.
 func (p *proxmoxProvider) Preflight() error {
+	// Fail fast on a missing/unreadable SSH key BEFORE any network call: sand
+	// installs <identity_path>.pub into the guest via cloud-init and then
+	// authenticates the ssh transport with the private key, so a Proxmox profile
+	// without a readable identity_path can never yield a reachable VM. Catching it
+	// here — the cheapest check, a local file read — beats failing minutes into
+	// the first base build, which is exactly where it used to surface.
+	if _, err := readPublicKey(p.identityPath); err != nil {
+		return fmt.Errorf("proxmox: %w; set identity_path in the profile to an SSH private key whose .pub sits beside it (e.g. ~/.ssh/id_ed25519, with ~/.ssh/id_ed25519.pub present)", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
@@ -1198,23 +1218,23 @@ func pveVersionAtLeast(version string, major, minor int) (atLeast, parsed bool) 
 	return gotMinor >= minor, true
 }
 
-// --- provisioning (not yet implemented) -----------------------------------------
+// --- provisioning lifecycle -----------------------------------------------------
+//
+// The implementations live in proxmoxprovision.go — building the base as a PVE
+// template, cloning from it, and the partial-failure cleanup — so these three
+// methods stay one-line delegations and this file keeps its discovery/power/
+// transport focus.
 
-// errProxmoxProvisioning is what the three lifecycle methods return until the
-// base-template build lands. They refuse outright rather than half-working: a
-// partially implemented create would leave VMs behind on a real cluster.
-var errProxmoxProvisioning = errors.New("proxmox: provisioning is not yet implemented for this backend")
-
-func (p *proxmoxProvider) Create(context.Context, vm.CreateConfig, provision.CreateOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return p.createInstance(ctx, cfg, opts, out)
 }
 
-func (p *proxmoxProvider) Recreate(context.Context, vm.CreateConfig, provision.CreateOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return p.recreateInstance(ctx, cfg, opts, out)
 }
 
-func (p *proxmoxProvider) Reset(context.Context, vm.CreateConfig, provision.ResetOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
+	return p.resetInstance(ctx, cfg, opts, out)
 }
 
 // --- progress -------------------------------------------------------------------
