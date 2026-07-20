@@ -808,3 +808,251 @@ func TestAcceptedImportExt(t *testing.T) {
 		}
 	}
 }
+
+// --- base build failure paths ---------------------------------------------------
+
+// TestProxmoxBaseBuildCleansUpOnCreateTaskFailure covers the base-build cleanup
+// path: when the base VM's own create task fails, the partial base VM is purged
+// rather than left occupying its VMID under the base name.
+func TestProxmoxBaseBuildCleansUpOnCreateTaskFailure(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	// The base create POST returns a UPID whose task then FAILS.
+	failUPID := upidFor("qmcreate", 100)
+	m.on("/nodes/pve1/qemu", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		upidData(w, failUPID)
+	})
+	m.data("/nodes/pve1/tasks/"+failUPID+"/status", `{"status":"stopped","exitstatus":"import failed"}`)
+
+	deleted := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/100", func(w http.ResponseWriter, _ *http.Request) {
+		deleted <- struct{}{}
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err == nil {
+		t.Fatal("Create: want a failure when the base create task fails")
+	}
+	select {
+	case <-deleted:
+	default:
+		t.Errorf("the partial base VM (100) was not cleaned up; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxBaseBuildFailsOnDownloadTaskFailure covers ensureCloudImage's
+// download-failure branch: a failed download task aborts the build before any VM
+// is created.
+func TestProxmoxBaseBuildFailsOnDownloadTaskFailure(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	dlFail := upidFor("download", 0)
+	m.on("/nodes/pve1/storage/local-lvm/download-url", func(w http.ResponseWriter, _ *http.Request) { upidData(w, dlFail) })
+	m.data("/nodes/pve1/tasks/"+dlFail+"/status", `{"status":"stopped","exitstatus":"404 not found"}`)
+
+	p := newCreateProvider(t, m)
+	err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil)
+	if err == nil {
+		t.Fatal("Create: want a failure when the cloud-image download fails")
+	}
+	if !strings.Contains(err.Error(), "cloud image") {
+		t.Errorf("error = %q; want it to name the cloud-image download", err)
+	}
+	// No base VM should have been created after a failed download.
+	if m.sawPath("/nodes/pve1/qemu/100/template") {
+		t.Errorf("a base template was built despite a failed image download; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateReusesExistingCloudImage covers ensureCloudImage's
+// already-present branch: when the volid is already in storage, no download is
+// issued.
+func TestProxmoxCreateReusesExistingCloudImage(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+	// The cloud image is already present in storage content.
+	m.data("/nodes/pve1/storage/local-lvm/content",
+		`[{"volid":"local-lvm:import/`+baseImageFile+`","content":"import","size":100}]`)
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if m.sawPath("/nodes/pve1/storage/local-lvm/download-url") {
+		t.Errorf("Create downloaded the image even though it was already present; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateCleansUpWhenCloneResizeFails covers finalizeClone's resize
+// stage: a failed disk resize on the fresh clone aborts the create and purges
+// the partial clone.
+func TestProxmoxCreateCleansUpWhenCloneResizeFails(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	// The clone's resize task fails.
+	resizeFail := upidFor("resize", 101)
+	m.on("/nodes/pve1/qemu/101/resize", func(w http.ResponseWriter, _ *http.Request) { upidData(w, resizeFail) })
+	m.data("/nodes/pve1/tasks/"+resizeFail+"/status", `{"status":"stopped","exitstatus":"resize refused"}`)
+
+	deleted := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/101", func(w http.ResponseWriter, _ *http.Request) {
+		deleted <- struct{}{}
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err == nil {
+		t.Fatal("Create: want a failure when the clone resize fails")
+	}
+	select {
+	case <-deleted:
+	default:
+		t.Errorf("the partial clone (101) was not cleaned up after a resize failure; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateRebuildsStaleBase covers ensureBaseTemplate's "base exists
+// but is stale" branch: an existing base template with no recorded playbook
+// version is destroyed and rebuilt before the clone. This is also the path that
+// exercises destroyVM (stop-if-running then purge).
+func TestProxmoxCreateRebuildsStaleBase(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	// The base template already exists (VMID 100, running so destroyVM must stop
+	// it first). No version stamp is written, so baseStale reports it stale.
+	m.data("/cluster/resources", `[
+	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"running","type":"qemu","template":1}
+	]`)
+	rec.setName(100, "sandbar-base")
+
+	destroyed := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/100", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			destroyed <- struct{}{}
+		}
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+		t.Fatalf("Create over a stale base: %v", err)
+	}
+	select {
+	case <-destroyed:
+	default:
+		t.Errorf("the stale base template was not destroyed before rebuild; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateRebuildOptionForcesRebuild covers the opts.Rebuild branch:
+// an existing (even current) base is rebuilt when the caller asks for it.
+func TestProxmoxCreateRebuildOptionForcesRebuild(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+	m.data("/cluster/resources", `[
+	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","template":1}
+	]`)
+	rec.setName(100, "sandbar-base")
+
+	rebuilt := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/100", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			rebuilt <- struct{}{}
+		}
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{Rebuild: true}, nil); err != nil {
+		t.Fatalf("Create --rebuild: %v", err)
+	}
+	select {
+	case <-rebuilt:
+	default:
+		t.Errorf("opts.Rebuild did not force a rebuild of the existing base; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateCleansUpWhenCloudInitWriteFails covers applyCloudInitIdentity's
+// failure branch: a failed cloud-init config write on the fresh clone aborts the
+// create and purges the partial clone before returning.
+func TestProxmoxCreateCleansUpWhenCloudInitWriteFails(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	// The clone's cloud-init config PUT fails. registerVM's /config handler serves
+	// both the GET (guest-IP) and PUT (cloud-init); override just for VMID 101 to
+	// fail the PUT while still answering the GET the finalize needs earlier.
+	m.on("/nodes/pve1/qemu/101/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"data":null,"message":"config write refused"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":{"net0":"virtio=%s,bridge=vmbr0"}}`, testMAC)
+	})
+
+	deleted := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/101", func(w http.ResponseWriter, _ *http.Request) {
+		deleted <- struct{}{}
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err == nil {
+		t.Fatal("Create: want a failure when the cloud-init config write fails")
+	}
+	select {
+	case <-deleted:
+	default:
+		t.Errorf("the partial clone was not cleaned up after a cloud-init write failure; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxResetFailsCleanlyWhenRecloneFails covers resetInstance's error path:
+// after the old VM is destroyed, a failed reclone from the base surfaces as an
+// error rather than a silent half-reset.
+func TestProxmoxResetFailsCleanlyWhenRecloneFails(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{nextID: 100}
+
+	dir := stubProvisioning(t)
+	shortAgentPolling(t, 5*time.Second)
+	m.data("/cluster/resources", `[
+	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","template":1},
+	  {"vmid":105,"name":"web","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu"}
+	]`)
+	m.data("/nodes/pve1/qemu/105/status/current", `{"vmid":105,"name":"web","status":"stopped"}`)
+	m.on("/nodes/pve1/qemu/105", func(w http.ResponseWriter, _ *http.Request) { upidData(w, testUPID) })
+	m.on("/cluster/nextid", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":%q}`, strconv.Itoa(rec.nextVMID()))
+	})
+	// The reclone POST itself fails.
+	m.fail("/nodes/pve1/qemu/100/clone", http.StatusInternalServerError, "reclone refused")
+	m.on("/nodes/pve1/qemu/101", func(w http.ResponseWriter, _ *http.Request) { upidData(w, testUPID) })
+	m.okTask(testUPID)
+
+	p := newProxmoxForTest(t, m)
+	recordSSH(p)
+	want, _ := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	_ = provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now())
+
+	if err := p.Reset(context.Background(), webConfig(), provision.ResetOptions{}, nil); err == nil {
+		t.Fatal("Reset: want an error when the reclone fails")
+	}
+}
