@@ -83,6 +83,21 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
 		}
 		return prov, cfg.Scope(), nil
+	case profiles.TypeProxmox:
+		// Mirrors the TypeRemoteSSH case above and provider.BuildFleet's
+		// buildBinding: an empty host is only reachable via a hand-edited
+		// profiles.yaml (store.Add/Update refuse it — see profiles.validate),
+		// so surface it as a clear error rather than letting NewProxmox
+		// construct something that fails later on a missing host.
+		if p.Host == "" {
+			return nil, registry.Scope{}, fmt.Errorf("profile %q has no host", p.Name)
+		}
+		cfg := targetConfigFor(p)
+		prov, err := provider.NewProxmox(cfg)
+		if err != nil {
+			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
+		}
+		return prov, cfg.Scope(), nil
 	case profiles.TypeLocal:
 		prov, err := provider.NewDefault()
 		if err != nil {
@@ -102,19 +117,38 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 // cross-profile ownership lookup, which only needs each enabled profile's
 // scope to query the registry, not a live connection to every remote.
 func scopeForProfile(p profiles.Profile) registry.Scope {
-	if p.Type == profiles.TypeRemoteSSH {
+	if p.Type == profiles.TypeRemoteSSH || p.Type == profiles.TypeProxmox {
 		return targetConfigFor(p).Scope()
 	}
 	return registry.LocalScope
 }
 
-// targetConfigFor converts a RemoteSSH profile into the provider layer's
-// TargetConfig — a direct field-for-field mapping, duplicating
+// targetConfigFor converts a RemoteSSH or Proxmox profile into the provider
+// layer's TargetConfig — a direct field-for-field mapping, duplicating
 // internal/provider/fleet.go's unexported targetConfigFor (which this
 // package cannot call). Keep the two in agreement if either changes; see
 // profiles.Profile.remoteTarget's doc comment for why this small duplication
 // is preferred over an import-cycle-inducing export.
+//
+// Like its fleet.go counterpart, this stays total (no error return): the
+// Proxmox token file is a PATH here too (TokenFile), never loaded eagerly —
+// NewProxmox reads it at construction, so a bad token file surfaces from
+// providerForProfile's call to NewProxmox, not from this conversion.
 func targetConfigFor(p profiles.Profile) provider.TargetConfig {
+	if p.Type == profiles.TypeProxmox {
+		return provider.TargetConfig{
+			Provider:  provider.ProxmoxProviderID,
+			Host:      p.Host,
+			User:      p.User,
+			Node:      p.Node,
+			Pool:      p.Pool,
+			Storage:   p.Storage,
+			Bridge:    p.Bridge,
+			TokenFile: p.TokenFile,
+			Insecure:  p.Insecure,
+			CAFile:    p.CAFile,
+		}
+	}
 	return provider.TargetConfig{
 		Provider:       provider.RemoteLimaProviderID,
 		Host:           p.Host,

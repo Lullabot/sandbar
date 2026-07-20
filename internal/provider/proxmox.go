@@ -1198,23 +1198,23 @@ func pveVersionAtLeast(version string, major, minor int) (atLeast, parsed bool) 
 	return gotMinor >= minor, true
 }
 
-// --- provisioning (not yet implemented) -----------------------------------------
+// --- provisioning lifecycle -----------------------------------------------------
+//
+// The implementations live in proxmoxprovision.go — building the base as a PVE
+// template, cloning from it, and the partial-failure cleanup — so these three
+// methods stay one-line delegations and this file keeps its discovery/power/
+// transport focus.
 
-// errProxmoxProvisioning is what the three lifecycle methods return until the
-// base-template build lands. They refuse outright rather than half-working: a
-// partially implemented create would leave VMs behind on a real cluster.
-var errProxmoxProvisioning = errors.New("proxmox: provisioning is not yet implemented for this backend")
-
-func (p *proxmoxProvider) Create(context.Context, vm.CreateConfig, provision.CreateOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return p.createInstance(ctx, cfg, opts, out)
 }
 
-func (p *proxmoxProvider) Recreate(context.Context, vm.CreateConfig, provision.CreateOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	return p.recreateInstance(ctx, cfg, opts, out)
 }
 
-func (p *proxmoxProvider) Reset(context.Context, vm.CreateConfig, provision.ResetOptions, io.Writer) error {
-	return errProxmoxProvisioning
+func (p *proxmoxProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
+	return p.resetInstance(ctx, cfg, opts, out)
 }
 
 // --- progress -------------------------------------------------------------------

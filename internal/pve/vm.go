@@ -27,6 +27,12 @@ type VMResource struct {
 	MaxMem  int64   `json:"maxmem"`
 	MaxDisk int64   `json:"maxdisk"`
 	CPUs    float64 `json:"cpus"`
+	// Tags is PVE's semicolon-separated tag list for the VM. This listing
+	// endpoint carries it even though it does NOT carry the description —
+	// see internal/provider/proxmoxprovenance.go's Provenance, which reads
+	// this field across the whole fleet in one call to find the (usually
+	// few) VMs worth a second, per-VM round trip for their description.
+	Tags string `json:"tags"`
 }
 
 // ListVMs lists qemu VMs across the cluster, filtered to pool when non-empty.

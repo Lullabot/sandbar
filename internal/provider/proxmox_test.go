@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -279,26 +278,8 @@ func TestProxmoxHostResourcesIsUnknown(t *testing.T) {
 	}
 }
 
-// TestProxmoxProvisioningIsStubbed proves the three lifecycle methods refuse
-// clearly instead of half-doing something.
-func TestProxmoxProvisioningIsStubbed(t *testing.T) {
-	p := newProxmoxForTest(t, newPVEMock(t))
-	ctx, cfg, out := context.Background(), vm.CreateConfig{Name: "web"}, io.Discard
-
-	for name, err := range map[string]error{
-		"Create":   p.Create(ctx, cfg, provision.CreateOptions{}, out),
-		"Recreate": p.Recreate(ctx, cfg, provision.CreateOptions{}, out),
-		"Reset":    p.Reset(ctx, cfg, provision.ResetOptions{}, out),
-	} {
-		if err == nil {
-			t.Errorf("%s: want a not-implemented error, got nil", name)
-			continue
-		}
-		if !strings.Contains(err.Error(), "not yet implemented") {
-			t.Errorf("%s error = %q; want it to say the feature is not yet implemented", name, err)
-		}
-	}
-}
+// The Create/Recreate/Reset lifecycle is exercised in proxmoxprovision_test.go;
+// they are no longer stubbed (see task 06).
 
 // --- discovery ------------------------------------------------------------------
 
