@@ -49,6 +49,7 @@ type Provider struct {
 	CopyFunc           func(ctx context.Context, out io.Writer, recursive bool, src, dst string) error
 
 	AttachArgvFunc func(v vm.VM) []string
+	RunArgvFunc    func(v vm.VM, workdir, expr string) []string
 	GuestHomeFunc  func(v vm.VM) string
 	GuestUserFunc  func(v vm.VM) string
 	GuestPathFunc  func(name, path string) string
@@ -176,6 +177,13 @@ func (f *Provider) Copy(ctx context.Context, out io.Writer, recursive bool, src,
 }
 
 // --- Interactive attach & guest paths ---
+
+func (f *Provider) RunArgv(v vm.VM, workdir, expr string) []string {
+	if f.RunArgvFunc != nil {
+		return f.RunArgvFunc(v, workdir, expr)
+	}
+	return []string{"true"}
+}
 
 func (f *Provider) AttachArgv(v vm.VM) []string {
 	if f.AttachArgvFunc != nil {

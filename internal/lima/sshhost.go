@@ -962,3 +962,11 @@ func (l *sshLock) Unlock() error {
 
 // Close releases any held lock (an unheld Close is a no-op).
 func (l *sshLock) Close() error { return l.Unlock() }
+
+// RunArgv is RunArgv's remote form: the same guest expression, ssh-wrapped
+// with a TTY, so the Landing pane's commit-and-push action behaves identically
+// against a remote-profile VM. Like AttachArgv, it reuses sshCommand's quoting
+// rather than re-spelling it.
+func (h *SSHHost) RunArgv(name, workdir, expr, colorterm string) []string {
+	return h.sshCommand(true, RunArgv(name, workdir, expr, colorterm)...)
+}

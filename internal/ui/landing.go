@@ -30,11 +30,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -78,6 +81,12 @@ const (
 	landActionNone landAction = iota
 	landActionOpenDraftPR
 	landActionOpenInBrowser
+	// landActionCommitAndPush is the at-risk row's action: commit whatever is
+	// uncommitted (opening the user's editor, in the guest, on their real
+	// terminal) and push the branch. It is the ONE landing action that is not
+	// a host-side gh call — it runs entirely inside the VM, because that is
+	// where the code is and where it must stay.
+	landActionCommitAndPush
 )
 
 // landRow is one rendered/actionable line of the pane: a single checkout
@@ -102,6 +111,16 @@ type resolvedPR struct {
 	ok bool
 }
 
+// hasRemote reports whether a checkout has any remote configured at all — the
+// one condition under which no landing action can do anything. The sweep only
+// records a Forge/OrgRepo when `git remote get-url` returned something, so a
+// non-empty either way means a remote exists. Forge is checked as well as
+// OrgRepo because a remote whose URL does not parse into an org/repo slug is
+// still perfectly pushable: `git push` names the REMOTE, not the parsed URL.
+func hasRemote(c checkouts.Checkout) bool {
+	return c.OrgRepo != "" || c.Forge != ""
+}
+
 // isGitHubForge reports whether forge is the one forge land's one-key action
 // covers. The plan scopes the one-key action to GitHub only; other forges
 // (GitLab, drupal.org) still show state but get no one-key action — and,
@@ -120,27 +139,51 @@ func isGitHubForge(forge string) bool {
 // plan's "treat the sweep's push-state as a hint" note.
 //
 // Priority order matters and is deliberate:
-//  1. At-risk (unpushed commits and/or uncommitted changes) wins outright,
-//     REGARDLESS of whether an earlier, already-pushed commit on the same
-//     branch has a PR — the safe move is always "push in the shell first",
-//     never a one-key action that could paper over local state the branch on
-//     GitHub does not yet reflect.
-//  2. Local only (never pushed, or no remote configured at all).
-//  3. A non-GitHub forge: state shown, no one-key action (deferred: glab).
-//  4. Pushed on GitHub: "no PR" (offer Open draft PR) or "PR #N" (offer Open
+//  1. No remote at all: nothing any action here could target. This is the
+//     ONLY meaning of "local only" — it used to also swallow a branch that
+//     simply had not been pushed yet, which hid the single case the pane is
+//     most useful for behind a label saying there was nothing to do.
+//  2. At-risk — uncommitted changes, unpushed commits, or a branch with no
+//     remote-tracking ref at all — wins over every PR arm below, REGARDLESS
+//     of whether an earlier, already-pushed commit on the same branch has a
+//     PR: local state the forge does not yet reflect must be resolved before
+//     anything points the user at a PR that misrepresents it.
+//  3. On the default branch with nothing of its own: no PR to open.
+//  4. A non-GitHub forge: state shown, no one-key action (deferred: glab).
+//  5. Pushed on GitHub: "no PR" (offer Open draft PR) or "PR #N" (offer Open
 //     in browser), depending on the authoritative check.
 func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, resolved bool) landRow {
 	row := landRow{Checkout: c, PR: pr, PRResolved: resolved}
 
 	switch {
-	case c.PushState == checkouts.PushStateUnpushed || c.Dirty > 0:
-		row.Kind = landRowAtRisk
-		row.Action = landActionNone
-		row.Label = atRiskLabel(c)
-	case c.PushState == checkouts.PushStateNever || c.OrgRepo == "":
+	case !hasRemote(c):
 		row.Kind = landRowLocalOnly
 		row.Action = landActionNone
+		// No remote means no action is possible — but the row must still say
+		// what is at stake. A checkout with uncommitted or unpushed work and
+		// nowhere to send it is the MOST fragile thing in the VM, so "local
+		// only" alone would understate it precisely where it matters most.
 		row.Label = "local only"
+		if c.Dirty > 0 || c.PushState == checkouts.PushStateUnpushed {
+			row.Label += " · " + atRiskLabel(c)
+		}
+	case c.PushState == checkouts.PushStateUnpushed ||
+		c.PushState == checkouts.PushStateNever ||
+		c.Dirty > 0:
+		// Work that exists only in this VM is exactly what the pane should be
+		// able to rescue, so this row offers to commit and push it rather than
+		// only naming the problem.
+		//
+		// PushStateNever belongs here and not under "local only": a branch
+		// created in the VM and committed to but never pushed is the CENTRAL
+		// case this feature exists for, and it has a remote to push to (the
+		// arm above already took the checkouts that do not). Leaving it out
+		// also made the pane self-contradictory — the same never-pushed branch
+		// was offered a rescue when it happened to be dirty and nothing at all
+		// when it was clean.
+		row.Kind = landRowAtRisk
+		row.Action = landActionCommitAndPush
+		row.Label = atRiskLabel(c)
 	case c.NothingToLand():
 		// On the repo's default branch with nothing of its own: a pristine
 		// clone, or work that already went straight to the trunk. Offering
@@ -176,7 +219,17 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, resolved bool) landRow
 // atRiskLabel formats the at-risk row's label: unpushed commits, uncommitted
 // changes, or both.
 func atRiskLabel(c checkouts.Checkout) string {
+	// A never-pushed branch has no honest ahead count to show (there is no
+	// tracking ref to count against — Checkout.Ahead is defined 0 for it), so
+	// it is named in words rather than with a fabricated "↑0". It gets its own
+	// arms rather than falling through to the dirty-only default, which used
+	// to render a clean never-pushed branch as "0 uncommitted" — a label that
+	// managed to be both wrong and reassuring.
 	switch {
+	case c.PushState == checkouts.PushStateNever && c.Dirty > 0:
+		return fmt.Sprintf("never pushed + %d uncommitted", c.Dirty)
+	case c.PushState == checkouts.PushStateNever:
+		return "never pushed"
 	case c.PushState == checkouts.PushStateUnpushed && c.Dirty > 0:
 		return fmt.Sprintf("↑%d unpushed + %d uncommitted", c.Ahead, c.Dirty)
 	case c.PushState == checkouts.PushStateUnpushed:
@@ -267,7 +320,12 @@ func buildLandRows(groups []landGroup, resolved map[string]resolvedPR) []landRow
 // with the rest of the model: nothing here outlives one Update call the way
 // a job's log or a heartbeat sample does.
 type landingPane struct {
-	scope    registry.Scope
+	scope registry.Scope
+	// vm is the VM record the pane was opened for, retained because the
+	// commit-and-push action needs it to build a guest argv (Provider.RunArgv)
+	// long after the board handed it over. vmName stays as the identity every
+	// message is keyed by.
+	vm       vm.VM
 	vmName   string
 	groups   []landGroup
 	rows     []landRow
@@ -321,6 +379,7 @@ func (m *model) openLandingPane(v boardVM) tea.Cmd {
 	groups := groupCheckouts(vc.Checkouts)
 	m.landing = landingPane{
 		scope:    v.scope,
+		vm:       v.VM,
 		vmName:   v.Name,
 		groups:   groups,
 		resolved: map[string]resolvedPR{},
@@ -468,6 +527,11 @@ func (m *model) runLandingAction() tea.Cmd {
 	case landActionOpenInBrowser:
 		title = "Open in browser: " + c.OrgRepo + "#" + c.Branch
 		run = landOpenBrowserRun(m.ghActions, c.OrgRepo, row.PR)
+	case landActionCommitAndPush:
+		// Not a streamFunc: this one suspends the TUI and hands the terminal
+		// to the guest so `git commit` can open an editor. It therefore
+		// returns directly rather than joining the job registry below.
+		return landCommitPushCmd(m.provFor(m.landing.scope), m.landing.scope, m.landing.vm, c.Path)
 	default:
 		return nil
 	}
@@ -601,4 +665,125 @@ func (m model) landingView() string {
 
 	b.WriteString("\n" + m.footerView(m.landingHelp()))
 	return appStyle.Render(b.String())
+}
+
+// commitAndPushExpr is the guest-side script the commit-and-push action runs.
+//
+// It is a FIXED, LITERAL string, and must stay one. The checkout it acts on is
+// selected entirely by the working directory Provider.RunArgv sets
+// (`--workdir <path>`, its own argv element), never by interpolating anything
+// into this text — the path, branch, and remote all come from a sweep of the
+// GUEST, and splicing any of them into a script the guest's `bash -c` parses
+// would hand that sweep output a shell. Everything the script needs about the
+// checkout it therefore works out for itself, in the guest, at run time.
+//
+// Behaviour, in order:
+//   - Commit only if there is actually something uncommitted, so a row that is
+//     merely unpushed goes straight to the push. `git commit` (no -m) opens the
+//     user's editor, which is the whole reason this action needs a real TTY.
+//   - Resolve the remote the same way the sweep does: the branch's configured
+//     remote, falling back to the first configured one — never assuming
+//     "origin".
+//   - Push with -u so a never-pushed branch gets its upstream set, and by HEAD
+//     so the branch name never has to be spelled.
+//
+// `set -e` means an aborted commit (the user quits their editor without saving
+// a message, so git exits non-zero) stops before the push. That is the correct
+// reading of "I changed my mind": nothing is pushed.
+const commitAndPushExpr = `set -e
+if [ -n "$(git status --porcelain)" ]; then
+  git commit -a
+fi
+b=$(git symbolic-ref --short HEAD)
+r=$(git config --get "branch.$b.remote") || true
+[ -n "$r" ] || r=$(git remote | head -n 1)
+if [ -z "$r" ]; then
+  echo "sand: this checkout has no remote configured — nothing to push to" >&2
+  exit 1
+fi
+git push -u "$r" HEAD`
+
+// landCommitPushCmd suspends the TUI and runs commitAndPushExpr inside the
+// guest, against the user's real terminal.
+//
+// It is tea.ExecProcess for the same reason shellCmd's suspending branch is:
+// `git commit` opens an editor, and an editor needs a TTY, not the captured
+// pipe every other landing action is happy with. The TUI restores itself when
+// the command exits.
+//
+// This is also the one landing action that touches the guest at all — and it
+// does so WITHOUT moving any code to the host, which is the invariant that
+// matters: the commit and the push both happen inside the VM, using the
+// guest's own least-privilege push token. The host never sees a diff, a patch,
+// or a working tree. See AGENTS.md's Landing invariants.
+func landCommitPushCmd(p provider.Provider, scope registry.Scope, v vm.VM, path string) tea.Cmd {
+	argv := p.RunArgv(v, path, commitAndPushExpr)
+	if len(argv) == 0 {
+		return nil
+	}
+	c := exec.Command(argv[0], argv[1:]...)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return landCommitPushDoneMsg{scope: scope, vm: v.Name, path: path, err: err}
+	})
+}
+
+// landCommitPushDoneMsg reports the interactive commit-and-push finishing, so
+// the pane can re-read the checkout it just changed rather than showing the
+// state that prompted the action.
+type landCommitPushDoneMsg struct {
+	scope registry.Scope
+	vm    string
+	path  string
+	err   error
+}
+
+// handleLandCommitPushDone folds the finished commit-and-push back in. The
+// checkout's state has almost certainly changed, so it re-sweeps rather than
+// leaving the pane advertising the work it just landed. A non-zero exit is
+// reported but NOT treated as a reason to skip the re-read: an aborted commit
+// leaves the checkout exactly as it was, and a push that failed halfway may
+// still have committed.
+func (m *model) handleLandCommitPushDone(msg landCommitPushDoneMsg) tea.Cmd {
+	if msg.err != nil {
+		m.logMsg("commit/push on " + msg.path + " did not complete")
+	}
+	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
+		return nil
+	}
+	return landRefreshCmd(m.sweeps, msg.scope, msg.vm)
+}
+
+// landRefreshCmd re-sweeps the VM the pane is showing. Same one-shot read the
+// delete guard uses (sweepRegistry.sweepOnce), against a VM the pane already
+// required to be running.
+func landRefreshCmd(sweeps *sweepRegistry, scope registry.Scope, name string) tea.Cmd {
+	return func() tea.Msg {
+		vc, err := sweeps.sweepOnce(context.Background(), scope, name)
+		return landRefreshMsg{scope: scope, vm: name, vc: vc, err: err}
+	}
+}
+
+// landRefreshMsg carries a post-action re-sweep back to the pane.
+type landRefreshMsg struct {
+	scope registry.Scope
+	vm    string
+	vc    checkouts.VMCheckouts
+	err   error
+}
+
+// handleLandRefresh rebuilds the pane's rows from a fresh sweep, keeping the
+// cursor where the user left it (clamped, since the row count can change).
+func (m *model) handleLandRefresh(msg landRefreshMsg) {
+	if msg.err != nil || m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
+		return
+	}
+	_ = m.checkouts.Set(msg.scope, msg.vm, msg.vc)
+	m.landing.groups = groupCheckouts(msg.vc.Checkouts)
+	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved)
+	if m.landing.cursor >= len(m.landing.rows) {
+		m.landing.cursor = len(m.landing.rows) - 1
+	}
+	if m.landing.cursor < 0 {
+		m.landing.cursor = 0
+	}
 }

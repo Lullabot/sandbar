@@ -112,8 +112,10 @@ func TestClassifyLandRowUnpushed(t *testing.T) {
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
 	}
-	if row.Action != landActionNone {
-		t.Fatalf("Action = %v, want landActionNone (push in the shell first)", row.Action)
+	// Work that exists only in the VM is what the pane should be able to
+	// rescue, so an at-risk row offers to commit and push it.
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
 	}
 	if !strings.Contains(row.Label, "3") {
 		t.Fatalf("Label = %q, want the ahead count", row.Label)
@@ -121,22 +123,77 @@ func TestClassifyLandRowUnpushed(t *testing.T) {
 }
 
 func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
-	// Pushed AND already has an open PR, but there are uncommitted changes: the
-	// safe row is still at-risk/no-action — never a one-key action that could
-	// paper over local state the branch on GitHub does not yet reflect.
+	// Pushed AND already has an open PR, but there are uncommitted changes:
+	// the row is still at-risk, and the action it offers must be the one that
+	// RESOLVES that (commit + push) — never "open in browser", which would
+	// send the user to a PR that does not reflect the local state.
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}
 	pr := &landgh.PR{Number: 1, URL: "https://github.com/acme/repo/pull/1"}
 	row := classifyLandRow(c, pr, true)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk (dirty overrides an existing PR)", row.Kind)
 	}
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
+	}
+}
+
+// TestClassifyLandRowNoRemoteStillNamesTheRisk covers the one at-risk case
+// with no action available: a checkout with nowhere to push to. It must still
+// say what is at stake — a checkout holding uncommitted work with no remote is
+// the most fragile thing in the VM, so a bare "local only" would understate it
+// exactly where it matters most.
+func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 2}
+	row := classifyLandRow(c, nil, false)
+	if row.Kind != landRowLocalOnly {
+		t.Fatalf("Kind = %v, want landRowLocalOnly — there is no remote at all", row.Kind)
+	}
 	if row.Action != landActionNone {
-		t.Fatalf("Action = %v, want landActionNone", row.Action)
+		t.Fatalf("Action = %v, want landActionNone — there is no remote to push to", row.Action)
+	}
+	if !strings.Contains(row.Label, "local only") {
+		t.Fatalf("Label = %q, want it to say the checkout is local only", row.Label)
+	}
+	if !strings.Contains(row.Label, "1") || !strings.Contains(row.Label, "2") {
+		t.Fatalf("Label = %q, want it to still name the unpushed and uncommitted work", row.Label)
+	}
+
+	// A CLEAN local-only checkout has nothing at stake, so it stays terse.
+	clean := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateNever}
+	if got := classifyLandRow(clean, nil, false); got.Label != "local only" {
+		t.Fatalf("Label = %q, want a bare %q for a clean local-only checkout", got.Label, "local only")
+	}
+}
+
+// TestCommitAndPushExprIsLiteral is the injection guard for the one landing
+// action that runs a script in the guest. The checkout is selected by
+// Provider.RunArgv's --workdir argument, so this script must never carry a
+// path, branch, or remote spliced in from the host — every one of those values
+// originates in a sweep of the guest, and this text is parsed by the guest's
+// `bash -c`.
+func TestCommitAndPushExprIsLiteral(t *testing.T) {
+	// No format verbs and no concatenation seams: if someone later builds this
+	// with Sprintf, this is what should stop them.
+	for _, verb := range []string{"%s", "%q", "%v", "%d"} {
+		if strings.Contains(commitAndPushExpr, verb) {
+			t.Fatalf("commitAndPushExpr contains the format verb %q — it must stay a literal", verb)
+		}
+	}
+	// It must work the checkout out for itself rather than being told.
+	for _, want := range []string{"git symbolic-ref --short HEAD", "git remote", "git push -u", "git commit -a"} {
+		if !strings.Contains(commitAndPushExpr, want) {
+			t.Fatalf("commitAndPushExpr is missing %q", want)
+		}
+	}
+	// set -e, so an aborted commit stops before the push.
+	if !strings.HasPrefix(commitAndPushExpr, "set -e") {
+		t.Fatalf("commitAndPushExpr must start with `set -e` so an aborted commit does not push")
 	}
 }
 
 func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
 	row := classifyLandRow(c, nil, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
@@ -146,17 +203,68 @@ func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
 	}
 }
 
+// TestClassifyLandRowNeverPushed covers a branch created in the VM and
+// committed to but never pushed — the CENTRAL case this feature exists for.
+//
+// It used to be swallowed by the "local only" arm, alongside checkouts with no
+// remote at all, and offered no action: the pane told the user there was
+// nothing to do about the one thing it was best placed to help with. Worse, it
+// was self-contradictory — the same never-pushed branch DID get a rescue
+// offered when it happened to be dirty (the Dirty > 0 arm caught it) and
+// nothing at all when it was clean.
 func TestClassifyLandRowNeverPushed(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}
+	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}
+	row := classifyLandRow(c, nil, false)
+	if row.Kind != landRowAtRisk {
+		t.Fatalf("Kind = %v, want landRowAtRisk — it exists nowhere but this VM", row.Kind)
+	}
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
+	}
+	// The label must not fabricate an ahead count: there is no tracking ref to
+	// count against, so Checkout.Ahead is 0 and "↑0 unpushed" would be a lie.
+	if row.Label != "never pushed" {
+		t.Fatalf("Label = %q, want %q", row.Label, "never pushed")
+	}
+
+	// Clean and dirty must agree about the ACTION — the inconsistency above is
+	// the regression this pins.
+	dirty := c
+	dirty.Dirty = 2
+	got := classifyLandRow(dirty, nil, false)
+	if got.Action != row.Action {
+		t.Fatalf("a dirty never-pushed branch got action %v but a clean one got %v — they must agree", got.Action, row.Action)
+	}
+	// ...and the dirty label must still say the branch has never been pushed,
+	// rather than reporting the uncommitted count alone.
+	if got.Label != "never pushed + 2 uncommitted" {
+		t.Fatalf("Label = %q, want it to name BOTH the never-pushed branch and the uncommitted work", got.Label)
+	}
+}
+
+// TestClassifyLandRowLocalOnlyIsOnlyForNoRemote pins the narrowed meaning of
+// "local only": it is now exactly "there is no remote to target", and nothing
+// else. A checkout with a remote always reaches an arm that can act.
+func TestClassifyLandRowLocalOnlyIsOnlyForNoRemote(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever}
 	row := classifyLandRow(c, nil, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly", row.Kind)
 	}
 	if row.Action != landActionNone {
-		t.Fatalf("Action = %v, want landActionNone", row.Action)
+		t.Fatalf("Action = %v, want landActionNone — there is nowhere to push", row.Action)
 	}
 	if row.Label != "local only" {
 		t.Fatalf("Label = %q, want %q", row.Label, "local only")
+	}
+
+	// A remote whose URL did not parse into an org/repo slug is still
+	// pushable: `git push` names the REMOTE, not the parsed URL. So a Forge
+	// alone is enough to keep it out of "local only".
+	withForge := c
+	withForge.Forge = "git.example.com"
+	if got := classifyLandRow(withForge, nil, false); got.Kind == landRowLocalOnly {
+		t.Fatalf("a checkout with a remote was classified local-only: %+v", got)
 	}
 }
 
