@@ -216,6 +216,21 @@ func (h *SSHHost) sshCommand(tty bool, remoteArgv ...string) []string {
 	return argv
 }
 
+// limactlArgv is the remote argv for a `limactl` invocation: `LIMA_HOME=<v>
+// limactl <args…>`, with LIMA_HOME assigned ON THE REMOTE PROCESS (it is just
+// another shell-quoted token in the remote argv sshCommand builds — never an
+// ssh client env/SetEnv), so the remote limactl resolves the SAME instance
+// directory h.LimaHome() (and every HostFiles read) already uses. Always
+// setting it — even at the remote default — is deliberate: it is always what
+// sand intends, and it means discovery and reads can never silently diverge
+// the moment a profile sets a non-default RemoteLimaHome. Assigning ONLY this
+// one var (never threading cmd.Env or forwarding the local environment)
+// preserves the hop's non-leak property: the laptop's own LIMA_HOME/XDG_* must
+// never cross to the remote host.
+func (h *SSHHost) limactlArgv(args ...string) []string {
+	return append([]string{"LIMA_HOME=" + h.LimaHome(), "limactl"}, args...)
+}
+
 // scpCommand builds an scp argv. Note scp's port flag is -P (capital), NOT ssh's
 // -p — getting this wrong silently ignores a non-default port. The same
 // multiplexing flags as sshBase are threaded in before the endpoints so an scp
@@ -243,7 +258,7 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 // (ErrListRacedInstanceDir), which matches the remote limactl's stderr folded into
 // the error here, still fires over the hop.
 func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdout = &stdout
@@ -263,7 +278,7 @@ func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
 // for live display. cmd.WaitDelay reaps the ssh→limactl→guest-ssh orphan chain on
 // a cancelled ctx, one generation deeper than the local case but the same hazard.
 func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
@@ -277,7 +292,7 @@ func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, ar
 // not corrupted by limactl's `cd` warning — exactly as execRunner.StreamOut does,
 // with the same stdin passthrough and WaitDelay reaping.
 func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, append([]string{"limactl"}, args...)...)
+	argv := h.sshCommand(false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
@@ -475,6 +490,84 @@ func (h *SSHHost) DiskAllocBytes(path string) int64 {
 // own per-instance state and sand's state ABOUT an instance (the base version
 // stamp and its lock, under _sand/) live beneath it — now on the remote host.
 func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
+
+// ReadInstanceMarkers reads filename from every instance directory directly
+// under limaHome in ONE ssh round trip: a remote sh script walks limaHome's
+// immediate subdirectories and, for each one that has <name>/<filename>,
+// emits it LENGTH-FRAMED — a name line, a decimal byte-count line, then
+// exactly that many raw bytes — so arbitrary JSON content (including embedded
+// newlines) survives the trip without a delimiter collision. limaHome is used
+// exactly as given (it may be RELATIVE, e.g. the remote default ".lima" — see
+// LimaHome): `cd` on the remote login shell resolves it against $HOME, same as
+// every other HostFiles method here. A missing limaHome or a missing/unreadable
+// per-instance file is simply skipped BY THE REMOTE SCRIPT, so one bad or
+// absent marker never aborts the batch — mirroring localFiles.
+func (h *SSHHost) ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error) {
+	remote := []string{"sh", "-c", markerScanScript, "sand", limaHome, filename}
+	out, errb, err := h.runRemote(ctx, nil, remote...)
+	if err != nil {
+		return nil, asNotExist("read markers", limaHome, errb, err)
+	}
+	return parseMarkerStream(out)
+}
+
+// markerScanScript is the remote half of ReadInstanceMarkers: run as
+// `sh -c markerScanScript sand <limaHome> <filename>`, it emits the
+// length-framed stream parseMarkerStream decodes. It is a package-level const
+// rather than a local so a test can run it through a real /bin/sh and feed the
+// result to the real parser — the two halves of this wire format were once
+// tested only against each other's ASSUMED shape, and drifted (see
+// TestMarkerScanScriptRoundTrip).
+const markerScanScript = `cd "$1" 2>/dev/null || exit 0
+for d in */; do
+  [ -d "$d" ] || continue
+  n=${d%/}
+  f="$n/$2"
+  [ -f "$f" ] || continue
+  printf '%s\n' "$n"
+  wc -c < "$f" | tr -d ' '
+  cat "$f"
+done`
+
+// NOTE on the length line: wc writes its own trailing newline (POSIX), and
+// `tr -d ' '` strips only the leading padding a BSD/macOS wc adds — so the
+// pipeline above already TERMINATES the length line. An extra `printf '\n'`
+// here does not "finish the line", it inserts a blank one, which shifts every
+// payload by a byte and desynchronizes the whole stream. That was the bug.
+
+// parseMarkerStream decodes ReadInstanceMarkers' length-framed wire format —
+// repeating (name line, decimal byte-count line, exactly that many raw bytes)
+// records — into instance name -> raw marker bytes. It is kept free of the
+// remote script so the framing itself can be unit-tested against canned bytes
+// without an ssh round trip.
+func parseMarkerStream(data []byte) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	r := bufio.NewReader(bytes.NewReader(data))
+	for {
+		nameLine, err := r.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) && strings.TrimSpace(nameLine) == "" {
+				break // clean end of stream between records
+			}
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading a name after %q", strings.TrimSpace(nameLine))
+		}
+		name := strings.TrimSuffix(nameLine, "\n")
+		lenLine, err := r.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading %q's length", name)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(lenLine))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("parse instance markers: bad length for %q: %q", name, strings.TrimSpace(lenLine))
+		}
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, fmt.Errorf("parse instance markers: truncated stream reading %q's %d bytes: %w", name, n, err)
+		}
+		out[name] = buf
+	}
+	return out, nil
+}
 
 // StagePlaybook copies the local playbook fileset to a stable path under the
 // remote LimaHome and returns that path so `limactl start` on the remote host can

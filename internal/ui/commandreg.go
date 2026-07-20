@@ -19,15 +19,29 @@ package ui
 // framework — see the task's scope note before adding to it.
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
+
+// provenancerFor returns the provider.Provenancer for scope's fleet member,
+// or nil when that member's provider does not implement one (or the member
+// is absent) — manage.RecreateBase treats a nil Provenancer exactly like an
+// omitted one (falling back to the registry), so this never changes behavior
+// for a backend that has no marker facility.
+func provenancerFor(m model, sc registry.Scope) provider.Provenancer {
+	if pv, ok := m.provFor(sc).(provider.Provenancer); ok {
+		return pv
+	}
+	return nil
+}
 
 // vmCommand is one per-VM verb on the detail screen. enabledFor is handed the
 // model (not just the VM) so a predicate can consult state the VM record
@@ -185,12 +199,12 @@ var vmCommands = []vmCommand{
 			if !notBuilding(m, v) {
 				return false
 			}
-			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope)
+			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope, provenancerFor(m, v.scope))
 			return ok
 		},
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			base, ok := manage.RecreateBase(m.reg, name, v.scope)
+			base, ok := manage.RecreateBase(m.reg, name, v.scope, provenancerFor(*m, v.scope))
 			if !ok {
 				// Unreachable via normal dispatch — enabledFor above already excludes
 				// this VM. Guarded anyway so a direct call never opens a form with a
@@ -333,4 +347,35 @@ var vmCommands = []vmCommand{
 			return m.showJobLog(v.scope, v.Name)
 		},
 	},
+}
+
+// publishProgressMsg reports the outcome of a marker progress republish. It
+// carries only the job and an error: the write is fire-and-forget as far as the
+// build is concerned, and this message exists so a FAILING write can be said
+// once (see model's handler) rather than degrading silently — the observing
+// controller would otherwise just see a bar that never moves, which is exactly
+// the symptom this whole feature set out to remove.
+type publishProgressMsg struct {
+	job jobKey
+	err error
+}
+
+// publishProgressCmd writes the build's current position into the VM's
+// provenance marker, off the Update goroutine — for a remote member this is an
+// ssh round trip, and it is called from the streamed-output handler, so doing it
+// inline would stall the UI on every role boundary.
+//
+// It rewrites the WHOLE marker (NewProvenance from the job's own config, with
+// Provisioning still true) rather than reading, patching and writing back: the
+// builder already holds the authoritative config, so a read-modify-write would
+// double the round trips to re-learn something it knows.
+func publishProgressCmd(pv provider.Provenancer, key jobKey, cfg vm.CreateConfig, prog provider.BuildProgress) tea.Cmd {
+	if pv == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		p := provider.NewProvenance(cfg, true)
+		p.Progress = prog
+		return publishProgressMsg{job: key, err: pv.MarkManaged(context.Background(), key.vm, p)}
+	}
 }

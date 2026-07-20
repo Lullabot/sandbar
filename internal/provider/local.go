@@ -70,6 +70,23 @@ func (p *limaProvider) StopStreaming(ctx context.Context, name string, out io.Wr
 // --- Provisioning lifecycle ---
 
 func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	// Write a PROVISIONAL (in-flight) provenance marker the moment the clone
+	// exists, so another controller of this same host sees the VM as a managed,
+	// building tile while the (long) finalize step runs — not only after it
+	// completes. The provisioner invokes OnCloned once the clone has booted and
+	// `limactl list` accepts it; a failure before that point cleans the instance
+	// dir (and this marker with it), so no stale claim is left. RecordSuccess
+	// overwrites this with a ready marker on success. Best-effort: a failed
+	// marker write only delays cross-controller visibility to completion, so it
+	// must not fail the build (the provisioner already treats OnCloned as
+	// non-fatal).
+	if opts.OnCloned == nil {
+		name := cfg.Name
+		pv := NewProvenance(cfg, true)
+		opts.OnCloned = func(ctx context.Context) error {
+			return p.MarkManaged(ctx, name, pv)
+		}
+	}
 	return p.prov.CreateVMWithOptions(ctx, cfg, opts, out)
 }
 

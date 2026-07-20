@@ -228,7 +228,22 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout); err != nil {
+	// p satisfies provider.Provenancer for every backend that has one today
+	// (local and remote Lima — see internal/provider/limaprovenance.go); the
+	// type assertion degrades to a nil Provenancer, not a panic, for a future
+	// backend that does not, in which case doHeadlessCreate's RecordSuccess
+	// call falls back to the registry-only behavior.
+	provenancer, _ := p.(provider.Provenancer)
+
+	// One-time (per process, per target) migration: stamp provenance markers
+	// onto VMs this registry already recorded as managed but that predate
+	// provenance — see manage.AdoptOnce. `live` is the same listing Reconcile
+	// just used above, so this costs no extra round trip. A no-op after the
+	// first successful run for this scope (or if the backend has no
+	// Provenancer).
+	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
+
+	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout, provenancer); err != nil {
 		return err
 	}
 
@@ -264,11 +279,21 @@ Flags:
 // it. The intent goes down to the provisioner instead, which destroys the base
 // inside ensureBaseStopped with the lock held and no clone in flight; this
 // function no longer has a lima client to delete anything with.
-func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer) error {
+// provenancer is an OPTIONAL trailing argument (Go variadic — see
+// manage.RecordSuccess) so every existing 8-arg call site (the unit/e2e
+// tests in this package, which construct doHeadlessCreate directly with a
+// stub provisioner and no real provider) keeps compiling unchanged; only
+// runCreate, which has a real provider.Provider in hand, passes one. It is
+// threaded into BOTH the RecreateBase gate below (a marker-only VM — created
+// on another controller, so absent from this machine's registry — can still
+// be reset here) and the RecordSuccess call (the provenance write proper);
+// omitted (nil), both fall back to their pre-provenance, registry-only
+// behavior exactly as before.
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer, provenancer ...provider.Provenancer) error {
 	opts := provision.CreateOptions{Rebuild: rebuild}
 
 	if recreate {
-		base, ok := manage.RecreateBase(reg, cfg.Name, scope)
+		base, ok := manage.RecreateBase(reg, cfg.Name, scope, provenancer...)
 		if !ok {
 			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
@@ -282,7 +307,11 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 		}
 	}
 
-	if err := manage.RecordSuccess(reg, cfg, scope); err != nil {
+	// Writes the registry cache AND (when provenancer is non-nil) the
+	// authoritative provenance marker — see manage.RecordSuccess's doc
+	// comment. A failure here (either write) is reported but does not fail
+	// the command: the VM itself is already up either way.
+	if err := manage.RecordSuccess(reg, cfg, scope, provenancer...); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
 	return nil

@@ -2347,3 +2347,104 @@ func TestCreateVM_FailedPlaybookKeepsTheVM(t *testing.T) {
 		t.Errorf("the VM was removed after its playbook failed: %v — a booted VM with a valid lima.yaml is inspectable, and its log is the point of keeping a failed run", statErr)
 	}
 }
+
+// TestCreateVM_MarksProvenanceAsSoonAsTheCloneLands pins WHEN the in-flight
+// provenance marker is stamped, which is the whole difference between another
+// controller seeing a VM build and seeing nothing until it is done.
+//
+// The hook must fire after `clone` (the instance directory and its lima.yaml
+// must exist — writing earlier would CREATE that directory and hand limactl one
+// it did not build) and before `start` (the boot and the finalize playbook that
+// follow are the long window an observer should already see as Building).
+//
+// It originally ran after `start`, on the reasoning that an earlier marker
+// "could be deleted by the clone-failure cleanup" — which is the desired
+// outcome, not a hazard: the cleanup removes the whole instance dir, marker
+// included, so no stale claim survives. TestCreateVM_NoMarkerWhenTheCloneFails
+// below is that half of the contract.
+func TestCreateVM_MarksProvenanceAsSoonAsTheCloneLands(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	opts := CreateOptions{OnCloned: func(context.Context) error {
+		f.mark("MARK-PROVENANCE") // a synthetic entry, so position is assertable
+		return nil
+	}}
+	if err := p.CreateVMWithOptions(context.Background(), testConfig(), opts, io.Discard); err != nil {
+		t.Fatalf("CreateVMWithOptions: %v", err)
+	}
+
+	marked := indexOfCall(f.calls, []string{"MARK-PROVENANCE"})
+	cloned := indexOfCall(f.calls, []string{"clone", "sandbar-base", "claude"})
+	started := indexOfCall(f.calls, []string{"start", "claude"})
+	switch {
+	case marked < 0:
+		t.Fatalf("the in-flight marker was never written:\n%v", f.calls)
+	case cloned < 0 || started < 0:
+		t.Fatalf("clone/start missing from the sequence:\n%v", f.calls)
+	case marked < cloned:
+		t.Fatalf("marker written BEFORE the clone — the write would create the instance dir itself:\n%v", f.calls)
+	case marked > started:
+		t.Fatalf("marker written after the VM started: an observer sees nothing for the whole boot:\n%v", f.calls)
+	}
+}
+
+// TestCreateVM_NoMarkerWhenTheCloneFails is the other half of writing the marker
+// early: a create that dies in the clone must leave NO claim behind. The hook
+// never runs, and cleanupInstance deletes the instance directory the marker
+// would have lived in — so a name that is later reused cannot inherit a stale
+// marker from a build that failed.
+func TestCreateVM_NoMarkerWhenTheCloneFails(t *testing.T) {
+	f := &fakeRunner{
+		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
+		failOn:  func(args []string) bool { return len(args) > 0 && args[0] == "clone" },
+		failErr: errors.New("no space left on device"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	// A half-written instance dir with a marker already in it — the state a
+	// clone that dies partway through leaves behind, now that the marker is
+	// written early. Cleanup must take the WHOLE directory, marker included.
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	dir := filepath.Join(home, "claude")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir instance: %v", err)
+	}
+	marker := filepath.Join(dir, lima.MarkerFilename)
+	if err := os.WriteFile(marker, []byte(`{"schema":3}`), 0o600); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	marked := false
+	opts := CreateOptions{OnCloned: func(context.Context) error { marked = true; return nil }}
+	if err := p.CreateVMWithOptions(context.Background(), testConfig(), opts, io.Discard); err == nil {
+		t.Fatal("CreateVMWithOptions: want the clone failure to propagate, got nil")
+	}
+	if marked {
+		t.Fatal("a failed clone stamped an in-flight marker — it would claim a VM that does not exist")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("the marker survived a failed clone (stat err = %v) — a reused name would inherit a stale claim", err)
+	}
+}
+
+// TestCreateVM_AMarkerWriteFailureDoesNotFailTheBuild pins the hook as
+// best-effort. A marker that cannot be written costs OTHER controllers their
+// tile; it must never cost the user the VM they are building.
+func TestCreateVM_AMarkerWriteFailureDoesNotFailTheBuild(t *testing.T) {
+	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	var out strings.Builder
+	opts := CreateOptions{OnCloned: func(context.Context) error { return errors.New("host went away") }}
+	if err := p.CreateVMWithOptions(context.Background(), testConfig(), opts, &out); err != nil {
+		t.Fatalf("a failed marker write must not fail the create: %v", err)
+	}
+	if indexOfCall(f.calls, []string{"start", "claude"}) < 0 {
+		t.Fatalf("the build did not continue past the failed marker write:\n%v", f.calls)
+	}
+	if !strings.Contains(out.String(), "could not write in-flight provenance marker") {
+		t.Errorf("the failure must be said in the build log, not swallowed:\n%s", out.String())
+	}
+}

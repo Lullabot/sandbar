@@ -27,6 +27,13 @@ type remoteLimaProvider struct {
 
 var _ Provider = (*remoteLimaProvider)(nil)
 
+// var _ Provenancer = ... proves remoteLimaProvider satisfies Provenancer with
+// NO override needed: it embeds *limaProvider, whose Provenance/ProvenanceOf/
+// MarkManaged/Unmark (limaprovenance.go) already read/write through
+// p.hostFiles — the SSHHost this constructor wires in below — so the marker
+// lands on the remote host automatically.
+var _ Provenancer = (*remoteLimaProvider)(nil)
+
 // AttachArgv returns the ssh-wrapped attach argv (`ssh -t <host> limactl shell
 // --workdir H NAME bash -c <expr>`), resolving the guest home from the REMOTE
 // host's cloud-config.yaml and keeping the guest tmux expression byte-for-byte

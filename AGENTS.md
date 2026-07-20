@@ -397,6 +397,70 @@ every bullet, not the constraint itself.
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
 
+## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
+
+**Ownership model:** A VM is **managed** (sand-owned) iff it carries a provenance marker on its
+host. The local `managed-vms.json` registry (`~/.local/share/sandbar/managed-vms.json`) is
+now a **cache + known-targets list + one-release legacy fallback**, NOT the source of truth.
+`Scope` (profile identity, e.g. `user@host:22`) groups the UI and keys known targets; it
+no longer decides ownership. The authority is the marker. Because the marker lives with the
+VM on its host, EVERY controller that can reach the host sees the same managed set — two
+laptops driving one Mac mini, or a host's own local sand and a remote client, converge with
+no sync protocol.
+
+**Marker contract** (for future Proxmox/cloud implementers):
+- **Location:** `<LimaHome>/<name>/sandbar.json` on the host (Lima home directory).
+- **JSON schema** — `internal/provider/provenance.go`'s `Provenance` struct
+  (`provider.MarkerSchemaVersion`, currently **2**):
+  ```json
+  {
+    "schema": 2,
+    "base": "sandbar-base",
+    "config": { /* vm.CreateConfig: name, BaseName, CPUs, Memory, Disk, etc. */ },
+    "sandbar_version": "0.6.0",
+    "created_at": "2026-07-17T12:34:56Z",
+    "provisioning": true
+  }
+  ```
+  `provisioning` (v2, `omitempty`) marks an IN-FLIGHT build; a v1 marker has no such key and
+  decodes as ready (`false`). Build a marker with `provider.NewProvenance(cfg, provisioning)`
+  — it stamps the current schema version and strips secrets (CloneToken never touches disk).
+- **Lifecycle:**
+  - **Written in-flight on clone (v2):** the provider writes a `provisioning:true` marker the
+    moment the clone boots (`limaProvider.Create` sets `provision.CreateOptions.OnCloned`,
+    which the provisioner calls at the durable post-clone point), so other controllers show
+    the VM **Building** while it provisions — not nothing. A failure before that point deletes
+    the instance dir (and marker) with it, leaving no stale claim.
+  - **Flipped to ready on success:** `manage.RecordSuccess` calls `provider.Provenancer.MarkManaged`
+    with a `provisioning:false` marker, overwriting the in-flight one.
+  - **Removed on delete:** the marker file is deleted with the instance directory when
+    `provider.Delete` removes the instance. No separate marker cleanup needed.
+  - **Adopted on upgrade (one-time, one-release fallback):** `manage.AdoptOnce` runs at most
+    once per process per scope. It calls `registry.Adopt` to stamp a (ready) marker onto any
+    managed-but-unmarked instance, so upgrading controllers keep pre-provenance VMs. Idempotent
+    (repeated calls are a map lookup). After one release, the fallback path
+    (`manage.RecreateBase`'s registry query and `board.go`'s legacy gate) can be removed — see
+    the "legacy, remove after one release" comments in those files.
+
+**The provider seam:** `provider.Provenancer` (`internal/provider/provenance.go`) is the
+interface a backend implements (or inherits) to read and write markers. Today's Lima
+implementations (local and remote-over-SSH) satisfy it with `limaprovenance.go`, which
+reads/writes the `sandbar.json` sidecar file via the provider's own `HostFiles` handle
+(local filesystem or SSH). A future Proxmox/cloud backend would implement the same interface
+using VM tags/labels instead of files, with no redesign.
+
+**Board status:** a VM carrying an in-flight (`provisioning:true`) marker but no local build
+job — i.e. one another controller is building — renders as **Building**, not Running
+(`deriveStatus`'s `remoteProvisioning` input, fed from the member's provenance map). The
+`lima_home` connection-profile field also scopes the remote `limactl` (discovery), not just
+sand's file reads, so discovery and marker reads always resolve the same instance directory.
+
+**Batched read:** Both local and remote providers read all instance markers in one host
+round trip via `lima.HostFiles.ReadInstanceMarkers` — no per-instance syscall. The local
+implementation scans the filesystem directly; the remote implementation (SSH) walks the
+remote Lima home with a shell script and length-frames the results over stdin so JSON
+with embedded newlines survives intact (see `internal/lima/sshhost.go`'s `ReadInstanceMarkers`).
+
 ## The `sand paste-image` feature: IMAGE-ONLY invariant (read before extending clipboard handling)
 
 The `sand paste-image` command and TUI verb (`v`) stage a host clipboard

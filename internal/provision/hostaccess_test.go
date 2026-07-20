@@ -72,6 +72,11 @@ func (f *fakeHostFiles) OpenLock(path string, _ fs.FileMode) (lima.LockFile, err
 	return nil, errors.New("fakeHostFiles does not support locking")
 }
 
+func (f *fakeHostFiles) ReadInstanceMarkers(_ context.Context, limaHome, filename string) (map[string][]byte, error) {
+	f.note("ReadInstanceMarkers", limaHome+"/"+filename)
+	return map[string][]byte{}, nil
+}
+
 var _ lima.HostFiles = (*fakeHostFiles)(nil)
 
 // TestProvisioner_TwoHostFilesNoCrossTalk is this task's acceptance test: it

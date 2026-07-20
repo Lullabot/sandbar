@@ -120,6 +120,26 @@ type fleetMember struct {
 	vms  []vm.VM
 	host hostSample
 
+	// provenance is this member's last-known provenance map, fetched in the same
+	// refreshCmd as vms via the provider's batched Provenancer.Provenance — one
+	// host round trip, never one per VM. A VM present in this map (regardless of
+	// its zero-value contents) carries a marker and is sand-managed; a VM absent
+	// from it falls back to the registry's IsManagedInScope/BaseInScope (legacy,
+	// remove after one release). nil for a provider that does not implement
+	// Provenancer, or when the batched read itself failed — either way every VM
+	// simply falls through to the legacy gate.
+	provenance map[string]provider.Provenance
+
+	// provenanceWarned is the edge-trigger for the ONE message logged when this
+	// member's batched provenance read fails. That failure is not fatal — every
+	// VM quietly falls back to the legacy per-controller registry — and quiet is
+	// precisely the danger: a broken marker read is INDISTINGUISHABLE, on screen,
+	// from the pre-provenance behaviour it was meant to replace, so each
+	// controller shows only the VMs it created itself and nothing says why.
+	// Latched so a failure that persists across every 5s refresh states itself
+	// once, and re-armed on the next success so a later regression speaks again.
+	provenanceWarned bool
+
 	state   connState
 	lastErr error
 

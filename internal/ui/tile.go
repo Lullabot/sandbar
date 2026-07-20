@@ -70,6 +70,14 @@ type tileInput struct {
 	VM     vm.VM
 	Job    jobSnapshot
 	HasJob bool
+	// RemoteProvisioning is set when the VM carries an in-flight provenance
+	// marker but has no local build job — another controller is building it, and
+	// this tile must show Building, not Running. See deriveStatus.
+	RemoteProvisioning bool
+	// RemoteProgress is that in-flight marker's published position, used to draw
+	// the bar when the build belongs to another controller. Ignored when HasJob:
+	// a local build's own parsed stream is fresher than anything it published.
+	RemoteProgress ansibleProgress
 
 	Sample    guestSample
 	HasSample bool
@@ -103,7 +111,7 @@ type tileInput struct {
 // renderTile draws one VM's card.
 func renderTile(in tileInput) string {
 	width := tileInnerWidth(in.Width)
-	status := deriveStatus(in.VM, in.Job, in.HasJob)
+	status := deriveStatus(in.VM, in.Job, in.HasJob, in.RemoteProvisioning)
 
 	lines := make([]string, tileContentRows)
 	lines[0] = tileTitleLine(in.VM.Name, in.ProfileLabel, width)
@@ -114,8 +122,16 @@ func renderTile(in tileInput) string {
 		// bar and the current Ansible role/task count — even if a live
 		// heartbeat sample exists (the VM is genuinely booted; Ansible is just
 		// a process inside it), cpu/mem must not leak through here.
-		lines[2] = tileProgressBarLine(in.Job.Progress, width)
-		lines[3] = tileRoleLine(in.Job.Progress)
+		// A LOCAL build's bar comes from its own parsed output stream; a build
+		// running on ANOTHER controller has no such stream here, so its position
+		// comes from what that controller published to the provenance marker. The
+		// two are the same shape on purpose — one renderer, either source.
+		prog := in.Job.Progress
+		if !in.HasJob {
+			prog = in.RemoteProgress
+		}
+		lines[2] = tileProgressBarLine(prog, width)
+		lines[3] = tileRoleLine(prog)
 		// lines[4] and lines[5] stay blank: a building VM's own vm.VM record
 		// can be a zero value for the first minutes of a create (the clone
 		// has not landed in `limactl list` yet — see jobRegistry's "seen"

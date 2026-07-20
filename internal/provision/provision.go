@@ -310,6 +310,17 @@ type CreateOptions struct {
 	// being removed. That is the race baselock.go exists to close, and `sand
 	// create --rebuild` used to be the hole in it.
 	Rebuild bool
+
+	// OnCloned, if set, is called ONCE the clone has booted and `limactl list`
+	// accepts it — i.e. at the point past which a failure no longer deletes the
+	// instance — and BEFORE the long finalize/provision step. The provider uses
+	// it to write an in-flight provenance marker so other controllers see the
+	// VM building. It is best-effort: an error is reported to out and ignored,
+	// never failing the build (a missing in-flight marker only delays
+	// cross-controller visibility until completion). This package does not
+	// depend on internal/provider — the callback is how the marker write is
+	// injected without an import cycle.
+	OnCloned func(ctx context.Context) error
 }
 
 // CreateVM ensures a stopped base image exists, clones it into the target VM,
@@ -350,6 +361,30 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		p.cleanupInstance(cfg.Name, out)
 		return err
 	}
+	// STAMP THE IN-FLIGHT MARKER THE MOMENT THE CLONE LANDS — not after the boot
+	// below. The instance directory now exists with a valid lima.yaml, which is
+	// everything the marker write and a remote reader need, and the boot plus the
+	// finalize playbook that follow are the long window during which another
+	// controller should already see this VM building.
+	//
+	// This used to run after StartStreaming, on the reasoning that a marker
+	// written earlier "could be deleted by the clone-failure cleanup above". It
+	// can be — and that is the DESIRED outcome, not the hazard it reads as:
+	// cleanupInstance removes the whole instance directory, taking the marker
+	// with it, so a failed clone leaves no claim behind. That is the same
+	// lifecycle-for-free property that put the marker inside the instance dir in
+	// the first place. What is genuinely unsafe is writing BEFORE the clone
+	// returns, since the write would create the instance directory itself and
+	// hand `limactl` a directory it did not build; that is why this sits here and
+	// not earlier still.
+	//
+	// Best-effort: a marker that cannot be written costs other controllers their
+	// tile, not this build.
+	if opts.OnCloned != nil {
+		if err := opts.OnCloned(ctx); err != nil {
+			step(out, "Note: could not write in-flight provenance marker for %q (%v); it will appear to other clients once the build finishes.", cfg.Name, err)
+		}
+	}
 	step(out, "Starting %q…", cfg.Name)
 	if err := timer.time("clone start", func() error {
 		// Size the clone before its first start: the base is built at a small
@@ -372,6 +407,9 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	// and `limactl list` is happy with it — so a failed or cancelled PLAYBOOK leaves
 	// a VM the user can shell into and a retained log they can read, which is the
 	// point of keeping a failed run. Deleting it here would throw away the evidence.
+	//
+	// (The in-flight provenance marker was stamped earlier, the moment the clone
+	// landed — see prepareBaseAndClone's caller above.)
 	if err := timer.time("finalize playbook", func() error {
 		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
 	}); err != nil {

@@ -13,6 +13,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -924,6 +925,25 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mem.lastErr = nil
 		mem.backoff = 0
 		mem.vms = msg.vms // DiskUsed / UpSince / LastUsed sampled in refreshCmd, off the Update goroutine
+		// The provenance map travels with vms, from the SAME refreshCmd batched
+		// read (commands.go) — never fetched here on the Update goroutine.
+		mem.provenance = msg.provenance
+		// A batched provenance read that failed does NOT fail the refresh: every
+		// VM falls back to the legacy per-controller registry and the board stays
+		// usable. But it must not do that in silence — a controller quietly
+		// showing only the VMs it created itself looks exactly like a healthy
+		// board, which is what made this class of bug so hard to see. Say it
+		// ONCE per failure streak (this handler runs every refresh), and re-arm
+		// on recovery so a later regression is reported again.
+		if msg.provenanceErr != nil {
+			if !mem.provenanceWarned {
+				mem.provenanceWarned = true
+				m.logMsg("provenance read failed on " + mem.profile.Name +
+					" — VMs will show per-controller (legacy) until this clears: " + msg.provenanceErr.Error())
+			}
+		} else {
+			mem.provenanceWarned = false
+		}
 		// everListed latches on the FIRST success and never clears — see its
 		// doc comment (fleet.go) and boardReady.
 		mem.everListed = true
@@ -975,6 +995,31 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range dropped {
 			_ = m.sec.Remove(name, sc)
 		}
+		// One-time (per process, per scope) provenance-adoption migration: stamp
+		// markers onto VMs the registry already recorded as managed under sc but
+		// that have not picked one up yet (e.g. created by a pre-provenance
+		// sand). This is the "first board load" trigger AdoptOnce's own doc
+		// comment calls for — it is a cheap map lookup after the first
+		// successful run for this scope. `live` already includes protected
+		// mid-build names, matching the Reconcile call above.
+		//
+		// Dispatched as a BACKGROUND command, never run inline here:
+		// AdoptOnce -> registry.Adopt -> Provenancer.ProvenanceOf/MarkManaged is a
+		// blocking ssh round trip for a remote member, and this branch runs on the
+		// Update goroutine (the batched provenance fetch lives off it in refreshCmd
+		// for exactly this reason). The once-per-scope guard keeps later ticks cheap.
+		var adoptCmd tea.Cmd
+		if pv, ok := m.provFor(sc).(provider.Provenancer); ok {
+			// Snapshot the registry's managed set HERE, on the Update goroutine,
+			// so the background command below touches no *Registry state (which
+			// this same loop mutates via Reconcile/AddScoped) — only the detached
+			// snapshot, the live slice, and the provider's ssh-backed marker I/O.
+			entries := m.reg.ManagedInScope(sc)
+			adoptCmd = func() tea.Msg {
+				manage.AdoptOnce(context.Background(), entries, live, sc, pv)
+				return nil
+			}
+		}
 		// The board's tiles come straight off the members' vms + the registry + the
 		// job registry, so there is nothing to rebuild — only the focus ring has to
 		// be re-pinned against a fleet that may have gained or lost VMs, which Update
@@ -985,7 +1030,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// budgeting a resize would, so the fleet's FIRST successful list already
 		// gets its band without waiting on a resize.
 		m.applySize(m.width, m.height)
-		return m, nil
+		return m, adoptCmd
 
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner
@@ -1084,7 +1129,34 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
-		return m, readNextCmd(msg.job, m.jobs.reader(msg.job))
+		// If this chunk moved the build into a new phase/role, republish its
+		// position to the VM's provenance marker so OTHER controllers' tiles get a
+		// bar that moves. Throttled to role boundaries by the registry (see
+		// progressToPublish) — a per-task write would be an ssh round trip per
+		// Ansible task on a remote build.
+		next := readNextCmd(msg.job, m.jobs.reader(msg.job))
+		if cfg, prog, due := m.jobs.progressToPublish(msg.job); due {
+			if pub := publishProgressCmd(provenancerFor(m, msg.job.scope), msg.job, cfg, prog); pub != nil {
+				return m, tea.Batch(next, pub)
+			}
+		}
+		return m, next
+
+	case publishProgressMsg:
+		// A republish that failed costs other controllers a moving bar, nothing
+		// more — the build is unaffected and the marker still says Building. Say it
+		// ONCE per build (the registry latches it) so a broken transport is
+		// visible without a line per role.
+		// ErrNoInstance is not a failure here, it is EXPECTED: republishing begins
+		// at the build's first phase banner, which is minutes before the clone
+		// creates the instance to hang a marker on. Those early attempts write
+		// nothing (the provider refuses to conjure an instance directory — see
+		// MarkManaged) and say nothing; once the clone lands, they start landing.
+		if msg.err != nil && !errors.Is(msg.err, provider.ErrNoInstance) && m.jobs.noteProgressWriteFailed(msg.job) {
+			m.logMsg("could not publish build progress for " + msg.job.vm +
+				" — other clients will show it building without a progress bar: " + msg.err.Error())
+		}
+		return m, nil
 
 	case provisionDoneMsg:
 		// finish retains the job — with its log — whether it succeeded or failed:
@@ -1117,7 +1189,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg, isProvision := m.jobs.config(msg.job.scope, msg.job.vm)
 		var applyCmd tea.Cmd
 		if msg.err == nil && msg.job.kind == kindProvision && isProvision && cfg.Name != "" {
-			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope); err != nil {
+			// Pass the scope's Provenancer so a TUI-created VM gets its
+			// authoritative host-side provenance marker written, not just the
+			// local registry cache entry. Without this, TUI builds were invisible
+			// to any OTHER controller of the same host (the marker is what a
+			// second controller reads — the registry is per-controller). nil for a
+			// backend with no Provenancer; RecordSuccess treats that as
+			// registry-only, unchanged.
+			if err := manage.RecordSuccess(m.reg, cfg, msg.job.scope, provenancerFor(m, msg.job.scope)); err != nil {
 				m.logMsg("VM ready, but recording it as managed failed: " + err.Error())
 			}
 			// A successful CREATE (never a Reset — job.Recreates is what

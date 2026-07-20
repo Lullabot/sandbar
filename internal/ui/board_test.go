@@ -294,6 +294,57 @@ func TestBoardShowsManagedClonesOnly(t *testing.T) {
 	}
 }
 
+// The roster gate's PRIMARY source is now the provider's provenance map, not
+// the registry: a VM present in the map (even with a zero-value marker) gets a
+// tile, an unmarked VM with no active job gets none, and a VM with no marker
+// but an old registry entry still lights a tile through the legacy fallback
+// (task 5's "remove after one release" path).
+func TestBoardRosterGatesOnProvenanceWithLegacyRegistryFallback(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+
+	// "marked" carries a provenance marker and nothing in the registry: it must
+	// still get a tile. "unmarked" carries neither and must get none.
+	loaded, _ := m.Update(vmsLoadedMsg{
+		vms: []vm.VM{
+			{Name: "marked", Status: "Running"},
+			{Name: "unmarked", Status: "Running"},
+		},
+		provenance: map[string]provider.Provenance{
+			"marked": {SchemaVersion: 1, Base: "sandbar-base"},
+		},
+	})
+	m = loaded.(model)
+
+	if got := boardNames(m); len(got) != 1 || got[0] != "marked" {
+		t.Fatalf("board = %v, want only the marked VM [marked] (unmarked, non-job VMs must get no tile)", got)
+	}
+
+	// A VM recorded managed in the REGISTRY but carrying no provenance marker
+	// (the pre-provenance state every existing managed VM starts in) must still
+	// light a tile through the legacy fallback.
+	if err := m.reg.Add(vm.CreateConfig{Name: "legacy", BaseName: "sandbar-base"}); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	loaded, _ = m.Update(vmsLoadedMsg{
+		vms: []vm.VM{
+			{Name: "marked", Status: "Running"},
+			{Name: "unmarked", Status: "Running"},
+			{Name: "legacy", Status: "Running"},
+		},
+		provenance: map[string]provider.Provenance{
+			"marked": {SchemaVersion: 1, Base: "sandbar-base"},
+		},
+	})
+	m = loaded.(model)
+
+	got := boardNames(m)
+	want := []string{"legacy", "marked"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("board = %v, want %v (marker-managed + legacy-registry-managed, unmarked excluded)", got, want)
+	}
+}
+
 // A VM being CREATED does not appear in `limactl list` until its clone lands,
 // minutes into its own build — and it is not recorded managed until the build
 // SUCCEEDS. It must still get a tile the moment the build starts: that (press n,

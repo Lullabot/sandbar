@@ -139,7 +139,15 @@ func (m model) boardVMs() []boardVM {
 		idx := make(map[string]vm.VM, len(mem.vms))
 		for _, v := range mem.vms {
 			idx[v.Name] = v
-			if m.reg.IsManagedInScope(v.Name, mem.scope) {
+			// managed iff the instance carries a provenance marker — or, when it
+			// carries none (an older provider that never wrote one, or one this
+			// build has not re-run yet), the legacy registry gate.
+			// TODO(provenance): legacy fallback, remove after one release.
+			_, managed := mem.provenance[v.Name]
+			if !managed {
+				managed = m.reg.IsManagedInScope(v.Name, mem.scope)
+			}
+			if managed {
 				on[v.Name] = true
 			}
 		}
@@ -491,7 +499,14 @@ func (m model) stopAllTargets() []boardVM {
 	for i := range m.members {
 		mem := m.members[i]
 		for _, v := range mem.vms {
-			if v.Status != limaRunning || !m.reg.IsManagedInScope(v.Name, mem.scope) || m.isBaseImage(v.Name) {
+			// managed iff the instance carries a provenance marker, else the legacy
+			// registry gate. TODO(provenance): legacy fallback, remove after one
+			// release.
+			_, managed := mem.provenance[v.Name]
+			if !managed {
+				managed = m.reg.IsManagedInScope(v.Name, mem.scope)
+			}
+			if v.Status != limaRunning || !managed || m.isBaseImage(v.Name) {
 				continue
 			}
 			if m.vmBuilding(mem.scope, v.Name) {
@@ -993,18 +1008,20 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		profileLabel = mem.profile.Name
 	}
 	return renderTile(tileInput{
-		VM:           v.VM,
-		Job:          job,
-		HasJob:       hasJob,
-		Sample:       sample,
-		HasSample:    hasSample,
-		Traits:       traits[i],
-		Uniform:      uniform,
-		Focused:      focusMatches(v, m.focusVM),
-		Width:        m.layout.TileWidth,
-		Spinner:      frame,
-		Now:          now,
-		ProfileLabel: profileLabel,
+		VM:                 v.VM,
+		Job:                job,
+		HasJob:             hasJob,
+		RemoteProvisioning: !hasJob && m.remoteProvisioning(v.scope, v.Name),
+		RemoteProgress:     m.remoteProgress(v.scope, v.Name),
+		Sample:             sample,
+		HasSample:          hasSample,
+		Traits:             traits[i],
+		Uniform:            uniform,
+		Focused:            focusMatches(v, m.focusVM),
+		Width:              m.layout.TileWidth,
+		Spinner:            frame,
+		Now:                now,
+		ProfileLabel:       profileLabel,
 	})
 }
 
@@ -1024,7 +1041,20 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 // uniform by construction and the managed/external badge unreachable — exactly
 // what tile.go predicts once the board filters to sand's own VMs.
 func (m model) traitsOf(v boardVM) vmTraits {
-	base, managed := m.reg.BaseInScope(v.Name, v.scope)
+	// Base and managed come from the provenance marker first — the same source
+	// boardVMs gates the roster on — and only fall back to the registry when
+	// the instance carries none. TODO(provenance): legacy fallback, remove
+	// after one release.
+	var base string
+	var managed bool
+	if mem, ok := m.memberByScope(v.scope); ok {
+		if pv, present := mem.provenance[v.Name]; present {
+			base, managed = pv.Base, true
+		}
+	}
+	if !managed {
+		base, managed = m.reg.BaseInScope(v.Name, v.scope)
+	}
 	if base == "" {
 		if cfg, ok := m.jobs.config(v.scope, v.Name); ok {
 			base = cfg.BaseName

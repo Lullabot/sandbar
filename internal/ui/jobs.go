@@ -55,6 +55,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -154,6 +155,26 @@ type job struct {
 	parser ansibleParser
 	cancel context.CancelFunc
 	reader *readPipe
+
+	// published is the (Step, Role, Total) triple most recently republished to
+	// this VM's provenance marker, and is what throttles those writes: progress
+	// crosses to other controllers at ROLE boundaries, never per task. A build
+	// runs a few hundred tasks and a dozen roles, and for a remote build each
+	// republish is an ssh round trip — per-task would be unusable, while per-role
+	// is a bar that visibly moves. Index is deliberately NOT part of the triple:
+	// it advances on every task, so including it would defeat the throttle.
+	published publishedProgress
+	// progressWarned latches the one log line a failing republish earns, so a
+	// transport problem states itself once per build instead of at every role.
+	progressWarned bool
+}
+
+// publishedProgress is the throttle key for marker progress republishes: the
+// coarse position whose CHANGE is what makes a republish due. See job.published.
+type publishedProgress struct {
+	Step  string
+	Role  string
+	Total int
 }
 
 // jobSnapshot is a race-free value copy of one job, taken under the registry's
@@ -288,6 +309,60 @@ func (r *jobRegistry) addOutput(key jobKey, chunk string) bool {
 	// safe to render today and what would make them unsafe.
 	j.output.WriteString(chunk)
 	j.parser.feed(chunk)
+	return true
+}
+
+// progressToPublish reports whether this job's build has crossed into a new
+// coarse position (a new sand phase, Ansible role, or task total) since the last
+// republish, and if so hands back everything the caller needs to write it to the
+// VM's provenance marker — the create config the marker is rebuilt from, and the
+// progress to stamp on it.
+//
+// It is a SEPARATE call from addOutput, taken under the same lock immediately
+// after, rather than an extra return value on it: addOutput is on the hot path
+// of every streamed chunk and is called from several places that care only
+// whether the job still exists.
+//
+// Only a running PROVISION job publishes. A transfer has no marker to update,
+// and a finished job's last word belongs to RecordSuccess (which writes the
+// ready marker) — a late chunk must never resurrect a Provisioning=true marker
+// on a VM that just finished building.
+func (r *jobRegistry) progressToPublish(key jobKey) (vm.CreateConfig, provider.BuildProgress, bool) {
+	if r == nil {
+		return vm.CreateConfig{}, provider.BuildProgress{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[key]
+	if !ok || j.state != jobRunning || key.kind != kindProvision {
+		return vm.CreateConfig{}, provider.BuildProgress{}, false
+	}
+	now := publishedProgress{Step: j.parser.progress.Step, Role: j.parser.progress.Role, Total: j.parser.progress.Total}
+	if now == j.published {
+		return vm.CreateConfig{}, provider.BuildProgress{}, false
+	}
+	j.published = now
+	return j.cfg, provider.BuildProgress{
+		Role:  j.parser.progress.Role,
+		Index: j.parser.progress.Index,
+		Total: j.parser.progress.Total,
+	}, true
+}
+
+// noteProgressWriteFailed latches a job's republish-failure warning, reporting
+// true only the FIRST time it is called for that job — so a marker write that
+// keeps failing is said once per build, not once per role.
+func (r *jobRegistry) noteProgressWriteFailed(key jobKey) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, ok := r.jobs[key]
+	if !ok || j.progressWarned {
+		return false
+	}
+	j.progressWarned = true
 	return true
 }
 
@@ -743,7 +818,7 @@ func (s derivedStatus) String() string {
 // state: a VM whose upload failed is a healthy running VM with a failed copy, and
 // painting its tile red would be its own small lie. The transfer's failure
 // surfaces where it belongs — on the status line, and in its reopenable log.
-func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
+func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool, remoteProvisioning bool) derivedStatus {
 	if hasJob && job.Provision {
 		switch {
 		case job.Running():
@@ -751,6 +826,15 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 		case job.Failed():
 			return statusFailed
 		}
+	}
+	// remoteProvisioning is the SAME "this VM is building" signal for a VM being
+	// built by ANOTHER controller: there is no local job here, but the instance
+	// carries an in-flight (Provisioning) provenance marker written by whoever is
+	// building it. Without this, a mid-build VM read over the wire would show the
+	// reassuring "Running" that deriveStatus exists to prevent. A local job (the
+	// controller doing the build) takes precedence above.
+	if remoteProvisioning {
+		return statusBuilding
 	}
 	if v.Status == limaRunning {
 		return statusRunning
@@ -764,5 +848,37 @@ func deriveStatus(v vm.VM, job jobSnapshot, hasJob bool) derivedStatus {
 // to become one by standing in the same slot.
 func (m model) statusOf(scope registry.Scope, v vm.VM) derivedStatus {
 	job, ok := m.jobs.snapshot(provisionKey(scope, v.Name))
-	return deriveStatus(v, job, ok)
+	return deriveStatus(v, job, ok, m.remoteProvisioning(scope, v.Name))
+}
+
+// remoteProvisioning reports whether name carries an in-flight (Provisioning)
+// provenance marker in its owning member's scope — i.e. some controller is
+// building it — WITHOUT this controller having a local build job for it. It is
+// how a VM another machine is provisioning shows as "Building" here.
+func (m model) remoteProvisioning(scope registry.Scope, name string) bool {
+	mem, ok := m.memberByScope(scope)
+	if !ok {
+		return false
+	}
+	return mem.provenance[name].Provisioning
+}
+
+// remoteProgress is how far along an in-flight build is ACCORDING TO ITS MARKER
+// — the only view of progress available to a controller that is not the one
+// running the build, since the bar on the builder's own tile is parsed from a
+// stdout stream that exists only in that process.
+//
+// It is the marker's coarse position widened back into the same ansibleProgress
+// the local path produces, so the tile renderer draws a remote build with the
+// identical code it draws a local one. Task and Step stay empty: they are not
+// published (they change per task, and the wire cost is per write), so the
+// remote tile names the role and counts tasks without claiming to know which
+// individual task is running.
+func (m model) remoteProgress(scope registry.Scope, name string) ansibleProgress {
+	mem, ok := m.memberByScope(scope)
+	if !ok {
+		return ansibleProgress{}
+	}
+	p := mem.provenance[name].Progress
+	return ansibleProgress{Role: p.Role, Index: p.Index, Total: p.Total}
 }

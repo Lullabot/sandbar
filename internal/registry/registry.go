@@ -1,9 +1,14 @@
-// Package registry tracks which Lima instances were created by sand so the
-// TUI can mark them and gate destructive operations. This matters because
-// recreate clones from a Claude base image and would replace ANY instance it is
-// pointed at; Lima does not record a clone's source, so we keep our own small
-// JSON index under the XDG data dir (the same location the original bash
-// provisioner used for its cache).
+// Package registry is now a cache, known-targets list, and one-release legacy fallback
+// for ownership decisions: the source of truth is the provider-side provenance marker
+// (sandbar.json in the instance directory, read via internal/provider/Provenancer).
+// This registry still tracks which Lima instances were created by sand so the TUI can
+// mark them and gate destructive operations, but it no longer decides ownership.
+// Legacy entries (from before provenance markers existed) are adopted once per process
+// per scope (see Adopt) to stamp markers onto unmarked instances during upgrade; after
+// one release in the wild, the fallback path can be removed (see "legacy, remove after
+// one release" comments in manage.RecreateBase and internal/ui/board.go).
+// The registry still serves as a known-targets list, keeping entries keyed by scope
+// (profile identity) for quick lookups that don't require a provider round trip.
 package registry
 
 import (
