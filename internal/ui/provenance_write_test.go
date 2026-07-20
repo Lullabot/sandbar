@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,5 +37,53 @@ func TestProvisionDoneWritesProvenanceMarkerForTUICreate(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"base":"sandbar-base"`) {
 		t.Fatalf("provenance marker is missing the recorded base: %s", data)
+	}
+}
+
+// TestAFailedProvenanceReadIsSaidOnceAndReArms pins the reporting of a batched
+// provenance read that fails. The failure is NOT fatal — the board keeps its
+// tiles and every VM falls through to the legacy per-controller registry — and
+// that is exactly why it has to be said out loud: a controller silently showing
+// only the VMs it created itself is indistinguishable, on screen, from a
+// healthy board, which is how a desynchronized marker stream stayed invisible
+// through a whole release of this feature.
+//
+// Said ONCE per failure streak (the handler runs on every 5s refresh), and
+// re-armed on recovery so a later regression speaks again.
+func TestAFailedProvenanceReadIsSaidOnceAndReArms(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "api", Status: "Running"})
+	before := len(m.boardVMs())
+
+	failed := vmsLoadedMsg{
+		vms:           []vm.VM{{Name: "api", Status: "Running"}},
+		provenanceErr: fmt.Errorf("parse instance markers: bad length for %q: %q", "", "api"),
+	}
+	for i := 0; i < 5; i++ { // five refresh ticks, as a persistent failure would produce
+		next, _ := m.Update(failed)
+		m = next.(model)
+	}
+
+	if got := len(m.boardVMs()); got != before {
+		t.Fatalf("a failed provenance read must not empty the board: %d tiles, want %d", got, before)
+	}
+	if n := countMessages(m, "provenance read failed"); n != 1 {
+		t.Fatalf("a persistent provenance failure must be reported once, not %d times", n)
+	}
+	if countMessages(m, "legacy") != 1 {
+		t.Fatalf("the message must say the board fell back to the legacy gate:\n%v", m.messages)
+	}
+
+	// It recovers: the latch clears, so a LATER regression is reported again
+	// rather than staying quiet for the rest of the session.
+	next, _ := m.Update(vmsLoadedMsg{vms: []vm.VM{{Name: "api", Status: "Running"}}})
+	m = next.(model)
+	if m.members[0].provenanceWarned {
+		t.Fatal("a successful provenance read must re-arm the warning")
+	}
+	next, _ = m.Update(failed)
+	m = next.(model)
+	if n := countMessages(m, "provenance read failed"); n != 2 {
+		t.Fatalf("a second failure streak should be reported again, got %d reports", n)
 	}
 }

@@ -67,6 +67,12 @@ type (
 		// does not implement Provenancer or the batched read failed; either way
 		// the board falls back to the legacy registry gate for every VM.
 		provenance map[string]provider.Provenance
+		// provenanceErr is WHY the batched read failed, when it did. It never
+		// fails the refresh — provenance simply stays nil and the legacy gate
+		// answers — it exists so that degradation is SAID rather than silently
+		// returning the fleet to one-view-per-controller. See
+		// member.provenanceWarned.
+		provenanceErr error
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -205,16 +211,24 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 		// back to the legacy registry gate until it re-provisions and picks up a
 		// marker.
 		var provenance map[string]provider.Provenance
+		var provenanceErr error
 		if pv, ok := prov.(provider.Provenancer); ok {
-			if mp, pErr := pv.Provenance(context.Background()); pErr == nil {
+			mp, pErr := pv.Provenance(context.Background())
+			if pErr == nil {
 				provenance = mp
+			} else {
+				// Reported, not swallowed. The refresh still succeeds — the
+				// fallback keeps the board usable — but the handler logs it ONCE
+				// so a broken marker read cannot masquerade as "these are simply
+				// the VMs on this host".
+				provenanceErr = pErr
 			}
 		}
 		return vmsLoadedMsg{
 			scope: sc, vms: vms, err: err,
 			hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser(),
 			hostMemAvail: memAvail, hostDiskTotal: diskTotal,
-			provenance: provenance,
+			provenance: provenance, provenanceErr: provenanceErr,
 		}
 	}
 }

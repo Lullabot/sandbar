@@ -503,7 +503,22 @@ func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
 // per-instance file is simply skipped BY THE REMOTE SCRIPT, so one bad or
 // absent marker never aborts the batch — mirroring localFiles.
 func (h *SSHHost) ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error) {
-	script := `cd "$1" 2>/dev/null || exit 0
+	remote := []string{"sh", "-c", markerScanScript, "sand", limaHome, filename}
+	out, errb, err := h.runRemote(ctx, nil, remote...)
+	if err != nil {
+		return nil, asNotExist("read markers", limaHome, errb, err)
+	}
+	return parseMarkerStream(out)
+}
+
+// markerScanScript is the remote half of ReadInstanceMarkers: run as
+// `sh -c markerScanScript sand <limaHome> <filename>`, it emits the
+// length-framed stream parseMarkerStream decodes. It is a package-level const
+// rather than a local so a test can run it through a real /bin/sh and feed the
+// result to the real parser — the two halves of this wire format were once
+// tested only against each other's ASSUMED shape, and drifted (see
+// TestMarkerScanScriptRoundTrip).
+const markerScanScript = `cd "$1" 2>/dev/null || exit 0
 for d in */; do
   [ -d "$d" ] || continue
   n=${d%/}
@@ -511,16 +526,14 @@ for d in */; do
   [ -f "$f" ] || continue
   printf '%s\n' "$n"
   wc -c < "$f" | tr -d ' '
-  printf '\n'
   cat "$f"
 done`
-	remote := []string{"sh", "-c", script, "sand", limaHome, filename}
-	out, errb, err := h.runRemote(ctx, nil, remote...)
-	if err != nil {
-		return nil, asNotExist("read markers", limaHome, errb, err)
-	}
-	return parseMarkerStream(out)
-}
+
+// NOTE on the length line: wc writes its own trailing newline (POSIX), and
+// `tr -d ' '` strips only the leading padding a BSD/macOS wc adds — so the
+// pipeline above already TERMINATES the length line. An extra `printf '\n'`
+// here does not "finish the line", it inserts a blank one, which shifts every
+// payload by a byte and desynchronizes the whole stream. That was the bug.
 
 // parseMarkerStream decodes ReadInstanceMarkers' length-framed wire format —
 // repeating (name line, decimal byte-count line, exactly that many raw bytes)

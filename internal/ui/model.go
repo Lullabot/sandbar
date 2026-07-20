@@ -928,6 +928,22 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The provenance map travels with vms, from the SAME refreshCmd batched
 		// read (commands.go) — never fetched here on the Update goroutine.
 		mem.provenance = msg.provenance
+		// A batched provenance read that failed does NOT fail the refresh: every
+		// VM falls back to the legacy per-controller registry and the board stays
+		// usable. But it must not do that in silence — a controller quietly
+		// showing only the VMs it created itself looks exactly like a healthy
+		// board, which is what made this class of bug so hard to see. Say it
+		// ONCE per failure streak (this handler runs every refresh), and re-arm
+		// on recovery so a later regression is reported again.
+		if msg.provenanceErr != nil {
+			if !mem.provenanceWarned {
+				mem.provenanceWarned = true
+				m.logMsg("provenance read failed on " + mem.profile.Name +
+					" — VMs will show per-controller (legacy) until this clears: " + msg.provenanceErr.Error())
+			}
+		} else {
+			mem.provenanceWarned = false
+		}
 		// everListed latches on the FIRST success and never clears — see its
 		// doc comment (fleet.go) and boardReady.
 		mem.everListed = true

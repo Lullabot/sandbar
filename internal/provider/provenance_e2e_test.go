@@ -130,6 +130,28 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 		t.Fatalf("controller B marker = %+v, want identical to controller A's %+v", got2, got)
 	}
 
+	// --- 2b. the BATCHED read, over the same ssh hop. This is the call the TUI
+	// roster actually makes on every refresh (refreshCmd -> Provenancer.
+	// Provenance), and it is a DIFFERENT remote implementation from
+	// ProvenanceOf above: single-marker reads are a plain `cat`, while the
+	// batched read runs a length-framed scan script whose output is decoded by
+	// parseMarkerStream. Asserting only ProvenanceOf therefore proves nothing
+	// about the roster — which is exactly how a desynchronized frame in that
+	// script shipped: every marker was written correctly and readable one at a
+	// time, while the batched read errored, silently dropping every controller
+	// back to its own registry.
+	batch, err := provB.Provenance(ctx)
+	if err != nil {
+		t.Fatalf("controller B batched Provenance over ssh: %v", err)
+	}
+	inBatch, ok := batch[name]
+	if !ok {
+		t.Fatalf("the batched read did not return %q, though ProvenanceOf did — the roster would fall back to the legacy registry. Got %d markers: %v", name, len(batch), batch)
+	}
+	if inBatch != got {
+		t.Fatalf("batched marker for %q = %+v, want identical to the single read's %+v", name, inBatch, got)
+	}
+
 	// --- 3. clearing the marker (what a delete does) reads unmanaged on both.
 	if err := provA.Unmark(ctx, name); err != nil {
 		t.Fatalf("Unmark: %v", err)
