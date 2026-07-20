@@ -1,4 +1,4 @@
-# sandbar!
+# sandbar!!
 
 `sand` is a single Go binary that provisions disposable Claude Code
 development VMs on [Lima](https://lima-vm.io). Spin up an isolated, fully
