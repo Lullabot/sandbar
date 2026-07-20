@@ -91,7 +91,9 @@ A tile whose checkouts have been swept recently carries a small badge on its
 footer row naming git work that has not yet reached a PR:
 
 - **Actionable** (amber, `⚠ actionable`) — at least one checkout has a pushed
-  branch, so a PR is one `l` (Land) away.
+  branch of its own, so a PR is one `l` (Land) away. A checkout sitting on its
+  repo's default branch doesn't count: a fresh clone is "pushed" in the literal
+  sense but has nothing to turn into a PR, so it never lights the badge.
 - **At-risk** (`↑N`, `unpushed`, and/or `dirty`, in dim chrome) — commits or
   uncommitted changes that exist only in the VM: `↑N` is the number of
   commits ahead of the remote-tracking branch, `unpushed` marks a branch

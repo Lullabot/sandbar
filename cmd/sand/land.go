@@ -32,7 +32,7 @@ import (
 // interface: they are pure, deterministic string-building functions (no I/O),
 // so callers below call them directly even in tests.
 type ghActions interface {
-	Available(ctx context.Context) bool
+	Availability(ctx context.Context) landgh.Availability
 	PRState(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	CreateDraftPR(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	OpenInBrowser(ctx context.Context, target string) error
@@ -368,7 +368,7 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 		return fmt.Errorf("sand land: checkout %q has no recognized remote to open a PR against", co.Path)
 	}
 
-	if gh.Available(ctx) {
+	if gh.Availability(ctx).OK() {
 		pr, err := gh.CreateDraftPR(ctx, co.OrgRepo, co.Branch)
 		if err != nil {
 			return fmt.Errorf("sand land: %w", err)

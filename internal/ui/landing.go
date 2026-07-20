@@ -47,7 +47,7 @@ import (
 // landgh.New() (a *landgh.Client) implements it; model.New wires that in as
 // the model's default (m.ghActions).
 type ghActions interface {
-	Available(ctx context.Context) bool
+	Availability(ctx context.Context) landgh.Availability
 	PRState(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	CreateDraftPR(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	OpenInBrowser(ctx context.Context, target string) error
@@ -62,6 +62,12 @@ const (
 	landRowPushedNoPR
 	landRowPushedHasPR
 	landRowOtherForge
+	// landRowNothingToLand is a checkout sitting on its repo's default branch
+	// with nothing of its own to land — every pristine clone, and any checkout
+	// whose work has already gone straight to the trunk. It is a state, not a
+	// warning: it renders in the pane's ordinary dim chrome and offers no
+	// action. See checkouts.Checkout.NothingToLand.
+	landRowNothingToLand
 )
 
 // landAction is the action-key half of the table: the ONE action a row's
@@ -135,6 +141,15 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, resolved bool) landRow
 		row.Kind = landRowLocalOnly
 		row.Action = landActionNone
 		row.Label = "local only"
+	case c.NothingToLand():
+		// On the repo's default branch with nothing of its own: a pristine
+		// clone, or work that already went straight to the trunk. Offering
+		// "Open draft PR" here proposed a main -> main PR, which GitHub
+		// rejects outright — so this arm sits ahead of every PR arm below and
+		// exposes no action at all.
+		row.Kind = landRowNothingToLand
+		row.Action = landActionNone
+		row.Label = "nothing to land"
 	case !isGitHubForge(c.Forge):
 		row.Kind = landRowOtherForge
 		row.Action = landActionNone
@@ -259,19 +274,22 @@ type landingPane struct {
 	cursor   int
 	resolved map[string]resolvedPR
 
-	// ghAvailable/ghChecked describe the lazy Available() check fired on
-	// open. ghChecked is false until that result lands, so the header can say
-	// "checking…" rather than guessing a mode before it knows one.
-	ghAvailable bool
-	ghChecked   bool
+	// ghAvailability/ghChecked describe the lazy host-gh probe fired on open.
+	// ghChecked is false until that result lands, so the header can say
+	// "checking…" rather than guessing a mode before it knows one. The full
+	// Availability (not just its OK bit) is retained so the header can name
+	// WHICH failure it hit — installed-but-unauthenticated is a different fix
+	// from not-installed, and the pane is where the user reads about it.
+	ghAvailability landgh.Availability
+	ghChecked      bool
 }
 
 // landingAvailableMsg carries the result of the lazy host-gh-availability
 // check fired when the Landing pane opens (openLandingPane).
 type landingAvailableMsg struct {
-	scope     registry.Scope
-	vm        string
-	available bool
+	scope        registry.Scope
+	vm           string
+	availability landgh.Availability
 }
 
 // landingPRStateMsg carries one checkout's AUTHORITATIVE PRState result.
@@ -315,7 +333,7 @@ func (m *model) openLandingPane(v boardVM) tea.Cmd {
 // checkLandingAvailableCmd fires the lazy host-gh-availability check.
 func checkLandingAvailableCmd(gh ghActions, scope registry.Scope, name string) tea.Cmd {
 	return func() tea.Msg {
-		return landingAvailableMsg{scope: scope, vm: name, available: gh.Available(context.Background())}
+		return landingAvailableMsg{scope: scope, vm: name, availability: gh.Availability(context.Background())}
 	}
 }
 
@@ -327,9 +345,9 @@ func (m *model) handleLandingAvailable(msg landingAvailableMsg) tea.Cmd {
 	if msg.scope != m.landing.scope || msg.vm != m.landing.vmName {
 		return nil // stale: the pane has since moved on
 	}
-	m.landing.ghAvailable = msg.available
+	m.landing.ghAvailability = msg.availability
 	m.landing.ghChecked = true
-	if !msg.available {
+	if !msg.availability.OK() {
 		// Graceful degradation: with no usable host gh there is nothing
 		// authoritative to check. Every pushed GitHub row stays on
 		// classifyLandRow's provisional "pushed · no PR" default, and "Open
@@ -340,7 +358,12 @@ func (m *model) handleLandingAvailable(msg landingAvailableMsg) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, row := range m.landing.rows {
 		c := row.Checkout
-		if c.PushState != checkouts.PushStatePushed || c.OrgRepo == "" || !isGitHubForge(c.Forge) {
+		// NothingToLand rows are skipped alongside the never-pushed and
+		// non-GitHub ones: a checkout parked on its default branch has no
+		// branch-vs-trunk PR to look up, so querying gh for one would spend a
+		// network round trip per pristine clone to answer a question that is
+		// already settled.
+		if c.PushState != checkouts.PushStatePushed || c.OrgRepo == "" || !isGitHubForge(c.Forge) || c.NothingToLand() {
 			continue
 		}
 		cmds = append(cmds, prStateCmd(m.ghActions, msg.scope, msg.vm, c.Path, c.OrgRepo, c.Branch))
@@ -441,7 +464,7 @@ func (m *model) runLandingAction() tea.Cmd {
 	switch row.Action {
 	case landActionOpenDraftPR:
 		title = "Open draft PR: " + c.OrgRepo + "#" + c.Branch
-		run = landDraftPRRun(m.ghActions, m.landing.ghAvailable, c.OrgRepo, c.Branch)
+		run = landDraftPRRun(m.ghActions, m.landing.ghAvailability.OK(), c.OrgRepo, c.Branch)
 	case landActionOpenInBrowser:
 		title = "Open in browser: " + c.OrgRepo + "#" + c.Branch
 		run = landOpenBrowserRun(m.ghActions, c.OrgRepo, row.PR)
@@ -497,21 +520,34 @@ func (m model) landingHelp() []key.Binding {
 
 // ghModeLabel is the pane header's gh-mode line — the plan's "the pane
 // surfaces which mode it's in" requirement for graceful degradation.
+//
+// The two degraded modes are named SEPARATELY and each carries its own fix.
+// They used to share one "gh: unavailable" line, which read as "you don't have
+// gh" to someone who demonstrably did: gh is exec'd directly, argv-only, so a
+// credential that lives in a shell alias or wrapper (the 1Password shell
+// plugin, and other credential injectors) is invisible to it even though the
+// same command works when typed at a prompt. Saying "not authenticated" and
+// naming `gh auth login` points at the actual gap instead of denying the
+// binary exists.
 func (p landingPane) ghModeLabel() string {
 	switch {
 	case !p.ghChecked:
 		return "checking host gh…"
-	case p.ghAvailable:
+	case p.ghAvailability.OK():
 		return "gh: available — Open draft PR creates it directly"
+	case !p.ghAvailability.Installed:
+		return "gh: not installed — Open draft PR opens the compare URL in your browser"
 	default:
-		return "gh: unavailable — Open draft PR opens the compare URL in your browser"
+		return "gh: not authenticated (run `gh auth login`, or export GH_TOKEN) — " +
+			"Open draft PR opens the compare URL in your browser"
 	}
 }
 
 // styleForLandRow picks a row's colour by its Kind: amber for the actionable
 // "pushed, no PR" row (the same warn vocabulary the tile badge uses), green
 // for an existing PR, red/at-risk styling for unpushed/dirty, and the plain
-// dim status colour for everything else (local-only, other-forge).
+// dim status colour for everything else (local-only, other-forge, and
+// nothing-to-land — all states, not warnings).
 func styleForLandRow(k landRowKind) lipgloss.Style {
 	switch k {
 	case landRowPushedNoPR:

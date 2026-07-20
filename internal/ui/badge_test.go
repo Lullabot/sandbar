@@ -5,11 +5,12 @@ package ui
 // gets ordinary table-driven unit tests (no rendering involved at all); the
 // text renderCheckoutBadge produces is pinned with golden.RequireEqual,
 // exactly the mechanism header_bands_golden_test.go uses (regenerate with
-// `go test ./internal/ui/ -run TestCheckoutBadgeRender -update`).
-// spliceCheckoutBadge gets its own tests against real renderTile output,
-// since that is the one piece reaching into a rendered tile's actual bytes.
+// `go test ./internal/ui/ -run TestCheckoutBadgeRender -update`). How that
+// text reaches a tile is tile.go's business, so the footer-layout tests below
+// drive it through real renderTile output rather than a hand-built fixture.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -150,61 +151,127 @@ func TestCheckoutBadgeRenderEmptyAndStaleAreBothNothing(t *testing.T) {
 	}
 }
 
-// TestSpliceCheckoutBadge exercises the one part of badge.go that reaches
-// into an actual renderTile string, against the real renderer rather than a
-// hand-built fixture — the whole point being that the splice must survive
-// whatever tile.go's border/padding wrapper actually looks like.
-func TestSpliceCheckoutBadge(t *testing.T) {
-	width := 32
-	in := tileInput{
-		VM:    vm.VM{Name: "web", CPUs: 2, Status: "Stopped"},
-		Width: width,
-		Now:   time.Now(),
-	}
-	tile := renderTile(in)
-	innerWidth := tileInnerWidth(width)
+// TestTileFooterBadgeRendersRightAligned exercises the badge on its real
+// path — through renderTile, against the actual renderer rather than a
+// hand-built fixture — and pins the two properties that matter: the tile stays
+// a perfect rectangle, and the badge sits on the RIGHT margin of the footer.
+//
+// It deliberately uses the STYLED badge renderCheckoutBadge actually emits,
+// not a bare string. The predecessor of this test spliced a plain "⚠
+// actionable" into the rendered tile and so never exercised an ANSI escape at
+// all; the splice it covered measured width byte-wise and would cut an escape
+// sequence in half, counting the escape's own bytes as visible cells and
+// pulling the footer's right border ~9 cells inside the tile. A styled badge
+// is the regression.
+func TestTileFooterBadgeRendersRightAligned(t *testing.T) {
+	for _, width := range []int{32, 40, 56} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			in := tileInput{
+				VM:    vm.VM{Name: "web", CPUs: 2, Status: "Running"},
+				Width: width,
+				Now:   time.Now(),
+			}
+			plain := renderTile(in)
+			in.Badge = renderCheckoutBadge(checkoutBadge{Actionable: true})
+			badged := renderTile(in)
 
-	spliced := spliceCheckoutBadge(tile, "⚠ actionable", innerWidth)
-	if spliced == tile {
-		t.Fatal("spliceCheckoutBadge did not change the tile at all")
-	}
-	lines := strings.Split(spliced, "\n")
-	origLines := strings.Split(tile, "\n")
-	if len(lines) != len(origLines) {
-		t.Fatalf("splice changed the tile's row count: got %d, want %d", len(lines), len(origLines))
-	}
-	for i, l := range lines {
-		if got := ansi.StringWidth(l); got != ansi.StringWidth(origLines[i]) {
-			t.Errorf("row %d width changed: got %d, want %d", i, got, ansi.StringWidth(origLines[i]))
-		}
-	}
-	if !strings.Contains(ansi.Strip(spliced), "actionable") {
-		t.Errorf("spliced tile does not contain the badge text:\n%s", ansi.Strip(spliced))
-	}
+			if badged == plain {
+				t.Fatal("the badge did not reach the rendered tile at all")
+			}
+			plainLines := strings.Split(plain, "\n")
+			lines := strings.Split(badged, "\n")
+			if len(lines) != len(plainLines) {
+				t.Fatalf("the badge changed the tile's row count: got %d, want %d", len(lines), len(plainLines))
+			}
+			// EVERY row keeps the tile's exact rendered width — the border
+			// stays a straight vertical line, footer included.
+			for i, l := range lines {
+				if got, want := ansi.StringWidth(l), ansi.StringWidth(plainLines[i]); got != want {
+					t.Errorf("row %d width changed: got %d, want %d\n%s", i, got, want, ansi.Strip(badged))
+				}
+			}
 
-	// Empty badge text is a no-op, byte for byte.
-	if got := spliceCheckoutBadge(tile, "", innerWidth); got != tile {
-		t.Error("spliceCheckoutBadge(tile, \"\", ...) must return the tile unchanged")
-	}
-
-	// A shape this function does not recognize degrades to "unchanged", not a
-	// panic: an arbitrary string with the wrong row count.
-	weird := "one\ntwo\nthree"
-	if got := spliceCheckoutBadge(weird, "⚠ actionable", innerWidth); got != weird {
-		t.Errorf("unrecognized tile shape was modified: got %q, want %q", got, weird)
+			footer := ansi.Strip(lines[len(lines)-2])
+			if !strings.Contains(footer, "actionable") {
+				t.Fatalf("footer row does not carry the badge: %q", footer)
+			}
+			// Right-aligned: the badge ends flush against the trailing padding
+			// + border, with no gap of its own.
+			if trimmed := strings.TrimRight(footer, " │╯╰┃"); !strings.HasSuffix(trimmed, "actionable") {
+				t.Errorf("badge is not right-aligned on the footer row: %q", footer)
+			}
+			// And the uptime clause still holds the left margin.
+			if !strings.Contains(footer, "up") {
+				t.Errorf("footer row lost its uptime clause: %q", footer)
+			}
+		})
 	}
 }
 
-// TestSpliceCheckoutBadgeGhostTileNoPanic is the never-swept/degrade-cleanly
-// acceptance criterion at the splice boundary: renderCell never actually
-// calls checkoutBadgeText for a ghost tile (see renderCell's `i >= len(vms)`
-// early return), so this is defense in depth rather than a real code path —
-// but the splice makes no ghost-tile-specific assumption, so it must not
-// panic if it is ever handed one anyway.
-func TestSpliceCheckoutBadgeGhostTileNoPanic(t *testing.T) {
-	ghost := renderGhostTile(32, false)
-	got := spliceCheckoutBadge(ghost, "⚠ actionable", tileInnerWidth(32))
-	if lines := strings.Split(got, "\n"); len(lines) != len(strings.Split(ghost, "\n")) {
-		t.Errorf("splice changed the ghost tile's row count: got %d lines, want %d", len(lines), len(strings.Split(ghost, "\n")))
+// TestTileFooterBadgeDegradesOnNarrowTiles pins tileFooterAlign's yield rule:
+// the badge shrinks and then disappears before the uptime clause it sits
+// beside ever does, and the row stays exactly width cells throughout.
+func TestTileFooterBadgeDegradesOnNarrowTiles(t *testing.T) {
+	clause := tileChromeStyle.Render("up 3d")
+	badge := renderCheckoutBadge(checkoutBadge{Actionable: true, AtRisk: true, Ahead: 2, Dirty: true})
+	for width := 1; width <= 60; width++ {
+		got := tileFooterAlign(clause, badge, width)
+		if w := ansi.StringWidth(got); w > width && w > ansi.StringWidth(clause) {
+			t.Fatalf("width %d: footer overflowed to %d cells: %q", width, w, ansi.Strip(got))
+		}
+		if !strings.Contains(ansi.Strip(got), "up 3d") {
+			t.Fatalf("width %d: the uptime clause was dropped or truncated: %q", width, ansi.Strip(got))
+		}
+	}
+	// An empty badge is a no-op, byte for byte.
+	if got := tileFooterAlign(clause, "", 40); got != clause {
+		t.Errorf("an empty badge must return the clause unchanged, got %q", got)
+	}
+}
+
+// TestCheckoutBadgeIgnoresPristineClones is the regression for the badge
+// firing on a VM where nobody had done any work: a fresh clone sits on the
+// default branch, level with its tracking ref, so the sweep classifies it
+// "pushed" — which the badge read as "actionable" and painted amber. Only a
+// checkout with something of its OWN to land may light it.
+func TestCheckoutBadgeIgnoresPristineClones(t *testing.T) {
+	now := time.Now()
+	pristine := checkouts.VMCheckouts{
+		SweptAt: now,
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/u/a", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed},
+			{Path: "/home/u/b", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed},
+		},
+	}
+	got := computeCheckoutBadge(pristine, true, true, now)
+	if got.Actionable {
+		t.Error("a VM holding only pristine clones must not be actionable")
+	}
+	if got.AtRisk {
+		t.Error("a VM holding only pristine clones has nothing at risk")
+	}
+	if rendered := renderCheckoutBadge(got); rendered != "" {
+		t.Errorf("badge rendered %q, want no badge at all", rendered)
+	}
+
+	// One real feature branch alongside the clones is still actionable — the
+	// fix must not suppress the case the badge exists for.
+	withWork := pristine
+	withWork.Checkouts = append(append([]checkouts.Checkout{}, pristine.Checkouts...),
+		checkouts.Checkout{Path: "/home/u/c", Branch: "feature", DefaultBranch: "main", PushState: checkouts.PushStatePushed})
+	if !computeCheckoutBadge(withWork, true, true, now).Actionable {
+		t.Error("a fully-pushed feature branch must still read as actionable")
+	}
+
+	// Uncommitted work ON the default branch is still at risk: NothingToLand
+	// answers only the actionable half, never the delete guard's half.
+	dirtyMain := checkouts.VMCheckouts{
+		SweptAt: now,
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/u/a", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed, Dirty: 3},
+		},
+	}
+	if !computeCheckoutBadge(dirtyMain, true, true, now).AtRisk {
+		t.Error("uncommitted changes on the default branch must still be at risk")
 	}
 }

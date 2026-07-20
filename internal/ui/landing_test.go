@@ -21,7 +21,8 @@ import (
 // real gh binary or opening a real browser — mirroring landgh's own
 // fakeRunner/fakeOpener test doubles (internal/landgh/fakes_test.go).
 type fakeGhActions struct {
-	available bool
+	available    bool
+	availability *landgh.Availability
 
 	prStateCalls []struct{ orgRepo, branch string }
 	prState      *landgh.PR
@@ -35,7 +36,16 @@ type fakeGhActions struct {
 	openErr error
 }
 
-func (f *fakeGhActions) Available(context.Context) bool { return f.available }
+// Availability maps the fake's single `available` knob onto the real result
+// type: available means installed AND authenticated, unavailable means gh was
+// never found. Tests that need the third state (installed but unauthenticated)
+// set availability explicitly, which takes precedence.
+func (f *fakeGhActions) Availability(context.Context) landgh.Availability {
+	if f.availability != nil {
+		return *f.availability
+	}
+	return landgh.Availability{Installed: f.available, Authenticated: f.available}
+}
 
 func (f *fakeGhActions) PRState(_ context.Context, orgRepo, branch string) (*landgh.PR, error) {
 	f.prStateCalls = append(f.prStateCalls, struct{ orgRepo, branch string }{orgRepo, branch})
@@ -450,7 +460,7 @@ func TestHandleLandingAvailableDropsStaleResult(t *testing.T) {
 	m.openLandingPane(v)
 
 	// A result for a DIFFERENT vm name — as if the pane had moved on.
-	cmd := m.handleLandingAvailable(landingAvailableMsg{scope: v.scope, vm: "some-other-vm", available: true})
+	cmd := m.handleLandingAvailable(landingAvailableMsg{scope: v.scope, vm: "some-other-vm", availability: landgh.Availability{Installed: true, Authenticated: true}})
 	if cmd != nil {
 		t.Fatal("a stale availability result must not fire any further commands")
 	}
@@ -560,7 +570,8 @@ func TestUpdateLandingActKeyRunsTheRowsActionAsAJob(t *testing.T) {
 	fake := &fakeGhActions{available: true, createPR: &landgh.PR{Number: 21, URL: "https://github.com/acme/repo/pull/21"}}
 	m.ghActions = fake
 	m.openLandingPane(v)
-	m.landing.ghAvailable = true // simulate the availability check having already resolved
+	// simulate the availability check having already resolved
+	m.landing.ghAvailability = landgh.Availability{Installed: true, Authenticated: true}
 	m.landing.ghChecked = true
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'o', Text: "o"})
@@ -626,8 +637,8 @@ func TestLandingViewShowsWorktreeIndentedAfterItsRepo(t *testing.T) {
 	if !strings.Contains(rendered, "└─") {
 		t.Fatalf("rendered view has no indentation marker for the nested worktree:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "gh: unavailable") {
-		t.Fatalf("rendered view = %q, want it to surface the gh-unavailable mode", rendered)
+	if !strings.Contains(rendered, "gh: not installed") {
+		t.Fatalf("rendered view = %q, want it to surface the gh-not-installed mode", rendered)
 	}
 }
 
@@ -636,7 +647,7 @@ func TestLandingViewNoCheckoutsYet(t *testing.T) {
 	m.ghActions = &fakeGhActions{available: true}
 	m.openLandingPane(v)
 	m.landing.ghChecked = true
-	m.landing.ghAvailable = true
+	m.landing.ghAvailability = landgh.Availability{Installed: true, Authenticated: true}
 
 	rendered := ansi.Strip(m.landingView())
 	if !strings.Contains(rendered, "No git checkouts discovered yet") {
@@ -670,21 +681,104 @@ func TestGhModeLabelAllModes(t *testing.T) {
 	if got := checking.ghModeLabel(); !strings.Contains(got, "checking") {
 		t.Fatalf("ghModeLabel(unchecked) = %q, want it to say it is still checking", got)
 	}
-	available := landingPane{ghChecked: true, ghAvailable: true}
+	available := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true, Authenticated: true}}
 	if got := available.ghModeLabel(); !strings.Contains(got, "available") {
 		t.Fatalf("ghModeLabel(available) = %q, want it to say gh is available", got)
 	}
-	unavailable := landingPane{ghChecked: true, ghAvailable: false}
-	if got := unavailable.ghModeLabel(); !strings.Contains(got, "unavailable") {
-		t.Fatalf("ghModeLabel(unavailable) = %q, want it to say gh is unavailable", got)
+	// The two degraded modes are named separately and must NOT be
+	// interchangeable: telling someone with gh installed that it is "not
+	// installed" sends them to fix the wrong thing. The unauthenticated case is
+	// the one a shell-alias credential injector (e.g. the 1Password gh plugin)
+	// produces, since gh is exec'd argv-only and never through a shell.
+	notInstalled := landingPane{ghChecked: true, ghAvailability: landgh.Availability{}}
+	if got := notInstalled.ghModeLabel(); !strings.Contains(got, "not installed") {
+		t.Fatalf("ghModeLabel(not installed) = %q, want it to say gh is not installed", got)
+	}
+	notAuthed := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true}}
+	got := notAuthed.ghModeLabel()
+	if !strings.Contains(got, "not authenticated") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, want it to say gh is not authenticated", got)
+	}
+	if strings.Contains(got, "not installed") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, must not claim gh is missing when it is present", got)
+	}
+	if !strings.Contains(got, "gh auth login") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, want it to name the fix", got)
+	}
+	// Every degraded mode must still say what happens instead.
+	for name, p := range map[string]landingPane{"not installed": notInstalled, "not authenticated": notAuthed} {
+		if !strings.Contains(p.ghModeLabel(), "compare URL") {
+			t.Fatalf("ghModeLabel(%s) = %q, want it to name the browser fallback", name, p.ghModeLabel())
+		}
 	}
 }
 
 func TestStyleForLandRowEveryKind(t *testing.T) {
-	kinds := []landRowKind{landRowLocalOnly, landRowAtRisk, landRowPushedNoPR, landRowPushedHasPR, landRowOtherForge}
+	kinds := []landRowKind{landRowLocalOnly, landRowAtRisk, landRowPushedNoPR, landRowPushedHasPR, landRowOtherForge, landRowNothingToLand}
 	for _, k := range kinds {
 		if got := styleForLandRow(k).Render("x"); ansi.Strip(got) != "x" {
 			t.Fatalf("styleForLandRow(%v).Render(\"x\") stripped = %q, want \"x\"", k, ansi.Strip(got))
+		}
+	}
+}
+
+// TestClassifyLandRowNothingToLand pins the pane's half of the pristine-clone
+// fix: a checkout parked on its repo's default branch offers NO action. The
+// previous behaviour offered "Open draft PR", which would have asked GitHub to
+// open a main -> main PR — a request it rejects outright.
+func TestClassifyLandRowNothingToLand(t *testing.T) {
+	c := checkouts.Checkout{
+		Path: "/home/u/repo", Branch: "main", DefaultBranch: "main",
+		PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
+	}
+	row := classifyLandRow(c, nil, false)
+	if row.Kind != landRowNothingToLand {
+		t.Fatalf("Kind = %v, want landRowNothingToLand", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone", row.Action)
+	}
+	if strings.Contains(row.Label, "checking") {
+		t.Fatalf("Label = %q: this row needs no gh lookup, so it must not claim to be waiting on one", row.Label)
+	}
+	if row.Label != "nothing to land" {
+		t.Fatalf("Label = %q, want %q", row.Label, "nothing to land")
+	}
+
+	// A feature branch in the same repo is unaffected.
+	c.Branch = "feature"
+	if got := classifyLandRow(c, nil, true); got.Kind != landRowPushedNoPR || got.Action != landActionOpenDraftPR {
+		t.Fatalf("feature branch classified as %v/%v, want landRowPushedNoPR/landActionOpenDraftPR", got.Kind, got.Action)
+	}
+}
+
+// TestNothingToLandRowsSkipTheGhLookup pins that a default-branch checkout
+// costs no gh round trip: the pane already knows there is no branch-vs-trunk
+// PR to find, so querying for one would spend a network call per clone.
+func TestNothingToLandRowsSkipTheGhLookup(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/u/clone", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"},
+			{Path: "/home/u/work", Branch: "feature", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{available: true}
+	m.ghActions = fake
+	m.openLandingPane(v)
+
+	cmd := m.handleLandingAvailable(landingAvailableMsg{
+		scope: v.scope, vm: v.Name,
+		availability: landgh.Availability{Installed: true, Authenticated: true},
+	})
+	if cmd != nil {
+		cmd() // drain the batch so the fake records its calls
+	}
+	for _, call := range fake.prStateCalls {
+		if call.branch == "main" {
+			t.Fatalf("a default-branch checkout triggered a gh PR lookup: %+v", fake.prStateCalls)
 		}
 	}
 }

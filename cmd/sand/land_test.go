@@ -34,7 +34,9 @@ type fakeGh struct {
 
 func prKey(orgRepo, branch string) string { return orgRepo + "|" + branch }
 
-func (f *fakeGh) Available(context.Context) bool { return f.available }
+func (f *fakeGh) Availability(context.Context) landgh.Availability {
+	return landgh.Availability{Installed: f.available, Authenticated: f.available}
+}
 
 func (f *fakeGh) PRState(_ context.Context, orgRepo, branch string) (*landgh.PR, error) {
 	key := prKey(orgRepo, branch)

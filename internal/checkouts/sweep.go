@@ -135,9 +135,14 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
     ahead=$(g rev-list --count "refs/remotes/$remote/$branch..HEAD")
     behind=$(g rev-list --count "HEAD..refs/remotes/$remote/$branch")
   fi
+  defbranch=
+  if [ -n "$remote" ]; then
+    defbranch=$(g symbolic-ref --short "refs/remotes/$remote/HEAD")
+    defbranch=${defbranch#"$remote/"}
+  fi
   dirty=$(g status --porcelain | grep -c .)
-  printf 'path=%s\nkind=%s\ngitdirptr=%s\nbranch=%s\nremote=%s\nurl=%s\ntracking=%s\nahead=%s\nbehind=%s\ndirty=%s\n__DELIM__\n' \
-    "$dir" "$kind" "$gitdirptr" "$branch" "$remote" "$url" "$tracking" "$ahead" "$behind" "$dirty"
+  printf 'path=%s\nkind=%s\ngitdirptr=%s\nbranch=%s\nremote=%s\nurl=%s\ntracking=%s\nahead=%s\nbehind=%s\ndirty=%s\ndefbranch=%s\n__DELIM__\n' \
+    "$dir" "$kind" "$gitdirptr" "$branch" "$remote" "$url" "$tracking" "$ahead" "$behind" "$dirty" "$defbranch"
 done
 `
 
@@ -166,7 +171,7 @@ func BuildSweepCommand() string {
 var sweepFieldKeys = map[string]bool{
 	"path": true, "kind": true, "gitdirptr": true, "branch": true,
 	"remote": true, "url": true, "tracking": true, "ahead": true,
-	"behind": true, "dirty": true,
+	"behind": true, "dirty": true, "defbranch": true,
 }
 
 // ParseSweep converts one sweep's raw guest output into a VMCheckouts: one
@@ -251,17 +256,18 @@ func checkoutFromRecord(rec map[string]string, now time.Time) Checkout {
 	}
 
 	return Checkout{
-		Path:      rec["path"],
-		Kind:      kind,
-		Parent:    parent,
-		Branch:    rec["branch"],
-		Forge:     forge,
-		OrgRepo:   orgRepo,
-		PushState: state,
-		Ahead:     ahead,
-		Behind:    behind,
-		Dirty:     atoiOr(rec["dirty"], 0),
-		LastSeen:  now,
+		Path:          rec["path"],
+		Kind:          kind,
+		Parent:        parent,
+		Branch:        rec["branch"],
+		Forge:         forge,
+		OrgRepo:       orgRepo,
+		PushState:     state,
+		Ahead:         ahead,
+		Behind:        behind,
+		Dirty:         atoiOr(rec["dirty"], 0),
+		DefaultBranch: rec["defbranch"],
+		LastSeen:      now,
 	}
 }
 
