@@ -28,6 +28,15 @@ import (
 // than treating it as an I/O failure.
 var ErrUnsupported = errors.New("provider does not support provenance")
 
+// ErrNoInstance is returned by MarkManaged when the instance it was asked to
+// mark does not exist yet, so there is nowhere legitimate to put the marker.
+// Callers that may legitimately run BEFORE an instance exists — notably build
+// progress republishing, which starts at the first phase banner and so races
+// ahead of the clone — should treat it as "not yet" and skip quietly, NOT as a
+// failure worth reporting. Every other caller runs after the clone and should
+// treat it as the real error it is.
+var ErrNoInstance = errors.New("instance does not exist")
+
 // MarkerSchemaVersion is the schema version this build writes into every new
 // marker. It is the single source of truth for the marker shape; manage
 // references it (see manage.RecordSuccess), and registry.adoptSchemaVersion is

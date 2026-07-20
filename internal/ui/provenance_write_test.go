@@ -26,6 +26,13 @@ import (
 func TestProvisionDoneWritesProvenanceMarkerForTUICreate(t *testing.T) {
 	m := newTestModel(t)
 	seedJob(t, &m, "myvm", vm.CreateConfig{Name: "myvm", BaseName: "sandbar-base"})
+	// The instance directory stands in for the clone that a real build would
+	// have completed by the time it succeeds. MarkManaged refuses to mark an
+	// instance that does not exist, because a marker write that created its own
+	// parent leaves a lima.yaml-less directory that makes `limactl list` fatal.
+	if err := os.MkdirAll(filepath.Join(os.Getenv("LIMA_HOME"), "myvm"), 0o700); err != nil {
+		t.Fatalf("seed instance dir: %v", err)
+	}
 
 	done, _ := m.Update(provisionDoneMsg{job: provisionKey(registry.LocalScope, "myvm")})
 	_ = done.(model)

@@ -22,5 +22,18 @@ const MarkerFilename = "sandbar.json"
 // relative path is exactly what a remote login shell (cat/stat/mkdir) resolves
 // against $HOME on its own.
 func MarkerPath(hf HostFiles, name string) string {
-	return filepath.Join(hf.LimaHome(), name, MarkerFilename)
+	return filepath.Join(InstanceDir(hf, name), MarkerFilename)
+}
+
+// InstanceDir is instance name's directory under hf's Lima home — the directory
+// Lima itself creates for an instance, and the one the marker lives inside.
+// Relative for the same reason MarkerPath is.
+//
+// It is exported so a marker write can CHECK that the instance exists before
+// writing. That check is not fussiness: a directory under LIMA_HOME holding a
+// sandbar.json but no lima.yaml makes every later `limactl list` FATAL (see
+// provision/cleanup.go), so a marker write that creates its own parent does not
+// merely write a useless file — it wedges the whole tool.
+func InstanceDir(hf HostFiles, name string) string {
+	return filepath.Join(hf.LimaHome(), name)
 }

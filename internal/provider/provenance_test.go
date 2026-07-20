@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,15 +32,30 @@ func asProvenancer(t *testing.T, p provider.Provider) provider.Provenancer {
 	return pv
 }
 
+// seedInstance creates instance name's directory under home, standing in for
+// what `limactl clone` does before sand ever marks it. Tests need it because
+// MarkManaged deliberately REFUSES to mark an instance that does not exist: a
+// marker write that created its own parent would leave a lima.yaml-less
+// directory under LIMA_HOME, which makes every later `limactl list` fatal. A
+// test that marks a VM into the void is testing something sand must never do.
+func seedInstance(t *testing.T, home, name string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, name), 0o700); err != nil {
+		t.Fatalf("seed instance dir %s: %v", name, err)
+	}
+}
+
 // TestLimaProviderProvenanceRoundTrip proves MarkManaged/ProvenanceOf write and
 // read the SAME marker through the local provider's HostFiles seam (the real
 // local filesystem, pointed at a temp dir via LIMA_HOME so the test never
 // touches a real ~/.lima). This is the write->read round trip the DoD calls
 // for.
 func TestLimaProviderProvenanceRoundTrip(t *testing.T) {
-	t.Setenv("LIMA_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
 	p := asProvenancer(t, newLocal(&fakeRunner{}))
 	ctx := context.Background()
+	seedInstance(t, home, "web")
 
 	want := provider.Provenance{
 		SchemaVersion:  1,
@@ -86,9 +102,11 @@ func TestLimaProviderProvenanceOfUnmanaged(t *testing.T) {
 // MarkManaged then Unmark, ProvenanceOf reports the instance unmanaged again,
 // and a second Unmark (nothing left to remove) is still not an error.
 func TestLimaProviderProvenanceUnmark(t *testing.T) {
-	t.Setenv("LIMA_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
 	p := asProvenancer(t, newLocal(&fakeRunner{}))
 	ctx := context.Background()
+	seedInstance(t, home, "web")
 
 	if err := p.MarkManaged(ctx, "web", provider.Provenance{SchemaVersion: 1, Base: "base"}); err != nil {
 		t.Fatalf("MarkManaged: %v", err)
@@ -117,6 +135,8 @@ func TestLimaProviderProvenanceBatchedRead(t *testing.T) {
 	p := asProvenancer(t, newLocal(&fakeRunner{}))
 	ctx := context.Background()
 
+	seedInstance(t, home, "web")
+	seedInstance(t, home, "api")
 	web := provider.Provenance{SchemaVersion: 1, Base: "base", Config: vm.CreateConfig{Name: "web"}}
 	api := provider.Provenance{SchemaVersion: 1, Base: "base", Config: vm.CreateConfig{Name: "api"}}
 	if err := p.MarkManaged(ctx, "web", web); err != nil {
@@ -199,9 +219,12 @@ func TestNewProvenance(t *testing.T) {
 // TestLimaProviderProvenanceRoundTrip — just for both marker states rather
 // than the schema-1 zero value.
 func TestLimaProviderProvenanceRoundTripProvisioningFlag(t *testing.T) {
-	t.Setenv("LIMA_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
 	p := asProvenancer(t, newLocal(&fakeRunner{}))
 	ctx := context.Background()
+	seedInstance(t, home, "building")
+	seedInstance(t, home, "ready")
 
 	building := provider.Provenance{SchemaVersion: provider.MarkerSchemaVersion, Base: "sandbar-base", Config: vm.CreateConfig{Name: "building"}, Provisioning: true}
 	ready := provider.Provenance{SchemaVersion: provider.MarkerSchemaVersion, Base: "sandbar-base", Config: vm.CreateConfig{Name: "ready"}, Provisioning: false}
@@ -288,6 +311,8 @@ func TestProvenanceProgressRoundTripAndV2Compat(t *testing.T) {
 	p := asProvenancer(t, newLocal(&fakeRunner{}))
 	ctx := context.Background()
 
+	seedInstance(t, home, "web")
+	seedInstance(t, home, "done")
 	want := provider.NewProvenance(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, true)
 	want.Progress = provider.BuildProgress{Role: "claude-code", Index: 30, Total: 120}
 	if err := p.MarkManaged(ctx, "web", want); err != nil {
@@ -337,5 +362,55 @@ func TestProvenanceProgressRoundTripAndV2Compat(t *testing.T) {
 	}
 	if oldGot.Progress != (provider.BuildProgress{}) {
 		t.Errorf("a v2 marker decoded with progress %+v, want the zero value", oldGot.Progress)
+	}
+}
+
+// TestMarkManagedRefusesToConjureAnInstance is the regression test for a bug
+// that made `sand` unusable rather than merely wrong: creating a VM from the
+// TUI left a directory under LIMA_HOME containing nothing but a sandbar.json,
+// which makes EVERY later `limactl list` fatal (it aborts on the first instance
+// it cannot load) and makes `limactl clone` refuse the name — so the board would
+// not render and the create could not be retried without hand-removing a
+// directory the user has never heard of. The CLI was unaffected, which is what
+// made it look like a TUI bug rather than a marker bug.
+//
+// The cause was a precondition asserted in a comment instead of in code:
+// MarkManaged's WriteFile creates missing parents, and it was documented as
+// safe because "the instance directory already exists by the time this is
+// called". That held until build-progress republishing started calling it from
+// the streamed-output handler, which begins at the first phase banner — minutes
+// before the clone exists.
+//
+// So: marking an instance that does not exist must return ErrNoInstance and
+// leave the filesystem EXACTLY as it found it.
+func TestMarkManagedRefusesToConjureAnInstance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	p := asProvenancer(t, newLocal(&fakeRunner{}))
+	ctx := context.Background()
+
+	err := p.MarkManaged(ctx, "not-cloned-yet", provider.NewProvenance(vm.CreateConfig{Name: "not-cloned-yet"}, true))
+	if !errors.Is(err, provider.ErrNoInstance) {
+		t.Fatalf("MarkManaged(absent instance) = %v, want ErrNoInstance", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "not-cloned-yet")); !os.IsNotExist(err) {
+		t.Fatalf("MarkManaged created an instance directory for a VM that does not exist (stat err = %v) — a lima.yaml-less dir under LIMA_HOME wedges every later `limactl list`", err)
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatalf("read LIMA_HOME: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("LIMA_HOME is not clean after a refused mark: %v", entries)
+	}
+
+	// And once the instance exists, the very same call succeeds — the refusal is
+	// about absence, not about the marker.
+	seedInstance(t, home, "not-cloned-yet")
+	if err := p.MarkManaged(ctx, "not-cloned-yet", provider.NewProvenance(vm.CreateConfig{Name: "not-cloned-yet"}, true)); err != nil {
+		t.Fatalf("MarkManaged after the instance exists: %v", err)
+	}
+	if _, ok, err := p.ProvenanceOf(ctx, "not-cloned-yet"); err != nil || !ok {
+		t.Fatalf("ProvenanceOf = (ok=%v, err=%v), want the marker just written", ok, err)
 	}
 }

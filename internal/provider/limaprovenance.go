@@ -72,17 +72,35 @@ func (p *limaProvider) ProvenanceOf(ctx context.Context, name string) (Provenanc
 	return pv, ok, nil
 }
 
-// MarkManaged writes (or overwrites) the provenance marker for name. The
-// instance directory already exists by the time this is called (it runs from
-// the create path, after clone/boot), so WriteFile's own mkdir is a no-op in
-// practice — but it is there anyway, matching the same restrictive 0o700/0o600
-// perms the existing base-version stamp writes use (see provision.go).
+// MarkManaged writes (or overwrites) the provenance marker for name, and
+// REFUSES to write one for an instance that does not exist yet — returning
+// ErrNoInstance, having created nothing.
+//
+// That refusal is the whole point of the Stat below, and it is load-bearing.
+// WriteFile creates missing parents, so without the check a marker write for a
+// not-yet-cloned instance manufactures <LimaHome>/<name>/ containing nothing but
+// a sandbar.json — precisely the lima.yaml-less directory that makes EVERY later
+// `limactl list` fatal (see provision/cleanup.go's package comment) and wedges
+// the board for a VM that was never created. `limactl clone` then also refuses
+// the name, so the user cannot even retry without hand-removing a directory they
+// have never heard of.
+//
+// This used to be a comment asserting "the instance directory already exists by
+// the time this is called (it runs from the create path, after clone/boot)".
+// That precondition held for the create path and then quietly stopped holding
+// when progress republishing began calling this from the streamed-output
+// handler, which starts firing at the FIRST phase banner — long before the
+// clone. An invariant that matters this much is enforced here rather than
+// assumed of every caller.
 func (p *limaProvider) MarkManaged(ctx context.Context, name string, pv Provenance) error {
 	data, err := json.Marshal(pv)
 	if err != nil {
 		return fmt.Errorf("encode provenance marker for %s: %w", name, err)
 	}
 	hf := p.hostFiles
+	if _, err := hf.Stat(lima.InstanceDir(hf, name)); err != nil {
+		return fmt.Errorf("provenance marker for %s: %w", name, ErrNoInstance)
+	}
 	if err := hf.WriteFile(lima.MarkerPath(hf, name), data, 0o700, 0o600); err != nil {
 		return fmt.Errorf("write provenance marker for %s: %w", name, err)
 	}

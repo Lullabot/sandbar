@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -192,5 +194,49 @@ func TestOnlyRunningProvisionJobsRepublishProgress(t *testing.T) {
 	m.jobs.addOutput(build, "TASK [late : straggler] ***\n")
 	if _, _, due := m.jobs.progressToPublish(build); due {
 		t.Fatal("a finished build republished progress — it would undo RecordSuccess's ready marker")
+	}
+}
+
+// TestPreCloneRepublishRefusalIsSilentButRealFailuresAreNot pins the UI half of
+// the "marker write must not conjure an instance" fix.
+//
+// Republishing starts at the build's FIRST phase banner, which is minutes
+// before the clone creates anything to mark — so ErrNoInstance is the normal,
+// expected answer for the early part of every build. Reporting it would put a
+// scary line in the log of every single create. But it must not make the
+// handler deaf: a genuine write failure (a host that went away mid-build) still
+// gets its one line, because the symptom otherwise is a frozen bar on another
+// machine with nothing explaining it.
+func TestPreCloneRepublishRefusalIsSilentButRealFailuresAreNot(t *testing.T) {
+	m := newTestModel(t)
+	m.jobs = newJobRegistry()
+	key := provisionKey(registry.LocalScope, "web")
+	if !m.jobs.begin(&job{key: key, state: jobRunning, cfg: vm.CreateConfig{Name: "web"}, cancel: func() {}}) {
+		t.Fatal("begin job")
+	}
+
+	// The pre-clone window: several republishes, every one refused because the
+	// instance does not exist yet.
+	for i := 0; i < 4; i++ {
+		next, _ := m.Update(publishProgressMsg{
+			job: key,
+			err: fmt.Errorf("provenance marker for web: %w", provider.ErrNoInstance),
+		})
+		m = next.(model)
+	}
+	if n := countMessages(m, "could not publish build progress"); n != 0 {
+		t.Fatalf("a pre-clone refusal was reported %d times; it is the expected state for the first minutes of every build", n)
+	}
+	if countMessages(m, "instance does not exist") != 0 {
+		t.Fatal("the ErrNoInstance sentinel leaked into the user-visible log")
+	}
+
+	// A REAL failure still speaks — once.
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(publishProgressMsg{job: key, err: errors.New("ssh: connection reset")})
+		m = next.(model)
+	}
+	if n := countMessages(m, "could not publish build progress"); n != 1 {
+		t.Fatalf("a real republish failure was reported %d times, want exactly 1", n)
 	}
 }

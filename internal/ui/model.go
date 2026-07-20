@@ -1147,7 +1147,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// more — the build is unaffected and the marker still says Building. Say it
 		// ONCE per build (the registry latches it) so a broken transport is
 		// visible without a line per role.
-		if msg.err != nil && m.jobs.noteProgressWriteFailed(msg.job) {
+		// ErrNoInstance is not a failure here, it is EXPECTED: republishing begins
+		// at the build's first phase banner, which is minutes before the clone
+		// creates the instance to hang a marker on. Those early attempts write
+		// nothing (the provider refuses to conjure an instance directory — see
+		// MarkManaged) and say nothing; once the clone lands, they start landing.
+		if msg.err != nil && !errors.Is(msg.err, provider.ErrNoInstance) && m.jobs.noteProgressWriteFailed(msg.job) {
 			m.logMsg("could not publish build progress for " + msg.job.vm +
 				" — other clients will show it building without a progress bar: " + msg.err.Error())
 		}

@@ -18,6 +18,8 @@ package manage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/provider"
@@ -34,12 +36,33 @@ import (
 // uses.
 func realLocalProvenancer(t *testing.T) provider.Provenancer {
 	t.Helper()
-	t.Setenv("LIMA_HOME", t.TempDir())
+	prov, _ := realLocalProvenancerIn(t)
+	return prov
+}
+
+// realLocalProvenancerIn is realLocalProvenancer plus the LIMA_HOME it was
+// pointed at, for a test that must seed instance directories in it.
+func realLocalProvenancerIn(t *testing.T) (provider.Provenancer, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
 	p, ok := provider.NewLocalLima(nil, nil).(provider.Provenancer)
 	if !ok {
 		t.Fatal("local Lima provider does not satisfy provider.Provenancer")
 	}
-	return p
+	return p, home
+}
+
+// seedInstance creates instance name's directory under home, standing in for
+// what `limactl clone` does. MarkManaged refuses to mark an instance that does
+// not exist — a marker write that created its own parent would leave a
+// lima.yaml-less directory that makes every later `limactl list` fatal — so a
+// test marking a VM must first have one.
+func seedInstance(t *testing.T, home, name string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, name), 0o700); err != nil {
+		t.Fatalf("seed instance dir %s: %v", name, err)
+	}
 }
 
 // adoptIntegrationScope is a scope unique to this test file, so its
@@ -58,7 +81,8 @@ var adoptIntegrationScope = registry.Scope{Provider: "lima-remote", RemoteTarget
 // backstopped by Adopt's own "already marked" skip), not merely
 // idempotent-by-accident.
 func TestAdoptOnceIntegration(t *testing.T) {
-	prov := realLocalProvenancer(t)
+	prov, home := realLocalProvenancerIn(t)
+	seedInstance(t, home, "legacy-web")
 	reg := registry.NewEmpty()
 	cfg := vm.CreateConfig{Name: "legacy-web", BaseName: "sandbar-base", CPUs: 4}
 	if err := reg.AddScoped(cfg, adoptIntegrationScope); err != nil {
@@ -111,7 +135,8 @@ func TestAdoptOnceIntegration(t *testing.T) {
 // contract — see manage.go), and RecreateBase resolves the clone source
 // from the REAL marker it wrote.
 func TestRecordSuccessWritesRealMarkerRecreateBaseReadsIt(t *testing.T) {
-	prov := realLocalProvenancer(t)
+	prov, home := realLocalProvenancerIn(t)
+	seedInstance(t, home, "claude")
 	reg := registry.NewEmpty()
 	cfg := vm.CreateConfig{Name: "claude", BaseName: "custom-base", CPUs: 4, Memory: "8GiB"}
 
@@ -140,10 +165,11 @@ func TestRecordSuccessWritesRealMarkerRecreateBaseReadsIt(t *testing.T) {
 // prove the same shape against a fake; this is the real-filesystem
 // round-trip counterpart.
 func TestRecreateBaseWithRealProvenancer_MarkerAloneDrivesItAndRefusalOnUnmark(t *testing.T) {
-	prov := realLocalProvenancer(t)
+	prov, home := realLocalProvenancerIn(t)
 	reg := registry.NewEmpty() // deliberately empty throughout: provenance alone must drive this
 	ctx := context.Background()
 	const name = "claude"
+	seedInstance(t, home, name)
 
 	pv := provider.Provenance{SchemaVersion: 1, Base: "marker-base", Config: vm.CreateConfig{Name: name, BaseName: "marker-base"}}
 	if err := prov.MarkManaged(ctx, name, pv); err != nil {
@@ -178,7 +204,8 @@ func TestRecreateBaseWithRealProvenancer_MarkerAloneDrivesItAndRefusalOnUnmark(t
 // compares them THROUGH a real adoption rather than by reading the constants:
 // what matters is the version that actually lands in the marker.
 func TestAdoptStampsTheCurrentMarkerSchema(t *testing.T) {
-	prov := realLocalProvenancer(t)
+	prov, home := realLocalProvenancerIn(t)
+	seedInstance(t, home, "schema-check")
 	reg := registry.NewEmpty()
 	scope := registry.Scope{Provider: "lima-remote", RemoteTarget: "adopt-schema-test@example.invalid:22"}
 	if err := reg.AddScoped(vm.CreateConfig{Name: "schema-check", BaseName: "sandbar-base"}, scope); err != nil {
