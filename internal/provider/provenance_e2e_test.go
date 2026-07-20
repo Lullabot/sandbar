@@ -26,6 +26,7 @@ package provider_test
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strconv"
 	"testing"
@@ -42,6 +43,16 @@ import (
 // Best-effort: a cleanup failure is logged, never fatal.
 func sshCleanupRemoteHome(t *testing.T, cfg provider.TargetConfig, remoteHomeDir string) {
 	t.Helper()
+	// remoteHomeDir is a fixed, relative, no-metacharacter path chosen by the
+	// tests below — safe to interpolate into the remote command.
+	args := append(sshBaseArgs(cfg), sshTarget(cfg), "rm", "-rf", remoteHomeDir)
+	if out, err := exec.Command("ssh", args...).CombinedOutput(); err != nil {
+		t.Logf("cleanup: ssh rm -rf %s: %v\n%s", remoteHomeDir, err, out)
+	}
+}
+
+// sshBaseArgs is the ssh option set both helpers here dial with.
+func sshBaseArgs(cfg provider.TargetConfig) []string {
 	args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new"}
 	if cfg.Port > 0 && cfg.Port != 22 {
 		args = append(args, "-p", strconv.Itoa(cfg.Port))
@@ -49,11 +60,25 @@ func sshCleanupRemoteHome(t *testing.T, cfg provider.TargetConfig, remoteHomeDir
 	if cfg.IdentityPath != "" {
 		args = append(args, "-i", cfg.IdentityPath)
 	}
-	// remoteHomeDir is a fixed, relative, no-metacharacter path chosen by the
-	// test below — safe to interpolate into the remote command.
-	args = append(args, sshTarget(cfg), "rm", "-rf", remoteHomeDir)
+	return args
+}
+
+// sshSeedRemoteInstance creates instance name's directory inside remoteHomeDir
+// on the remote host, standing in for the `limactl clone` a real create would
+// have run before anything marked it.
+//
+// These tests exercise the marker plumbing without ever booting a VM, so they
+// have no instance directory unless they make one — and MarkManaged now REFUSES
+// to mark an instance that does not exist, because a marker write that created
+// its own parent would leave a lima.yaml-less directory under LIMA_HOME that
+// makes every later `limactl list` fatal. Seeding here is not a workaround for
+// that guard; it is what makes these tests model a real create, in which the
+// clone always precedes the marker.
+func sshSeedRemoteInstance(t *testing.T, cfg provider.TargetConfig, remoteHomeDir, name string) {
+	t.Helper()
+	args := append(sshBaseArgs(cfg), sshTarget(cfg), "mkdir", "-p", remoteHomeDir+"/"+name)
 	if out, err := exec.Command("ssh", args...).CombinedOutput(); err != nil {
-		t.Logf("cleanup: ssh rm -rf %s: %v\n%s", remoteHomeDir, err, out)
+		t.Fatalf("seed remote instance dir %s/%s: %v\n%s", remoteHomeDir, name, err, out)
 	}
 }
 
@@ -77,6 +102,7 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 	const name = "sand-prov-e2e"
 	const base = "sand-prov-e2e-base"
 	ctx := context.Background()
+	sshSeedRemoteInstance(t, cfg, remoteHome, name)
 
 	controllerA, err := provider.NewRemoteLima(cfg)
 	if err != nil {
@@ -130,6 +156,19 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 		t.Fatalf("controller B marker = %+v, want identical to controller A's %+v", got2, got)
 	}
 
+	// --- 2a. the guard, over the REAL transport: marking an instance that does
+	// not exist must refuse, not manufacture its directory on the remote host.
+	// The local unit test pins the behaviour; this pins that SSHHost.Stat
+	// resolves the (relative, $HOME-anchored) instance path the same way the
+	// write does, so the check cannot pass locally and silently no-op over ssh.
+	// The failure it prevents is severe and REMOTE: a lima.yaml-less directory
+	// under the host's LIMA_HOME makes `limactl list` fatal for every controller
+	// of that host, over a VM nobody ever created.
+	const neverCloned = "sand-prov-e2e-never-cloned"
+	if err := provA.MarkManaged(ctx, neverCloned, provider.NewProvenance(vmCfg, true)); !errors.Is(err, provider.ErrNoInstance) {
+		t.Fatalf("MarkManaged(%s) over ssh = %v, want ErrNoInstance", neverCloned, err)
+	}
+
 	// --- 2b. the BATCHED read, over the same ssh hop. This is the call the TUI
 	// roster actually makes on every refresh (refreshCmd -> Provenancer.
 	// Provenance), and it is a DIFFERENT remote implementation from
@@ -150,6 +189,12 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 	}
 	if inBatch != got {
 		t.Fatalf("batched marker for %q = %+v, want identical to the single read's %+v", name, inBatch, got)
+	}
+	// The refused mark above left NOTHING behind: the batched read walks every
+	// directory under the remote Lima home, so its absence here is proof no
+	// instance directory was conjured on the host.
+	if _, ok := batch[neverCloned]; ok {
+		t.Fatalf("marking a non-existent instance created %q on the remote host — that is the lima.yaml-less directory that wedges `limactl list`", neverCloned)
 	}
 
 	// --- 3. clearing the marker (what a delete does) reads unmanaged on both.
@@ -177,6 +222,7 @@ func TestE2EInFlightProvisioningMarkerVisibleRemotely(t *testing.T) {
 	const name = "sand-inflight-e2e"
 	const base = "sand-inflight-e2e-base"
 	ctx := context.Background()
+	sshSeedRemoteInstance(t, cfg, remoteHome, name)
 
 	builder, err := provider.NewRemoteLima(cfg)
 	if err != nil {
