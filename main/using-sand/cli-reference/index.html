@@ -984,6 +984,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-land-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand land NAME
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-version-sand-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1624,6 +1635,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-land-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand land NAME
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-version-sand-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1661,8 +1683,14 @@
 <li><a href="#sand-create"><code>sand create</code></a> — headless, non-interactive VM provisioning.</li>
 <li><a href="#sand-shell-name"><code>sand shell NAME</code></a> — attach to a running VM's persistent
   tmux session.</li>
-<li><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
-  host clipboard on a running VM's guest clipboard.</li>
+<li>
+<p><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
+  host clipboard on a running VM's guest clipboard.</p>
+</li>
+<li>
+<p><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
+  draft PR / browser for one of them.</p>
+</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
   the build identity.</li>
 </ul>
@@ -2047,6 +2075,50 @@ path at all.</p>
 <p>Like <code>sand shell</code>, <code>sand paste-image NAME</code> resolves which connection profile
 you mean using the same logic described above under <code>sand shell</code>'s
 <a href="#cross-profile-resolution-for-sand-shell">Cross-profile resolution</a>.</p>
+<h2 id="sand-land-name"><code>sand land NAME</code></h2>
+<p>List <code>NAME</code>'s git checkouts and their branch/push/PR state, or act on one.
+This is the same detection and the same <code>gh</code> actions the TUI's <code>l</code> (Land)
+key uses — see <a href="../files-and-shells/#landing">Landing</a>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Usage: sand land NAME [PATH] [--pr | --web] [--profile &lt;name&gt;]
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>List NAME&#39;s git checkouts and their branch/push/PR state, or act on one:
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  sand land NAME                list checkouts + branch/push/PR state
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH&#39;s pushed branch
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  sand land NAME PATH --web     open PATH&#39;s branch (or PR) in a browser
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>--pr uses the workstation&#39;s own &#39;gh&#39; (never the guest&#39;s token). Without gh
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>an existing PR for the branch on its own.
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>The named VM must already exist and be running (see &#39;sand&#39; to list
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>instances, or &#39;sand create&#39; to make one). If NAME is managed under more than
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>one connection profile, --profile picks which one to act on.
+</code></pre></div>
+<p>With no <code>PATH</code> or flags, <code>sand land NAME</code> prints a table (<code>PATH KIND BRANCH
+PUSH PR</code>) of every checkout the sweep found, including an ahead count for an
+unpushed branch (<code>unpushed (+3)</code>) and the PR's number/state when one exists
+(<code>#42 open (draft)</code>).</p>
+<p><code>--pr PATH</code> and <code>--web PATH</code> require a <code>PATH</code> from that listing, and are
+mutually exclusive. Both refuse a checkout that isn't pushed or has no
+recognized remote — there's nothing to open a PR or browser page against
+yet.</p>
+<ul>
+<li><strong><code>--pr</code></strong> opens a one-shot <strong>draft PR</strong> via the workstation's own <code>gh</code>.
+  Without <code>gh</code> installed, it instead prints the branch's compare URL: on a
+  real terminal it offers to open that URL in a browser (<code>y</code>/<code>N</code> prompt); in
+  a script or pipe (no terminal) it does not prompt — it exits non-zero with
+  the compare URL as the only text on stderr, so automation can capture and
+  act on it.</li>
+<li><strong><code>--web</code></strong> is <strong>gh-free by construction</strong>: it never calls <code>gh</code> at all. It
+  opens a constructed GitHub compare URL in a browser, which GitHub's own
+  routing redirects to an existing open PR for that branch when one exists.</li>
+</ul>
+<p><code>sand land</code> never pushes, commits, or otherwise touches the checkout's
+working state — it only reads what the guest already has and, for <code>--pr</code>,
+calls <code>gh</code> on the workstation.</p>
 <h2 id="sand-version-sand-version"><code>sand version</code> / <code>sand --version</code></h2>
 <p>Prints the build identity and exits. Both spellings do the same thing, and
 <code>--version</code> is checked before anything else in <code>sand</code>'s argument dispatch, so
@@ -2055,8 +2127,8 @@ it works even without <code>limactl</code> installed.</p>
 (<code>-ldflags "-X main.version=..."</code>). A binary built from source instead prints
 the git revision Go's toolchain embeds automatically, with a <code>-dirty</code> suffix
 if the working tree had uncommitted changes at build time — for example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>$ sand --version
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>07bae1a-dirty
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>$ sand --version
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>07bae1a-dirty
 </code></pre></div>
 
 

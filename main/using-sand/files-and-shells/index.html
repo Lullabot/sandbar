@@ -857,10 +857,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#uploading-and-downloading-files" class="md-nav__link">
+  <a href="#uploading-and-downloading-files-data-not-code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Uploading and downloading files
+        Uploading and downloading files: data, not code
       
     </span>
   </a>
@@ -906,6 +906,45 @@
     <span class="md-ellipsis">
       
         Known limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#landing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Landing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Landing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-landing-says-gh-isnt-usable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When Landing says gh isn't usable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#1password-shell-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1Password shell plugin
       
     </span>
   </a>
@@ -1308,10 +1347,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#uploading-and-downloading-files" class="md-nav__link">
+  <a href="#uploading-and-downloading-files-data-not-code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Uploading and downloading files
+        Uploading and downloading files: data, not code
       
     </span>
   </a>
@@ -1357,6 +1396,45 @@
     <span class="md-ellipsis">
       
         Known limitation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#landing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Landing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Landing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-landing-says-gh-isnt-usable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When Landing says gh isn't usable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#1password-shell-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1Password shell plugin
       
     </span>
   </a>
@@ -1433,17 +1511,24 @@ once.</p>
 <p>The VM must be running before you can shell into it; a stopped VM won't
 offer <code>S</code> on its tile, and <code>sand shell</code> refuses cleanly with an error
 telling you to start it first.</p>
-<h2 id="uploading-and-downloading-files">Uploading and downloading files</h2>
+<h2 id="uploading-and-downloading-files-data-not-code">Uploading and downloading files: data, not code</h2>
 <p><code>u</code> (upload) and <code>g</code> (download) on a focused tile open a file-transfer pane.
 Download is bound to <code>g</code>, not <code>d</code> — <code>d</code> is always delete; see the
 <a href="../tui/#keybindings">Board</a> page for the full keybinding table.</p>
+<p>These move <strong>data</strong>, not code — think a SQL dump going in, or a screenshot,
+video, or build artifact coming out. They are not a way to get code changes
+onto or off of a VM; that path is git, and it's what <a href="#landing">Landing</a>
+below is for.</p>
 <ul>
 <li><strong>Upload (<code>u</code>)</strong> copies a file or directory from this machine into the
-  guest. You browse the host for a source starting at your current working
-  directory, then pick a destination directory in the guest.</li>
+  guest — for example, seeding a database dump or a fixtures file the guest
+  needs but shouldn't fetch itself. You browse the host for a source
+  starting at your current working directory, then pick a destination
+  directory in the guest.</li>
 <li><strong>Download (<code>g</code>)</strong> copies a file or directory out of the guest onto this
-  machine. You browse the guest for a source, then pick a destination on
-  the host.</li>
+  machine — for example, pulling a screenshot, a recorded video, or a build
+  artifact Claude Code produced, to look at on the host. You browse the
+  guest for a source, then pick a destination on the host.</li>
 </ul>
 <p>Both directions require the VM to be running, and neither is offered while
 a build or a reset is in progress on that VM — starting a transfer against
@@ -1487,6 +1572,103 @@ PNG, so this edge case applies to Linux hosts only. If it causes real-world
 friction, it will be revisited.</p>
 <p>The verb is only offered on running VMs. Stop or reset a VM and the verb
 disappears from its tile until the VM runs again.</p>
+<h2 id="landing">Landing</h2>
+<p><code>l</code> on a focused tile (or <code>sand land NAME [&lt;path&gt;]</code> from the command line)
+opens the <strong>Landing pane</strong>: a listing of that VM's git checkouts, swept live
+from the guest, with each one's branch, push state, and PR state. This is
+how code — as opposed to the data <code>u</code>/<code>g</code> move above — leaves the VM: not by
+copying files, but by pushing a branch and opening a PR against it, exactly
+as you would from your own machine.</p>
+<p>Each checkout lands in one of a few states, and the pane offers the action
+that state calls for:</p>
+<ul>
+<li><strong>Pushed, no PR</strong> — open a one-shot <strong>draft PR</strong> for that checkout's
+  pushed branch.</li>
+<li><strong>PR already open</strong> — open it in a browser.</li>
+<li><strong>PR state unknown</strong> — the branch is pushed, but sand could not confirm
+  whether a PR exists, because host <code>gh</code> is unusable or the lookup failed.
+  Opening a draft PR still works (it falls back to the compare URL).</li>
+<li><strong>Never pushed, unpushed, or dirty</strong> — work that exists only in this VM:
+  a branch you created in the guest and haven't pushed, commits ahead of the
+  remote, uncommitted changes, or any combination. Acting on this row
+  <strong>commits and pushes it</strong>: sand drops you into the guest with your editor
+  open on <code>git commit -a</code>, and pushes the branch when you save (setting its
+  upstream if it has none). Quit the editor without saving and nothing is
+  committed or pushed.</li>
+<li><strong>Nothing to land</strong> — the checkout is on its repo's default branch with
+  nothing of its own on top. Every fresh clone starts here.</li>
+<li><strong>Local-only</strong> — the checkout has no remote configured, so there is
+  nowhere for Landing to push. This is the only state with nothing to offer.
+  If such a checkout holds uncommitted or unpushed work, the row still says
+  so (<code>local only · 2 uncommitted</code>) — there is nothing sand can do about it,
+  but you should know it is there before deleting the VM.</li>
+</ul>
+<p>The commit-and-push action is the only Landing action that runs inside the
+VM, and it stays there: the commit and the push both happen in the guest,
+using the guest's own least-privilege push token. No diff, patch, or working
+tree ever reaches your machine — see
+<a href="../../reference/security-model/">Security Model</a>.</p>
+<p>Opening a draft PR uses the <strong>workstation's own <code>gh</code></strong> — never the guest's
+own push token — so the PR is created by you, not by whatever ran inside
+the VM. See <a href="../../reference/security-model/">Security Model</a> for why that
+split matters. Without a usable <code>gh</code> on the workstation, Landing falls back to
+printing the branch's compare URL instead.</p>
+<h3 id="when-landing-says-gh-isnt-usable">When Landing says <code>gh</code> isn't usable</h3>
+<p>The pane's header names which mode it's in, and distinguishes two different
+problems:</p>
+<ul>
+<li><strong><code>gh: not installed</code></strong> — no <code>gh</code> on your <code>PATH</code>.</li>
+<li><strong><code>gh: not authenticated</code></strong> — <code>gh</code> is there, but <code>gh auth status</code> failed.
+  Run <code>gh auth login</code>, or export <code>GH_TOKEN</code> in the environment you start
+  <code>sand</code> from.</li>
+<li><strong><code>gh: 1Password did not authorize</code></strong> — you use the 1Password <code>gh</code> shell
+  plugin (below) and the vault did not hand over the token. Unlock 1Password
+  and reopen the pane.</li>
+</ul>
+<h3 id="1password-shell-plugin">1Password shell plugin</h3>
+<p>The <a href="https://developer.1password.com/docs/cli/shell-plugins/github/">1Password <code>gh</code> shell plugin</a>
+is supported directly — no configuration needed. If you have it set up, sand
+runs <code>op plugin run -- gh …</code> instead of bare <code>gh</code>, so your token comes from
+the vault exactly as it does at your own prompt.</p>
+<p>sand detects it by reading <code>~/.config/op/plugins.sh</code> (the file <code>op plugin init</code>
+generates) and checking for <code>op</code> on your <code>PATH</code>. Detection is <strong>file-only</strong> —
+sand never runs <code>op</code> to find out, precisely because that could pop an
+authorization prompt underneath the full-screen UI.</p>
+<p>Two things worth knowing:</p>
+<ul>
+<li><strong><code>GH_TOKEN</code> wins.</strong> If <code>GH_TOKEN</code> or <code>GITHUB_TOKEN</code> is set in sand's
+  environment, sand uses plain <code>gh</code> and ignores the plugin entirely. That is
+  the escape hatch if you would rather sand not touch <code>op</code>.</li>
+<li><strong>1Password may need to authorize.</strong> The first Landing action in a while can
+  require unlocking 1Password. sand gives the <code>op</code> process no terminal, so a
+  prompt can never corrupt the display — but it does mean an authorization
+  that can only be answered in the terminal will time out. Unlock 1Password
+  first and reopen the pane.</li>
+</ul>
+<p>Why any of this is needed: sand runs <code>gh</code> <strong>directly, never through a shell</strong>,
+because the branch names and repo slugs it passes come from inside the VM and
+must not be able to reach a shell interpreter. The plugin's usual <code>gh</code> alias
+is therefore invisible to sand — but <code>op plugin run -- gh …</code> is a plain
+command, not a shell trick, so supporting it costs nothing in safety.</p>
+<p>The token needs <strong><code>Pull requests: write</code></strong> (fine-grained), or <code>repo</code> /
+<code>public_repo</code> (classic) — sand resolves the base branch and the head commit's
+message, then POSTs the draft PR. Note this is the <strong>workstation's</strong> token,
+which is a different thing from the token you provisioned into the VM: the
+guest's token only ever pushes branches and never needs pull-request
+permission at all.</p>
+<p>The footer names the action for the checkout you have selected — <code>commit +
+push</code>, <code>push</code>, <code>open draft PR</code>, <code>open in browser</code> — rather than a generic
+"act", so you can see what <code>enter</code> will do before pressing it. A row with
+nothing to do offers no key at all.</p>
+<p>The header shows how old the listing is (<code>scanned 2m ago</code>). The rows come from
+a background sweep that runs about every 60 seconds, so after committing or
+pushing inside the VM's own shell the pane can briefly be out of date. Press
+<strong><code>r</code></strong> to rescan immediately.</p>
+<p>The pane's own ledger of what it did (which PR it opened, when) is
+reopenable later with <code>L</code> (Log), the same key that reopens a build's or
+transfer's log.</p>
+<p>For <code>sand land</code>'s full CLI flags (<code>--pr</code>, <code>--web</code>), see the
+<a href="../cli-reference/#sand-land-name">CLI Reference</a>.</p>
 
 
 

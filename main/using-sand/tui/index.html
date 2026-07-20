@@ -817,6 +817,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#the-unlanded-work-badge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The unlanded-work badge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-delete-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The delete guard
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1363,6 +1385,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#the-unlanded-work-badge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The unlanded-work badge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-delete-guard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The delete guard
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1555,6 +1599,11 @@ require the VM to be running.</p>
 </tr>
 <tr>
 <td><code>l</code></td>
+<td>Land</td>
+<td>Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR or the branch's page in a browser. See <a href="../files-and-shells/#landing">Landing</a>.</td>
+</tr>
+<tr>
+<td><code>L</code></td>
 <td>Log</td>
 <td>Reopen the log of this VM's last build or file transfer — including one still running, or one that failed.</td>
 </tr>
@@ -1563,6 +1612,32 @@ require the VM to be running.</p>
 <p><code>d</code> is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does <strong>not</strong> use
 <code>d</code>; it's bound to <code>g</code> instead.</p>
+<h3 id="the-unlanded-work-badge">The unlanded-work badge</h3>
+<p>A tile whose checkouts have been swept recently carries a small badge on its
+footer row naming git work that has not yet reached a PR:</p>
+<ul>
+<li><strong>Actionable</strong> (amber, <code>⚠ actionable</code>) — at least one checkout has a pushed
+  branch of its own, so a PR is one <code>l</code> (Land) away. A checkout sitting on its
+  repo's default branch doesn't count: a fresh clone is "pushed" in the literal
+  sense but has nothing to turn into a PR, so it never lights the badge.</li>
+<li><strong>At-risk</strong> (<code>↑N</code>, <code>unpushed</code>, and/or <code>dirty</code>, in dim chrome) — commits or
+  uncommitted changes that exist only in the VM: <code>↑N</code> is the number of
+  commits ahead of the remote-tracking branch, <code>unpushed</code> marks a branch
+  that's never been pushed at all, and <code>dirty</code> marks uncommitted changes.
+  This is exactly the work the delete guard (below) calls out.</li>
+</ul>
+<p>The badge shows nothing for a VM that has never been swept, is stopped, or
+whose last sweep is stale — it never guesses.</p>
+<h3 id="the-delete-guard">The delete guard</h3>
+<p>Pressing <code>d</code> on a VM whose checkouts hold work the registry has seen adds a
+line to the confirmation naming what's at stake: unpushed commits and
+uncommitted changes as <strong>"lost on delete"</strong>, and pushed-but-PR-less branches
+as <strong>"safe on GitHub"</strong>. This reads only the host's own cached checkout
+registry (the same data the badge above uses) — it never contacts the guest
+to refresh it, so confirming delete on a VM you suspect is compromised never
+triggers a round-trip into it. On a stopped VM the warning is labeled with
+how long ago that data was last seen (<code>as of 3d ago</code>), since a stopped guest
+cannot be re-swept.</p>
 <p>For the full set of <code>sand</code> subcommands and flags (including <code>sand shell</code>),
 see the <a href="../cli-reference/">CLI Reference</a>.</p>
 <h2 id="connection-profiles">Connection profiles</h2>

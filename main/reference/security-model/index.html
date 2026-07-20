@@ -688,6 +688,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#landing-the-audited-counterpart-to-the-no-host-mount-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Landing: the audited counterpart to the no-host-mount boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1258,6 +1269,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#landing-the-audited-counterpart-to-the-no-host-mount-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Landing: the audited counterpart to the no-host-mount boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1363,6 +1385,31 @@ delete and rebuild the VM rather than trust it after the fact.</p>
 you run inside it, and rely on deletion — not defense — to recover. Nothing
 you do inside the VM is expected to reach your host filesystem except
 through the two deliberate exceptions above.</p>
+<h2 id="landing-the-audited-counterpart-to-the-no-host-mount-boundary">Landing: the audited counterpart to the no-host-mount boundary</h2>
+<p>The no-host-mount boundary above means code inside a <code>sand</code> VM cannot write
+to your host filesystem. <strong>Landing</strong> (<code>l</code> on a tile, or <code>sand land</code>) is the
+one deliberate path code takes to <em>leave</em> the VM at all, and it is built to
+match that boundary rather than undercut it: Landing moves <strong>PR metadata —
+a branch name, a compare URL, a PR number and state — never a file, a diff,
+or a commit's contents</strong>. It reads the guest's git state and, for <code>--pr</code>,
+calls GitHub through your own workstation's <code>gh</code>; it does not copy the
+guest's working tree anywhere, and nothing it produces auto-executes on the
+host.</p>
+<p>This is a genuine <strong>two-token split</strong>, not a formality: the VM's Claude Code
+uses its own least-privilege token (above) to <code>git push</code> from inside the
+guest; opening the draft PR is a <em>separate</em> action that runs the
+<strong>workstation's</strong> <code>gh</code> and its own, human-held credentials. The guest's
+token never touches PR creation, and the workstation's <code>gh</code> never touches
+the guest.</p>
+<p><strong>What this provably does and does not do:</strong> Landing controls what PR
+metadata reaches your host and records that action in its own ledger — it
+does not, and cannot, stop the guest from using its own push token to push a
+branch; that authority was already granted at create time by the token's
+own scope (see the least-privilege token section below). Landing narrows
+what happens <em>after</em> a push, not what the guest's token can do. Code from
+that branch reaches your host only when you choose to bring it there
+yourself — a <code>gh pr checkout</code> or <code>git pull</code> you run and review — never as a
+side effect of Landing itself.</p>
 <h2 id="a-least-privilege-token-reasonable-agent-access">A least-privilege token: reasonable agent access</h2>
 <p><code>sand</code> can hand Claude Code a GitHub token at create time so it can clone,
 pull, push, and open pull requests from inside the VM (see
