@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
-	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -279,26 +278,8 @@ func TestProxmoxHostResourcesIsUnknown(t *testing.T) {
 	}
 }
 
-// TestProxmoxProvisioningIsStubbed proves the three lifecycle methods refuse
-// clearly instead of half-doing something.
-func TestProxmoxProvisioningIsStubbed(t *testing.T) {
-	p := newProxmoxForTest(t, newPVEMock(t))
-	ctx, cfg, out := context.Background(), vm.CreateConfig{Name: "web"}, io.Discard
-
-	for name, err := range map[string]error{
-		"Create":   p.Create(ctx, cfg, provision.CreateOptions{}, out),
-		"Recreate": p.Recreate(ctx, cfg, provision.CreateOptions{}, out),
-		"Reset":    p.Reset(ctx, cfg, provision.ResetOptions{}, out),
-	} {
-		if err == nil {
-			t.Errorf("%s: want a not-implemented error, got nil", name)
-			continue
-		}
-		if !strings.Contains(err.Error(), "not yet implemented") {
-			t.Errorf("%s error = %q; want it to say the feature is not yet implemented", name, err)
-		}
-	}
-}
+// The Create/Recreate/Reset lifecycle is exercised in proxmoxprovision_test.go;
+// they are no longer stubbed (see task 06).
 
 // --- discovery ------------------------------------------------------------------
 
@@ -1073,7 +1054,32 @@ func TestProxmoxAttachArgvUnresolvableFailsLoudly(t *testing.T) {
 	}
 }
 
+// TestProxmoxExpandsTildeInIdentityPath proves a leading ~ in identity_path is
+// resolved to the home directory — sand execs ssh and reads the .pub with no
+// shell, so a literal "~" would open a nonexistent path.
+func TestProxmoxExpandsTildeInIdentityPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	m := newPVEMock(t)
+
+	p := newProxmoxForTest(t, m, func(c *TargetConfig) { c.IdentityPath = "~/.ssh/id_ed25519" })
+	want := filepath.Join(home, ".ssh", "id_ed25519")
+	if p.identityPath != want {
+		t.Errorf("identityPath = %q; want the ~ expanded to %q", p.identityPath, want)
+	}
+}
+
 // --- preflight ------------------------------------------------------------------
+
+// stubPublicKey makes readPublicKey succeed without a real key pair on disk —
+// the same seam stubProvisioning uses, exposed for the preflight tests, which
+// build a provider directly (newProxmoxForTest) without the create-path stubs.
+func stubPublicKey(t *testing.T) {
+	t.Helper()
+	old := readPublicKey
+	readPublicKey = func(string) (string, error) { return "ssh-ed25519 AAAAtest sand@test", nil }
+	t.Cleanup(func() { readPublicKey = old })
+}
 
 // preflightHappyPath registers every endpoint a good preflight touches.
 func preflightHappyPath(m *pveMock) {
@@ -1083,12 +1089,32 @@ func preflightHappyPath(m *pveMock) {
 }
 
 func TestProxmoxPreflightHappyPath(t *testing.T) {
+	stubPublicKey(t)
 	m := newPVEMock(t)
 	preflightHappyPath(m)
 	p := newProxmoxForTest(t, m)
 
 	if err := p.Preflight(); err != nil {
 		t.Fatalf("Preflight: %v", err)
+	}
+}
+
+// TestProxmoxPreflightRequiresIdentityPath proves Preflight fails FAST — before
+// any API call — when the profile has no identity_path, since cloud-init would
+// have no public key to install for the guest login user.
+func TestProxmoxPreflightRequiresIdentityPath(t *testing.T) {
+	m := newPVEMock(t) // no routes registered: the check must fail before touching the API
+	p := newProxmoxForTest(t, m, func(c *TargetConfig) { c.IdentityPath = "" })
+
+	err := p.Preflight()
+	if err == nil {
+		t.Fatal("Preflight: want an error when identity_path is unset")
+	}
+	if !strings.Contains(err.Error(), "identity_path") {
+		t.Errorf("Preflight error = %q; want it to name identity_path", err)
+	}
+	if len(m.seen()) != 0 {
+		t.Errorf("Preflight hit the API before checking identity_path; requests: %v", m.seen())
 	}
 }
 
@@ -1150,6 +1176,7 @@ func TestProxmoxPreflightNamesTheSpecificFailure(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			stubPublicKey(t) // these cases exercise failures PAST the identity check
 			m := newPVEMock(t)
 			tc.setup(m)
 			p := newProxmoxForTest(t, m)
@@ -1172,6 +1199,7 @@ func TestProxmoxPreflightNamesTheSpecificFailure(t *testing.T) {
 // format before, and locking a working host out over a cosmetic change would be
 // worse than skipping a check the other failures already cover.
 func TestProxmoxPreflightToleratesAnUnparseableVersion(t *testing.T) {
+	stubPublicKey(t)
 	m := newPVEMock(t)
 	preflightHappyPath(m)
 	m.data("/nodes/pve1/status", `{"pveversion":"something-unexpected"}`)

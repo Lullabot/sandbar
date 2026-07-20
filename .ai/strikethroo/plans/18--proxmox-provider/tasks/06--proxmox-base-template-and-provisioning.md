@@ -2,7 +2,7 @@
 id: 6
 group: "provider"
 dependencies: [3, 5]
-status: "pending"
+status: "completed"
 created: 2026-07-20
 model: "opus"
 effort: "xhigh"
