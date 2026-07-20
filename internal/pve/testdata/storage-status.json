@@ -1,0 +1,9 @@
+{
+  "total": 500000000000,
+  "used": 210000000000,
+  "avail": 290000000000,
+  "used_fraction": 0.42,
+  "active": 1,
+  "enabled": 1,
+  "content": "images,iso,vztmpl"
+}

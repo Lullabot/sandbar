@@ -2,7 +2,7 @@
 id: 3
 group: "pve-api-client"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-20
 model: "sonnet"
 effort: "high"
