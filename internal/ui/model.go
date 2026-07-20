@@ -868,8 +868,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleLandCommitPushDone(msg)
 
 	case landRefreshMsg:
-		m.handleLandRefresh(msg)
-		return m, nil
+		// May itself fire PR-state lookups for checkouts the rescan surfaced.
+		return m, m.handleLandRefresh(msg)
 
 	case landingAvailableMsg:
 		// The Landing pane's lazy host-gh-availability check (landing.go),
