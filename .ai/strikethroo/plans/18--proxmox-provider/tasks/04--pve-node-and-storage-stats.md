@@ -2,7 +2,7 @@
 id: 4
 group: "pve-api-client"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-07-20
 model: "sonnet"
 effort: "medium"
@@ -40,7 +40,7 @@ status field semantics and units).
 ## Technical Requirements
 
 - `NodeStatus(ctx)` via `GET /nodes/{node}/status`.
-- `StorageStatus(ctx, storage)` via `GET /nodes/{node}/storage/{storage}`.
+- `StorageStatus(ctx, storage)` via `GET /nodes/{node}/storage/{storage}/status`. (Corrected during execution: the bare `/storage/{storage}` path returns storage *config*; the usage figures live under `/status`.)
 - All byte sizes in these responses are **bytes** (no KiB anywhere).
 - All `cpu` fields are a **fraction 0..1**, not a percentage.
 - `uptime` is integer seconds.
