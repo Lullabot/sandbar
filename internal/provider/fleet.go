@@ -132,14 +132,15 @@ func buildBinding(p profiles.Profile) Binding {
 func targetConfigFor(p profiles.Profile) TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return TargetConfig{
-			Provider:  ProxmoxProviderID,
-			Host:      p.Host,
-			User:      p.User,
-			Node:      p.Node,
-			Pool:      p.Pool,
-			Storage:   p.Storage,
-			Bridge:    p.Bridge,
-			TokenFile: p.TokenFile,
+			Provider:     ProxmoxProviderID,
+			Host:         p.Host,
+			User:         p.User,
+			Node:         p.Node,
+			Pool:         p.Pool,
+			Storage:      p.Storage,
+			ImageStorage: p.ImageStorage,
+			Bridge:       p.Bridge,
+			TokenFile:    p.TokenFile,
 			// IdentityPath is REQUIRED for Proxmox (unlike remote-ssh, which can
 			// fall back to the ssh agent): sand installs <identity_path>.pub into
 			// the guest via cloud-init and then connects with the private key.

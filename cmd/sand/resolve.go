@@ -137,14 +137,15 @@ func scopeForProfile(p profiles.Profile) registry.Scope {
 func targetConfigFor(p profiles.Profile) provider.TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return provider.TargetConfig{
-			Provider:  provider.ProxmoxProviderID,
-			Host:      p.Host,
-			User:      p.User,
-			Node:      p.Node,
-			Pool:      p.Pool,
-			Storage:   p.Storage,
-			Bridge:    p.Bridge,
-			TokenFile: p.TokenFile,
+			Provider:     provider.ProxmoxProviderID,
+			Host:         p.Host,
+			User:         p.User,
+			Node:         p.Node,
+			Pool:         p.Pool,
+			Storage:      p.Storage,
+			ImageStorage: p.ImageStorage,
+			Bridge:       p.Bridge,
+			TokenFile:    p.TokenFile,
 			// IdentityPath is REQUIRED for Proxmox (see the fleet.go twin): sand
 			// installs <identity_path>.pub via cloud-init and connects with the
 			// private key. Omitting it here is what left the profile's key unused.
