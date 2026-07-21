@@ -48,29 +48,15 @@ env:
   # The published asset name. base_image's default in the provider derives its
   # import filename from this, so keep the two in agreement.
   ASSET: sandbar-base-debian-13-amd64.qcow2
-  # The direct backend runs qemu itself (KVM if /dev/kvm is present, TCG
-  # otherwise) instead of going through libvirt — more reliable on CI runners.
-  LIBGUESTFS_BACKEND: direct
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install libguestfs
+      - name: Install qemu tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y guestfs-tools qemu-utils
-          # libguestfs' supermin appliance must read the host kernel; the runner
-          # ships /boot/vmlinuz-* mode 0600, which makes virt-* fail with a
-          # cryptic "supermin: ... Permission denied". Open it up.
-          sudo chmod 0644 /boot/vmlinuz-* || true
-          # Ubuntu 24.04's passt AppArmor profile denies the socket/PID paths
-          # libguestfs uses, so every virt-* command dies with "passt exited with
-          # status 1" (Debian #1086844, fixed in guestfs-tools 1.52.2-2 — newer
-          # than the runner's 1.52.0). aa-teardown fully UNLOADS the profiles
-          # (unlike `systemctl stop apparmor`, which leaves loaded ones active),
-          # so passt runs unconfined.
-          sudo aa-teardown || true
+          sudo apt-get install -y qemu-utils
 
       - name: Download the upstream Debian cloud image
         run: curl -fSL "$SRC_URL" -o "$ASSET"
@@ -80,9 +66,8 @@ jobs:
           # Download qemu-guest-agent and every dependency not already in a
           # minimal trixie — which the genericcloud image also is — in a matching
           # debian:trixie container, so they can be installed OFFLINE inside the
-          # image. This sidesteps libguestfs' appliance networking (its `passt`
-          # user-mode helper fails on the runner), and matches the image's Debian
-          # release exactly. Docker is preinstalled on GitHub's ubuntu runners.
+          # image (no in-guest network needed). Matches the image's Debian release
+          # exactly. Docker is preinstalled on GitHub's ubuntu runners.
           mkdir -p debs
           docker run --rm -v "$PWD/debs:/debs" debian:trixie-slim bash -euc '
             apt-get update
@@ -91,21 +76,45 @@ jobs:
           '
           ls -la debs
 
-      - name: Bake in qemu-guest-agent (offline) and sysprep
+      - name: Bake in qemu-guest-agent (qemu-nbd + chroot, no libguestfs)
         run: |
-          # Install the pre-fetched .debs with dpkg INSIDE the image and enable
-          # the service — all offline, so no appliance network (hence no passt).
-          # Then sysprep (default ops only, which need no network) to strip
-          # machine-specific state so clones stay independent. Both edit the disk
-          # offline and never boot the guest, so cloud-init's first-boot behaviour
-          # is untouched.
-          sudo virt-customize -a "$ASSET" \
-            --copy-in debs:/tmp \
-            --run-command 'dpkg -i /tmp/debs/*.deb' \
-            --run-command 'systemctl enable qemu-guest-agent' \
-            --run-command 'rm -rf /tmp/debs'
-          sudo virt-sysprep -a "$ASSET"
-          sudo chown "$USER" "$ASSET" # virt-* leave it root-owned
+          # We mount the qcow2 as a block device and dpkg-install the debs in a
+          # chroot rather than using libguestfs, whose virt-* tools are broken on
+          # the 24.04 runner (its passt AppArmor profile — Debian #1086844). This
+          # needs only qemu-nbd (stable everywhere) and never boots the guest, so
+          # cloud-init's first-boot behaviour is untouched.
+          set -euxo pipefail
+          sudo modprobe nbd max_part=16
+          sudo qemu-nbd --connect=/dev/nbd0 "$ASSET"
+          for _ in $(seq 1 15); do
+            sudo partprobe /dev/nbd0 2>/dev/null || true
+            lsblk -lnpo NAME,FSTYPE /dev/nbd0 | grep -q ext4 && break
+            sleep 1
+          done
+          # Debian genericcloud is GPT: the root is the ext4 partition.
+          root=$(lsblk -lnpo NAME,FSTYPE /dev/nbd0 | awk '$2=="ext4"{print $1; exit}')
+          test -n "$root"
+          sudo mkdir -p /mnt/img
+          sudo mount "$root" /mnt/img
+          # Deny service starts inside the chroot: qemu-guest-agent's postinst
+          # would otherwise try to START the daemon, but there is no init here.
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /mnt/img/usr/sbin/policy-rc.d >/dev/null
+          sudo chmod +x /mnt/img/usr/sbin/policy-rc.d
+          for d in dev proc sys; do sudo mount --bind "/$d" "/mnt/img/$d"; done
+          sudo mkdir -p /mnt/img/tmp/debs
+          sudo cp debs/*.deb /mnt/img/tmp/debs/
+          sudo chroot /mnt/img sh -c 'dpkg -i /tmp/debs/*.deb'
+          # Enable the service on the offline root (chroot systemctl refuses with
+          # no running init; --root writes the wants/ symlink directly).
+          sudo systemctl --root=/mnt/img enable qemu-guest-agent
+          sudo systemctl --root=/mnt/img is-enabled qemu-guest-agent
+          test -e /mnt/img/usr/sbin/qemu-ga
+          sudo rm -f /mnt/img/usr/sbin/policy-rc.d
+          sudo rm -rf /mnt/img/tmp/debs
+          for d in dev proc sys; do sudo umount "/mnt/img/$d"; done
+          sudo umount /mnt/img
+          sudo qemu-nbd --disconnect /dev/nbd0
+          sudo chown "$USER" "$ASSET"
 
       - name: Checksum
         run: sha256sum "$ASSET" | tee "$ASSET.sha256"
@@ -125,6 +134,6 @@ jobs:
           gh release create "$tag" "$ASSET" "$ASSET.sha256" \
             --draft \
             --title "Base image $tag" \
-            --notes "Debian 13 genericcloud with qemu-guest-agent preinstalled, for sand's Proxmox \`base_image\`. Built offline with virt-sysprep by .github/workflows/base-image.yml. Verify with the .sha256 asset."
+            --notes "Debian 13 genericcloud with qemu-guest-agent preinstalled, for sand's Proxmox \`base_image\`. Built offline by .github/workflows/base-image.yml. Verify with the .sha256 asset."
           gh release edit "$tag" --draft=false
           echo "Published $tag with $ASSET"
