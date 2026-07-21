@@ -136,10 +136,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # --repo is explicit because this job has no checkout, so gh can't infer
+          # the repository from a git remote.
           tag='${{ steps.tag.outputs.tag }}'
+          repo='${{ github.repository }}'
           gh release create "$tag" "$ASSET" "$ASSET.sha256" \
+            --repo "$repo" \
             --draft \
             --title "Base image $tag" \
             --notes "Debian 13 genericcloud with qemu-guest-agent preinstalled, for sand's Proxmox \`base_image\`. Built offline by .github/workflows/base-image.yml. Verify with the .sha256 asset."
-          gh release edit "$tag" --draft=false
+          gh release edit "$tag" --repo "$repo" --draft=false
           echo "Published $tag with $ASSET"
