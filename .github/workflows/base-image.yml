@@ -64,6 +64,13 @@ jobs:
           # ships /boot/vmlinuz-* mode 0600, which makes virt-* fail with a
           # cryptic "supermin: ... Permission denied". Open it up.
           sudo chmod 0644 /boot/vmlinuz-* || true
+          # Ubuntu 24.04's passt AppArmor profile denies the socket/PID paths
+          # libguestfs uses, so every virt-* command dies with "passt exited with
+          # status 1" (Debian #1086844, fixed in guestfs-tools 1.52.2-2 — newer
+          # than the runner's 1.52.0). aa-teardown fully UNLOADS the profiles
+          # (unlike `systemctl stop apparmor`, which leaves loaded ones active),
+          # so passt runs unconfined.
+          sudo aa-teardown || true
 
       - name: Download the upstream Debian cloud image
         run: curl -fSL "$SRC_URL" -o "$ASSET"
