@@ -373,6 +373,13 @@ type model struct {
 	profileInputs    []textinput.Model
 	profileFormFocus int
 	profileFormErr   error
+	// profileInsecure is the Proxmox form's "skip cert validation" checkbox
+	// value — the one form field that is not a textinput.Model, so unlike
+	// every other field it cannot live inside profileInputs. Meaningless
+	// (and left false) for a Local/RemoteSSH form; profileFormSlots
+	// (profilesview.go) is the single place that decides which field, if
+	// any, is this checkbox.
+	profileInsecure bool
 }
 
 // New wires the dependencies into a ready-to-run tea.Model over a FLEET: one
