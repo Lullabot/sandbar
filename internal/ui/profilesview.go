@@ -550,13 +550,46 @@ func newProfileInputs(t profiles.Type) []textinput.Model {
 	return inputs
 }
 
-// openProfileCreateForm opens a blank RemoteSSH profile form. Create only
-// ever offers RemoteSSH: Local is permanent and pre-seeded, never created
-// from this screen — see openProfileEditForm for its rename-only form.
-func (m *model) openProfileCreateForm() tea.Cmd {
+// creatableProfileTypes are the types `n` can create, in menu order. Local is
+// omitted: it is permanent and pre-seeded (there is exactly one, created on
+// first run), so it is editable but never creatable — a future type is one
+// line to add here.
+var creatableProfileTypes = []profiles.Type{profiles.TypeRemoteSSH, profiles.TypeProxmox}
+
+// profileTypeLabel is the picker's (and any future menu's) human label for a
+// creatable profile type. A small function of its own, rather than reusing
+// profileRowText's inline switch, since the picker has only a bare Type to
+// name — not a whole Profile value.
+func profileTypeLabel(t profiles.Type) string {
+	switch t {
+	case profiles.TypeProxmox:
+		return "Proxmox"
+	default: // TypeRemoteSSH
+		return "Remote SSH"
+	}
+}
+
+// openProfileCreateForm opens the pre-form type picker (viewProfileTypePicker)
+// rather than jumping straight into a field form: now that a second creatable
+// type (Proxmox) exists alongside RemoteSSH, `n` has to ask WHICH one before
+// any inputs are built. See creatableProfileTypes for the offered types and
+// openProfileFormForType for what a picker selection opens into. Local is
+// never offered: it is permanent and pre-seeded, never created from this
+// screen — see openProfileEditForm for its rename-only edit form.
+func (m *model) openProfileCreateForm() {
+	m.profileTypeCursor = 0
+	m.profileMsg = ""
+	m.view = viewProfileTypePicker
+}
+
+// openProfileFormForType opens a blank create form for profile type t — what
+// openProfileCreateForm used to do unconditionally for RemoteSSH before the
+// type picker existed, now parameterized so the picker can reach it for any
+// creatable type.
+func (m *model) openProfileFormForType(t profiles.Type) tea.Cmd {
 	m.profileFormID = ""
-	m.profileFormType = profiles.TypeRemoteSSH
-	m.profileInputs = newProfileInputs(profiles.TypeRemoteSSH)
+	m.profileFormType = t
+	m.profileInputs = newProfileInputs(t)
 	m.profileFormFocus = 0
 	m.profileFormErr = nil
 	m.profileInsecure = false
@@ -808,6 +841,69 @@ func (m model) profileFormView() string {
 	return appStyle.Render(b.String())
 }
 
+// profileTypePickerSelect is the picker's own local key.Binding, mirroring
+// profileMove/profileEdit above — screen-local since nothing outside this
+// view dispatches it. Up/down reuse profileMove; there is no separate
+// binding for them.
+var profileTypePickerSelect = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
+
+// updateProfileTypePicker handles keys on the CREATE path's pre-form type
+// picker (viewProfileTypePicker): move the ring over creatableProfileTypes,
+// esc back to the profile list, or enter to open the field form for the
+// type under the cursor (openProfileFormForType) — mirroring
+// updateProfiles' own up/down-then-verb shape.
+func (m model) updateProfileTypePicker(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.Code {
+	case tea.KeyUp:
+		if m.profileTypeCursor > 0 {
+			m.profileTypeCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.profileTypeCursor < len(creatableProfileTypes)-1 {
+			m.profileTypeCursor++
+		}
+		return m, nil
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.view = viewProfiles
+		return m, nil
+	case key.Matches(msg, profileTypePickerSelect):
+		return m, m.openProfileFormForType(creatableProfileTypes[m.profileTypeCursor])
+	}
+	return m, nil
+}
+
+// profileTypePickerHelp is the picker's footer.
+func (m model) profileTypePickerHelp() []key.Binding {
+	return []key.Binding{profileMove, profileTypePickerSelect, m.keys.Back}
+}
+
+// profileTypePickerView renders the pre-form type picker: one row per
+// creatable type (creatableProfileTypes), with the same cursor/focus styling
+// the profile list and the field form already use, so the three screens read
+// as one flow rather than three different UIs bolted together.
+func (m model) profileTypePickerView() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("New Connection Profile"))
+	b.WriteString("\n\n")
+
+	for i, t := range creatableProfileTypes {
+		cursor := "  "
+		ls := labelStyle
+		if i == m.profileTypeCursor {
+			cursor = "> "
+			ls = focusedLabelStyle
+		}
+		b.WriteString(ls.Render(cursor+profileTypeLabel(t)) + "\n")
+	}
+
+	b.WriteString("\n" + m.footerView(m.profileTypePickerHelp()))
+	return appStyle.Render(b.String())
+}
+
 // updateProfiles handles keys on the profile management list.
 func (m model) updateProfiles(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.profileConfirmDeleteID != "" {
@@ -844,7 +940,8 @@ func (m model) updateProfiles(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.New):
-		return m, m.openProfileCreateForm()
+		m.openProfileCreateForm()
+		return m, nil
 
 	case key.Matches(msg, profileEdit):
 		p, ok := m.currentProfile()
