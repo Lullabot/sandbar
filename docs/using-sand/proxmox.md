@@ -16,8 +16,8 @@ matter of `sand` behaving well.
 !!! info "What you'll set up"
     1. A dedicated **pool** for `sand`'s VMs.
     2. A custom **role** holding the minimum privileges.
-    3. A dedicated **user** and a **privilege-separated API token**.
-    4. **ACLs** binding the role to the token at the pool — plus three
+    3. A dedicated **user** and an **API token** that inherits the user's rights.
+    4. **ACLs** binding the role to the **user** at the pool — plus three
        privileges that Proxmox does not allow to be pool-scoped, granted at the
        narrowest path that works.
     5. Optionally, a **second isolated pool** for automated tests.
@@ -86,11 +86,11 @@ failures — so, for the record, why each of the less-obvious ones is here:
     reject the whole command. `VM.Console` is only for the VNC/SPICE console,
     which `sand` never uses. Leaving both out is deliberate.
 
-## Step 3 — Create a user and a privilege-separated token
+## Step 3 — Create a user and an API token
 
 ```bash
 pveum user add sandbar@pve --comment "sandbar automation"
-pveum user token add sandbar@pve prov --privsep 1 --output-format json
+pveum user token add sandbar@pve prov --privsep 0 --output-format json
 ```
 
 The second command prints the token **value exactly once**:
@@ -99,13 +99,21 @@ The second command prints the token **value exactly once**:
 {
   "full-tokenid": "sandbar@pve!prov",
   "value": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "info": { "privsep": "1" }
+  "info": { "privsep": "0" }
 }
 ```
 
-`--privsep 1` means the token carries **only** the permissions you grant it
-explicitly below — even though its user could later be given more, the token
-stays confined. **Save the value now**; it cannot be retrieved again.
+`--privsep 0` turns privilege separation **off**, so the token inherits its
+user's permissions. That's deliberate: Proxmox computes a privilege-separated
+(`--privsep 1`) token's rights as the **intersection** of the user's permissions
+and the token's own. So if you grant the ACLs only to the token and its user has
+none — exactly the case here, where `sandbar@pve` exists solely to own this
+token — the token ends up with **no permissions at all**, and
+`pveum user permissions 'sandbar@pve!prov'` prints `{}`. With separation off you
+grant the least-privilege ACLs below to the **user** `sandbar@pve` instead, and
+the token carries exactly those. Because this user has no password and no other
+roles, its permissions *are* the confined set — there is nothing broader for the
+token to inherit. **Save the value now**; it cannot be retrieved again.
 
 `sand` authenticates with the token's **full identity**, which is the two fields
 above joined by an `=`:
@@ -129,11 +137,11 @@ chmod 600 ~/.config/sandbar/pve1.token
 The file holds **one line** and nothing else — the identity, an `=`, and the
 value. `sand` refuses to read it unless it is mode `600` (owner-only).
 
-## Step 4 — Bind the role to the token at the pool
+## Step 4 — Bind the role to the user at the pool
 
 ```bash
-# Scope the token to the pool: this is what confines it to sandbar's own VMs.
-pveum acl modify /pool/sandbar --roles SandbarProv --tokens 'sandbar@pve!prov'
+# Scope the user (and so its token) to the pool: this confines it to sandbar's own VMs.
+pveum acl modify /pool/sandbar --roles SandbarProv --users sandbar@pve
 
 # Add the VM storage to the pool so the role's Datastore privileges apply to it.
 # This grants them on the WHOLE storage object (see the note below), not a
@@ -168,15 +176,15 @@ broader role.
 #    SDN zone "localnetwork"; with a VLAN tag the path gains the tag as a further
 #    segment (…/vmbr0/<tag>).
 pveum role add SandbarNet --privs "SDN.Use"
-pveum acl modify /sdn/zones/localnetwork/vmbr0 --roles SandbarNet --tokens 'sandbar@pve!prov'
+pveum acl modify /sdn/zones/localnetwork/vmbr0 --roles SandbarNet --users sandbar@pve
 
 # 2. Download the cloud image to storage, and read node CPU/memory for the board
 #    header. Both are node-scoped, not pool-scoped.
 pveum role add SandbarNode --privs "Sys.AccessNetwork Sys.Audit"
-pveum acl modify /nodes/pve1 --roles SandbarNode --tokens 'sandbar@pve!prov'
+pveum acl modify /nodes/pve1 --roles SandbarNode --users sandbar@pve
 
 # 3. Allocate the imported template on the storage (the download-url import step).
-pveum acl modify /storage/local-lvm --roles SandbarProv --tokens 'sandbar@pve!prov'
+pveum acl modify /storage/local-lvm --roles SandbarProv --users sandbar@pve
 ```
 
 | Privilege | Path | What it allows |
@@ -184,6 +192,13 @@ pveum acl modify /storage/local-lvm --roles SandbarProv --tokens 'sandbar@pve!pr
 | `SDN.Use` | `/sdn/zones/localnetwork/vmbr0` | Attaching a VM to **that one bridge** — nothing else on the network |
 | `Sys.AccessNetwork` | `/nodes/pve1` | Downloading the cloud image to storage |
 | `Sys.Audit` | `/nodes/pve1` | Reading node CPU/memory/disk stats for the board header |
+
+!!! note "You won't see `localnetwork` under SDN → Zones"
+    `localnetwork` is a built-in *synthetic* zone that Proxmox uses only as the
+    permission path for plain Linux bridges — it is **not** a configured SDN
+    zone, so it never appears under **Datacenter → SDN → Zones**, and that's
+    expected. To confirm the bridge grant landed, look under **Datacenter →
+    Permissions** (or run the verification command below), not the SDN panel.
 
 ### Verify the scope
 
@@ -197,6 +212,14 @@ pveum user permissions 'sandbar@pve!prov' --output-format json
 The result should list **only** `/pool/sandbar`, your storage, the bridge, and
 the node `/nodes/pve1`. **If any permission appears at `/`, the isolation
 guarantee does not hold** — go back and remove the over-broad grant.
+
+!!! warning "If this prints `{}`"
+    An empty result means the token has **no** effective permissions — almost
+    always because it was created with `--privsep 1` and the ACLs were granted to
+    the **token** instead of the **user**. A privilege-separated token's rights
+    are the *intersection* of the user's and the token's, so a token whose user
+    holds no ACLs gets nothing. Recreate it with `--privsep 0` (Step 3) and grant
+    the ACLs to `--users sandbar@pve` (Steps 4–5).
 
 ## Step 6 — Point `sand` at the host
 
