@@ -1219,6 +1219,9 @@ func TestProxmoxBaseImageDefaultAndOverride(t *testing.T) {
 		t.Errorf("unset base_image = (%q, %q); want the built-in default (%q, %q)",
 			def.baseImageURL, def.baseImageFile, baseImageURL, baseImageFile)
 	}
+	if def.baseImageSHA256 != defaultBaseImageSHA256 {
+		t.Errorf("default image checksum = %q; want the pinned %q", def.baseImageSHA256, defaultBaseImageSHA256)
+	}
 
 	const url = "https://example.test/golden/sandbar-base.qcow2?sig=abc"
 	over := newProxmoxForTest(t, m, func(c *TargetConfig) { c.BaseImage = url })
@@ -1227,6 +1230,9 @@ func TestProxmoxBaseImageDefaultAndOverride(t *testing.T) {
 	}
 	if over.baseImageFile != "sandbar-base.qcow2" {
 		t.Errorf("derived filename = %q; want %q (query stripped)", over.baseImageFile, "sandbar-base.qcow2")
+	}
+	if over.baseImageSHA256 != "" {
+		t.Errorf("custom base_image must carry no pinned checksum, got %q", over.baseImageSHA256)
 	}
 }
 

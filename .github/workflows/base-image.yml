@@ -27,13 +27,6 @@ on:
         default: ''
   schedule:
     - cron: '0 6 1 * *' # 06:00 UTC on the 1st of each month
-  # BOOTSTRAP-ONLY (remove once this file is on the default branch): lets the
-  # first image release be cut from the proxmox-provider PR. workflow_dispatch
-  # can't target a branch whose workflow isn't yet on the default branch, so a
-  # scoped push trigger is the only way to run it pre-merge.
-  push:
-    branches: [worktree-proxmox-provider]
-    paths: ['.github/workflows/base-image.yml']
 
 permissions:
   contents: write # create the release
