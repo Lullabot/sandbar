@@ -311,3 +311,52 @@ and `go test ./internal/ui/... -race` green. Phase 3 additionally requires
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-20
+
+### Results
+
+The TUI profile form now supports Proxmox at parity with local and remote-ssh,
+across 4 tasks in 3 phases:
+
+- **Task 001** — the Proxmox field form. The homogeneous `[]textinput.Model`
+  form gained a boolean input kind via a descriptor list (`profileFormSlots`):
+  each slot is a text field or the `insecure` checkbox (value in
+  `model.profileInsecure`, toggled by space/enter, text keys blocked when
+  focused). Save/edit/build/list wiring for `TypeProxmox`, in-form
+  host/node/pool/token_file validation, `token_file` carried strictly as a path,
+  and a fix to `connectionFieldsEqual` (it ignored every proxmox field, so a
+  node/pool edit was misread as a rename and skipped the rebuild — a real bug).
+- **Task 002** — the create type picker. `n` now opens a picker of the creatable
+  types (Remote SSH / Proxmox; Local excluded) that routes to the right form.
+  The edit path is untouched.
+- **Task 003** — golden snapshots for the picker and the Proxmox form, with the
+  checkbox captured in both `[ ]` and `[x]` states.
+- **Task 004** — docs: proxmox.md drops the "TUI can't create proxmox" caveat,
+  connection-profiles.md and AGENTS.md describe the picker and the checkbox.
+
+### Noteworthy Events
+
+- **The "provider option on main" question was reconciled during planning.** The
+  existing TUI "provider option" is the VM-create form's *profile selector*
+  (which existing profile to build a VM on) — type-agnostic and already working.
+  It is not a profile-creation type picker; none existed. The plan added the
+  latter. No wasted work resulted.
+- **The docs task (haiku) overclaimed** that the picker offers "Local, Remote
+  SSH, or Proxmox". Local is never creatable, so the orchestrator corrected
+  connection-profiles.md and AGENTS.md to "Remote SSH or Proxmox" and fixed a
+  stale "every other profile is remote-ssh" line, verified against the
+  implementation before committing.
+- No significant issues otherwise: `go build`/`go vet`/`gofmt`, the full `-race`
+  suite (18 packages), the three new goldens (stable — a plain run after
+  `-update` yields no diff), and `mkdocs build --strict` all pass;
+  `go.mod`/`go.sum` unchanged.
+
+### Necessary follow-ups
+
+- None required. Possible future polish (not requested): edit-time affordance to
+  reveal/rotate the token file, and a confirm when the referenced token file does
+  not exist yet (today `Preflight` reports it on first connect).
