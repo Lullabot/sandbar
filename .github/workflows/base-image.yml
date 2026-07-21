@@ -73,7 +73,11 @@ jobs:
           # Offline edit (never boots the guest, so cloud-init's first-boot
           # behaviour is untouched); virt-sysprep also strips machine-specific
           # state so clones stay independent.
+          # --network is REQUIRED: virt-sysprep disables the appliance network by
+          # default (unlike virt-customize), so apt can't reach deb.debian.org
+          # without it.
           sudo virt-sysprep -a "$ASSET" \
+            --network \
             --run-command 'apt-get update' \
             --install qemu-guest-agent \
             --run-command 'systemctl enable qemu-guest-agent'
