@@ -199,7 +199,16 @@ var vmCommands = []vmCommand{
 			if !notBuilding(m, v) {
 				return false
 			}
-			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope, provenancerFor(m, v.scope))
+			// boardHelp evaluates this every frame, so it must NOT touch the
+			// network: use the registry-only form of RecreateBase (no Provenancer),
+			// or a focused remote/Proxmox VM would make a blocking, no-timeout
+			// SSH/REST provenance round trip on every render and freeze the TUI
+			// behind a slow host — the exact anti-pattern the async toolset-load
+			// change removed (form.go). The background provenance-adoption
+			// (AdoptOnce) keeps the registry in sync with markers, so a VM another
+			// controller created still becomes resettable once the board has loaded;
+			// the keypress `action` below still consults the authoritative marker.
+			_, ok := manage.RecreateBase(m.reg, v.Name, v.scope)
 			return ok
 		},
 		action: func(m *model, v boardVM) tea.Cmd {

@@ -1387,6 +1387,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolDDEV = cfg.WithDDEV
 			m.toolGo = cfg.WithGo
 			m.toolJava = cfg.WithJava
+			// Codex must be refreshed too, or the probed base's codex state is
+			// silently dropped: the checkbox stays at openForm's default (false)
+			// while the base was built WITH codex, and submitting reconverges the
+			// shared base without it (the silent de-select form.go's reset path
+			// guards against, reintroduced here for the create/probe path).
+			m.toolCodex = cfg.WithCodex
 		}
 		return m, nil
 

@@ -879,12 +879,9 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	cfg.Name = m.resetName
 	cfg.BaseName = m.resetBaseName
 	if err := cfg.Validate(); err != nil {
+		// Validate now enforces the base-disk floor for every entrypoint (a clone
+		// cannot shrink below it), so the reset path no longer needs its own check.
 		m.formErr = err
-		return m, nil
-	}
-	floor, _ := parseLimaSize(vm.BaseDiskFloor)
-	if want, ok := parseLimaSize(cfg.Disk); ok && want < floor {
-		m.formErr = fmt.Errorf("disk %s is below the base floor of %s; a reset can only grow the disk", cfg.Disk, vm.BaseDiskFloor)
 		return m, nil
 	}
 	// A reset of a VM a copy is still streaming into would delete the copy's target
