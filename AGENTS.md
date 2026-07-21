@@ -49,6 +49,11 @@ it is not where prose belongs.
   secrets) or `proxmox` profiles (host/node/pool/storage/bridge + a
   `token_file` **path**, still no secrets — the token value lives in the file,
   loaded by `profiles.LoadToken`, which refuses one readable by group/other).
+  The TUI's profile creation form (`p` → `n`) opens a type picker to choose
+  Remote SSH or Proxmox (Local is permanent/pre-seeded, never creatable) before
+  presenting the form. The Proxmox form includes one boolean **checkbox** input
+  (`insecure` for self-signed certs) — the sole non-text input in the profile
+  form family.
   Deliberately does not import `provider` (to avoid an import
   cycle) — `provider.BuildFleet` is what converts a `Profile` into a
   `Binding`.

@@ -185,13 +185,12 @@ guarantee does not hold** — go back and remove the over-broad grant.
 
 ## Step 6 — Point `sand` at the host
 
-!!! note "Proxmox profiles are added by editing `profiles.yaml`"
-    The TUI's profile screen (press `p`) can create and edit `local` and
-    `remote-ssh` profiles, but **not** `proxmox` ones yet — so add a Proxmox
-    profile by hand-editing `profiles.yaml` as shown here. Once it's in the file
-    and `enabled`, it appears in the TUI's profile list and board like any other,
-    and `sand --profile <name>` targets it from the CLI; only the *creation* form
-    is CLI/YAML-only for now.
+!!! info "Proxmox profiles can be created in the TUI or by editing `profiles.yaml`"
+    A Proxmox profile can be created in the TUI by pressing `p` → `n`, choosing
+    **Proxmox** from the type picker, and filling the form (which includes an
+    optional `insecure` checkbox for self-signed certificates). Alternatively, add
+    a Proxmox profile by hand-editing `profiles.yaml` as shown here — the YAML
+    form is the reference and automation path.
 
 Add a `proxmox` profile to your
 [`profiles.yaml`](connection-profiles.md#profilesyaml):

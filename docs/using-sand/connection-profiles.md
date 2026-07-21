@@ -34,8 +34,8 @@ A profile has:
 
 There is always exactly one **Local** profile — permanent, created
 automatically the first time `sand` runs, and not deletable (though you can
-rename it). Every other profile is `remote-ssh`, and you can create, edit,
-enable, disable, or delete as many of those as you like.
+rename it). Every other profile is `remote-ssh` or `proxmox`, and you can
+create, edit, enable, disable, or delete as many of those as you like.
 
 ## `profiles.yaml`
 
@@ -102,6 +102,11 @@ every profile, its type, and its enabled/disabled state.
 | `enter` | Edit the selected profile (or create a new one from the ghost row) |
 | `t` | Toggle enabled/disabled |
 | `d` | Delete (not offered for Local) |
+
+When creating a profile (press `n`), a type picker first asks whether to create
+a **Remote SSH** or a **Proxmox** profile, then opens the matching form. (Local
+is not offered — there is always exactly one Local profile, created for you and
+never deletable.)
 
 Every change here is **live** — there is no restart, and no separate "apply"
 step:
