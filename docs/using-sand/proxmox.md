@@ -55,6 +55,12 @@ cluster access) as a full admin — usually `root@pam`.
   `sand` talks to guests over SSH once they boot (it discovers each VM's IP from
   the guest agent), so your workstation must be able to reach the addresses the
   VMs get on that bridge.
+- **An SSH key pair.** `sand` installs your public key into each guest via
+  cloud-init and then connects with the private key, so the profile's
+  `identity_path` must point to a private key whose `.pub` sits beside it
+  (`ssh-keygen -t ed25519` if you need one). Unlike a `remote-ssh` profile, a
+  Proxmox profile cannot fall back to the SSH agent — it needs the `.pub` file to
+  hand to cloud-init.
 - **The `qemu-guest-agent`** is installed by `sand`'s provisioning into the base
   image, so you don't need to prepare an image yourself — `sand` builds its base
   template from a cloud image the first time you create a VM.
@@ -269,6 +275,8 @@ profiles:
     #                             # cloud-image download; defaults to "local"
     bridge: vmbr0                 # the Linux bridge
     token_file: ~/.config/sandbar/pve1.token
+    identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sand installs + connects with
+    # user: dev                   # the guest login user; defaults to your host username
     # insecure: true              # only if the PVE cert is self-signed
     # ca_file: /etc/pve/pve-root-ca.pem   # or pin the CA instead
 ```
@@ -284,6 +292,8 @@ The profile fields:
 | `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
 | `bridge` | The Linux bridge `net0` attaches to. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
+| `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
+| `user` | Optional. The guest login user `sand`'s cloud-init creates (and SSHes in as). Defaults to your host username. |
 | `insecure` | Optional. Skip TLS verification (PVE ships a self-signed cert by default). |
 | `ca_file` | Optional. Pin a CA certificate instead of disabling verification. |
 

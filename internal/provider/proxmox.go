@@ -1265,6 +1265,16 @@ func (p *proxmoxProvider) HostFiles() lima.HostFiles { return p.files }
 // the node exists, that the version is supported, that the pool exists, and that
 // the storage exists and can hold VM images.
 func (p *proxmoxProvider) Preflight() error {
+	// Fail fast on a missing/unreadable SSH key BEFORE any network call: sand
+	// installs <identity_path>.pub into the guest via cloud-init and then
+	// authenticates the ssh transport with the private key, so a Proxmox profile
+	// without a readable identity_path can never yield a reachable VM. Catching it
+	// here — the cheapest check, a local file read — beats failing minutes into
+	// the first base build, which is exactly where it used to surface.
+	if _, err := readPublicKey(p.identityPath); err != nil {
+		return fmt.Errorf("proxmox: %w; set identity_path in the profile to an SSH private key whose .pub sits beside it (e.g. ~/.ssh/id_ed25519, with ~/.ssh/id_ed25519.pub present)", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 	defer cancel()
 
