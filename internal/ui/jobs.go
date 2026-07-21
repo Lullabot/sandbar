@@ -219,6 +219,23 @@ func (s jobSnapshot) Running() bool { return s.State == jobRunning }
 // paint the VM red.
 func (s jobSnapshot) Failed() bool { return s.State == jobFailed && !s.Canceled }
 
+// jobFailedLabel is a short "<verb> <vm>" describing a finished run, used when a
+// failure is surfaced in the Messages log. The snapshot carries Recreates so a
+// reset (delete-and-recreate) is not mislabeled as a create.
+func jobFailedLabel(key jobKey, job jobSnapshot) string {
+	switch key.kind {
+	case kindTransfer:
+		return "file transfer for " + key.vm
+	case kindLand:
+		return "gh action for " + key.vm
+	default:
+		if job.Recreates {
+			return "reset of " + key.vm
+		}
+		return "create of " + key.vm
+	}
+}
+
 // jobRegistry holds every run, keyed by jobKey. The zero value is unusable; use
 // newJobRegistry. A nil *jobRegistry is safe to call every method on and reports
 // "no jobs", so a model built by hand (as tests do) needs no registry.
