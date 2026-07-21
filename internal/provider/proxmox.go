@@ -57,13 +57,16 @@ const (
 	pveStopped = "stopped"
 )
 
-// The oldest Proxmox VE this provider supports. 8.1 is the floor because the
-// privilege set the setup guide grants exists in that form from 8.1 onwards;
-// older releases fail later with an opaque 403 rather than anything an operator
-// can act on, which is what Preflight exists to prevent.
+// The oldest Proxmox VE this provider supports. 9.0 is the floor because the
+// minimum-privilege role the setup guide grants is expressed in PVE 9's
+// privilege vocabulary: the VM.GuestAgent.* privileges it relies on were
+// introduced in PVE 9, and VM.Monitor (which older guides used) was removed in
+// PVE 9. On an 8.x host that role cannot even be created, so the token would
+// fail later with an opaque 403 rather than anything an operator can act on —
+// which is exactly what Preflight exists to prevent by naming the version here.
 const (
-	minPVEMajor = 8
-	minPVEMinor = 1
+	minPVEMajor = 9
+	minPVEMinor = 0
 )
 
 // Timings. All are vars, not consts, so tests can shrink them and keep the suite
@@ -1284,7 +1287,7 @@ func (p *proxmoxProvider) Preflight() error {
 
 // pveVersionAtLeast reports whether a PVE version string is at least
 // major.minor, and — separately — whether it could be parsed at all. The two
-// answers are distinct on purpose: "older than 8.1" and "unreadable" call for
+// answers are distinct on purpose: "older than 9.0" and "unreadable" call for
 // opposite responses, and collapsing them would let a format change lock every
 // user out (see Preflight).
 //

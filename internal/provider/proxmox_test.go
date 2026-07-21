@@ -1195,7 +1195,7 @@ func TestProxmoxAttachArgvUnresolvableFailsLoudly(t *testing.T) {
 
 // preflightHappyPath registers every endpoint a good preflight touches.
 func preflightHappyPath(m *pveMock) {
-	m.data("/nodes/pve1/status", `{"pveversion":"pve-manager/8.2.4/abcdef","cpuinfo":{"cpus":16}}`)
+	m.data("/nodes/pve1/status", `{"pveversion":"pve-manager/9.0.4/abcdef","cpuinfo":{"cpus":16}}`)
 	m.data("/pools", `[{"poolid":"sandbar"},{"poolid":"other"}]`)
 	m.data("/nodes/pve1/storage/local-lvm/status", `{"total":1000,"avail":900,"active":1,"enabled":1,"content":"images,rootdir"}`)
 }
@@ -1236,9 +1236,10 @@ func TestProxmoxPreflightNamesTheSpecificFailure(t *testing.T) {
 			name: "version too old",
 			setup: func(m *pveMock) {
 				preflightHappyPath(m)
-				m.data("/nodes/pve1/status", `{"pveversion":"pve-manager/8.0.9/aaaa"}`)
+				// Even the latest 8.x is now too old — the floor is PVE 9.0.
+				m.data("/nodes/pve1/status", `{"pveversion":"pve-manager/8.4.1/aaaa"}`)
 			},
-			want: []string{"8.1", "8.0.9"},
+			want: []string{"9.0", "8.4.1"},
 		},
 		{
 			name: "pool missing",
@@ -1306,14 +1307,14 @@ func TestPVEVersionAtLeast(t *testing.T) {
 		major, min int
 		want, ok   bool
 	}{
-		{"pve-manager/8.2.4/abcdef", 8, 1, true, true},
-		{"pve-manager/8.1.0/abcdef", 8, 1, true, true},
-		{"pve-manager/8.0.9/abcdef", 8, 1, false, true},
-		{"pve-manager/9.0.0/abcdef", 8, 1, true, true},
-		{"pve-manager/7.4.17/abcdef", 8, 1, false, true},
-		{"8.1.4", 8, 1, true, true},
-		{"garbage", 8, 1, false, false},
-		{"", 8, 1, false, false},
+		{"pve-manager/9.2.4/abcdef", 9, 0, true, true},
+		{"pve-manager/9.0.0/abcdef", 9, 0, true, true},
+		{"pve-manager/8.4.1/abcdef", 9, 0, false, true},
+		{"pve-manager/10.0.0/abcdef", 9, 0, true, true},
+		{"pve-manager/7.4.17/abcdef", 9, 0, false, true},
+		{"9.0.4", 9, 0, true, true},
+		{"garbage", 9, 0, false, false},
+		{"", 9, 0, false, false},
 	}
 	for _, tc := range cases {
 		got, ok := pveVersionAtLeast(tc.in, tc.major, tc.min)
