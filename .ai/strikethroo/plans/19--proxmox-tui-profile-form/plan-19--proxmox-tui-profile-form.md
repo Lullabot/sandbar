@@ -297,10 +297,10 @@ No circular dependencies; every task appears in exactly one phase.
 **Parallel Tasks:**
 - ✔️ Task 002: Pre-form type picker (depends on: 001)
 
-### Phase 3: Tests and Docs
+### ✅ Phase 3: Tests and Docs
 **Parallel Tasks:**
-- Task 003: Golden snapshots for the picker and the Proxmox form (depends on: 001, 002)
-- Task 004: Docs — remove the "TUI can't create proxmox" caveat, update connection-profiles.md and AGENTS.md (depends on: 001, 002)
+- ✔️ Task 003: Golden snapshots for the picker and the Proxmox form (depends on: 001, 002)
+- ✔️ Task 004: Docs — remove the "TUI can't create proxmox" caveat, update connection-profiles.md and AGENTS.md (depends on: 001, 002)
 
 ### Post-phase Actions
 
