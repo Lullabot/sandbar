@@ -1112,6 +1112,39 @@ func (p *proxmoxProvider) AttachArgv(v vm.VM) []string {
 	return p.sshHost(ip).SSHArgv(true, lima.GuestAttachArgv(os.Getenv("COLORTERM"))...)
 }
 
+// RunArgv returns the full argv that runs ONE interactive guest command (expr)
+// with a real TTY, in workdir — the Landing pane's commit-and-push action needs
+// it because `git commit` opens the user's editor, which requires a terminal
+// rather than the captured-output transport every other path uses. The Lima
+// providers reach this through `limactl shell --workdir`; this one ssh -t's
+// straight to the guest, since a Proxmox VM has no limactl in front of it.
+//
+// SAFETY: workdir is the lowest-trust string in the system — a checkout path
+// DISCOVERED BY SWEEPING THE GUEST — so, exactly as the Lima RunArgv keeps it
+// out of expr by passing it as its own `--workdir` element, this passes workdir
+// (and COLORTERM) to the guest bash as POSITIONAL DATA PARAMETERS ($1/$2),
+// never spliced into the script text. `cd "$1"` therefore treats a hostile path
+// as a directory name, never as shell to interpret; expr stays a fixed literal
+// that must compute anything it needs about the checkout from the cwd it lands
+// in, never receive it by host-side interpolation.
+func (p *proxmoxProvider) RunArgv(v vm.VM, workdir, expr string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), attachResolveTimeout)
+	defer cancel()
+
+	ip, err := p.guestIP(ctx, v.Name)
+	if err != nil {
+		return failArgv(fmt.Sprintf("sand: cannot run in %q: %v", v.Name, err))
+	}
+	// $1 = workdir, $2 = COLORTERM (either may be empty); both are data, so a
+	// path or terminal value containing shell metacharacters cannot execute.
+	// `shift 2` then clears them so expr sees no leftover positional parameters.
+	script := `cd "$1" || exit 1
+[ -n "$2" ] && export COLORTERM="$2"
+shift 2
+` + expr
+	return p.sshHost(ip).SSHArgv(true, "bash", "-c", script, "sand-run", workdir, os.Getenv("COLORTERM"))
+}
+
 // failArgv is a real, runnable command that prints msg and exits non-zero — the
 // only honest answer for an argv-returning method that has just failed. The
 // message travels as $0 rather than being spliced into the script, so nothing in

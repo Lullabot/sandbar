@@ -131,3 +131,60 @@ func TestProxmoxShellInteractive(t *testing.T) {
 type errAfterOutput struct{}
 
 func (errAfterOutput) Error() string { return "exit status 2" }
+
+// TestProxmoxRunArgvPassesWorkdirAsData pins RunArgv's safety contract: the
+// workdir (a low-trust, guest-swept path) is an ssh -t argv element and a bash
+// POSITIONAL parameter, never spliced into the script text where a hostile path
+// could execute. The expr, by contrast, is the caller's fixed literal script.
+func TestProxmoxRunArgvPassesWorkdirAsData(t *testing.T) {
+	_, p := withGuest(t) // caches web -> 192.168.1.50
+
+	hostile := "/home/dev/$(touch pwned)"
+	argv := p.RunArgv(vm.VM{Name: "web"}, hostile, "git status")
+	if len(argv) == 0 {
+		t.Fatal("RunArgv returned no argv")
+	}
+	if argv[0] != "ssh" {
+		t.Fatalf("argv[0] = %q; want ssh", argv[0])
+	}
+	// It must be an interactive (-t) ssh to the resolved guest.
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "-t") || !strings.Contains(joined, "dev@192.168.1.50") {
+		t.Errorf("RunArgv is not an interactive ssh to the guest: %v", argv)
+	}
+	// The hostile workdir must ride in its OWN argv element (sshCommand may
+	// single-quote it for the remote shell — that quoting is itself part of the
+	// protection), never concatenated into the element that carries the script.
+	var inOwnElement bool
+	for _, a := range argv {
+		if strings.Contains(a, hostile) && !strings.Contains(a, "git status") {
+			inOwnElement = true
+		}
+		if strings.Contains(a, "git status") && strings.Contains(a, hostile) {
+			t.Errorf("workdir was spliced into the script element %q — it must stay separate data", a)
+		}
+	}
+	if !inOwnElement {
+		t.Errorf("workdir %q was not carried as its own data element; argv=%v", hostile, argv)
+	}
+	// The script element itself references the workdir only as the positional
+	// $1 (data), never the literal path.
+	for _, a := range argv {
+		if strings.Contains(a, "git status") && !strings.Contains(a, `cd "$1"`) {
+			t.Errorf("script element does not cd via the $1 data param: %q", a)
+		}
+	}
+}
+
+// TestProxmoxRunArgvUnresolvableFailsLoudly proves an unresolvable guest yields a
+// real, runnable command that exits non-zero rather than a bad ssh target.
+func TestProxmoxRunArgvUnresolvableFailsLoudly(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+	// No cached IP and an empty listing → guestIP cannot resolve.
+	m.data("/cluster/resources", `[]`)
+	argv := p.RunArgv(vm.VM{Name: "ghost"}, "/x", "git status")
+	if len(argv) == 0 || argv[0] == "ssh" {
+		t.Fatalf("RunArgv(unresolvable) = %v; want a non-ssh failure command", argv)
+	}
+}
