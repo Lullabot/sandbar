@@ -144,6 +144,7 @@ func targetConfigFor(p profiles.Profile) provider.TargetConfig {
 			Pool:         p.Pool,
 			Storage:      p.Storage,
 			ImageStorage: p.ImageStorage,
+			BaseImage:    p.BaseImage,
 			Bridge:       p.Bridge,
 			TokenFile:    p.TokenFile,
 			// IdentityPath is REQUIRED for Proxmox (see the fleet.go twin): sand

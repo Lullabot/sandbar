@@ -52,11 +52,12 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// baseImageURL / baseImageFile identify the cloud image the base template is
-// built from. They are VARS, not consts, so a test can point them at a rejected
-// extension to exercise the early guard without a real download. The default is
-// Debian's genericcloud qcow2 — a storage-backed volid of
-// "<storage>:import/<baseImageFile>" once downloaded.
+// baseImageURL / baseImageFile are the DEFAULT cloud image the base template is
+// built from, used when a profile sets no base_image (see NewProxmox, which
+// copies these into the provider's own fields). They are VARS, not consts, so a
+// test can point them at a rejected extension to exercise the early guard
+// without a real download. The default is Debian's genericcloud qcow2 — a
+// storage-backed volid of "<imageStorage>:import/<baseImageFile>" once downloaded.
 var (
 	baseImageURL  = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
 	baseImageFile = "debian-13-genericcloud-amd64.qcow2"
@@ -370,15 +371,15 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 // extension PVE's download-url rejects (notably .img), naming the accepted set,
 // rather than letting the download task fail opaquely minutes later.
 func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (string, error) {
-	if !acceptedImportExt(baseImageFile) {
-		return "", fmt.Errorf("proxmox: cloud image %q has an extension PVE's download-url rejects; convert it to one of %s first", baseImageFile, strings.Join(acceptedImportExts, "|"))
+	if !acceptedImportExt(p.baseImageFile) {
+		return "", fmt.Errorf("proxmox: cloud image %q has an extension PVE's download-url rejects; convert it to one of %s first", p.baseImageFile, strings.Join(acceptedImportExts, "|"))
 	}
 	// The image is downloaded onto the file-based imageStorage (content=import),
 	// NOT the VM-disk storage — a block disk storage (zfspool, lvm-thin) rejects
 	// content=import. buildBaseTemplate then imports the disk onto p.storage FROM
 	// this volid (import-from allows a cross-storage source). See the imageStorage
 	// field's doc and Preflight's import-content check.
-	volid := fmt.Sprintf("%s:import/%s", p.imageStorage, baseImageFile)
+	volid := fmt.Sprintf("%s:import/%s", p.imageStorage, p.baseImageFile)
 
 	items, err := p.client.StorageContent(ctx, p.imageStorage)
 	if err != nil {
@@ -391,11 +392,11 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 		}
 	}
 
-	progress(out, "Downloading cloud image %s into %s\n", baseImageURL, p.imageStorage)
+	progress(out, "Downloading cloud image %s into %s\n", p.baseImageURL, p.imageStorage)
 	dlUPID, err := p.client.DownloadURL(ctx, p.imageStorage, pve.DownloadURLOptions{
 		Content:  "import",
-		Filename: baseImageFile,
-		URL:      baseImageURL,
+		Filename: p.baseImageFile,
+		URL:      p.baseImageURL,
 	})
 	if err != nil {
 		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.imageStorage, err)

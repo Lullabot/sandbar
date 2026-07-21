@@ -62,6 +62,11 @@ type TargetConfig struct {
 	// registry identity (Scope) — two profiles differing only in image storage
 	// still target the same pool — so it is deliberately absent from Scope below.
 	ImageStorage string
+	// BaseImage is an optional URL of the cloud image the base template is built
+	// from; "" uses the built-in Debian default. Like ImageStorage it is not part
+	// of the registry identity — two profiles differing only in base image still
+	// target the same pool — so it is absent from Scope below.
+	BaseImage string
 	// TokenFile is a PATH to a file holding the PVE API token, never the token
 	// itself — the same contract IdentityPath keeps, and non-negotiable here:
 	// Scope() folds this struct's fields into an identity the registry
