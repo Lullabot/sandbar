@@ -69,11 +69,18 @@ func TestManagementScreenKeyDrivenCreateEditToggleDelete(t *testing.T) {
 		t.Fatal("no delete confirmation should be pending for the permanent Local profile")
 	}
 
-	// 'n' opens the create form.
+	// 'n' opens the type picker; enter on its default (Remote SSH) selection
+	// opens a blank create form — the picker itself is pinned in its own
+	// focused test (TestProfileTypePickerCreateEntryPoint) below.
 	next, _ = m.Update(runeKey('n'))
 	m = next.(model)
-	if m.view != viewProfileForm || m.profileFormID != "" {
-		t.Fatalf("'n' should open a blank create form, view=%v id=%q", m.view, m.profileFormID)
+	if m.view != viewProfileTypePicker {
+		t.Fatalf("'n' should open the type picker, got view %v", m.view)
+	}
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewProfileForm || m.profileFormID != "" || m.profileFormType != profiles.TypeRemoteSSH {
+		t.Fatalf("selecting Remote SSH should open a blank create form, view=%v id=%q type=%v", m.view, m.profileFormID, m.profileFormType)
 	}
 
 	// Validation: empty name.
@@ -564,5 +571,98 @@ func TestProfileRowTextCoversEveryRuntimeState(t *testing.T) {
 	}
 	if got := profileRowText(remote, fleetMember{state: connDisabled}, true); !strings.Contains(got, "disabled") {
 		t.Fatalf("disabled-member row = %q, want it to mention disabled", got)
+	}
+}
+
+// TestProfileTypePickerCreateEntryPoint drives the CREATE entry point
+// through real keys: 'n' on the profile management screen must show the
+// pre-form type picker listing exactly the two CREATABLE types (Remote SSH,
+// Proxmox — never Local, which is permanent and pre-seeded), and selecting
+// either one must open the right field form — Proxmox's nine-field set with
+// profileFormType == TypeProxmox, or the unchanged pre-existing RemoteSSH
+// form. This is task 2's whole job: task 1 already built the Proxmox form
+// itself (see TestProxmoxEditFormPrefillToggleSave, which reaches it via
+// edit); this test is what proves CREATE can reach it too, through the
+// picker rather than by hardcoding a type.
+func TestProfileTypePickerCreateEntryPoint(t *testing.T) {
+	isolateHostState(t)
+	m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)
+	m = resized(m, 100, 30)
+
+	next, _ := m.Update(runeKey('p'))
+	m = next.(model)
+
+	// 'n' opens the picker, not a form.
+	next, _ = m.Update(runeKey('n'))
+	m = next.(model)
+	if m.view != viewProfileTypePicker {
+		t.Fatalf("'n' should open the type picker, got view %v", m.view)
+	}
+	view := m.profileTypePickerView()
+	if !strings.Contains(view, "Remote SSH") || !strings.Contains(view, "Proxmox") {
+		t.Fatalf("picker should list Remote SSH and Proxmox:\n%s", view)
+	}
+	if strings.Contains(view, "Local") {
+		t.Fatalf("picker must NOT offer Local (permanent, pre-seeded, never creatable):\n%s", view)
+	}
+	if len(creatableProfileTypes) != 2 {
+		t.Fatalf("creatableProfileTypes = %v, want exactly Remote SSH and Proxmox", creatableProfileTypes)
+	}
+
+	// esc from the picker backs all the way out to the profile list.
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(model)
+	if m.view != viewProfiles {
+		t.Fatalf("esc from the picker should return to the profile list, got view %v", m.view)
+	}
+
+	// Re-open the picker, move the cursor down onto Proxmox, and select it.
+	next, _ = m.Update(runeKey('n'))
+	m = next.(model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = next.(model)
+	if creatableProfileTypes[m.profileTypeCursor] != profiles.TypeProxmox {
+		t.Fatalf("moving down once should land the cursor on Proxmox, got %v", creatableProfileTypes[m.profileTypeCursor])
+	}
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if m.view != viewProfileForm || m.profileFormID != "" {
+		t.Fatalf("selecting a type should open a blank create form, view=%v id=%q", m.view, m.profileFormID)
+	}
+	if m.profileFormType != profiles.TypeProxmox {
+		t.Fatalf("profileFormType = %v, want TypeProxmox", m.profileFormType)
+	}
+	if len(m.profileInputs) != len(proxmoxFieldLabels) {
+		t.Fatalf("selecting Proxmox should build the Proxmox field set (%d fields), got %d", len(proxmoxFieldLabels), len(m.profileInputs))
+	}
+	formView := m.profileFormView()
+	for _, label := range proxmoxFieldLabels {
+		if !strings.Contains(formView, label) {
+			t.Errorf("Proxmox form should show field %q:\n%s", label, formView)
+		}
+	}
+	if !strings.Contains(formView, "Insecure") {
+		t.Errorf("Proxmox form should show the Insecure checkbox:\n%s", formView)
+	}
+
+	// esc from the field form backs out to the profile list (matching the
+	// existing form's back behaviour — see updateProfileForm).
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(model)
+	if m.view != viewProfiles {
+		t.Fatalf("esc from the field form should return to the profile list, got view %v", m.view)
+	}
+
+	// Selecting Remote SSH (the picker's first/default entry) yields the
+	// unchanged pre-existing form.
+	next, _ = m.Update(runeKey('n'))
+	m = next.(model)
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if m.profileFormType != profiles.TypeRemoteSSH {
+		t.Fatalf("selecting Remote SSH: profileFormType = %v, want TypeRemoteSSH", m.profileFormType)
+	}
+	if len(m.profileInputs) != len(profileFieldLabels) {
+		t.Fatalf("selecting Remote SSH should build the RemoteSSH field set (%d fields), got %d", len(profileFieldLabels), len(m.profileInputs))
 	}
 }

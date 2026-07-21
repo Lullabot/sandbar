@@ -9,6 +9,7 @@ package ui
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 )
 
@@ -22,7 +23,8 @@ func TestTUIProfilesScreen(t *testing.T) {
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
-// 'n' on the profile list opens the (blank) create form, and it accepts
+// 'n' on the profile list opens the pre-form type picker (task 2); selecting
+// its default (Remote SSH) entry opens the blank create form, and it accepts
 // typing — the behavioural counterpart to the golden above, catching a form
 // that opens unfocused and silently drops input.
 func TestTUIProfilesNewFormAcceptsTyping(t *testing.T) {
@@ -32,6 +34,8 @@ func TestTUIProfilesNewFormAcceptsTyping(t *testing.T) {
 	waitForText(t, tm, "Connection Profiles")
 	tm.Send(runeKey('n'))
 	waitForText(t, tm, "New Connection Profile")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter}) // select the picker's default (Remote SSH) entry
+	waitForText(t, tm, "Name:")
 	tm.Type("build-host")
 	waitForTypedText(t, tm, "build-host")
 

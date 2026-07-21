@@ -31,7 +31,7 @@ func TestProfileEnableRefreshDisableCycle(t *testing.T) {
 	m = resized(m, 100, 30)
 
 	m.openProfiles()
-	cmd := m.openProfileCreateForm()
+	cmd := m.openProfileFormForType(profiles.TypeRemoteSSH)
 	if cmd == nil {
 		t.Fatal("opening the create form should focus its first field")
 	}
@@ -139,7 +139,7 @@ func TestHeartbeatResolverReflectsLiveEnabledProfile(t *testing.T) {
 	// path (submitProfileForm -> rebuildMember) — the same path
 	// TestProfileEnableRefreshDisableCycle drives above.
 	m.openProfiles()
-	m.openProfileCreateForm()
+	m.openProfileFormForType(profiles.TypeRemoteSSH)
 	m.profileInputs[pfName].SetValue("build-host")
 	m.profileInputs[pfHost].SetValue("example.com")
 	m.profileInputs[pfUser].SetValue("dev")
