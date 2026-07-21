@@ -66,7 +66,7 @@ VM.Allocate VM.Clone VM.Audit VM.PowerMgmt VM.Snapshot \
 VM.Config.Disk VM.Config.CPU VM.Config.Memory VM.Config.Network \
 VM.Config.Options VM.Config.Cloudinit VM.Config.HWType VM.Config.CDROM \
 VM.GuestAgent.Audit VM.GuestAgent.Unrestricted \
-Datastore.AllocateSpace Datastore.Audit Pool.Audit"
+Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Audit"
 ```
 
 Some of these are non-obvious, and if you trim them further you'll get confusing
@@ -78,6 +78,7 @@ failures — so, for the record, why each of the less-obvious ones is here:
 | `VM.Config.Options` | Setting `agent`, `name`, and `ostype`. |
 | `VM.Config.Disk` | Covers disk devices **and** the `boot` order. |
 | `VM.Config.Cloudinit` | Injecting the SSH key, user, and network config. |
+| `Datastore.AllocateTemplate` | Downloading the cloud image into storage via the `download-url` endpoint (content type `import`). PVE gates that endpoint on this privilege specifically — `Datastore.AllocateSpace` alone is not enough, and its absence fails the very first base-build step with a 403. |
 | `Pool.Audit` | So the pool name appears in listings — without it `sand` can't tell which VMs are its own. |
 | `VM.GuestAgent.Unrestricted` | Only needed for guest-agent `exec`. It's the broadest privilege in the set; drop it if you never need `sand` to run a command via the agent (it uses SSH for shells regardless). |
 
