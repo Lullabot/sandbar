@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -312,5 +313,194 @@ func TestTargetConfigFor_ConvertsProfile(t *testing.T) {
 	}
 	if strings.Contains(cfg.Scope().RemoteTarget, cfg.IdentityPath) {
 		t.Fatalf("derived scope must never carry the identity path, got %+v", cfg.Scope())
+	}
+}
+
+// proxmoxTokenFile writes a valid, owner-only-readable token file and returns
+// its path, so tests can construct a real Proxmox binding without touching
+// the network (profiles.LoadToken refuses a group/other-readable file, so
+// mode matters here).
+func proxmoxTokenFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("sandbar@pve!prov=1234\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	return path
+}
+
+// TestBuildFleet_ProxmoxProfile confirms an enabled Proxmox profile produces
+// a healthy Binding whose Scope is the "host:node/pool" identity
+// TargetConfig.Scope derives — the same conversion the RemoteSSH case
+// exercises above, extended to the third provider.
+func TestBuildFleet_ProxmoxProfile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tokenFile := proxmoxTokenFile(t)
+
+	store := newTestStore(t, profiles.Profile{
+		Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "pve.example.com", Node: "pve1", Pool: "sandbar",
+		Storage: "local-lvm", Bridge: "vmbr0", TokenFile: tokenFile,
+	})
+
+	fleet := BuildFleet(store)
+	if len(fleet) != 2 {
+		t.Fatalf("BuildFleet() = %d bindings, want 2 (local + proxmox)", len(fleet))
+	}
+
+	var sawProxmox bool
+	for _, b := range fleet {
+		if b.Profile.Type != profiles.TypeProxmox {
+			continue
+		}
+		sawProxmox = true
+		if b.Err != nil {
+			t.Fatalf("proxmox binding Err = %v, want nil", b.Err)
+		}
+		if b.Prov == nil {
+			t.Fatal("proxmox binding Prov is nil")
+		}
+		want := registry.Scope{Provider: ProxmoxProviderID, RemoteTarget: "pve.example.com:pve1/sandbar"}
+		if b.Scope != want {
+			t.Fatalf("proxmox binding Scope = %+v, want %+v", b.Scope, want)
+		}
+	}
+	if !sawProxmox {
+		t.Fatal("fleet should contain a proxmox binding")
+	}
+}
+
+// TestBuildFleet_ProxmoxBadTokenBecomesErrorBinding confirms a Proxmox
+// profile whose token_file cannot be read (missing here) becomes an error
+// binding — Err set, Prov nil — rather than aborting the whole fleet build or
+// failing confusingly on first use.
+func TestBuildFleet_ProxmoxBadTokenBecomesErrorBinding(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	store := newTestStore(t, profiles.Profile{
+		Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "pve.example.com", Node: "pve1", Pool: "sandbar",
+		TokenFile: filepath.Join(t.TempDir(), "does-not-exist"),
+	})
+
+	fleet := BuildFleet(store)
+	if len(fleet) != 2 {
+		t.Fatalf("BuildFleet() = %d bindings, want 2 (local + error)", len(fleet))
+	}
+
+	var sawLocal, sawErr bool
+	for _, b := range fleet {
+		switch b.Profile.Type {
+		case profiles.TypeLocal:
+			sawLocal = true
+			if b.Err != nil {
+				t.Fatalf("local binding Err = %v, want nil — a bad proxmox profile must not poison it", b.Err)
+			}
+		case profiles.TypeProxmox:
+			sawErr = true
+			if b.Err == nil {
+				t.Fatal("proxmox binding with a missing token file: Err = nil, want a clear error")
+			}
+			if b.Prov != nil {
+				t.Fatalf("error binding Prov = %v, want nil", b.Prov)
+			}
+		}
+	}
+	if !sawLocal || !sawErr {
+		t.Fatalf("fleet should contain one healthy local binding and one proxmox error binding, got %+v", fleet)
+	}
+}
+
+// TestBuildFleet_ProxmoxEmptyHostBecomesErrorBinding mirrors the RemoteSSH
+// empty-host regression: a hand-edited profile with no host (store.Add
+// itself refuses one — see profiles.validate — so this is only reachable via
+// a hand-edited profiles.yaml, exactly like TestBuildFleet_EmptyHostBecomesErrorBinding
+// above) must be a clear per-profile error, not a construction attempt that
+// fails cryptically.
+func TestBuildFleet_ProxmoxEmptyHostBecomesErrorBinding(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tokenFile := proxmoxTokenFile(t)
+
+	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	yamlContent := `version: 1
+profiles:
+  - id: local
+    name: local
+    type: local
+    enabled: true
+  - id: nohost
+    name: nohost
+    type: proxmox
+    enabled: true
+    node: pve1
+    pool: sandbar
+    token_file: ` + tokenFile + `
+`
+	if err := os.WriteFile(path, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	store, err := profiles.LoadFrom(path)
+	if err != nil {
+		t.Fatalf("profiles.LoadFrom: %v", err)
+	}
+
+	fleet := BuildFleet(store)
+	var sawErr bool
+	for _, b := range fleet {
+		if b.Profile.Type != profiles.TypeProxmox {
+			continue
+		}
+		sawErr = true
+		if b.Err == nil {
+			t.Fatal("proxmox binding with empty host: Err = nil, want a clear error")
+		}
+		if !strings.Contains(b.Err.Error(), "host") {
+			t.Errorf("proxmox binding Err = %q, want it to mention the missing host", b.Err.Error())
+		}
+	}
+	if !sawErr {
+		t.Fatal("fleet should contain an error binding for the empty-host proxmox profile")
+	}
+}
+
+// TestBuildFleet_NoNetworkIO confirms BuildFleet never round-trips the
+// network even for an unreachable Proxmox host: construction only reads the
+// token file from disk (an allowed, deliberate exception — see NewProxmox's
+// doc comment), so building the fleet against a host nothing answers on must
+// still return promptly with a usable (if later-unreachable) binding.
+// Reachability is Preflight's job, never BuildFleet's.
+func TestBuildFleet_NoNetworkIO(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tokenFile := proxmoxTokenFile(t)
+
+	store := newTestStore(t, profiles.Profile{
+		Name: "unreachable", Type: profiles.TypeProxmox, Enabled: true,
+		// A non-routable TEST-NET-1 address (RFC 5737): connecting to it
+		// would hang or time out, so a fast return here proves no connection
+		// was attempted.
+		Host: "192.0.2.1", Node: "pve1", Pool: "sandbar", TokenFile: tokenFile,
+	})
+
+	start := time.Now()
+	fleet := BuildFleet(store)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("BuildFleet() against an unreachable host took %s, want near-instant (construction must not touch the network)", elapsed)
+	}
+
+	var sawProxmox bool
+	for _, b := range fleet {
+		if b.Profile.Type != profiles.TypeProxmox {
+			continue
+		}
+		sawProxmox = true
+		if b.Err != nil {
+			t.Fatalf("proxmox binding Err = %v, want nil (construction alone must succeed against an unreachable host)", b.Err)
+		}
+		if b.Prov == nil {
+			t.Fatal("proxmox binding Prov is nil")
+		}
+	}
+	if !sawProxmox {
+		t.Fatal("fleet should contain a proxmox binding")
 	}
 }

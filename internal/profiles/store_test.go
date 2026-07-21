@@ -656,6 +656,137 @@ profiles:
 	}
 }
 
+// TestAddProxmoxNoHostRejected confirms a proxmox profile without a Host is
+// rejected, mirroring the RemoteSSH empty-host guard.
+func TestAddProxmoxNoHostRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	_, err = s.Add(Profile{Name: "pve", Type: TypeProxmox, Enabled: true, Node: "pve1", Pool: "sandbar", TokenFile: "/tmp/token"})
+	if err == nil {
+		t.Fatal("Add() proxmox profile with no host: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "host") {
+		t.Errorf("Add() no-host proxmox error = %q, want it to mention the missing host", err.Error())
+	}
+}
+
+// TestAddProxmoxNoTokenFileRejected confirms a proxmox profile without a
+// TokenFile is rejected — profiles.yaml is secret-free, so a proxmox profile
+// with nowhere to load its token from can never actually connect.
+func TestAddProxmoxNoTokenFileRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	_, err = s.Add(Profile{Name: "pve", Type: TypeProxmox, Enabled: true, Host: "pve.example.com", Node: "pve1", Pool: "sandbar"})
+	if err == nil {
+		t.Fatal("Add() proxmox profile with no token_file: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "token_file") {
+		t.Errorf("Add() no-token_file proxmox error = %q, want it to mention token_file", err.Error())
+	}
+}
+
+// TestAddProxmoxDuplicateTargetRejected confirms two enabled proxmox
+// profiles resolving to the same host+node+pool are rejected, mirroring
+// TestDuplicateTargetRejected for RemoteSSH.
+func TestAddProxmoxDuplicateTargetRejected(t *testing.T) {
+	path := testPath(t)
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	base := Profile{Type: TypeProxmox, Enabled: true, Host: "pve.example.com", Node: "pve1", Pool: "sandbar", TokenFile: "/tmp/token"}
+
+	first := base
+	first.Name = "a"
+	if _, err := s.Add(first); err != nil {
+		t.Fatalf("first Add() error = %v", err)
+	}
+
+	second := base
+	second.Name = "b"
+	_, err = s.Add(second)
+	if err == nil {
+		t.Fatal("Add() with duplicate proxmox target: want error, got nil")
+	}
+
+	// A disabled duplicate target must be allowed (only enabled ones collide).
+	third := base
+	third.Name = "c"
+	third.Enabled = false
+	if _, err := s.Add(third); err != nil {
+		t.Errorf("Add() with disabled duplicate proxmox target: want no error, got %v", err)
+	}
+}
+
+// TestProxmoxRoundTripHasNoTokenValue writes a proxmox profile whose
+// token_file points at a real (secret-bearing) file, reloads the store, and
+// confirms every field survives while the persisted YAML never contains the
+// token's actual value — only the path to it.
+func TestProxmoxRoundTripHasNoTokenValue(t *testing.T) {
+	path := testPath(t)
+	tokenPath := filepath.Join(t.TempDir(), "pve-token")
+	const secretValue = "super-secret-pve-api-token-value"
+	if err := os.WriteFile(tokenPath, []byte(secretValue), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	s, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	pve := Profile{
+		Name:      "pve",
+		Type:      TypeProxmox,
+		Enabled:   true,
+		Host:      "pve.example.com",
+		Node:      "pve1",
+		Pool:      "sandbar",
+		Storage:   "local-lvm",
+		Bridge:    "vmbr0",
+		TokenFile: tokenPath,
+		Insecure:  true,
+		CAFile:    "/etc/ssl/pve-ca.pem",
+	}
+	added, err := s.Add(pve)
+	if err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	s2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload error = %v", err)
+	}
+	got, ok := s2.Get(added.ID)
+	if !ok {
+		t.Fatal("reloaded store missing the added proxmox profile")
+	}
+	if got.Name != pve.Name || got.Host != pve.Host || got.Node != pve.Node || got.Pool != pve.Pool ||
+		got.Storage != pve.Storage || got.Bridge != pve.Bridge || got.TokenFile != pve.TokenFile ||
+		got.Insecure != pve.Insecure || got.CAFile != pve.CAFile {
+		t.Errorf("reloaded proxmox profile = %+v, want fields to match %+v", got, pve)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	if strings.Contains(string(raw), secretValue) {
+		t.Fatalf("persisted profiles.yaml contains the secret token value: %s", raw)
+	}
+	if !strings.Contains(string(raw), tokenPath) {
+		t.Errorf("persisted profiles.yaml should contain the token_file PATH %q, got: %s", tokenPath, raw)
+	}
+}
+
 // TestDuplicateTargetCatchesMissingPortVsExplicit22 confirms finding 8's
 // canonicalization actually closes the validation gap: a profile whose port
 // is left unset must collide with an existing enabled profile on the SAME

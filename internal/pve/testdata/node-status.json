@@ -1,0 +1,27 @@
+{
+  "cpu": 0.0734,
+  "wait": 0.0012,
+  "idle": 0,
+  "uptime": 1234567,
+  "loadavg": ["0.15", "0.22", "0.18"],
+  "memory": {
+    "total": 16000000000,
+    "used": 12000000000,
+    "free": 500000000,
+    "available": 3000000000
+  },
+  "rootfs": {
+    "total": 100000000000,
+    "used": 42000000000,
+    "avail": 58000000000,
+    "free": 58000000000
+  },
+  "cpuinfo": {
+    "cpus": 8,
+    "sockets": 1,
+    "cores": 8,
+    "model": "Intel(R) Xeon(R) CPU E3-1275 v6 @ 3.80GHz",
+    "mhz": "2100.000"
+  },
+  "pveversion": "pve-manager/8.2.4/faee381d"
+}

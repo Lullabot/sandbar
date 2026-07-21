@@ -8,6 +8,8 @@ package ui
 // backend.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,7 +31,7 @@ func TestProfileEnableRefreshDisableCycle(t *testing.T) {
 	m = resized(m, 100, 30)
 
 	m.openProfiles()
-	cmd := m.openProfileCreateForm()
+	cmd := m.openProfileFormForType(profiles.TypeRemoteSSH)
 	if cmd == nil {
 		t.Fatal("opening the create form should focus its first field")
 	}
@@ -137,7 +139,7 @@ func TestHeartbeatResolverReflectsLiveEnabledProfile(t *testing.T) {
 	// path (submitProfileForm -> rebuildMember) — the same path
 	// TestProfileEnableRefreshDisableCycle drives above.
 	m.openProfiles()
-	m.openProfileCreateForm()
+	m.openProfileFormForType(profiles.TypeRemoteSSH)
 	m.profileInputs[pfName].SetValue("build-host")
 	m.profileInputs[pfHost].SetValue("example.com")
 	m.profileInputs[pfUser].SetValue("dev")
@@ -269,6 +271,44 @@ func TestProfileRenameIsLiveAndNotGated(t *testing.T) {
 	}
 }
 
+// TestConnectionFieldsEqualProxmoxFields pins the fix to a latent bug:
+// connectionFieldsEqual used to compare only the RemoteSSH fields, so editing
+// a Proxmox profile's node, pool, storage, bridge, token_file, insecure or
+// ca_file was silently treated as a pure rename and never rebuilt the live
+// binding. Each sub-test flips exactly one Proxmox field and asserts the two
+// profiles are no longer considered equal.
+func TestConnectionFieldsEqualProxmoxFields(t *testing.T) {
+	base := profiles.Profile{
+		Type: profiles.TypeProxmox, Host: "pve.example.com", Node: "pve1",
+		Pool: "sandbar", Storage: "local-lvm", Bridge: "vmbr0",
+		TokenFile: "/etc/sandbar/token", Insecure: false, CAFile: "/etc/sandbar/ca.pem",
+	}
+	if !connectionFieldsEqual(base, base) {
+		t.Fatal("two identical proxmox profiles should be considered equal")
+	}
+
+	mutations := []struct {
+		name string
+		with func(profiles.Profile) profiles.Profile
+	}{
+		{"node", func(p profiles.Profile) profiles.Profile { p.Node = "pve2"; return p }},
+		{"pool", func(p profiles.Profile) profiles.Profile { p.Pool = "other-pool"; return p }},
+		{"storage", func(p profiles.Profile) profiles.Profile { p.Storage = "local-zfs"; return p }},
+		{"bridge", func(p profiles.Profile) profiles.Profile { p.Bridge = "vmbr1"; return p }},
+		{"token_file", func(p profiles.Profile) profiles.Profile { p.TokenFile = "/etc/sandbar/other-token"; return p }},
+		{"insecure", func(p profiles.Profile) profiles.Profile { p.Insecure = true; return p }},
+		{"ca_file", func(p profiles.Profile) profiles.Profile { p.CAFile = "/etc/sandbar/other-ca.pem"; return p }},
+	}
+	for _, m := range mutations {
+		t.Run(m.name, func(t *testing.T) {
+			other := m.with(base)
+			if connectionFieldsEqual(base, other) {
+				t.Fatalf("a %s change must not be treated as a pure rename", m.name)
+			}
+		})
+	}
+}
+
 // seedRemoteProfile persists a RemoteSSH profile into the SAME profiles.yaml
 // New() will independently load (XDG_CONFIG_HOME must already be isolated —
 // see isolateHostState), and returns it with its real store-assigned id, so a
@@ -290,4 +330,66 @@ func seedRemoteProfile(t *testing.T, name, host, user string, port int) profiles
 		t.Fatalf("add profile: %v", err)
 	}
 	return added
+}
+
+// proxmoxTokenFile writes a valid, owner-only-readable (0600) token file and
+// returns its path — profiles.LoadToken (which provider.NewProxmox calls at
+// construction) refuses a group/other-readable file outright, so mode
+// matters here. Mirrors internal/provider/fleet_test.go's own
+// proxmoxTokenFile helper.
+func proxmoxTokenFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("sandbar@pve!prov=1234\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	return path
+}
+
+// seedProxmoxProfile is seedRemoteProfile's Proxmox sibling: it persists a
+// Proxmox profile into the SAME profiles.yaml New() will independently load,
+// with a real, valid token file on disk (see proxmoxTokenFile) so
+// buildProfileProvider's NewProxmox call — which reads that file at
+// construction, unlike NewRemoteLima/NewDefault — succeeds without touching
+// the network.
+func seedProxmoxProfile(t *testing.T, name, host, node, pool string) profiles.Profile {
+	t.Helper()
+	store, err := profiles.Load()
+	if err != nil {
+		t.Fatalf("load profiles store: %v", err)
+	}
+	added, err := store.Add(profiles.Profile{
+		Name: name, Type: profiles.TypeProxmox, Enabled: true,
+		Host: host, Node: node, Pool: pool,
+		Storage: "local-lvm", Bridge: "vmbr0",
+		TokenFile: proxmoxTokenFile(t),
+	})
+	if err != nil {
+		t.Fatalf("add profile: %v", err)
+	}
+	return added
+}
+
+// TestBuildProfileProviderProxmox proves buildProfileProvider's new
+// TypeProxmox branch constructs a real provider.NewProxmox binding without
+// error — mirroring provider.BuildFleet's own buildBinding (fleet_test.go's
+// TestBuildFleet_ProxmoxProfile) and cmd/sand/resolve.go's
+// providerForProfile. Construction reads only the (real, valid) token file
+// on disk; it does no network round trip, so this stays fast and safe here
+// exactly as it is for RemoteSSH/Local.
+func TestBuildProfileProviderProxmox(t *testing.T) {
+	isolateHostState(t)
+	p := seedProxmoxProfile(t, "cluster", "pve.example.com", "pve1", "sandbar")
+
+	prov, scope, err := buildProfileProvider(p)
+	if err != nil {
+		t.Fatalf("buildProfileProvider: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("buildProfileProvider should return a non-nil provider for a valid proxmox profile")
+	}
+	wantScope := registry.Scope{Provider: provider.ProxmoxProviderID, RemoteTarget: "pve.example.com:pve1/sandbar"}
+	if scope != wantScope {
+		t.Fatalf("scope = %+v, want %+v", scope, wantScope)
+	}
 }

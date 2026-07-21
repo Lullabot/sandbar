@@ -20,19 +20,22 @@ A profile has:
   `local`). Names don't need to be unique, though the TUI won't stop you from
   picking a name that collides with another profile's — it's a display label,
   not an identifier.
-- A **type** — `local` or `remote-ssh`.
-- **Connection details** — for `remote-ssh` only: host, SSH user, port, an
+- A **type** — `local`, `remote-ssh`, or `proxmox`.
+- **Connection details** — for `remote-ssh`: host, SSH user, port, an
   optional path to a private key file, and an optional remote `LIMA_HOME`.
   Setting a profile's `lima_home` scopes both the remote instance discovery
   (determining which instances `limactl list` returns) and file-based state reads
   (base version stamp, provenance markers). Different profiles can point at the
   same remote host but use different `LIMA_HOME` paths, isolating their instances.
+  For `proxmox`: host, node, pool, storage, bridge, and a path to a token file —
+  see [Proxmox VE](proxmox.md) for the full field list and the one-time host
+  setup that scopes the API token to a dedicated pool.
 - An **enabled** flag.
 
 There is always exactly one **Local** profile — permanent, created
 automatically the first time `sand` runs, and not deletable (though you can
-rename it). Every other profile is `remote-ssh`, and you can create, edit,
-enable, disable, or delete as many of those as you like.
+rename it). Every other profile is `remote-ssh` or `proxmox`, and you can
+create, edit, enable, disable, or delete as many of those as you like.
 
 ## `profiles.yaml`
 
@@ -99,6 +102,11 @@ every profile, its type, and its enabled/disabled state.
 | `enter` | Edit the selected profile (or create a new one from the ghost row) |
 | `t` | Toggle enabled/disabled |
 | `d` | Delete (not offered for Local) |
+
+When creating a profile (press `n`), a type picker first asks whether to create
+a **Remote SSH** or a **Proxmox** profile, then opens the matching form. (Local
+is not offered — there is always exactly one Local profile, created for you and
+never deletable.)
 
 Every change here is **live** — there is no restart, and no separate "apply"
 step:
@@ -198,8 +206,10 @@ mapping (`SAND_REMOTE_HOST` → `host`, `SAND_REMOTE_USER` → `user`,
 `SAND_REMOTE_PORT` → `port`, `SAND_REMOTE_IDENTITY` → `identity_path`,
 `SAND_REMOTE_LIMA_HOME` → `lima_home`).
 
-## Future providers
+## Other backends
 
-The remote-Lima backend is one implementation of `sand`'s internal `Provider`
-seam. That seam is what will let non-Lima backends (Proxmox, DigitalOcean,
-Linode) be added later; none is available yet.
+The local and remote-Lima backends are two implementations of `sand`'s internal
+`Provider` seam. A third, **[Proxmox VE](proxmox.md)**, drives VMs through the
+Proxmox REST API with a least-privilege, pool-scoped API token — see that page
+for setup. The same seam is what would let further non-Lima backends
+(DigitalOcean, Linode) be added later; those are not available yet.

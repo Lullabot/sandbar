@@ -113,6 +113,13 @@ const (
 	// view-enum + sub-model pattern as viewForm/viewSecrets above.
 	viewProfiles
 	viewProfileForm
+	// viewProfileTypePicker is the CREATE path's pre-form step
+	// (profilesview.go): a small menu of the creatable profile types
+	// (creatableProfileTypes) that `n` opens on the profile management
+	// screen, before viewProfileForm's fields ever appear. The edit path
+	// never shows it — openProfileEditForm goes straight to viewProfileForm
+	// with the existing profile's own type.
+	viewProfileTypePicker
 	viewHelp
 )
 
@@ -357,6 +364,12 @@ type model struct {
 	// top of the screen until the next action replaces or clears it.
 	profileCursor int
 	profileMsg    string
+	// profileTypeCursor indexes creatableProfileTypes (profilesview.go) for
+	// the pre-form type picker's own tiny ring — a SEPARATE cursor from
+	// profileCursor above, since the picker and the profile list are never
+	// showing at the same time but do coexist in model state between one
+	// screen and the next.
+	profileTypeCursor int
 	// profileConfirmDeleteID is the id of a profile pending a delete
 	// confirmation ("" = none pending). Deleting a profile is a synchronous
 	// local store write, not an asynchronous VM lifecycle action, so it uses
@@ -373,6 +386,13 @@ type model struct {
 	profileInputs    []textinput.Model
 	profileFormFocus int
 	profileFormErr   error
+	// profileInsecure is the Proxmox form's "skip cert validation" checkbox
+	// value — the one form field that is not a textinput.Model, so unlike
+	// every other field it cannot live inside profileInputs. Meaningless
+	// (and left false) for a Local/RemoteSSH form; profileFormSlots
+	// (profilesview.go) is the single place that decides which field, if
+	// any, is this checkbox.
+	profileInsecure bool
 }
 
 // New wires the dependencies into a ready-to-run tea.Model over a FLEET: one
@@ -1421,6 +1441,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateProfiles(msg)
 		case viewProfileForm:
 			return m.updateProfileForm(msg)
+		case viewProfileTypePicker:
+			return m.updateProfileTypePicker(msg)
 		case viewHelp:
 			return m.updateHelp(msg)
 		}
@@ -1569,6 +1591,8 @@ func (m model) View() tea.View {
 		content = m.profilesView()
 	case viewProfileForm:
 		content = m.profileFormView()
+	case viewProfileTypePicker:
+		content = m.profileTypePickerView()
 	case viewHelp:
 		content = m.helpView()
 	default:
