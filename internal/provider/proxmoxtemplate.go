@@ -46,14 +46,20 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 
 	wasRunning := st.Status == pveRunning
 	if wasRunning {
-		progress(out, "Stopping %s to snapshot it\n", source)
+		progress(out, "Shutting %s down to snapshot it\n", source)
 		p.invalidateGuest(source)
-		upid, err := p.client.StopVM(ctx, vmid)
+		// A GRACEFUL shutdown (ACPI), not a hard stop: a hard-powered-off guest
+		// never flushes its filesystem, so the cloned disk would be crash-
+		// consistent — the very thing snapshotting a stopped source is meant to
+		// avoid, and a way to lose the user VM's recently-written data. This
+		// matches the base build, which also shuts down gracefully before its
+		// convert.
+		upid, err := p.client.ShutdownVM(ctx, vmid)
 		if err != nil {
-			return fmt.Errorf("proxmox: stopping %s before snapshotting it: %w", source, err)
+			return fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
 		}
 		if err := p.client.WaitTask(ctx, upid.Raw); err != nil {
-			return fmt.Errorf("proxmox: stopping %s before snapshotting it: %w", source, err)
+			return fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
 		}
 		// Restore the source's power state no matter how we leave: a snapshot
 		// that silently leaves the user's VM stopped is worse than a failed
@@ -63,15 +69,13 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		defer func() { _ = p.restart(context.WithoutCancel(ctx), source) }()
 	}
 
-	newid, err := p.client.NextID(ctx)
-	if err != nil {
-		return fmt.Errorf("proxmox: allocating a VMID for template %s: %w", templateName, err)
-	}
-
-	progress(out, "Cloning %s into template %s (VMID %d -> %d)\n", source, templateName, vmid, newid)
-	cUPID, err := p.client.CloneVM(ctx, vmid, pve.CloneVMOptions{
-		NewID: newid,
-		Name:  templateName,
+	// CloneVMWithNextID retries the "already exists" collision with a fresh id
+	// rather than deleting the id it tried to use — which, in our own pool, would
+	// be another creator's VM. A non-collision synchronous error created nothing,
+	// so there is nothing to clean up on that path either.
+	progress(out, "Cloning %s into template %s (VMID %d)\n", source, templateName, vmid)
+	newid, cUPID, err := p.client.CloneVMWithNextID(ctx, vmid, pve.CloneVMOptions{
+		Name: templateName,
 		// Pool membership on the clone is as non-negotiable here as it is on
 		// every other clone this backend makes: without it the new template is
 		// not a pool member and every later token-scoped permission check
@@ -83,16 +87,15 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		Storage: p.storage,
 	})
 	if err != nil {
-		// The clone POST failed before a task started, so nothing was created —
-		// but purge is harmless if a partial did land.
-		p.cleanupVM(ctx, newid, templateName, out)
-		return fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
-	}
-	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
-		p.cleanupVM(ctx, newid, templateName, out)
 		return fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
 	}
 	p.setVMID(templateName, newid)
+	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
+		// The clone TASK started under newid and failed, so that partial VM is
+		// ours to purge (a synchronous collision never reaches here).
+		p.cleanupVM(ctx, newid, templateName, out)
+		return fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
+	}
 
 	progress(out, "Converting %s to a template\n", templateName)
 	tUPID, err := p.client.ConvertToTemplate(ctx, newid)

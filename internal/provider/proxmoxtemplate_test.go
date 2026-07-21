@@ -37,11 +37,12 @@ func primeName(m *pveMock, p *proxmoxProvider, name string, vmid int, status str
 func primeStatefulName(m *pveMock, p *proxmoxProvider, name string, vmid int) {
 	p.setVMID(name, vmid)
 	stopPath := fmt.Sprintf("/nodes/pve1/qemu/%d/status/stop", vmid)
+	shutdownPath := fmt.Sprintf("/nodes/pve1/qemu/%d/status/shutdown", vmid)
 	startPath := fmt.Sprintf("/nodes/pve1/qemu/%d/status/start", vmid)
 	m.on(fmt.Sprintf("/nodes/pve1/qemu/%d/status/current", vmid),
 		func(w http.ResponseWriter, _ *http.Request) {
 			status := "running"
-			if m.count(stopPath) > m.count(startPath) {
+			if m.count(stopPath)+m.count(shutdownPath) > m.count(startPath) {
 				status = "stopped"
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -70,7 +71,7 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	}
 	// A stopped source must never be powered: no stop, and — crucially — no
 	// start that would leave it running afterwards.
-	if m.sawPath("/nodes/pve1/qemu/101/status/stop") {
+	if m.sawPath("/nodes/pve1/qemu/101/status/shutdown") {
 		t.Error("stopped a source that was already stopped")
 	}
 	if m.sawPath("/nodes/pve1/qemu/101/status/start") {
@@ -89,9 +90,9 @@ func TestProxmoxSnapshotFromRunningSourceRestartsIt(t *testing.T) {
 	shortAgentPolling(t, 2)
 	primeStatefulName(m, p, "web", 101)
 
-	stopUPID := "UPID:pve1:0:0:0:qmstop:101:u:"
+	stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
 	startUPID := "UPID:pve1:0:0:0:qmstart:101:u:"
-	m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
 	m.okTask(stopUPID)
 	m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", startUPID))
 	m.okTask(startUPID)
@@ -107,7 +108,7 @@ func TestProxmoxSnapshotFromRunningSourceRestartsIt(t *testing.T) {
 	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
 		t.Fatalf("SnapshotTemplate: %v", err)
 	}
-	if !m.sawPath("/nodes/pve1/qemu/101/status/stop") {
+	if !m.sawPath("/nodes/pve1/qemu/101/status/shutdown") {
 		t.Error("never stopped the running source before cloning it")
 	}
 	if !m.sawPath("/nodes/pve1/qemu/101/status/start") {
@@ -124,9 +125,9 @@ func TestProxmoxSnapshotFailurePreservesRunningSourceAndCleansUp(t *testing.T) {
 	shortAgentPolling(t, 2)
 	primeStatefulName(m, p, "web", 101)
 
-	stopUPID := "UPID:pve1:0:0:0:qmstop:101:u:"
+	stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
 	startUPID := "UPID:pve1:0:0:0:qmstart:101:u:"
-	m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
 	m.okTask(stopUPID)
 	m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", startUPID))
 	m.okTask(startUPID)
@@ -162,9 +163,9 @@ func TestProxmoxSnapshotCancelledContextStillRestartsSource(t *testing.T) {
 	shortAgentPolling(t, 2)
 	primeStatefulName(m, p, "web", 101)
 
-	stopUPID := "UPID:pve1:0:0:0:qmstop:101:u:"
+	stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
 	startUPID := "UPID:pve1:0:0:0:qmstart:101:u:"
-	m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
 	m.okTask(stopUPID)
 	m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", startUPID))
 	m.okTask(startUPID)
@@ -340,26 +341,38 @@ func TestProxmoxSnapshotCloneFailureCleansUpAndRestarts(t *testing.T) {
 	shortAgentPolling(t, 2)
 	primeStatefulName(m, p, "web", 101)
 
-	stopUPID := "UPID:pve1:0:0:0:qmstop:101:u:"
+	stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
 	startUPID := "UPID:pve1:0:0:0:qmstart:101:u:"
-	m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
 	m.okTask(stopUPID)
 	m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", startUPID))
 	m.okTask(startUPID)
 
 	m.data("/cluster/nextid", `"900"`)
-	// The clone POST itself fails (no task ever starts).
-	m.fail("/nodes/pve1/qemu/101/clone", http.StatusInternalServerError, "clone boom")
-	// cleanupVM still issues a best-effort purge of the would-be id.
-	delUPID := "UPID:pve1:0:0:0:qmdestroy:900:u:"
-	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
-	m.okTask(delUPID)
+	// The clone POST succeeds and a task starts, then the clone TASK fails — the
+	// one clone-failure shape where a partial VM landed under 900, so cleanup is
+	// correct. (A synchronous clone POST error, by contrast, created nothing and
+	// must NOT purge the id — see TestCloneVMWithNextIDRetriesCollision.)
+	cloneUPID := "UPID:pve1:0:0:0:qmclone:900:u:"
+	m.data("/nodes/pve1/qemu/101/clone", fmt.Sprintf("%q", cloneUPID))
+	m.data("/nodes/pve1/tasks/"+cloneUPID+"/status", `{"status":"stopped","exitstatus":"clone failed"}`)
+	deleted := make(chan struct{}, 2)
+	m.on("/nodes/pve1/qemu/900", func(w http.ResponseWriter, _ *http.Request) {
+		deleted <- struct{}{}
+		upidData(w, "UPID:pve1:0:0:0:qmdestroy:900:u:")
+	})
+	m.okTask("UPID:pve1:0:0:0:qmdestroy:900:u:")
 
 	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
-		t.Fatal("SnapshotTemplate succeeded despite a clone failure")
+		t.Fatal("SnapshotTemplate succeeded despite a clone-task failure")
 	}
 	if !m.sawPath("/nodes/pve1/qemu/101/status/start") {
 		t.Error("a clone failure left the running source stopped")
+	}
+	select {
+	case <-deleted:
+	default:
+		t.Error("the partial clone (900) was not purged after the clone task failed")
 	}
 }
 

@@ -525,3 +525,85 @@ func TestDeleteVMPurgeQueryParam(t *testing.T) {
 		t.Errorf("purge = %q; want 1", got)
 	}
 }
+
+// TestCloneVMWithNextIDRetriesCollision is the regression guard for a data-loss
+// bug: a bare NextID+CloneVM with no retry, whose caller then "cleaned up" the
+// colliding id, could purge the VM another creator just placed at that id in the
+// same pool. CloneVMWithNextID must instead retry with a FRESH id, and must
+// NEVER issue a DELETE against the colliding id (it is not ours).
+func TestCloneVMWithNextIDRetriesCollision(t *testing.T) {
+	var nextIDCalls, cloneCalls, deleteCalls atomic.Int32
+	ids := []string{"100", "101"}
+
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete:
+			deleteCalls.Add(1) // MUST NOT happen — the colliding id belongs to someone else
+			writeUPID(w, testUPID)
+		case strings.HasSuffix(r.URL.Path, "/cluster/nextid"):
+			i := nextIDCalls.Add(1) - 1
+			w.Header().Set("Content-Type", "application/json")
+			b, _ := json.Marshal(map[string]any{"data": ids[i]})
+			_, _ = w.Write(b)
+		case strings.HasSuffix(r.URL.Path, "/clone"):
+			n := cloneCalls.Add(1)
+			if n == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				b, _ := json.Marshal(map[string]any{"data": nil, "message": "config file already exists"})
+				_, _ = w.Write(b)
+				return
+			}
+			writeUPID(w, testUPID)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	c, err := New(Config{Host: strings.TrimPrefix(ts.URL, "https://"), Node: "node1", TokenID: "user@pve!token=1", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	newid, _, err := c.CloneVMWithNextID(context.Background(), 9000, CloneVMOptions{Name: "web", Pool: "sandbar", Full: true, Storage: "local-zfs"})
+	if err != nil {
+		t.Fatalf("CloneVMWithNextID: %v", err)
+	}
+	if newid != 101 {
+		t.Errorf("newid = %d; want 101 (the fresh id after the collision)", newid)
+	}
+	if got := deleteCalls.Load(); got != 0 {
+		t.Errorf("issued %d DELETE(s); want 0 — a collision must never purge the id, which is another creator's VM", got)
+	}
+	if got := nextIDCalls.Load(); got != 2 {
+		t.Errorf("NextID called %d times; want 2 (a fresh id per collision)", got)
+	}
+}
+
+// TestResizeDiskFractionalSizeIsExactBytes pins the precision fix: a size that
+// is not a whole GiB must be sent as exact bytes, never truncated to "0G" or a
+// smaller "<n>G" that would under-size the disk or no-op the resize.
+func TestResizeDiskFractionalSizeIsExactBytes(t *testing.T) {
+	var got string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		got = r.PostForm.Get("size")
+		writeUPID(w, testUPID)
+	}))
+	defer ts.Close()
+	c, err := New(Config{Host: strings.TrimPrefix(ts.URL, "https://"), Node: "node1", TokenID: "user@pve!token=1", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// 1.5 GiB — the truncating "%dG" form would have sent "1G" (a silent
+	// under-size); a sub-GiB size would have sent "0G".
+	oneAndAHalfGiB := int64(3) * (1 << 30) / 2
+	if _, err := c.ResizeDisk(context.Background(), 100, "scsi0", oneAndAHalfGiB); err != nil {
+		t.Fatalf("ResizeDisk: %v", err)
+	}
+	if want := strconv.FormatInt(oneAndAHalfGiB, 10); got != want {
+		t.Errorf("size = %q; want the exact byte count %q (bare number = bytes to PVE)", got, want)
+	}
+}

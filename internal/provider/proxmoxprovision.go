@@ -426,15 +426,15 @@ func (p *proxmoxProvider) stampBaseVersion(cfg vm.CreateConfig, out io.Writer) {
 // and storage, waits for the clone task, and records the new VMID. A failure
 // deletes whatever partial VM the clone left behind (purge=1).
 func (p *proxmoxProvider) cloneFromTemplate(ctx context.Context, templateVMID int, cfg vm.CreateConfig, out io.Writer) (int, error) {
-	newid, err := p.client.NextID(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("proxmox: allocating a VMID for %s: %w", cfg.Name, err)
-	}
-
-	progress(out, "Cloning %s from base template %s (VMID %d -> %d)\n", cfg.Name, cfg.BaseName, templateVMID, newid)
-	cUPID, err := p.client.CloneVM(ctx, templateVMID, pve.CloneVMOptions{
-		NewID: newid,
-		Name:  cfg.Name,
+	// CloneVMWithNextID allocates the id and retries a fresh one on the "already
+	// exists" collision — the clone-path equivalent of the base create's
+	// CreateVMWithNextID. It must live in the client, not here, because the wrong
+	// recovery (deleting the id we tried to use) would purge the VM the colliding
+	// creator just put in our pool. On a NON-collision synchronous error nothing
+	// was created, so there is nothing to clean up either.
+	progress(out, "Cloning %s from base template %s (VMID %d)\n", cfg.Name, cfg.BaseName, templateVMID)
+	newid, cUPID, err := p.client.CloneVMWithNextID(ctx, templateVMID, pve.CloneVMOptions{
+		Name: cfg.Name,
 		// Pool on the clone is as non-negotiable as on the base create: without
 		// it the clone is not a pool member and every later token-scoped
 		// permission check against it fails.
@@ -445,16 +445,16 @@ func (p *proxmoxProvider) cloneFromTemplate(ctx context.Context, templateVMID in
 		Storage: p.storage,
 	})
 	if err != nil {
-		// The clone POST failed before a task started, so nothing was created —
-		// but purge is harmless if a partial did land.
-		p.cleanupVM(ctx, newid, cfg.Name, out)
-		return 0, fmt.Errorf("proxmox: cloning %s: %w", cfg.Name, err)
-	}
-	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
-		p.cleanupVM(ctx, newid, cfg.Name, out)
 		return 0, fmt.Errorf("proxmox: cloning %s: %w", cfg.Name, err)
 	}
 	p.setVMID(cfg.Name, newid)
+	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
+		// The clone TASK started under newid and then failed, so the partial VM
+		// under newid is genuinely OURS to purge (unlike a synchronous collision,
+		// which never reaches here).
+		p.cleanupVM(ctx, newid, cfg.Name, out)
+		return 0, fmt.Errorf("proxmox: cloning %s: %w", cfg.Name, err)
+	}
 	return newid, nil
 }
 
