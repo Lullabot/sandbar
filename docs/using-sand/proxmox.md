@@ -27,9 +27,11 @@ cluster access) as a full admin — usually `root@pam`.
 
 ## Prerequisites
 
-- **Proxmox VE 8.1 or newer.** `sand` checks the version at preflight. (PVE 9
-  removed the `VM.Monitor` privilege and added the `VM.GuestAgent.*` ones; the
-  role below is written for both.)
+- **Proxmox VE 9.0 or newer.** `sand` checks the version at preflight and
+  refuses an older host. The minimum-privilege role below is expressed in PVE 9's
+  privilege vocabulary — it relies on the `VM.GuestAgent.*` privileges introduced
+  in PVE 9, and PVE 9 removed the old `VM.Monitor` privilege — so it cannot be
+  created on an 8.x host.
 - **A storage that supports `images` content** (e.g. `local-lvm`, a ZFS pool, or
   a directory storage with *Disk image* enabled). The built-in `local` storage
   does **not** hold disk images by default, so `sand` cannot put a VM disk or a

@@ -18,9 +18,8 @@ type Pool struct {
 //
 // The bare collection endpoint is used rather than the per-pool
 // GET /pools/{poolid}: the single-pool form is deprecated upstream in favour of
-// a `?poolid=` query added in PVE 8, so preferring the collection keeps one code
-// path working across the 8.x-9.x range this client supports instead of forking
-// on version.
+// a `?poolid=` query, so the collection endpoint is the forward-looking choice
+// on the PVE 9+ releases this client supports.
 //
 // PVE filters the result to pools the token holds Pool.Audit on, so an absent
 // pool and an unauditable one are indistinguishable here. That ambiguity belongs
