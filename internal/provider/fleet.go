@@ -141,6 +141,12 @@ func targetConfigFor(p profiles.Profile) TargetConfig {
 			ImageStorage: p.ImageStorage,
 			Bridge:       p.Bridge,
 			TokenFile:    p.TokenFile,
+			// IdentityPath is REQUIRED for Proxmox (unlike remote-ssh, which can
+			// fall back to the ssh agent): sand installs <identity_path>.pub into
+			// the guest via cloud-init and then connects with the private key.
+			// Dropping it here left the provider with an empty key and a build that
+			// failed at readPublicKey / Preflight even though the profile set it.
+			IdentityPath: p.IdentityPath,
 			Insecure:     p.Insecure,
 			CAFile:       p.CAFile,
 		}

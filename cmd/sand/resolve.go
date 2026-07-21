@@ -146,6 +146,10 @@ func targetConfigFor(p profiles.Profile) provider.TargetConfig {
 			ImageStorage: p.ImageStorage,
 			Bridge:       p.Bridge,
 			TokenFile:    p.TokenFile,
+			// IdentityPath is REQUIRED for Proxmox (see the fleet.go twin): sand
+			// installs <identity_path>.pub via cloud-init and connects with the
+			// private key. Omitting it here is what left the profile's key unused.
+			IdentityPath: p.IdentityPath,
 			Insecure:     p.Insecure,
 			CAFile:       p.CAFile,
 		}

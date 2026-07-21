@@ -316,6 +316,30 @@ func TestTargetConfigFor_ConvertsProfile(t *testing.T) {
 	}
 }
 
+// TestTargetConfigFor_ConvertsProxmoxProfile pins the Proxmox branch of the same
+// conversion — every connection field must carry, including identity_path (which
+// a Proxmox build needs for the cloud-init key and was previously dropped here)
+// and image_storage.
+func TestTargetConfigFor_ConvertsProxmoxProfile(t *testing.T) {
+	p := profiles.Profile{
+		ID: "pve1", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "pve.example.com", User: "dev", Node: "pve1", Pool: "sandbar",
+		Storage: "local-lvm", ImageStorage: "local", Bridge: "vmbr0",
+		TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
+		Insecure: true, CAFile: "/etc/ssl/pve-ca.pem",
+	}
+	cfg := targetConfigFor(p)
+	if cfg.Provider != ProxmoxProviderID {
+		t.Fatalf("targetConfigFor Provider = %q, want %q", cfg.Provider, ProxmoxProviderID)
+	}
+	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
+		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.Bridge != p.Bridge ||
+		cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
+		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
+		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
+	}
+}
+
 // proxmoxTokenFile writes a valid, owner-only-readable token file and returns
 // its path, so tests can construct a real Proxmox binding without touching
 // the network (profiles.LoadToken refuses a group/other-readable file, so
