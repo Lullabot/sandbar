@@ -135,9 +135,24 @@ value. `sand` refuses to read it unless it is mode `600` (owner-only).
 # Scope the token to the pool: this is what confines it to sandbar's own VMs.
 pveum acl modify /pool/sandbar --roles SandbarProv --tokens 'sandbar@pve!prov'
 
-# Add the VM storage to the pool so the storage privileges above are pool-scoped too.
+# Add the VM storage to the pool so the role's Datastore privileges apply to it.
+# This grants them on the WHOLE storage object (see the note below), not a
+# pool-private slice — Proxmox has no notion of "the pool's part" of a storage.
 pveum pool modify sandbar --storage local-lvm
 ```
+
+!!! note "A shared storage is trusted as a whole"
+    A pool can only contain VMIDs and *entire* storages — there is no "pool's
+    slice" of a datastore. So if `local-lvm` also backs VMs outside the pool, the
+    token's `Datastore.AllocateSpace` and `Datastore.Audit` reach the whole of it:
+    it can **enumerate** every volume on that storage (volume names, sizes, and
+    the owning VMID) and **allocate space** anywhere on it. It still **cannot read
+    or modify** another VM's disk — and it never sees those VMs' configuration or
+    state — because reading, attaching, or reassigning a volume owned by another
+    guest requires access to that guest or the `Datastore.Allocate` privilege,
+    neither of which this token has. If you want the storage boundary as tight as
+    the VM one, give `sand` a **dedicated storage** (its own LVM-thin pool or
+    dataset) rather than one shared with other VMs.
 
 ## Step 5 — Grant the three privileges that can't be pool-scoped
 
