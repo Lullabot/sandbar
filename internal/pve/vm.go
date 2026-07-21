@@ -289,6 +289,42 @@ func (c *Client) CloneVM(ctx context.Context, vmid int, opts CloneVMOptions) (UP
 	return ParseUPID(raw)
 }
 
+// CloneVMWithNextID allocates a fresh vmid via NextID and clones sourceVMID into
+// it, returning the new id and the clone task's UPID. It is the clone-path
+// sibling of CreateVMWithNextID and exists for the SAME reason: NextID reserves
+// nothing, so a concurrent creator ANYWHERE on the cluster can take the id in
+// the NextID→clone window, and the clone then fails synchronously with the same
+// "already exists" 500. This retries with a FRESH id (never a local increment)
+// rather than surfacing that as a clone failure.
+//
+// Crucially, a collision must be retried HERE rather than handled by the caller,
+// because the caller's only recourse — deleting the id it tried to use — would
+// destroy the VM the OTHER creator just put there (a pool-scoped token can act
+// on any VM in its pool). So the collision id is never touched: it is not ours.
+func (c *Client) CloneVMWithNextID(ctx context.Context, sourceVMID int, opts CloneVMOptions) (int, UPID, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxNextIDAttempts; attempt++ {
+		newid, err := c.NextID(ctx)
+		if err != nil {
+			return 0, UPID{}, err
+		}
+		opts.NewID = newid
+
+		upid, err := c.CloneVM(ctx, sourceVMID, opts)
+		if err == nil {
+			return newid, upid, nil
+		}
+
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusInternalServerError && createVMExistsRE.MatchString(ae.Message) {
+			lastErr = err
+			continue // the id was taken by another creator; re-ask, never purge it
+		}
+		return 0, UPID{}, err
+	}
+	return 0, UPID{}, fmt.Errorf("pve: CloneVMWithNextID: exhausted %d attempts, last error: %w", maxNextIDAttempts, lastErr)
+}
+
 // ConvertToTemplate converts vmid to a template via POST .../qemu/{vmid}/template,
 // an asynchronous call that returns a UPID.
 func (c *Client) ConvertToTemplate(ctx context.Context, vmid int) (UPID, error) {
@@ -342,15 +378,25 @@ func (c *Client) SetConfigAsync(ctx context.Context, vmid int, form url.Values) 
 }
 
 // ResizeDisk resizes disk on vmid via PUT .../qemu/{vmid}/resize, returning a
-// UPID. sizeBytes is normalized to an ABSOLUTE size with an explicit unit
-// suffix ("20G") before being sent: PVE reads a BARE number as bytes, so
-// never emit one here. Shrinking is a hard error upstream; resizing to the
-// current size is a silent successful no-op, which makes repeated calls with
-// the same sizeBytes safely idempotent.
+// UPID. Shrinking is a hard error upstream; resizing to the current size is a
+// silent successful no-op, which makes repeated calls with the same sizeBytes
+// safely idempotent.
+//
+// The size is sent as an EXACT absolute value: whole GiB as "<n>G" (the common
+// case), and any non-integer-GiB request as its exact byte count with NO suffix
+// — PVE's resize reads a bare number as bytes (its size pattern accepts only
+// K/M/G/T suffixes, no "B"). Emitting "<n>G" with n = sizeBytes/GiB would
+// silently TRUNCATE a fractional request (a 1.5 GiB disk would come up as 1 GiB,
+// and a sub-GiB request as "0G"), so a remainder switches to the lossless bare-
+// bytes form rather than rounding.
 func (c *Client) ResizeDisk(ctx context.Context, vmid int, disk string, sizeBytes int64) (UPID, error) {
+	size := fmt.Sprintf("%dG", sizeBytes/(1<<30))
+	if sizeBytes%(1<<30) != 0 {
+		size = strconv.FormatInt(sizeBytes, 10) // bare number = exact bytes
+	}
 	form := url.Values{
 		"disk": {disk},
-		"size": {fmt.Sprintf("%dG", sizeBytes/(1<<30))},
+		"size": {size},
 	}
 	path := fmt.Sprintf("/nodes/%s/qemu/%d/resize", c.node, vmid)
 	var raw string
