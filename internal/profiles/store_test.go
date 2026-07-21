@@ -752,6 +752,7 @@ func TestProxmoxRoundTripHasNoTokenValue(t *testing.T) {
 		Pool:         "sandbar",
 		Storage:      "local-lvm",
 		ImageStorage: "local",
+		BaseImage:    "https://ex.test/img.qcow2",
 		Bridge:       "vmbr0",
 		TokenFile:    tokenPath,
 		Insecure:     true,
@@ -771,8 +772,8 @@ func TestProxmoxRoundTripHasNoTokenValue(t *testing.T) {
 		t.Fatal("reloaded store missing the added proxmox profile")
 	}
 	if got.Name != pve.Name || got.Host != pve.Host || got.Node != pve.Node || got.Pool != pve.Pool ||
-		got.Storage != pve.Storage || got.ImageStorage != pve.ImageStorage || got.Bridge != pve.Bridge ||
-		got.TokenFile != pve.TokenFile || got.Insecure != pve.Insecure || got.CAFile != pve.CAFile {
+		got.Storage != pve.Storage || got.ImageStorage != pve.ImageStorage || got.BaseImage != pve.BaseImage ||
+		got.Bridge != pve.Bridge || got.TokenFile != pve.TokenFile || got.Insecure != pve.Insecure || got.CAFile != pve.CAFile {
 		t.Errorf("reloaded proxmox profile = %+v, want fields to match %+v", got, pve)
 	}
 
