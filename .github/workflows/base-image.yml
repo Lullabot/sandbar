@@ -1,0 +1,102 @@
+# Proxmox base image. Builds the cloud image sand's Proxmox provider starts its
+# base template from — upstream Debian genericcloud with `qemu-guest-agent`
+# baked in — and publishes it as a GitHub Release asset that a profile's
+# `base_image` points at (the provider defaults to the latest such asset).
+#
+# Why the agent must be preinstalled: sand learns a VM's IP ONLY from the QEMU
+# guest agent (the only address a pure-API PVE client can read), and it needs
+# that IP to SSH in and run the base playbook. Stock cloud images don't ship the
+# agent, and PVE's API can neither install packages via its built-in cloud-init
+# nor upload a cloud-init snippet — so the agent has to be in the image already.
+# sand's base playbook still apt-upgrades on top, so this image only needs to be
+# recent-ish; the monthly run keeps it fresh with Debian security updates.
+#
+# Releases: this repo has IMMUTABLE releases on, so assets cannot be added after
+# publish (the 422 that release-please.yml documents). We therefore create a
+# DRAFT, upload the asset + checksum, then flip it to published — assets frozen
+# in place. Tags are `base-image-YYYY.MM.DD`, disjoint from release-please's
+# `vX.Y.Z`.
+name: Base image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (default: base-image-YYYY.MM.DD)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 6 1 * *' # 06:00 UTC on the 1st of each month
+  # BOOTSTRAP-ONLY (remove once this file is on the default branch): lets the
+  # first image release be cut from the proxmox-provider PR. workflow_dispatch
+  # can't target a branch whose workflow isn't yet on the default branch, so a
+  # scoped push trigger is the only way to run it pre-merge.
+  push:
+    branches: [worktree-proxmox-provider]
+    paths: ['.github/workflows/base-image.yml']
+
+permissions:
+  contents: write # create the release
+
+concurrency:
+  group: base-image
+  cancel-in-progress: false
+
+env:
+  # The upstream image the golden image is derived from.
+  SRC_URL: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+  # The published asset name. base_image's default in the provider derives its
+  # import filename from this, so keep the two in agreement.
+  ASSET: sandbar-base-debian-13-amd64.qcow2
+  # The direct backend runs qemu itself (KVM if /dev/kvm is present, TCG
+  # otherwise) instead of going through libvirt — more reliable on CI runners.
+  LIBGUESTFS_BACKEND: direct
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install libguestfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y guestfs-tools qemu-utils
+          # libguestfs' supermin appliance must read the host kernel; the runner
+          # ships /boot/vmlinuz-* mode 0600, which makes virt-* fail with a
+          # cryptic "supermin: ... Permission denied". Open it up.
+          sudo chmod 0644 /boot/vmlinuz-* || true
+
+      - name: Download the upstream Debian cloud image
+        run: curl -fSL "$SRC_URL" -o "$ASSET"
+
+      - name: Bake in qemu-guest-agent
+        run: |
+          # Offline edit (never boots the guest, so cloud-init's first-boot
+          # behaviour is untouched); virt-sysprep also strips machine-specific
+          # state so clones stay independent.
+          sudo virt-sysprep -a "$ASSET" \
+            --run-command 'apt-get update' \
+            --install qemu-guest-agent \
+            --run-command 'systemctl enable qemu-guest-agent'
+          sudo chown "$USER" "$ASSET" # virt-sysprep leaves it root-owned
+
+      - name: Checksum
+        run: sha256sum "$ASSET" | tee "$ASSET.sha256"
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          tag="${{ github.event.inputs.tag }}"
+          [ -n "$tag" ] || tag="base-image-$(date -u +%Y.%m.%d)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release (draft first — immutable releases reject later uploads)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ steps.tag.outputs.tag }}'
+          gh release create "$tag" "$ASSET" "$ASSET.sha256" \
+            --draft \
+            --title "Base image $tag" \
+            --notes "Debian 13 genericcloud with qemu-guest-agent preinstalled, for sand's Proxmox \`base_image\`. Built offline with virt-sysprep by .github/workflows/base-image.yml. Verify with the .sha256 asset."
+          gh release edit "$tag" --draft=false
+          echo "Published $tag with $ASSET"
