@@ -273,6 +273,11 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 		t.Fatalf("an unmanaged VM's help bar must not offer reset, got:\n%s", boardVerbs(m))
 	}
 
+	// The failed build above now surfaces in the Messages pane on purpose — that
+	// is the failure-logging this test's setup exercises — so "silent" for the
+	// reset means it adds NOTHING on top, not that the log is empty.
+	msgBefore := m.lastMessage()
+
 	after, cmd := m.Update(runeKey('R'))
 	m = after.(model)
 
@@ -282,8 +287,48 @@ func TestResetGateUnmanagedIsSilentNoOp(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("reset on an unmanaged VM should dispatch no command")
 	}
-	if m.lastMessage() != "" {
-		t.Fatalf("reset on an unmanaged VM should be a silent no-op (help bar already omits it), got status %q", m.lastMessage())
+	if m.lastMessage() != msgBefore {
+		t.Fatalf("reset on an unmanaged VM should add no message (help bar already omits it), got status %q", m.lastMessage())
+	}
+}
+
+// A non-canceled provision failure must land in the session Messages log — not
+// only on the full-screen progress view and the tile's Failed badge. Otherwise a
+// user watching the board never learns WHY a build failed, even though the CLI
+// prints the identical error to stderr.
+func TestProvisionFailureSurfacedInMessages(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	l := newTeaLoop(t, m)
+
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
+	build.done <- errAnsibleBoom
+	l.pump("the build to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
+
+	got := l.m.lastMessage()
+	if !strings.Contains(got, "web") || !strings.Contains(got, errAnsibleBoom.Error()) {
+		t.Fatalf("a failed build must surface in the Messages log with the VM name and error; got %q", got)
+	}
+}
+
+// A user-canceled run is NOT a failure — its error is the kill we caused — so it
+// must stay out of the Messages log (it never reddens the tile either).
+func TestCanceledProvisionNotSurfacedInMessages(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	l := newTeaLoop(t, m)
+
+	job := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", job.run, vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}))
+	job.write(l, provisionKey(registry.LocalScope, "web"), "TASK [base : Install]\n")
+
+	// ^C: cancel, then the run reports back canceled.
+	l.m.jobs.cancelJob(provisionKey(registry.LocalScope, "web"))
+	l.send(provisionDoneMsg{job: provisionKey(registry.LocalScope, "web"), err: context.Canceled})
+
+	if got := l.m.lastMessage(); got != "" {
+		t.Fatalf("a canceled build must not surface in the Messages log; got %q", got)
 	}
 }
 
