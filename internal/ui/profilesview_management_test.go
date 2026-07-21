@@ -365,6 +365,176 @@ func TestSubmitProfileEditRefusedWhileJobInFlightOnConnectionChange(t *testing.T
 	}
 }
 
+// TestProxmoxEditFormPrefillToggleSave drives the edit form for a seeded
+// Proxmox profile through the REAL key-dispatch path (openProfileEditForm,
+// then updateProfileForm exactly as a user's keystrokes travel): every field
+// prefills from the stored profile, the insecure checkbox is the one field
+// that is NOT a textinput.Model yet still participates in tab-based focus
+// traversal and toggles on space, and saving persists the toggled value —
+// with token_file carried as a PATH, never the token value itself, exactly
+// like identity_path. Creating a Proxmox profile is task 2's type picker;
+// this is the edit path task 1 makes verifiable on its own
+// (openProfileEditForm already opens the form for an existing profile,
+// whatever its type).
+func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
+	isolateHostState(t)
+
+	p := seedProxmoxProfile(t, "cluster", "pve.example.com", "pve1", "sandbar")
+	_, scope, err := buildProfileProvider(p)
+	if err != nil {
+		t.Fatalf("buildProfileProvider: %v", err)
+	}
+	fleet := provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: p, Prov: &providerfake.Provider{}, Scope: scope},
+	}
+	m := New(fleet).(model)
+	m = resized(m, 100, 30)
+
+	// Give the stored profile a ca_file value too (seedProxmoxProfile leaves
+	// it empty so the buildProfileProvider call just above stays a clean,
+	// real construction) — through the model's OWN store instance, since
+	// New() loaded an independent Store from the same profiles.yaml
+	// seedProxmoxProfile already wrote to.
+	withCA := p
+	withCA.CAFile = "/etc/sandbar/pve-ca.pem"
+	p, err = m.profileStore.Update(withCA)
+	if err != nil {
+		t.Fatalf("seed a ca_file value: %v", err)
+	}
+
+	cmd := m.openProfileEditForm(p)
+	if cmd == nil {
+		t.Fatal("opening the edit form should focus its first field")
+	}
+	if m.profileFormType != profiles.TypeProxmox {
+		t.Fatalf("profileFormType = %v, want TypeProxmox", m.profileFormType)
+	}
+
+	// Every field prefilled from the stored profile.
+	checks := []struct {
+		name, got, want string
+	}{
+		{"name", m.profileInputs[ppName].Value(), "cluster"},
+		{"host", m.profileInputs[ppHost].Value(), "pve.example.com"},
+		{"node", m.profileInputs[ppNode].Value(), "pve1"},
+		{"pool", m.profileInputs[ppPool].Value(), "sandbar"},
+		{"storage", m.profileInputs[ppStorage].Value(), "local-lvm"},
+		{"bridge", m.profileInputs[ppBridge].Value(), "vmbr0"},
+		{"token_file", m.profileInputs[ppTokenFile].Value(), p.TokenFile},
+		{"ca_file", m.profileInputs[ppCAFile].Value(), "/etc/sandbar/pve-ca.pem"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s prefill = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+	if m.profileInsecure {
+		t.Fatal("insecure should prefill false for this profile")
+	}
+
+	// On-screen order is name,host,node,pool,storage,bridge,token_file,
+	// insecure,ca_file (profileFormSlots) — 7 tabs from Name (index 0)
+	// lands on the checkbox (index 7).
+	for i := 0; i < 7; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+	}
+	if !m.profileFormFocusIsCheckbox() {
+		t.Fatalf("focus index %d should be the insecure checkbox after 7 tabs", m.profileFormFocus)
+	}
+
+	// Space toggles it on.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = next.(model)
+	if !m.profileInsecure {
+		t.Fatal("space should toggle the insecure checkbox on")
+	}
+
+	// One more tab must land on CA file's textinput, not stay stuck on the
+	// checkbox.
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	if m.profileFormFocusIsCheckbox() {
+		t.Fatal("tab past the checkbox should land on the CA file text field")
+	}
+
+	// Save.
+	next, cmd = m.Update(ctrlKey('s'))
+	m = next.(model)
+	if m.profileFormErr != nil {
+		t.Fatalf("a valid edit-save should not error, got %v", m.profileFormErr)
+	}
+	if m.view != viewProfiles {
+		t.Fatalf("a valid edit-save should return to the profile list, got view %v", m.view)
+	}
+
+	saved, ok := m.profileStore.Get(p.ID)
+	if !ok {
+		t.Fatal("the edited profile should still be in the store")
+	}
+	if !saved.Insecure {
+		t.Fatal("the toggled insecure value should have been persisted")
+	}
+	if saved.TokenFile != p.TokenFile {
+		t.Fatalf("token_file = %q, want the path unchanged (%q)", saved.TokenFile, p.TokenFile)
+	}
+	if strings.Contains(saved.TokenFile, "sandbar@pve!prov") {
+		t.Fatal("token_file must be a PATH, never the token value itself")
+	}
+	if saved.Host != "pve.example.com" || saved.Node != "pve1" || saved.Pool != "sandbar" ||
+		saved.Storage != "local-lvm" || saved.Bridge != "vmbr0" || saved.CAFile != "/etc/sandbar/pve-ca.pem" {
+		t.Fatalf("saved profile = %+v, every other field should round-trip unchanged", saved)
+	}
+}
+
+// TestProxmoxFormRequiredFieldValidation proves the in-form validation that
+// mirrors profiles.validate's Proxmox rule (store.go): clearing host, node,
+// pool or token_file and saving sets profileFormErr, stays on the form (does
+// NOT return to the list), and never reaches the store.
+func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
+	isolateHostState(t)
+
+	p := seedProxmoxProfile(t, "cluster", "pve.example.com", "pve1", "sandbar")
+	_, scope, err := buildProfileProvider(p)
+	if err != nil {
+		t.Fatalf("buildProfileProvider: %v", err)
+	}
+	fleet := provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: p, Prov: &providerfake.Provider{}, Scope: scope},
+	}
+
+	for _, missing := range []struct {
+		field    string
+		inputIdx int
+	}{
+		{"host", ppHost},
+		{"node", ppNode},
+		{"pool", ppPool},
+		{"token file", ppTokenFile},
+	} {
+		t.Run(missing.field, func(t *testing.T) {
+			m := New(fleet).(model)
+			m = resized(m, 100, 30)
+			m.openProfileEditForm(p)
+			m.profileInputs[missing.inputIdx].SetValue("")
+
+			next, _ := m.submitProfileForm()
+			m = next.(model)
+			if m.profileFormErr == nil || !strings.Contains(m.profileFormErr.Error(), missing.field) {
+				t.Fatalf("clearing %s: error = %v, want it to mention %q", missing.field, m.profileFormErr, missing.field)
+			}
+			if m.view != viewProfileForm {
+				t.Fatalf("an invalid submit must not leave the form, got view %v", m.view)
+			}
+			if got, _ := m.profileStore.Get(p.ID); got.Host != p.Host || got.Node != p.Node || got.Pool != p.Pool || got.TokenFile != p.TokenFile {
+				t.Fatalf("a rejected submit must not have persisted, got %+v", got)
+			}
+		})
+	}
+}
+
 // TestProfileRowTextCoversEveryRuntimeState pins profileRowText's full
 // contract: kind/target formatting for Local vs RemoteSSH, the persisted
 // enabled/disabled status, and every live runtime state a member can be in
