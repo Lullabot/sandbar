@@ -86,13 +86,19 @@ jobs:
           set -euxo pipefail
           sudo modprobe nbd max_part=16
           sudo qemu-nbd --connect=/dev/nbd0 "$ASSET"
-          for _ in $(seq 1 15); do
+          # Find the root filesystem via blkid (reads superblocks directly, needs
+          # root; more reliable than racing udev-populated lsblk FSTYPE). Debian
+          # genericcloud is GPT with the root as its ext4 partition.
+          root=""
+          for _ in $(seq 1 20); do
             sudo partprobe /dev/nbd0 2>/dev/null || true
-            lsblk -lnpo NAME,FSTYPE /dev/nbd0 | grep -q ext4 && break
+            sudo udevadm settle 2>/dev/null || true
+            root=$(sudo blkid -o device -t TYPE=ext4 2>/dev/null | grep -E '^/dev/nbd0' | head -1 || true)
+            [ -n "$root" ] && break
             sleep 1
           done
-          # Debian genericcloud is GPT: the root is the ext4 partition.
-          root=$(lsblk -lnpo NAME,FSTYPE /dev/nbd0 | awk '$2=="ext4"{print $1; exit}')
+          sudo lsblk -f /dev/nbd0 || true
+          echo "root partition: ${root:-<none>}"
           test -n "$root"
           sudo mkdir -p /mnt/img
           sudo mount "$root" /mnt/img
