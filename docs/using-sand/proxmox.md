@@ -105,15 +105,29 @@ The second command prints the token **value exactly once**:
 
 `--privsep 1` means the token carries **only** the permissions you grant it
 explicitly below — even though its user could later be given more, the token
-stays confined. **Save the value now**; it cannot be retrieved again. Write it to
-a file `sand` will read (see [Step 6](#step-6-point-sand-at-the-host)), in the
-form `sandbar@pve!prov=<value>`:
+stays confined. **Save the value now**; it cannot be retrieved again.
+
+`sand` authenticates with the token's **full identity**, which is the two fields
+above joined by an `=`:
+
+```
+<full-tokenid>=<value>
+sandbar@pve!prov=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+Write exactly that one line into a file `sand` will read (referenced as
+`token_file` in [Step 6](#step-6-point-sand-at-the-host)):
 
 ```bash
+mkdir -p ~/.config/sandbar
 umask 077
 printf 'sandbar@pve!prov=%s\n' 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' \
   > ~/.config/sandbar/pve1.token
+chmod 600 ~/.config/sandbar/pve1.token
 ```
+
+The file holds **one line** and nothing else — the identity, an `=`, and the
+value. `sand` refuses to read it unless it is mode `600` (owner-only).
 
 ## Step 4 — Bind the role to the token at the pool
 
@@ -170,6 +184,14 @@ the node `/nodes/pve1`. **If any permission appears at `/`, the isolation
 guarantee does not hold** — go back and remove the over-broad grant.
 
 ## Step 6 — Point `sand` at the host
+
+!!! note "Proxmox profiles are added by editing `profiles.yaml`"
+    The TUI's profile screen (press `p`) can create and edit `local` and
+    `remote-ssh` profiles, but **not** `proxmox` ones yet — so add a Proxmox
+    profile by hand-editing `profiles.yaml` as shown here. Once it's in the file
+    and `enabled`, it appears in the TUI's profile list and board like any other,
+    and `sand --profile <name>` targets it from the CLI; only the *creation* form
+    is CLI/YAML-only for now.
 
 Add a `proxmox` profile to your
 [`profiles.yaml`](connection-profiles.md#profilesyaml):
