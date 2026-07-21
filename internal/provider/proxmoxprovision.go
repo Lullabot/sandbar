@@ -56,12 +56,25 @@ import (
 // built from, used when a profile sets no base_image (see NewProxmox, which
 // copies these into the provider's own fields). They are VARS, not consts, so a
 // test can point them at a rejected extension to exercise the early guard
-// without a real download. The default is Debian's genericcloud qcow2 — a
-// storage-backed volid of "<imageStorage>:import/<baseImageFile>" once downloaded.
+// without a real download.
+//
+// The default is the project's own golden image: upstream Debian genericcloud
+// with qemu-guest-agent baked in, published by .github/workflows/base-image.yml.
+// sand needs the agent running on first boot to learn a VM's IP, and stock cloud
+// images don't ship it — so the default carries it rather than making every user
+// build their own. Bumping to a newer monthly build means updating all three of
+// URL, file, and defaultBaseImageSHA256 together (the workflow publishes the
+// matching .sha256 asset).
 var (
-	baseImageURL  = "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
-	baseImageFile = "debian-13-genericcloud-amd64.qcow2"
+	baseImageURL  = "https://github.com/Lullabot/sandbar/releases/download/base-image-2026.07.21/sandbar-base-debian-13-amd64.qcow2"
+	baseImageFile = "sandbar-base-debian-13-amd64.qcow2"
 )
+
+// defaultBaseImageSHA256 pins the default image so PVE's download-url verifies it
+// server-side — the default image is downloaded and BOOTED, so its integrity is
+// worth checking. Empty for a custom base_image (a user's own URL carries no
+// checksum here). Keep in lockstep with baseImageURL above.
+const defaultBaseImageSHA256 = "57500f861b5a2e5a12a9d90a3046aae09b49d4a49bbfa7b1a9b48ff62b4b4659"
 
 // acceptedImportExts is the extension set PVE's download-url endpoint accepts for
 // content=import. `.img` is deliberately ABSENT: PVE rejects it outright, so a
@@ -393,11 +406,18 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 	}
 
 	progress(out, "Downloading cloud image %s into %s\n", p.baseImageURL, p.imageStorage)
-	dlUPID, err := p.client.DownloadURL(ctx, p.imageStorage, pve.DownloadURLOptions{
+	opts := pve.DownloadURLOptions{
 		Content:  "import",
 		Filename: p.baseImageFile,
 		URL:      p.baseImageURL,
-	})
+	}
+	// Pin the checksum for the default image so PVE verifies the download
+	// server-side (empty for a custom base_image — see NewProxmox).
+	if p.baseImageSHA256 != "" {
+		opts.Checksum = p.baseImageSHA256
+		opts.ChecksumAlgorithm = "sha256"
+	}
+	dlUPID, err := p.client.DownloadURL(ctx, p.imageStorage, opts)
 	if err != nil {
 		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.imageStorage, err)
 	}

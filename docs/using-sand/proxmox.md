@@ -292,7 +292,7 @@ The profile fields:
 | `pool` | The dedicated pool. Every VM `sand` creates lands here, and the token is scoped to it. |
 | `storage` | The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
 | `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
-| `base_image` | Optional. URL of the cloud image the base template is built from. Defaults to upstream Debian genericcloud. Point it at a **golden image with `qemu-guest-agent` baked in** to avoid the guest-agent bootstrap the stock image needs (see below). The download filename is derived from the URL. |
+| `base_image` | Optional. URL of the cloud image the base template is built from. Defaults to the **project golden image** (Debian genericcloud with `qemu-guest-agent` preinstalled, checksum-verified). Override only to use your own image — which must also ship the agent (see below). The download filename is derived from the URL. |
 | `bridge` | The Linux bridge `net0` attaches to. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
 | `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
@@ -314,33 +314,31 @@ Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
 real CPU, memory, and storage usage, sampled from the API.
 
-!!! warning "The base image must have `qemu-guest-agent`"
+!!! note "Why the default image is a project-built one, not stock Debian"
     `sand` learns a VM's IP address only from the QEMU guest agent (it is the
     only IP a pure-API client can read from PVE), and it needs that IP to SSH in
     and provision the base. So the base image must boot with `qemu-guest-agent`
     **already running** — but stock cloud images (including Debian genericcloud)
     don't ship it, and PVE's API can neither install packages through its
-    built-in cloud-init nor upload a cloud-init snippet. Two ways to satisfy this:
+    built-in cloud-init nor upload a cloud-init snippet. So `base_image` defaults
+    to a **project-built golden image** — upstream Debian genericcloud with the
+    agent baked in, published as a GitHub release asset and checksum-verified on
+    download. You don't need to do anything for this to work.
 
-    - **Point `base_image` at a golden image** that has the agent baked in. Build
-      one once on any Linux box (or the PVE node itself, which is Debian) with
-      libguestfs' `guestfs-tools`:
+    **If you override `base_image` with your own URL**, that image must likewise
+    have `qemu-guest-agent` installed and enabled, or the base build will hang
+    waiting for the agent. Bake it in offline on any Linux box with libguestfs'
+    `guestfs-tools`:
 
-        ```bash
-        virt-sysprep -a debian-13-genericcloud-amd64.qcow2 \
-          --install qemu-guest-agent \
-          --run-command 'systemctl enable qemu-guest-agent'
-        ```
+    ```bash
+    virt-sysprep -a your-image.qcow2 \
+      --install qemu-guest-agent \
+      --run-command 'systemctl enable qemu-guest-agent'
+    ```
 
-        `virt-sysprep` edits the disk **offline** (it never boots the guest, so
-        cloud-init's first-boot behaviour is untouched) and also strips
-        machine-specific state so clones stay independent. Host the result (e.g. a
-        GitHub release asset) and set `base_image` to its URL, or drop it onto your
-        `image_storage` as `import/<name>.qcow2` so `sand` uses it in place.
-
-    - **Or** replace the already-downloaded import volume (`<image_storage>:import/
-      debian-13-genericcloud-amd64.qcow2`) with an agent-equipped image of the same
-      name — `sand`'s "already present" check then uses it without re-downloading.
+    `virt-sysprep` edits the disk offline (never boots the guest, so cloud-init's
+    first-boot behaviour is untouched) and strips machine-specific state so clones
+    stay independent.
 
 ## A separate pool for automated tests
 

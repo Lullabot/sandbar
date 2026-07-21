@@ -138,6 +138,10 @@ type proxmoxProvider struct {
 	// NewProxmox. Kept as fields (not the package vars) so one endpoint's custom
 	// image cannot leak into another's build.
 	baseImageURL, baseImageFile string
+	// baseImageSHA256 is the expected checksum for the DEFAULT image, passed to
+	// PVE's download-url so it verifies the download server-side. Empty for a
+	// custom base_image (a user URL carries no pinned checksum here).
+	baseImageSHA256 string
 
 	// ciUser is the guest login user: the cloud-init ciuser this provider
 	// configures at create time, and therefore the account every ssh, every scp,
@@ -244,7 +248,7 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 	// qemu-guest-agent baked in); "" uses the built-in Debian default. The
 	// filename PVE stores the import under is derived from the URL, stripping any
 	// query/fragment so "…/img.qcow2?sig=…" still names "img.qcow2".
-	baseURL, baseFile := baseImageURL, baseImageFile
+	baseURL, baseFile, baseSHA := baseImageURL, baseImageFile, defaultBaseImageSHA256
 	if cfg.BaseImage != "" {
 		baseURL = cfg.BaseImage
 		name := baseURL
@@ -252,24 +256,26 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 			name = name[:i]
 		}
 		baseFile = path.Base(name)
+		baseSHA = "" // a custom image carries no pinned checksum
 	}
 
 	return &proxmoxProvider{
-		client:        client,
-		host:          cfg.Host,
-		node:          cfg.Node,
-		pool:          cfg.Pool,
-		storage:       cfg.Storage,
-		imageStorage:  imageStorage,
-		baseImageURL:  baseURL,
-		baseImageFile: baseFile,
-		bridge:        cfg.Bridge,
-		ciUser:        ciUser,
-		identityPath:  identityPath,
-		files:         newProxmoxFiles(proxmoxStateRoot(cfg)),
-		runSSH:        execSSH,
-		vmids:         map[string]int{},
-		ips:           map[string]string{},
+		client:          client,
+		host:            cfg.Host,
+		node:            cfg.Node,
+		pool:            cfg.Pool,
+		storage:         cfg.Storage,
+		imageStorage:    imageStorage,
+		baseImageURL:    baseURL,
+		baseImageFile:   baseFile,
+		baseImageSHA256: baseSHA,
+		bridge:          cfg.Bridge,
+		ciUser:          ciUser,
+		identityPath:    identityPath,
+		files:           newProxmoxFiles(proxmoxStateRoot(cfg)),
+		runSSH:          execSSH,
+		vmids:           map[string]int{},
+		ips:             map[string]string{},
 	}, nil
 }
 
