@@ -91,14 +91,18 @@ func (c *Client) WaitTask(ctx context.Context, upid string) error {
 		err := c.do(ctx, http.MethodGet, path, nil, nil, &st)
 
 		switch {
-		case err == nil && st.Status != "running":
+		case err == nil && st.Status != "running" && st.Status != "":
 			if taskSucceeded(st.ExitStatus) {
 				return nil
 			}
 			return c.taskFailedErr(ctx, upid, st.ExitStatus)
 
 		case err == nil:
-			// Still running: fall through to the poll delay below.
+			// Still running — OR a transient empty/null {"data":...} envelope,
+			// which do() decodes to a zero-valued Status. Treating that empty
+			// status as a finished task would abort a live start/create/delete
+			// with a spurious `exitstatus ""`, so it keeps polling too (bounded by
+			// ctx). Fall through to the poll delay below.
 
 		case IsPermission(err):
 			return err // permanent: never retry

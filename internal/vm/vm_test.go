@@ -46,6 +46,29 @@ func TestValidate(t *testing.T) {
 			mutate:  func(c *CreateConfig) { c.CPUs = 0 },
 			wantErr: true,
 		},
+		{
+			// A clone can't shrink below the base floor, so a smaller disk must be
+			// rejected up front rather than fail deep in a Proxmox create.
+			name:    "disk below the base floor",
+			mutate:  func(c *CreateConfig) { c.Disk = "10GiB" },
+			wantErr: true,
+		},
+		{
+			name:    "disk exactly at the floor",
+			mutate:  func(c *CreateConfig) { c.Disk = BaseDiskFloor },
+			wantErr: false,
+		},
+		{
+			name:    "disk above the floor",
+			mutate:  func(c *CreateConfig) { c.Disk = "200GiB" },
+			wantErr: false,
+		},
+		{
+			// An empty/unparseable disk is permissive — the provider decides.
+			name:    "empty disk is not a floor violation",
+			mutate:  func(c *CreateConfig) { c.Disk = "" },
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

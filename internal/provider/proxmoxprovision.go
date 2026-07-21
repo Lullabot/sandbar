@@ -123,7 +123,11 @@ var cloneSerial sync.Map // key string -> *sync.Mutex
 // contract, and it avoids a partial clone that would then need cleaning up), then
 // build/clone/finalize.
 func (p *proxmoxProvider) createInstance(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	if _, err := p.Get(cfg.Name); err == nil {
+	// Existence check only: Status resolves the VM (name->VMID + status) WITHOUT
+	// Get's whole-storage content listing (diskUsedIndex), whose DiskUsed we would
+	// only discard here. It reports lima.ErrNoSuchInstance for an absent VM just
+	// as Get does.
+	if _, err := p.Status(cfg.Name); err == nil {
 		return fmt.Errorf("proxmox: vm %q already exists in pool %q — delete it first, or choose a different name", cfg.Name, p.pool)
 	} else if !errors.Is(err, lima.ErrNoSuchInstance) {
 		// A permission error (or any non-absence failure) must not be read as
@@ -707,14 +711,18 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 
 	// 1. Stage out the selected state while the source VM is still alive.
 	if opts.PreserveClaude || opts.PreserveProject {
-		if _, err := p.Get(cfg.Name); err != nil {
+		// Status is the existence check AND gives the running state in one resolve,
+		// without Get's discarded whole-storage listing or the extra Status call
+		// this used to make.
+		st, err := p.Status(cfg.Name)
+		if err != nil {
 			// Nothing to preserve from a VM that is not there; fall through to a
 			// clean recreate rather than fail.
 			if !errors.Is(err, lima.ErrNoSuchInstance) {
 				return err
 			}
 		} else {
-			if st, _ := p.Status(cfg.Name); st != "Running" {
+			if st != "Running" {
 				progress(out, "Starting %s to stage its data\n", cfg.Name)
 				if err := p.start(ctx, cfg.Name, out); err != nil {
 					return fmt.Errorf("proxmox: starting %s for staging: %w", cfg.Name, err)

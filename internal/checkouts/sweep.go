@@ -315,15 +315,11 @@ func parseRemoteURL(raw string) (forge, orgRepo string) {
 
 	switch {
 	case strings.HasPrefix(raw, "https://"):
-		return splitHostPath(strings.TrimPrefix(raw, "https://"))
+		return splitHostPath(stripUserinfo(strings.TrimPrefix(raw, "https://")))
 	case strings.HasPrefix(raw, "http://"):
-		return splitHostPath(strings.TrimPrefix(raw, "http://"))
+		return splitHostPath(stripUserinfo(strings.TrimPrefix(raw, "http://")))
 	case strings.HasPrefix(raw, "ssh://"):
-		rest := strings.TrimPrefix(raw, "ssh://")
-		if i := strings.Index(rest, "@"); i >= 0 {
-			rest = rest[i+1:]
-		}
-		return splitHostPath(rest)
+		return splitHostPath(stripUserinfo(strings.TrimPrefix(raw, "ssh://")))
 	default:
 		// scp-like syntax: [user@]host:path
 		rest := raw
@@ -344,6 +340,25 @@ func parseRemoteURL(raw string) (forge, orgRepo string) {
 // splitHostPath splits "host/org/repo(.git)" (an https:// or ssh:// URL with
 // its scheme and any userinfo already stripped) into (host, org/repo),
 // stripping a trailing ".git" and any stray slashes from the path.
+// stripUserinfo drops a leading "[user[:password]@]" from a "host/path"
+// authority. A remote URL can carry embedded credentials
+// (https://oauth2:GLPAT-xxxx@gitlab.com/org/repo.git is a common manual/CI clone
+// form), and without this the secret would become part of the forge host and be
+// written verbatim into the host-persisted checkout registry — a credential leak
+// to disk, and a host that never matches its real forge. The "@" is sought only
+// within the authority (before the first "/") so a path segment containing "@"
+// is never mistaken for a userinfo delimiter.
+func stripUserinfo(hostPath string) string {
+	authEnd := len(hostPath)
+	if slash := strings.IndexByte(hostPath, '/'); slash >= 0 {
+		authEnd = slash
+	}
+	if at := strings.LastIndexByte(hostPath[:authEnd], '@'); at >= 0 {
+		return hostPath[at+1:]
+	}
+	return hostPath
+}
+
 func splitHostPath(rest string) (host, orgRepo string) {
 	i := strings.Index(rest, "/")
 	if i < 0 {

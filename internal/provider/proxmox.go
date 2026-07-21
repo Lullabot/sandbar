@@ -961,11 +961,11 @@ func net0MAC(net0 string) string {
 // interface's list, preferring IPv4.
 //
 // The filter is netip's own classification rather than a string prefix test:
-// IsGlobalUnicast excludes loopback, multicast and the unspecified address,
-// while IsLinkLocalUnicast excludes both fe80::/10 and 169.254.0.0/16 (the
-// address a guest gives itself when DHCP has NOT answered — reachable-looking
-// and useless). IPv4 is preferred because that is what a typical VM subnet
-// routes; an IPv6-only guest still works via the fallback.
+// IsGlobalUnicast excludes loopback, multicast, the unspecified address, AND
+// link-local unicast — both fe80::/10 and 169.254.0.0/16, the latter being the
+// address a guest gives itself when DHCP has NOT answered (reachable-looking and
+// useless). IPv4 is preferred because that is what a typical VM subnet routes;
+// an IPv6-only guest still works via the fallback.
 func firstRoutable(addrs []pve.IPAddress) string {
 	var v6 string
 	for _, a := range addrs {
@@ -974,7 +974,7 @@ func firstRoutable(addrs []pve.IPAddress) string {
 			continue
 		}
 		ip = ip.Unmap() // a 4-in-6 address is an IPv4 address
-		if !ip.IsGlobalUnicast() || ip.IsLinkLocalUnicast() {
+		if !ip.IsGlobalUnicast() {
 			continue
 		}
 		if ip.Is4() {
