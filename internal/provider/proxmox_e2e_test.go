@@ -72,6 +72,7 @@ const (
 	proxmoxE2ENode        = "PROXMOX_E2E_NODE"
 	proxmoxE2EPool        = "PROXMOX_E2E_POOL"
 	proxmoxE2EStorage     = "PROXMOX_E2E_STORAGE"
+	proxmoxE2EImageStore  = "PROXMOX_E2E_IMAGE_STORAGE" // optional; defaults to "local"
 	proxmoxE2EBridge      = "PROXMOX_E2E_BRIDGE"
 	proxmoxE2ETokenFile   = "PROXMOX_E2E_TOKEN_FILE"
 	proxmoxE2ESSHUser     = "PROXMOX_E2E_SSH_USER"
@@ -99,6 +100,7 @@ func proxmoxE2ETargetConfig(t *testing.T) provider.TargetConfig {
 		Node:         os.Getenv(proxmoxE2ENode),
 		Pool:         os.Getenv(proxmoxE2EPool),
 		Storage:      os.Getenv(proxmoxE2EStorage),
+		ImageStorage: os.Getenv(proxmoxE2EImageStore), // "" -> NewProxmox defaults to "local"
 		Bridge:       os.Getenv(proxmoxE2EBridge),
 		TokenFile:    os.Getenv(proxmoxE2ETokenFile),
 		User:         os.Getenv(proxmoxE2ESSHUser),

@@ -514,7 +514,8 @@ func TestProviderForProfileProxmox(t *testing.T) {
 // TestTargetConfigForProxmoxCarriesEveryField pins the CLI's own
 // profiles.Profile -> TargetConfig conversion (the resolve.go twin of
 // provider.targetConfigFor): every connection field must carry, including
-// identity_path (needed for the cloud-init key, previously dropped here).
+// identity_path (needed for the cloud-init key, previously dropped here) and
+// image_storage.
 func TestTargetConfigForProxmoxCarriesEveryField(t *testing.T) {
 	p := profiles.Profile{
 		ID: "cluster", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
@@ -528,7 +529,7 @@ func TestTargetConfigForProxmoxCarriesEveryField(t *testing.T) {
 		t.Fatalf("Provider = %q, want %q", cfg.Provider, provider.ProxmoxProviderID)
 	}
 	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
-		cfg.Storage != p.Storage || cfg.Bridge != p.Bridge ||
+		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.Bridge != p.Bridge ||
 		cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
 		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
 		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)

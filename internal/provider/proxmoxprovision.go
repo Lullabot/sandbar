@@ -373,11 +373,16 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 	if !acceptedImportExt(baseImageFile) {
 		return "", fmt.Errorf("proxmox: cloud image %q has an extension PVE's download-url rejects; convert it to one of %s first", baseImageFile, strings.Join(acceptedImportExts, "|"))
 	}
-	volid := fmt.Sprintf("%s:import/%s", p.storage, baseImageFile)
+	// The image is downloaded onto the file-based imageStorage (content=import),
+	// NOT the VM-disk storage — a block disk storage (zfspool, lvm-thin) rejects
+	// content=import. buildBaseTemplate then imports the disk onto p.storage FROM
+	// this volid (import-from allows a cross-storage source). See the imageStorage
+	// field's doc and Preflight's import-content check.
+	volid := fmt.Sprintf("%s:import/%s", p.imageStorage, baseImageFile)
 
-	items, err := p.client.StorageContent(ctx, p.storage)
+	items, err := p.client.StorageContent(ctx, p.imageStorage)
 	if err != nil {
-		return "", fmt.Errorf("proxmox: listing storage %q content: %w", p.storage, err)
+		return "", fmt.Errorf("proxmox: listing image storage %q content: %w", p.imageStorage, err)
 	}
 	for _, it := range items {
 		if it.VolID == volid {
@@ -386,17 +391,17 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 		}
 	}
 
-	progress(out, "Downloading cloud image %s into %s\n", baseImageURL, p.storage)
-	dlUPID, err := p.client.DownloadURL(ctx, p.storage, pve.DownloadURLOptions{
+	progress(out, "Downloading cloud image %s into %s\n", baseImageURL, p.imageStorage)
+	dlUPID, err := p.client.DownloadURL(ctx, p.imageStorage, pve.DownloadURLOptions{
 		Content:  "import",
 		Filename: baseImageFile,
 		URL:      baseImageURL,
 	})
 	if err != nil {
-		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.storage, err)
+		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.imageStorage, err)
 	}
 	if err := p.client.WaitTask(ctx, dlUPID.Raw); err != nil {
-		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.storage, err)
+		return "", fmt.Errorf("proxmox: downloading cloud image into %q: %w", p.imageStorage, err)
 	}
 	return volid, nil
 }

@@ -32,10 +32,24 @@ cluster access) as a full admin — usually `root@pam`.
   privilege vocabulary — it relies on the `VM.GuestAgent.*` privileges introduced
   in PVE 9, and PVE 9 removed the old `VM.Monitor` privilege — so it cannot be
   created on an 8.x host.
-- **A storage that supports `images` content** (e.g. `local-lvm`, a ZFS pool, or
-  a directory storage with *Disk image* enabled). The built-in `local` storage
-  does **not** hold disk images by default, so `sand` cannot put a VM disk or a
-  cloud-init drive there.
+- **A storage that supports `images` content** for VM disks (e.g. `local-lvm`, a
+  ZFS pool, or a directory storage with *Disk image* enabled). The built-in
+  `local` storage does **not** hold disk images by default, so `sand` cannot put
+  a VM disk or a cloud-init drive there.
+- **A file-based storage that supports `import` content** for the one-time
+  cloud-image download — a **directory**, **NFS**, or **CIFS** storage. `sand`
+  downloads the base image with PVE's `download-url` (content type `import`),
+  which **block** storages (`zfspool`, `lvm-thin`, RBD) reject with *"not a file
+  based storage"*. This is a **separate** storage from the disk storage above and
+  defaults to `local`; set the profile's `image_storage` to override it. If your
+  disk storage is a directory that already enables `import`, point `image_storage`
+  at it and the same storage serves both.
+
+    !!! tip "Enabling `import` on `local`"
+        The default `local` is a directory storage but often ships without the
+        `import` content type. Enable it once with
+        `pvesm set local --content iso,vztmpl,backup,import` (keep whatever it
+        already lists), or point `image_storage` at another file-based storage.
 - **A Linux bridge** for VM networking (usually `vmbr0`).
 - **Network reachability from the machine running `sand` to the VM subnet.**
   `sand` talks to guests over SSH once they boot (it discovers each VM's IP from
@@ -190,8 +204,13 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0 --roles SandbarNet --users sandba
 pveum role add SandbarNode --privs "Sys.AccessNetwork Sys.Audit"
 pveum acl modify /nodes/pve1 --roles SandbarNode --users sandbar@pve
 
-# 3. Allocate the imported template on the storage (the download-url import step).
+# 3. Storage privileges on BOTH storages sand uses:
+#    - the DISK storage, so it can allocate VM disks (Datastore.AllocateSpace);
+#    - the IMAGE storage, so it can download the cloud image with content=import
+#      (Datastore.AllocateTemplate). These are the same command when a single
+#      file-based storage serves both — run it once in that case.
 pveum acl modify /storage/local-lvm --roles SandbarProv --users sandbar@pve
+pveum acl modify /storage/local     --roles SandbarProv --users sandbar@pve
 ```
 
 | Privilege | Path | What it allows |
@@ -216,9 +235,10 @@ check that proves the isolation guarantee actually holds:
 pveum user permissions 'sandbar@pve!prov' --output-format json
 ```
 
-The result should list **only** `/pool/sandbar`, your storage, the bridge, and
-the node `/nodes/pve1`. **If any permission appears at `/`, the isolation
-guarantee does not hold** — go back and remove the over-broad grant.
+The result should list **only** `/pool/sandbar`, your disk **and** image
+storages, the bridge, and the node `/nodes/pve1`. **If any permission appears at
+`/`, the isolation guarantee does not hold** — go back and remove the over-broad
+grant.
 
 !!! warning "If this prints `{}`"
     An empty result means the token has **no** effective permissions — almost
@@ -250,7 +270,9 @@ profiles:
     host: pve1.example.com        # the API host; add :8006 only if non-default
     node: pve1                    # the PVE node name
     pool: sandbar                 # the dedicated pool from Step 1
-    storage: local-lvm            # images-capable storage
+    storage: local-lvm            # images-capable storage for VM disks
+    # image_storage: local        # file-based (dir/NFS/CIFS) storage for the
+    #                             # cloud-image download; defaults to "local"
     bridge: vmbr0                 # the Linux bridge
     token_file: ~/.config/sandbar/pve1.token
     identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sand installs + connects with
@@ -266,7 +288,8 @@ The profile fields:
 | `host` | Hostname or IP the API answers on. A bare host uses port `8006`; append `:port` only if you've changed it. |
 | `node` | The PVE **node name** (the identifier in `/nodes/<node>/…` paths) — often the same string as the host, but not always. |
 | `pool` | The dedicated pool. Every VM `sand` creates lands here, and the token is scoped to it. |
-| `storage` | The images-capable storage backing VM disks and the cloud-init drive. |
+| `storage` | The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
+| `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
 | `bridge` | The Linux bridge `net0` attaches to. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
 | `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
@@ -307,6 +330,7 @@ export PROXMOX_E2E_HOST=pve1.example.com
 export PROXMOX_E2E_NODE=pve1
 export PROXMOX_E2E_POOL=sandbar-test          # the ISOLATED test pool
 export PROXMOX_E2E_STORAGE=local-lvm
+# export PROXMOX_E2E_IMAGE_STORAGE=local       # file-based; defaults to "local"
 export PROXMOX_E2E_BRIDGE=vmbr0
 export PROXMOX_E2E_TOKEN_FILE=~/.config/sandbar/pve-test.token
 export PROXMOX_E2E_SSH_USER=debian            # the cloud-init guest login user
