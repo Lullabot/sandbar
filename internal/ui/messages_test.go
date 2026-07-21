@@ -148,6 +148,54 @@ func TestMessagesStripRendersWarnEntriesWithMarkerAndAmber(t *testing.T) {
 	}
 }
 
+// A message longer than the pane width WRAPS across rows rather than being
+// clipped to one line with an ellipsis — the docked pane exists to be read. The
+// tail of the message (which truncation dropped) must survive.
+func TestMessageLinesWrapLongEntry(t *testing.T) {
+	m := newTestModel(t)
+	const long = `create of test123 failed: proxmox: downloading cloud image into "uberphoenix-vmdata": pve: 500 can't upload to storage type 'zfspool', not a file based storage`
+	m.logWarn(long)
+
+	const width, rows = 40, 6
+	lines := m.messageLines(rows, width)
+	if len(lines) != rows {
+		t.Fatalf("messageLines returned %d lines, want exactly %d", len(lines), rows)
+	}
+
+	nonBlank := 0
+	var joined string
+	for _, ln := range lines {
+		plain := ansi.Strip(ln)
+		if w := ansi.StringWidth(plain); w > width {
+			t.Fatalf("a wrapped line must not exceed width %d: %q (w=%d)", width, plain, w)
+		}
+		if strings.Contains(plain, "…") {
+			t.Fatalf("a wrapped message must not be ellipsis-truncated, got line %q", plain)
+		}
+		if strings.TrimSpace(plain) != "" {
+			nonBlank++
+		}
+		joined += " " + plain
+	}
+	if nonBlank < 2 {
+		t.Fatalf("a long message should occupy multiple rows, got %d non-blank of %d:\n%q", nonBlank, rows, lines)
+	}
+	// The ⚠ marker still leads, and the TAIL that truncation used to drop is now
+	// present — the whole reason to wrap.
+	if !strings.Contains(joined, "⚠") {
+		t.Fatalf("a wrapped warn entry must keep its ⚠ marker, got:\n%q", lines)
+	}
+	for _, want := range []string{"downloading cloud", "zfspool", "not a file based storage"} {
+		if !strings.Contains(spaceCollapse(joined), spaceCollapse(want)) {
+			t.Fatalf("wrapped output lost %q; joined lines:\n%q", want, joined)
+		}
+	}
+}
+
+// spaceCollapse squeezes runs of whitespace to single spaces so a wrap point
+// (which turns one space into a line break) does not defeat a substring check.
+func spaceCollapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // The single-line activity view (shown on a terminal too short for the
 // docked strip) applies the same ⚠ + amber treatment to a warn entry, and
 // renders a plain entry exactly as before.
