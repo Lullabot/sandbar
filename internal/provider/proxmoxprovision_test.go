@@ -206,8 +206,13 @@ func registerBaseBuild(m *pveMock, rec *createRecorder) {
 	// Exists-guard and base lookup both read this; empty means neither the target
 	// nor the base exists yet.
 	m.data("/cluster/resources", `[]`)
-	m.data("/nodes/pve1/storage/local-lvm/content", `[]`)
-	m.on("/nodes/pve1/storage/local-lvm/download-url", func(w http.ResponseWriter, _ *http.Request) { upidData(w, testUPID) })
+	m.data("/nodes/pve1/storage/local-lvm/content", `[]`) // disk-usage index (p.storage)
+	// The cloud image is downloaded onto the IMAGE storage (the "local" default),
+	// which is distinct from the local-lvm disk storage — content=import only
+	// works on a file-based storage. Empty content means the image is absent, so
+	// a build downloads it.
+	m.data("/nodes/pve1/storage/local/content", `[]`)
+	m.on("/nodes/pve1/storage/local/download-url", func(w http.ResponseWriter, _ *http.Request) { upidData(w, testUPID) })
 
 	m.on("/cluster/nextid", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -567,7 +572,7 @@ func TestProxmoxCreateRejectsImgImageEarly(t *testing.T) {
 	if !strings.Contains(err.Error(), "qcow2") || !strings.Contains(err.Error(), "raw") {
 		t.Errorf("error = %q; want it to name the accepted extension set", err)
 	}
-	if m.sawPath("/nodes/pve1/storage/local-lvm/download-url") {
+	if m.sawPath("/nodes/pve1/storage/local/download-url") {
 		t.Errorf("Create attempted a download of a rejected image; requests: %v", m.seen())
 	}
 }
@@ -853,7 +858,7 @@ func TestProxmoxBaseBuildFailsOnDownloadTaskFailure(t *testing.T) {
 	registerBaseBuild(m, rec)
 
 	dlFail := upidFor("download", 0)
-	m.on("/nodes/pve1/storage/local-lvm/download-url", func(w http.ResponseWriter, _ *http.Request) { upidData(w, dlFail) })
+	m.on("/nodes/pve1/storage/local/download-url", func(w http.ResponseWriter, _ *http.Request) { upidData(w, dlFail) })
 	m.data("/nodes/pve1/tasks/"+dlFail+"/status", `{"status":"stopped","exitstatus":"404 not found"}`)
 
 	p := newCreateProvider(t, m)
@@ -877,16 +882,36 @@ func TestProxmoxCreateReusesExistingCloudImage(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{}
 	registerBaseBuild(m, rec)
-	// The cloud image is already present in storage content.
-	m.data("/nodes/pve1/storage/local-lvm/content",
-		`[{"volid":"local-lvm:import/`+baseImageFile+`","content":"import","size":100}]`)
+	// The cloud image is already present in the IMAGE storage's content.
+	m.data("/nodes/pve1/storage/local/content",
+		`[{"volid":"local:import/`+baseImageFile+`","content":"import","size":100}]`)
 
 	p := newCreateProvider(t, m)
 	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if m.sawPath("/nodes/pve1/storage/local-lvm/download-url") {
+	if m.sawPath("/nodes/pve1/storage/local/download-url") {
 		t.Errorf("Create downloaded the image even though it was already present; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxImageDownloadUsesImageStorageNotDiskStorage proves the cloud-image
+// download targets the file-based image storage (the "local" default), never the
+// block disk storage (local-lvm) that would reject content=import.
+func TestProxmoxImageDownloadUsesImageStorageNotDiskStorage(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	p := newCreateProvider(t, m)
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if !m.sawPath("/nodes/pve1/storage/local/download-url") {
+		t.Errorf("image download must target the image storage (local); requests: %v", m.seen())
+	}
+	if m.sawPath("/nodes/pve1/storage/local-lvm/download-url") {
+		t.Errorf("image download must NOT target the disk storage (local-lvm); requests: %v", m.seen())
 	}
 }
 

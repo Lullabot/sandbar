@@ -69,6 +69,14 @@ const (
 	minPVEMinor = 0
 )
 
+// defaultImageStorage is the storage a Proxmox profile's cloud-image download
+// falls back to when image_storage is unset — "local", the directory storage
+// PVE creates by default on every node. It is file-based, so it can hold the
+// content=import download that block storages (zfspool, lvm-thin) reject. A node
+// whose "local" does not enable "import" content, or that wants a different
+// file-based storage, sets image_storage explicitly (Preflight checks it).
+const defaultImageStorage = "local"
+
 // Timings. All are vars, not consts, so tests can shrink them and keep the suite
 // fast rather than waiting on real minutes.
 var (
@@ -111,6 +119,16 @@ type proxmoxProvider struct {
 	// because error messages must name them: a preflight failure that does not
 	// say WHICH pool or storage it was looking for is a support ticket.
 	host, node, pool, storage, bridge string
+
+	// imageStorage is the FILE-BASED storage the one-time cloud-image download
+	// lands on (content=import). It is deliberately SEPARATE from storage: the
+	// download-url endpoint only accepts content=import on file-based storages
+	// (dir/NFS/CIFS), which block storages like zfspool and lvm-thin reject — yet
+	// those block storages are exactly what a VM's disks want. So the image is
+	// downloaded here and the disk is imported onto `storage` from it (PVE's
+	// import-from allows a source on a different storage than the target disk).
+	// Empty in the config defaults to defaultImageStorage; see NewProxmox.
+	imageStorage string
 
 	// ciUser is the guest login user: the cloud-init ciuser this provider
 	// configures at create time, and therefore the account every ssh, every scp,
@@ -193,12 +211,23 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		ciUser = vm.HostUser()
 	}
 
+	// The image-download storage is separate from the VM-disk storage (see the
+	// imageStorage field's doc). An unset image_storage falls back to
+	// defaultImageStorage — "local", the dir storage present on essentially every
+	// PVE node — so a block-storage disk target (the common case) still has a
+	// file-based place to stage the cloud-image import without extra config.
+	imageStorage := cfg.ImageStorage
+	if imageStorage == "" {
+		imageStorage = defaultImageStorage
+	}
+
 	return &proxmoxProvider{
 		client:       client,
 		host:         cfg.Host,
 		node:         cfg.Node,
 		pool:         cfg.Pool,
 		storage:      cfg.Storage,
+		imageStorage: imageStorage,
 		bridge:       cfg.Bridge,
 		ciUser:       ciUser,
 		identityPath: cfg.IdentityPath,
@@ -1281,6 +1310,26 @@ func (p *proxmoxProvider) Preflight() error {
 	}
 	if !storage.SupportsContent("images") {
 		return fmt.Errorf("proxmox: storage %q on node %s does not accept \"images\" content (it accepts %q), so VM disks and cloud-init drives cannot be created there", p.storage, p.node, storage.Content)
+	}
+
+	// The cloud image is downloaded once with content=import, which PVE's
+	// download-url endpoint accepts ONLY on file-based storages (dir/NFS/CIFS) —
+	// a block storage like zfspool or lvm-thin rejects it with a 500 far into the
+	// first build. Catch it here, on the image storage (which may be p.storage or
+	// the "local" default), and say exactly how to fix it. Skip the second lookup
+	// when the image storage IS the disk storage and already passed above.
+	if p.imageStorage == p.storage {
+		if !storage.SupportsContent("import") {
+			return fmt.Errorf("proxmox: storage %q on node %s does not accept \"import\" content (it accepts %q) — the cloud image is downloaded there with content=import, which block storages like zfspool and lvm-thin reject; set image_storage to a file-based (dir/NFS/CIFS) storage, or enable it with `pvesm set %s --content %s,import`", p.storage, p.node, storage.Content, p.storage, storage.Content)
+		}
+		return nil
+	}
+	imgStore, err := p.client.StorageStatus(ctx, p.imageStorage)
+	if err != nil {
+		return fmt.Errorf("proxmox: image storage %q is not usable on node %s: %w (set image_storage to a file-based storage that exists, or leave it unset to use %q)", p.imageStorage, p.node, err, defaultImageStorage)
+	}
+	if !imgStore.SupportsContent("import") {
+		return fmt.Errorf("proxmox: image storage %q on node %s does not accept \"import\" content (it accepts %q) — the cloud image is downloaded there with content=import, which block storages like zfspool and lvm-thin reject; set image_storage to a file-based (dir/NFS/CIFS) storage, or enable it with `pvesm set %s --content %s,import`", p.imageStorage, p.node, imgStore.Content, p.imageStorage, imgStore.Content)
 	}
 	return nil
 }

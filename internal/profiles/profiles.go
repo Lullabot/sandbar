@@ -58,13 +58,18 @@ type Profile struct {
 	// TokenFile is a PATH to a credential file, never credential material — the
 	// profiles store is secret-free and must stay that way, because these fields
 	// are folded into the registry scope that gets persisted.
-	Node      string `yaml:"node,omitempty"`
-	Pool      string `yaml:"pool,omitempty"`
-	Storage   string `yaml:"storage,omitempty"`
-	Bridge    string `yaml:"bridge,omitempty"`
-	TokenFile string `yaml:"token_file,omitempty"`
-	Insecure  bool   `yaml:"insecure,omitempty"`
-	CAFile    string `yaml:"ca_file,omitempty"`
+	Node    string `yaml:"node,omitempty"`
+	Pool    string `yaml:"pool,omitempty"`
+	Storage string `yaml:"storage,omitempty"`
+	// ImageStorage is an optional FILE-BASED storage (dir/NFS/CIFS) used only for
+	// the one-time cloud-image download (content=import, which a block Storage
+	// like zfspool/lvm-thin rejects). Empty defaults to "local". The VM disks
+	// still land on Storage; only the image staging uses this.
+	ImageStorage string `yaml:"image_storage,omitempty"`
+	Bridge       string `yaml:"bridge,omitempty"`
+	TokenFile    string `yaml:"token_file,omitempty"`
+	Insecure     bool   `yaml:"insecure,omitempty"`
+	CAFile       string `yaml:"ca_file,omitempty"`
 }
 
 // remoteTarget returns the stable, secret-free "user@host:port" identity for

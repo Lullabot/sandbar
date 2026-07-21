@@ -137,16 +137,17 @@ func scopeForProfile(p profiles.Profile) registry.Scope {
 func targetConfigFor(p profiles.Profile) provider.TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return provider.TargetConfig{
-			Provider:  provider.ProxmoxProviderID,
-			Host:      p.Host,
-			User:      p.User,
-			Node:      p.Node,
-			Pool:      p.Pool,
-			Storage:   p.Storage,
-			Bridge:    p.Bridge,
-			TokenFile: p.TokenFile,
-			Insecure:  p.Insecure,
-			CAFile:    p.CAFile,
+			Provider:     provider.ProxmoxProviderID,
+			Host:         p.Host,
+			User:         p.User,
+			Node:         p.Node,
+			Pool:         p.Pool,
+			Storage:      p.Storage,
+			ImageStorage: p.ImageStorage,
+			Bridge:       p.Bridge,
+			TokenFile:    p.TokenFile,
+			Insecure:     p.Insecure,
+			CAFile:       p.CAFile,
 		}
 	}
 	return provider.TargetConfig{

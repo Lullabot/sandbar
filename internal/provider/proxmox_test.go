@@ -1191,6 +1191,23 @@ func TestProxmoxAttachArgvUnresolvableFailsLoudly(t *testing.T) {
 	}
 }
 
+// TestProxmoxImageStorageDefaultAndOverride proves image_storage falls back to
+// the "local" default when unset, and is honored when set — so a block disk
+// storage (the common case) gets a file-based image-staging storage for free.
+func TestProxmoxImageStorageDefaultAndOverride(t *testing.T) {
+	m := newPVEMock(t)
+
+	def := newProxmoxForTest(t, m)
+	if def.imageStorage != defaultImageStorage {
+		t.Errorf("unset image_storage = %q; want the %q default", def.imageStorage, defaultImageStorage)
+	}
+
+	over := newProxmoxForTest(t, m, func(c *TargetConfig) { c.ImageStorage = "nfs-images" })
+	if over.imageStorage != "nfs-images" {
+		t.Errorf("image_storage override = %q; want %q", over.imageStorage, "nfs-images")
+	}
+}
+
 // --- preflight ------------------------------------------------------------------
 
 // preflightHappyPath registers every endpoint a good preflight touches.
@@ -1198,6 +1215,9 @@ func preflightHappyPath(m *pveMock) {
 	m.data("/nodes/pve1/status", `{"pveversion":"pve-manager/9.0.4/abcdef","cpuinfo":{"cpus":16}}`)
 	m.data("/pools", `[{"poolid":"sandbar"},{"poolid":"other"}]`)
 	m.data("/nodes/pve1/storage/local-lvm/status", `{"total":1000,"avail":900,"active":1,"enabled":1,"content":"images,rootdir"}`)
+	// The image storage (the "local" default) must accept content=import for the
+	// cloud-image download — a separate check from the disk storage's "images".
+	m.data("/nodes/pve1/storage/local/status", `{"total":500,"avail":400,"active":1,"enabled":1,"content":"iso,vztmpl,import,backup"}`)
 }
 
 func TestProxmoxPreflightHappyPath(t *testing.T) {
@@ -1264,6 +1284,16 @@ func TestProxmoxPreflightNamesTheSpecificFailure(t *testing.T) {
 				m.data("/nodes/pve1/storage/local-lvm/status", `{"total":10,"avail":9,"active":1,"enabled":1,"content":"iso,vztmpl"}`)
 			},
 			want: []string{"local-lvm", "images"},
+		},
+		{
+			name: "image storage without import content",
+			setup: func(m *pveMock) {
+				preflightHappyPath(m)
+				// The disk storage is fine; the image storage ("local") lacks import,
+				// which is what the cloud-image download needs.
+				m.data("/nodes/pve1/storage/local/status", `{"total":10,"avail":9,"active":1,"enabled":1,"content":"iso,vztmpl"}`)
+			},
+			want: []string{"local", "import", "image_storage"},
 		},
 	}
 

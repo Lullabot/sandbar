@@ -744,17 +744,18 @@ func TestProxmoxRoundTripHasNoTokenValue(t *testing.T) {
 	}
 
 	pve := Profile{
-		Name:      "pve",
-		Type:      TypeProxmox,
-		Enabled:   true,
-		Host:      "pve.example.com",
-		Node:      "pve1",
-		Pool:      "sandbar",
-		Storage:   "local-lvm",
-		Bridge:    "vmbr0",
-		TokenFile: tokenPath,
-		Insecure:  true,
-		CAFile:    "/etc/ssl/pve-ca.pem",
+		Name:         "pve",
+		Type:         TypeProxmox,
+		Enabled:      true,
+		Host:         "pve.example.com",
+		Node:         "pve1",
+		Pool:         "sandbar",
+		Storage:      "local-lvm",
+		ImageStorage: "local",
+		Bridge:       "vmbr0",
+		TokenFile:    tokenPath,
+		Insecure:     true,
+		CAFile:       "/etc/ssl/pve-ca.pem",
 	}
 	added, err := s.Add(pve)
 	if err != nil {
@@ -770,8 +771,8 @@ func TestProxmoxRoundTripHasNoTokenValue(t *testing.T) {
 		t.Fatal("reloaded store missing the added proxmox profile")
 	}
 	if got.Name != pve.Name || got.Host != pve.Host || got.Node != pve.Node || got.Pool != pve.Pool ||
-		got.Storage != pve.Storage || got.Bridge != pve.Bridge || got.TokenFile != pve.TokenFile ||
-		got.Insecure != pve.Insecure || got.CAFile != pve.CAFile {
+		got.Storage != pve.Storage || got.ImageStorage != pve.ImageStorage || got.Bridge != pve.Bridge ||
+		got.TokenFile != pve.TokenFile || got.Insecure != pve.Insecure || got.CAFile != pve.CAFile {
 		t.Errorf("reloaded proxmox profile = %+v, want fields to match %+v", got, pve)
 	}
 

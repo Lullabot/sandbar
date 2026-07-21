@@ -132,16 +132,17 @@ func buildBinding(p profiles.Profile) Binding {
 func targetConfigFor(p profiles.Profile) TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return TargetConfig{
-			Provider:  ProxmoxProviderID,
-			Host:      p.Host,
-			User:      p.User,
-			Node:      p.Node,
-			Pool:      p.Pool,
-			Storage:   p.Storage,
-			Bridge:    p.Bridge,
-			TokenFile: p.TokenFile,
-			Insecure:  p.Insecure,
-			CAFile:    p.CAFile,
+			Provider:     ProxmoxProviderID,
+			Host:         p.Host,
+			User:         p.User,
+			Node:         p.Node,
+			Pool:         p.Pool,
+			Storage:      p.Storage,
+			ImageStorage: p.ImageStorage,
+			Bridge:       p.Bridge,
+			TokenFile:    p.TokenFile,
+			Insecure:     p.Insecure,
+			CAFile:       p.CAFile,
 		}
 	}
 	return TargetConfig{

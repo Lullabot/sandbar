@@ -56,6 +56,12 @@ type TargetConfig struct {
 	// bridge net0 attaches to.
 	Storage string
 	Bridge  string
+	// ImageStorage is the FILE-BASED storage (dir/NFS/CIFS) the one-time
+	// cloud-image download lands on (content=import, which a block Storage like
+	// zfspool/lvm-thin rejects). "" defaults to "local". It is NOT part of the
+	// registry identity (Scope) — two profiles differing only in image storage
+	// still target the same pool — so it is deliberately absent from Scope below.
+	ImageStorage string
 	// TokenFile is a PATH to a file holding the PVE API token, never the token
 	// itself — the same contract IdentityPath keeps, and non-negotiable here:
 	// Scope() folds this struct's fields into an identity the registry
