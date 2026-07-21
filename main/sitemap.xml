@@ -2,78 +2,78 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://lullabot.github.io/sandbar/main/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/why/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/contributing/ansible-playbook/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/contributing/development/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/contributing/releases/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/getting-started/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/getting-started/available-tools/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/getting-started/first-vm/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/getting-started/how-it-works/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/getting-started/installation/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/reference/files-and-state/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/reference/security-model/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/reference/troubleshooting/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/cli-reference/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/connection-profiles/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/files-and-shells/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/secrets/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/tui/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
     <url>
          <loc>https://lullabot.github.io/sandbar/main/using-sand/web-servers/</loc>
-         <lastmod>2026-07-20</lastmod>
+         <lastmod>2026-07-21</lastmod>
     </url>
 </urlset>
