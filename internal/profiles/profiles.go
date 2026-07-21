@@ -66,10 +66,15 @@ type Profile struct {
 	// like zfspool/lvm-thin rejects). Empty defaults to "local". The VM disks
 	// still land on Storage; only the image staging uses this.
 	ImageStorage string `yaml:"image_storage,omitempty"`
-	Bridge       string `yaml:"bridge,omitempty"`
-	TokenFile    string `yaml:"token_file,omitempty"`
-	Insecure     bool   `yaml:"insecure,omitempty"`
-	CAFile       string `yaml:"ca_file,omitempty"`
+	// BaseImage is an optional URL of the cloud image the base template is built
+	// from. Empty uses the built-in Debian genericcloud default. Point it at a
+	// golden image (e.g. one with qemu-guest-agent baked in) to skip the
+	// bootstrap the stock image needs. The filename is derived from the URL.
+	BaseImage string `yaml:"base_image,omitempty"`
+	Bridge    string `yaml:"bridge,omitempty"`
+	TokenFile string `yaml:"token_file,omitempty"`
+	Insecure  bool   `yaml:"insecure,omitempty"`
+	CAFile    string `yaml:"ca_file,omitempty"`
 }
 
 // remoteTarget returns the stable, secret-free "user@host:port" identity for

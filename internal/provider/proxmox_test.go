@@ -1208,6 +1208,28 @@ func TestProxmoxImageStorageDefaultAndOverride(t *testing.T) {
 	}
 }
 
+// TestProxmoxBaseImageDefaultAndOverride proves base_image defaults to the
+// built-in Debian image and is honored when set, with the import filename
+// derived from the URL (query/fragment stripped).
+func TestProxmoxBaseImageDefaultAndOverride(t *testing.T) {
+	m := newPVEMock(t)
+
+	def := newProxmoxForTest(t, m)
+	if def.baseImageURL != baseImageURL || def.baseImageFile != baseImageFile {
+		t.Errorf("unset base_image = (%q, %q); want the built-in default (%q, %q)",
+			def.baseImageURL, def.baseImageFile, baseImageURL, baseImageFile)
+	}
+
+	const url = "https://example.test/golden/sandbar-base.qcow2?sig=abc"
+	over := newProxmoxForTest(t, m, func(c *TargetConfig) { c.BaseImage = url })
+	if over.baseImageURL != url {
+		t.Errorf("base_image URL = %q; want the override %q", over.baseImageURL, url)
+	}
+	if over.baseImageFile != "sandbar-base.qcow2" {
+		t.Errorf("derived filename = %q; want %q (query stripped)", over.baseImageFile, "sandbar-base.qcow2")
+	}
+}
+
 // TestProxmoxExpandsTildeInIdentityPath proves a leading ~ in identity_path is
 // resolved to the home directory — sand execs ssh and reads the .pub with no
 // shell, so a literal "~" would open a nonexistent path.

@@ -36,6 +36,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -129,6 +130,14 @@ type proxmoxProvider struct {
 	// import-from allows a source on a different storage than the target disk).
 	// Empty in the config defaults to defaultImageStorage; see NewProxmox.
 	imageStorage string
+
+	// baseImageURL is the cloud image the base template is built from, and
+	// baseImageFile is the filename derived from it (the "<imageStorage>:import/
+	// <baseImageFile>" volid the download lands on). Both come from the profile's
+	// base_image when set, or the built-in Debian default otherwise — see
+	// NewProxmox. Kept as fields (not the package vars) so one endpoint's custom
+	// image cannot leak into another's build.
+	baseImageURL, baseImageFile string
 
 	// ciUser is the guest login user: the cloud-init ciuser this provider
 	// configures at create time, and therefore the account every ssh, every scp,
@@ -231,20 +240,36 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		return nil, fmt.Errorf("proxmox: identity_path: %w", err)
 	}
 
+	// base_image lets a profile point at a golden image (e.g. one with
+	// qemu-guest-agent baked in); "" uses the built-in Debian default. The
+	// filename PVE stores the import under is derived from the URL, stripping any
+	// query/fragment so "…/img.qcow2?sig=…" still names "img.qcow2".
+	baseURL, baseFile := baseImageURL, baseImageFile
+	if cfg.BaseImage != "" {
+		baseURL = cfg.BaseImage
+		name := baseURL
+		if i := strings.IndexAny(name, "?#"); i >= 0 {
+			name = name[:i]
+		}
+		baseFile = path.Base(name)
+	}
+
 	return &proxmoxProvider{
-		client:       client,
-		host:         cfg.Host,
-		node:         cfg.Node,
-		pool:         cfg.Pool,
-		storage:      cfg.Storage,
-		imageStorage: imageStorage,
-		bridge:       cfg.Bridge,
-		ciUser:       ciUser,
-		identityPath: identityPath,
-		files:        newProxmoxFiles(proxmoxStateRoot(cfg)),
-		runSSH:       execSSH,
-		vmids:        map[string]int{},
-		ips:          map[string]string{},
+		client:        client,
+		host:          cfg.Host,
+		node:          cfg.Node,
+		pool:          cfg.Pool,
+		storage:       cfg.Storage,
+		imageStorage:  imageStorage,
+		baseImageURL:  baseURL,
+		baseImageFile: baseFile,
+		bridge:        cfg.Bridge,
+		ciUser:        ciUser,
+		identityPath:  identityPath,
+		files:         newProxmoxFiles(proxmoxStateRoot(cfg)),
+		runSSH:        execSSH,
+		vmids:         map[string]int{},
+		ips:           map[string]string{},
 	}, nil
 }
 

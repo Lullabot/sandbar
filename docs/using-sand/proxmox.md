@@ -273,6 +273,8 @@ profiles:
     storage: local-lvm            # images-capable storage for VM disks
     # image_storage: local        # file-based (dir/NFS/CIFS) storage for the
     #                             # cloud-image download; defaults to "local"
+    # base_image: https://…/sandbar-base.qcow2   # golden image URL; defaults to
+    #                             # upstream Debian genericcloud (see note below)
     bridge: vmbr0                 # the Linux bridge
     token_file: ~/.config/sandbar/pve1.token
     identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sand installs + connects with
@@ -290,6 +292,7 @@ The profile fields:
 | `pool` | The dedicated pool. Every VM `sand` creates lands here, and the token is scoped to it. |
 | `storage` | The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
 | `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
+| `base_image` | Optional. URL of the cloud image the base template is built from. Defaults to upstream Debian genericcloud. Point it at a **golden image with `qemu-guest-agent` baked in** to avoid the guest-agent bootstrap the stock image needs (see below). The download filename is derived from the URL. |
 | `bridge` | The Linux bridge `net0` attaches to. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
 | `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
@@ -310,6 +313,34 @@ create a VM (this takes a few minutes — it downloads the image, runs the same
 Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
 real CPU, memory, and storage usage, sampled from the API.
+
+!!! warning "The base image must have `qemu-guest-agent`"
+    `sand` learns a VM's IP address only from the QEMU guest agent (it is the
+    only IP a pure-API client can read from PVE), and it needs that IP to SSH in
+    and provision the base. So the base image must boot with `qemu-guest-agent`
+    **already running** — but stock cloud images (including Debian genericcloud)
+    don't ship it, and PVE's API can neither install packages through its
+    built-in cloud-init nor upload a cloud-init snippet. Two ways to satisfy this:
+
+    - **Point `base_image` at a golden image** that has the agent baked in. Build
+      one once on any Linux box (or the PVE node itself, which is Debian) with
+      libguestfs' `guestfs-tools`:
+
+        ```bash
+        virt-sysprep -a debian-13-genericcloud-amd64.qcow2 \
+          --install qemu-guest-agent \
+          --run-command 'systemctl enable qemu-guest-agent'
+        ```
+
+        `virt-sysprep` edits the disk **offline** (it never boots the guest, so
+        cloud-init's first-boot behaviour is untouched) and also strips
+        machine-specific state so clones stay independent. Host the result (e.g. a
+        GitHub release asset) and set `base_image` to its URL, or drop it onto your
+        `image_storage` as `import/<name>.qcow2` so `sand` uses it in place.
+
+    - **Or** replace the already-downloaded import volume (`<image_storage>:import/
+      debian-13-genericcloud-amd64.qcow2`) with an agent-equipped image of the same
+      name — `sand`'s "already present" check then uses it without re-downloading.
 
 ## A separate pool for automated tests
 

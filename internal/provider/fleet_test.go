@@ -324,8 +324,8 @@ func TestTargetConfigFor_ConvertsProxmoxProfile(t *testing.T) {
 	p := profiles.Profile{
 		ID: "pve1", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
 		Host: "pve.example.com", User: "dev", Node: "pve1", Pool: "sandbar",
-		Storage: "local-lvm", ImageStorage: "local", Bridge: "vmbr0",
-		TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
+		Storage: "local-lvm", ImageStorage: "local", BaseImage: "https://ex.test/img.qcow2",
+		Bridge: "vmbr0", TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
 		Insecure: true, CAFile: "/etc/ssl/pve-ca.pem",
 	}
 	cfg := targetConfigFor(p)
@@ -333,8 +333,8 @@ func TestTargetConfigFor_ConvertsProxmoxProfile(t *testing.T) {
 		t.Fatalf("targetConfigFor Provider = %q, want %q", cfg.Provider, ProxmoxProviderID)
 	}
 	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
-		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.Bridge != p.Bridge ||
-		cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
+		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.BaseImage != p.BaseImage ||
+		cfg.Bridge != p.Bridge || cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
 		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
 		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
 	}
