@@ -140,8 +140,11 @@ func (m model) profileBlockingJob(scope registry.Scope) (string, bool) {
 		return "", false
 	}
 	kind := "build"
-	if key.kind == kindTransfer {
+	switch key.kind {
+	case kindTransfer:
 		kind = "file transfer"
+	case kindLand:
+		kind = "landing action"
 	}
 	return kind + " of " + key.vm, true
 }

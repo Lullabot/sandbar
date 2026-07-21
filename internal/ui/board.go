@@ -1007,6 +1007,14 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 	if mem, ok := m.memberByScope(v.scope); ok {
 		profileLabel = mem.profile.Name
 	}
+	// The unlanded-work badge is purely registry-derived (badge.go) and never
+	// grows the tile's fixed row budget — it rides the footer row,
+	// right-aligned. running gates the same way badge.go's freshness rule
+	// documents: the sweep only ever refreshes a running VM's entry, so a
+	// stopped VM is unconditionally stale here.
+	running := deriveStatus(v.VM, job, hasJob, !hasJob && m.remoteProvisioning(v.scope, v.Name)) == statusRunning
+	badge := checkoutBadgeText(m.checkouts, v.scope, v.Name, running, now)
+
 	return renderTile(tileInput{
 		VM:                 v.VM,
 		Job:                job,
@@ -1022,6 +1030,7 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		Spinner:            frame,
 		Now:                now,
 		ProfileLabel:       profileLabel,
+		Badge:              badge,
 	})
 }
 

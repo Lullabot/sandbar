@@ -1,0 +1,1195 @@
+package ui
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/vm"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// --- fakeGhActions: the ghActions seam's test double ------------------------
+
+// fakeGhActions records every call it receives and returns canned results, so
+// a test can exercise the Landing pane's dispatch logic without spawning a
+// real gh binary or opening a real browser — mirroring landgh's own
+// fakeRunner/fakeOpener test doubles (internal/landgh/fakes_test.go).
+type fakeGhActions struct {
+	availability landgh.Availability
+
+	prStateCalls []struct{ orgRepo, branch string }
+	prState      *landgh.PR
+	prStateErr   error
+
+	createCalls []struct{ orgRepo, branch string }
+	createPR    *landgh.PR
+	createErr   error
+
+	opened  []string
+	openErr error
+}
+
+func (f *fakeGhActions) Availability(context.Context) landgh.Availability {
+	return f.availability
+}
+
+// ghUp is the "host gh is installed and authenticated" fixture, named because
+// most tests only care that the one-key path is open. Its zero-value opposite
+// (a bare landgh.Availability{}) is gh missing from PATH entirely.
+func ghUp() landgh.Availability {
+	return landgh.Availability{Installed: true, Authenticated: true}
+}
+
+func (f *fakeGhActions) PRState(_ context.Context, orgRepo, branch string) (*landgh.PR, error) {
+	f.prStateCalls = append(f.prStateCalls, struct{ orgRepo, branch string }{orgRepo, branch})
+	return f.prState, f.prStateErr
+}
+
+func (f *fakeGhActions) CreateDraftPR(_ context.Context, orgRepo, branch string) (*landgh.PR, error) {
+	f.createCalls = append(f.createCalls, struct{ orgRepo, branch string }{orgRepo, branch})
+	return f.createPR, f.createErr
+}
+
+func (f *fakeGhActions) OpenInBrowser(_ context.Context, target string) error {
+	f.opened = append(f.opened, target)
+	return f.openErr
+}
+
+// --- classifyLandRow: the pure row-state -> action mapping, every table case
+
+func TestClassifyLandRowPushedNoPRNotYetResolved(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowPushedNoPR {
+		t.Fatalf("Kind = %v, want landRowPushedNoPR", row.Kind)
+	}
+	if row.Action != landActionOpenDraftPR {
+		t.Fatalf("Action = %v, want landActionOpenDraftPR", row.Action)
+	}
+	if !strings.Contains(row.Label, "checking") {
+		t.Fatalf("Label = %q, want it to say the PR check is still provisional", row.Label)
+	}
+}
+
+func TestClassifyLandRowPushedNoPRResolved(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
+	row := classifyLandRow(c, nil, prCheckDone)
+	if row.Kind != landRowPushedNoPR {
+		t.Fatalf("Kind = %v, want landRowPushedNoPR", row.Kind)
+	}
+	if row.Action != landActionOpenDraftPR {
+		t.Fatalf("Action = %v, want landActionOpenDraftPR", row.Action)
+	}
+	if strings.Contains(row.Label, "checking") {
+		t.Fatalf("Label = %q, an AUTHORITATIVELY resolved no-PR row must not say it is still checking", row.Label)
+	}
+}
+
+func TestClassifyLandRowPushedHasPR(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
+	pr := &landgh.PR{Number: 42, URL: "https://github.com/acme/repo/pull/42", State: "OPEN", Draft: true}
+	row := classifyLandRow(c, pr, prCheckDone)
+	if row.Kind != landRowPushedHasPR {
+		t.Fatalf("Kind = %v, want landRowPushedHasPR", row.Kind)
+	}
+	if row.Action != landActionOpenInBrowser {
+		t.Fatalf("Action = %v, want landActionOpenInBrowser", row.Action)
+	}
+	if !strings.Contains(row.Label, "#42") || !strings.Contains(row.Label, "draft") {
+		t.Fatalf("Label = %q, want it to name the PR number and its draft state", row.Label)
+	}
+}
+
+func TestClassifyLandRowUnpushed(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "acme/repo", Forge: "github.com"}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowAtRisk {
+		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
+	}
+	// Work that exists only in the VM is what the pane should be able to
+	// rescue, so an at-risk row offers to commit and push it.
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
+	}
+	if !strings.Contains(row.Label, "3") {
+		t.Fatalf("Label = %q, want the ahead count", row.Label)
+	}
+}
+
+func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
+	// Pushed AND already has an open PR, but there are uncommitted changes:
+	// the row is still at-risk, and the action it offers must be the one that
+	// RESOLVES that (commit + push) — never "open in browser", which would
+	// send the user to a PR that does not reflect the local state.
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}
+	pr := &landgh.PR{Number: 1, URL: "https://github.com/acme/repo/pull/1"}
+	row := classifyLandRow(c, pr, prCheckDone)
+	if row.Kind != landRowAtRisk {
+		t.Fatalf("Kind = %v, want landRowAtRisk (dirty overrides an existing PR)", row.Kind)
+	}
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
+	}
+}
+
+// TestClassifyLandRowNoRemoteStillNamesTheRisk covers the one at-risk case
+// with no action available: a checkout with nowhere to push to. It must still
+// say what is at stake — a checkout holding uncommitted work with no remote is
+// the most fragile thing in the VM, so a bare "local only" would understate it
+// exactly where it matters most.
+func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 2}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowLocalOnly {
+		t.Fatalf("Kind = %v, want landRowLocalOnly — there is no remote at all", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone — there is no remote to push to", row.Action)
+	}
+	if !strings.Contains(row.Label, "local only") {
+		t.Fatalf("Label = %q, want it to say the checkout is local only", row.Label)
+	}
+	if !strings.Contains(row.Label, "1") || !strings.Contains(row.Label, "2") {
+		t.Fatalf("Label = %q, want it to still name the unpushed and uncommitted work", row.Label)
+	}
+
+	// A CLEAN local-only checkout has nothing at stake, so it stays terse.
+	clean := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateNever}
+	if got := classifyLandRow(clean, nil, prCheckPending); got.Label != "local only" {
+		t.Fatalf("Label = %q, want a bare %q for a clean local-only checkout", got.Label, "local only")
+	}
+}
+
+// TestCommitAndPushExprIsLiteral is the injection guard for the one landing
+// action that runs a script in the guest. The checkout is selected by
+// Provider.RunArgv's --workdir argument, so this script must never carry a
+// path, branch, or remote spliced in from the host — every one of those values
+// originates in a sweep of the guest, and this text is parsed by the guest's
+// `bash -c`.
+func TestCommitAndPushExprIsLiteral(t *testing.T) {
+	// No format verbs and no concatenation seams: if someone later builds this
+	// with Sprintf, this is what should stop them.
+	for _, verb := range []string{"%s", "%q", "%v", "%d"} {
+		if strings.Contains(commitAndPushExpr, verb) {
+			t.Fatalf("commitAndPushExpr contains the format verb %q — it must stay a literal", verb)
+		}
+	}
+	// It must work the checkout out for itself rather than being told.
+	for _, want := range []string{"git symbolic-ref --short HEAD", "git remote", "git push -u", "git commit -a"} {
+		if !strings.Contains(commitAndPushExpr, want) {
+			t.Fatalf("commitAndPushExpr is missing %q", want)
+		}
+	}
+	// set -e, so an aborted commit stops before the push.
+	if !strings.HasPrefix(commitAndPushExpr, "set -e") {
+		t.Fatalf("commitAndPushExpr must start with `set -e` so an aborted commit does not push")
+	}
+}
+
+func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowAtRisk {
+		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
+	}
+	if !strings.Contains(row.Label, "2") || !strings.Contains(row.Label, "1") {
+		t.Fatalf("Label = %q, want both the ahead count and the dirty count", row.Label)
+	}
+}
+
+// TestClassifyLandRowNeverPushed covers a branch created in the VM and
+// committed to but never pushed — the CENTRAL case this feature exists for.
+//
+// It used to be swallowed by the "local only" arm, alongside checkouts with no
+// remote at all, and offered no action: the pane told the user there was
+// nothing to do about the one thing it was best placed to help with. Worse, it
+// was self-contradictory — the same never-pushed branch DID get a rescue
+// offered when it happened to be dirty (the Dirty > 0 arm caught it) and
+// nothing at all when it was clean.
+func TestClassifyLandRowNeverPushed(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowAtRisk {
+		t.Fatalf("Kind = %v, want landRowAtRisk — it exists nowhere but this VM", row.Kind)
+	}
+	if row.Action != landActionCommitAndPush {
+		t.Fatalf("Action = %v, want landActionCommitAndPush", row.Action)
+	}
+	// The label must not fabricate an ahead count: there is no tracking ref to
+	// count against, so Checkout.Ahead is 0 and "↑0 unpushed" would be a lie.
+	if row.Label != "never pushed" {
+		t.Fatalf("Label = %q, want %q", row.Label, "never pushed")
+	}
+
+	// Clean and dirty must agree about the ACTION — the inconsistency above is
+	// the regression this pins.
+	dirty := c
+	dirty.Dirty = 2
+	got := classifyLandRow(dirty, nil, prCheckPending)
+	if got.Action != row.Action {
+		t.Fatalf("a dirty never-pushed branch got action %v but a clean one got %v — they must agree", got.Action, row.Action)
+	}
+	// ...and the dirty label must still say the branch has never been pushed,
+	// rather than reporting the uncommitted count alone.
+	if got.Label != "never pushed + 2 uncommitted" {
+		t.Fatalf("Label = %q, want it to name BOTH the never-pushed branch and the uncommitted work", got.Label)
+	}
+}
+
+// TestClassifyLandRowLocalOnlyIsOnlyForNoRemote pins the narrowed meaning of
+// "local only": it is now exactly "there is no remote to target", and nothing
+// else. A checkout with a remote always reaches an arm that can act.
+func TestClassifyLandRowLocalOnlyIsOnlyForNoRemote(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowLocalOnly {
+		t.Fatalf("Kind = %v, want landRowLocalOnly", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone — there is nowhere to push", row.Action)
+	}
+	if row.Label != "local only" {
+		t.Fatalf("Label = %q, want %q", row.Label, "local only")
+	}
+
+	// A remote whose URL did not parse into an org/repo slug is still
+	// pushable: `git push` names the REMOTE, not the parsed URL. So a Forge
+	// alone is enough to keep it out of "local only".
+	withForge := c
+	withForge.Forge = "git.example.com"
+	if got := classifyLandRow(withForge, nil, prCheckPending); got.Kind == landRowLocalOnly {
+		t.Fatalf("a checkout with a remote was classified local-only: %+v", got)
+	}
+}
+
+func TestClassifyLandRowNoRemoteAtAll(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: ""}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowLocalOnly {
+		t.Fatalf("Kind = %v, want landRowLocalOnly (no remote configured at all)", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone", row.Action)
+	}
+}
+
+func TestClassifyLandRowGitLabForgeNoOneKeyAction(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "group/repo", Forge: "gitlab.com", Branch: "feature"}
+	// Even if somehow "resolved" with a PR-shaped result (never actually
+	// produced for a non-GitHub forge — handleLandingAvailable only fires
+	// PRState for github.com checkouts), gh scope is GitHub-only: no one-key
+	// action for GitLab/drupal.org.
+	row := classifyLandRow(c, &landgh.PR{Number: 1}, prCheckDone)
+	if row.Kind != landRowOtherForge {
+		t.Fatalf("Kind = %v, want landRowOtherForge", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone — no one-key MR action for GitLab (deferred)", row.Action)
+	}
+	if !strings.Contains(row.Label, "gitlab.com") {
+		t.Fatalf("Label = %q, want it to name the forge", row.Label)
+	}
+}
+
+func TestClassifyLandRowDrupalOrgForgeNoOneKeyAction(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowOtherForge {
+		t.Fatalf("Kind = %v, want landRowOtherForge", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone", row.Action)
+	}
+}
+
+// --- groupCheckouts: worktrees nested under their parent repo ---------------
+
+func TestGroupCheckoutsWorktreeUnderParent(t *testing.T) {
+	cs := []checkouts.Checkout{
+		{Path: "/home/user/repo", Kind: checkouts.KindRepo},
+		{Path: "/home/user/repo-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/repo"},
+	}
+	groups := groupCheckouts(cs)
+	if len(groups) != 1 {
+		t.Fatalf("len(groups) = %d, want 1 (the worktree must nest, not stand alone)", len(groups))
+	}
+	if !groups[0].HasRepo || groups[0].Repo.Path != "/home/user/repo" {
+		t.Fatalf("groups[0].Repo = %+v, want the repo row", groups[0].Repo)
+	}
+	if len(groups[0].Worktrees) != 1 || groups[0].Worktrees[0].Path != "/home/user/repo-wt" {
+		t.Fatalf("groups[0].Worktrees = %+v, want the one worktree", groups[0].Worktrees)
+	}
+}
+
+func TestGroupCheckoutsMultipleReposPreserveOrder(t *testing.T) {
+	cs := []checkouts.Checkout{
+		{Path: "/home/user/a", Kind: checkouts.KindRepo},
+		{Path: "/home/user/b", Kind: checkouts.KindRepo},
+		{Path: "/home/user/a-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/a"},
+		{Path: "/home/user/b-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/b"},
+	}
+	groups := groupCheckouts(cs)
+	if len(groups) != 2 {
+		t.Fatalf("len(groups) = %d, want 2", len(groups))
+	}
+	if groups[0].Repo.Path != "/home/user/a" || groups[1].Repo.Path != "/home/user/b" {
+		t.Fatalf("groups out of order: %+v", groups)
+	}
+	if len(groups[0].Worktrees) != 1 || groups[0].Worktrees[0].Path != "/home/user/a-wt" {
+		t.Fatalf("groups[0] worktrees = %+v, want a's own worktree only", groups[0].Worktrees)
+	}
+	if len(groups[1].Worktrees) != 1 || groups[1].Worktrees[0].Path != "/home/user/b-wt" {
+		t.Fatalf("groups[1] worktrees = %+v, want b's own worktree only", groups[1].Worktrees)
+	}
+}
+
+func TestGroupCheckoutsOrphanWorktreeStillRendered(t *testing.T) {
+	// The worktree's parent was cut by the sweep's own cap (or otherwise never
+	// recorded) — it must still show up, standing alone, rather than vanish.
+	cs := []checkouts.Checkout{
+		{Path: "/home/user/repo", Kind: checkouts.KindRepo},
+		{Path: "/home/user/orphan-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/never-swept"},
+	}
+	groups := groupCheckouts(cs)
+	if len(groups) != 2 {
+		t.Fatalf("len(groups) = %d, want 2 (the repo, plus the orphan standing alone)", len(groups))
+	}
+	orphan := groups[1]
+	if orphan.HasRepo {
+		t.Fatalf("orphan group HasRepo = true, want false")
+	}
+	if len(orphan.Worktrees) != 1 || orphan.Worktrees[0].Path != "/home/user/orphan-wt" {
+		t.Fatalf("orphan group worktrees = %+v, want the orphan", orphan.Worktrees)
+	}
+}
+
+// --- buildLandRows: grouping + resolution folded into the flat row list ----
+
+func TestBuildLandRowsIndentsWorktreesUnderParent(t *testing.T) {
+	groups := groupCheckouts([]checkouts.Checkout{
+		{Path: "/home/user/repo", Kind: checkouts.KindRepo, PushState: checkouts.PushStateNever},
+		{Path: "/home/user/repo-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/repo", PushState: checkouts.PushStateNever},
+	})
+	rows := buildLandRows(groups, map[string]resolvedPR{}, prCheckPending)
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].Indent {
+		t.Fatalf("rows[0] (the repo) is indented, want top-level")
+	}
+	if !rows[1].Indent {
+		t.Fatalf("rows[1] (the worktree) is not indented, want it nested under its parent")
+	}
+}
+
+func TestBuildLandRowsUsesResolvedPRPerPath(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", Kind: checkouts.KindRepo, PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
+	groups := groupCheckouts([]checkouts.Checkout{c})
+	pr := &landgh.PR{Number: 9, URL: "https://github.com/acme/repo/pull/9"}
+	rows := buildLandRows(groups, map[string]resolvedPR{"/home/user/repo": {pr: pr, state: prCheckDone}}, prCheckPending)
+	if rows[0].Kind != landRowPushedHasPR {
+		t.Fatalf("rows[0].Kind = %v, want landRowPushedHasPR", rows[0].Kind)
+	}
+	if rows[0].PR != pr {
+		t.Fatalf("rows[0].PR = %+v, want the resolved PR", rows[0].PR)
+	}
+}
+
+// --- landDraftPRRun / landOpenBrowserRun: the dispatched action bodies -----
+
+func TestLandDraftPRRunCreatesWhenGhAvailable(t *testing.T) {
+	fake := &fakeGhActions{createPR: &landgh.PR{Number: 7, URL: "https://github.com/acme/repo/pull/7"}}
+	run := landDraftPRRun(fake, true, "acme/repo", "feature")
+	var out strings.Builder
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() = %v, want nil", err)
+	}
+	if len(fake.createCalls) != 1 || fake.createCalls[0].orgRepo != "acme/repo" || fake.createCalls[0].branch != "feature" {
+		t.Fatalf("CreateDraftPR calls = %+v, want exactly one call for acme/repo#feature", fake.createCalls)
+	}
+	if len(fake.opened) != 0 {
+		t.Fatalf("OpenInBrowser calls = %v, want none — gh was available, so no browser fallback", fake.opened)
+	}
+	if !strings.Contains(out.String(), "#7") {
+		t.Fatalf("output = %q, want it to name the created PR", out.String())
+	}
+}
+
+// TestLandDraftPRRunOpensCompareURLWhenGhUnavailable is the acceptance
+// criterion's graceful-degradation case: with host gh absent/unauthed
+// (available == false), "Open draft PR" must NEVER call CreateDraftPR — it
+// falls back to opening the gh-free compare URL in the browser instead, so
+// the action is never simply dead without gh.
+func TestLandDraftPRRunOpensCompareURLWhenGhUnavailable(t *testing.T) {
+	fake := &fakeGhActions{availability: landgh.Availability{}}
+	run := landDraftPRRun(fake, false, "acme/repo", "feature")
+	var out strings.Builder
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() = %v, want nil", err)
+	}
+	if len(fake.createCalls) != 0 {
+		t.Fatalf("CreateDraftPR calls = %+v, want none — gh is unavailable", fake.createCalls)
+	}
+	wantURL := "https://github.com/acme/repo/pull/new/feature"
+	if len(fake.opened) != 1 || fake.opened[0] != wantURL {
+		t.Fatalf("OpenInBrowser calls = %v, want exactly one call opening %q", fake.opened, wantURL)
+	}
+	if !strings.Contains(out.String(), wantURL) {
+		t.Fatalf("output = %q, want it to name the compare URL it opened", out.String())
+	}
+}
+
+func TestLandOpenBrowserRunOpensThePRURL(t *testing.T) {
+	fake := &fakeGhActions{}
+	pr := &landgh.PR{Number: 5, URL: "https://github.com/acme/repo/pull/5"}
+	run := landOpenBrowserRun(fake, "acme/repo", pr)
+	var out strings.Builder
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() = %v, want nil", err)
+	}
+	if len(fake.opened) != 1 || fake.opened[0] != pr.URL {
+		t.Fatalf("OpenInBrowser calls = %v, want exactly one call opening %q", fake.opened, pr.URL)
+	}
+}
+
+func TestLandOpenBrowserRunFallsBackToConstructedURL(t *testing.T) {
+	// gh's response happened not to carry a URL: PRURL must fill the gap.
+	fake := &fakeGhActions{}
+	pr := &landgh.PR{Number: 5}
+	run := landOpenBrowserRun(fake, "acme/repo", pr)
+	var out strings.Builder
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() = %v, want nil", err)
+	}
+	want := "https://github.com/acme/repo/pull/5"
+	if len(fake.opened) != 1 || fake.opened[0] != want {
+		t.Fatalf("OpenInBrowser calls = %v, want exactly one call opening %q", fake.opened, want)
+	}
+}
+
+// --- The pane wired into the model: open, navigate, act --------------------
+
+func landingTestVM(t *testing.T, name string) (model, boardVM) {
+	t.Helper()
+	m := newTestModel(t)
+	m = resized(m, 100, 40)
+	m = putOnBoard(t, m, vm.VM{Name: name, Status: limaRunning, CPUs: 2})
+	v, ok := m.focusedVM()
+	if !ok {
+		t.Fatalf("putOnBoard did not focus %s", name)
+	}
+	return m, v
+}
+
+func TestOpenLandingPaneGroupsAndSwitchesView(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "main", PushState: checkouts.PushStateNever},
+			{Path: "/home/user/repo-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{availability: landgh.Availability{}}
+
+	cmd := m.openLandingPane(v)
+	if m.view != viewLanding {
+		t.Fatalf("view = %v, want viewLanding", m.view)
+	}
+	if len(m.landing.rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2 (grouped repo + worktree)", len(m.landing.rows))
+	}
+	if m.landing.rows[1].Indent != true {
+		t.Fatalf("rows[1].Indent = false, want the worktree indented under its parent")
+	}
+	if cmd == nil {
+		t.Fatal("openLandingPane returned a nil cmd — the availability check must always fire")
+	}
+}
+
+// TestLandingAvailableFiresPRStateOnlyForPushedGitHubRows drives the full
+// open -> availability-check -> per-row PRState sequence through the real
+// teaLoop harness (jobs_test.go), asserting that ONLY the pushed GitHub
+// checkout gets an authoritative lookup: the GitLab row (gh scope is
+// GitHub-only) and the never-pushed row (nothing to check) must not.
+func TestLandingAvailableFiresPRStateOnlyForPushedGitHubRows(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/gh-repo", Kind: checkouts.KindRepo, Branch: "feature", OrgRepo: "acme/repo", Forge: "github.com", PushState: checkouts.PushStatePushed},
+			{Path: "/home/user/gitlab-repo", Kind: checkouts.KindRepo, Branch: "feature", OrgRepo: "group/repo", Forge: "gitlab.com", PushState: checkouts.PushStatePushed},
+			{Path: "/home/user/local-repo", Kind: checkouts.KindRepo, Branch: "wip", PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{availability: ghUp(), prState: &landgh.PR{Number: 11, URL: "https://github.com/acme/repo/pull/11"}}
+	m.ghActions = fake
+	cmd := m.openLandingPane(v)
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("PR state resolved for the github.com row", func(m model) bool {
+		row := m.landing.rows[0]
+		return row.PRResolved && row.Kind == landRowPushedHasPR
+	})
+
+	if len(fake.prStateCalls) != 1 {
+		t.Fatalf("PRState calls = %+v, want exactly one (the github.com row only)", fake.prStateCalls)
+	}
+	if fake.prStateCalls[0].orgRepo != "acme/repo" || fake.prStateCalls[0].branch != "feature" {
+		t.Fatalf("PRState call = %+v, want acme/repo#feature", fake.prStateCalls[0])
+	}
+	// The GitLab and never-pushed rows stay exactly as classifyLandRow put
+	// them without any resolution ever landing for them.
+	if l.m.landing.rows[1].PRResolved {
+		t.Fatal("the GitLab row must never receive an authoritative PRState resolution (gh scope is GitHub-only)")
+	}
+	if l.m.landing.rows[2].PRResolved {
+		t.Fatal("the never-pushed row must never receive a PRState resolution")
+	}
+}
+
+// TestHandleLandingAvailableDropsStaleResult proves a result for a VM the
+// pane has since moved on from (closed and reopened on a different VM) is
+// recognized as stale and ignored, rather than corrupting the CURRENT pane's
+// state.
+func TestHandleLandingAvailableDropsStaleResult(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	m.openLandingPane(v)
+
+	// A result for a DIFFERENT vm name — as if the pane had moved on.
+	cmd := m.handleLandingAvailable(landingAvailableMsg{scope: v.scope, vm: "some-other-vm", availability: ghUp()})
+	if cmd != nil {
+		t.Fatal("a stale availability result must not fire any further commands")
+	}
+	if m.landing.ghChecked {
+		t.Fatal("a stale availability result must not be folded into the pane's current state")
+	}
+}
+
+// TestHandleLandingPRStateDropsStaleResult mirrors the above for a stale
+// PRState result.
+func TestHandleLandingPRStateDropsStaleResult(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "feature", OrgRepo: "acme/repo", Forge: "github.com", PushState: checkouts.PushStatePushed},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	pr := &landgh.PR{Number: 3}
+	m.handleLandingPRState(landingPRStateMsg{scope: v.scope, vm: "some-other-vm", path: "/home/user/repo", pr: pr})
+	if m.landing.rows[0].PRResolved {
+		t.Fatal("a stale PRState result must not be folded into the pane's current rows")
+	}
+}
+
+// TestHandleLandingPRStateIgnoresErrors: a failed authoritative check must
+// leave the row on its provisional hint rather than being folded in as a
+// (bogus) resolution.
+func TestHandleLandingPRStateIgnoresErrors(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "feature", OrgRepo: "acme/repo", Forge: "github.com", PushState: checkouts.PushStatePushed},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	m.handleLandingPRState(landingPRStateMsg{scope: v.scope, vm: v.Name, path: "/home/user/repo", err: errors.New("boom")})
+	if m.landing.rows[0].PRResolved {
+		t.Fatal("an error result must not mark the row resolved")
+	}
+}
+
+// --- Navigation and dispatch, driven through real key presses --------------
+
+func TestUpdateLandingCursorMovesWithinBounds(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/a", Kind: checkouts.KindRepo, PushState: checkouts.PushStateNever},
+			{Path: "/home/user/b", Kind: checkouts.KindRepo, PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	if m.landing.cursor != 0 {
+		t.Fatalf("initial cursor = %d, want 0", m.landing.cursor)
+	}
+	next, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = next.(model)
+	if m.landing.cursor != 0 {
+		t.Fatalf("cursor after Up at the top = %d, want 0 (clamped)", m.landing.cursor)
+	}
+	next, _ = m.updateLanding(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = next.(model)
+	if m.landing.cursor != 1 {
+		t.Fatalf("cursor after Down = %d, want 1", m.landing.cursor)
+	}
+	next, _ = m.updateLanding(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = next.(model)
+	if m.landing.cursor != 1 {
+		t.Fatalf("cursor after Down past the end = %d, want 1 (clamped)", m.landing.cursor)
+	}
+}
+
+func TestUpdateLandingBackReturnsToBoard(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	next, _ := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(model)
+	if m.view != viewBoard {
+		t.Fatalf("view after Back = %v, want viewBoard", m.view)
+	}
+}
+
+func TestUpdateLandingActKeyRunsTheRowsActionAsAJob(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "feature", OrgRepo: "acme/repo", Forge: "github.com", PushState: checkouts.PushStatePushed},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{availability: ghUp(), createPR: &landgh.PR{Number: 21, URL: "https://github.com/acme/repo/pull/21"}}
+	m.ghActions = fake
+	m.openLandingPane(v)
+	// simulate the availability check having already resolved
+	m.landing.ghAvailability = ghUp()
+	m.landing.ghChecked = true
+
+	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("the act key produced no command — the row's action must dispatch as a job")
+	}
+	if m.view != viewProgress {
+		t.Fatalf("view after dispatching the action = %v, want viewProgress (the job/log plumbing)", m.view)
+	}
+	jk := landKey(v.scope, v.Name)
+	snap, ok := m.jobs.snapshot(jk)
+	if !ok {
+		t.Fatal("no job was registered under the land key — the action must reuse jobs.go's registry")
+	}
+	if !strings.Contains(snap.Title, "Open draft PR") {
+		t.Fatalf("job title = %q, want it to name the draft-PR action", snap.Title)
+	}
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the land job to finish", func(m model) bool {
+		s, ok := m.jobs.snapshot(jk)
+		return ok && !s.Running()
+	})
+	final, _ := l.m.jobs.snapshot(jk)
+	if final.Failed() {
+		t.Fatalf("job failed: %v", final.Err)
+	}
+	if !strings.Contains(final.Output, "#21") {
+		t.Fatalf("job output = %q, want it to name the created PR", final.Output)
+	}
+	if len(fake.createCalls) != 1 {
+		t.Fatalf("CreateDraftPR calls = %+v, want exactly one", fake.createCalls)
+	}
+}
+
+// --- Rendering: grouping is visible in the pane's own view ------------------
+
+func TestLandingViewShowsWorktreeIndentedAfterItsRepo(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "main", PushState: checkouts.PushStateNever},
+			{Path: "/home/user/repo-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{availability: landgh.Availability{}}
+	m.openLandingPane(v)
+	m.landing.ghChecked = true
+
+	rendered := ansi.Strip(m.landingView())
+	repoIdx := strings.Index(rendered, "/home/user/repo ")
+	wtIdx := strings.Index(rendered, "/home/user/repo-wt")
+	if repoIdx < 0 || wtIdx < 0 {
+		t.Fatalf("rendered view is missing a row:\n%s", rendered)
+	}
+	if wtIdx < repoIdx {
+		t.Fatalf("the worktree row must render AFTER its parent repo row:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "└─") {
+		t.Fatalf("rendered view has no indentation marker for the nested worktree:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "gh: not installed") {
+		t.Fatalf("rendered view = %q, want it to surface the gh-not-installed mode", rendered)
+	}
+}
+
+func TestLandingViewNoCheckoutsYet(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	m.openLandingPane(v)
+	m.landing.ghChecked = true
+	m.landing.ghAvailability = ghUp()
+
+	rendered := ansi.Strip(m.landingView())
+	if !strings.Contains(rendered, "No git checkouts discovered yet") {
+		t.Fatalf("rendered view = %q, want the empty-registry hint", rendered)
+	}
+	if !strings.Contains(rendered, "gh: available") {
+		t.Fatalf("rendered view = %q, want it to surface the gh-available mode", rendered)
+	}
+}
+
+func TestLandingViewDetachedHeadLabel(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "", PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	rendered := ansi.Strip(m.landingView())
+	if !strings.Contains(rendered, "(detached)") {
+		t.Fatalf("rendered view = %q, want a detached-HEAD label for an empty branch", rendered)
+	}
+}
+
+func TestGhModeLabelAllModes(t *testing.T) {
+	checking := landingPane{}
+	if got := checking.ghModeLabel(); !strings.Contains(got, "checking") {
+		t.Fatalf("ghModeLabel(unchecked) = %q, want it to say it is still checking", got)
+	}
+	available := landingPane{ghChecked: true, ghAvailability: ghUp()}
+	if got := available.ghModeLabel(); !strings.Contains(got, "available") {
+		t.Fatalf("ghModeLabel(available) = %q, want it to say gh is available", got)
+	}
+	// The two degraded modes are named separately and must NOT be
+	// interchangeable: telling someone with gh installed that it is "not
+	// installed" sends them to fix the wrong thing. The unauthenticated case is
+	// the one a shell-alias credential injector (e.g. the 1Password gh plugin)
+	// produces, since gh is exec'd argv-only and never through a shell.
+	notInstalled := landingPane{ghChecked: true, ghAvailability: landgh.Availability{}}
+	if got := notInstalled.ghModeLabel(); !strings.Contains(got, "not installed") {
+		t.Fatalf("ghModeLabel(not installed) = %q, want it to say gh is not installed", got)
+	}
+	notAuthed := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true}}
+	got := notAuthed.ghModeLabel()
+	if !strings.Contains(got, "not authenticated") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, want it to say gh is not authenticated", got)
+	}
+	if strings.Contains(got, "not installed") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, must not claim gh is missing when it is present", got)
+	}
+	if !strings.Contains(got, "gh auth login") {
+		t.Fatalf("ghModeLabel(not authenticated) = %q, want it to name the fix", got)
+	}
+	// Every degraded mode must still say what happens instead.
+	for name, p := range map[string]landingPane{"not installed": notInstalled, "not authenticated": notAuthed} {
+		if !strings.Contains(p.ghModeLabel(), "compare URL") {
+			t.Fatalf("ghModeLabel(%s) = %q, want it to name the browser fallback", name, p.ghModeLabel())
+		}
+	}
+}
+
+func TestStyleForLandRowEveryKind(t *testing.T) {
+	kinds := []landRowKind{landRowLocalOnly, landRowAtRisk, landRowPushedNoPR, landRowPushedHasPR, landRowOtherForge, landRowNothingToLand}
+	for _, k := range kinds {
+		if got := styleForLandRow(k).Render("x"); ansi.Strip(got) != "x" {
+			t.Fatalf("styleForLandRow(%v).Render(\"x\") stripped = %q, want \"x\"", k, ansi.Strip(got))
+		}
+	}
+}
+
+// TestClassifyLandRowNothingToLand pins the pane's half of the pristine-clone
+// fix: a checkout parked on its repo's default branch offers NO action. The
+// previous behaviour offered "Open draft PR", which would have asked GitHub to
+// open a main -> main PR — a request it rejects outright.
+func TestClassifyLandRowNothingToLand(t *testing.T) {
+	c := checkouts.Checkout{
+		Path: "/home/u/repo", Branch: "main", DefaultBranch: "main",
+		PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
+	}
+	row := classifyLandRow(c, nil, prCheckPending)
+	if row.Kind != landRowNothingToLand {
+		t.Fatalf("Kind = %v, want landRowNothingToLand", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone", row.Action)
+	}
+	// Exact equality, which also pins that the row never picks up the
+	// "(checking…)" suffix: it needs no gh lookup, so it must not claim to be
+	// waiting on one.
+	if row.Label != "nothing to land" {
+		t.Fatalf("Label = %q, want %q", row.Label, "nothing to land")
+	}
+
+	// A feature branch in the same repo is unaffected.
+	c.Branch = "feature"
+	if got := classifyLandRow(c, nil, prCheckDone); got.Kind != landRowPushedNoPR || got.Action != landActionOpenDraftPR {
+		t.Fatalf("feature branch classified as %v/%v, want landRowPushedNoPR/landActionOpenDraftPR", got.Kind, got.Action)
+	}
+}
+
+// TestNothingToLandRowsSkipTheGhLookup pins that a default-branch checkout
+// costs no gh round trip: the pane already knows there is no branch-vs-trunk
+// PR to find, so querying for one would spend a network call per clone.
+func TestNothingToLandRowsSkipTheGhLookup(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/u/clone", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"},
+			{Path: "/home/u/work", Branch: "feature", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{availability: ghUp()}
+	m.ghActions = fake
+	m.openLandingPane(v)
+
+	cmd := m.handleLandingAvailable(landingAvailableMsg{
+		scope: v.scope, vm: v.Name,
+		availability: ghUp(),
+	})
+	if cmd != nil {
+		cmd() // drain the batch so the fake records its calls
+	}
+	for _, call := range fake.prStateCalls {
+		if call.branch == "main" {
+			t.Fatalf("a default-branch checkout triggered a gh PR lookup: %+v", fake.prStateCalls)
+		}
+	}
+}
+
+// TestGhModeLabelOnePasswordPath pins that a 1Password-plugin user gets advice
+// that fits their setup: their gh works and their token is in the vault, so
+// "run gh auth login" would send them to fix the wrong thing.
+func TestGhModeLabelOnePasswordPath(t *testing.T) {
+	p := landingPane{ghChecked: true, ghAvailability: landgh.Availability{Installed: true, ViaOnePassword: true}}
+	got := p.ghModeLabel()
+	if !strings.Contains(got, "1Password") {
+		t.Fatalf("ghModeLabel = %q, want it to name 1Password", got)
+	}
+	if strings.Contains(got, "gh auth login") {
+		t.Fatalf("ghModeLabel = %q, must not tell a 1Password user to re-auth gh itself", got)
+	}
+	if !strings.Contains(got, "compare URL") {
+		t.Fatalf("ghModeLabel = %q, want it to name the browser fallback", got)
+	}
+}
+
+// TestLandingActLabelNamesTheRealAction pins that the footer says what the act
+// key would DO to the focused row, rather than a generic "act" that made the
+// user press the key to find out. The actions differ enough — one opens an
+// editor and pushes, one creates a PR, one opens a browser — that the
+// difference is worth knowing beforehand.
+func TestLandingActLabelNamesTheRealAction(t *testing.T) {
+	cases := []struct {
+		name string
+		c    checkouts.Checkout
+		want string
+	}{
+		{"dirty", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "commit + push"},
+		// Clean but unpushed: promising an editor that never opens would be
+		// worse than saying nothing.
+		{"unpushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
+		{"never pushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
+		{"pushed, no PR", checkouts.Checkout{Path: "/a", Branch: "f", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}, "open draft PR"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := landingPane{rows: []landRow{classifyLandRow(tc.c, nil, prCheckDone)}}
+			if got := p.landingActBinding().Help().Desc; got != tc.want {
+				t.Fatalf("act label = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// An existing PR is the browser case.
+	withPR := checkouts.Checkout{Path: "/a", Branch: "f", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}
+	p := landingPane{rows: []landRow{classifyLandRow(withPR, &landgh.PR{Number: 7}, prCheckDone)}}
+	if got := p.landingActBinding().Help().Desc; got != "open in browser" {
+		t.Fatalf("act label = %q, want %q", got, "open in browser")
+	}
+}
+
+// TestLandingActKeyHiddenWhenTheRowHasNoAction pins that the footer never
+// advertises a key that would do nothing — a "nothing to land" row has no
+// action, so the binding is disabled and drops out of the help bar.
+func TestLandingActKeyHiddenWhenTheRowHasNoAction(t *testing.T) {
+	clone := checkouts.Checkout{Path: "/a", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}
+	p := landingPane{rows: []landRow{classifyLandRow(clone, nil, prCheckDone)}}
+	if p.landingActBinding().Enabled() {
+		t.Fatal("the act key must be disabled on a row with no action")
+	}
+}
+
+// TestLandingFooterDoesNotClaimEnterMoves pins a footer bug worth not
+// reintroducing: the pane used to borrow the FORM's cursor keys, whose help
+// reads "next field" and whose binding includes ENTER — so the footer claimed
+// enter moved the cursor down while enter actually ran the row's action.
+func TestLandingFooterDoesNotClaimEnterMoves(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 1, OrgRepo: "acme/repo", Forge: "github.com"},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	for _, b := range m.landingHelp() {
+		if !b.Enabled() {
+			continue
+		}
+		if strings.Contains(b.Help().Desc, "field") {
+			t.Fatalf("footer describes a checkout row as a form field: %q", b.Help().Desc)
+		}
+		if b.Help().Desc == "move" && strings.Contains(b.Help().Key, "enter") {
+			t.Fatalf("footer claims enter moves the cursor, but enter runs the row action: %q", b.Help().Key)
+		}
+	}
+
+	// And enter really does act rather than move.
+	m.landing.cursor = 0
+	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if next.(model).landing.cursor != 0 {
+		t.Fatal("enter moved the cursor; it should have run the row's action")
+	}
+	if cmd == nil {
+		t.Fatal("enter should have dispatched the row's action")
+	}
+}
+
+// TestLandingScanLabel pins the freshness line: the pane reads a cache the
+// background sweep refreshes about every 60s, and without an age on screen
+// three-second-old and three-minute-old data looked identical — worst right
+// after the user has committed inside the VM's own shell.
+func TestLandingScanLabel(t *testing.T) {
+	now := time.Now()
+
+	fresh := landingPane{sweptAt: now.Add(-90 * time.Second)}
+	got := fresh.scanLabel(now)
+	if !strings.Contains(got, "1m ago") {
+		t.Fatalf("scanLabel = %q, want it to name the age", got)
+	}
+	if strings.Contains(got, "ago ago") {
+		t.Fatalf("scanLabel = %q: formatAgo already carries \"ago\"", got)
+	}
+	if !strings.Contains(got, "r to rescan") {
+		t.Fatalf("scanLabel = %q, want it to name the refresh key", got)
+	}
+
+	// Never swept: say so rather than render an age off a zero time.
+	never := landingPane{}
+	if got := never.scanLabel(now); strings.Contains(got, "1970") || strings.Contains(got, "ago") {
+		t.Fatalf("scanLabel(never swept) = %q, want no fabricated age", got)
+	}
+
+	if got := (landingPane{scanning: true}).scanLabel(now); !strings.Contains(got, "rescanning") {
+		t.Fatalf("scanLabel(scanning) = %q, want it to say a rescan is in flight", got)
+	}
+}
+
+// TestLandingRescanKey drives the `r` key: it fires a rescan, refuses to start
+// a second while one is in flight, and — crucially — clears the in-flight flag
+// even when the rescan FAILS, or the header would say "rescanning…" forever
+// and the key would look dead from then on.
+func TestLandingRescanKey(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	next, cmd := m.updateLanding(runeKey('r'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("'r' should dispatch a rescan")
+	}
+	if !m.landing.scanning {
+		t.Fatal("'r' should mark the pane as scanning")
+	}
+
+	// A second press while one is in flight must not race it.
+	if _, cmd2 := m.updateLanding(runeKey('r')); cmd2 != nil {
+		t.Fatal("a second 'r' while scanning must not dispatch another rescan")
+	}
+
+	// A FAILED rescan still clears the flag.
+	_ = m.handleLandRefresh(landRefreshMsg{scope: v.scope, vm: v.Name, err: errors.New("guest went away")})
+	if m.landing.scanning {
+		t.Fatal("a failed rescan must clear the scanning flag, or the key looks dead forever")
+	}
+
+	// A successful one folds fresh rows in and records the new age.
+	swept := time.Now()
+	m.landing.scanning = true
+	_ = m.handleLandRefresh(landRefreshMsg{scope: v.scope, vm: v.Name, vc: checkouts.VMCheckouts{
+		SweptAt:   swept,
+		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 4, OrgRepo: "acme/repo", Forge: "github.com"}},
+	}})
+	_ = swept
+	if m.landing.scanning {
+		t.Fatal("a completed rescan must clear the scanning flag")
+	}
+	if !m.landing.sweptAt.Equal(swept) {
+		t.Fatalf("sweptAt = %v, want the fresh sweep's timestamp %v", m.landing.sweptAt, swept)
+	}
+	if len(m.landing.rows) != 1 || m.landing.rows[0].Checkout.Ahead != 4 {
+		t.Fatalf("rows were not rebuilt from the fresh sweep: %+v", m.landing.rows)
+	}
+}
+
+// TestPRCheckStatesReadHonestly pins that "(checking…)" appears ONLY while a
+// lookup is genuinely in flight.
+//
+// The pane used to carry a plain "resolved bool", so every row without an
+// answer rendered as "(checking…)" — including the two cases where no answer
+// was ever coming. With host gh unusable, handleLandingAvailable fired no
+// lookups at all; when a lookup FAILED, its result was dropped without being
+// recorded. Both left a row claiming to be checking, forever, with nothing
+// checking. A row that cannot know must say it does not know.
+func TestPRCheckStatesReadHonestly(t *testing.T) {
+	c := checkouts.Checkout{
+		Path: "/home/u/repo", Branch: "feature", DefaultBranch: "main",
+		PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
+	}
+	cases := []struct {
+		name  string
+		check prCheck
+		want  string
+	}{
+		{"in flight", prCheckPending, "pushed · no PR (checking…)"},
+		{"answered: no PR", prCheckDone, "pushed · no PR"},
+		{"no usable gh", prCheckSkipped, "pushed · PR state unknown (no usable gh)"},
+		{"lookup failed", prCheckFailed, "pushed · PR state unknown (check failed)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyLandRow(c, nil, tc.check).Label
+			if got != tc.want {
+				t.Fatalf("Label = %q, want %q", got, tc.want)
+			}
+			if tc.check != prCheckPending && strings.Contains(got, "checking") {
+				t.Fatalf("Label = %q claims to be checking, but nothing is", got)
+			}
+		})
+	}
+}
+
+// TestNoUsableGhStopsClaimingToCheck drives the real path for the case a user
+// actually hit: the header says gh is unusable, and the rows underneath must
+// not sit on "(checking…)" for a lookup that will never fire.
+func TestNoUsableGhStopsClaimingToCheck(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{{
+			Path: "/home/u/repo", Branch: "feature", DefaultBranch: "main",
+			PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
+		}},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{}
+	m.ghActions = fake
+	m.openLandingPane(v)
+
+	// Before the probe answers, "checking…" is honest: a lookup may still come.
+	if !strings.Contains(m.landing.rows[0].Label, "checking") {
+		t.Fatalf("before the probe answers, want a checking label, got %q", m.landing.rows[0].Label)
+	}
+
+	cmd := m.handleLandingAvailable(landingAvailableMsg{
+		scope: v.scope, vm: v.Name,
+		availability: landgh.Availability{Installed: true}, // installed, not authed
+	})
+	if cmd != nil {
+		t.Fatal("no lookups should be dispatched when gh is unusable")
+	}
+	if len(fake.prStateCalls) != 0 {
+		t.Fatalf("gh was queried despite being unusable: %+v", fake.prStateCalls)
+	}
+	got := m.landing.rows[0].Label
+	if strings.Contains(got, "checking") {
+		t.Fatalf("row = %q: nothing is checking, and nothing will", got)
+	}
+	if !strings.Contains(got, "unknown") {
+		t.Fatalf("row = %q, want it to admit the PR state is unknown", got)
+	}
+	// The action is still offered — it falls back to the compare URL.
+	if m.landing.rows[0].Action != landActionOpenDraftPR {
+		t.Fatalf("Action = %v, want the draft-PR action to remain available", m.landing.rows[0].Action)
+	}
+}
+
+// TestRescanChecksNewlySurfacedCheckouts pins the third way a row could get
+// stuck: a rescan can surface a checkout that did not exist when the pane
+// opened (the user just made a branch), and nothing was dispatching a lookup
+// for it.
+func TestRescanChecksNewlySurfacedCheckouts(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	fake := &fakeGhActions{availability: ghUp()}
+	m.ghActions = fake
+	m.openLandingPane(v)
+	m.landing.ghAvailability, m.landing.ghChecked = ghUp(), true
+
+	cmd := m.handleLandRefresh(landRefreshMsg{scope: v.scope, vm: v.Name, vc: checkouts.VMCheckouts{
+		SweptAt: time.Now(),
+		Checkouts: []checkouts.Checkout{{
+			Path: "/home/u/new", Branch: "brand-new", DefaultBranch: "main",
+			PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
+		}},
+	}})
+	if cmd == nil {
+		t.Fatal("a rescan that surfaced a new pushed checkout should dispatch a PR lookup for it")
+	}
+	cmd() // drain the batch
+	var sawBranch bool
+	for _, call := range fake.prStateCalls {
+		if call.branch == "brand-new" {
+			sawBranch = true
+		}
+	}
+	if !sawBranch {
+		t.Fatalf("no lookup fired for the newly surfaced checkout: %+v", fake.prStateCalls)
+	}
+}

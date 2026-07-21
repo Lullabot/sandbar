@@ -126,6 +126,11 @@ func (p *limaProvider) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }
 
+// RunArgv runs one interactive command in a guest directory. See Provider.RunArgv.
+func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
+	return lima.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
+}
+
 // HostUser returns this machine's user — for local Lima the limactl host IS this
 // machine, and Lima creates a guest account matching it (see Provider.HostUser).
 func (p *limaProvider) HostUser() string { return vm.HostUser() }

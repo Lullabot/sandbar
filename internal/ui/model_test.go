@@ -199,6 +199,9 @@ func TestConfirmDeletePromptHasNoRecreateBranch(t *testing.T) {
 	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 	next, _ := m.Update(runeKey('d'))
 	m = next.(model)
+	// A running VM's guard re-reads its checkouts before accepting an answer;
+	// this test is about the settled overlay, so let that land first.
+	m = settleDeleteGuard(m)
 
 	rendered := ansi.Strip(m.boardView())
 	if !strings.Contains(rendered, `Delete "claude"?  [y] yes   [n] cancel`) {
@@ -216,13 +219,13 @@ func TestDeleteNoRecreateDoubleTapIsSafe(t *testing.T) {
 	m := newTestModel(t)
 	m = putOnBoard(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
 
-	m, cmd1 := pressDispatch(t, m, runeKey('d'))
+	m, _ = pressDispatch(t, m, runeKey('d'))
 	if m.confirm == nil {
 		t.Fatal("first 'd' should raise the confirm overlay")
 	}
-	if cmd1 != nil {
-		t.Fatal("raising the overlay must not itself dispatch a command")
-	}
+	// Raising the overlay dispatches at most the guard's freshness re-read
+	// (deleteguard.go) — never the delete itself, which only 'y' can reach.
+	m = settleDeleteGuard(m)
 
 	m, cmd2 := pressDispatch(t, m, runeKey('d'))
 	if m.confirm == nil {

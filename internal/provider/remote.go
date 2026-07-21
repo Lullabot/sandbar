@@ -43,6 +43,12 @@ func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
 	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"))
 }
 
+// RunArgv is AttachArgv's one-command sibling, ssh-wrapped the same way. See
+// Provider.RunArgv.
+func (p *remoteLimaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
+	return p.host.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
+}
+
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH
 // HostFiles), not the local filesystem where they do not exist.
 func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }

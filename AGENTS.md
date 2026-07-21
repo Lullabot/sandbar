@@ -412,6 +412,73 @@ every bullet, not the constraint itself.
 - **Naming prohibition: no nautical metaphor anywhere.** No harbour/harbor,
   slip, boat, pier, moored, deck, or cargo in any identifier, comment, or
   user-visible string, in this subsystem or elsewhere in the repo.
+- **The checkout registry (`internal/checkouts`) is populated ONLY by a
+  sweep of a RUNNING guest, and is otherwise a passive, host-side cache.**
+  The unlanded-work badge and `sand land`'s listing read this cached data and
+  never re-sweep on their own — the badge in particular runs on the render
+  path, where any guest contact is forbidden outright. A stopped or
+  never-swept VM's entry can only get staler, never fresher.
+  The ONE exception is the delete guard's freshness re-read (see the next
+  bullet), which is bounded, running-VM-only, and user-initiated.
+- **The delete guard (`internal/ui/deleteguard.go`) NEVER starts a stopped
+  VM to inspect it — this is load-bearing, not incidental.** A user deleting
+  a VM may be doing so precisely because they suspect it is compromised;
+  booting it to look inside defeats the point. A stopped VM's confirmation is
+  therefore composed from the registry's already-cached data alone, labeled
+  `(as of <ago>)` so it is never mistaken for a live read.
+  `deleteguard_test.go`'s `TestDeleteGuardNoGuestContactStoppedVM` enforces
+  this with a Runner that fails the test if any of its methods are called; do
+  not weaken that test to "fix" a feature request here.
+  A RUNNING VM is different, and deliberately so: its cached entry can be a
+  full `sweepInterval` stale, which is exactly the window in which someone
+  edits a file and then reaches for delete. Raising the confirmation for a
+  running VM therefore fires ONE re-read (`sweepRegistry.sweepOnce`) and holds
+  the Confirm key until it lands. That is not a new capability — it is the
+  same read-only pass that VM's own sweep loop is already running, against a
+  VM that is already up — and it is hard-bounded by `sweepOnceTimeout` so a
+  wedged guest degrades to the cached answer plus "(could not re-check just
+  now)" rather than freezing the overlay. Cancel is always accepted.
+- **Landing (`l` / `sand land`) never copies code to the host.** It moves PR
+  metadata only — branch name, compare URL, PR number/state — via the
+  workstation's own `gh` (a two-token split: the guest pushes with its own
+  least-privilege token, the host opens the PR with the workstation's `gh`
+  and credentials). `--web` never calls `gh` at all. Do not add a code path
+  here that fetches a diff, a patch, or the checkout's working tree onto the
+  host. That specifically rules out "just stream the changes to `gh api`" —
+  GitHub's Git Data API CAN build a commit with no clone, but every byte
+  would pass through the host to get there, which is the thing this forbids;
+  it would also need the HOST token to gain `Contents: write`, inverting the
+  two-token split. Committing and pushing belongs IN the guest, which is what
+  the Landing pane's commit-and-push action does (`landCommitPushCmd` +
+  `commitAndPushExpr`): it suspends the TUI, runs `git commit`/`git push`
+  inside the VM against the user's real terminal, and brings back nothing but
+  an exit code. `commitAndPushExpr` must stay a LITERAL string — the checkout
+  is selected by `Provider.RunArgv`'s `--workdir` argv element, because the
+  path/branch/remote all come from sweeping the guest and must never reach a
+  guest `bash -c` as text — that would break the "the only guest mount is read-only, nothing
+  leaves the VM except through the TUI's Upload/Download" property this
+  feature was deliberately built alongside without becoming a silent
+  third exception to it. See `docs/reference/security-model.md`'s "Landing"
+  section for the precise, non-overreaching claim this makes.
+- **`gh` is invoked argv-only, NEVER through a shell.** Every argument
+  reaches `gh` as its own argv element (`internal/landgh`'s `Runner`), so a
+  branch name or `org/repo` containing `;`, backticks, or `$(...)` is inert
+  — and those values come from a sweep of the GUEST, the lowest-trust
+  source in the system. The visible consequence is that a credential held
+  only in a shell alias or wrapper function (the 1Password `gh` plugin and
+  similar injectors) is invisible to sand, which reports `gh: not
+  authenticated` even though the same command works at the user's prompt.
+  That is the documented trade, not a bug: do NOT "fix" it by re-invoking
+  `gh` through `sh -c` or the user's login shell.
+  The 1Password shell plugin specifically IS supported (`internal/landgh/
+  opplugin.go`), and supporting it cost nothing here: `op plugin run -- gh
+  <args...>` is an ordinary argv invocation, so sand simply prepends those
+  elements — no shell is introduced and every argument still arrives as its
+  own element. Detection is FILE-ONLY (`~/.config/op/plugins.sh` plus `op` on
+  PATH): probing by running `op` could raise an authorization prompt
+  underneath the full-screen TUI, so it must stay a pure filesystem read. An
+  explicit `GH_TOKEN`/`GITHUB_TOKEN` in sand's environment bypasses the
+  plugin path entirely.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 
@@ -568,6 +635,18 @@ comment at `roles/claude-code/tasks/main.yml`.
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
   (`feat:`, `fix:`, `test:`, `ci:`, `docs:`, `chore:`, scopes like
   `fix(reset):`). Releases are automated by release-please, which parses them.
+- **A commit message must not reference a plan, phase, or task** — no "plan 17
+  phase 3", no "task 04". The one exception is a commit whose changes are
+  confined to `.ai/strikethroo/`, where the plan *is* the subject. Commit
+  messages are read years later by people who have no access to the planning
+  artefact and no reason to want one; the message has to stand on its own, and
+  release-please copies the subject line verbatim into `CHANGELOG.md`, where a
+  phase number is pure noise. Say what changed and why instead. The same rule
+  applies to code comments (see below).
+- **Code comments must not reference plan documents either.** A comment
+  pointing at "plan 17, Component 2" is a dangling link the moment the plan is
+  archived, and it substitutes a pointer for the reason the reader actually
+  needs. Inline the rationale.
 - Match the surrounding code's comment density and idiom — this codebase favours
   explanatory comments on the *why*, not the *what*.
 - When you change TUI rendering, update the affected goldens (`-update`) and

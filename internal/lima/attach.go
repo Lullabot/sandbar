@@ -181,3 +181,32 @@ func colortermFlag(colorterm string) string {
 	}
 	return " -e COLORTERM=" + colorterm
 }
+
+// RunArgv returns the full argv that runs one INTERACTIVE guest command with
+// the caller's real TTY attached — the same `limactl shell` transport
+// AttachArgv uses, but running expr in workdir instead of joining the guest's
+// persistent tmux session. It is what the Landing pane's commit-and-push
+// action needs: `git commit` opens the user's editor, which requires a
+// terminal, so it cannot go through the captured-output Runner path.
+//
+// SAFETY: workdir is passed as its OWN argv element (`--workdir <dir>`), never
+// spliced into expr. That matters because workdir is a checkout path
+// DISCOVERED BY SWEEPING THE GUEST — the lowest-trust string in the system —
+// and expr is parsed by the guest's `bash -c`. Callers must therefore keep
+// expr a FIXED, literal command: anything it needs to know about the checkout
+// it should compute for itself in the guest (the working directory is already
+// the checkout), never receive by interpolation from the host.
+func RunArgv(name, workdir, expr, colorterm string) []string {
+	argv := []string{"limactl", "shell"}
+	if workdir != "" {
+		argv = append(argv, "--workdir", workdir)
+	}
+	// COLORTERM rides through the same validated-or-dropped path AttachArgv
+	// uses, so an editor launched here reports the same colour capability the
+	// guest's tmux session would.
+	if flag := colortermFlag(colorterm); flag != "" {
+		argv = append(argv, name, "bash", "-c", "export COLORTERM="+colorterm+"; "+expr)
+		return argv
+	}
+	return append(argv, name, "bash", "-c", expr)
+}

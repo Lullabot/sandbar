@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/browse"
+	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/landgh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/paste"
@@ -71,6 +73,22 @@ type confirmState struct {
 	prompt  string  // e.g. `Delete "web"?`
 	run     tea.Cmd // dispatched (via beginAction) when the user presses Confirm
 	working string  // status shown (with the live spinner) while run is in flight; "" leaves the status line untouched
+
+	// checking marks a confirmation whose prompt is still being refined by an
+	// in-flight read — today only the delete guard's freshness check
+	// (deleteguard.go). Confirm is REFUSED while it is set, so a user cannot
+	// answer "yes" against a picture that is about to change under them; the
+	// refresh is hard-bounded (sweepOnceTimeout) so this can never wedge the
+	// overlay. Cancel is always accepted, checking or not.
+	checking bool
+
+	// scope/vmName identify the VM this confirmation is about, so a refresh
+	// result that arrives after the user cancelled — or moved on and raised a
+	// DIFFERENT confirmation — is recognized as stale and dropped rather than
+	// rewriting the wrong prompt. Same epoch-style guard the sweep and
+	// Landing panes use.
+	scope  registry.Scope
+	vmName string
 }
 
 // view is the active screen the model renders and routes keys to. viewBoard is
@@ -85,6 +103,10 @@ const (
 	viewBrowse
 	viewDest
 	viewSecrets
+	// viewLanding is the Landing pane (landing.go): a per-VM pull-request
+	// cockpit opened for a focused, running VM, following the same view-enum
+	// + sub-model pattern as viewSecrets above.
+	viewLanding
 	// viewProfiles and viewProfileForm are the profile management screen
 	// (profilesview.go): a list of every connection profile, and a
 	// sub-form over one profile's fields (create/edit), following the same
@@ -164,6 +186,37 @@ type model struct {
 	// `limactl shell` per RUNNING VM, streaming real cpu and memory out of the guest.
 	// A POINTER for the same reason jobs is, and nil-safe for the same reason.
 	heartbeats *heartbeatRegistry
+
+	// checkouts is the per-VM git checkout registry (internal/checkouts): the
+	// host-persisted spine the "land" feature reads — the sweep (sweeps below,
+	// sweepshell.go) is its single writer, applied via a message in Update
+	// exactly like heartbeat samples; the unlanded-work badge, the delete guard
+	// and the Landing pane are pure readers. A POINTER for the same reason
+	// reg/jobs are (the model is copied by value), and nil-safe: a model built
+	// by hand reports "no checkouts".
+	checkouts *checkouts.Registry
+
+	// sweeps is the VM-keyed checkout-sweep registry (sweepshell.go): one live
+	// `limactl shell` per RUNNING VM, a SIBLING of heartbeats above (its own
+	// connection, goroutine, and ~60s cadence) that discovers git checkouts and
+	// feeds them into checkouts via a sweepResultMsg. A POINTER for the same
+	// reason heartbeats is, and nil-safe for the same reason.
+	sweeps *sweepRegistry
+
+	// ghActions is the Landing pane's seam (landing.go) over internal/landgh's
+	// host-side gh/browser actions: Available, PRState, CreateDraftPR,
+	// OpenInBrowser. Defaulted to landgh.New() in New(); tests fake it so no
+	// test spawns a real gh binary or launches a real browser. A plain
+	// interface value (not a pointer to shared state), so a value-passed model
+	// copy carries it for free exactly like every other seam here.
+	ghActions ghActions
+
+	// landing is the Landing pane's own state (landing.go): the focused VM
+	// identity it was opened for, its grouped/flattened rows, the resolved
+	// per-checkout PR results, and which gh mode it is in. Plain value state —
+	// nothing here outlives one Update call the way a job's log does — so,
+	// unlike jobs/heartbeats/checkouts/sweeps above, this is not a pointer.
+	landing landingPane
 
 	// lastInput is when the user last touched a key. Together with the active view
 	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
@@ -354,6 +407,14 @@ func New(fleet provider.Fleet) tea.Model {
 		sec = secrets.NewEmpty()
 	}
 
+	// The checkout registry (land feature) gets the same tolerant posture: a
+	// corrupt/unreadable file surfaces as a warning rather than crashing, and the
+	// badge/guard/pane simply see no checkouts until the next sweep repopulates it.
+	checkoutReg, checkoutErr := checkouts.Load()
+	if checkoutReg == nil {
+		checkoutReg = checkouts.NewEmpty()
+	}
+
 	// The profiles store gets the same tolerant posture: a corrupt file is
 	// quarantined and reseeded (profiles.LoadFrom's doc comment) rather than
 	// failing New outright. This is a SEPARATE load from whatever main.go
@@ -411,6 +472,9 @@ func New(fleet provider.Fleet) tea.Model {
 		profileStore: profileStore,
 		jobs:         newJobRegistry(),
 		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
+		checkouts:    checkoutReg,
+		sweeps:       newSweepsResolver(fleetShellResolver(members)),
+		ghActions:    landgh.New(),
 		keys:         newKeyMap(),
 		help:         help.New(),
 		view:         viewBoard,
@@ -439,7 +503,7 @@ func New(fleet provider.Fleet) tea.Model {
 	m.applySize(80, 24)
 	// No one load failure may silently shadow another.
 	var warnings []string
-	for _, err := range []error{loadErr, secErr, profErr} {
+	for _, err := range []error{loadErr, secErr, profErr, checkoutErr} {
 		if err != nil {
 			warnings = append(warnings, err.Error())
 		}
@@ -725,7 +789,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// would arm another, stacking refresh loops until the list call rate ran away.
 	// gc happens to copy last today. This is the same hazard updateBoard already
 	// hoists around (see the note under Quit there); not leaning on it is free.
-	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.tickRefresh())
+	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.syncSweeps(), nm.tickRefresh())
 	return nm, cmds
 }
 
@@ -765,6 +829,59 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// one. Routed by the sample's own scope, so a fleet's same-named VMs never
 		// cross streams.
 		return m, heartbeatReadCmd(msg.scope, msg.vm, msg.epoch, m.heartbeats.fold(msg.scope, msg.vm, msg.epoch, msg.sample))
+
+	case sweepResultMsg:
+		// The channel closed: this VM's sweep stream ended — most commonly a
+		// `limactl stop` underneath it, exactly like a heartbeat's stream
+		// ending (see heartbeatSampleMsg above). ended() drops the connection
+		// and starts a cooldown so a VM sand cannot shell into does not get a
+		// fresh `limactl shell` thrown at it by every single message.
+		if !msg.ok {
+			m.sweeps.ended(msg.scope, msg.vm, msg.epoch)
+			return m, nil
+		}
+		// This is the ONLY place the checkout registry is written — a
+		// completed pass arrives as a message and is recorded here, under
+		// checkouts.Registry's own mutex, never by a direct write from the
+		// sweeping goroutine. Mirrors the heartbeat's sample-recording
+		// contract exactly.
+		if m.checkouts != nil {
+			if err := m.checkouts.Set(msg.scope, msg.vm, msg.result); err != nil {
+				m.logWarn("checkout registry: " + err.Error())
+			}
+		}
+		// fold returns nil for a pass from a connection that has since been
+		// replaced, which ends that stale read loop rather than letting it
+		// double up on the live one.
+		return m, sweepReadCmd(msg.scope, msg.vm, msg.epoch, m.sweeps.fold(msg.scope, msg.vm, msg.epoch))
+
+	case deleteGuardRefreshMsg:
+		// The delete guard's freshness re-read landed (deleteguard.go). It
+		// rewrites the pending confirmation's prompt and releases the Confirm
+		// key, which was held while the check was in flight.
+		m.handleDeleteGuardRefresh(msg)
+		return m, nil
+
+	case landCommitPushDoneMsg:
+		// The interactive commit/push finished and the TUI is back; re-read the
+		// checkout it just changed (landing.go).
+		return m, m.handleLandCommitPushDone(msg)
+
+	case landRefreshMsg:
+		// May itself fire PR-state lookups for checkouts the rescan surfaced.
+		return m, m.handleLandRefresh(msg)
+
+	case landingAvailableMsg:
+		// The Landing pane's lazy host-gh-availability check (landing.go),
+		// fired once when the pane opens. Folding it in may itself fire the
+		// per-checkout PRState lookups (only once gh is known usable).
+		return m, m.handleLandingAvailable(msg)
+
+	case landingPRStateMsg:
+		// One checkout's AUTHORITATIVE gh PR-state result (landing.go). Purely
+		// a model-state fold — nothing further to dispatch.
+		m.handleLandingPRState(msg)
+		return m, nil
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after
@@ -1298,6 +1415,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDest(msg)
 		case viewSecrets:
 			return m.updateSecrets(msg)
+		case viewLanding:
+			return m.updateLanding(msg)
 		case viewProfiles:
 			return m.updateProfiles(msg)
 		case viewProfileForm:
@@ -1391,6 +1510,14 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Confirm): // y
+		if m.confirm.checking {
+			// A freshness check is still in flight (today: the delete guard's
+			// re-read). Answering now would be answering a question that is
+			// about to change, so the key is swallowed rather than acted on.
+			// Bounded by sweepOnceTimeout, so this is never a long wait, and
+			// Cancel below stays available throughout.
+			return m, nil
+		}
 		run := m.confirm.run
 		// Log the in-flight label so the spinner (raised by beginAction) has a
 		// message to sit beside — otherwise a confirmed stop-all/delete would spin
@@ -1412,6 +1539,11 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // clipped to ContentWidth like every other line, since a prompt that wrapped
 // would cost the screen a row it never budgeted.
 func (m model) confirmView() string {
+	if m.confirm.checking {
+		// Confirm is held while a freshness check runs, so the overlay must
+		// say why rather than looking like a dead key. Cancel still works.
+		return m.clipLine(errStyle.Render(m.confirm.prompt + "  checking for recent changes…   [n] cancel"))
+	}
 	return m.clipLine(errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel"))
 }
 
@@ -1431,6 +1563,8 @@ func (m model) View() tea.View {
 		content = m.destView()
 	case viewSecrets:
 		content = m.secretsView()
+	case viewLanding:
+		content = m.landingView()
 	case viewProfiles:
 		content = m.profilesView()
 	case viewProfileForm:

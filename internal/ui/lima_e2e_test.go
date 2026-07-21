@@ -528,7 +528,7 @@ func TestE2ETwoVMsProvisionConcurrently(t *testing.T) {
 	// killed.
 	l.m.view = viewBoard
 	l.m.focusVM.Name = nameA
-	l.send(runeKey('l'))
+	l.send(runeKey('L'))
 	if l.m.view != viewProgress || l.m.progressJob != provisionKey(registry.LocalScope, nameA) {
 		t.Fatalf("reopening %s's log should show it on the progress view (view=%v job=%+v)", nameA, l.m.view, l.m.progressJob)
 	}

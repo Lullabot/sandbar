@@ -76,6 +76,35 @@ you run inside it, and rely on deletion — not defense — to recover. Nothing
 you do inside the VM is expected to reach your host filesystem except
 through the two deliberate exceptions above.
 
+## Landing: the audited counterpart to the no-host-mount boundary
+
+The no-host-mount boundary above means code inside a `sand` VM cannot write
+to your host filesystem. **Landing** (`l` on a tile, or `sand land`) is the
+one deliberate path code takes to *leave* the VM at all, and it is built to
+match that boundary rather than undercut it: Landing moves **PR metadata —
+a branch name, a compare URL, a PR number and state — never a file, a diff,
+or a commit's contents**. It reads the guest's git state and, for `--pr`,
+calls GitHub through your own workstation's `gh`; it does not copy the
+guest's working tree anywhere, and nothing it produces auto-executes on the
+host.
+
+This is a genuine **two-token split**, not a formality: the VM's Claude Code
+uses its own least-privilege token (above) to `git push` from inside the
+guest; opening the draft PR is a *separate* action that runs the
+**workstation's** `gh` and its own, human-held credentials. The guest's
+token never touches PR creation, and the workstation's `gh` never touches
+the guest.
+
+**What this provably does and does not do:** Landing controls what PR
+metadata reaches your host and records that action in its own ledger — it
+does not, and cannot, stop the guest from using its own push token to push a
+branch; that authority was already granted at create time by the token's
+own scope (see the least-privilege token section below). Landing narrows
+what happens *after* a push, not what the guest's token can do. Code from
+that branch reaches your host only when you choose to bring it there
+yourself — a `gh pr checkout` or `git pull` you run and review — never as a
+side effect of Landing itself.
+
 ## A least-privilege token: reasonable agent access
 
 `sand` can hand Claude Code a GitHub token at create time so it can clone,
