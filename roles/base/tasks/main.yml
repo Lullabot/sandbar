@@ -273,6 +273,14 @@
     # A missing compiler fails far from here and reads as "npm is broken", so the
     # two settings are one change: do not flip this without checking that list.
     install_recommends: false
+  # Retry the fetch/unpack: this single large transaction pulls dozens of .debs
+  # from public mirrors, and a mid-download "Connection reset by peer" from one
+  # mirror is transient. Mirror the "Upgrade all apt packages" task above so a
+  # flaky fetch retries instead of failing the whole base build.
+  register: _apt_install
+  until: _apt_install is succeeded
+  retries: 3
+  delay: 5
   when: provision_phase | default('full') != 'finalize'
 
 # Let an SSH client forward COLORTERM so truecolor terminals (iTerm2, WezTerm,
