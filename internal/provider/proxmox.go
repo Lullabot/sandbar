@@ -221,6 +221,16 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		imageStorage = defaultImageStorage
 	}
 
+	// Expand a leading ~ in identity_path exactly as LoadToken does for the token
+	// file. This one value is used three ways — read as "<path>.pub" for cloud-init
+	// and passed as ssh -i for the transport — none of which goes through a shell,
+	// so a literal "~/.ssh/id_ed25519" would never resolve. Empty stays empty;
+	// Preflight and readPublicKey report a missing key.
+	identityPath, err := profiles.ExpandHome(cfg.IdentityPath)
+	if err != nil {
+		return nil, fmt.Errorf("proxmox: identity_path: %w", err)
+	}
+
 	return &proxmoxProvider{
 		client:       client,
 		host:         cfg.Host,
@@ -230,7 +240,7 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		imageStorage: imageStorage,
 		bridge:       cfg.Bridge,
 		ciUser:       ciUser,
-		identityPath: cfg.IdentityPath,
+		identityPath: identityPath,
 		files:        newProxmoxFiles(proxmoxStateRoot(cfg)),
 		runSSH:       execSSH,
 		vmids:        map[string]int{},

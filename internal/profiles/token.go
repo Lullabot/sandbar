@@ -14,7 +14,7 @@ import (
 // outright rather than warned about — a leaked API token is not a
 // recoverable mistake.
 func LoadToken(path string) (string, error) {
-	expanded, err := expandHome(path)
+	expanded, err := ExpandHome(path)
 	if err != nil {
 		return "", err
 	}
@@ -36,11 +36,13 @@ func LoadToken(path string) (string, error) {
 	return tok, nil
 }
 
-// expandHome expands a leading "~/" (or a bare "~") in path against the
+// ExpandHome expands a leading "~/" (or a bare "~") in path against the
 // current user's home directory, mirroring how IdentityPath is resolved
 // elsewhere in the codebase (e.g. internal/lima/hostfiles.go). Any other
-// path is returned unchanged.
-func expandHome(path string) (string, error) {
+// path is returned unchanged. Exported so the provider layer can give
+// identity_path the same treatment token_file gets here — sand execs ssh and
+// reads the .pub directly (no shell), so a literal "~" would never resolve.
+func ExpandHome(path string) (string, error) {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path, nil
 	}

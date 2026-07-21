@@ -1208,6 +1208,21 @@ func TestProxmoxImageStorageDefaultAndOverride(t *testing.T) {
 	}
 }
 
+// TestProxmoxExpandsTildeInIdentityPath proves a leading ~ in identity_path is
+// resolved to the home directory — sand execs ssh and reads the .pub with no
+// shell, so a literal "~" would open a nonexistent path.
+func TestProxmoxExpandsTildeInIdentityPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	m := newPVEMock(t)
+
+	p := newProxmoxForTest(t, m, func(c *TargetConfig) { c.IdentityPath = "~/.ssh/id_ed25519" })
+	want := filepath.Join(home, ".ssh", "id_ed25519")
+	if p.identityPath != want {
+		t.Errorf("identityPath = %q; want the ~ expanded to %q", p.identityPath, want)
+	}
+}
+
 // --- preflight ------------------------------------------------------------------
 
 // stubPublicKey makes readPublicKey succeed without a real key pair on disk —
