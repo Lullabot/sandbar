@@ -293,9 +293,9 @@ No circular dependencies; every task appears in exactly one phase.
 **Parallel Tasks:**
 - ✔️ Task 001: Proxmox field form, insecure checkbox input kind, save/build/edit/row wiring, `connectionFieldsEqual` fix
 
-### Phase 2: The Create Entry
+### ✅ Phase 2: The Create Entry
 **Parallel Tasks:**
-- Task 002: Pre-form type picker (depends on: 001)
+- ✔️ Task 002: Pre-form type picker (depends on: 001)
 
 ### Phase 3: Tests and Docs
 **Parallel Tasks:**
