@@ -233,19 +233,50 @@ func messagesFrameTop(width int) string {
 		frameStyle.Render(strings.Repeat("─", fill)+"╮")
 }
 
-// messageLines is the last n logged messages, oldest first, each clipped to
-// width — padded at the FRONT with blanks when fewer than n have been logged, so
-// the newest always sits on the bottom row and the pane never changes height.
+// messageLines is the session's most recent log lines rendered to fit an n-row,
+// width-wide pane, oldest first. A message longer than width WRAPS onto extra
+// rows (ansi.Wrap breaks on whitespace and hard-breaks an over-long token like a
+// URL or a storage error) rather than being clipped to one line with an ellipsis
+// — the whole point of the docked pane is to be readable. The slice is always
+// exactly n lines: front-padded with blanks when little has been logged, so the
+// newest content sits on the bottom row and the pane never changes height.
 func (m model) messageLines(n, width int) []string {
-	recent := m.recentMessages(n)
 	lines := make([]string, n)
-	for i := 0; i < n; i++ {
-		idx := len(recent) - n + i
-		if idx < 0 {
-			continue // blank: nothing logged for this slot yet
+	if n <= 0 || width < 1 || len(m.messages) == 0 {
+		return lines
+	}
+	// Wrap messages newest-first until we have at least n display lines, so a
+	// long newest message can occupy several rows and still land at the bottom.
+	blocks := make([][]string, 0, n) // blocks[0] is the NEWEST message
+	total := 0
+	for i := len(m.messages) - 1; i >= 0 && total < n; i-- {
+		msg := m.messages[i]
+		style := messageStyleFor(msg.warn)
+		segs := strings.Split(ansi.Wrap(warnPrefix(msg.text, msg.warn), width, ""), "\n")
+		for j := range segs {
+			segs[j] = style.Render(segs[j])
 		}
-		text := ansi.Truncate(warnPrefix(recent[idx].text, recent[idx].warn), width, "…")
-		lines[i] = messageStyleFor(recent[idx].warn).Render(text)
+		blocks = append(blocks, segs)
+		total += len(segs)
+	}
+	// If the newest message ALONE overflows the pane, show its HEAD — the part
+	// that says what happened — instead of scrolling past it to its tail.
+	if len(blocks[0]) >= n {
+		copy(lines, blocks[0][:n])
+		return lines
+	}
+	// Otherwise flatten oldest-first and keep the last n lines: the newest
+	// message sits complete on the bottom rows, older ones scroll off the top.
+	var display []string
+	for i := len(blocks) - 1; i >= 0; i-- {
+		display = append(display, blocks[i]...)
+	}
+	if len(display) > n {
+		display = display[len(display)-n:]
+	}
+	offset := n - len(display)
+	for i, ln := range display {
+		lines[offset+i] = ln
 	}
 	return lines
 }
