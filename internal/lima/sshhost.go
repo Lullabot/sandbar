@@ -52,6 +52,23 @@ type SSHConfig struct {
 	// IdentityPath is a private-key FILE path, or "" to fall back to the ambient
 	// ssh agent / ssh_config. Never key material.
 	IdentityPath string
+	// EphemeralHostKeys, when true, adds `-o StrictHostKeyChecking=no -o
+	// UserKnownHostsFile=/dev/null -o LogLevel=ERROR` to every ssh and scp argv.
+	// It is for a backend whose "host" is a freshly-created VM reached at a
+	// recycled IP (the Proxmox provider): that guest's host key is never in
+	// known_hosts, and a rebuilt VM presents a DIFFERENT key on an IP the last one
+	// used, so the OpenSSH default (StrictHostKeyChecking=ask) opens /dev/tty to
+	// prompt — hanging a TUI that owns the terminal, and then failing the
+	// provisioning ssh with "Host key verification failed" — while a strict-yes
+	// setup would hard-fail the moment an IP is reused. /dev/null keeps those
+	// throwaway keys out of the user's real known_hosts, and LogLevel=ERROR mutes
+	// the "Permanently added …" warning that would otherwise bleed into the
+	// message log.
+	//
+	// The remote-Lima hop deliberately leaves this FALSE: that host is a
+	// persistent machine the user configured, where trust-on-first-use host-key
+	// pinning is the right default and a changed key genuinely warrants a stop.
+	EphemeralHostKeys bool
 	// RemoteLimaHome is LIMA_HOME on the remote host. "" defaults to defaultRemoteLimaHome,
 	// a path RELATIVE to the remote login home (see LimaHome) — Lima's own default.
 	RemoteLimaHome string
@@ -201,8 +218,25 @@ func (h *SSHHost) sshBase(tty bool) []string {
 	if h.cfg.IdentityPath != "" {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
+	a = append(a, h.ephemeralHostKeyFlags()...)
 	a = append(a, h.muxFlags()...)
 	return append(a, h.target())
+}
+
+// ephemeralHostKeyFlags returns the host-key options for a backend whose guests
+// are throwaway VMs on recycled IPs (see SSHConfig.EphemeralHostKeys), or nil
+// when the connection is to a persistent host that should keep the OpenSSH
+// trust-on-first-use default. Shared by sshBase and scpCommand so ssh and scp
+// treat the guest's key identically.
+func (h *SSHHost) ephemeralHostKeyFlags() []string {
+	if !h.cfg.EphemeralHostKeys {
+		return nil
+	}
+	return []string{
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+	}
 }
 
 // sshCommand builds the full ssh argv to run remoteArgv on the remote host, with
@@ -246,8 +280,34 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	if h.cfg.IdentityPath != "" {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
+	a = append(a, h.ephemeralHostKeyFlags()...)
 	a = append(a, h.muxFlags()...)
 	return append(a, from, to)
+}
+
+// SSHArgv builds the full ssh argv that runs remoteArgv on this connection's
+// host, with every remote token shell-quoted (see the file header: the quoting
+// is the one genuinely new hazard the transport introduces) and the port,
+// identity, and connection-multiplexing flags threaded in. tty adds -t.
+//
+// It is the argv-only half of Output/Stream — those two prepend `LIMA_HOME=…
+// limactl` and then run the result, while this returns the command for a caller
+// that runs it itself and whose remote command is not limactl at all. That
+// caller is the Proxmox provider (internal/provider), whose guest transport is
+// direct ssh to the VM: it reuses this so the quoting, the identity flag, and
+// the ControlMaster socket sharing are spelled once for every ssh sand runs,
+// rather than re-derived against a different backend.
+func (h *SSHHost) SSHArgv(tty bool, remoteArgv ...string) []string {
+	return h.sshCommand(tty, remoteArgv...)
+}
+
+// SCPArgv builds the scp argv for a transfer between from and to (either of
+// which may be a `user@host:path` endpoint), with the same port/identity/
+// multiplexing flags SSHArgv threads in — including scp's capital -P port flag,
+// which is the detail scpCommand exists to get right in one place. Exported for
+// the same non-limactl caller SSHArgv serves.
+func (h *SSHHost) SCPArgv(recursive bool, from, to string) []string {
+	return h.scpCommand(recursive, from, to)
 }
 
 // --- Runner: run limactl over ssh -----------------------------------------------

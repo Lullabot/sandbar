@@ -389,6 +389,32 @@ func TestParseSweep_StampsLastSeenAndSweptAt(t *testing.T) {
 	}
 }
 
+func TestParseRemoteURL(t *testing.T) {
+	cases := []struct {
+		name, raw, forge, orgRepo string
+	}{
+		{"scp-like ssh", "git@github.com:org/repo.git", "github.com", "org/repo"},
+		{"https plain", "https://gitlab.com/group/sub/repo.git", "gitlab.com", "group/sub/repo"},
+		{"ssh:// with user", "ssh://git@example.com/org/repo.git", "example.com", "org/repo"},
+		// A remote carrying embedded credentials must NOT leak the secret into the
+		// forge host (which is persisted to disk) — the userinfo is stripped.
+		{"https with token", "https://oauth2:GLPAT-xxxx@gitlab.com/org/repo.git", "gitlab.com", "org/repo"},
+		{"http with user:pass", "http://user:pw@ghe.internal/o/r.git", "ghe.internal", "o/r"},
+		{"empty", "", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			forge, orgRepo := parseRemoteURL(c.raw)
+			if forge != c.forge || orgRepo != c.orgRepo {
+				t.Errorf("parseRemoteURL(%q) = (%q, %q), want (%q, %q)", c.raw, forge, orgRepo, c.forge, c.orgRepo)
+			}
+			if strings.Contains(forge, "@") {
+				t.Errorf("forge %q still contains userinfo — a credential would be persisted to disk", forge)
+			}
+		})
+	}
+}
+
 func TestParentFromGitdirPointer(t *testing.T) {
 	cases := []struct {
 		name string

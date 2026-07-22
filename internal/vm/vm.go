@@ -176,7 +176,55 @@ func (c CreateConfig) Validate() error {
 	if c.CPUs < 1 {
 		return fmt.Errorf("cpus must be a positive integer (got %d)", c.CPUs)
 	}
+	// A clone's qcow2 disk is grown from BaseDiskFloor and can never shrink live,
+	// so a smaller request must be rejected UP FRONT — otherwise a Proxmox create
+	// fails minutes in, after the base build and clone, when PVE hard-errors on the
+	// shrink. Enforced here (not in a submit handler) so every entrypoint — CLI
+	// create, TUI create, and reset — gets it. Only checked when Disk parses; an
+	// empty or odd value falls through to the provider unchanged.
+	if want, ok := parseDiskSize(c.Disk); ok {
+		if floor, ok := parseDiskSize(BaseDiskFloor); ok && want < floor {
+			return fmt.Errorf("disk %s is below the base floor of %s; a clone's disk can only grow from the base, never shrink", c.Disk, BaseDiskFloor)
+		}
+	}
 	return nil
+}
+
+// parseDiskSize parses a size string ("20GiB", "512MiB", "2TiB", or a bare byte
+// count) using binary (1024) units, matching Lima's sizing. It returns false for
+// an empty or unparseable value, so Validate treats an unrecognisable size as
+// "let the provider decide" rather than a hard error. Kept here rather than
+// reusing the ui/provider copies so the vm package can enforce the floor without
+// importing them.
+func parseDiskSize(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	i := 0
+	for i < len(s) && (s[i] == '.' || (s[i] >= '0' && s[i] <= '9')) {
+		i++
+	}
+	num, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil || num < 0 {
+		return 0, false
+	}
+	var mult float64
+	switch strings.ToLower(strings.TrimSpace(s[i:])) {
+	case "", "b":
+		mult = 1
+	case "k", "kib", "kb":
+		mult = 1 << 10
+	case "m", "mib", "mb":
+		mult = 1 << 20
+	case "g", "gib", "gb":
+		mult = 1 << 30
+	case "t", "tib", "tb":
+		mult = 1 << 40
+	default:
+		return 0, false
+	}
+	return int64(num * mult), true
 }
 
 // EffectiveHostname defaults to Name when unset; helper used by the form/provisioner.

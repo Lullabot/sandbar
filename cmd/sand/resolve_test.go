@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -466,5 +468,87 @@ func TestResolveShellProviderProvenanceErrorFallsBackToRegistry(t *testing.T) {
 	}
 	if prov == nil {
 		t.Fatal("resolveShellProvider: want a non-nil provider from the registry fallback")
+	}
+}
+
+// proxmoxTokenFile writes a valid, owner-only-readable token file and returns
+// its path — mirrors internal/provider/fleet_test.go's helper of the same
+// name, needed here because this package cannot import that test file.
+func proxmoxTokenFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte("sandbar@pve!prov=1234\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	return path
+}
+
+// TestProviderForProfileProxmox confirms the CLI's own conversion path
+// (mirroring provider.BuildFleet's buildBinding) constructs a Proxmox
+// provider for a proxmox profile, with the same "host:node/pool" scope the
+// fleet path derives.
+func TestProviderForProfileProxmox(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	p := profiles.Profile{
+		ID: "cluster", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "pve.example.com", Node: "pve1", Pool: "sandbar",
+		Storage: "local-lvm", Bridge: "vmbr0", TokenFile: proxmoxTokenFile(t),
+	}
+
+	prov, scope, err := providerForProfile(p)
+	if err != nil {
+		t.Fatalf("providerForProfile: unexpected error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("providerForProfile: want a non-nil provider")
+	}
+	want := registry.Scope{Provider: "proxmox", RemoteTarget: "pve.example.com:pve1/sandbar"}
+	if scope != want {
+		t.Fatalf("providerForProfile scope = %+v, want %+v", scope, want)
+	}
+	if got := scopeForProfile(p); got != want {
+		t.Fatalf("scopeForProfile = %+v, want the identical scope %+v providerForProfile returned", got, want)
+	}
+}
+
+// TestTargetConfigForProxmoxCarriesEveryField pins the CLI's own
+// profiles.Profile -> TargetConfig conversion (the resolve.go twin of
+// provider.targetConfigFor): every connection field must carry, including
+// identity_path (needed for the cloud-init key, previously dropped here) and
+// image_storage.
+func TestTargetConfigForProxmoxCarriesEveryField(t *testing.T) {
+	p := profiles.Profile{
+		ID: "cluster", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "pve.example.com", User: "dev", Node: "pve1", Pool: "sandbar",
+		Storage: "local-lvm", ImageStorage: "local", BaseImage: "https://ex.test/img.qcow2",
+		Bridge: "vmbr0", TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
+		Insecure: true, CAFile: "/etc/ssl/pve-ca.pem",
+	}
+	cfg := targetConfigFor(p)
+	if cfg.Provider != provider.ProxmoxProviderID {
+		t.Fatalf("Provider = %q, want %q", cfg.Provider, provider.ProxmoxProviderID)
+	}
+	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
+		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.BaseImage != p.BaseImage ||
+		cfg.Bridge != p.Bridge || cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
+		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
+		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
+	}
+}
+
+// TestProviderForProfileProxmoxEmptyHostErrors mirrors the RemoteSSH
+// empty-host regression for the Proxmox path.
+func TestProviderForProfileProxmoxEmptyHostErrors(t *testing.T) {
+	p := profiles.Profile{
+		ID: "nohost", Name: "nohost", Type: profiles.TypeProxmox, Enabled: true,
+		Host: "", Node: "pve1", Pool: "sandbar", TokenFile: "/tmp/whatever",
+	}
+
+	_, _, err := providerForProfile(p)
+	if err == nil {
+		t.Fatal("providerForProfile: want error for an empty host, got nil")
+	}
+	if !strings.Contains(err.Error(), "host") {
+		t.Errorf("providerForProfile error = %q, want it to mention the missing host", err.Error())
 	}
 }

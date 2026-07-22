@@ -1293,6 +1293,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if job.Canceled {
 			return m, m.refreshMemberCmd(msg.job.scope)
 		}
+		// A non-canceled failure is otherwise surfaced only on the full-screen
+		// progress/log view and the tile's Failed badge — someone watching the
+		// board (not that screen) never sees WHY it failed. Echo it into the
+		// session Messages log too, matching the CLI, which prints the same error
+		// to stderr. (Canceled runs returned just above, so this is a real failure.)
+		if msg.err != nil {
+			m.logWarn(jobFailedLabel(msg.job, job) + " failed: " + msg.err.Error())
+		}
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it. Shared with the headless
@@ -1379,6 +1387,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolDDEV = cfg.WithDDEV
 			m.toolGo = cfg.WithGo
 			m.toolJava = cfg.WithJava
+			// Codex must be refreshed too, or the probed base's codex state is
+			// silently dropped: the checkbox stays at openForm's default (false)
+			// while the base was built WITH codex, and submitting reconverges the
+			// shared base without it (the silent de-select form.go's reset path
+			// guards against, reintroduced here for the create/probe path).
+			m.toolCodex = cfg.WithCodex
 		}
 		return m, nil
 

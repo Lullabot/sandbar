@@ -228,6 +228,54 @@ func TestSSHPortAndIdentityThreading(t *testing.T) {
 	})
 }
 
+// TestSSHEphemeralHostKeys pins the throwaway-guest host-key contract
+// (SSHConfig.EphemeralHostKeys): when set, EVERY ssh and scp argv must carry
+// `-o StrictHostKeyChecking=no`, `-o UserKnownHostsFile=/dev/null`, and
+// `-o LogLevel=ERROR` — the flags that stop the Proxmox provider's first
+// provisioning ssh from blocking on OpenSSH's interactive host-key prompt (a
+// hang the TUI cannot answer) and from hard-failing when a rebuilt VM reuses a
+// prior VM's IP with a new key. When UNSET (the remote-Lima default), none of
+// those options may appear — that hop pins host keys on first use.
+func TestSSHEphemeralHostKeys(t *testing.T) {
+	// hasOptPair reports whether argv contains the contiguous `-o <opt>` pair, so
+	// a stray "-o" or a lookalike value elsewhere cannot pass the assertion.
+	hasOptPair := func(argv []string, opt string) bool {
+		for i := 0; i+1 < len(argv); i++ {
+			if argv[i] == "-o" && argv[i+1] == opt {
+				return true
+			}
+		}
+		return false
+	}
+	opts := []string{"StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "LogLevel=ERROR"}
+
+	t.Run("set: ssh and scp carry every option", func(t *testing.T) {
+		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev", EphemeralHostKeys: true})
+		ssh := h.SSHArgv(false, "true")
+		scp := h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a")
+		for _, argv := range [][]string{ssh, scp} {
+			for _, opt := range opts {
+				if !hasOptPair(argv, opt) {
+					t.Errorf("argv %v missing `-o %s`", argv, opt)
+				}
+			}
+		}
+	})
+
+	t.Run("unset: neither ssh nor scp mentions host-key options", func(t *testing.T) {
+		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
+		ssh := h.SSHArgv(false, "true")
+		scp := h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a")
+		for _, argv := range [][]string{ssh, scp} {
+			for _, opt := range opts {
+				if hasToken(argv, opt) {
+					t.Errorf("argv %v must not weaken host-key checking for a persistent host (found %q)", argv, opt)
+				}
+			}
+		}
+	})
+}
+
 // TestSSHStdinReachesRemoteLimactl is the secret-hygiene proof for the hop: the
 // provision vars must arrive over STDIN, never argv, so a finalize token never
 // lands in the remote process listing. The stub echoes stdin (cat), so seeing the

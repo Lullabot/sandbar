@@ -353,20 +353,25 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 		// no other profile it could possibly be on.
 		target = enabled[0]
 	default:
-		owners := probeProvenanceOwners(enabled, name)
-		if len(owners) == 0 {
-			// legacy, remove after one release: no candidate profile's
-			// provenance marker named NAME — consult the registry cache next
-			// (see resolveShellProvider's doc comment).
-			for _, p := range enabled {
-				if reg.IsManagedInScope(name, scopeForProfile(p)) {
-					owners = append(owners, p)
-				}
+		// Registry FIRST — a pure in-memory lookup. The common case (NAME is a VM
+		// in this controller's managed index) resolves with ZERO network I/O, so
+		// `sand shell localvm` never hangs behind an unreachable/slow OTHER profile.
+		// Only on a registry miss do we pay the network: the authoritative
+		// provenance marker per profile, then a List probe for an unmanaged VM.
+		var owners []profiles.Profile
+		for _, p := range enabled {
+			if reg.IsManagedInScope(name, scopeForProfile(p)) {
+				owners = append(owners, p)
 			}
 		}
 		if len(owners) == 0 {
-			// Neither provenance nor the registry found an owner; only now
-			// fall back to the (network-round-tripping) List probe.
+			// Registry cache miss: consult each candidate profile's provenance
+			// marker (a network round trip per profile).
+			owners = probeProvenanceOwners(enabled, name)
+		}
+		if len(owners) == 0 {
+			// Neither the registry nor a marker found an owner; only now fall back
+			// to the (network-round-tripping) List probe.
 			owners = probeUnmanagedOwners(enabled, name)
 		}
 		switch len(owners) {
