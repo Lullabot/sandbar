@@ -1003,6 +1003,13 @@ func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
 		Host:         host,
 		User:         p.ciUser,
 		IdentityPath: p.identityPath,
+		// A guest is a VM sand just created, reached at whatever IP the DHCP lease
+		// handed out — an address a prior, now-deleted VM likely used, presenting a
+		// different host key. Without this the FIRST provisioning ssh blocks on
+		// OpenSSH's interactive host-key prompt (which the TUI cannot answer, so it
+		// hangs and then fails "Host key verification failed"), and a rebuilt VM on
+		// a recycled IP would trip the changed-key hard stop. See EphemeralHostKeys.
+		EphemeralHostKeys: true,
 	})
 }
 

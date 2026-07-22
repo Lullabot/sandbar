@@ -126,6 +126,42 @@ func TestProxmoxShellInteractive(t *testing.T) {
 	}
 }
 
+// TestProxmoxGuestSSHAcceptsEphemeralHostKey is the regression guard for the
+// hang-then-fail a fresh Proxmox guest caused: sand ssh's to a VM it just
+// created, at a DHCP IP a prior (now-deleted) VM likely used, so the guest's
+// host key is unknown and OpenSSH's default would open /dev/tty to prompt —
+// which the TUI cannot answer, so provisioning hung and then died "Host key
+// verification failed". Every guest ssh AND scp must therefore disable strict
+// host-key checking and route known_hosts to /dev/null. This runs under plain
+// `go test ./...` (the real-host proxmoxe2e suite never runs in CI), so it is
+// the coverage that actually guards the fix.
+func TestProxmoxGuestSSHAcceptsEphemeralHostKey(t *testing.T) {
+	_, p := withGuest(t) // caches web -> 192.168.1.50
+	argvs := recordSSH(p)
+
+	// A guest command (ssh) and a guest copy (scp) must both carry the flags.
+	if err := p.Shell(context.Background(), "web", nil, &bytes.Buffer{}, "true"); err != nil {
+		t.Fatalf("Shell: %v", err)
+	}
+	if err := p.Copy(context.Background(), &bytes.Buffer{}, false, p.GuestPath("web", "/home/dev/f"), "/tmp/f"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if len(*argvs) != 2 {
+		t.Fatalf("recorded %d transport commands; want 2 (ssh + scp)", len(*argvs))
+	}
+	for _, argv := range *argvs {
+		joined := strings.Join(argv, " ")
+		for _, want := range []string{
+			"-o StrictHostKeyChecking=no",
+			"-o UserKnownHostsFile=/dev/null",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("guest transport argv %q missing %q", joined, want)
+			}
+		}
+	}
+}
+
 // errAfterOutput is a stand-in for an ssh exit error that arrives after the
 // command has already written some output.
 type errAfterOutput struct{}
