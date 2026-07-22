@@ -172,3 +172,20 @@ the [`profiles.yaml`](files-and-state.md#host-paths) file records only a **path*
 to the token file (`token_file`), never the value, and `sand` refuses to read a
 token file that is readable by group or other. The credential stays outside the
 config that's safe to share.
+
+### Guest SSH host keys are not pinned
+
+`sand` reaches a Proxmox guest by SSH to the IP the guest's DHCP lease handed
+out — an address a prior, now-deleted VM very likely used before it. Those VMs
+are cattle: each is freshly created and presents a brand-new host key on an IP
+the last one already put a different key on. So the guest transport
+deliberately runs with `StrictHostKeyChecking=no` and
+`UserKnownHostsFile=/dev/null` — trust-on-first-use pinning would fail on the
+first reused IP, and the interactive prompt it falls back to cannot be answered
+from the TUI (it would just hang). The tradeoff is bounded to this backend: it
+means `sand`'s provisioning traffic to a guest is not protected against an
+on-path attacker *on the VM subnet* who can impersonate the guest's IP. The
+remote-Lima hop — SSH to a persistent host you configured — keeps host-key
+pinning on, because there the key is stable and a change is worth stopping for.
+Keep the VM subnet one you trust; it is the same network you must already trust
+to reach the guests at all.
