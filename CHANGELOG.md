@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1](https://github.com/Lullabot/sandbar/compare/v0.8.0...v0.8.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 3eef36e ([#102](https://github.com/Lullabot/sandbar/issues/102)) ([ae82a38](https://github.com/Lullabot/sandbar/commit/ae82a38a9d0a92424d3354a25b484c3ce490b58f))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260720091843-3eef36eaaa28 ([#100](https://github.com/Lullabot/sandbar/issues/100)) ([93a092c](https://github.com/Lullabot/sandbar/commit/93a092cdfe4a337095142c67607ecf87e61ac86b))
+
 ## [0.8.0](https://github.com/Lullabot/sandbar/compare/v0.7.0...v0.8.0) (2026-07-20)
 
 
