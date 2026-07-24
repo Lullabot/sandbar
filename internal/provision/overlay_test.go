@@ -34,7 +34,7 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"command -v curl >/dev/null 2>&1",
 		"command -v gpg >/dev/null 2>&1",
 		"python3 -c 'import passlib' >/dev/null 2>&1",
-		"apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib",
+		"install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib",
 	}
 	// Lima's own container stack is redundant (the playbook installs Docker) and
 	// expensive: its setup runs in cloud-final on EVERY boot, costing ~19s of a
@@ -82,7 +82,7 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if len(doc.Provision) != 1 || doc.Provision[0].Mode != "dependency" {
 		t.Fatalf("provision = %+v, want one dependency entry", doc.Provision)
 	}
-	if !strings.Contains(doc.Provision[0].Script, "apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib") {
+	if !strings.Contains(doc.Provision[0].Script, "install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib") {
 		t.Errorf("dependency script missing ansible-core+rsync+curl+gnupg+ca-certificates+passlib install:\n%s", doc.Provision[0].Script)
 	}
 	// passlib is not optional and not a recommendation we can inherit: the user
