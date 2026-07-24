@@ -108,7 +108,7 @@ func TestBaseOverlayReaderUnderstandsTheOverlayWeWrite(t *testing.T) {
 	if got.PlaybookDir != dir {
 		t.Errorf("PlaybookDir = %q, want %q", got.PlaybookDir, dir)
 	}
-	if !strings.Contains(got.Bootstrap, "apt-get install -y") {
+	if !strings.Contains(got.Bootstrap, "install -y") {
 		t.Errorf("the bootstrap script did not come through:\n%q", got.Bootstrap)
 	}
 }

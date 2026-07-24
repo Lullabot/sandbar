@@ -538,6 +538,16 @@ func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, 
 // --no-install-recommends is load-bearing (Debian's ansible-core Recommends the
 // 200MB `ansible` bundle), which is why python3-passlib — needed by the user
 // role's password_hash filter — is named explicitly.
+//
+// The apt_retry wrapper is load-bearing: we SSH in the moment the guest agent
+// answers, which is BEFORE the stock Debian cloud image's first-boot apt work
+// (apt-daily.service / unattended-upgrades) has released the apt locks. Racing
+// it dies with "Could not get lock /var/lib/apt/lists/lock ... held by process
+// N (apt-get)". DPkg::Lock::Timeout alone is NOT enough — it is not honoured by
+// apt-get update's /var/lib/apt/lists/lock acquisition, so a timeout-guarded
+// update still fails outright. We therefore retry the whole apt step until the
+// boot-time apt finishes and releases every lock, failing loudly if it never
+// does within the ceiling (40 * 15s = 10 min).
 const baseDepsScript = `set -eux -o pipefail
 if command -v ansible-playbook >/dev/null 2>&1 \
    && command -v rsync >/dev/null 2>&1 \
@@ -547,8 +557,20 @@ if command -v ansible-playbook >/dev/null 2>&1 \
   exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
+apt_retry() {
+  n=0
+  until "$@"; do
+    n=$((n + 1))
+    if [ "$n" -ge 40 ]; then
+      echo "apt: still locked after $n attempts, giving up" >&2
+      return 1
+    fi
+    echo "apt: locked by the guest's first-boot apt, retry $n/40..." >&2
+    sleep 15
+  done
+}
+apt_retry apt-get -o DPkg::Lock::Timeout=60 update
+apt_retry apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
 `
 
 // stagePlaybookScript receives the playbook tarball on stdin and unpacks it to

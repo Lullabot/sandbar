@@ -66,7 +66,25 @@ const overlayProvision = `provision:
       exit 0
     fi
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
+    # apt_retry rides out the VM's first-boot apt work (apt-daily /
+    # unattended-upgrades): this script can run before that has released the apt
+    # locks, and DPkg::Lock::Timeout does NOT cover apt-get update's
+    # /var/lib/apt/lists/lock, so a timeout-guarded update still dies with "Could
+    # not get lock ... held by process N". Retry the whole step until the locks
+    # free (40 * 15s = 10 min ceiling), then fail loudly.
+    apt_retry() {
+      n=0
+      until "$@"; do
+        n=$((n + 1))
+        if [ "$n" -ge 40 ]; then
+          echo "apt: still locked after $n attempts, giving up" >&2
+          return 1
+        fi
+        echo "apt: locked by the VM's first-boot apt, retry $n/40..." >&2
+        sleep 15
+      done
+    }
+    apt_retry apt-get -o DPkg::Lock::Timeout=60 update
     # --no-install-recommends is load-bearing, not hygiene: Debian's ansible-core
     # Recommends: ansible, so without it apt pulls the very 200MB collection
     # bundle (~436MB of ansible_collections on disk) that installing ansible-core
@@ -79,7 +97,7 @@ const overlayProvision = `provision:
     # pull it in as a Recommends, so dropping the bundle broke the play with
     # "Unable to encrypt nor hash, passlib must be installed". Name it
     # explicitly rather than leaning on another package's recommendation.
-    apt-get install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
+    apt_retry apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
 `
 
 // RenderBaseOverlay produces the Lima overlay YAML for the base image: the
