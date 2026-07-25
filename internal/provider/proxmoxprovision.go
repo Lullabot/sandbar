@@ -321,6 +321,12 @@ func (p *proxmoxProvider) buildBaseTemplate(ctx context.Context, cfg vm.CreateCo
 		Pool:    p.pool,
 		CIUser:  p.ciUser,
 		SSHKeys: []string{pubkey},
+		// host CPU passthrough, never PVE's default kvm64: that generic model
+		// hides SSE4.2/POPCNT/AVX2 and makes Claude Code >= 2.1.205 livelock at
+		// 100% CPU during `claude install`, hanging base provisioning forever.
+		// Clones inherit this from the resulting template. See the Cpu field doc
+		// and anthropics/claude-code#77208.
+		Cpu: "host",
 		// A storage-backed import volid, never an absolute filesystem path:
 		// absolute paths are hard-gated to root@pam and fail even for a root@pam
 		// API token.

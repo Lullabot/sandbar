@@ -103,6 +103,23 @@ type CreateVMOptions struct {
 	// "local:import/debian-13.qcow2") to import as scsi0 instead of
 	// allocating a fresh empty disk.
 	ImportFrom string
+	// Cpu is the QEMU CPU model (PVE's `cpu=` option). formValues defaults it
+	// to "host" (full host-CPU passthrough) when empty, and it must NOT be left
+	// as PVE's own default of "kvm64".
+	//
+	// Why this matters, and why it is not cosmetic: the generic kvm64/qemu64
+	// model masks modern x86-64 instruction extensions (no SSE4.2, POPCNT, or
+	// AVX2) from the guest. Claude Code >= 2.1.205 ships on a newer Bun runtime
+	// that assumes at least SSE4.2/POPCNT, and on a CPU without them it enters a
+	// userspace thread livelock at 100% CPU during startup instead of failing
+	// with an error — which hangs `claude install` in the base playbook forever,
+	// with no output. See anthropics/claude-code#77208
+	// (https://github.com/anthropics/claude-code/issues/77208); the confirmed
+	// fix there is exactly "set the Proxmox CPU type to host". The base VM sets
+	// this and clones inherit it from the resulting template. Host passthrough's
+	// only tradeoff is live-migration across heterogeneous host CPUs, which
+	// sand's ephemeral build VMs never do.
+	Cpu string
 }
 
 // formValues builds the POST body for CreateVM. Storage, Bridge, and Pool are
@@ -150,6 +167,15 @@ func (o CreateVMOptions) formValues() (url.Values, error) {
 	if o.Cores > 0 {
 		form.Set("cores", strconv.Itoa(o.Cores))
 	}
+	// cpu defaults to host passthrough and is NEVER left as PVE's generic
+	// kvm64: that model hides SSE4.2/POPCNT/AVX2 and makes Claude Code >= 2.1.205
+	// livelock at 100% CPU during `claude install` in the base playbook. See the
+	// Cpu field doc and anthropics/claude-code#77208.
+	cpu := o.Cpu
+	if cpu == "" {
+		cpu = "host"
+	}
+	form.Set("cpu", cpu)
 	if o.Memory > 0 {
 		form.Set("memory", strconv.Itoa(o.Memory))
 	}
