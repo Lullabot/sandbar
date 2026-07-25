@@ -466,3 +466,174 @@ func TestProxmoxTemplateMethodsAreNotOnTheInterface(t *testing.T) {
 		_ = errors.New("")
 	}
 }
+
+// failTask registers a task that finished unsuccessfully, along with the log
+// fetch taskFailedErr makes to explain it.
+func (m *pveMock) failTask(upid, exitStatus string) {
+	m.data("/nodes/pve1/tasks/"+upid+"/status", fmt.Sprintf(`{"status":"stopped","exitstatus":%q}`, exitStatus))
+	m.data("/nodes/pve1/tasks/"+upid+"/log", `[]`)
+}
+
+// TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone pins the two ways the
+// pre-clone shutdown can fail. Both must abort before any clone is attempted: a
+// source still running is a source whose disk would clone crash-consistent,
+// which is the one outcome stopping it first exists to prevent. Neither may
+// trigger the restart defer, which is only armed once the shutdown has landed.
+func TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone(t *testing.T) {
+	t.Run("shutdown call rejected", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "running")
+		m.fail("/nodes/pve1/qemu/101/status/shutdown", http.StatusForbidden, "Permission check failed")
+
+		if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+			t.Fatal("SnapshotTemplate: expected the shutdown failure to abort the snapshot")
+		}
+		if m.sawPath("/nodes/pve1/qemu/101/clone") {
+			t.Error("cloned a source that could not be shut down — the clone would be crash-consistent")
+		}
+	})
+
+	t.Run("shutdown task fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "running")
+		stopUPID := "UPID:pve1:0:0:0:qmshutdown:101:u:"
+		m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
+		m.failTask(stopUPID, "shutdown timed out")
+
+		err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard)
+		if err == nil {
+			t.Fatal("SnapshotTemplate: expected the failed shutdown task to abort the snapshot")
+		}
+		if !strings.Contains(err.Error(), "web") {
+			t.Errorf("err = %q; want it to name the source", err)
+		}
+		if m.sawPath("/nodes/pve1/qemu/101/clone") {
+			t.Error("cloned a source whose shutdown task failed")
+		}
+	})
+}
+
+// TestProxmoxSnapshotResolveFailureIsReported pins that an unresolvable source
+// aborts before anything is created. The name reaches this method from the
+// caller, so a typo must produce an error naming it — not a clone of whatever
+// VM the stale index happened to point at.
+func TestProxmoxSnapshotResolveFailureIsReported(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", `[]`)
+	p := newProxmoxForTest(t, m)
+
+	err := p.SnapshotTemplate(context.Background(), "ghost", "ghost-golden", io.Discard)
+	if err == nil {
+		t.Fatal("SnapshotTemplate(unresolvable): expected an error")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("err = %q; want it to name the source the caller asked for", err)
+	}
+	if m.sawPath("/cluster/nextid") {
+		t.Error("allocated a VMID for a source that does not exist")
+	}
+}
+
+// TestProxmoxSnapshotConvertTaskFailureCleansUp covers the conversion's
+// asynchronous failure arm, distinct from the synchronous POST rejection the
+// existing test drives. A clone that landed but never became a template is a
+// plain VM sitting under the name the caller asked for a template — the exact
+// thing DeleteTemplate's guard would later refuse to remove — so it must be
+// purged here.
+func TestProxmoxSnapshotConvertTaskFailureCleansUp(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+	primeName(m, p, "web", 101, "stopped")
+
+	m.data("/cluster/nextid", `"900"`)
+	cloneUPID := "UPID:pve1:0:0:0:qmclone:900:u:"
+	tmplUPID := "UPID:pve1:0:0:0:qmtemplate:900:u:"
+	m.data("/nodes/pve1/qemu/101/clone", fmt.Sprintf("%q", cloneUPID))
+	m.okTask(cloneUPID)
+	m.data("/nodes/pve1/qemu/900/template", fmt.Sprintf("%q", tmplUPID))
+	m.failTask(tmplUPID, "unable to create template")
+	// cleanupVM's stop-then-delete of the partial clone.
+	m.data("/nodes/pve1/qemu/900/status/current", `{"vmid":900,"name":"web-golden","status":"stopped"}`)
+	delUPID := "UPID:pve1:0:0:0:qmdestroy:900:u:"
+	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
+	m.okTask(delUPID)
+
+	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+		t.Fatal("SnapshotTemplate: expected the failed conversion task to be reported")
+	}
+	if !m.sawPath("/nodes/pve1/qemu/900") {
+		t.Errorf("never purged the clone left behind by the failed conversion; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxDeleteTemplateReportsDeleteFailures covers the two failure arms
+// after the is-a-template guard has passed. A swallowed failure here would drop
+// the template from sand's index while it is still occupying its VMID and name
+// on the node, so the next snapshot under that name collides with a template the
+// caller was told had been removed.
+func TestProxmoxDeleteTemplateReportsDeleteFailures(t *testing.T) {
+	setup := func(t *testing.T) (*pveMock, *proxmoxProvider) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.data("/nodes/pve1/qemu/900/config", `{"name":"web-golden","template":1}`)
+		return m, p
+	}
+
+	t.Run("delete call rejected", func(t *testing.T) {
+		m, p := setup(t)
+		m.fail("/nodes/pve1/qemu/900", http.StatusForbidden, "Permission check failed")
+		if err := p.DeleteTemplate(context.Background(), "web-golden"); err == nil {
+			t.Fatal("DeleteTemplate: expected the rejected delete to be reported")
+		}
+	})
+
+	t.Run("delete task fails", func(t *testing.T) {
+		m, p := setup(t)
+		delUPID := "UPID:pve1:0:0:0:qmdestroy:900:u:"
+		m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
+		m.failTask(delUPID, "storage is busy")
+		err := p.DeleteTemplate(context.Background(), "web-golden")
+		if err == nil {
+			t.Fatal("DeleteTemplate: expected the failed delete task to be reported")
+		}
+		if !strings.Contains(err.Error(), "web-golden") {
+			t.Errorf("err = %q; want it to name the template", err)
+		}
+	})
+}
+
+// TestProxmoxTemplateDiskBytesUnknownWithoutConfigOrStorage completes the "-1
+// rather than a guess" sweep with the two remaining sources of doubt: a config
+// that cannot be read at all, and a profile that names no VM-disk storage to
+// look the volid up in. A zero here would render as a template occupying no
+// space, which reads as a successfully-built empty template.
+func TestProxmoxTemplateDiskBytesUnknownWithoutConfigOrStorage(t *testing.T) {
+	t.Run("config read fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.fail("/nodes/pve1/qemu/900/config", http.StatusForbidden, "Permission check failed")
+		if got := p.TemplateDiskBytes("web-golden"); got != -1 {
+			t.Errorf("TemplateDiskBytes(config error) = %d; want -1", got)
+		}
+	})
+
+	t.Run("no storage configured", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m, func(cfg *TargetConfig) { cfg.Storage = "" })
+		primeName(m, p, "web-golden", 900, "stopped")
+		m.data("/nodes/pve1/qemu/900/config",
+			`{"boot":"order=scsi0","scsi0":"local-lvm:vm-900-disk-0,size=32G"}`)
+		if got := p.TemplateDiskBytes("web-golden"); got != -1 {
+			t.Errorf("TemplateDiskBytes(no storage) = %d; want -1", got)
+		}
+		for _, seen := range m.seen() {
+			if strings.Contains(seen, "/storage/") {
+				t.Errorf("asked for a storage listing with no storage configured: %v", m.seen())
+			}
+		}
+	})
+}

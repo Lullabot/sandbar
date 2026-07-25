@@ -135,3 +135,57 @@ func TestProxmoxFilesLocalRoundTrip(t *testing.T) {
 		t.Fatalf("Unlock: %v", err)
 	}
 }
+
+// TestProxmoxStateRootFallsBackWhenXDGStateHomeIsUnset covers the two paths
+// taken when the environment does not name a state dir. Both matter because the
+// base LOCK lives under this root: an empty base would put it at the filesystem
+// root, where it either fails to create or is shared by every endpoint on the
+// machine — turning a per-endpoint lock into a global one.
+func TestProxmoxStateRootFallsBackWhenXDGStateHomeIsUnset(t *testing.T) {
+	cfg := TargetConfig{Host: "pve.example.com", Node: "pve1", Pool: "sandbar"}
+
+	t.Run("home directory", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("XDG_STATE_HOME", "")
+		t.Setenv("HOME", home)
+
+		got := proxmoxStateRoot(cfg)
+		if want := filepath.Join(home, ".local", "state", "sandbar", "proxmox"); !strings.HasPrefix(got, want) {
+			t.Errorf("state root = %q; want it under %q", got, want)
+		}
+	})
+
+	t.Run("no home either", func(t *testing.T) {
+		t.Setenv("XDG_STATE_HOME", "")
+		t.Setenv("HOME", "")
+
+		got := proxmoxStateRoot(cfg)
+		if got == "" || filepath.Dir(got) == string(filepath.Separator) {
+			t.Fatalf("state root = %q; a homeless environment must not root state at /", got)
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("state root = %q; want an absolute path", got)
+		}
+	})
+}
+
+// TestSanitizePathComponentNeverYieldsAnEmptyName guards the join. A component
+// that sanitizes away entirely (an unset field, or one made only of separators)
+// would otherwise contribute nothing to the directory name, so two endpoints
+// differing ONLY in that field would collide on one state root — exactly the
+// cross-endpoint stamp confusion the per-endpoint root exists to prevent.
+func TestSanitizePathComponentNeverYieldsAnEmptyName(t *testing.T) {
+	if got := sanitizePathComponent(""); got != "unset" {
+		t.Errorf("sanitizePathComponent(\"\") = %q; want a non-empty placeholder", got)
+	}
+	if got := sanitizePathComponent("//"); got != "--" {
+		t.Errorf("sanitizePathComponent(%q) = %q; want every separator mapped, not dropped", "//", got)
+	}
+
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	a := proxmoxStateRoot(TargetConfig{Host: "pve.example.com", Pool: "sandbar"})
+	b := proxmoxStateRoot(TargetConfig{Host: "pve.example.com", Node: "pve1", Pool: "sandbar"})
+	if a == b {
+		t.Errorf("an unset node collided with node pve1 on one state root: %q", a)
+	}
+}

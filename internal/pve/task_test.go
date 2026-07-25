@@ -3,6 +3,7 @@ package pve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -328,5 +329,62 @@ func TestWaitTaskHonoursContextCancellation(t *testing.T) {
 	err := c.WaitTask(ctx, "UPID:node1:00001234:1A2B3C4D:5E6F7A8B:qmcreate:100:user@pve!token:")
 	if err == nil {
 		t.Fatal("WaitTask: expected an error from context cancellation")
+	}
+}
+
+// TestTaskFailedErrKeepsOnlyTheLogTail pins the truncation. The log is fetched
+// with limit=1000 precisely because "TASK ERROR:" is usually far past the
+// default 50-line window, but the whole thousand lines must not then be pasted
+// into an error message — only the tail, which is where that line sits.
+func TestTaskFailedErrKeepsOnlyTheLogTail(t *testing.T) {
+	const lineCount = 40
+	c := waitClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": map[string]any{"status": "stopped", "exitstatus": "job errors"},
+		})
+	}, func(w http.ResponseWriter, r *http.Request) {
+		lines := make([]map[string]any, 0, lineCount)
+		for i := range lineCount {
+			lines = append(lines, map[string]any{"n": i + 1, "t": fmt.Sprintf("log line %d", i+1)})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": lines})
+	})
+
+	err := c.WaitTask(context.Background(), "UPID:node1:00001234:1A2B3C4D:5E6F7A8B:qmcreate:100:user@pve!token:")
+	if err == nil {
+		t.Fatal("WaitTask: expected an error for a failed task")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "log line 40") || !strings.Contains(got, "log line 36") {
+		t.Errorf("err = %q; want the last five log lines, which is where TASK ERROR lands", got)
+	}
+	if strings.Contains(got, "log line 35") || strings.Contains(got, "log line 1\n") {
+		t.Errorf("err = %q; want only the tail, not the whole log", got)
+	}
+}
+
+// TestWaitTaskBacksOffToTheCeiling drives enough poll iterations to reach the
+// linear backoff's cap. Without the cap the delay grows without bound, so a task
+// that takes a few minutes — a base-image build, routinely — would be noticed
+// minutes after it actually finished.
+func TestWaitTaskBacksOffToTheCeiling(t *testing.T) {
+	withFastPolling(t)
+
+	var polls atomic.Int32
+	c := waitClient(t, func(w http.ResponseWriter, r *http.Request) {
+		// waitTaskMaxPollInterval is 5x the base interval under fast polling, so
+		// the cap is only reached from the sixth wait onwards.
+		if polls.Add(1) < 8 {
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "running"}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "stopped", "exitstatus": "OK"}})
+	}, nil)
+
+	if err := c.WaitTask(context.Background(), "UPID:node1:00001234:1A2B3C4D:5E6F7A8B:qmcreate:100:user@pve!token:"); err != nil {
+		t.Fatalf("WaitTask: %v", err)
+	}
+	if got := polls.Load(); got != 8 {
+		t.Errorf("polled %d times; want 8 (the task must be observed as finished, not abandoned)", got)
 	}
 }

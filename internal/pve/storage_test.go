@@ -89,3 +89,32 @@ func TestStorageContentListsVolumes(t *testing.T) {
 		t.Fatalf("items = %+v", items)
 	}
 }
+
+// TestStorageCallErrorsPropagate covers both storage calls' failure arms. A
+// download-url failure is the one an operator most needs to see verbatim — the
+// cloud image is fetched once per node, so this is where a storage that lacks
+// the "import" content type, or a token without Datastore.AllocateTemplate,
+// first shows up.
+func TestStorageCallErrorsPropagate(t *testing.T) {
+	c := storageTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"data":null,"message":"storage 'local' does not support content type 'import'"}`))
+	})
+	ctx := context.Background()
+
+	upid, err := c.DownloadURL(ctx, "local", DownloadURLOptions{Content: "import", Filename: "debian-13.qcow2", URL: "https://example.com/debian-13.qcow2"})
+	if err == nil {
+		t.Fatal("DownloadURL: expected an error")
+	}
+	if !strings.Contains(err.Error(), "does not support content type") {
+		t.Errorf("err = %q; want the PVE message carried through", err)
+	}
+	if upid.Raw != "" {
+		t.Errorf("upid = %+v alongside the error; want the zero UPID, never one a caller would wait on", upid)
+	}
+
+	if _, err := c.StorageContent(ctx, "local"); err == nil {
+		t.Error("StorageContent: expected an error")
+	}
+}

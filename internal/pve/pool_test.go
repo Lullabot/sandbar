@@ -46,3 +46,23 @@ func TestPoolsEmptyWhenTokenSeesNone(t *testing.T) {
 		t.Fatalf("Pools() = %+v; want an empty slice", pools)
 	}
 }
+
+// TestPoolsPropagatesAPIError guards the ambiguity Preflight has to phrase. An
+// error here must not collapse into an empty pool list: "the token cannot reach
+// /pools at all" and "the token can audit no pools" call for entirely different
+// advice, and only the error tells them apart.
+func TestPoolsPropagatesAPIError(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"data":null}`))
+	})
+
+	pools, err := c.Pools(context.Background())
+	if !IsPermission(err) {
+		t.Fatalf("Pools err = %v; want a permission error", err)
+	}
+	if pools != nil {
+		t.Errorf("Pools = %+v alongside its error; want nil", pools)
+	}
+}

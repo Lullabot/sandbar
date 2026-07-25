@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -1436,4 +1437,192 @@ func runArgvForTest(t *testing.T, argv []string) (string, error) {
 	t.Helper()
 	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
 	return string(out), err
+}
+
+// TestProxmoxPreflightSingleStorageMustAcceptBothContentTypes covers the
+// profile that points disk storage and image storage at the SAME storage. That
+// configuration takes a different branch — one status lookup, two content
+// requirements — and the check it must not skip is "import": a storage accepting
+// "images" but not "import" passes the disk check and then rejects the cloud
+// image download with a 500 minutes into the first base build, which is exactly
+// the failure Preflight exists to move forward.
+func TestProxmoxPreflightSingleStorageMustAcceptBothContentTypes(t *testing.T) {
+	sameStorage := func(cfg *TargetConfig) { cfg.ImageStorage = cfg.Storage }
+
+	t.Run("accepts both", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		preflightHappyPath(m)
+		m.data("/nodes/pve1/storage/local-lvm/status", `{"total":1000,"avail":900,"active":1,"enabled":1,"content":"images,import"}`)
+		p := newProxmoxForTest(t, m, sameStorage)
+
+		if err := p.Preflight(); err != nil {
+			t.Fatalf("Preflight: %v", err)
+		}
+		if m.sawPath("/nodes/pve1/storage/local/status") {
+			t.Error("looked up the default image storage even though the profile names one storage for both")
+		}
+	})
+
+	t.Run("images but not import", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		preflightHappyPath(m) // local-lvm accepts "images,rootdir" — no import
+		p := newProxmoxForTest(t, m, sameStorage)
+
+		err := p.Preflight()
+		if err == nil {
+			t.Fatal("Preflight: expected the missing \"import\" content type to be caught")
+		}
+		if !strings.Contains(err.Error(), "image_storage") {
+			t.Errorf("err = %q; want it to point at the setting that fixes this", err)
+		}
+	})
+}
+
+// TestProxmoxPreflightReportsEachStageFailure walks the checks Preflight makes
+// after the token is accepted. Each produces its own advice, and the value of
+// this method is entirely in that specificity — a generic "preflight failed"
+// would leave an operator with the same opaque mid-create 403 the method exists
+// to replace.
+func TestProxmoxPreflightReportsEachStageFailure(t *testing.T) {
+	t.Run("API unreachable", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		// Neither a 401/403 (a token problem) nor a 404 (a node-name problem):
+		// this arm must name the endpoint rather than mis-attributing the cause.
+		m.fail("/nodes/pve1/status", http.StatusBadGateway, "proxy error")
+		p := newProxmoxForTest(t, m)
+
+		err := p.Preflight()
+		if err == nil {
+			t.Fatal("Preflight: expected an error")
+		}
+		if !strings.Contains(err.Error(), "cannot reach") {
+			t.Errorf("err = %q; want it phrased as a reachability problem", err)
+		}
+	})
+
+	t.Run("pool listing fails", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		preflightHappyPath(m)
+		m.fail("/pools", http.StatusInternalServerError, "boom")
+		p := newProxmoxForTest(t, m)
+
+		err := p.Preflight()
+		if err == nil {
+			t.Fatal("Preflight: expected an error")
+		}
+		if !strings.Contains(err.Error(), "resource pools") {
+			t.Errorf("err = %q; want it to say the pool listing is what failed", err)
+		}
+	})
+
+	t.Run("no storage configured", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		preflightHappyPath(m)
+		p := newProxmoxForTest(t, m, func(cfg *TargetConfig) { cfg.Storage = "" })
+
+		err := p.Preflight()
+		if err == nil {
+			t.Fatal("Preflight: expected a profile with no storage to be rejected")
+		}
+		if !strings.Contains(err.Error(), "storage") {
+			t.Errorf("err = %q; want it to name the missing setting", err)
+		}
+	})
+
+	t.Run("image storage does not exist", func(t *testing.T) {
+		stubPublicKey(t)
+		m := newPVEMock(t)
+		preflightHappyPath(m)
+		m.fail("/nodes/pve1/storage/local/status", http.StatusNotFound, "storage 'local' does not exist")
+		p := newProxmoxForTest(t, m)
+
+		err := p.Preflight()
+		if err == nil {
+			t.Fatal("Preflight: expected an unusable image storage to be caught")
+		}
+		if !strings.Contains(err.Error(), "image storage") {
+			t.Errorf("err = %q; want it to distinguish the image storage from the disk storage", err)
+		}
+	})
+}
+
+// TestPVEVersionAtLeastRejectsNonNumericComponents completes the parse
+// classification: a version with the right SHAPE but non-numeric components must
+// report "unparseable" (which Preflight tolerates), never "older than required"
+// (which locks the host out). The distinction is the whole reason the function
+// returns two bools.
+func TestPVEVersionAtLeastRejectsNonNumericComponents(t *testing.T) {
+	for _, in := range []string{"nine.zero.four", "pve-manager/x.y/abcdef", "9.x"} {
+		atLeast, parsed := pveVersionAtLeast(in, 9, 0)
+		if parsed {
+			t.Errorf("pveVersionAtLeast(%q) reported the version as parsed; want unparseable", in)
+		}
+		if atLeast {
+			t.Errorf("pveVersionAtLeast(%q) = true; an unparseable version must never satisfy the minimum", in)
+		}
+	}
+}
+
+// TestIsMACAddressRejectsMisplacedSeparators pins the hand-rolled parser's
+// positional rules. It decides which guest interface is net0, so anything it
+// wrongly accepts becomes a MAC that matches no interface (a create that hangs
+// waiting for an address) — and the separator positions are the part a
+// hex-only check would miss.
+func TestIsMACAddressRejectsMisplacedSeparators(t *testing.T) {
+	cases := map[string]bool{
+		"BC:24:11:AA:BB:CC": true,
+		"bc:24:11:aa:bb:cc": true,
+		"BC-24-11-AA-BB-CC": false, // right length, wrong separator
+		"BC:24:11:AA:BBCC:": false, // right length, separators misplaced
+		"BC:24:11:AA:BB:CG": false, // not hex
+		"BC:24:11:AA:BB:C":  false, // too short
+		"":                  false,
+	}
+	for in, want := range cases {
+		if got := isMACAddress(in); got != want {
+			t.Errorf("isMACAddress(%q) = %v; want %v", in, got, want)
+		}
+	}
+}
+
+// TestFirstRoutablePrefersIPv4AndSkipsUnusableAddresses pins the address choice
+// made for every guest ssh. The link-local cases are the load-bearing ones: a
+// guest whose DHCP has not answered assigns itself 169.254/16 (or fe80::/10),
+// which looks like an address and routes nowhere — accepting it turns "still
+// booting" into a connection that fails much later, with a worse error.
+func TestFirstRoutablePrefersIPv4AndSkipsUnusableAddresses(t *testing.T) {
+	addr := func(ips ...string) []pve.IPAddress {
+		out := make([]pve.IPAddress, 0, len(ips))
+		for _, ip := range ips {
+			out = append(out, pve.IPAddress{IPAddress: ip})
+		}
+		return out
+	}
+
+	cases := []struct {
+		name string
+		in   []pve.IPAddress
+		want string
+	}{
+		{"ipv4 wins over an earlier ipv6", addr("2001:db8::1", "10.0.0.5"), "10.0.0.5"},
+		{"ipv6 only", addr("2001:db8::1"), "2001:db8::1"},
+		{"first ipv6 wins", addr("2001:db8::1", "2001:db8::2"), "2001:db8::1"},
+		{"4-in-6 counts as ipv4", addr("::ffff:10.0.0.5"), "10.0.0.5"},
+		{"unparseable entries are skipped", addr("not-an-ip", "10.0.0.5"), "10.0.0.5"},
+		{"dhcp never answered", addr("169.254.3.4", "fe80::1"), ""},
+		{"loopback only", addr("127.0.0.1", "::1"), ""},
+		{"nothing at all", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstRoutable(tc.in); got != tc.want {
+				t.Errorf("firstRoutable(%v) = %q; want %q", tc.in, got, tc.want)
+			}
+		})
+	}
 }
