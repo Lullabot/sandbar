@@ -141,7 +141,7 @@ func renderTile(in tileInput) string {
 			prog = in.RemoteProgress
 		}
 		lines[2] = tileProgressBarLine(prog, width)
-		lines[3] = tileRoleLine(prog)
+		lines[3] = tileRoleLine(prog, in.Now, width)
 		// lines[4] and lines[5] stay blank: a building VM's own vm.VM record
 		// can be a zero value for the first minutes of a create (the clone
 		// has not landed in `limactl list` yet — see jobRegistry's "seen"
@@ -587,20 +587,83 @@ func tileProgressBarLine(p ansibleProgress, width int) string {
 	return tileGaugeLine("build", frac, fmt.Sprintf("%d%%", int(frac*100+0.5)), width)
 }
 
+// taskTimerAfter is how long the CURRENT Ansible task must have been running
+// before the tile starts showing its elapsed time.
+//
+// The delay is the whole point of the feature working rather than annoying. A
+// building board redraws about ten times a second, and a normal playbook run
+// steps through hundreds of tasks that each finish in well under a second — a
+// timer with no threshold would be a digit flickering between "0s" and "1s" for
+// the entire build, which reads as noise and trains the eye to ignore the row.
+// Appearing only once a task has outstayed every normal one turns it into a
+// signal: something is showing a number BECAUSE it is slow.
+const taskTimerAfter = 10 * time.Second
+
 // tileRoleLine is a building tile's second content row: the current Ansible
-// role and task count (e.g. "ansible: docker · 7/19"). Ansible has not
+// role and task count (e.g. "ansible: docker · 7/19"), with the current task's
+// elapsed time right-aligned once it passes taskTimerAfter. Ansible has not
 // necessarily started yet — the clone and the boot take most of a build's
 // wall time — so this falls back through Task, then to sand's own phase
 // banner (Step), which is the tile's only signal during those otherwise
 // silent minutes (see ansible.go's Step doc).
-func tileRoleLine(p ansibleProgress) string {
+//
+// The timer rides tileRowSplit rather than being appended to the text so it
+// obeys the same yield rule the title and footer rows do: on a tile too narrow
+// for both, the elapsed time truncates and then disappears, and the role/task
+// position — which is the row's identity — never gives way. Appending it would
+// have inverted that, letting tilePad's ellipsis eat the task count to keep a
+// timer.
+func tileRoleLine(p ansibleProgress, now time.Time, width int) string {
 	switch {
 	case cmp.Or(p.Role, p.Task) != "":
-		return tileChromeStyle.Render(fmt.Sprintf("ansible: %s · %d/%d", cmp.Or(p.Role, p.Task), p.Index, p.Total))
+		text := fmt.Sprintf("ansible: %s · %d/%d", cmp.Or(p.Role, p.Task), p.Index, p.Total)
+		elapsed := taskElapsed(p, now)
+		if elapsed == "" {
+			return tileChromeStyle.Render(text)
+		}
+		return tileRowSplit(tileChromeStyle.Render(text), ansi.StringWidth(text), elapsed, width, 0,
+			func(s string) string { return tileChromeStyle.Render(s) })
 	case p.Step != "":
 		return tileChromeStyle.Render(p.Step)
 	default:
 		return tileChromeStyle.Render("starting…")
+	}
+}
+
+// taskElapsed renders how long the current task has been running, or "" when
+// there is nothing honest to show: no task started yet, a position that came
+// from a provenance marker (which carries no start time — see
+// ansibleProgress.TaskStarted), a clock that has gone backwards, or a task too
+// young to be worth a number.
+func taskElapsed(p ansibleProgress, now time.Time) string {
+	if p.TaskStarted.IsZero() {
+		return ""
+	}
+	d := now.Sub(p.TaskStarted)
+	if d < taskTimerAfter {
+		return ""
+	}
+	return formatElapsed(d)
+}
+
+// formatElapsed renders a running task's age compactly, keeping SECONDS
+// visible for the first hour.
+//
+// This is deliberately not formatUptime, which rounds to whole minutes: that is
+// right for "up 3h20m" on a VM that has been running for days, and useless here,
+// where the interesting range is the first few minutes and a task at 45 seconds
+// would render as "0m".
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch s := int(d.Seconds()); {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm%02ds", s/60, s%60)
+	default:
+		return fmt.Sprintf("%dh%02dm", s/3600, (s%3600)/60)
 	}
 }
 

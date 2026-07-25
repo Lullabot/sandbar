@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -886,5 +887,102 @@ func TestTileDiskLineGuestBoundaryExactlyAtThresholdDoesNotWarn(t *testing.T) {
 	got := ansi.Strip(renderTile(in))
 	if strings.Contains(got, "⚠ disk") {
 		t.Fatalf("exactly 10%% free (the boundary) must not warn, got:\n%s", got)
+	}
+}
+
+// --- The current task's elapsed time ---------------------------------------------
+
+// The timer must appear only once a task has outstayed every normal one.
+//
+// The threshold is what makes the feature legible rather than noisy: a build
+// steps through hundreds of sub-second tasks while the board redraws ~10x a
+// second, so an unconditional timer would be a flickering digit for the whole
+// run. A number appearing at all has to MEAN something is slow.
+func TestTileRoleLineShowsElapsedOnlyForASlowTask(t *testing.T) {
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	base := ansibleProgress{Role: "project", Index: 72, Total: 72}
+
+	for _, tc := range []struct {
+		name    string
+		started time.Time
+		want    string // "" means no timer at all
+	}{
+		{"just started", now, ""},
+		{"still under the threshold", now.Add(-9 * time.Second), ""},
+		{"at the threshold", now.Add(-10 * time.Second), "10s"},
+		{"minutes in", now.Add(-8*time.Minute - 14*time.Second), "8m14s"},
+		{"hours in", now.Add(-time.Hour - 4*time.Minute), "1h04m"},
+		// A build on another controller is reconstructed from a provenance
+		// marker, which carries no task start — it must show no timer rather
+		// than a fabricated one measured from the zero time.
+		{"no start time (remote build)", time.Time{}, ""},
+		// A clock that jumped backwards must not render a negative age.
+		{"clock skew", now.Add(time.Minute), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := base
+			p.TaskStarted = tc.started
+			got := ansi.Strip(tileRoleLine(p, now, 44))
+
+			if !strings.Contains(got, "ansible: project · 72/72") {
+				t.Fatalf("tileRoleLine = %q, want it to keep the role/task position", got)
+			}
+			if tc.want == "" {
+				// Nothing that looks like a duration may appear.
+				if regexp.MustCompile(`\d+[smh]`).MatchString(strings.TrimPrefix(got, "ansible: project · 72/72")) {
+					t.Fatalf("tileRoleLine = %q, want no timer", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("tileRoleLine = %q, want it to show %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The timer is a SECONDARY on the row: on a tile too narrow for both, it yields
+// and the role/task position — the row's identity — survives whole. Appending
+// the timer as text would invert that, letting tilePad's ellipsis eat the task
+// count to keep a duration nobody can act on without it.
+func TestTileRoleLineYieldsTheTimerBeforeThePosition(t *testing.T) {
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	p := ansibleProgress{Role: "dev-tools", Index: 42, Total: 71, TaskStarted: now.Add(-8 * time.Minute)}
+
+	const position = "ansible: dev-tools · 42/71"
+	wide := ansi.Strip(tileRoleLine(p, now, 44))
+	if !strings.Contains(wide, position) || !strings.Contains(wide, "8m00s") {
+		t.Fatalf("wide tile = %q, want both the position and the timer", wide)
+	}
+	narrow := ansi.Strip(tileRoleLine(p, now, len(position)+1))
+	if !strings.Contains(narrow, position) {
+		t.Fatalf("narrow tile = %q, want the position kept intact at %q", narrow, position)
+	}
+	if strings.Contains(narrow, "8m00s") {
+		t.Fatalf("narrow tile = %q, want the timer dropped rather than crowding the position", narrow)
+	}
+}
+
+// formatElapsed keeps SECONDS visible for the first hour — the range where a
+// task's age is actually informative. formatUptime rounds to whole minutes,
+// which would render a 45-second task as "0m".
+func TestFormatElapsed(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{-time.Second, "0s"},
+		{45 * time.Second, "45s"},
+		{59*time.Second + 999*time.Millisecond, "59s"},
+		{time.Minute, "1m00s"},
+		{8*time.Minute + 14*time.Second, "8m14s"},
+		{59*time.Minute + 59*time.Second, "59m59s"},
+		{time.Hour, "1h00m"},
+		{2*time.Hour + 34*time.Minute, "2h34m"},
+	} {
+		if got := formatElapsed(tc.d); got != tc.want {
+			t.Errorf("formatElapsed(%v) = %q, want %q", tc.d, got, tc.want)
+		}
 	}
 }
