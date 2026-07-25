@@ -112,6 +112,13 @@ type SSHHost struct {
 	// must silently fall back to the pre-multiplexing argv shape rather than
 	// failing construction or any later command.
 	controlDir string
+
+	// debugLogPath, when non-empty, is the file ssh appends its own verbose
+	// protocol log to (see debugFlags). It is opt-in via SAND_SSH_DEBUG and
+	// resolved once at construction, for the same reason controlDir is: a
+	// failure to resolve it must degrade to "no transport log", never to a
+	// failed command.
+	debugLogPath string
 }
 
 // Compile-time proof the SSH host satisfies the whole seam and the copy hook.
@@ -141,8 +148,79 @@ func NewSSHHost(cfg SSHConfig) *SSHHost {
 			h.controlDir = dir
 		}
 	}
+	h.debugLogPath = resolveDebugLog(cfg)
 	return h
 }
+
+// resolveDebugLog returns the file ssh should append its verbose log to for this
+// connection, or "" when the host did not ask for one.
+//
+// SAND_SSH_DEBUG is an ABSOLUTE directory path to write the logs into, or any
+// other non-empty value except "0" (e.g. "1") to use a default directory beside
+// the control sockets. Only an absolute path is read as a destination: a
+// relative one would resolve against whatever working directory the process
+// happens to have, which for a TUI launched from anywhere is not a place a user
+// can predict — so it is treated as a plain "on" instead.
+//
+// The log is per TARGET, not per command: a single provisioning run
+// makes many ssh calls to one guest and — with multiplexing on — some of them
+// are mux clients of a master started by an earlier one, so the only view that
+// explains a transport failure is all of them interleaved in one file, in order.
+//
+// Best-effort throughout: an unresolvable cache dir or an uncreatable directory
+// yields "", which just means no log. Diagnostics must never be able to fail a
+// command.
+func resolveDebugLog(cfg SSHConfig) string {
+	v := os.Getenv("SAND_SSH_DEBUG")
+	if v == "" || v == "0" {
+		return ""
+	}
+	dir := v
+	if !filepath.IsAbs(v) {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(cacheDir, "sandbar", "ssh-debug")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return filepath.Join(dir, debugLogName(cfg)+".log")
+}
+
+// debugLogName renders a connection identity as a single filename-safe token, so
+// a target that is a bare IPv4 address, an IPv6 literal, or a user@host all
+// produce a name that is readable and cannot escape the log directory.
+func debugLogName(cfg SSHConfig) string {
+	name := cfg.Host
+	if cfg.User != "" {
+		name = cfg.User + "@" + name
+	}
+	if cfg.Port > 0 && cfg.Port != 22 {
+		name += "-" + strconv.Itoa(cfg.Port)
+	}
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		case r == '.', r == '-', r == '_', r == '@':
+			return r
+		}
+		return '-'
+	}, name)
+	if safe == "" {
+		return "ssh"
+	}
+	return safe
+}
+
+// DebugLogPath is the transport log this connection is writing, or "" when
+// SAND_SSH_DEBUG did not ask for one. A caller that reports an ssh-level failure
+// uses it to point the user at the evidence (see the Proxmox provider's
+// transport-error annotation), which is the whole reason the path is resolved
+// once and remembered rather than recomputed at the failure site.
+func (h *SSHHost) DebugLogPath() string { return h.debugLogPath }
 
 // --- ssh/scp argv construction --------------------------------------------------
 
@@ -203,10 +281,12 @@ func (h *SSHHost) muxFlags() []string {
 }
 
 // sshBase is the ssh argv prefix up to and INCLUDING the target: `ssh [-t] [-p
-// port] [-i identity] [mux flags] target`. tty adds -t for the interactive
-// attach. Port is omitted at the default (<=0 or 22) and identity when unset,
-// and the multiplexing flags are omitted when controlDir could not be
-// resolved, so the common case is the bare `ssh target …` the tests pin.
+// port] [-i identity] [host-key flags] [keepalives] [debug log] [mux flags]
+// target`. tty adds -t for the interactive attach. Port is omitted at the
+// default (<=0 or 22) and identity when unset, the multiplexing flags are
+// omitted when controlDir could not be resolved, and the debug flags only
+// appear when the host asked for a transport log — so the common case is the
+// bare `ssh <keepalives> target …` the tests pin.
 func (h *SSHHost) sshBase(tty bool) []string {
 	a := []string{"ssh"}
 	if tty {
@@ -219,8 +299,54 @@ func (h *SSHHost) sshBase(tty bool) []string {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
 	a = append(a, h.ephemeralHostKeyFlags()...)
+	a = append(a, keepaliveFlags()...)
+	a = append(a, h.debugFlags()...)
 	a = append(a, h.muxFlags()...)
 	return append(a, h.target())
+}
+
+// keepaliveFlags returns the application-level keepalive options every ssh and
+// scp this package builds carries.
+//
+// They are unconditional because the alternative is not "a slower failure", it is
+// NO failure: a provisioning run streams one ssh session for a whole playbook,
+// and single tasks in it (a repo clone, an apt install) go minutes without
+// putting a byte on the channel. OpenSSH detects nothing in that window on its
+// own — TCPKeepAlive is on by default but fires at the kernel's two-hour idle
+// timer — so a session reaped by a stateful firewall or NAT on the path, or a
+// guest that stops answering, leaves the client blocked forever with no output
+// and no error. That is indistinguishable from a slow task, which makes it
+// undiagnosable.
+//
+// 15s x 8 declares a dead channel in about two minutes and exits, turning an
+// unbounded hang into a bounded, reported failure. The count is deliberately
+// generous: a guest pinned by a heavy apt install can miss several replies
+// without being gone, and a false positive here would kill a healthy build.
+func keepaliveFlags() []string {
+	return []string{
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=8",
+	}
+}
+
+// debugFlags returns `-vv -E <path>` when a transport log was asked for (see
+// resolveDebugLog), or nil.
+//
+// -E is what makes this safe to switch on during a real create: it sends ssh's
+// verbose log to a FILE rather than stderr, and every caller here merges ssh's
+// stderr into the same stream the guest's own output goes to. Without it, -vv
+// would interleave protocol chatter with the playbook output the user is reading
+// and with the TASK banners the TUI's progress parser matches on (internal/ui's
+// ansible.go), corrupting the display in exactly the run being diagnosed.
+//
+// ssh only: scp has no -E, so a debug scp would have nowhere to put its log but
+// the payload stream, which for a `tar -czf -` transfer is the one thing that
+// must not be written to.
+func (h *SSHHost) debugFlags() []string {
+	if h.debugLogPath == "" {
+		return nil
+	}
+	return []string{"-vv", "-E", h.debugLogPath}
 }
 
 // ephemeralHostKeyFlags returns the host-key options for a backend whose guests
@@ -267,8 +393,10 @@ func (h *SSHHost) limactlArgv(args ...string) []string {
 
 // scpCommand builds an scp argv. Note scp's port flag is -P (capital), NOT ssh's
 // -p — getting this wrong silently ignores a non-default port. The same
-// multiplexing flags as sshBase are threaded in before the endpoints so an scp
-// transfer benefits from (and can itself become) the shared master connection.
+// keepalive and multiplexing flags as sshBase are threaded in before the
+// endpoints so an scp transfer benefits from (and can itself become) the shared
+// master connection, and so a stalled transfer of a multi-gigabyte project tree
+// fails in bounded time rather than hanging (see keepaliveFlags).
 func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	a := []string{"scp"}
 	if recursive {
@@ -281,6 +409,7 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 		a = append(a, "-i", h.cfg.IdentityPath)
 	}
 	a = append(a, h.ephemeralHostKeyFlags()...)
+	a = append(a, keepaliveFlags()...)
 	a = append(a, h.muxFlags()...)
 	return append(a, from, to)
 }
