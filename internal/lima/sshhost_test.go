@@ -87,12 +87,14 @@ func muxFlags(h *SSHHost) []string {
 	}
 }
 
-// sshArgv builds the expected `ssh <preTarget...> <mux-flags> <target>
-// <tail...>` argv for h, factoring the multiplexing-flag splice (always
-// immediately before the target) so no pinned test hand-repeats it.
+// sshArgv builds the expected `ssh <preTarget...> <keepalives> <mux-flags>
+// <target> <tail...>` argv for h, factoring the always-present splice
+// (keepalives then multiplexing, immediately before the target) so no pinned
+// test hand-repeats it.
 func sshArgv(h *SSHHost, preTarget []string, target string, tail ...string) []string {
 	argv := []string{"ssh"}
 	argv = append(argv, preTarget...)
+	argv = append(argv, keepaliveFlags()...)
 	argv = append(argv, muxFlags(h)...)
 	argv = append(argv, target)
 	argv = append(argv, tail...)
@@ -138,24 +140,148 @@ func TestSSHControlDirAndMuxFlags(t *testing.T) {
 	}
 }
 
+// TestSSHKeepalivesAlwaysThreaded pins the liveness options onto EVERY ssh and
+// scp this package builds, whatever the connection's shape.
+//
+// The regression it guards is not a wrong argv, it is a hang: a provisioning run
+// streams one ssh session for a whole playbook, and a task that goes minutes
+// without writing to the channel (a repo clone, an apt install) is
+// indistinguishable from a session a firewall silently reaped — OpenSSH's own
+// defaults notice neither for two hours. Dropping these options anywhere, for
+// any connection, turns a reported failure back into an unbounded wait with no
+// output to explain it.
+func TestSSHKeepalivesAlwaysThreaded(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  SSHConfig
+	}{
+		{"plain", testCfg},
+		{"port and identity", SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}},
+		{"ephemeral guest", SSHConfig{Host: "10.0.0.9", User: "dev", EphemeralHostKeys: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewSSHHost(tc.cfg)
+			for _, cmd := range []struct {
+				name string
+				argv []string
+			}{
+				{"sshBase", h.sshBase(false)},
+				{"sshBase tty", h.sshBase(true)},
+				{"scpCommand", h.scpCommand(true, "/local", "remote:/path")},
+			} {
+				for _, val := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=8"} {
+					idx := slices.Index(cmd.argv, val)
+					if idx <= 0 || cmd.argv[idx-1] != "-o" {
+						t.Fatalf("%s = %v: want %q preceded by its own -o", cmd.name, cmd.argv, val)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestSSHDebugLogOptIn proves the transport log is opt-in, lands in a file
+// rather than on stderr, and is per-target.
+//
+// The -E is the load-bearing half. Every guest-command caller in the Proxmox
+// provider merges ssh's stderr into the stream carrying the guest's own output,
+// which is also the stream the TUI's progress parser reads TASK banners from —
+// so a -vv that logged to stderr would corrupt the display of the very run being
+// diagnosed, and the tool would be unusable for the failures it exists to catch.
+func TestSSHDebugLogOptIn(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		t.Setenv("SAND_SSH_DEBUG", "")
+		h := NewSSHHost(testCfg)
+		if got := h.DebugLogPath(); got != "" {
+			t.Fatalf("DebugLogPath = %q with SAND_SSH_DEBUG unset, want empty", got)
+		}
+		if argv := h.sshBase(false); hasToken(argv, "-vv") {
+			t.Fatalf("sshBase = %v, want no -vv when the debug log is off", argv)
+		}
+	})
+
+	t.Run("explicit directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("SAND_SSH_DEBUG", dir)
+		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
+
+		want := filepath.Join(dir, "dev@10.0.0.9.log")
+		if got := h.DebugLogPath(); got != want {
+			t.Fatalf("DebugLogPath = %q, want %q", got, want)
+		}
+		argv := h.sshBase(false)
+		idx := slices.Index(argv, "-E")
+		if idx < 0 || idx+1 >= len(argv) || argv[idx+1] != want {
+			t.Fatalf("sshBase = %v, want `-E %s`", argv, want)
+		}
+		if !hasToken(argv, "-vv") {
+			t.Fatalf("sshBase = %v, want -vv alongside the log file", argv)
+		}
+		// scp has no -E, so a debug log must never be requested for it: its only
+		// outlet would be the payload stream.
+		if scp := h.scpCommand(false, "/local", "remote:/path"); hasToken(scp, "-E") || hasToken(scp, "-vv") {
+			t.Fatalf("scpCommand = %v, want no debug flags (scp has no -E)", scp)
+		}
+	})
+
+	t.Run("one file per target", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("SAND_SSH_DEBUG", dir)
+		a := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
+		b := NewSSHHost(SSHConfig{Host: "10.0.0.10", User: "dev"})
+		if a.DebugLogPath() == b.DebugLogPath() {
+			t.Fatalf("two targets shared one log file: %q", a.DebugLogPath())
+		}
+		// A second connection to the SAME target must append to the same file:
+		// with multiplexing on, a mux client's failure is only explicable next to
+		// the master's log lines, in order.
+		if again := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"}); again.DebugLogPath() != a.DebugLogPath() {
+			t.Fatalf("same target got two log files: %q and %q", a.DebugLogPath(), again.DebugLogPath())
+		}
+	})
+
+	t.Run("IPv6 literal stays a safe filename", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("SAND_SSH_DEBUG", dir)
+		h := NewSSHHost(SSHConfig{Host: "fd00::1", User: "dev"})
+		got := h.DebugLogPath()
+		if filepath.Dir(got) != dir {
+			t.Fatalf("DebugLogPath = %q, want it inside %q", got, dir)
+		}
+		if strings.ContainsAny(filepath.Base(got), ":/") {
+			t.Fatalf("log filename %q kept a separator-unsafe character", filepath.Base(got))
+		}
+	})
+}
+
 // TestSSHNoControlDirOmitsMuxFlags proves the graceful-degradation path: when
 // controlDir could not be resolved (simulated here by constructing the struct
 // directly, standing in for os.UserCacheDir/MkdirAll failing in NewSSHHost),
-// sshBase/scpCommand argv is EXACTLY the pre-multiplexing shape — connection
+// sshBase/scpCommand argv carries no multiplexing flags — connection
 // multiplexing is a pure optimization and must NEVER become a hard
 // requirement for reaching the remote host.
+//
+// The keepalive options stay, and that asymmetry is the point: multiplexing is
+// an optimization that can be dropped, while a connection with no liveness check
+// can hang forever instead of failing (see keepaliveFlags). One degrades, the
+// other does not.
 func TestSSHNoControlDirOmitsMuxFlags(t *testing.T) {
 	h := &SSHHost{cfg: testCfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
 		return exec.CommandContext(ctx, argv[0], argv[1:]...)
 	}}
 	// controlDir left at its zero value "" — the failure path.
-	want := []string{"ssh", "dev@example.com"}
+	want := append(append([]string{"ssh"}, keepaliveFlags()...), "dev@example.com")
 	if got := h.sshBase(false); !slices.Equal(got, want) {
 		t.Fatalf("sshBase with empty controlDir = %v, want %v", got, want)
 	}
-	wantScp := []string{"scp", "/local", "remote:/path"}
+	wantScp := append(append([]string{"scp"}, keepaliveFlags()...), "/local", "remote:/path")
 	if got := h.scpCommand(false, "/local", "remote:/path"); !slices.Equal(got, wantScp) {
 		t.Fatalf("scpCommand with empty controlDir = %v, want %v", got, wantScp)
+	}
+	for _, tok := range []string{"-vv", "-E"} {
+		if hasToken(h.sshBase(false), tok) {
+			t.Fatalf("sshBase carried %q with no SAND_SSH_DEBUG set: %v", tok, h.sshBase(false))
+		}
 	}
 }
 
