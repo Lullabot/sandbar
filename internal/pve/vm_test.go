@@ -18,8 +18,12 @@ import (
 type recordedRequest struct {
 	method string
 	path   string
-	query  url.Values
-	form   url.Values
+	// rawPath is the still-escaped request path, kept alongside the decoded
+	// path so a test can tell "one segment containing a slash" apart from
+	// "two segments" — a distinction the decoded form erases.
+	rawPath string
+	query   url.Values
+	form    url.Values
 }
 
 func vmTestClient(t *testing.T, handler func(w http.ResponseWriter, r *http.Request, rec *recordedRequest)) (*Client, *recordedRequest) {
@@ -28,6 +32,7 @@ func vmTestClient(t *testing.T, handler func(w http.ResponseWriter, r *http.Requ
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.method = r.Method
 		rec.path = r.URL.Path
+		rec.rawPath = r.URL.EscapedPath()
 		rec.query = r.URL.Query()
 		if err := r.ParseForm(); err == nil {
 			rec.form = r.PostForm
@@ -533,6 +538,369 @@ func TestNextIDParsesStringData(t *testing.T) {
 	}
 	if id != 142 {
 		t.Errorf("NextID = %d; want 142", id)
+	}
+}
+
+// TestNextIDParsesBareNumberData covers the tolerated second shape. PVE renders
+// nextid as a JSON string today, but the value is semantically a number and the
+// client accepts either — a bare number must not fall through to the string
+// branch's Atoi and fail the whole create.
+func TestNextIDParsesBareNumberData(t *testing.T) {
+	c, _ := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":142}`))
+	})
+
+	id, err := c.NextID(context.Background())
+	if err != nil {
+		t.Fatalf("NextID: %v", err)
+	}
+	if id != 142 {
+		t.Errorf("NextID = %d; want 142", id)
+	}
+}
+
+// TestNextIDRejectsUnparseableData pins that a nextid the client cannot turn
+// into an integer is an error rather than a silent 0 — creating a VM at vmid 0
+// would be rejected by PVE with a message about the id, sending the reader after
+// the wrong problem.
+func TestNextIDRejectsUnparseableData(t *testing.T) {
+	for _, body := range []string{`{"data":"not-a-number"}`, `{"data":{"id":100}}`} {
+		c, _ := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		})
+
+		id, err := c.NextID(context.Background())
+		if err == nil {
+			t.Errorf("NextID with data %s = %d, nil; want an error", body, id)
+		}
+		if id != 0 {
+			t.Errorf("NextID with data %s returned id %d alongside its error; want 0", body, id)
+		}
+	}
+}
+
+// TestCreateVMWithNextIDGivesUpAfterBoundedRetries pins the retry bound. A
+// cluster whose nextid is permanently colliding (a stale reservation, another
+// tool holding the range) would otherwise spin forever inside a create; the loop
+// must terminate and surface the last collision so the operator sees the cause.
+func TestCreateVMWithNextIDGivesUpAfterBoundedRetries(t *testing.T) {
+	var nextIDCalls, createCalls atomic.Int32
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/cluster/nextid"):
+			w.Header().Set("Content-Type", "application/json")
+			b, _ := json.Marshal(map[string]any{"data": strconv.Itoa(100 + int(nextIDCalls.Add(1)))})
+			_, _ = w.Write(b)
+		default:
+			createCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"data":null,"message":"unable to create VM - config file already exists"}`))
+		}
+	}))
+	defer ts.Close()
+
+	c, err := New(Config{Host: strings.TrimPrefix(ts.URL, "https://"), Node: "node1", TokenID: "user@pve!token=1", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, _, err = c.CreateVMWithNextID(context.Background(), CreateVMOptions{Storage: "local-zfs", Bridge: "vmbr0", Pool: "sandbar"})
+	if err == nil {
+		t.Fatal("CreateVMWithNextID: expected an error once the attempt budget is exhausted")
+	}
+	if !strings.Contains(err.Error(), "config file already exists") {
+		t.Errorf("err = %q; want it to carry the last collision so the cause is visible", err)
+	}
+	if got := createCalls.Load(); got != maxNextIDAttempts {
+		t.Errorf("create attempted %d times; want exactly maxNextIDAttempts (%d)", got, maxNextIDAttempts)
+	}
+}
+
+// TestCloneVMWithNextIDGivesUpAfterBoundedRetries is the clone-path sibling of
+// the bound above; the two loops are separate code and only one of them being
+// bounded is exactly the kind of drift that goes unnoticed.
+func TestCloneVMWithNextIDGivesUpAfterBoundedRetries(t *testing.T) {
+	var nextIDCalls, cloneCalls, deleteCalls atomic.Int32
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete:
+			deleteCalls.Add(1)
+			writeUPID(w, testUPID)
+		case strings.HasSuffix(r.URL.Path, "/cluster/nextid"):
+			w.Header().Set("Content-Type", "application/json")
+			b, _ := json.Marshal(map[string]any{"data": strconv.Itoa(100 + int(nextIDCalls.Add(1)))})
+			_, _ = w.Write(b)
+		default:
+			cloneCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"data":null,"message":"VM 101 already exists"}`))
+		}
+	}))
+	defer ts.Close()
+
+	c, err := New(Config{Host: strings.TrimPrefix(ts.URL, "https://"), Node: "node1", TokenID: "user@pve!token=1", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, _, err := c.CloneVMWithNextID(context.Background(), 9000, CloneVMOptions{Pool: "sandbar"}); err == nil {
+		t.Fatal("CloneVMWithNextID: expected an error once the attempt budget is exhausted")
+	}
+	if got := cloneCalls.Load(); got != maxNextIDAttempts {
+		t.Errorf("clone attempted %d times; want exactly maxNextIDAttempts (%d)", got, maxNextIDAttempts)
+	}
+	// Even after giving up, none of the colliding ids may be touched: each one
+	// holds another creator's VM, which a pool-scoped token is able to delete.
+	if got := deleteCalls.Load(); got != 0 {
+		t.Errorf("issued %d DELETE(s) after exhausting retries; want 0", got)
+	}
+}
+
+// TestNextIDFailurePropagatesWithoutCreating pins that a nextid outage aborts
+// before any create is attempted. The alternative — carrying on with the
+// zero-valued vmid — would ask PVE to create VM 0.
+func TestNextIDFailurePropagatesWithoutCreating(t *testing.T) {
+	var createCalls atomic.Int32
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/cluster/nextid") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"data":null}`))
+			return
+		}
+		createCalls.Add(1)
+		writeUPID(w, testUPID)
+	}))
+	defer ts.Close()
+
+	c, err := New(Config{Host: strings.TrimPrefix(ts.URL, "https://"), Node: "node1", TokenID: "user@pve!token=1", InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, _, err := c.CreateVMWithNextID(context.Background(), CreateVMOptions{Storage: "local-zfs", Bridge: "vmbr0", Pool: "sandbar"}); !IsPermission(err) {
+		t.Fatalf("CreateVMWithNextID err = %v; want the 403 propagated unchanged", err)
+	}
+	if _, _, err := c.CloneVMWithNextID(context.Background(), 9000, CloneVMOptions{Pool: "sandbar"}); !IsPermission(err) {
+		t.Fatalf("CloneVMWithNextID err = %v; want the 403 propagated unchanged", err)
+	}
+	if got := createCalls.Load(); got != 0 {
+		t.Errorf("attempted %d create/clone call(s) after nextid failed; want 0", got)
+	}
+}
+
+// TestCreateVMRequiresStorage completes the required-options set: Storage backs
+// both scsi0 and the cloud-init drive, so an omitted one produces a form PVE
+// rejects with a message about scsi0 rather than about the missing setting.
+func TestCreateVMRequiresStorage(t *testing.T) {
+	c, _ := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		t.Fatal("server should not be contacted when Storage is missing")
+	})
+
+	if _, err := c.CreateVM(context.Background(), CreateVMOptions{VMID: 100, Bridge: "vmbr0", Pool: "sandbar"}); err == nil {
+		t.Error("CreateVM: expected an error when Storage is missing")
+	}
+}
+
+// TestCloneVMFullSendsFormat covers the other half of the full-clone parameter
+// pair. Storage and Format are gated by the same `if opts.Full`, and a test that
+// only ever passes Storage would not notice Format being dropped.
+func TestCloneVMFullSendsFormat(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	_, err := c.CloneVM(context.Background(), 100, CloneVMOptions{NewID: 101, Name: "web", Pool: "sandbar", Full: true, Format: "qcow2"})
+	if err != nil {
+		t.Fatalf("CloneVM: %v", err)
+	}
+	if got := rec.form.Get("format"); got != "qcow2" {
+		t.Errorf("format = %q; want qcow2", got)
+	}
+	if got := rec.form.Get("name"); got != "web" {
+		t.Errorf("name = %q; want web", got)
+	}
+	if got := rec.form.Get("pool"); got != "sandbar" {
+		t.Errorf("pool = %q; want sandbar", got)
+	}
+}
+
+// TestResizeDiskNoUPIDResponseIsNotAnError pins the resize no-op. Resizing to
+// the size a disk already has succeeds with an empty data field and no task, and
+// treating that missing UPID as a malformed-UPID error would fail an otherwise
+// idempotent, correct resize.
+func TestResizeDiskNoUPIDResponseIsNotAnError(t *testing.T) {
+	c, _ := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":null}`))
+	})
+
+	upid, err := c.ResizeDisk(context.Background(), 100, "scsi0", 20<<30)
+	if err != nil {
+		t.Fatalf("ResizeDisk: %v", err)
+	}
+	if upid.Raw != "" {
+		t.Errorf("upid = %+v; want the zero UPID when PVE returns no task", upid)
+	}
+}
+
+// TestVMCallErrorsPropagate sweeps the API-error arm of the VM calls that have
+// one, so a swallowed error cannot leave a caller acting on a zero value — a
+// zero UPID would be waited on as if the operation had been dispatched, and a
+// nil VM list reads as "no VMs" rather than "could not ask".
+func TestVMCallErrorsPropagate(t *testing.T) {
+	c, _ := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"data":null}`))
+	})
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"ListVMs":        func() error { _, err := c.ListVMs(ctx, "sandbar"); return err },
+		"SetConfigAsync": func() error { _, err := c.SetConfigAsync(ctx, 100, url.Values{"cores": {"4"}}); return err },
+		"ResizeDisk":     func() error { _, err := c.ResizeDisk(ctx, 100, "scsi0", 20<<30); return err },
+		"DeleteVM":       func() error { _, err := c.DeleteVM(ctx, 100, true); return err },
+		"ListSnapshots":  func() error { _, err := c.ListSnapshots(ctx, 100); return err },
+		"CreateSnapshot": func() error { _, err := c.CreateSnapshot(ctx, 100, "snap", "", false); return err },
+		"DeleteSnapshot": func() error { _, err := c.DeleteSnapshot(ctx, 100, "snap"); return err },
+		"RebootVM":       func() error { _, err := c.RebootVM(ctx, 100); return err },
+	}
+	for name, call := range calls {
+		if err := call(); !IsPermission(err) {
+			t.Errorf("%s err = %v; want the 403 classified as a permission error", name, err)
+		}
+	}
+}
+
+// TestRebootVMUsesTheRebootStatusAction pins reboot to its own status action.
+// A reboot expressed as stop+start would drop the "reboot" semantics PVE
+// implements (it applies pending config on the way through) and, for a VM under
+// a lock, behave quite differently.
+func TestRebootVMUsesTheRebootStatusAction(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	upid, err := c.RebootVM(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("RebootVM: %v", err)
+	}
+	if rec.method != http.MethodPost {
+		t.Errorf("method = %q; want POST", rec.method)
+	}
+	if rec.path != "/api2/json/nodes/node1/qemu/100/status/reboot" {
+		t.Errorf("path = %q; want the reboot status action", rec.path)
+	}
+	if upid.Raw != testUPID {
+		t.Errorf("upid.Raw = %q; want the task returned by PVE", upid.Raw)
+	}
+}
+
+// --- snapshots ---
+
+func TestListSnapshotsDecodesEntries(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[
+			{"name":"current","description":"You are here!"},
+			{"name":"clean","description":"before the build","parent":"current","snaptime":1700000000}
+		]}`))
+	})
+
+	snaps, err := c.ListSnapshots(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ListSnapshots: %v", err)
+	}
+	if rec.method != http.MethodGet {
+		t.Errorf("method = %q; want GET", rec.method)
+	}
+	if rec.path != "/api2/json/nodes/node1/qemu/100/snapshot" {
+		t.Errorf("path = %q", rec.path)
+	}
+	// PVE synthesises a pseudo-snapshot named "current" into this listing; it is
+	// not a real snapshot, and callers filtering it out need it decoded, not
+	// dropped here.
+	if len(snaps) != 2 || snaps[0].Name != "current" || snaps[1].Parent != "current" {
+		t.Fatalf("snaps = %+v; want both entries including PVE's synthetic \"current\"", snaps)
+	}
+	if snaps[1].SnapTime != 1700000000 {
+		t.Errorf("snaptime = %d; want 1700000000", snaps[1].SnapTime)
+	}
+}
+
+// TestCreateSnapshotOmitsOptionalFields pins that description and vmstate are
+// sent only when asked for. vmstate in particular is not a harmless default: it
+// dumps the VM's entire RAM to storage, turning a metadata-cheap snapshot into a
+// multi-gigabyte write.
+func TestCreateSnapshotOmitsOptionalFields(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	if _, err := c.CreateSnapshot(context.Background(), 100, "clean", "", false); err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if rec.method != http.MethodPost {
+		t.Errorf("method = %q; want POST", rec.method)
+	}
+	if got := rec.form.Get("snapname"); got != "clean" {
+		t.Errorf("snapname = %q; want clean", got)
+	}
+	if rec.form.Has("description") {
+		t.Errorf("description = %q; an empty description must be omitted", rec.form.Get("description"))
+	}
+	if rec.form.Has("vmstate") {
+		t.Errorf("vmstate = %q; it must be sent only when RAM state was asked for", rec.form.Get("vmstate"))
+	}
+}
+
+func TestCreateSnapshotSendsDescriptionAndVMState(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	upid, err := c.CreateSnapshot(context.Background(), 100, "clean", "before the build", true)
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if got := rec.form.Get("description"); got != "before the build" {
+		t.Errorf("description = %q", got)
+	}
+	if got := rec.form.Get("vmstate"); got != "1" {
+		t.Errorf("vmstate = %q; want 1", got)
+	}
+	if upid.Raw != testUPID {
+		t.Errorf("upid.Raw = %q; want the task returned by PVE", upid.Raw)
+	}
+}
+
+// TestDeleteSnapshotEscapesTheNameInThePath guards against a snapshot name
+// reaching the URL unescaped. The name is the only caller-supplied string that
+// lands in a path segment here, so an unescaped '/' would silently retarget the
+// DELETE at a different endpoint entirely.
+func TestDeleteSnapshotEscapesTheNameInThePath(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	if _, err := c.DeleteSnapshot(context.Background(), 100, "a/b c"); err != nil {
+		t.Fatalf("DeleteSnapshot: %v", err)
+	}
+	if rec.method != http.MethodDelete {
+		t.Errorf("method = %q; want DELETE", rec.method)
+	}
+	// r.URL.Path is the decoded form, so the assertion is that the server saw
+	// ONE path segment carrying the whole name — not two.
+	if rec.path != "/api2/json/nodes/node1/qemu/100/snapshot/a/b c" {
+		t.Errorf("decoded path = %q", rec.path)
+	}
+	if rec.rawPath != "/api2/json/nodes/node1/qemu/100/snapshot/a%2Fb%20c" {
+		t.Errorf("raw path = %q; want the snapshot name percent-escaped into a single segment", rec.rawPath)
 	}
 }
 

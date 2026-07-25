@@ -169,6 +169,72 @@ func TestAgentExecUsesPOSTAndSendsArrayCommand(t *testing.T) {
 	}
 }
 
+// TestAgentExecSendsInputData pins that stdin for the guest command is carried
+// as the "input-data" form field and only when there is any. PVE rejects an
+// empty input-data outright, so sending it unconditionally would break every
+// exec that has no stdin — which is most of them.
+func TestAgentExecSendsInputData(t *testing.T) {
+	var gotInput string
+	var inputPresent bool
+	c := agentTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		gotInput = r.PostForm.Get("input-data")
+		inputPresent = r.PostForm.Has("input-data")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"result":{"pid":555}}}`))
+	})
+
+	if _, err := c.AgentExec(context.Background(), 100, []string{"sh", "-c", "cat"}, "hello\n"); err != nil {
+		t.Fatalf("AgentExec: %v", err)
+	}
+	if gotInput != "hello\n" {
+		t.Errorf("input-data = %q; want the caller's stdin verbatim", gotInput)
+	}
+
+	inputPresent = false
+	if _, err := c.AgentExec(context.Background(), 100, []string{"true"}, ""); err != nil {
+		t.Fatalf("AgentExec: %v", err)
+	}
+	if inputPresent {
+		t.Error("input-data was sent for an exec with no stdin; PVE rejects an empty value")
+	}
+}
+
+// TestAgentCallErrorsPropagate sweeps every agent wrapper's failure arm. These
+// all fail with a 500 whose text is the only signal (see
+// AgentUnavailableReason), so an error swallowed here would surface as an
+// empty interface list or a zero exec status — read by callers as "the guest
+// has no IP" or "the command exited 0", both of which are worse than failing.
+func TestAgentCallErrorsPropagate(t *testing.T) {
+	c := agentTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"data":null,"message":"VM 100 is not running"}`))
+	})
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"AgentPing":                 func() error { return c.AgentPing(ctx, 100) },
+		"AgentFsfreezeStatus":       func() error { _, err := c.AgentFsfreezeStatus(ctx, 100); return err },
+		"AgentNetworkGetInterfaces": func() error { _, err := c.AgentNetworkGetInterfaces(ctx, 100); return err },
+		"AgentGetFsinfo":            func() error { _, err := c.AgentGetFsinfo(ctx, 100); return err },
+		"AgentExec":                 func() error { _, err := c.AgentExec(ctx, 100, []string{"true"}, ""); return err },
+		"AgentExecStatus":           func() error { _, err := c.AgentExecStatus(ctx, 100, 555); return err },
+	}
+	for name, call := range calls {
+		err := call()
+		if err == nil {
+			t.Errorf("%s: expected an error", name)
+			continue
+		}
+		if got := AgentUnavailableReason(err); got != "vm-stopped" {
+			t.Errorf("%s: AgentUnavailableReason = %q; want vm-stopped (the error must reach the classifier intact)", name, got)
+		}
+	}
+}
+
 // --- AgentUnavailableReason classification ---
 
 func TestAgentUnavailableReason(t *testing.T) {

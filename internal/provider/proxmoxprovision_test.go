@@ -853,6 +853,20 @@ func TestParseSizeToBytes(t *testing.T) {
 		{"512MiB", 512 << 20, true},
 		{"2G", 2 << 30, true},
 		{"1024", 1024, true},
+		// Every accepted unit, including the ones no profile writes today: they
+		// are all base 1024 to match Lima's sizing, and a "KB"/"TB" quietly
+		// treated as base 1000 would under-size a disk by 2.4% per unit step.
+		{"4096KiB", 4 << 20, true},
+		{"4096K", 4 << 20, true},
+		{"4096KB", 4 << 20, true},
+		{"2TiB", 2 << 40, true},
+		{"2T", 2 << 40, true},
+		{"2TB", 2 << 40, true},
+		{"1MB", 1 << 20, true},
+		{"512B", 512, true},
+		// A fractional value must not be truncated at the parse: 1.5GiB is a
+		// legitimate Lima size, and "1GiB" would silently under-provision it.
+		{"1.5GiB", 3 * (1 << 30) / 2, true},
 		{"", 0, false},
 		{"biscuits", 0, false},
 		{"10QiB", 0, false},
@@ -1153,4 +1167,183 @@ func TestProxmoxResetFailsCleanlyWhenRecloneFails(t *testing.T) {
 	if err := p.Reset(context.Background(), webConfig(), provision.ResetOptions{}, nil); err == nil {
 		t.Fatal("Reset: want an error when the reclone fails")
 	}
+}
+
+// --- destroyVM / resizeDisk / cleanupVM -----------------------------------------
+
+// TestProxmoxDestroyVMStopsARunningVMFirst pins the ordering PVE requires: a
+// running VM cannot be deleted, so the stop has to land — and be waited on —
+// before the DELETE. Reversing them, or firing the DELETE without waiting,
+// leaves the stale base still occupying the name a rebuild is about to reuse,
+// which surfaces as an "already exists" collision minutes later.
+func TestProxmoxDestroyVMStopsARunningVMFirst(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+
+	m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"sandbar-base","status":"running"}`)
+	stopUPID := "UPID:pve1:0:0:0:qmstop:100:u:"
+	delUPID := "UPID:pve1:0:0:0:qmdestroy:100:u:"
+	m.data("/nodes/pve1/qemu/100/status/stop", fmt.Sprintf("%q", stopUPID))
+	m.okTask(stopUPID)
+	m.data("/nodes/pve1/qemu/100", fmt.Sprintf("%q", delUPID))
+	m.okTask(delUPID)
+
+	if err := p.destroyVM(context.Background(), 100, io.Discard); err != nil {
+		t.Fatalf("destroyVM: %v", err)
+	}
+
+	var stopAt, stopTaskAt, deleteAt = -1, -1, -1
+	for i, path := range m.seen() {
+		switch path {
+		case "/api2/json/nodes/pve1/qemu/100/status/stop":
+			stopAt = i
+		case "/api2/json/nodes/pve1/tasks/" + stopUPID + "/status":
+			stopTaskAt = i
+		case "/api2/json/nodes/pve1/qemu/100":
+			deleteAt = i
+		}
+	}
+	if stopAt < 0 || stopTaskAt < 0 || deleteAt < 0 {
+		t.Fatalf("missing one of stop/stop-task/delete; requests: %v", m.seen())
+	}
+	if !(stopAt < stopTaskAt && stopTaskAt < deleteAt) {
+		t.Errorf("order was stop=%d stopTask=%d delete=%d; want the stop waited on before the delete", stopAt, stopTaskAt, deleteAt)
+	}
+}
+
+// TestProxmoxDestroyVMPropagatesEveryFailure sweeps destroyVM's four failure
+// arms. Unlike cleanupVM's best-effort tidy, this is a first-class delete on the
+// rebuild path: swallowing any of these would let a rebuild proceed to create a
+// new base while the old one still holds the name and the VMID.
+func TestProxmoxDestroyVMPropagatesEveryFailure(t *testing.T) {
+	running := `{"vmid":100,"name":"sandbar-base","status":"running"}`
+	stopUPID := "UPID:pve1:0:0:0:qmstop:100:u:"
+	delUPID := "UPID:pve1:0:0:0:qmdestroy:100:u:"
+
+	cases := map[string]func(*pveMock){
+		"status read fails": func(m *pveMock) {
+			m.fail("/nodes/pve1/qemu/100/status/current", http.StatusForbidden, "Permission check failed")
+		},
+		"stop call rejected": func(m *pveMock) {
+			m.data("/nodes/pve1/qemu/100/status/current", running)
+			m.fail("/nodes/pve1/qemu/100/status/stop", http.StatusForbidden, "Permission check failed")
+		},
+		"stop task fails": func(m *pveMock) {
+			m.data("/nodes/pve1/qemu/100/status/current", running)
+			m.data("/nodes/pve1/qemu/100/status/stop", fmt.Sprintf("%q", stopUPID))
+			m.failTask(stopUPID, "stop timed out")
+		},
+		"delete call rejected": func(m *pveMock) {
+			m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"sandbar-base","status":"stopped"}`)
+			m.fail("/nodes/pve1/qemu/100", http.StatusForbidden, "Permission check failed")
+		},
+		"delete task fails": func(m *pveMock) {
+			m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"sandbar-base","status":"stopped"}`)
+			m.data("/nodes/pve1/qemu/100", fmt.Sprintf("%q", delUPID))
+			m.failTask(delUPID, "storage is busy")
+		},
+	}
+	for name, register := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := newPVEMock(t)
+			register(m)
+			p := newProxmoxForTest(t, m)
+			if err := p.destroyVM(context.Background(), 100, io.Discard); err == nil {
+				t.Error("destroyVM returned nil; want the failure propagated")
+			}
+		})
+	}
+}
+
+// TestProxmoxResizeDiskFailures pins that a disk that did not grow is reported.
+// The resize runs after the clone, so a swallowed failure hands the user a VM
+// with the TEMPLATE's disk size — which does not fail until the guest fills it
+// mid-build, far from the cause.
+func TestProxmoxResizeDiskFailures(t *testing.T) {
+	t.Run("empty size is a no-op", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		if err := p.resizeDisk(context.Background(), 100, "scsi0", "  ", io.Discard); err != nil {
+			t.Fatalf("resizeDisk with no size = %v; want nil", err)
+		}
+		if len(m.seen()) != 0 {
+			t.Errorf("an empty size made requests: %v", m.seen())
+		}
+	})
+
+	t.Run("unparseable size", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		err := p.resizeDisk(context.Background(), 100, "scsi0", "biscuits", io.Discard)
+		if err == nil {
+			t.Fatal("resizeDisk with an unparseable size returned nil")
+		}
+		if !strings.Contains(err.Error(), "biscuits") {
+			t.Errorf("err = %q; want it to quote the value it could not parse", err)
+		}
+		if len(m.seen()) != 0 {
+			t.Errorf("an unparseable size still reached the API: %v", m.seen())
+		}
+	})
+
+	t.Run("resize call rejected", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		m.fail("/nodes/pve1/qemu/100/resize", http.StatusForbidden, "Permission check failed")
+		if err := p.resizeDisk(context.Background(), 100, "scsi0", "100GiB", io.Discard); err == nil {
+			t.Error("resizeDisk returned nil for a rejected resize")
+		}
+	})
+
+	t.Run("resize task fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		resizeUPID := "UPID:pve1:0:0:0:qmresize:100:u:"
+		m.data("/nodes/pve1/qemu/100/resize", fmt.Sprintf("%q", resizeUPID))
+		m.failTask(resizeUPID, "shrinking disks is not supported")
+		err := p.resizeDisk(context.Background(), 100, "scsi0", "100GiB", io.Discard)
+		if err == nil {
+			t.Fatal("resizeDisk returned nil for a failed resize task")
+		}
+		if !strings.Contains(err.Error(), "scsi0") {
+			t.Errorf("err = %q; want it to name the disk", err)
+		}
+	})
+}
+
+// TestProxmoxCleanupVMTellsTheUserWhatToRemoveByHand pins cleanupVM's opposite
+// posture to destroyVM's: it runs on an already-failing path and must never
+// replace the error that brought us there. What it MUST do is say the VMID out
+// loud, because a partial VM nobody knows about keeps its id — and PVE will hand
+// that id to someone else's create.
+func TestProxmoxCleanupVMTellsTheUserWhatToRemoveByHand(t *testing.T) {
+	t.Run("delete rejected", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", testUPID))
+		m.okTask(testUPID)
+		m.fail("/nodes/pve1/qemu/101", http.StatusForbidden, "Permission check failed")
+
+		var out bytes.Buffer
+		p.cleanupVM(context.Background(), 101, "web", &out)
+		if !strings.Contains(out.String(), "qm destroy 101 --purge") {
+			t.Errorf("cleanup output = %q; want the manual removal command for VMID 101", out.String())
+		}
+	})
+
+	t.Run("delete task fails", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		delUPID := "UPID:pve1:0:0:0:qmdestroy:101:u:"
+		m.data("/nodes/pve1/qemu/101/status/stop", fmt.Sprintf("%q", testUPID))
+		m.okTask(testUPID)
+		m.data("/nodes/pve1/qemu/101", fmt.Sprintf("%q", delUPID))
+		m.failTask(delUPID, "storage is busy")
+
+		var out bytes.Buffer
+		p.cleanupVM(context.Background(), 101, "web", &out)
+		if !strings.Contains(out.String(), "could not confirm deletion") {
+			t.Errorf("cleanup output = %q; want the unconfirmed-deletion note", out.String())
+		}
+	})
 }

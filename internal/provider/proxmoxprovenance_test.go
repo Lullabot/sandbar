@@ -453,3 +453,184 @@ func TestSpliceAndRemoveDescriptionBlock(t *testing.T) {
 		t.Error("decodeProvenanceBlock accepted text with no fence at all")
 	}
 }
+
+// TestRemoveDescriptionBlockKeepsTextOnEitherSide covers the two placements the
+// round-trip test never produces, because spliceDescriptionBlock always appends:
+// a block an operator has typed text AFTER, and one with text on both sides.
+// Both must come back with the operator's own paragraphs intact and separated,
+// and with no leading or trailing blank line left where the block was — the
+// residue that would otherwise accumulate over repeated mark/unmark cycles.
+func TestRemoveDescriptionBlockKeepsTextOnEitherSide(t *testing.T) {
+	block := provenanceBeginMarker + "\n{\"schema\":1}\n" + provenanceEndMarker
+
+	cases := []struct {
+		name, description, want string
+	}{
+		{"block only", block, ""},
+		{"text after the block", block + "\n\nOwner: ops", "Owner: ops"},
+		{"text before the block", "Owner: ops\n\n" + block, "Owner: ops"},
+		{"text on both sides", "Owner: ops\n\n" + block + "\n\nTicket: OPS-1", "Owner: ops\n\nTicket: OPS-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := removeDescriptionBlock(tc.description); got != tc.want {
+				t.Errorf("removeDescriptionBlock(%q) = %q; want %q", tc.description, got, tc.want)
+			}
+		})
+	}
+}
+
+// --- error propagation ------------------------------------------------------
+
+// TestProxmoxProvenanceListFailureIsAnError pins that a fleet-wide listing
+// failure is reported rather than returned as an empty marker set. The board
+// reads an empty result as "no VM here is managed by sand", which is exactly the
+// verdict that makes a delete guard let go of VMs it should be protecting.
+func TestProxmoxProvenanceListFailureIsAnError(t *testing.T) {
+	m := newPVEMock(t)
+	m.fail("/cluster/resources", http.StatusForbidden, "Permission check failed")
+	p := newProxmoxForTest(t, m)
+
+	got, err := p.Provenance(context.Background())
+	if err == nil {
+		t.Fatalf("Provenance = %+v, nil; want the listing failure surfaced", got)
+	}
+	if !strings.Contains(err.Error(), "sandbar") {
+		t.Errorf("err = %q; want it to name the pool that could not be listed", err)
+	}
+}
+
+// TestProxmoxProvenanceBatchToleratesOneUnreadableConfig is the peer-protection
+// rule stated for the fetch itself rather than the payload: one VM whose config
+// cannot be read (migrating, locked, momentarily 500ing) must cost only its own
+// marker, never the batch. The tagged-but-unreadable VM is the interesting case
+// precisely because the tag filter already decided it was worth fetching.
+func TestProxmoxProvenanceBatchToleratesOneUnreadableConfig(t *testing.T) {
+	m, cfgs := newStatefulConfigMock(t, 100)
+	m.data("/cluster/resources", `[
+	  {"vmid":100,"name":"web","node":"pve1","pool":"sandbar","status":"running","type":"qemu","tags":"sandbar"},
+	  {"vmid":101,"name":"api","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","tags":"sandbar"}
+	]`)
+	// 101 is tagged, so it IS fetched — and answers with a failure.
+	m.fail("/nodes/pve1/qemu/101/config", http.StatusInternalServerError, "VM 101 is locked (migrate)")
+	cfgs.set(100, map[string]string{
+		"description": provenanceBeginMarker + "\n" + `{"schema":3,"base":"sandbar-base"}` + "\n" + provenanceEndMarker,
+		"tags":        "sandbar",
+	})
+	p := newProxmoxForTest(t, m)
+
+	got, err := p.Provenance(context.Background())
+	if err != nil {
+		t.Fatalf("Provenance: %v", err)
+	}
+	if _, ok := got["web"]; !ok {
+		t.Errorf("Provenance() = %+v; want web's readable marker despite api's config failing", got)
+	}
+	if _, ok := got["api"]; ok {
+		t.Errorf("Provenance() included api, whose config could not be read: %+v", got)
+	}
+}
+
+// TestProxmoxProvenanceOfDistinguishesAbsenceFromFailure pins the one asymmetry
+// in this file: a VM that is simply gone reads back as "not managed" with no
+// error, while a VM that exists but cannot be read propagates. Collapsing the
+// second into the first would report a 403 as "this VM was never sand's", which
+// is the worst possible answer for a caller about to decide whether to delete it.
+func TestProxmoxProvenanceOfDistinguishesAbsenceFromFailure(t *testing.T) {
+	t.Run("listing failure propagates", func(t *testing.T) {
+		m := newPVEMock(t)
+		m.fail("/cluster/resources", http.StatusForbidden, "Permission check failed")
+		p := newProxmoxForTest(t, m)
+
+		if _, ok, err := p.ProvenanceOf(context.Background(), "web"); err == nil || ok {
+			t.Fatalf("ProvenanceOf = %v, %v; want a propagated permission failure", ok, err)
+		}
+	})
+
+	t.Run("config read failure propagates", func(t *testing.T) {
+		m := newPVEMock(t)
+		m.data("/cluster/resources", clusterResources)
+		m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"web","status":"running"}`)
+		m.fail("/nodes/pve1/qemu/100/config", http.StatusForbidden, "Permission check failed")
+		p := newProxmoxForTest(t, m)
+
+		_, ok, err := p.ProvenanceOf(context.Background(), "web")
+		if err == nil || ok {
+			t.Fatalf("ProvenanceOf = %v, %v; want the config failure surfaced", ok, err)
+		}
+		if !strings.Contains(err.Error(), "web") {
+			t.Errorf("err = %q; want it to name the instance", err)
+		}
+	})
+}
+
+// TestProxmoxMarkAndUnmarkPropagateFailures sweeps the write path's three
+// distinct failure points. Each one leaves the VM's metadata in a state the
+// caller did not ask for, so a swallowed error here means sand believes a VM is
+// marked (and therefore safe to reclaim, or safe to skip) when PVE holds no such
+// record. A permission failure on the resolve is called out separately from a
+// missing VM, which Unmark treats as a legitimate no-op.
+func TestProxmoxMarkAndUnmarkPropagateFailures(t *testing.T) {
+	newMockAt := func(t *testing.T, configHandler http.HandlerFunc) *pveMock {
+		m := newPVEMock(t)
+		m.data("/cluster/resources", clusterResources)
+		m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"web","status":"running"}`)
+		m.on("/nodes/pve1/qemu/100/config", configHandler)
+		return m
+	}
+	readOK := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"data":null,"message":"Permission check failed (VM.Config.Options)"}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"description":"","tags":""}}`)
+	}
+	readFails := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"data":null,"message":"Permission check failed"}`)
+	}
+
+	t.Run("resolve failure is not mistaken for a missing VM", func(t *testing.T) {
+		m := newPVEMock(t)
+		m.fail("/cluster/resources", http.StatusForbidden, "Permission check failed")
+		p := newProxmoxForTest(t, m)
+
+		err := p.MarkManaged(context.Background(), "web", Provenance{SchemaVersion: MarkerSchemaVersion})
+		if err == nil {
+			t.Fatal("MarkManaged: expected the permission failure to propagate")
+		}
+		if errors.Is(err, ErrNoInstance) {
+			t.Errorf("MarkManaged reported %v; a permission failure must never read as a missing VM", err)
+		}
+		// Unmark's missing-VM no-op must likewise not swallow a 403: the caller
+		// would take "nothing to unmark" as proof the marker is gone.
+		if err := p.Unmark(context.Background(), "web"); err == nil {
+			t.Fatal("Unmark: expected the permission failure to propagate, not a silent no-op")
+		}
+	})
+
+	t.Run("config read failure", func(t *testing.T) {
+		p := newProxmoxForTest(t, newMockAt(t, readFails))
+		if err := p.MarkManaged(context.Background(), "web", Provenance{SchemaVersion: MarkerSchemaVersion}); err == nil {
+			t.Error("MarkManaged: expected the config read failure to propagate")
+		}
+		p2 := newProxmoxForTest(t, newMockAt(t, readFails))
+		if err := p2.Unmark(context.Background(), "web"); err == nil {
+			t.Error("Unmark: expected the config read failure to propagate")
+		}
+	})
+
+	t.Run("config write failure", func(t *testing.T) {
+		p := newProxmoxForTest(t, newMockAt(t, readOK))
+		if err := p.MarkManaged(context.Background(), "web", Provenance{SchemaVersion: MarkerSchemaVersion}); err == nil {
+			t.Error("MarkManaged: expected the config write failure to propagate")
+		}
+		p2 := newProxmoxForTest(t, newMockAt(t, readOK))
+		if err := p2.Unmark(context.Background(), "web"); err == nil {
+			t.Error("Unmark: expected the config write failure to propagate")
+		}
+	})
+}
