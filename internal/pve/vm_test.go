@@ -334,6 +334,34 @@ func TestCreateVMFormValuesCloudInitDefaultsAndImport(t *testing.T) {
 	if got := rec.form.Get("boot"); got != "order=scsi0" {
 		t.Errorf("boot = %q", got)
 	}
+	// cpu MUST default to host passthrough, never PVE's generic kvm64: that
+	// model hides SSE4.2/POPCNT/AVX2 and makes Claude Code >= 2.1.205 livelock
+	// at 100% CPU during `claude install`. See anthropics/claude-code#77208.
+	if got := rec.form.Get("cpu"); got != "host" {
+		t.Errorf("cpu = %q; want host (never the kvm64 default — see anthropics/claude-code#77208)", got)
+	}
+}
+
+// A caller may override the CPU model, but the default must never silently
+// become kvm64; this pins that an explicit value wins while empty stays "host".
+func TestCreateVMCPUModelDefaultsToHostAndIsOverridable(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, r *http.Request, rec *recordedRequest) {
+		writeUPID(w, testUPID)
+	})
+
+	_, err := c.CreateVM(context.Background(), CreateVMOptions{
+		VMID:    100,
+		Storage: "local-zfs",
+		Bridge:  "vmbr0",
+		Pool:    "sandbar",
+		Cpu:     "x86-64-v2-AES",
+	})
+	if err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+	if got := rec.form.Get("cpu"); got != "x86-64-v2-AES" {
+		t.Errorf("cpu = %q; want the explicit override x86-64-v2-AES", got)
+	}
 }
 
 func TestCreateVMDiskGBBareNumberMeansGiB(t *testing.T) {

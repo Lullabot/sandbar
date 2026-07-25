@@ -23,6 +23,36 @@ sand create --rebuild
 `--rebuild` deletes and recreates the base image first, then makes the VM.
 It always rebuilds, regardless of the staleness check.
 
+## Proxmox: base provisioning hangs at "Install Claude Code"
+
+**Symptom:** on the Proxmox backend, building the base image runs the playbook
+fine until the `claude-code : Install Claude Code using the official installer`
+task, where it hangs indefinitely with no output. On the guest, the
+`claude … install` process sits pegged at ~100% CPU (state `R`) with no network
+sockets and making almost no syscalls.
+
+**Why:** it is not `sand`, apt, or the network — it is a Claude Code bug
+([anthropics/claude-code#77208](https://github.com/anthropics/claude-code/issues/77208)).
+Proxmox's default CPU model, `kvm64`, masks modern x86-64 instruction
+extensions (no SSE4.2/POPCNT/AVX2) from the guest, and Claude Code ≥ 2.1.205 —
+built on a newer Bun runtime that assumes those instructions — livelocks in
+userspace at 100% CPU during startup instead of failing with an error. `curl`
+and the installer's own download succeed first (that host is reached over IPv4
+with a full instruction set on the *host* side), so provisioning gets all the
+way to the `claude install` step before wedging. It bites Proxmox specifically
+because Lima runs guests with host-CPU passthrough, so the Lima backends never
+see a feature-masked CPU.
+
+**Fix:** `sand` now creates its Proxmox VMs with the CPU type set to `host`
+(full host-CPU passthrough), which exposes the real instruction set and is the
+fix the upstream issue confirms. You get this automatically once the base is
+rebuilt on a current `sand` — delete the base and recreate, or `sand create
+--rebuild`. If you provision VMs outside `sand`, set their CPU type to `host`
+(or any model exposing SSE4.2/POPCNT/AVX2, e.g. `x86-64-v2-AES`) rather than
+leaving the `kvm64` default. A quick check on a guest: `lscpu | grep -i sse4_2`
+— if it prints nothing, that VM has the feature-masked CPU that triggers the
+hang.
+
 ## `limactl list` fails while a VM is being cloned or deleted
 
 **Symptom:** the fleet briefly disappears from the board, or a headless
