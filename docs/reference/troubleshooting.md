@@ -53,6 +53,62 @@ leaving the `kvm64` default. A quick check on a guest: `lscpu | grep -i sse4_2`
 — if it prints nothing, that VM has the feature-masked CPU that triggers the
 hang.
 
+## Proxmox: a create fails with `exit status 255`
+
+**Symptom:** a create dies part-way through provisioning with an error ending in
+`exit status 255`, and the streamed output simply stops — the last thing shown is
+an Ansible `TASK [...]` banner, with no `fatal:` line, no `PLAY RECAP`, and no
+error from the task itself. `sand` then removes the partial VM.
+
+**Why:** 255 is `ssh`'s own status, not Ansible's. `sand` runs each provisioning
+phase as a single ssh session to the guest, and a playbook that genuinely fails a
+task exits 2 (or 4 for unreachable, 250 for an internal error) — statuses you
+would see reported verbatim. 255 means the layer underneath failed instead: the
+connection to the guest dropped, or the remote command was killed by a signal.
+The task banner on screen is simply the last one printed before the channel went
+away; it is not the task that failed.
+
+Whether `ssh` printed anything of its own is a useful first split. `sand` merges
+ssh's stderr into the same stream as the guest's output, and ssh reports a
+connection it *noticed* failing (`connect to host … failed`, `client_loop: send
+disconnect: Broken pipe`, `Connection reset by peer`) even at the quiet log level
+`sand` uses. A 255 with one of those lines is a connection that broke. A 255 with
+no ssh message at all points instead at the remote command being killed by a
+signal, which OpenSSH reports as 255 and says nothing about.
+
+Since `sand` deletes a partially-built VM, the guest's own logs — the best
+evidence for which of those happened — go with it. Two opt-ins change that:
+
+```bash
+# Keep the failed VM instead of purging it, so you can inspect the guest.
+SAND_KEEP_FAILED=1 sand create …
+
+# Write ssh's own protocol log to a file (one per target, appended across every
+# connection to it) instead of to the output stream.
+SAND_SSH_DEBUG=1 sand create …                 # ~/.cache/sandbar/ssh-debug/
+SAND_SSH_DEBUG=/path/to/dir sand create …      # or a directory you choose
+```
+
+With both set, the failure names the log file it wrote, and the guest is still
+running. On it, `journalctl -u ssh`, `dmesg`, and `ps` for the `ansible-playbook`
+process answer the question the exit status cannot: whether the guest-side run
+was still alive when the client gave up (the connection died) or was already gone
+(the process died).
+
+A kept VM is **not** usable, holds its VMID, and blocks its own name until you
+remove it with `qm destroy <vmid> --purge`. If the create got as far as cloning
+your project, it also holds the clone token in the guest's per-org `.env` — so
+destroy it once you're done rather than leaving it around.
+
+`SAND_KEEP_FAILED` applies to a create's finalize — everything from the moment
+the clone exists. A failure earlier than that (the base template build, or the
+clone itself) has no VM to keep. `sand reset` already leaves its VM in place when
+the finalize fails, so it needs no opt-in.
+
+`SAND_SSH_DEBUG` is not Proxmox-specific: it logs every ssh `sand` runs, on any
+backend. It does not change scp transfers, which have nowhere to put a log but
+the payload stream.
+
 ## `limactl list` fails while a VM is being cloned or deleted
 
 **Symptom:** the fleet briefly disappears from the board, or a headless
