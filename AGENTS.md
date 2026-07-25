@@ -630,6 +630,23 @@ comment at `roles/claude-code/tasks/main.yml`.
   `/var/run/reboot-required` (a kernel/libc upgrade), and `Reset` warns
   instead of silently destroying a live tmux session before bouncing one.
 
+- **A provisioning failure must say WHICH LAYER failed.** Each phase runs as one
+  ssh session to the guest, so an `exit status 255` from it is ssh's own status —
+  the connection dropped, or the remote command was killed by a signal — and
+  never a status the playbook produced (`set -e` bash around `ansible-playbook`,
+  whose failure statuses are 2/4/250). The Proxmox provider annotates that case
+  (`transportError`, `internal/provider/proxmox.go`); do not let the bare status
+  through, and do not widen the annotation to other statuses — dressing a real
+  guest failure up as a transport problem sends the reader away from the actual
+  error. Two opt-ins exist because this failure class is otherwise
+  undiagnosable: `SAND_KEEP_FAILED` suppresses the partial-VM purge that would
+  destroy the guest journal holding the explanation, and `SAND_SSH_DEBUG` writes
+  ssh's protocol log to a FILE (`-E`) — never to stderr, which every guest-command
+  caller merges into the stream the TUI's progress parser reads. The
+  keepalive options in `sshBase` (`internal/lima/sshhost.go`) belong to the same
+  story: without them a reaped connection hangs forever instead of failing, and a
+  hang carries no evidence at all.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**

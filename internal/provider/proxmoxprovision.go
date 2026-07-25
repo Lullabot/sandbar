@@ -152,18 +152,58 @@ func (p *proxmoxProvider) recreateInstance(ctx context.Context, cfg vm.CreateCon
 // provisionClone is the create body shared by Create and Recreate: the serialized
 // base-and-clone critical section, then the unserialized finalize. A finalize
 // failure deletes the partial VM (purge=1) so a failed create never leaves a
-// half-built VM occupying a VMID on the cluster.
+// half-built VM occupying a VMID on the cluster — unless the host asked to keep
+// it for inspection (see keepFailedVM).
 func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
 	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, opts, out)
 	if err != nil {
 		return err
 	}
 	if err := p.finalizeClone(ctx, cloneVMID, cfg, out); err != nil {
+		if keepFailedVM() {
+			reportKeptVM(cloneVMID, cfg.Name, out)
+			return fmt.Errorf("proxmox: creating %s (kept the partial VM, VMID %d, for inspection): %w", cfg.Name, cloneVMID, err)
+		}
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
 		return fmt.Errorf("proxmox: creating %s (removed the partial VM): %w", cfg.Name, err)
 	}
 	progress(out, "%s is ready\n", cfg.Name)
 	return nil
+}
+
+// keepFailedVM reports whether the host asked for a failed create's VM to be
+// LEFT IN PLACE instead of purged (SAND_KEEP_FAILED, any non-empty value other
+// than "0").
+//
+// It exists because the cleanup it disables destroys the only copy of the
+// evidence. A provisioning failure that is not a clean Ansible task failure — an
+// ssh transport drop, a guest that stopped answering — leaves its explanation in
+// the guest's own journal, and by the time the user reads the error the VM
+// carrying that journal has been deleted and purged. Every occurrence is then
+// equally undiagnosable, no matter how many times it reproduces.
+//
+// Off by default, and deliberately an env var rather than a flag: the failures
+// worth catching this way happen in the TUI as often as in the CLI, and this is
+// reachable from both.
+func keepFailedVM() bool {
+	v := os.Getenv("SAND_KEEP_FAILED")
+	return v != "" && v != "0"
+}
+
+// reportKeptVM tells the user what was kept, what to do with it, and what it is
+// still holding — the three things that make a kept VM useful rather than
+// mysterious clutter.
+//
+// The secret warning is not boilerplate: a finalize that got as far as the
+// project role has already written the clone token into a per-org .env inside
+// the guest (roles/project), so a VM kept for debugging is a VM holding a live
+// credential. It is worth one line at the moment the decision is made, rather
+// than being discovered later.
+func reportKeptVM(vmid int, name string, out io.Writer) {
+	progress(out, "Keeping the failed VM %s (VMID %d) because SAND_KEEP_FAILED is set.\n", name, vmid)
+	progress(out, "  It is NOT a usable VM, and sand will refuse to create %s again until it is gone.\n", name)
+	progress(out, "  Inspect it, then remove it with `qm destroy %d --purge` on the node.\n", vmid)
+	progress(out, "  Note it may hold a clone token in the guest's per-org .env — destroy it once you are done.\n")
 }
 
 // ensureBaseAndClone is the base template's WHOLE critical section — prepare it,

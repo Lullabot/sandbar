@@ -3,7 +3,10 @@ package provider
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -222,5 +225,102 @@ func TestProxmoxRunArgvUnresolvableFailsLoudly(t *testing.T) {
 	argv := p.RunArgv(vm.VM{Name: "ghost"}, "/x", "git status")
 	if len(argv) == 0 || argv[0] == "ssh" {
 		t.Fatalf("RunArgv(unresolvable) = %v; want a non-ssh failure command", argv)
+	}
+}
+
+// --- transport-level failure annotation -----------------------------------------
+
+// exitStatus returns a real *exec.ExitError carrying code, by running a command
+// that exits with it. Constructing one by hand is not possible (os.ProcessState
+// has no exported constructor), and a hand-rolled stand-in would prove nothing
+// about the errors.As match the production code actually performs.
+func exitStatus(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("sh -c 'exit %d' did not yield an *exec.ExitError: %v", code, err)
+	}
+	return err
+}
+
+// TestProxmoxShellAnnotatesTransportFailure proves an ssh-level 255 is reported
+// as a TRANSPORT failure rather than passed through bare.
+//
+// A bare "exit status 255" attached to whichever provisioning phase was running
+// reads as if that phase failed, which sends the reader after the Ansible task
+// that happened to be on screen — a task that in fact never reported anything.
+// The annotation names the layer that failed and the two env vars that make the
+// next occurrence self-diagnosing.
+func TestProxmoxShellAnnotatesTransportFailure(t *testing.T) {
+	_, p := withGuest(t)
+	p.runSSH = func(context.Context, []string, io.Reader, io.Writer, io.Writer) error {
+		return exitStatus(t, 255)
+	}
+
+	err := p.Shell(context.Background(), "web", nil, io.Discard, "true")
+	if err == nil {
+		t.Fatal("Shell: want the ssh failure to surface")
+	}
+	for _, want := range []string{"ssh transport failed", "exit status 255", "SAND_SSH_DEBUG", "SAND_KEEP_FAILED"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q; want it to mention %q", err, want)
+		}
+	}
+}
+
+// TestProxmoxShellLeavesGuestFailuresAlone is the other half, and the one that
+// matters more: a status the GUEST produced must pass through untouched. The
+// in-guest script is `set -e` bash around ansible-playbook, whose own failure
+// statuses (2 failed, 4 unreachable, 250 unexpected) are real diagnoses —
+// dressing one of those up as a transport problem would send the reader away
+// from the actual error.
+func TestProxmoxShellLeavesGuestFailuresAlone(t *testing.T) {
+	_, p := withGuest(t)
+	for _, code := range []int{1, 2, 4, 137} {
+		p.runSSH = func(context.Context, []string, io.Reader, io.Writer, io.Writer) error {
+			return exitStatus(t, code)
+		}
+		err := p.Shell(context.Background(), "web", nil, io.Discard, "true")
+		if err == nil {
+			t.Fatalf("Shell: want the exit-%d failure to surface", code)
+		}
+		if strings.Contains(err.Error(), "ssh transport failed") {
+			t.Errorf("exit %d was annotated as a transport failure: %q", code, err)
+		}
+	}
+}
+
+// TestProxmoxTransportErrorNamesTheDebugLog proves that when a transport log IS
+// being written, the error points at the file instead of telling the user how to
+// turn it on — the whole reason SSHHost remembers the path it resolved.
+func TestProxmoxTransportErrorNamesTheDebugLog(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SAND_SSH_DEBUG", dir)
+
+	_, p := withGuest(t)
+	p.runSSH = func(context.Context, []string, io.Reader, io.Writer, io.Writer) error {
+		return exitStatus(t, 255)
+	}
+
+	err := p.Shell(context.Background(), "web", nil, io.Discard, "true")
+	if err == nil {
+		t.Fatal("Shell: want the ssh failure to surface")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("error = %q; want it to name the ssh debug log under %q", err, dir)
+	}
+}
+
+// TestProxmoxTransportErrorPassesNilThrough guards the trivial-but-fatal case:
+// the annotation sits on the success path of every guest command, so it must
+// return a nil error unchanged rather than manufacturing one.
+func TestProxmoxTransportErrorPassesNilThrough(t *testing.T) {
+	if err := transportError(nil, nil); err != nil {
+		t.Fatalf("transportError(nil) = %v; want nil", err)
+	}
+	plain := errors.New("resolve guest ip: no such vm")
+	if err := transportError(plain, nil); !errors.Is(err, plain) {
+		t.Fatalf("transportError(non-exit error) = %v; want it passed through", err)
 	}
 }

@@ -1013,13 +1013,54 @@ func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
 	})
 }
 
-// guestArgv builds the ssh argv that runs argv inside name's guest.
-func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, error) {
+// guestArgv builds the ssh argv that runs argv inside name's guest, and returns
+// the connection it was built for alongside it. The caller needs that handle to
+// annotate an ssh-level failure (see transportError) — it is the only thing that
+// knows whether a transport log was being written and where.
+func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, *lima.SSHHost, error) {
 	ip, err := p.guestIP(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return p.sshHost(ip).SSHArgv(tty, argv...), nil
+	h := p.sshHost(ip)
+	return h.SSHArgv(tty, argv...), h, nil
+}
+
+// sshExitTransport is the status ssh exits with when the CONNECTION failed
+// rather than the remote command: it could not be established, it was torn down
+// mid-session, or the remote command was killed by a signal (OpenSSH maps the
+// protocol's exit-signal onto 255, and prints nothing about it at the default
+// log level).
+//
+// It is technically ambiguous — a remote command that itself exits 255 is
+// reported identically, since the protocol has one field for both. In this
+// backend it is not ambiguous in practice: every remote command sand runs is a
+// `set -e` bash script wrapping ansible-playbook, whose own failure statuses are
+// 2 (failed task), 4 (unreachable) and 250 (unexpected), never 255.
+const sshExitTransport = 255
+
+// transportError annotates ssh's own 255 so a transport failure stops reading as
+// a guest failure.
+//
+// Without this, a create that lost its connection during a long silent task
+// surfaces as a bare "exit status 255" attached to whatever phase was running —
+// which invites debugging the Ansible task that happened to be on screen, when
+// the task never reported anything at all. The annotation says which layer
+// failed, and names the two env vars that make the NEXT occurrence
+// self-diagnosing instead of leaving the same two-line trace.
+func transportError(err error, h *lima.SSHHost) error {
+	var ee *exec.ExitError
+	if err == nil || !errors.As(err, &ee) || ee.ExitCode() != sshExitTransport {
+		return err
+	}
+	detail := "the ssh transport failed, not the guest command: the connection to the guest dropped, or the remote command was killed by a signal. " +
+		"Nothing the guest printed is missing — it never reported a failure"
+	if h != nil {
+		if path := h.DebugLogPath(); path != "" {
+			return fmt.Errorf("%w: %s. The ssh debug log for this connection is at %s", err, detail, path)
+		}
+	}
+	return fmt.Errorf("%w: %s. Re-run with SAND_SSH_DEBUG=1 for an ssh protocol log, and SAND_KEEP_FAILED=1 to keep the VM for inspection", err, detail)
 }
 
 // Shell runs argv in the guest with stdout and stderr MERGED into out for live
@@ -1031,24 +1072,24 @@ func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, 
 // reading. The one path that genuinely needs a terminal is the interactive
 // attach, which the caller execs against its own TTY (see AttachArgv).
 func (p *proxmoxProvider) Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
-	full, err := p.guestArgv(ctx, name, false, argv...)
+	full, h, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return err
 	}
-	return p.runSSH(ctx, full, stdin, out, out)
+	return transportError(p.runSSH(ctx, full, stdin, out, out), h)
 }
 
 // ShellStreamOut streams the guest command's stdout ONLY to out, keeping stderr
 // out of the payload (it is folded into the error) so a binary stream — a
 // `tar -czf -` piped into an archive — cannot be corrupted by a warning.
 func (p *proxmoxProvider) ShellStreamOut(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
-	full, err := p.guestArgv(ctx, name, false, argv...)
+	full, h, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return err
 	}
 	var stderr bytes.Buffer
 	if err := p.runSSH(ctx, full, stdin, out, &stderr); err != nil {
-		return foldStderr(err, stderr.Bytes())
+		return foldStderr(transportError(err, h), stderr.Bytes())
 	}
 	return nil
 }
@@ -1056,13 +1097,13 @@ func (p *proxmoxProvider) ShellStreamOut(ctx context.Context, name string, stdin
 // ShellOut returns the guest command's stdout, with stderr kept separate for the
 // same reason ShellStreamOut does: every caller of this parses what it gets back.
 func (p *proxmoxProvider) ShellOut(ctx context.Context, name string, argv ...string) ([]byte, error) {
-	full, err := p.guestArgv(ctx, name, false, argv...)
+	full, h, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
 	if err := p.runSSH(ctx, full, nil, &stdout, &stderr); err != nil {
-		return stdout.Bytes(), foldStderr(err, stderr.Bytes())
+		return stdout.Bytes(), foldStderr(transportError(err, h), stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
 }
@@ -1087,8 +1128,8 @@ func (p *proxmoxProvider) Copy(ctx context.Context, out io.Writer, recursive boo
 	// contributes only the flags (identity file, multiplexing) — which is why an
 	// already-resolved endpoint, whose address this provider never learned, is
 	// still copied correctly.
-	argv := p.sshHost(guest).SCPArgv(recursive, src, dst)
-	return p.runSSH(ctx, argv, nil, out, out)
+	h := p.sshHost(guest)
+	return transportError(p.runSSH(ctx, h.SCPArgv(recursive, src, dst), nil, out, out), h)
 }
 
 // GuestPath forms a transport endpoint for Copy. For an ssh transport that is

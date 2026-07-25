@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -519,6 +520,78 @@ func TestProxmoxCreateCleansUpPartialCloneOnFailure(t *testing.T) {
 		}
 	default:
 		t.Fatalf("the partial clone (VMID 101) was not deleted; requests: %v", m.seen())
+	}
+}
+
+// TestProxmoxCreateKeepsFailedVMWhenAsked proves SAND_KEEP_FAILED suppresses that
+// cleanup and says so.
+//
+// This is the diagnostic escape hatch for the failure class the cleanup makes
+// impossible to investigate: when a create dies for a reason the guest never
+// reported — an ssh transport drop, a guest that stopped answering — the
+// explanation is in that guest's journal, and purging the VM destroys the only
+// copy of it before anyone can read it. Every occurrence is then equally opaque,
+// however many times it reproduces.
+func TestProxmoxCreateKeepsFailedVMWhenAsked(t *testing.T) {
+	t.Setenv("SAND_KEEP_FAILED", "1")
+
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+
+	failUPID := upidFor("qmstart", 101)
+	m.on("/nodes/pve1/qemu/101/status/start", func(w http.ResponseWriter, _ *http.Request) { upidData(w, failUPID) })
+	m.data("/nodes/pve1/tasks/"+failUPID+"/status", `{"status":"stopped","exitstatus":"start failed: boot device missing"}`)
+
+	deleted := make(chan string, 4)
+	m.on("/nodes/pve1/qemu/101", func(w http.ResponseWriter, r *http.Request) {
+		deleted <- r.URL.Query().Get("purge")
+		upidData(w, testUPID)
+	})
+
+	p := newCreateProvider(t, m)
+
+	var out bytes.Buffer
+	err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, &out)
+	if err == nil {
+		t.Fatal("Create: want a failure when the clone's start fails")
+	}
+	if !strings.Contains(err.Error(), "kept the partial VM") {
+		t.Errorf("error = %q; want it to say the partial VM was kept", err)
+	}
+	select {
+	case purge := <-deleted:
+		t.Fatalf("the failed VM was deleted (purge=%q) despite SAND_KEEP_FAILED", purge)
+	default:
+	}
+	// The VM is useless and blocks its own name until removed, so the operator has
+	// to be told how to get rid of it — a kept VM nobody knows how to clean up is
+	// worse than no escape hatch at all.
+	for _, want := range []string{"SAND_KEEP_FAILED", "qm destroy 101 --purge"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("streamed output %q does not mention %q", out.String(), want)
+		}
+	}
+}
+
+// TestKeepFailedVMEnvParsing pins the opt-in's vocabulary: the default (and an
+// explicit "0") must clean up, because a user who never asked for this must never
+// silently accumulate broken VMs on a shared cluster.
+func TestKeepFailedVMEnvParsing(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want bool
+	}{
+		{"", false},
+		{"0", false},
+		{"1", true},
+		{"true", true},
+		{"yes", true},
+	} {
+		t.Setenv("SAND_KEEP_FAILED", tc.val)
+		if got := keepFailedVM(); got != tc.want {
+			t.Errorf("keepFailedVM() with SAND_KEEP_FAILED=%q = %v; want %v", tc.val, got, tc.want)
+		}
 	}
 }
 
