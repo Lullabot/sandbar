@@ -26,6 +26,7 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -67,6 +68,22 @@ type ansibleProgress struct {
 	// Handlers do not advance Index: they are not part of the counted task list.
 	Index int
 	Total int
+
+	// TaskStarted is when the CURRENT task's banner was parsed, or the zero time
+	// when no task is running (before Ansible starts, between playbook runs) or
+	// when the position came from somewhere that cannot know it — a build on
+	// another controller, whose progress is reconstructed from a provenance
+	// marker (see model.remoteProgress).
+	//
+	// It exists because a task's ELAPSED time is the only thing distinguishing
+	// "working" from "wedged" on a stream that goes silent for both. Ansible
+	// prints a task's banner and then nothing at all until the task returns, and
+	// tasks legitimately run for many minutes (a repo clone whose submodule is a
+	// gigabyte, an apt install on a cold cache). Without this the tile shows an
+	// unchanging bar and an unchanging task name for ten minutes, which is
+	// indistinguishable from a hung build — and that ambiguity has cost real
+	// debugging time.
+	TaskStarted time.Time
 }
 
 // Fraction is the progress bar's fill, in [0,1]. It is 0 when the total is not
@@ -88,6 +105,20 @@ func (p ansibleProgress) Fraction() float64 {
 type ansibleParser struct {
 	partial  string // bytes since the last newline: the head of a line whose tail has not arrived
 	progress ansibleProgress
+
+	// now is the clock the task timer is stamped from, injectable so a test can
+	// assert on an exact elapsed time instead of racing a real one. Nil means
+	// time.Now — the zero-value parser the job registry embeds is the production
+	// case, so the seam must cost its construction nothing.
+	now func() time.Time
+}
+
+// clock reads the parser's injected time source, defaulting to the real one.
+func (p *ansibleParser) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
 }
 
 // feed folds one chunk of streamed output into the parser. Only complete lines
@@ -127,6 +158,10 @@ func (p *ansibleParser) line(l string) {
 		p.progress.Total = n
 		p.progress.Index = 0
 		p.progress.Role, p.progress.Task = "", ""
+		// No task is running between one playbook run and the next, so the timer
+		// must not carry the previous run's last task forward and report it as
+		// still going.
+		p.progress.TaskStarted = time.Time{}
 
 	case strings.HasPrefix(l, stepPrefix):
 		// A sand phase banner supersedes whatever Ansible was last doing: the
@@ -137,13 +172,18 @@ func (p *ansibleParser) line(l string) {
 		if name, ok := bracketed(l, taskPrefix); ok {
 			p.progress.Index++
 			p.progress.Role, p.progress.Task = splitRoleTask(name)
+			p.progress.TaskStarted = p.clock()
 		}
 
 	case strings.HasPrefix(l, handlerPrefix):
 		// A handler is real work worth naming, but it is not in the counted task
 		// list (--list-tasks does not list handlers), so it must not advance Index.
+		// It DOES restart the timer: a handler is a task as far as "how long has
+		// this been running" is concerned, and a slow one (a service restart that
+		// blocks) is exactly the case the timer exists to expose.
 		if name, ok := bracketed(l, handlerPrefix); ok {
 			p.progress.Role, p.progress.Task = splitRoleTask(name)
+			p.progress.TaskStarted = p.clock()
 		}
 
 	}

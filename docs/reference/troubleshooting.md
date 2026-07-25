@@ -142,6 +142,33 @@ view to keep a build going: leaving it (or starting another VM) doesn't
 cancel anything, builds keep running in the background, and the tile itself
 carries the progress bar and pass/fail state so you can check back later.
 
+## A build looks stuck on one task
+
+Ansible prints a task's banner and then nothing at all until that task returns,
+so a slow task and a wedged one look identical on the tile: the same name, the
+same bar. To tell them apart, a building tile shows the **current task's elapsed
+time**, right-aligned on the `ansible: …` row, once that task has been running
+more than ten seconds:
+
+```
+ansible: project · 72/72           8m14s
+```
+
+A number appearing there means the task is genuinely slow, not that anything is
+wrong — under ten seconds nothing is shown, so the row stays quiet through the
+hundreds of sub-second tasks a normal run steps through. A timer that keeps
+climbing well past what the task should need is the signal worth acting on;
+press `l` on the tile to read the log.
+
+Also note the bar reaching 100% does **not** mean the build is done — it tracks
+which task the run is on, and the last task still has to finish. A full bar with
+a climbing timer is a run working on its final task.
+
+The most common cause of a genuinely slow clone is submodules: `sand` clones
+recursively, so a small project can pull in a very large one. `rtl_433` is 5 MB
+and its test-data submodule is 1.2 GB — a multi-minute clone, all of it under a
+single silent task banner.
+
 ## Out of disk on the Lima volume
 
 Each VM clone is grown to its configured `--disk` size, and that space has

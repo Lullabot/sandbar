@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The fixtures are REAL, CAPTURED output — contiguous slices of actual
@@ -44,9 +45,21 @@ func loadFixture(t *testing.T, path string) string {
 	return string(b)
 }
 
+// fixedClock is the instant every parser in this file stamps a task start with.
+// Pinning it keeps the struct-equality assertions below about PARSING: the
+// chunk-boundary test compares whole ansibleProgress values across a dozen
+// chunkings, and a real clock would make TaskStarted differ between them for
+// reasons that have nothing to do with the property under test.
+var fixedClock = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+// newTestParser builds a parser on the pinned clock.
+func newTestParser() ansibleParser {
+	return ansibleParser{now: func() time.Time { return fixedClock }}
+}
+
 // parseAll feeds s to a fresh parser in chunks of size n (n <= 0 = all at once).
 func parseAll(s string, n int) ansibleProgress {
-	var p ansibleParser
+	p := newTestParser()
 	if n <= 0 {
 		p.feed(s)
 		return p.progress
@@ -145,7 +158,7 @@ func TestAnsibleParserAcrossReadBoundaries(t *testing.T) {
 				t.Fatal("the fixture should contain a TASK banner")
 			}
 			for _, off := range []int{1, 3, 6, 12, 20} { // inside "\nTASK [", and inside the role name
-				var p ansibleParser
+				p := newTestParser()
 				p.feed(fixture[:i+off])
 				p.feed(fixture[i+off:])
 				if got := p.progress; got != want {
@@ -235,5 +248,67 @@ func TestAnsibleParserBoundsItsPartialLine(t *testing.T) {
 	p.feed("\nTASK [base : Set hostname] ****\n")
 	if p.progress.Task != "Set hostname" {
 		t.Fatalf("the parser should recover after dropping an unbounded fragment, got %+v", p.progress)
+	}
+}
+
+// The task timer's clock: a banner stamps the start, and anything that means
+// "no task is running" clears it.
+//
+// The clearing half is what keeps the timer honest. A stamp left standing
+// between one playbook run and the next would render the PREVIOUS run's last
+// task as though it were still going — and it would keep counting up, so the
+// tile would claim a wedged task at exactly the moment the build is healthiest
+// (a create streams two runs, base then finalize, down one pipe).
+func TestAnsibleParserStampsAndClearsTheTaskTimer(t *testing.T) {
+	p := newTestParser()
+
+	p.feed("SAND_ANSIBLE_TASK_TOTAL=3\n")
+	if !p.progress.TaskStarted.IsZero() {
+		t.Fatalf("a run marker left TaskStarted set: %v", p.progress.TaskStarted)
+	}
+
+	p.feed("TASK [project : Clone the project] ****\n")
+	if got := p.progress.TaskStarted; !got.Equal(fixedClock) {
+		t.Fatalf("TASK banner: TaskStarted = %v, want %v", got, fixedClock)
+	}
+
+	// A handler is work too, and a blocking one is exactly what the timer is
+	// for — so it restarts the clock even though it does not advance Index.
+	later := fixedClock.Add(time.Minute)
+	p.now = func() time.Time { return later }
+	p.feed("RUNNING HANDLER [base : Reload sshd] ****\n")
+	if got := p.progress.TaskStarted; !got.Equal(later) {
+		t.Fatalf("handler banner: TaskStarted = %v, want it restarted at %v", got, later)
+	}
+
+	// The next playbook run in the same stream starts from nothing.
+	p.feed("SAND_ANSIBLE_TASK_TOTAL=9\n")
+	if !p.progress.TaskStarted.IsZero() {
+		t.Fatalf("a second run marker left the previous run's stamp: %v", p.progress.TaskStarted)
+	}
+
+	// So does one of sand's own phase banners, which supersedes Ansible
+	// entirely and may introduce a phase that runs no playbook at all.
+	p.feed("TASK [base : Set hostname] ****\n")
+	p.feed("==> Stopping base image \"sandbar-base\"…\n")
+	if !p.progress.TaskStarted.IsZero() {
+		t.Fatalf("a sand phase banner left a task stamp standing: %v", p.progress.TaskStarted)
+	}
+}
+
+// Against the real captured runs: every TASK banner in a fixture must leave a
+// stamp behind, so the timer can never silently stop working on output shapes
+// the hand-written cases above do not cover.
+func TestAnsibleParserStampsRealFixtures(t *testing.T) {
+	for _, f := range ansibleFixtures {
+		t.Run(f.name, func(t *testing.T) {
+			got := parseAll(loadFixture(t, f.path), 0)
+			if got.Task == "" {
+				t.Fatalf("fixture ended with no current task: %+v", got)
+			}
+			if got.TaskStarted.IsZero() {
+				t.Fatalf("fixture ended on task %q with no start time recorded", got.Task)
+			}
+		})
 	}
 }
