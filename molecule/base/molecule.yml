@@ -11,7 +11,7 @@ platforms:
     # Pinned by digest for reproducibility (the image publishes only a floating
     # `latest` tag). Renovate keeps the digest current via the customManager in
     # renovate.json; don't hand-edit the sha without updating molecule/samba too.
-    image: "geerlingguy/docker-debian13-ansible:latest@sha256:4e244be72fd543bab8c870f8e246b27d4c8e95f4341368531424901b70a85a19"
+    image: "geerlingguy/docker-debian13-ansible:latest@sha256:32aea259e42294f7fffbb29ce401692f56ae75917f15793bbe486e403ce41152"
     command: /sbin/init
     privileged: true
     pre_build_image: true
