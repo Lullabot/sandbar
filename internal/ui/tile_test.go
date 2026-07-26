@@ -715,6 +715,40 @@ func TestTileDiskGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 	}
 }
 
+// A backend that can only report an ALLOCATION (Proxmox: PVE's storage listing
+// gives each volume's provisioned size) must not be drawn as a usage fraction.
+// The provisioned size equals the disk's own size, so the old shared path put
+// every such VM's gauge at a full, ⚠-flagged bar — visible on the board every
+// time the guest heartbeat dropped for a moment and the tile fell back to it.
+func TestTileDiskAllocationRendersSizeWithoutBarOrWarning(t *testing.T) {
+	in := baseTileInput()
+	// Allocation slightly EXCEEDS the disk size, exactly as PVE reports it: the
+	// boot disk plus the 4 MiB cloud-init drive against maxdisk.
+	in.VM = vm.VM{
+		Name: "web", Status: "Stopped",
+		Disk: "107374182400", DiskUsed: "107378376704",
+		DiskUsedIsAllocation: true,
+	}
+	got := ansi.Strip(renderTile(in))
+	if strings.Contains(got, "⚠") {
+		t.Fatalf("an allocation is not a usage and must never warn, got:\n%s", got)
+	}
+	if strings.Contains(got, "█") {
+		t.Fatalf("an allocation has no honest fraction, so no bar may be filled, got:\n%s", got)
+	}
+	if !strings.Contains(got, "100 GiB") {
+		t.Fatalf("the allocated size itself must still be shown, got:\n%s", got)
+	}
+
+	// The same numbers WITHOUT the flag are a real measurement, and must still
+	// warn — this is the local/remote Lima `du` path, unchanged.
+	lima := baseTileInput()
+	lima.VM = vm.VM{Name: "web", Status: "Stopped", Disk: "107374182400", DiskUsed: "107378376704"}
+	if got := ansi.Strip(renderTile(lima)); !strings.Contains(got, "⚠ disk") {
+		t.Fatalf("a measured disk at capacity must still warn, got:\n%s", got)
+	}
+}
+
 // Both warnings can be active on the same tile simultaneously.
 func TestTileBothMemAndDiskWarningsSimultaneously(t *testing.T) {
 	in := baseTileInput()
