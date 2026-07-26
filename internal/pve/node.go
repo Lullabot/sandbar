@@ -49,6 +49,21 @@ type NodeStatus struct {
 
 	PVEVersion string `json:"pveversion"`
 
+	// CurrentKernel is the kernel the node is running now, and Machine in it is
+	// the node's ARCHITECTURE — "x86_64", "aarch64" — which is the only place
+	// this API publishes it in a structured form. (The `kversion` string carries
+	// it too, at the end of a free-form uname line PVE has reformatted before;
+	// this field has a stable shape, so parsing that one would be strictly
+	// worse.) There is deliberately no per-VM equivalent to read instead: PVE's
+	// `arch` config key exists only for containers, and a QEMU guest on a node
+	// runs that node's architecture.
+	CurrentKernel struct {
+		SysName string `json:"sysname"`
+		Release string `json:"release"`
+		Version string `json:"version"`
+		Machine string `json:"machine"`
+	} `json:"current-kernel"`
+
 	// Disk/MaxDisk are absent from the published API schema but present in
 	// practice on some PVE versions. Pointers so their absence decodes
 	// cleanly instead of silently becoming a false zero.

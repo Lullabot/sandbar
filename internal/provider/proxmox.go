@@ -171,6 +171,11 @@ type proxmoxProvider struct {
 	// ips is name->reachable guest address, invalidated on every power
 	// transition.
 	ips map[string]string
+	// arch is the node's architecture ("x86_64"), cached because it cannot
+	// change under a running node and every VM on the board wants it. Empty
+	// means NOT YET KNOWN (or a token without Sys.Audit on the node), which the
+	// tile renders as an absence rather than a guess — see nodeArch.
+	arch string
 }
 
 var _ Provider = (*proxmoxProvider)(nil)
@@ -370,6 +375,7 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 	// per VM, so a fleet listing costs one extra round trip total, not one per
 	// tile.
 	diskUsed := p.diskUsedIndex(ctx)
+	arch := p.nodeArch(ctx)
 
 	out := make([]vm.VM, 0, len(index))
 	for _, r := range resources {
@@ -378,7 +384,7 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 		if id, ok := index[r.Name]; !ok || id != r.VMID {
 			continue
 		}
-		out = append(out, p.resourceVM(r, diskUsed))
+		out = append(out, p.resourceVM(r, diskUsed, arch))
 	}
 	return out, nil
 }
@@ -419,7 +425,7 @@ func (p *proxmoxProvider) Get(name string) (vm.VM, error) {
 	if err != nil {
 		return vm.VM{}, err
 	}
-	return p.statusVM(name, st, p.diskUsedIndex(ctx)), nil
+	return p.statusVM(name, st, p.diskUsedIndex(ctx), p.nodeArch(ctx)), nil
 }
 
 // Status reports one instance's status in the vocabulary the UI and provisioner
@@ -497,11 +503,52 @@ func (p *proxmoxProvider) lookupVMID(ctx context.Context, name string) (int, err
 	return vmid, nil
 }
 
+// nodeArch returns the node's architecture, fetching it once and caching it.
+//
+// It is a NODE property, not a per-VM one, and that is not a shortcut: PVE's
+// per-guest `arch` config key exists only for containers, and a QEMU guest runs
+// the architecture of the node hosting it. So one reading answers for every VM
+// in the pool, which is why this is worth caching rather than asking per VM (the
+// alternative — the guest agent's guest-get-osinfo — costs a round trip per VM
+// per refresh and cannot answer for a stopped one at all).
+//
+// A failed fetch returns "" and caches NOTHING, so the next List tries again.
+// That is deliberate: "" means unknown, the board renders unknown as an absence,
+// and a token that cannot Sys.Audit the node must not turn a missing reading
+// into a permanent wrong one.
+func (p *proxmoxProvider) nodeArch(ctx context.Context) string {
+	p.mu.Lock()
+	cached := p.arch
+	p.mu.Unlock()
+	if cached != "" {
+		return cached
+	}
+	ns, err := p.client.NodeStatus(ctx)
+	if err != nil {
+		return ""
+	}
+	return p.setArch(ns.CurrentKernel.Machine)
+}
+
+// setArch records a node architecture read from any NodeStatus this provider
+// already had to fetch — Preflight's and HostResources' — so the first List
+// usually finds it cached rather than paying its own round trip. Returns the
+// value for the caller's convenience.
+func (p *proxmoxProvider) setArch(machine string) string {
+	if machine == "" {
+		return ""
+	}
+	p.mu.Lock()
+	p.arch = machine
+	p.mu.Unlock()
+	return machine
+}
+
 // resourceVM converts a cluster-listing entry into sand's VM record. diskUsed
 // is this call's storage-content index (see diskUsedIndex); a VM absent from
 // it (the fetch failed, or it simply owns no volume yet) gets DiskUsed=="",
 // the same "unknown" byteString already uses for Memory/Disk.
-func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64) vm.VM {
+func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64, arch string) vm.VM {
 	return vm.VM{
 		Name:     r.Name,
 		Status:   limaStatus(r.Status),
@@ -511,13 +558,14 @@ func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64) v
 		DiskUsed: byteString(diskUsed[r.VMID]),
 		// PVE gives a PROVISIONED size, never a usage — see vm.VM's field.
 		DiskUsedIsAllocation: true,
+		Arch:                 arch,
 		Dir:                  p.instanceDir(r.Name),
 	}
 }
 
 // statusVM converts a single-VM status reading into sand's VM record.
 // diskUsed is this call's storage-content index (see diskUsedIndex).
-func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64) vm.VM {
+func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64, arch string) vm.VM {
 	return vm.VM{
 		Name:                 name,
 		Status:               limaStatus(st.Status),
@@ -526,6 +574,7 @@ func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[in
 		Disk:                 byteString(st.MaxDisk),
 		DiskUsed:             byteString(diskUsed[st.VMID]),
 		DiskUsedIsAllocation: true, // provisioned, not used — see resourceVM
+		Arch:                 arch,
 		Dir:                  p.instanceDir(name),
 	}
 }
@@ -1329,6 +1378,9 @@ func (p *proxmoxProvider) HostResources() HostResources {
 	if ns, err := p.client.NodeStatus(ctx); err == nil {
 		hr.CPUs = ns.CPUInfo.CPUs
 		hr.MemBytes = ns.Memory.Total
+		// Free: this status already carries the node's architecture, so
+		// recording it here spares List a round trip of its own (nodeArch).
+		p.setArch(ns.CurrentKernel.Machine)
 	}
 	// Do NOT compute headroom as total-used: PVE defines
 	// memused = memtotal - memavailable, so used+free != total. Memory

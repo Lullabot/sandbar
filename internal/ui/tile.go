@@ -335,7 +335,13 @@ func tileStyleFor(status derivedStatus) lipgloss.Style {
 // clones only (board.go), which makes it uniform by construction.
 func tileBadges(t vmTraits, u fleetUniformity) []string {
 	var badges []string
-	if u.ShowArch {
+	// An UNKNOWN value is never rendered. A backend that could not read a field
+	// (a Proxmox token without Sys.Audit on the node, a VM Lima has not reported
+	// yet) leaves it empty, and "arch " with nothing after it states a fact about
+	// the VM that sand does not have — the same refusal every gauge in this file
+	// already makes. computeFleetUniformity keeps an unknown from turning the
+	// badge on across the whole board, so this is the second half of one rule.
+	if u.ShowArch && t.Arch != "" {
 		badges = append(badges, "arch "+t.Arch)
 	}
 	if u.ShowBase {
@@ -387,12 +393,33 @@ type fleetUniformity struct {
 // react automatically, with no code change here. An empty or single-VM fleet
 // is vacuously uniform: there is nothing yet to disagree with, so every Show
 // flag comes back false.
+//
+// Arch compares only the values it KNOWS (fleetAgreesOnKnown). An unknown is not
+// a disagreement: before this, one VM whose architecture sand could not read
+// disagreed with every VM that had one, which turned the badge on for the whole
+// board and printed a bare "arch " on the tile that caused it — a missing reading
+// masquerading as a foreign architecture.
 func computeFleetUniformity(fleet []vmTraits) fleetUniformity {
 	return fleetUniformity{
-		ShowArch:    !fleetAgrees(fleet, func(t vmTraits) string { return t.Arch }),
+		ShowArch:    !fleetAgreesOnKnown(fleet, func(t vmTraits) string { return t.Arch }),
 		ShowBase:    !fleetAgrees(fleet, func(t vmTraits) string { return t.Base }),
 		ShowManaged: !fleetAgrees(fleet, func(t vmTraits) bool { return t.Managed }),
 	}
+}
+
+// fleetAgreesOnKnown is fleetAgrees over the VMs whose value is KNOWN (non-empty),
+// for a field a backend may legitimately fail to read. It is deliberately NOT the
+// default: Base and Managed are facts sand always holds for a managed clone, so an
+// empty one there is a real difference worth showing, while an unreadable
+// architecture is an absence.
+func fleetAgreesOnKnown(fleet []vmTraits, get func(vmTraits) string) bool {
+	known := make([]vmTraits, 0, len(fleet))
+	for _, t := range fleet {
+		if get(t) != "" {
+			known = append(known, t)
+		}
+	}
+	return fleetAgrees(known, get)
 }
 
 // fleetAgrees reports whether every VM in fleet has the same value for get.

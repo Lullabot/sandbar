@@ -1020,3 +1020,29 @@ func TestFormatElapsed(t *testing.T) {
 		}
 	}
 }
+
+// An UNKNOWN architecture is an absence, not a difference. A backend that could
+// not read the field (a Proxmox token without Sys.Audit on the node) used to
+// "disagree" with every VM that had one, which turned the badge on across the
+// whole board AND printed a bare "arch " with nothing after it on the tile that
+// caused it.
+func TestUnknownArchNeitherRendersNorTurnsTheBadgeOn(t *testing.T) {
+	fleet := []vmTraits{{Arch: "x86_64"}, {Arch: ""}}
+	u := computeFleetUniformity(fleet)
+	if u.ShowArch {
+		t.Fatalf("an unknown arch beside a known one must not count as a disagreement: %+v", u)
+	}
+
+	// Even when the fleet genuinely does disagree (two known values), the tile
+	// whose value is unknown renders no arch badge at all.
+	mixed := computeFleetUniformity([]vmTraits{{Arch: "x86_64"}, {Arch: "aarch64"}, {Arch: ""}})
+	if !mixed.ShowArch {
+		t.Fatal("two different known arches must turn the badge on")
+	}
+	if got := tileBadges(vmTraits{Arch: ""}, mixed); len(got) != 0 {
+		t.Fatalf("a VM with no known arch rendered %q; want no badge", got)
+	}
+	if got := tileBadges(vmTraits{Arch: "aarch64"}, mixed); len(got) != 1 || got[0] != "arch aarch64" {
+		t.Fatalf("a VM with a known arch rendered %q; want its own value", got)
+	}
+}
