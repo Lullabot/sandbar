@@ -1026,7 +1026,10 @@ func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, 
 		return nil, nil, err
 	}
 	h := p.sshHost(ip)
-	return h.SSHArgv(tty, argv...), h, nil
+	// SSHArgvCtx, not SSHArgv: a caller that marked its context WithoutMux (the
+	// board's long-lived heartbeat and sweep) must get its own connection rather
+	// than share the control master every other guest command rides.
+	return h.SSHArgvCtx(ctx, tty, argv...), h, nil
 }
 
 // sshExitTransport is the status ssh exits with when the CONNECTION failed

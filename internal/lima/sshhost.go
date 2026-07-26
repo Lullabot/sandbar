@@ -280,6 +280,49 @@ func (h *SSHHost) muxFlags() []string {
 	}
 }
 
+// muxOptOutKey carries WithoutMux's opt-out on a context.
+type muxOptOutKey struct{}
+
+// WithoutMux marks a context's command as one that must NOT share (or become)
+// the connection-multiplexing master, and it exists because sharing is only a
+// good trade for SHORT commands.
+//
+// Every ssh sand runs to a given target reuses one master (see muxFlags), and
+// with ControlMaster=auto the master is whichever connection got there first —
+// which may be a command sand considers disposable and kills on a cancelled
+// context. When a master dies, EVERY session multiplexed through it dies in the
+// same instant. Field evidence: 28 master deaths in one session's transport log,
+// each taking down a burst of five or six sessions at once — every VM's gauges
+// and sweep, plus whatever provisioning was in flight.
+//
+// The long-lived probes (internal/ui's heartbeat and checkout sweep) hold one
+// connection each for their whole life, so multiplexing saves them nothing: they
+// pay one handshake either way. They are also the most likely candidates to
+// BECOME the master (they connect early and last longest) and the biggest losers
+// when one dies. Opting them out is therefore all upside — it costs one TCP
+// connection per running VM, which is what they already hold, and it decouples
+// their fate from every other command's.
+//
+// ControlPath=none as well as ControlMaster=no: without it, `ssh` still consults
+// (and can be blocked by) an existing socket. This does NOT stop the short
+// commands — refresh reads, file copies, provisioning steps, the interactive
+// attach — from multiplexing among themselves, which is where the saved
+// handshakes (and the un-repeated agent prompts) actually matter.
+func WithoutMux(ctx context.Context) context.Context {
+	return context.WithValue(ctx, muxOptOutKey{}, true)
+}
+
+// MuxSuppressed reports whether ctx carries WithoutMux's opt-out. Exported for
+// the Proxmox provider, whose guest transport is direct ssh built from this
+// package's argv rather than limactl over the hop.
+func MuxSuppressed(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	optedOut, _ := ctx.Value(muxOptOutKey{}).(bool)
+	return optedOut
+}
+
 // sshBase is the ssh argv prefix up to and INCLUDING the target: `ssh [-t] [-p
 // port] [-i identity] [host-key flags] [keepalives] [debug log] [mux flags]
 // target`. tty adds -t for the interactive attach. Port is omitted at the
@@ -287,7 +330,11 @@ func (h *SSHHost) muxFlags() []string {
 // omitted when controlDir could not be resolved, and the debug flags only
 // appear when the host asked for a transport log — so the common case is the
 // bare `ssh <keepalives> target …` the tests pin.
-func (h *SSHHost) sshBase(tty bool) []string {
+//
+// mux false replaces the multiplexing flags with an explicit opt-out, for a
+// long-lived command that must not share (or become) the master — see
+// WithoutMux, which is how a caller asks for it.
+func (h *SSHHost) sshBase(tty, mux bool) []string {
 	a := []string{"ssh"}
 	if tty {
 		a = append(a, "-t")
@@ -301,7 +348,11 @@ func (h *SSHHost) sshBase(tty bool) []string {
 	a = append(a, h.ephemeralHostKeyFlags()...)
 	a = append(a, keepaliveFlags()...)
 	a = append(a, h.debugFlags()...)
-	a = append(a, h.muxFlags()...)
+	if mux {
+		a = append(a, h.muxFlags()...)
+	} else {
+		a = append(a, "-o", "ControlMaster=no", "-o", "ControlPath=none")
+	}
 	return append(a, h.target())
 }
 
@@ -369,7 +420,15 @@ func (h *SSHHost) ephemeralHostKeyFlags() []string {
 // each remote token shell-quoted so ssh's space-join + remote reshell reconstruct
 // the identical argv the local execRunner would have passed via execve.
 func (h *SSHHost) sshCommand(tty bool, remoteArgv ...string) []string {
-	argv := h.sshBase(tty)
+	return h.sshCommandMux(true, tty, remoteArgv...)
+}
+
+// sshCommandMux is sshCommand with the multiplexing decision made explicitly:
+// mux false builds the long-lived, unshared form (see WithoutMux). Every
+// ctx-carrying entry point below routes through it so one context value decides
+// the shape of the argv.
+func (h *SSHHost) sshCommandMux(mux, tty bool, remoteArgv ...string) []string {
+	argv := h.sshBase(tty, mux)
 	for _, a := range remoteArgv {
 		argv = append(argv, shellQuote(a))
 	}
@@ -430,6 +489,18 @@ func (h *SSHHost) SSHArgv(tty bool, remoteArgv ...string) []string {
 	return h.sshCommand(tty, remoteArgv...)
 }
 
+// SSHArgvCtx is SSHArgv with the context's multiplexing opt-out honoured
+// (WithoutMux): a long-lived command gets its own unshared connection instead of
+// riding — or becoming — the master every other command depends on.
+//
+// It is separate from SSHArgv rather than a signature change because only one
+// caller has a context to consult at argv-build time. The Proxmox provider's
+// guest commands do; its interactive attach, which hands an argv to a terminal
+// it does not run itself, does not.
+func (h *SSHHost) SSHArgvCtx(ctx context.Context, tty bool, remoteArgv ...string) []string {
+	return h.sshCommandMux(!MuxSuppressed(ctx), tty, remoteArgv...)
+}
+
 // SCPArgv builds the scp argv for a transfer between from and to (either of
 // which may be a `user@host:path` endpoint), with the same port/identity/
 // multiplexing flags SSHArgv threads in — including scp's capital -P port flag,
@@ -447,7 +518,7 @@ func (h *SSHHost) SCPArgv(recursive bool, from, to string) []string {
 // (ErrListRacedInstanceDir), which matches the remote limactl's stderr folded into
 // the error here, still fires over the hop.
 func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
-	argv := h.sshCommand(false, h.limactlArgv(args...)...)
+	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdout = &stdout
@@ -467,7 +538,7 @@ func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
 // for live display. cmd.WaitDelay reaps the ssh→limactl→guest-ssh orphan chain on
 // a cancelled ctx, one generation deeper than the local case but the same hazard.
 func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, h.limactlArgv(args...)...)
+	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
@@ -481,7 +552,7 @@ func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, ar
 // not corrupted by limactl's `cd` warning — exactly as execRunner.StreamOut does,
 // with the same stdin passthrough and WaitDelay reaping.
 func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommand(false, h.limactlArgv(args...)...)
+	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
@@ -501,7 +572,7 @@ func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer,
 // the HostFiles methods for cat / stat / mkdir / rm), capturing stdout and stderr
 // separately. It mirrors Output's stdout/stderr discipline.
 func (h *SSHHost) runRemote(ctx context.Context, stdin io.Reader, remoteArgv ...string) ([]byte, []byte, error) {
-	argv := h.sshCommand(false, remoteArgv...)
+	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, remoteArgv...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin

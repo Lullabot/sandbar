@@ -62,11 +62,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
 
 	tea "charm.land/bubbletea/v2"
@@ -86,6 +86,12 @@ const (
 	// deliberate stop sets no cooldown, so coming back to the board is
 	// instant.
 	sweepRetry = 5 * time.Second
+
+	// sweepRetryMax caps the sweep's backoff, mirroring heartbeatRetryMax and
+	// existing for the same reason: a guest that keeps dropping this stream must
+	// not be answered with an immediate reconnect every time. A sweep pass is the
+	// more expensive of the two probes, so making it back off matters more.
+	sweepRetryMax = 2 * time.Minute
 
 	// sweepEndMarker terminates ONE FULL SWEEP PASS in the guest stream —
 	// distinct from heartbeatDelim (a different stream entirely) and from
@@ -114,10 +120,20 @@ const (
 // repeat. Like the heartbeat's guestScript, everything CLEVER lives on the
 // host (internal/checkouts' classification, this file's lifecycle) — the
 // guest side is the sweep command plus the dumbest possible wrapper loop.
+//
+// The loop framing is guestloop.go's, shared with the heartbeat: the pid-file
+// janitor and the bounded pass count that stop abandoned copies of this loop
+// piling up in the guest. This one also runs at LOW priority — a pass is a
+// recursive `find` over $HOME plus a git read per checkout, which is exactly the
+// work that should yield to whatever the developer is actually doing in there.
 func guestSweepScript(every time.Duration) string {
-	secs := strconv.Itoa(int(every / time.Second))
-	return "while true; do\n" + checkouts.BuildSweepCommand() +
-		"echo '" + sweepEndMarker + "'\nsleep " + secs + "\ndone"
+	return guestLoop{
+		marker:  sweepEndMarker,
+		pidFile: "sand-sweep.pid",
+		body:    checkouts.BuildSweepCommand() + "echo '" + sweepEndMarker + "'\n",
+		every:   every,
+		lowPrio: true,
+	}.script()
 }
 
 // sweepParser turns the guest sweep stream's bytes into completed sweep
@@ -227,6 +243,11 @@ type sweepRegistry struct {
 	// when they may not be retried. See sweepRetry.
 	cooldown map[vmHandle]time.Time
 
+	// fails counts CONSECUTIVE deaths per VM, turning cooldown into a backoff
+	// (sweepRetryMax) exactly as heartbeatRegistry.fails does. Reset by the
+	// first completed pass a new connection folds in.
+	fails map[vmHandle]int
+
 	nextEpoch uint64
 
 	// shell resolves the backend seam for a sweep's scope — the SAME
@@ -250,6 +271,7 @@ func newSweepsResolver(resolve shellFor) *sweepRegistry {
 	return &sweepRegistry{
 		sweeps:   make(map[vmHandle]*sweepConn),
 		cooldown: make(map[vmHandle]time.Time),
+		fails:    make(map[vmHandle]int),
 		shell:    resolve,
 		interval: sweepInterval,
 		retry:    sweepRetry,
@@ -301,7 +323,10 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 
 	r.nextEpoch++
 	epoch := r.nextEpoch
-	ctx, cancel := context.WithCancel(context.Background())
+	// WithoutMux, for the same reason the heartbeat's connection is: a long-lived
+	// probe must not share the fate of the control master every short command
+	// uses. See lima.WithoutMux.
+	ctx, cancel := context.WithCancel(lima.WithoutMux(context.Background()))
 	// Buffered by one so the sweeper can hand off a completed pass and get
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.
@@ -379,10 +404,13 @@ func (r *sweepRegistry) fold(scope registry.Scope, name string, epoch uint64) <-
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	sc, ok := r.sweeps[vmHandle{Scope: scope, Name: name}]
+	key := vmHandle{Scope: scope, Name: name}
+	sc, ok := r.sweeps[key]
 	if !ok || sc.epoch != epoch {
 		return nil
 	}
+	// A pass completed, so the run of failures before it is over.
+	delete(r.fails, key)
 	return sc.ch
 }
 
@@ -392,17 +420,22 @@ func (r *sweepRegistry) fold(scope registry.Scope, name string, epoch uint64) <-
 // heartbeatRegistry.ended precisely (see its doc for the reasoning). A stale
 // epoch means this connection was already stopped deliberately and this is
 // just its goroutine finishing: nothing to drop, nothing to cool down.
-func (r *sweepRegistry) ended(scope registry.Scope, name string, epoch uint64) {
+func (r *sweepRegistry) ended(scope registry.Scope, name string, epoch uint64) (bool, time.Duration) {
 	if r == nil {
-		return
+		return false, 0
 	}
 	key := vmHandle{Scope: scope, Name: name}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if sc, ok := r.sweeps[key]; ok && sc.epoch == epoch {
-		delete(r.sweeps, key)
-		r.cooldown[key] = time.Now().Add(r.retry)
+	sc, ok := r.sweeps[key]
+	if !ok || sc.epoch != epoch {
+		return false, 0
 	}
+	delete(r.sweeps, key)
+	r.fails[key]++
+	wait := backoff(r.retry, r.fails[key], sweepRetryMax)
+	r.cooldown[key] = time.Now().Add(wait)
+	return true, wait
 }
 
 // names lists the VMs with a sweep connection open IN scope, in no order.
@@ -433,6 +466,11 @@ func (r *sweepRegistry) forget(scope registry.Scope, keep map[string]bool) {
 	for key := range r.cooldown {
 		if key.Scope == scope && !keep[key.Name] {
 			delete(r.cooldown, key)
+		}
+	}
+	for key := range r.fails {
+		if key.Scope == scope && !keep[key.Name] {
+			delete(r.fails, key)
 		}
 	}
 }
@@ -502,9 +540,22 @@ func (m model) syncSweeps() tea.Cmd {
 		sc := m.members[i].scope
 		want := map[string]bool{}
 		for _, bv := range board {
-			if bv.scope == sc && bv.Status == limaRunning {
-				want[bv.Name] = true
+			if bv.scope != sc || bv.Status != limaRunning {
+				continue
 			}
+			// NOT while this VM has a run in flight. A sweep pass is a recursive
+			// find over $HOME plus a git read per checkout, and a provisioning
+			// run is both the busiest the guest's disk ever gets and the moment
+			// sand can least afford to compete with itself for it — an Ansible
+			// task starved of I/O is a task whose ssh session can miss enough
+			// keepalives to be declared dead. The badge and the delete guard read
+			// the last completed pass meanwhile, and catch up within one
+			// sweepInterval of the build finishing, which is the same
+			// eventual-consistency the idle gate above already relies on.
+			if m.jobs.isRunning(sc, bv.Name) {
+				continue
+			}
+			want[bv.Name] = true
 		}
 		for _, name := range m.sweeps.names(sc) {
 			if !want[name] {
