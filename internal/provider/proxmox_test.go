@@ -1626,3 +1626,59 @@ func TestFirstRoutablePrefersIPv4AndSkipsUnusableAddresses(t *testing.T) {
 		})
 	}
 }
+
+// Every VM's architecture comes from the NODE's current-kernel.machine, cached
+// after one read: PVE has no per-VM arch for a QEMU guest (its `arch` config key
+// is container-only) and a guest runs the architecture of the node hosting it. A
+// board with an empty arch badge was the symptom — the field was simply never
+// populated for this backend.
+func TestProxmoxListPopulatesArchFromTheNodeAndCachesIt(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	m.data("/nodes/pve1/storage/local-lvm/content", storageContentFixture)
+	m.data("/nodes/pve1/status", `{"cpuinfo":{"cpus":8},"current-kernel":{"sysname":"Linux","release":"6.14.0-2-pve","machine":"x86_64"}}`)
+	p := newProxmoxForTest(t, m)
+
+	vms, err := p.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(vms) == 0 {
+		t.Fatal("no VMs listed")
+	}
+	for _, v := range vms {
+		if v.Arch != "x86_64" {
+			t.Fatalf("%s.Arch = %q, want the node's x86_64", v.Name, v.Arch)
+		}
+	}
+
+	// A node's architecture cannot change under it, so a second listing must
+	// not pay for another read.
+	if _, err := p.List(); err != nil {
+		t.Fatalf("second List: %v", err)
+	}
+	if n := m.count("/nodes/pve1/status"); n != 1 {
+		t.Errorf("node status fetched %d times across two listings; want 1 (cached)", n)
+	}
+}
+
+// A token that cannot read the node leaves the architecture UNKNOWN — never a
+// guess, and never a failed listing. The tile renders unknown as an absence
+// (internal/ui's tileBadges), which is why "" is the honest value here.
+func TestProxmoxListArchUnknownWhenTheNodeCannotBeRead(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	m.data("/nodes/pve1/storage/local-lvm/content", storageContentFixture)
+	m.fail("/nodes/pve1/status", http.StatusForbidden, "")
+	p := newProxmoxForTest(t, m)
+
+	vms, err := p.List()
+	if err != nil {
+		t.Fatalf("List must survive an unreadable node: %v", err)
+	}
+	for _, v := range vms {
+		if v.Arch != "" {
+			t.Fatalf("%s.Arch = %q, want \"\" (unknown) when the node status is refused", v.Name, v.Arch)
+		}
+	}
+}
