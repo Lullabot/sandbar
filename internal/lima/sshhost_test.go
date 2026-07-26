@@ -127,7 +127,7 @@ func TestSSHControlDirAndMuxFlags(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{"sshBase", h.sshBase(false)},
+		{"sshBase", h.sshBase(false, true)},
 		{"scpCommand", h.scpCommand(false, "/local", "remote:/path")},
 	} {
 		argv := tc.argv
@@ -165,8 +165,8 @@ func TestSSHKeepalivesAlwaysThreaded(t *testing.T) {
 				name string
 				argv []string
 			}{
-				{"sshBase", h.sshBase(false)},
-				{"sshBase tty", h.sshBase(true)},
+				{"sshBase", h.sshBase(false, true)},
+				{"sshBase tty", h.sshBase(true, true)},
 				{"scpCommand", h.scpCommand(true, "/local", "remote:/path")},
 			} {
 				for _, val := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=8"} {
@@ -195,7 +195,7 @@ func TestSSHDebugLogOptIn(t *testing.T) {
 		if got := h.DebugLogPath(); got != "" {
 			t.Fatalf("DebugLogPath = %q with SAND_SSH_DEBUG unset, want empty", got)
 		}
-		if argv := h.sshBase(false); hasToken(argv, "-vv") {
+		if argv := h.sshBase(false, true); hasToken(argv, "-vv") {
 			t.Fatalf("sshBase = %v, want no -vv when the debug log is off", argv)
 		}
 	})
@@ -209,7 +209,7 @@ func TestSSHDebugLogOptIn(t *testing.T) {
 		if got := h.DebugLogPath(); got != want {
 			t.Fatalf("DebugLogPath = %q, want %q", got, want)
 		}
-		argv := h.sshBase(false)
+		argv := h.sshBase(false, true)
 		idx := slices.Index(argv, "-E")
 		if idx < 0 || idx+1 >= len(argv) || argv[idx+1] != want {
 			t.Fatalf("sshBase = %v, want `-E %s`", argv, want)
@@ -271,7 +271,7 @@ func TestSSHNoControlDirOmitsMuxFlags(t *testing.T) {
 	}}
 	// controlDir left at its zero value "" — the failure path.
 	want := append(append([]string{"ssh"}, keepaliveFlags()...), "dev@example.com")
-	if got := h.sshBase(false); !slices.Equal(got, want) {
+	if got := h.sshBase(false, true); !slices.Equal(got, want) {
 		t.Fatalf("sshBase with empty controlDir = %v, want %v", got, want)
 	}
 	wantScp := append(append([]string{"scp"}, keepaliveFlags()...), "/local", "remote:/path")
@@ -279,8 +279,8 @@ func TestSSHNoControlDirOmitsMuxFlags(t *testing.T) {
 		t.Fatalf("scpCommand with empty controlDir = %v, want %v", got, wantScp)
 	}
 	for _, tok := range []string{"-vv", "-E"} {
-		if hasToken(h.sshBase(false), tok) {
-			t.Fatalf("sshBase carried %q with no SAND_SSH_DEBUG set: %v", tok, h.sshBase(false))
+		if hasToken(h.sshBase(false, true), tok) {
+			t.Fatalf("sshBase carried %q with no SAND_SSH_DEBUG set: %v", tok, h.sshBase(false, true))
 		}
 	}
 }
@@ -1206,4 +1206,67 @@ func TestSSHReadInstanceMarkersProvenance(t *testing.T) {
 			t.Fatalf("ReadInstanceMarkers(no markers) = %v, want empty", got)
 		}
 	})
+}
+
+// A context marked WithoutMux must produce an argv that neither joins nor
+// becomes the shared control master, while an ordinary context keeps
+// multiplexing — the whole point being that ONE dying master must not be able to
+// take every long-lived session down with it (see WithoutMux).
+func TestWithoutMuxOptsOneCommandOutOfTheSharedMaster(t *testing.T) {
+	h := NewSSHHost(testCfg)
+	if h.controlDir == "" {
+		t.Skip("no control dir resolved in this environment; multiplexing is off entirely")
+	}
+
+	shared := h.SSHArgvCtx(context.Background(), false, "true")
+	if slices.Index(shared, "ControlMaster=auto") <= 0 {
+		t.Fatalf("an ordinary command must still multiplex, got %v", shared)
+	}
+
+	alone := h.SSHArgvCtx(WithoutMux(context.Background()), false, "true")
+	for _, val := range []string{"ControlMaster=no", "ControlPath=none"} {
+		idx := slices.Index(alone, val)
+		if idx <= 0 || alone[idx-1] != "-o" {
+			t.Fatalf("WithoutMux argv = %v: want %q preceded by its own -o", alone, val)
+		}
+	}
+	if slices.Contains(alone, "ControlMaster=auto") {
+		t.Fatalf("WithoutMux argv must not also ask to multiplex: %v", alone)
+	}
+	// ControlPath=none as well as ControlMaster=no: without it ssh still
+	// consults (and can block on) an existing socket.
+	if i := slices.IndexFunc(alone, func(s string) bool {
+		return strings.HasPrefix(s, "ControlPath=") && s != "ControlPath=none"
+	}); i >= 0 {
+		t.Fatalf("WithoutMux argv must not name a control socket: %v", alone)
+	}
+	// The keepalives are not negotiable, whichever shape the argv takes.
+	for _, val := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=8"} {
+		if !slices.Contains(alone, val) {
+			t.Fatalf("WithoutMux argv dropped %q: %v", val, alone)
+		}
+	}
+}
+
+// The opt-out travels on the context, so every ctx-carrying runner must honour
+// it — not just the argv builder the Proxmox provider calls.
+func TestWithoutMuxHonouredByTheStreamingRunners(t *testing.T) {
+	h := NewSSHHost(testCfg)
+	if h.controlDir == "" {
+		t.Skip("no control dir resolved in this environment; multiplexing is off entirely")
+	}
+	var got []string
+	h.newCmd = func(ctx context.Context, argv []string) *exec.Cmd {
+		got = argv
+		return exec.CommandContext(ctx, "true")
+	}
+
+	_ = h.Stream(WithoutMux(context.Background()), nil, io.Discard, "list")
+	if !slices.Contains(got, "ControlMaster=no") {
+		t.Fatalf("Stream ignored the context's opt-out: %v", got)
+	}
+	_ = h.Stream(context.Background(), nil, io.Discard, "list")
+	if !slices.Contains(got, "ControlMaster=auto") {
+		t.Fatalf("Stream must still multiplex an ordinary command: %v", got)
+	}
 }

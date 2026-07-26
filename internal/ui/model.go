@@ -15,6 +15,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -821,7 +822,19 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// exceptional one. ended() drops the reading, so the gauge goes with the VM
 		// instead of freezing at whatever it last said.
 		if !msg.ok {
-			m.heartbeats.ended(msg.scope, msg.vm, msg.epoch)
+			// A LIVE heartbeat ending is worth a line in the log. Until now the
+			// only trace of it was the gauges quietly emptying, which reads as
+			// "the VM is idle" rather than "sand lost the connection" — and a
+			// transport that flaps every few minutes (a control master dying and
+			// taking every session with it) was therefore invisible unless the
+			// user happened to be running with SAND_SSH_DEBUG. ended() reports
+			// false for a heartbeat already stopped deliberately AND for one that
+			// never produced a reading, so leaving the board, stopping a VM, and
+			// a guest whose sshd is still coming up all stay silent.
+			if lost, wait := m.heartbeats.ended(msg.scope, msg.vm, msg.epoch); lost {
+				m.logWarn(fmt.Sprintf("lost the guest connection to %s; retrying in %s",
+					msg.vm, wait.Round(time.Second)))
+			}
 			return m, nil
 		}
 		// fold returns nil for a sample from a connection that has since been replaced,
@@ -837,6 +850,10 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and starts a cooldown so a VM sand cannot shell into does not get a
 		// fresh `limactl shell` thrown at it by every single message.
 		if !msg.ok {
+			// Not logged, unlike the heartbeat's: the two connections die
+			// together (they share a guest, and usually a cause), and saying it
+			// twice per event would make the log read like two failures. The
+			// heartbeat's line is the one the user needs.
 			m.sweeps.ended(msg.scope, msg.vm, msg.epoch)
 			return m, nil
 		}

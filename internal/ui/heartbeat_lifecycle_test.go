@@ -603,3 +603,77 @@ func TestStaleSampleIsDroppedAndItsReadLoopEnds(t *testing.T) {
 	r.stopAll()
 	sh.await(t, "close:web")
 }
+
+// A transport that flaps must be VISIBLE. Before this, a lost guest connection
+// showed up only as the gauges quietly emptying — which reads as "the VM is
+// idle", not "sand cannot reach it" — so a control master dying every few minutes
+// and taking every session with it was undiagnosable without SAND_SSH_DEBUG.
+//
+// The line is gated on the connection having WORKED: a stream that never produced
+// a reading was never a connection, and announcing a loss for a guest whose sshd
+// is still coming up (every create, for its first seconds) would make the log
+// lie during the one operation the user is already watching closely.
+func TestLosingAConnectedHeartbeatIsLoggedButABootingGuestIsNot(t *testing.T) {
+	sh := newFakeShell()
+	l := newTeaLoop(t, heartbeatModel(t, sh, "web"))
+
+	// A guest whose stream dies before it ever reports: a retry, not a loss.
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	sh.await(t, "open:web")
+	sh.die(t, "web", errors.New("exit status 255"))
+	l.pump("the never-connected heartbeat to be dropped", func(m model) bool {
+		return len(m.heartbeats.names(registry.LocalScope)) == 0
+	})
+	if log := messageLog(l.m); strings.Contains(log, "lost the guest connection") {
+		t.Fatalf("a heartbeat that never produced a reading must not be announced as lost:\n%s", log)
+	}
+
+	// Now one that WORKS and then dies: that is a loss, and it is reported with
+	// the delay before the next attempt.
+	l.m.heartbeats.cooldown = map[vmHandle]time.Time{} // skip the retry wait
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	sh.await(t, "open:web")
+	sh.write(t, "web", record(100, 900, 2048, 1024))
+	l.pump("the first reading to land", func(m model) bool {
+		_, ok := m.heartbeats.latest(registry.LocalScope, "web")
+		return ok
+	})
+	sh.die(t, "web", errors.New("exit status 255"))
+	l.pump("the loss to be logged", func(m model) bool {
+		return strings.Contains(messageLog(m), "lost the guest connection to web")
+	})
+	if log := messageLog(l.m); !strings.Contains(log, "retrying in") {
+		t.Fatalf("the log line must say when the next attempt is:\n%s", log)
+	}
+}
+
+// Consecutive deaths back off, and a reading resets the run. A flat retry answers
+// every failure with an immediate reconnect — and a reconnect costs the guest an
+// ssh handshake and a fresh shell, which is precisely what a guest already
+// thrashing cannot afford.
+func TestConsecutiveHeartbeatDeathsBackOffAndAReadingResetsThem(t *testing.T) {
+	r := newHeartbeats(nil) // no shell: start() opens nothing, so drive the registry directly
+	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
+
+	var last time.Duration
+	for i := 1; i <= 4; i++ {
+		r.beats[key] = &heartbeat{epoch: uint64(i), seen: true}
+		_, wait := r.ended(registry.LocalScope, "web", uint64(i))
+		if i > 1 && wait <= last && last < heartbeatRetryMax {
+			t.Fatalf("failure %d waited %s, not longer than the previous %s", i, wait, last)
+		}
+		if wait > heartbeatRetryMax {
+			t.Fatalf("failure %d waited %s, past the %s ceiling", i, wait, heartbeatRetryMax)
+		}
+		last = wait
+	}
+
+	// A sample arriving means the guest is healthy again: the next death starts
+	// over at the base delay.
+	r.beats[key] = &heartbeat{epoch: 99, ch: make(chan guestSample, 1)}
+	r.fold(registry.LocalScope, "web", 99, guestSample{MemTotal: 1, MemUsed: 1})
+	r.beats[key] = &heartbeat{epoch: 100, seen: true}
+	if _, wait := r.ended(registry.LocalScope, "web", 100); wait != heartbeatRetry {
+		t.Fatalf("after a good reading the backoff restarted at %s, want %s", wait, heartbeatRetry)
+	}
+}

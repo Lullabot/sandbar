@@ -440,3 +440,46 @@ func TestGuestSweepScriptShape(t *testing.T) {
 		t.Fatalf("script must sleep for sweepInterval's seconds, got %q", script)
 	}
 }
+
+// A sweep pass is the heaviest thing sand asks a guest to do in the background —
+// a recursive find over $HOME plus a git read per checkout — and a provisioning
+// run is the moment that competition costs the most: an Ansible task starved of
+// I/O is a task whose ssh session can miss enough keepalives to be declared dead.
+// So a VM with a run in flight gets no sweep, and gets one back when the run ends.
+func TestSweepStandsDownWhileTheVMIsBuilding(t *testing.T) {
+	sh := newFakeShell()
+	l := newTeaLoop(t, sweepModel(t, sh, "web"))
+
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	sh.await(t, "open:web")
+
+	// A build starts on the same VM: the sweep must close.
+	if !l.m.jobs.begin(&job{
+		key:    provisionKey(registry.LocalScope, "web"),
+		title:  "Creating web",
+		state:  jobRunning,
+		cancel: func() {},
+	}) {
+		t.Fatal("could not begin a build for web")
+	}
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	sh.await(t, "close:web")
+	if n := len(l.m.sweeps.names(registry.LocalScope)); n != 0 {
+		t.Fatalf("a building VM still has %d sweep connections, want 0", n)
+	}
+
+	// The heartbeat is deliberately NOT gated the same way: its two /proc reads
+	// are what draw a building tile's gauges, which is exactly when a user is
+	// watching them.
+	if !strings.Contains(guestScript(heartbeatInterval), "/proc/stat") {
+		t.Fatal("the heartbeat must still read /proc while a VM builds")
+	}
+
+	// The build finishes: the sweep comes back.
+	l.m.jobs.finish(provisionKey(registry.LocalScope, "web"), nil)
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	sh.await(t, "open:web")
+	if n := sh.opened("web"); n != 2 {
+		t.Fatalf("web's sweep opened %d times, want 2 (once before the build, once after)", n)
+	}
+}

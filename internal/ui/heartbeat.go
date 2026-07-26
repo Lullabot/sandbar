@@ -58,6 +58,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
 
 	tea "charm.land/bubbletea/v2"
@@ -93,6 +94,14 @@ const (
 	// to the board is instant.
 	heartbeatRetry = 5 * time.Second
 
+	// heartbeatRetryMax caps the backoff heartbeatRetry starts. A guest that keeps
+	// dropping its stream doubles its own cooldown up to this, which is what stops
+	// sand answering a sick VM's every failure with an immediate reconnect: the
+	// reconnect itself costs the guest an ssh handshake and a fresh shell, so a
+	// flat retry turns one unhealthy guest into a load source that keeps it
+	// unhealthy. It resets the moment a reading actually arrives.
+	heartbeatRetryMax = 30 * time.Second
+
 	// heartbeatIdleAfter is how long sand may sit with no input from the user before
 	// it decides nobody is watching and drops the connections. See shouldTick.
 	heartbeatIdleAfter = 5 * time.Minute
@@ -120,10 +129,21 @@ const (
 // keys on `cpu ` and `MemTotal:` — and so a df that fails (no stdout, just an
 // error to stderr) yields a harmless "DISK \n" the parser ignores rather than
 // a line it might misparse.
+//
+// The loop framing — the pid-file janitor and the bounded pass count that keep
+// an abandoned copy of this loop from running in the guest forever — is
+// guestloop.go's, shared with the sweep. Read its header for why a long-lived
+// guest probe needs one.
 func guestScript(every time.Duration) string {
-	secs := strconv.Itoa(int(every / time.Second))
-	return "while true; do cat /proc/stat /proc/meminfo; echo -n 'DISK '; df -kP / | tail -n 1; echo '" +
-		heartbeatDelim + "'; sleep " + secs + "; done"
+	return guestLoop{
+		marker:  heartbeatDelim,
+		pidFile: "sand-heartbeat.pid",
+		body: "cat /proc/stat /proc/meminfo\n" +
+			"echo -n 'DISK '\n" +
+			"df -kP / | tail -n 1\n" +
+			"echo '" + heartbeatDelim + "'\n",
+		every: every,
+	}.script()
 }
 
 // guestSample is ONE utilization reading from inside a running guest, and it is the
@@ -482,6 +502,12 @@ type heartbeatRegistry struct {
 	// not be retried. See heartbeatRetry.
 	cooldown map[vmHandle]time.Time
 
+	// fails counts CONSECUTIVE deaths per VM, and is what turns cooldown from a
+	// flat delay into a backoff (see heartbeatRetryMax). Reset by the first
+	// sample a new connection folds in — a stream that produced a reading is
+	// healthy by the only definition this file has.
+	fails map[vmHandle]int
+
 	nextEpoch uint64
 
 	// shell resolves the backend seam for a heartbeat's scope (fleet.go's
@@ -504,6 +530,7 @@ func newHeartbeatsResolver(resolve shellFor) *heartbeatRegistry {
 	return &heartbeatRegistry{
 		beats:    make(map[vmHandle]*heartbeat),
 		cooldown: make(map[vmHandle]time.Time),
+		fails:    make(map[vmHandle]int),
 		shell:    resolve,
 		interval: heartbeatInterval,
 		retry:    heartbeatRetry,
@@ -576,7 +603,10 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 
 	r.nextEpoch++
 	epoch := r.nextEpoch
-	ctx, cancel := context.WithCancel(context.Background())
+	// WithoutMux: this connection lives as long as the board does, so it must not
+	// ride (or become) the shared control master — one master's death would
+	// otherwise take every VM's gauges down with it. See lima.WithoutMux.
+	ctx, cancel := context.WithCancel(lima.WithoutMux(context.Background()))
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
@@ -664,6 +694,9 @@ func (r *heartbeatRegistry) fold(scope registry.Scope, name string, epoch uint64
 		return nil
 	}
 	hb.last, hb.seen = s, true
+	// A reading arrived, so whatever run of failures preceded it is over: the
+	// next death starts the backoff from heartbeatRetry again.
+	delete(r.fails, vmHandle{Scope: scope, Name: name})
 	return hb.ch
 }
 
@@ -679,17 +712,30 @@ func (r *heartbeatRegistry) fold(scope registry.Scope, name string, epoch uint64
 //
 // A stale epoch means the heartbeat was ALREADY stopped deliberately and this is
 // just its goroutine finishing: nothing to drop, and nothing to cool down.
-func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint64) {
+//
+// It reports whether a CONNECTED heartbeat was lost — one that had produced at
+// least one reading — and the cooldown before the next attempt. The `seen` part
+// of that is what keeps the caller's log line honest: a stream that ended without
+// ever producing a sample was never a working connection, so a VM Lima calls
+// Running while its sshd is still coming up (every create, for its first
+// seconds) is a retry, not a loss, and must not be announced as one. It still
+// counts toward the backoff, because backing off is exactly right there.
+func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint64) (bool, time.Duration) {
 	if r == nil {
-		return
+		return false, 0
 	}
 	key := vmHandle{Scope: scope, Name: name}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if hb, ok := r.beats[key]; ok && hb.epoch == epoch {
-		delete(r.beats, key)
-		r.cooldown[key] = time.Now().Add(r.retry)
+	hb, ok := r.beats[key]
+	if !ok || hb.epoch != epoch {
+		return false, 0
 	}
+	delete(r.beats, key)
+	r.fails[key]++
+	wait := backoff(r.retry, r.fails[key], heartbeatRetryMax)
+	r.cooldown[key] = time.Now().Add(wait)
+	return hb.seen, wait
 }
 
 // latest is the reader's entry point — the one the tile renderer (tile.go) calls.
@@ -743,6 +789,13 @@ func (r *heartbeatRegistry) forget(scope registry.Scope, keep map[string]bool) {
 	for key := range r.cooldown {
 		if key.Scope == scope && !keep[key.Name] {
 			delete(r.cooldown, key)
+		}
+	}
+	// The failure run belongs to the VM, so it goes when the VM does — a name
+	// that comes back (recreated, or re-listed after a blip) starts clean.
+	for key := range r.fails {
+		if key.Scope == scope && !keep[key.Name] {
+			delete(r.fails, key)
 		}
 	}
 }

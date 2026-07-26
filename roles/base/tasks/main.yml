@@ -297,6 +297,47 @@
 # tmux session via `tmux new-session -e COLORTERM=…` — see internal/lima.AttachArgv.
 # This AcceptEnv drop-in stays because it is the only lever for the plain-ssh path
 # and is harmless to the tmux path.
+# Make sshd NOTICE a client that vanished, which is what stops sand's guest-side
+# probe loops from piling up.
+#
+# sand holds one long-lived ssh session per running VM for the board's gauges
+# (internal/ui/heartbeat.go) and another for the checkout sweep
+# (internal/ui/sweepshell.go), each running a loop in the guest. When the host
+# end of one of those dies abruptly — the process killed, a control master lost,
+# a laptop suspended — the guest is not told: upstream sshd defaults
+# ClientAliveInterval to 0, so it never probes the peer, and TCPKeepAlive rides
+# the kernel's TWO-HOUR idle timer. The session process therefore lives on, and
+# so does the loop it is running, until a write finally errors out minutes later
+# or never. Reconnects then stack fresh loops on top of the abandoned ones, and a
+# guest carrying dozens of them (the sweep's is a recursive `find` over $HOME)
+# starves itself of I/O and memory until the OOM killer takes out sshd — which
+# drops EVERY session, including the user's own interactive ones.
+#
+# 15s x 4 tears an abandoned session down about a minute after its client goes
+# away. The loop's next write then hits a closed stdout, takes SIGPIPE, and dies
+# with it. This is the guest half of the fix; the host half bounds the same leak
+# from the other side (a self-identifying pid file and a bounded session
+# lifetime, in the two files named above), so an older base image that predates
+# this drop-in is still not unbounded.
+#
+# A RELOAD, never a restart: reload re-execs the listener and leaves established
+# sessions alone, while `systemctl restart ssh` under systemd's default
+# KillMode=control-group would kill every session in the unit's cgroup — this
+# playbook's own included. Killing our transport to fix a transport leak is not
+# a trade this task is willing to make.
+- name: Reap SSH sessions whose client has vanished
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-sand-clientalive.conf
+    content: |
+      # Managed by sand (roles/base). See the task comment for why.
+      ClientAliveInterval 15
+      ClientAliveCountMax 4
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sshd
+  when: provision_phase | default('full') != 'finalize'
+
 - name: Accept COLORTERM over SSH for truecolor terminals
   ansible.builtin.copy:
     dest: /etc/ssh/sshd_config.d/10-colorterm.conf
