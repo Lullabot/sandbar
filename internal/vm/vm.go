@@ -30,6 +30,19 @@ type VM struct {
 	Dir      string
 	Arch     string
 
+	// DiskUsedIsAllocation says DiskUsed is a PROVISIONED size, not a measure of
+	// how much of the disk is in use — and it exists because those two numbers
+	// look identical (both are bytes) while meaning opposite things to a gauge.
+	//
+	// A host-side `du` of a qcow2 (local and remote Lima) is a real measurement:
+	// DiskUsed/Disk is a fraction worth drawing. PVE's storage-content listing is
+	// not: it reports each volume's provisioned size, which for a thin or raw
+	// volume IS its full size, so the same fraction comes out at 1.0 by
+	// construction and would paint every Proxmox VM's disk as full. The tile
+	// (ui/tile.go) reads this flag to draw the size alone, with no bar and no
+	// low-space warning, rather than a fraction it knows to be meaningless.
+	DiskUsedIsAllocation bool
+
 	// UpSince / LastUsed are the tile's closing line ("up 2h14m" / "last used 3d
 	// ago"), sampled from the Lima instance dir's files. They are ENRICHMENTS, like
 	// DiskUsed: `limactl list` does not report them, and they are filled in by the

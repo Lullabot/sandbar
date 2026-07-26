@@ -564,6 +564,17 @@ func tileDiskLine(v vm.VM, status derivedStatus, sample guestSample, hasSample b
 	if v.DiskUsed == "" {
 		return tileGaugeLine("disk", 0, "?/"+total, width)
 	}
+	// An ALLOCATION is not a usage: PVE reports each volume's provisioned size,
+	// so used/total is 1.0 by construction and every gauge built from it would
+	// sit pegged at full, in the low-space warning style, on a VM with an empty
+	// disk. There is no honest fraction here, so this draws none — the size
+	// alone, with the same "no reading" bar the unread gauges use. See
+	// vm.VM.DiskUsedIsAllocation.
+	if v.DiskUsedIsAllocation {
+		return tileGaugeRow("disk", humanizeBytes(v.DiskUsed), width, func(barWidth int) string {
+			return strings.Repeat("·", barWidth)
+		})
+	}
 	usedN, uerr := strconv.ParseInt(v.DiskUsed, 10, 64)
 	totalN, terr := strconv.ParseInt(v.Disk, 10, 64)
 	if uerr == nil && terr == nil && totalN > 0 {

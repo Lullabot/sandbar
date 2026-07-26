@@ -509,7 +509,9 @@ func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64) v
 		Memory:   byteString(r.MaxMem),
 		Disk:     byteString(r.MaxDisk),
 		DiskUsed: byteString(diskUsed[r.VMID]),
-		Dir:      p.instanceDir(r.Name),
+		// PVE gives a PROVISIONED size, never a usage — see vm.VM's field.
+		DiskUsedIsAllocation: true,
+		Dir:                  p.instanceDir(r.Name),
 	}
 }
 
@@ -517,13 +519,14 @@ func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64) v
 // diskUsed is this call's storage-content index (see diskUsedIndex).
 func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64) vm.VM {
 	return vm.VM{
-		Name:     name,
-		Status:   limaStatus(st.Status),
-		CPUs:     int(st.CPUs),
-		Memory:   byteString(st.MaxMem),
-		Disk:     byteString(st.MaxDisk),
-		DiskUsed: byteString(diskUsed[st.VMID]),
-		Dir:      p.instanceDir(name),
+		Name:                 name,
+		Status:               limaStatus(st.Status),
+		CPUs:                 int(st.CPUs),
+		Memory:               byteString(st.MaxMem),
+		Disk:                 byteString(st.MaxDisk),
+		DiskUsed:             byteString(diskUsed[st.VMID]),
+		DiskUsedIsAllocation: true, // provisioned, not used — see resourceVM
+		Dir:                  p.instanceDir(name),
 	}
 }
 
