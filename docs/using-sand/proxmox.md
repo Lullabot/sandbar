@@ -65,6 +65,54 @@ cluster access) as a full admin — usually `root@pam`.
   image, so you don't need to prepare an image yourself — `sand` builds its base
   template from a cloud image the first time you create a VM.
 
+## All of it in one script
+
+Every command on this page, in order, is also packaged as a single script —
+[`proxmox-setup.sh`](proxmox-setup.sh). All of its settings are environment
+variables in one block at the top, so the usual case is overriding two or three
+of them. Copy it to the Proxmox host and run it there as a full admin
+(`root@pam`):
+
+```bash
+SAND_DISK_STORAGE=local-lvm SAND_IMAGE_STORAGE=local ./proxmox-setup.sh
+```
+
+It creates the pool, the three roles, the user and token, and every ACL, then
+prints the token's **effective permissions** so you can confirm the scope
+yourself. It finishes by printing the token line to save and a ready-to-paste
+`profiles.yaml` block.
+
+It builds **one pool per run**, named by `SAND_POOL`. A second, fully isolated
+scope — the [test pool](#a-separate-pool-for-automated-tests), or anything else
+that must never be able to touch your day-to-day VMs — is the *same run under a
+different name*, not a different procedure:
+
+```bash
+SAND_POOL=sandbar-test ./proxmox-setup.sh
+```
+
+The user, the token and every ACL are derived from the pool name, so two runs
+produce two scopes that cannot see each other. (The roles are shared, which
+changes nothing: a role is a privilege set and grants nothing until an ACL binds
+it to a user at a path.) The token file each run tells you to write is named
+after the pool too, so the second never overwrites the first.
+
+Re-running is safe — the pool, roles, and ACLs are converged in place. The one
+exception is the API token: Proxmox reveals a token's secret **exactly once**,
+so an existing token is left untouched (and no secret is printed) unless you set
+`SAND_TOKEN_RECREATE=1`, which deletes and recreates it — invalidating the old
+secret everywhere it is configured.
+
+??? example "The full script"
+
+    ```bash title="proxmox-setup.sh"
+    --8<-- "docs/using-sand/proxmox-setup.sh"
+    ```
+
+The rest of this page is the same setup done by hand, with the reasoning for
+each privilege — read it if you want to know *why* the script does what it does,
+or if your host differs enough that you'd rather drive it yourself.
+
 ## Step 1 — Create a dedicated pool
 
 Every VM `sand` creates is placed in this pool automatically, and the token is
@@ -344,10 +392,23 @@ real CPU, memory, and storage usage, sampled from the API.
 
 If you run `sand`'s opt-in end-to-end test suite (or otherwise want a throwaway
 pool that can never touch your day-to-day VMs), set up a **second** pool and
-token exactly as above but with different names — `sandbar-test`, a
-`SandbarTestProv` role assignment, and its own token. The two pools are fully
-isolated from each other, so automated runs create and destroy VMs freely in
-`sandbar-test` with no possibility of affecting the VMs in `sandbar`.
+token exactly as above but with different names — `sandbar-test`, its own user,
+and its own token. The two pools are fully isolated from each other, so
+automated runs create and destroy VMs freely in `sandbar-test` with no
+possibility of affecting the VMs in `sandbar`.
+
+[`proxmox-setup.sh`](proxmox-setup.sh) does this for you — it is the same run
+you did for the everyday pool, with one variable changed:
+
+```bash
+SAND_POOL=sandbar-test ./proxmox-setup.sh
+```
+
+It derives the user (`sandbar-test@pve`) and every ACL from that name, so the
+second scope shares nothing with the first, and it prints the `PROXMOX_E2E_*`
+block below already filled in. If you override `SAND_USER` to a user that
+already owns another pool, the script's verification step says so rather than
+letting you build two pools one token can see.
 
 The test suite is documented in the repository's development guide; it's gated
 behind a build tag and skips unless you configure it, and it reads its target

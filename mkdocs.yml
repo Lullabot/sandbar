@@ -41,7 +41,12 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.snippets:
+      # Snippet paths are relative to the repo root (where mkdocs runs), and a
+      # missing one fails the build instead of silently rendering nothing.
+      base_path: ['.']
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
