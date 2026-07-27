@@ -1797,3 +1797,29 @@ func TestProxmoxListArchUnknownWhenTheNodeCannotBeRead(t *testing.T) {
 		}
 	}
 }
+
+// TestExecSSHTreatsAHeldPipeSuccessAsSuccess pins the fix for a field failure:
+// the base build's dependency install — the FIRST ssh into the fresh guest,
+// and therefore the connection that becomes the ControlPersist mux master —
+// succeeded after ten minutes of apt and was then reported "Failed: … exec:
+// WaitDelay expired before I/O complete", because on some OpenSSH builds the
+// forked master inherits and holds the stderr pipe past WaitDelay. Go returns
+// exec.ErrWaitDelay only IN PLACE OF a nil error, so mapping it to success can
+// never mask a real failure — which the second half proves against a child
+// that fails with the same pipe-holder behind it.
+func TestExecSSHTreatsAHeldPipeSuccessAsSuccess(t *testing.T) {
+	var out bytes.Buffer
+	err := execSSH(context.Background(), []string{"sh", "-c", "(sleep 5 &); echo done"}, nil, &out, &out)
+	if err != nil {
+		t.Fatalf("execSSH reported %v for a command that exited 0; a lingering pipe-holder (the ControlPersist master) is not the command's failure", err)
+	}
+	if !strings.Contains(out.String(), "done") {
+		t.Fatalf("execSSH output %q lost the command's own output", out.String())
+	}
+
+	err = execSSH(context.Background(), []string{"sh", "-c", "(sleep 5 &); exit 7"}, nil, &out, &out)
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 7 {
+		t.Fatalf("execSSH error = %v; want the child's own exit status 7 — the held-pipe mapping must never mask a real failure", err)
+	}
+}

@@ -1313,7 +1313,12 @@ func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.WaitDelay = sshWaitDelay
-	return cmd.Run()
+	// A held-pipe success is a SUCCESS: the first mux ssh to a guest forks the
+	// ControlPersist master, which on some OpenSSH builds inherits (and keeps)
+	// the stderr pipe — and without this mapping, the base build's first, and
+	// longest, guest command succeeded and was then reported "Failed: … exec:
+	// WaitDelay expired before I/O complete". See lima.SuccessDespiteHeldPipes.
+	return lima.SuccessDespiteHeldPipes(cmd.Run())
 }
 
 // --- interactive attach & guest identity ----------------------------------------

@@ -3,6 +3,7 @@ package lima
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -53,6 +54,34 @@ type Runner interface {
 // happy path.
 const waitDelay = 2 * time.Second
 
+// SuccessDespiteHeldPipes maps exec.ErrWaitDelay to success, and every executor
+// that sets WaitDelay on captured or streamed pipes must route its Run error
+// through it.
+//
+// Go returns ErrWaitDelay ONLY in place of a nil error ("Wait returns
+// ErrWaitDelay instead of a nil error"): the child exited reporting success and
+// its output was drained, but something that inherited its pipes still held
+// them open when WaitDelay expired. A real failure — a non-zero remote exit, a
+// transport 255, the kill after a cancel — produces an ExitError, which takes
+// precedence, so this can never mask one.
+//
+// The inheritor is real, not hypothetical: the FIRST mux ssh to a target
+// (ControlMaster=auto + ControlPersist, sshhost.go) forks a background master,
+// and on OpenSSH builds that do not detach its stderr, that master holds the
+// pipe for the whole ControlPersist window. Observed in the field: a Proxmox
+// base build's ten-minute dependency install — the first ssh into the fresh
+// guest, and therefore the connection that BECAME the master — succeeded and
+// was then reported as "Failed: … exec: WaitDelay expired before I/O
+// complete", which purged the successfully provisioned base. The lingering
+// holder is exactly what WaitDelay exists to stop waiting on; it is not the
+// command's failure.
+func SuccessDespiteHeldPipes(err error) error {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	return err
+}
+
 // execRunner is the real Runner: it shells out to the limactl binary.
 type execRunner struct{ bin string }
 
@@ -83,7 +112,7 @@ func (r *execRunner) Stream(ctx context.Context, stdin io.Reader, out io.Writer,
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.WaitDelay = waitDelay // a cancel must REAP the stream, orphaned ssh child and all
-	return cmd.Run()
+	return SuccessDespiteHeldPipes(cmd.Run())
 }
 
 func (r *execRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
@@ -95,7 +124,7 @@ func (r *execRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writ
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = waitDelay // a cancel must REAP the stream, orphaned ssh child and all
-	err := cmd.Run()
+	err := SuccessDespiteHeldPipes(cmd.Run())
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			err = fmt.Errorf("%w: %s", err, msg)
