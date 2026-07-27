@@ -230,6 +230,11 @@ type sweepConn struct {
 	epoch  uint64
 	cancel context.CancelFunc
 	ch     chan checkouts.VMCheckouts
+
+	// started is when this connection opened — what lets ended tell the guest
+	// loop's scheduled TTL exit from a genuine loss, exactly as the heartbeat's
+	// started does.
+	started time.Time
 }
 
 // sweepRegistry owns every live sweep connection, mirroring heartbeatRegistry
@@ -253,10 +258,12 @@ type sweepRegistry struct {
 	// shell resolves the backend seam for a sweep's scope — the SAME
 	// shellFor/guestShell seam the heartbeat uses (fleetShellResolver), so a
 	// remote-profile VM's sweep opens into the remote host exactly like its
-	// heartbeat does.
-	shell    shellFor
-	interval time.Duration
-	retry    time.Duration
+	// heartbeat does. interval, retry and rotateAfter are settable for the
+	// same test reasons the heartbeat's are.
+	shell       shellFor
+	interval    time.Duration
+	retry       time.Duration
+	rotateAfter time.Duration
 }
 
 // newSweeps builds a registry whose sweeps all open through the SAME shell,
@@ -269,12 +276,13 @@ func newSweeps(shell guestShell) *sweepRegistry {
 
 func newSweepsResolver(resolve shellFor) *sweepRegistry {
 	return &sweepRegistry{
-		sweeps:   make(map[vmHandle]*sweepConn),
-		cooldown: make(map[vmHandle]time.Time),
-		fails:    make(map[vmHandle]int),
-		shell:    resolve,
-		interval: sweepInterval,
-		retry:    sweepRetry,
+		sweeps:      make(map[vmHandle]*sweepConn),
+		cooldown:    make(map[vmHandle]time.Time),
+		fails:       make(map[vmHandle]int),
+		shell:       resolve,
+		interval:    sweepInterval,
+		retry:       sweepRetry,
+		rotateAfter: guestLoopRotateAfter,
 	}
 }
 
@@ -331,7 +339,7 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.
 	ch := make(chan checkouts.VMCheckouts, 1)
-	r.sweeps[key] = &sweepConn{epoch: epoch, cancel: cancel, ch: ch}
+	r.sweeps[key] = &sweepConn{epoch: epoch, cancel: cancel, ch: ch, started: time.Now()}
 	interval := r.interval
 	r.mu.Unlock()
 
@@ -432,6 +440,13 @@ func (r *sweepRegistry) ended(scope registry.Scope, name string, epoch uint64) (
 		return false, 0
 	}
 	delete(r.sweeps, key)
+	// A stream about as old as the guest loop's TTL exited on its own schedule
+	// (guestLoopTTL) — a planned rotation, not a failure, so no failure count
+	// and no cooldown; the next syncSweeps reopens it at once. Mirrors the
+	// heartbeat's ended exactly.
+	if !sc.started.IsZero() && r.rotateAfter > 0 && time.Since(sc.started) >= r.rotateAfter {
+		return false, 0
+	}
 	r.fails[key]++
 	wait := backoff(r.retry, r.fails[key], sweepRetryMax)
 	r.cooldown[key] = time.Now().Add(wait)
