@@ -474,3 +474,132 @@ func TestE2EProxmoxSessionDiesWhenTheGuestVanishes(t *testing.T) {
 			mustDieWithin)
 	}
 }
+
+// TestE2EProxmoxTwoClonesHoldDistinctLeases is the end-to-end proof of the
+// DHCP-collision fix, against the real hypervisor, DHCP server, and guests.
+//
+// The failure it guards: a base template that kept the /etc/machine-id its
+// build's boot committed gave every clone the same systemd-networkd DHCP
+// client identity, the DHCP server handed them all ONE lease, and the clones
+// fought over the address at the ARP layer — the board's guest probes flapped
+// with "lost the guest connection; retrying in 5s" forever, and any ssh could
+// silently land in the wrong VM. Reproduced verbatim on a real pool (two
+// clones, distinct MACs, both reporting one IPv4) before the template build
+// learned to reset the identity (generalizeScript).
+//
+// Three assertions, in causal order:
+//
+//  1. The clones' machine-ids DIFFER (and are real 32-hex ids, not empty —
+//     proving the truncated file was regenerated, not left blank).
+//  2. Their IPv4 leases differ — the identity fix's observable purpose.
+//  3. Long-lived streams into BOTH guests, held OPEN CONCURRENTLY, survive a
+//     window comfortably longer than the flap's period. This is the board's
+//     heartbeat shape (one ShellStreamOut per VM), and it is the assertion
+//     that fails first if the guests are fighting over an address.
+//
+// Creating two full VMs is the most expensive test in the suite; it exists
+// because nothing short of two real clones behind a real DHCP server can prove
+// any of the three.
+func TestE2EProxmoxTwoClonesHoldDistinctLeases(t *testing.T) {
+	cfg := skipUnlessProxmoxE2EConfigured(t)
+
+	prov, err := provider.NewProxmox(cfg)
+	if err != nil {
+		t.Fatalf("NewProxmox: %v", err)
+	}
+	if err := prov.Preflight(); err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+
+	suffix := strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+	names := []string{"sand-pve-lease-a-" + suffix, "sand-pve-lease-b-" + suffix}
+	for _, name := range names {
+		t.Cleanup(func() { _ = prov.Delete(name, true) })
+	}
+
+	ctx := context.Background()
+	for _, name := range names {
+		vmCfg := vm.CreateConfig{
+			Name:     name,
+			BaseName: vm.DefaultCreateConfig().BaseName,
+			User:     os.Getenv(proxmoxE2ESSHUser),
+			GitName:  "Sand PVE E2E",
+			GitEmail: "sand-pve-e2e@example.com",
+			CPUs:     2,
+			Memory:   "2GiB",
+			Disk:     vm.BaseDiskFloor,
+			Domain:   "lan",
+			Locale:   "en_US.UTF-8",
+		}
+		var createLog bytes.Buffer
+		if err := prov.Create(ctx, vmCfg, provision.CreateOptions{}, &createLog); err != nil {
+			t.Fatalf("Create %s: %v\n%s", name, err, createLog.String())
+		}
+	}
+
+	// --- 1. distinct, well-formed machine identities -------------------------
+	ids := make([]string, len(names))
+	for i, name := range names {
+		out, err := prov.ShellOut(ctx, name, "cat", "/etc/machine-id")
+		if err != nil {
+			t.Fatalf("reading %s's machine-id: %v", name, err)
+		}
+		ids[i] = strings.TrimSpace(string(out))
+		if len(ids[i]) != 32 {
+			t.Fatalf("%s's machine-id is %q; want a regenerated 32-hex id — an empty one means the truncated file was never re-initialized", name, ids[i])
+		}
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("both clones carry machine-id %s — the template still bakes an identity in, and their DHCP leases will collide", ids[0])
+	}
+
+	// --- 2. distinct leases ---------------------------------------------------
+	addrs := make([]string, len(names))
+	for i, name := range names {
+		out, err := prov.ShellOut(ctx, name, "hostname", "-I")
+		if err != nil {
+			t.Fatalf("reading %s's addresses: %v", name, err)
+		}
+		fields := strings.Fields(string(out))
+		if len(fields) == 0 {
+			t.Fatalf("%s reports no address at all", name)
+		}
+		addrs[i] = fields[0]
+	}
+	if addrs[0] == addrs[1] {
+		t.Fatalf("both clones hold the lease %s — the DHCP server still sees one client identity", addrs[0])
+	}
+	t.Logf("distinct identities (%s…, %s…) and distinct leases (%s, %s)", ids[0][:8], ids[1][:8], addrs[0], addrs[1])
+
+	// --- 3. concurrent long-lived streams survive -----------------------------
+	// One streaming shell per VM, open at the same time, each ticking for over
+	// a minute — the exact shape of the board's per-VM heartbeat, and several
+	// times the observed flap period (a probe died within seconds of its rival
+	// VM's probe opening). ShellStreamOut must return nil: an address fight
+	// surfaces as an ssh transport failure (exit 255) mid-stream.
+	const ticks, tickEvery = 24, "3"
+	type result struct {
+		name  string
+		lines int
+		err   error
+	}
+	results := make(chan result, len(names))
+	for _, name := range names {
+		go func(name string) {
+			var out bytes.Buffer
+			err := prov.ShellStreamOut(ctx, name, nil, &out,
+				"sh", "-c", "for i in $(seq 1 "+strconv.Itoa(ticks)+"); do echo tick-$i; sleep "+tickEvery+"; done")
+			results <- result{name: name, lines: strings.Count(out.String(), "tick-"), err: err}
+		}(name)
+	}
+	for range names {
+		got := <-results
+		if got.err != nil {
+			t.Errorf("the long-lived stream into %s died while its sibling's stream was open — the address flap's signature: %v", got.name, got.err)
+			continue
+		}
+		if got.lines != ticks {
+			t.Errorf("%s's stream delivered %d/%d ticks; a dropped or hijacked connection loses output", got.name, got.lines, ticks)
+		}
+	}
+}

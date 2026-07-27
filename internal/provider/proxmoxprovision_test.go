@@ -156,6 +156,15 @@ func stubProvisioning(t *testing.T) string {
 	return dir
 }
 
+// agentInterfacesFor is agentInterfaces with a per-VM address (192.168.1.<id>).
+// Two VMs behind registerVM must not present the same lease: that is what a
+// real pool looks like once the template build resets the machine identity,
+// and guardSharedAddress refuses an address two VMs claim — deliberately, so a
+// fixture reusing one canned address would trip it in every multi-VM test.
+func agentInterfacesFor(id int) string {
+	return strings.Replace(agentInterfaces, "192.168.1.50", fmt.Sprintf("192.168.1.%d", id), 1)
+}
+
 // registerVM registers every per-VM route the finalize path touches for one VMID:
 // its status, the guest-IP discovery pair (config + agent interfaces + ping), the
 // power and resize tasks, and the cloud-init config write / regenerate (recorded
@@ -169,7 +178,7 @@ func registerVM(m *pveMock, rec *createRecorder, id int) {
 		_, _ = fmt.Fprintf(w, `{"data":{"vmid":%d,"name":%q,"status":"stopped"}}`, id, rec.nameFor(id))
 	})
 	m.data(base+"/agent/ping", `null`)
-	m.data(base+"/agent/network-get-interfaces", agentInterfaces)
+	m.data(base+"/agent/network-get-interfaces", agentInterfacesFor(id))
 
 	m.on(base+"/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
@@ -402,7 +411,7 @@ func TestProxmoxConcurrentCreatesSerializeClones(t *testing.T) {
 
 	// Pre-seed a CURRENT base template so both creates skip the build and race
 	// straight to the clone — the step under test.
-	dir := stubProvisioning(t)
+	stubProvisioning(t)
 	shortAgentPolling(t, 5*time.Second)
 	// The listing is DYNAMIC — the base template plus every clone recorded so far
 	// — because a real /cluster/resources reflects a sibling's just-created clone,
@@ -446,9 +455,9 @@ func TestProxmoxConcurrentCreatesSerializeClones(t *testing.T) {
 	quietSSH(p) // stateless: two Create goroutines drive the transport at once
 
 	// Stamp the base as current so baseStale reuses it rather than rebuilding.
-	want, err := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	want, err := p.templateVersion(webConfig())
 	if err != nil {
-		t.Fatalf("PlaybookVersion: %v", err)
+		t.Fatalf("templateVersion: %v", err)
 	}
 	if err := provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now()); err != nil {
 		t.Fatalf("WriteBaseVersion: %v", err)
@@ -659,7 +668,7 @@ func TestProxmoxRecreateForceDeletesThenClones(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{nextID: 100} // clone takes 101
 
-	dir := stubProvisioning(t)
+	stubProvisioning(t)
 	shortAgentPolling(t, 5*time.Second)
 	// The target VM (web, VMID 105) exists and is running; the base template
 	// (100) exists and is current.
@@ -695,7 +704,7 @@ func TestProxmoxRecreateForceDeletesThenClones(t *testing.T) {
 
 	p := newProxmoxForTest(t, m)
 	recordSSH(p)
-	want, _ := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	want, _ := p.templateVersion(webConfig())
 	_ = provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now())
 
 	if err := p.Recreate(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
@@ -726,7 +735,7 @@ func TestProxmoxResetDeletesAndReclones(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{nextID: 100}
 
-	dir := stubProvisioning(t)
+	stubProvisioning(t)
 	shortAgentPolling(t, 5*time.Second)
 	m.data("/cluster/resources", `[
 	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","template":1},
@@ -756,7 +765,7 @@ func TestProxmoxResetDeletesAndReclones(t *testing.T) {
 
 	p := newProxmoxForTest(t, m)
 	recordSSH(p)
-	want, _ := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	want, _ := p.templateVersion(webConfig())
 	_ = provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now())
 
 	if err := p.Reset(context.Background(), webConfig(), provision.ResetOptions{}, nil); err != nil {
@@ -780,7 +789,7 @@ func TestProxmoxResetPreservesStateOverSSH(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{nextID: 100}
 
-	dir := stubProvisioning(t)
+	stubProvisioning(t)
 	shortAgentPolling(t, 5*time.Second)
 	// The source VM is present and RUNNING so tar can read from it.
 	m.data("/cluster/resources", `[
@@ -807,7 +816,7 @@ func TestProxmoxResetPreservesStateOverSSH(t *testing.T) {
 
 	p := newProxmoxForTest(t, m)
 	argvs := recordSSH(p)
-	want, _ := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	want, _ := p.templateVersion(webConfig())
 	_ = provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now())
 
 	cfg := webConfig()
@@ -1142,7 +1151,7 @@ func TestProxmoxResetFailsCleanlyWhenRecloneFails(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{nextID: 100}
 
-	dir := stubProvisioning(t)
+	stubProvisioning(t)
 	shortAgentPolling(t, 5*time.Second)
 	m.data("/cluster/resources", `[
 	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","template":1},
@@ -1161,7 +1170,7 @@ func TestProxmoxResetFailsCleanlyWhenRecloneFails(t *testing.T) {
 
 	p := newProxmoxForTest(t, m)
 	recordSSH(p)
-	want, _ := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	want, _ := p.templateVersion(webConfig())
 	_ = provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now())
 
 	if err := p.Reset(context.Background(), webConfig(), provision.ResetOptions{}, nil); err == nil {
@@ -1346,4 +1355,89 @@ func TestProxmoxCleanupVMTellsTheUserWhatToRemoveByHand(t *testing.T) {
 			t.Errorf("cleanup output = %q; want the unconfirmed-deletion note", out.String())
 		}
 	})
+}
+
+// TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating pins the fix for a
+// field failure: a template that keeps the machine-id its build's boot
+// committed hands every clone the same systemd-networkd DHCP client identity,
+// the DHCP server hands them all ONE lease, and the clones fight over the
+// address forever (see generalizeScript). The reset must run in the BASE guest
+// — after its playbook, so nothing later re-commits an identity — and exactly
+// once: the clone's own boot must regenerate, never re-truncate, its id.
+func TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+	stubProvisioning(t)
+	shortAgentPolling(t, 5*time.Second)
+	p := newProxmoxForTest(t, m)
+	argvs := recordSSH(p)
+
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	playbook, truncate := -1, -1
+	truncates := 0
+	for i, argv := range *argvs {
+		joined := strings.Join(argv, " ")
+		if playbook == -1 && strings.Contains(joined, "ansible-playbook") {
+			playbook = i // the BASE phase: the first playbook run of the build
+		}
+		if strings.Contains(joined, "truncate -s 0 /etc/machine-id") {
+			truncate = i
+			truncates++
+		}
+	}
+	if truncate == -1 {
+		t.Fatalf("no ssh command reset /etc/machine-id — every clone of this template will share one DHCP identity; commands: %v", *argvs)
+	}
+	if truncates != 1 {
+		t.Errorf("machine-id reset ran %d times; want exactly once, in the base guest", truncates)
+	}
+	if playbook == -1 || truncate < playbook {
+		t.Errorf("machine-id reset ran at ssh command %d, before the base playbook at %d — a later step could re-commit an identity", truncate, playbook)
+	}
+}
+
+// TestProxmoxTemplateGenerationInvalidatesPreFixTemplates proves the migration
+// path: a template stamped before the machine-identity reset existed — its
+// stamp is the bare playbook version — must read as STALE under the new
+// generation-suffixed stamp, so the next create rebuilds it instead of quietly
+// cloning more same-identity VMs from it forever. A template stamped with the
+// current templateVersion reads as current.
+func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
+	m := newPVEMock(t)
+	stubProvisioning(t)
+	p := newProxmoxForTest(t, m)
+
+	dir, err := locatePlaybookFn()
+	if err != nil {
+		t.Fatalf("locate playbook: %v", err)
+	}
+	preFix, err := provision.PlaybookVersion(os.DirFS(dir), webConfig().ToolsetKey())
+	if err != nil {
+		t.Fatalf("PlaybookVersion: %v", err)
+	}
+	if err := provision.WriteBaseVersion(p.files, "sandbar-base", preFix, time.Now()); err != nil {
+		t.Fatalf("WriteBaseVersion: %v", err)
+	}
+	stale, why := p.baseStale(webConfig())
+	if !stale {
+		t.Fatal("a template stamped before the identity reset was judged current; it must rebuild")
+	}
+	if !strings.Contains(why, "template preparation") {
+		t.Errorf("staleness reason = %q; want it to name the template preparation among the causes", why)
+	}
+
+	current, err := p.templateVersion(webConfig())
+	if err != nil {
+		t.Fatalf("templateVersion: %v", err)
+	}
+	if err := provision.WriteBaseVersion(p.files, "sandbar-base", current, time.Now()); err != nil {
+		t.Fatalf("WriteBaseVersion: %v", err)
+	}
+	if stale, why := p.baseStale(webConfig()); stale {
+		t.Fatalf("a template stamped with the current version was judged stale (%s); it must be reused", why)
+	}
 }
