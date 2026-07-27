@@ -50,9 +50,27 @@
   ],
   "packageRules": [
     {
-      "description": "Never automerge GitHub Actions updates; require manual review",
+      "description": "Tagged action releases: cooldown, then automerge",
       "matchManagers": ["github-actions"],
-      "automerge": false
+      "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Major action bumps: cooldown, then automerge",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "3 days",
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Pure digest moves: no timestamp available, always review",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["digest", "pinDigest", "pin"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
     },
     {
       "description": "Node.js base image: only offer LTS (even-numbered) majors, and require manual review since these are major bumps",
