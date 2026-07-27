@@ -154,6 +154,51 @@ func proxmoxContainsVM(vms []vm.VM, name string) bool {
 	return false
 }
 
+// proxmoxE2EClient builds a raw pve.Client scoped exactly as the provider under
+// test is: same token file, same node, same TLS posture. Tests that need to act
+// on the hypervisor from OUTSIDE the provider — to prove the token is refused,
+// or to cut a VM's power out from under a live session — drive this directly.
+func proxmoxE2EClient(t *testing.T, cfg provider.TargetConfig) *pve.Client {
+	t.Helper()
+	token, err := os.ReadFile(os.Getenv(proxmoxE2ETokenFile))
+	if err != nil {
+		t.Fatalf("read token file: %v", err)
+	}
+	// pve.Config.Host carries the port as "host:port" (a bare host gets :8006);
+	// reconstruct the pair the profile split apart in proxmoxE2ETargetConfig.
+	host := cfg.Host
+	if cfg.Port > 0 {
+		host = net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+	}
+	client, err := pve.New(pve.Config{
+		Host:               host,
+		Node:               cfg.Node,
+		TokenID:            strings.TrimSpace(string(token)),
+		InsecureSkipVerify: cfg.Insecure,
+	})
+	if err != nil {
+		t.Fatalf("pve.New: %v", err)
+	}
+	return client
+}
+
+// proxmoxE2EVMID resolves a pool member's name to its VMID through the same
+// pool listing the provider uses, so a test can address it on the raw client.
+func proxmoxE2EVMID(t *testing.T, client *pve.Client, pool, name string) int {
+	t.Helper()
+	vms, err := client.ListVMs(context.Background(), pool)
+	if err != nil {
+		t.Fatalf("listing pool %q: %v", pool, err)
+	}
+	for _, r := range vms {
+		if r.Name == name {
+			return r.VMID
+		}
+	}
+	t.Fatalf("%s is not in pool %q: %+v", name, pool, vms)
+	return 0
+}
+
 // TestE2EProxmoxLifecycle is one cohesive integration test: preflight, create
 // (which builds the base template on the first run), list, a plain
 // non-interactive ShellOut, host-resource sampling, reset, and delete.
@@ -272,25 +317,7 @@ func TestE2EProxmoxPoolIsolation(t *testing.T) {
 	// Delete resolve names through a pool listing, and a foreign VM is not in it,
 	// so this drives the client at the VMID directly, which is the sharper test:
 	// it proves the TOKEN is refused, not merely that the name is unlisted.
-	token, err := os.ReadFile(os.Getenv(proxmoxE2ETokenFile))
-	if err != nil {
-		t.Fatalf("read token file: %v", err)
-	}
-	// pve.Config.Host carries the port as "host:port" (a bare host gets :8006);
-	// reconstruct the pair the profile split apart in proxmoxE2ETargetConfig.
-	host := cfg.Host
-	if cfg.Port > 0 {
-		host = net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	}
-	client, err := pve.New(pve.Config{
-		Host:               host,
-		Node:               cfg.Node,
-		TokenID:            strings.TrimSpace(string(token)),
-		InsecureSkipVerify: cfg.Insecure,
-	})
-	if err != nil {
-		t.Fatalf("pve.New: %v", err)
-	}
+	client := proxmoxE2EClient(t, cfg)
 
 	ctx := context.Background()
 
@@ -320,4 +347,130 @@ func TestE2EProxmoxPoolIsolation(t *testing.T) {
 	// read the foreign VM's state to confirm it, and borrowing an admin token
 	// into an automated test would defeat the very isolation being proven. The
 	// three permission refusals above are what a token CAN establish on its own.
+}
+
+// TestE2EProxmoxSessionDiesWhenTheGuestVanishes proves the keepalive fix does
+// what it claims on a real guest, which no unit test can reach.
+//
+// TestSSHKeepalivesAlwaysThreaded (internal/lima) pins ServerAliveInterval and
+// ServerAliveCountMax onto every ssh argv this codebase builds. That is an argv
+// assertion: it proves the options are REQUESTED, never that OpenSSH honours
+// them against a peer that has actually stopped answering. The bug being
+// guarded is a hang, and a hang is only observable end to end.
+//
+// The cut is a HARD stop (PVE's status/stop, not status/shutdown), because the
+// point is a guest that vanishes WITHOUT closing its TCP connections. A clean
+// shutdown sends FIN, ssh notices immediately, and the test would pass with the
+// keepalives stripped out — proving nothing.
+//
+// Two deliberate choices keep this honest rather than merely green:
+//
+//   - The silent command runs on context.Background(), NOT a context with a
+//     deadline. A deadline would cancel the call itself, so the test would pass
+//     on a build where the keepalives do nothing. The ONLY thing that may end
+//     that call is ssh giving up. The ceiling below is enforced outside it, and
+//     tripping it is a FAILURE, not a cancellation.
+//   - The bound is deliberately loose. The fix targets ~120s (15s x 8), and the
+//     bug it replaced was an unbounded wait against the kernel's two-hour idle
+//     timer. Asserting a tight window around 120s on a shared hypervisor would
+//     buy nothing and flake; a five-minute ceiling is still 24x tighter than the
+//     behaviour being guarded against, and cannot flake under ordinary load.
+func TestE2EProxmoxSessionDiesWhenTheGuestVanishes(t *testing.T) {
+	const (
+		// Long enough that the session is unambiguously established and idle
+		// before the power is cut — the failure being reproduced is an IDLE
+		// session reaped mid-task, not a connection that never came up.
+		idleBeforeCut = 20 * time.Second
+		// See the doc comment: loose on purpose.
+		mustDieWithin = 5 * time.Minute
+		// Comfortably longer than the ceiling, so the command's own completion
+		// can never be what ends the wait.
+		silentFor = "600"
+	)
+
+	cfg := skipUnlessProxmoxE2EConfigured(t)
+
+	prov, err := provider.NewProxmox(cfg)
+	if err != nil {
+		t.Fatalf("NewProxmox: %v", err)
+	}
+	if err := prov.Preflight(); err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+
+	name := "sand-pve-cut-" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+	t.Cleanup(func() { _ = prov.Delete(name, true) })
+
+	vmCfg := vm.CreateConfig{
+		Name:     name,
+		BaseName: vm.DefaultCreateConfig().BaseName,
+		User:     os.Getenv(proxmoxE2ESSHUser),
+		GitName:  "Sand PVE E2E",
+		GitEmail: "sand-pve-e2e@example.com",
+		CPUs:     2,
+		Memory:   "2GiB",
+		Disk:     vm.BaseDiskFloor,
+		Domain:   "lan",
+		Locale:   "en_US.UTF-8",
+	}
+
+	ctx := context.Background()
+	var createLog bytes.Buffer
+	if err := prov.Create(ctx, vmCfg, provision.CreateOptions{}, &createLog); err != nil {
+		t.Fatalf("Create: %v\n%s", err, createLog.String())
+	}
+
+	// Establish that the transport works BEFORE breaking it, so a failure below
+	// cannot be quietly explained by a guest that was never reachable.
+	if _, err := prov.ShellOut(ctx, name, "true"); err != nil {
+		t.Fatalf("the guest was not reachable before the cut, so this test proves nothing: %v", err)
+	}
+
+	client := proxmoxE2EClient(t, cfg)
+	vmid := proxmoxE2EVMID(t, client, cfg.Pool, name)
+
+	type outcome struct {
+		err     error
+		elapsed time.Duration
+	}
+	done := make(chan outcome, 1)
+	started := time.Now()
+	go func() {
+		_, err := prov.ShellOut(context.Background(), name, "sleep", silentFor)
+		done <- outcome{err: err, elapsed: time.Since(started)}
+	}()
+
+	// Let it go quiet on the channel, and make sure it really is still running.
+	select {
+	case got := <-done:
+		t.Fatalf("`sleep %s` returned after %s, before the guest was cut — the session ended for some reason other than the one under test: %v",
+			silentFor, got.elapsed, got.err)
+	case <-time.After(idleBeforeCut):
+	}
+
+	// Pull the power. No FIN, no RST: from the client's side the peer simply
+	// stops answering, which is the condition the keepalives exist to detect.
+	if _, err := client.StopVM(context.Background(), vmid); err != nil {
+		t.Fatalf("hard-stopping %s (VMID %d): %v", name, vmid, err)
+	}
+	cut := time.Now()
+
+	select {
+	case got := <-done:
+		if got.err == nil {
+			t.Fatalf("`sleep %s` returned SUCCESSFULLY %s after the guest was hard-stopped — the session cannot have survived, so this result is not trustworthy",
+				silentFor, time.Since(cut))
+		}
+		// Any error would end the wait; only a TRANSPORT error means the
+		// keepalives did it. Without this the test would pass on an unrelated
+		// failure and quietly stop guarding anything.
+		if !strings.Contains(got.err.Error(), "the ssh transport failed") {
+			t.Fatalf("the session ended %s after the cut, but not as a transport failure — got %v; want transportError's annotation (ssh exit %d)",
+				time.Since(cut), got.err, 255)
+		}
+		t.Logf("the session was declared dead %s after the guest vanished (%s total)", time.Since(cut).Round(time.Second), got.elapsed.Round(time.Second))
+	case <-time.After(mustDieWithin):
+		t.Fatalf("the ssh session was STILL blocked %s after the guest was hard-stopped: the keepalives are not ending a session whose peer stopped answering, which is the exact hang they were added to bound",
+			mustDieWithin)
+	}
 }
