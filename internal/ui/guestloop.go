@@ -52,6 +52,16 @@ import (
 // unreaped loop can run.
 const guestLoopTTL = 30 * time.Minute
 
+// guestLoopRotateAfter is how old a guest stream must be for its end to be
+// read as the loop's own scheduled TTL exit rather than a failure. The loop
+// runs a fixed pass count whose sleeps alone take the whole TTL, so a real
+// loop always lives slightly OVER guestLoopTTL and never meaningfully under
+// it; one minute of slack keeps the classification unambiguous. A stream this
+// old that ends did what it was built to do — announcing it as "lost the
+// guest connection" (and paying a retry cooldown) would turn a planned
+// rotation into a twice-hourly false alarm per VM.
+const guestLoopRotateAfter = guestLoopTTL - time.Minute
+
 // guestLoop is one long-lived in-guest probe: a body run every interval, framed
 // by the janitor and the pass counter above.
 type guestLoop struct {

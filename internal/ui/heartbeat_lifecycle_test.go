@@ -677,3 +677,62 @@ func TestConsecutiveHeartbeatDeathsBackOffAndAReadingResetsThem(t *testing.T) {
 		t.Fatalf("after a good reading the backoff restarted at %s, want %s", wait, heartbeatRetry)
 	}
 }
+
+// The guest loop BOUNDS its own lifetime: it counts passes and exits after
+// guestLoopTTL, and the host's ordinary reconnect brings the next one
+// (guestloop.go). That scheduled exit used to be indistinguishable from a
+// loss, so every VM put a "lost the guest connection" warning in the log twice
+// an hour and paid a retry cooldown for a stream that did exactly what it was
+// built to do. A connected stream about as old as the TTL is a ROTATION: no
+// announcement, no failure count, no cooldown — the next sync reopens it at
+// once. A young stream dying is still a loss, with everything a loss earns.
+func TestHeartbeatTTLRotationIsNotALoss(t *testing.T) {
+	r := newHeartbeats(nil) // no shell: drive the registry directly
+	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
+
+	r.beats[key] = &heartbeat{epoch: 1, seen: true, started: time.Now().Add(-guestLoopTTL)}
+	lost, wait := r.ended(registry.LocalScope, "web", 1)
+	if lost {
+		t.Fatal("a TTL-old stream's end was reported as a loss; the log would cry wolf twice an hour per VM")
+	}
+	if wait != 0 {
+		t.Fatalf("a rotation asked for a %s retry delay; want none", wait)
+	}
+	if _, ok := r.cooldown[key]; ok {
+		t.Fatal("a rotation started a cooldown; the reconnect must be immediate")
+	}
+	if r.fails[key] != 0 {
+		t.Fatalf("a rotation counted %d failures; a later real loss would start its backoff inflated", r.fails[key])
+	}
+
+	// A young connected stream dying is a genuine loss and keeps its warning,
+	// its failure count, and its cooldown.
+	r.beats[key] = &heartbeat{epoch: 2, seen: true, started: time.Now()}
+	lost, wait = r.ended(registry.LocalScope, "web", 2)
+	if !lost {
+		t.Fatal("a young connected stream's death must still be reported as a loss")
+	}
+	if wait != heartbeatRetry {
+		t.Fatalf("a first loss waited %s; want the base %s", wait, heartbeatRetry)
+	}
+}
+
+// The sweep shares the guest loop's TTL, so it earns the same rotation
+// treatment: a scheduled exit must not put the VM in a retry cooldown.
+func TestSweepTTLRotationSkipsTheCooldown(t *testing.T) {
+	r := newSweeps(nil)
+	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
+
+	r.sweeps[key] = &sweepConn{epoch: 1, started: time.Now().Add(-guestLoopTTL)}
+	if _, wait := r.ended(registry.LocalScope, "web", 1); wait != 0 {
+		t.Fatalf("a rotation asked for a %s retry delay; want none", wait)
+	}
+	if _, ok := r.cooldown[key]; ok {
+		t.Fatal("a sweep rotation started a cooldown; the reconnect must be immediate")
+	}
+
+	r.sweeps[key] = &sweepConn{epoch: 2, started: time.Now()}
+	if _, wait := r.ended(registry.LocalScope, "web", 2); wait != sweepRetry {
+		t.Fatalf("a young sweep stream's death waited %s; want the base %s", wait, sweepRetry)
+	}
+}

@@ -480,6 +480,11 @@ type heartbeat struct {
 	cancel context.CancelFunc
 	ch     chan guestSample
 
+	// started is when this connection opened, and is what lets ended tell the
+	// guest loop's scheduled TTL exit (a stream about guestLoopTTL old) from a
+	// genuine loss.
+	started time.Time
+
 	last guestSample
 	seen bool
 }
@@ -511,11 +516,12 @@ type heartbeatRegistry struct {
 	nextEpoch uint64
 
 	// shell resolves the backend seam for a heartbeat's scope (fleet.go's
-	// per-member provider); interval and retry are settable so the lifecycle
-	// tests need not sleep for real seconds.
-	shell    shellFor
-	interval time.Duration
-	retry    time.Duration
+	// per-member provider); interval, retry and rotateAfter are settable so the
+	// lifecycle tests need not sleep for real seconds (or half-hours).
+	shell       shellFor
+	interval    time.Duration
+	retry       time.Duration
+	rotateAfter time.Duration
 }
 
 // newHeartbeats builds a registry whose heartbeats all open through the SAME
@@ -528,12 +534,13 @@ func newHeartbeats(shell guestShell) *heartbeatRegistry {
 
 func newHeartbeatsResolver(resolve shellFor) *heartbeatRegistry {
 	return &heartbeatRegistry{
-		beats:    make(map[vmHandle]*heartbeat),
-		cooldown: make(map[vmHandle]time.Time),
-		fails:    make(map[vmHandle]int),
-		shell:    resolve,
-		interval: heartbeatInterval,
-		retry:    heartbeatRetry,
+		beats:       make(map[vmHandle]*heartbeat),
+		cooldown:    make(map[vmHandle]time.Time),
+		fails:       make(map[vmHandle]int),
+		shell:       resolve,
+		interval:    heartbeatInterval,
+		retry:       heartbeatRetry,
+		rotateAfter: guestLoopRotateAfter,
 	}
 }
 
@@ -610,7 +617,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
-	r.beats[key] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch}
+	r.beats[key] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch, started: time.Now()}
 	interval := r.interval
 	r.mu.Unlock()
 
@@ -732,6 +739,16 @@ func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint6
 		return false, 0
 	}
 	delete(r.beats, key)
+	// A CONNECTED stream about as old as the guest loop's TTL did not fail: the
+	// in-guest loop counts its passes and exits on schedule (guestLoopTTL), and
+	// the very next syncHeartbeats reopens it. No warning, no failure count, no
+	// cooldown — a planned rotation announced as "lost the guest connection"
+	// (with a retry gap behind it) is a twice-hourly false alarm per VM.
+	// The started guard is not decorative: an unknown start time must read as
+	// "not provably old", never as ancient.
+	if hb.seen && !hb.started.IsZero() && r.rotateAfter > 0 && time.Since(hb.started) >= r.rotateAfter {
+		return false, 0
+	}
 	r.fails[key]++
 	wait := backoff(r.retry, r.fails[key], heartbeatRetryMax)
 	r.cooldown[key] = time.Now().Add(wait)
