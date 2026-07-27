@@ -10,3 +10,7 @@ dist/
 
 # MkDocs build output
 site/
+
+# Local env for the opt-in e2e suites (host names, pool, token file paths).
+# `sand` itself reads no env vars — these belong to the tests alone.
+.env
