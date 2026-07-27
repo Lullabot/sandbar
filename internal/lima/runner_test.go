@@ -3,7 +3,9 @@ package lima
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -103,3 +105,53 @@ func TestStreamReapsAnOrphanedGrandchildHoldingThePipe(t *testing.T) {
 // inherited stdout/stderr open — the `limactl shell` -> ssh relationship, in one
 // line of POSIX sh.
 const orphanScript = `sleep 60 & sleep 60`
+
+// A held-pipe SUCCESS must be a success. The FIRST mux ssh to a target forks
+// the ControlPersist master, and on some OpenSSH builds that master inherits
+// (and keeps) the stderr pipe for its whole persist window — so the child
+// exits 0, its output is fully drained, and Wait still comes back with
+// exec.ErrWaitDelay, which Go documents as replacing only a NIL error.
+// Observed in the field as a Proxmox base build whose ten-minute dependency
+// install succeeded and was then reported "Failed: … exec: WaitDelay expired
+// before I/O complete" — and purged. The holderScript below is that
+// relationship in one line of sh, exactly as orphanScript is for the cancel
+// case.
+func TestAHeldPipeAfterSuccessIsNotAFailure(t *testing.T) {
+	r := &execRunner{bin: "sh"}
+
+	var out bytes.Buffer
+	start := time.Now()
+	err := r.Stream(context.Background(), nil, &out, "-c", holderScript+"; echo done")
+	if err != nil {
+		t.Fatalf("Stream reported %v for a command that exited 0; a lingering pipe-holder is not the command's failure", err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("done")) {
+		t.Fatalf("Stream output %q lost the child's own output; want it drained in full before the pipes were given up on", out.String())
+	}
+	// The wait really was bounded by WaitDelay — proving the holder held the
+	// pipes and the suppression (not a fast clean exit) is what was exercised.
+	if elapsed := time.Since(start); elapsed < waitDelay {
+		t.Fatalf("Stream returned in %s, before WaitDelay (%s) — the grandchild did not hold the pipes and this test proved nothing", elapsed, waitDelay)
+	}
+}
+
+// The suppression maps ONLY the held-pipe success: a child that FAILS while a
+// grandchild holds its pipes must still report its own failure.
+func TestAHeldPipeDoesNotMaskARealFailure(t *testing.T) {
+	r := &execRunner{bin: "sh"}
+
+	var out bytes.Buffer
+	err := r.Stream(context.Background(), nil, &out, "-c", holderScript+"; exit 7")
+	if err == nil {
+		t.Fatal("Stream reported success for a child that exited 7")
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 7 {
+		t.Fatalf("Stream error = %v; want the child's own exit status 7", err)
+	}
+}
+
+// holderScript backgrounds a child that inherits and holds the shell's
+// stdout/stderr past waitDelay while the shell itself exits promptly — the
+// ssh -> ControlPersist-master relationship, in one line of POSIX sh.
+const holderScript = `(sleep 5 &)`

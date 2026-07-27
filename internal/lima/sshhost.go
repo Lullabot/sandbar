@@ -544,7 +544,7 @@ func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, ar
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.WaitDelay = waitDelay // a cancel must REAP the whole ssh->limactl->guest chain
-	return cmd.Run()
+	return SuccessDespiteHeldPipes(cmd.Run())
 }
 
 // StreamOut runs `ssh … limactl args…`, streaming stdout ONLY to out and keeping
@@ -559,7 +559,7 @@ func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer,
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = waitDelay
-	err := cmd.Run()
+	err := SuccessDespiteHeldPipes(cmd.Run())
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			err = fmt.Errorf("%w: %s", err, msg)
@@ -1037,7 +1037,7 @@ func (h *SSHHost) scp(ctx context.Context, out io.Writer, recursive bool, from, 
 	f := &scpDebugFilter{w: out}
 	cmd.Stdout = f
 	cmd.Stderr = f
-	err := cmd.Run()
+	err := SuccessDespiteHeldPipes(cmd.Run())
 	if ferr := f.Flush(); err == nil {
 		err = ferr
 	}
