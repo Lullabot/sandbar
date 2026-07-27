@@ -727,6 +727,121 @@ func TestProxmoxGuestIPNoMatchingInterface(t *testing.T) {
 	}
 }
 
+// registerIPResolution wires one VM's whole address-resolution path (status,
+// config with mac on net0, agent interfaces reporting ip on that mac) so the
+// shared-address tests below can give each VM its own — or deliberately the
+// same — lease.
+func registerIPResolution(m *pveMock, vmid int, name, mac, ip string) {
+	base := fmt.Sprintf("/nodes/pve1/qemu/%d", vmid)
+	m.data(base+"/status/current", fmt.Sprintf(`{"vmid":%d,"name":%q,"status":"running"}`, vmid, name))
+	m.data(base+"/config", fmt.Sprintf(`{"name":%q,"net0":"virtio=%s,bridge=vmbr0"}`, name, mac))
+	m.data(base+"/agent/network-get-interfaces", fmt.Sprintf(`{"result":[
+	  {"name":"eth0","hardware-address":%q,"ip-addresses":[{"ip-address":%q,"ip-address-type":"ipv4","prefix":24}]}
+	]}`, strings.ToLower(mac), ip))
+}
+
+// TestProxmoxGuestIPRefusesASharedAddress proves the DHCP-collision guard: two
+// VMs whose guest agents genuinely both claim one address (the observed result
+// of clones sharing a machine-id-derived DHCP client identity) must make
+// guestIP fail LOUDLY for BOTH names, naming both VMs — because a connection
+// to that address reaches whichever guest last won the ARP fight, and sand
+// must never stream one VM's commands (or secrets) into the other.
+func TestProxmoxGuestIPRefusesASharedAddress(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	registerIPResolution(m, 100, "web", testMAC, "192.168.1.50")
+	registerIPResolution(m, 101, "api", "BC:24:11:AA:BB:DD", "192.168.1.50")
+	p := newProxmoxForTest(t, m)
+
+	if _, err := p.List(); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := p.guestIP(context.Background(), "web"); err != nil {
+		t.Fatalf("the first VM's address resolves without a rival: %v", err)
+	}
+	_, err := p.guestIP(context.Background(), "api")
+	if err == nil {
+		t.Fatal("guestIP(api) succeeded on an address web already claims; want a refusal")
+	}
+	for _, want := range []string{"web", "api", "192.168.1.50", "machine-id"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the shared-address error must mention %q for the user to act on it; got:\n%v", want, err)
+		}
+	}
+
+	// SYMMETRIC: the first claimant's address is exactly as ambiguous as the
+	// second's, so it must now be refused too — not quietly kept working
+	// against whichever guest answers.
+	if _, err := p.guestIP(context.Background(), "web"); err == nil {
+		t.Fatal("guestIP(web) still succeeded after the address was found to be shared")
+	}
+}
+
+// TestProxmoxGuestIPSharedAddressStaleCacheRecovers proves the guard does not
+// condemn on a stale cache entry: when the earlier claimant's agent now
+// reports a DIFFERENT address (its lease moved), the collision was historical
+// — the cache is corrected and both VMs resolve.
+func TestProxmoxGuestIPSharedAddressStaleCacheRecovers(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	registerIPResolution(m, 100, "web", testMAC, "192.168.1.50")
+	registerIPResolution(m, 101, "api", "BC:24:11:AA:BB:DD", "192.168.1.50")
+	p := newProxmoxForTest(t, m)
+
+	if _, err := p.List(); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := p.guestIP(context.Background(), "web"); err != nil {
+		t.Fatalf("guestIP(web): %v", err)
+	}
+
+	// web's lease moves on: its agent now reports .60, while the cache still
+	// says .50 — the one staleness invalidateGuest's power-transition hook
+	// cannot see.
+	registerIPResolution(m, 100, "web", testMAC, "192.168.1.60")
+
+	ip, err := p.guestIP(context.Background(), "api")
+	if err != nil {
+		t.Fatalf("guestIP(api) refused an address whose rival claim was stale: %v", err)
+	}
+	if ip != "192.168.1.50" {
+		t.Fatalf("guestIP(api) = %q; want 192.168.1.50", ip)
+	}
+	// And the re-resolution corrected web's entry in passing.
+	if ip, _ := p.guestIP(context.Background(), "web"); ip != "192.168.1.60" {
+		t.Fatalf("guestIP(web) = %q after its lease moved; want the fresh 192.168.1.60", ip)
+	}
+}
+
+// TestProxmoxGuestIPSharedAddressUnreachableClaimantIsDropped proves the guard
+// treats a claimant it cannot re-verify (stopped, agent down) as not answering
+// on the address: its stale entry is dropped and the resolving VM proceeds.
+func TestProxmoxGuestIPSharedAddressUnreachableClaimantIsDropped(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", clusterResources)
+	registerIPResolution(m, 100, "web", testMAC, "192.168.1.50")
+	registerIPResolution(m, 101, "api", "BC:24:11:AA:BB:DD", "192.168.1.50")
+	p := newProxmoxForTest(t, m)
+
+	if _, err := p.List(); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := p.guestIP(context.Background(), "web"); err != nil {
+		t.Fatalf("guestIP(web): %v", err)
+	}
+
+	// web goes dark: its agent no longer answers (a stopped VM outside sand's
+	// own power path, so nothing invalidated the cache).
+	m.fail("/nodes/pve1/qemu/100/agent/network-get-interfaces", 500, "QEMU guest agent is not running")
+
+	if _, err := p.guestIP(context.Background(), "api"); err != nil {
+		t.Fatalf("guestIP(api) refused an address whose rival cannot be answering on it: %v", err)
+	}
+	if _, ok := p.cachedGuestIP("web"); ok {
+		t.Fatal("web's unverifiable address claim should have been dropped from the cache")
+	}
+}
+
 func TestProxmoxNet0MACParsing(t *testing.T) {
 	cases := []struct {
 		name, net0, want string

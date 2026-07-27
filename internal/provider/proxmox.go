@@ -900,21 +900,78 @@ func (p *proxmoxProvider) waitGuestIP(ctx context.Context, vmid int, name string
 
 // --- guest address discovery ----------------------------------------------------
 
-// guestIP resolves name's reachable address, from cache when possible.
+// guestIP resolves name's reachable address, from cache when possible — and
+// refuses to hand out an address another VM in the pool is ALSO claiming
+// (guardSharedAddress).
 func (p *proxmoxProvider) guestIP(ctx context.Context, name string) (string, error) {
-	if ip, ok := p.cachedGuestIP(name); ok {
-		return ip, nil
+	ip, ok := p.cachedGuestIP(name)
+	if !ok {
+		vmid, _, err := p.resolve(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		if ip, err = p.resolveGuestIP(ctx, vmid, name); err != nil {
+			return "", err
+		}
+		p.setGuestIP(name, ip)
 	}
-	vmid, _, err := p.resolve(ctx, name)
-	if err != nil {
+	if err := p.guardSharedAddress(ctx, name, ip); err != nil {
 		return "", err
 	}
-	ip, err := p.resolveGuestIP(ctx, vmid, name)
-	if err != nil {
-		return "", err
-	}
-	p.setGuestIP(name, ip)
 	return ip, nil
+}
+
+// guardSharedAddress refuses to use an address that two VMs are BOTH claiming,
+// because a connection to it is a coin flip: ssh reaches whichever guest most
+// recently won the ARP fight, the ephemeral host-key posture (sshHost) means
+// nothing detects the swap, and sand would happily stream one VM's provisioning
+// — secrets included — into the other. Observed for real: two clones of a
+// template that still carried its build's /etc/machine-id presented the same
+// systemd-networkd DHCP client identity, the DHCP server handed BOTH the same
+// lease, and every guest probe flapped between them. buildBaseTemplate now
+// strips that identity (generalizeScript), but templates built before it — and
+// any future identity collision — must fail loudly here, naming both VMs, not
+// as an endless silent reconnect loop.
+//
+// A cached claimant is re-resolved before being believed: its entry may simply
+// be stale (a lease that moved without a power transition, the one case
+// invalidateGuest cannot see). A claimant whose fresh resolution fails is
+// dropped rather than condemned — a stopped or unreachable guest is not
+// answering on this address.
+func (p *proxmoxProvider) guardSharedAddress(ctx context.Context, name, ip string) error {
+	other := p.otherClaimant(name, ip)
+	if other == "" {
+		return nil
+	}
+	vmid, ok := p.cachedVMID(other)
+	if !ok {
+		p.invalidateGuest(other)
+		return nil
+	}
+	fresh, err := p.resolveGuestIP(ctx, vmid, other)
+	if err != nil {
+		p.invalidateGuest(other)
+		return nil
+	}
+	p.setGuestIP(other, fresh)
+	if fresh != ip {
+		return nil
+	}
+	return fmt.Errorf("proxmox: %s and %s both report the guest address %s, so a connection to it could reach either VM and sand refuses to use it. "+
+		"Their DHCP server handed one lease to both because they share a DHCP client identity — an /etc/machine-id inherited from the template they were cloned from. "+
+		"Recreate them from a rebuilt base (which now resets that identity), or run `truncate -s 0 /etc/machine-id` in each guest and reboot it", name, other, ip)
+}
+
+// otherClaimant returns another cached name currently mapped to ip, or "".
+func (p *proxmoxProvider) otherClaimant(name, ip string) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for n, cached := range p.ips {
+		if n != name && cached == ip {
+			return n
+		}
+	}
+	return ""
 }
 
 // resolveGuestIP asks the guest agent for the VM's address, matching the
