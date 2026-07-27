@@ -16,7 +16,7 @@
         <link rel="prev" href="../web-servers/">
       
       
-        <link rel="next" href="../../reference/files-and-state/">
+        <link rel="next" href="../proxmox/">
       
       
         
@@ -1007,10 +1007,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#future-providers" class="md-nav__link">
+  <a href="#other-backends" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Future providers
+        Other backends
       
     </span>
   </a>
@@ -1021,6 +1021,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1446,10 +1474,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#future-providers" class="md-nav__link">
+  <a href="#other-backends" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Future providers
+        Other backends
       
     </span>
   </a>
@@ -1494,13 +1522,16 @@ environment variables for this; those are <strong>removed</strong> — see
   <code>local</code>). Names don't need to be unique, though the TUI won't stop you from
   picking a name that collides with another profile's — it's a display label,
   not an identifier.</li>
-<li>A <strong>type</strong> — <code>local</code> or <code>remote-ssh</code>.</li>
-<li><strong>Connection details</strong> — for <code>remote-ssh</code> only: host, SSH user, port, an
+<li>A <strong>type</strong> — <code>local</code>, <code>remote-ssh</code>, or <code>proxmox</code>.</li>
+<li><strong>Connection details</strong> — for <code>remote-ssh</code>: host, SSH user, port, an
   optional path to a private key file, and an optional remote <code>LIMA_HOME</code>.
   Setting a profile's <code>lima_home</code> scopes both the remote instance discovery
   (determining which instances <code>limactl list</code> returns) and file-based state reads
   (base version stamp, provenance markers). Different profiles can point at the
-  same remote host but use different <code>LIMA_HOME</code> paths, isolating their instances.</li>
+  same remote host but use different <code>LIMA_HOME</code> paths, isolating their instances.
+  For <code>proxmox</code>: host, node, pool, storage, bridge, and a path to a token file —
+  see <a href="../proxmox/">Proxmox VE</a> for the full field list and the one-time host
+  setup that scopes the API token to a dedicated pool.</li>
 <li>An <strong>enabled</strong> flag.</li>
 </ul>
 <p>There is always exactly one <strong>Local</strong> profile — permanent, created
@@ -1666,10 +1697,12 @@ profile instead (in the TUI's <code>p</code> screen, or by hand-editing
 mapping (<code>SAND_REMOTE_HOST</code> → <code>host</code>, <code>SAND_REMOTE_USER</code> → <code>user</code>,
 <code>SAND_REMOTE_PORT</code> → <code>port</code>, <code>SAND_REMOTE_IDENTITY</code> → <code>identity_path</code>,
 <code>SAND_REMOTE_LIMA_HOME</code> → <code>lima_home</code>).</p>
-<h2 id="future-providers">Future providers</h2>
-<p>The remote-Lima backend is one implementation of <code>sand</code>'s internal <code>Provider</code>
-seam. That seam is what will let non-Lima backends (Proxmox, DigitalOcean,
-Linode) be added later; none is available yet.</p>
+<h2 id="other-backends">Other backends</h2>
+<p>The local and remote-Lima backends are two implementations of <code>sand</code>'s internal
+<code>Provider</code> seam. A third, <strong><a href="../proxmox/">Proxmox VE</a></strong>, drives VMs through the
+Proxmox REST API with a least-privilege, pool-scoped API token — see that page
+for setup. The same seam is what would let further non-Lima backends
+(DigitalOcean, Linode) be added later; those are not available yet.</p>
 
 
 

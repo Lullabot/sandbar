@@ -709,6 +709,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#proxmox-a-pool-scoped-api-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: a pool-scoped API token
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proxmox: a pool-scoped API token">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#guest-ssh-host-keys-are-not-pinned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guest SSH host keys are not pinned
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -930,6 +958,34 @@
     
   
     Connection Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
   
 
     
@@ -1290,6 +1346,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#proxmox-a-pool-scoped-api-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: a pool-scoped API token
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proxmox: a pool-scoped API token">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#guest-ssh-host-keys-are-not-pinned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guest SSH host keys are not pinned
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1476,6 +1560,46 @@ must. Add a <strong>branch protection rule</strong> (or ruleset) on <code>main</
 other protected branch that <strong>requires a pull request before merging</strong>.
 Without it, nothing prevents an agent from pushing straight to <code>main</code>.</p>
 </div>
+<h2 id="proxmox-a-pool-scoped-api-token">Proxmox: a pool-scoped API token</h2>
+<p>The <a href="../../using-sand/proxmox/">Proxmox</a> backend applies the same
+least-privilege idea to a different boundary: the API token <code>sand</code> uses to
+drive a Proxmox host. The concern there is not an agent inside a VM — it's
+<code>sand</code> itself, on a host that may run VMs you care about and never want <code>sand</code>
+to touch.</p>
+<p>The guarantee is <strong>structural, not behavioural</strong>. <code>sand</code> places every VM it
+creates into a dedicated resource pool, and the token is granted a custom role
+scoped to <code>/pool/&lt;pool&gt;</code>. Proxmox enforces pool permissions by <em>projecting</em> the
+role onto the pool's member VMs and storage only — a VM outside the pool has no
+projection, so the token is denied on it, with no wildcard or path that escapes.
+This is not <code>sand</code> choosing to leave other VMs alone; it is Proxmox refusing the
+token if it tried. The setup guide's
+<a href="../../using-sand/proxmox/#verify-the-scope">verification step</a> is how you confirm
+the token really did end up confined — if any grant lands at <code>/</code>, it hasn't.</p>
+<p>Three privileges (<code>SDN.Use</code> for the bridge, <code>Sys.AccessNetwork</code> for the image
+download, <code>Sys.Audit</code> for node stats) cannot be pool-scoped, because a pool
+holds only VMs and storage. The guide grants each at the narrowest path that
+works and names them explicitly rather than papering over the gap with a broad
+role — none of the three grants any access to another VM.</p>
+<p>The token is a secret, and <code>sand</code> handles it the way it handles every secret:
+the <a href="../files-and-state/#host-paths"><code>profiles.yaml</code></a> file records only a <strong>path</strong>
+to the token file (<code>token_file</code>), never the value, and <code>sand</code> refuses to read a
+token file that is readable by group or other. The credential stays outside the
+config that's safe to share.</p>
+<h3 id="guest-ssh-host-keys-are-not-pinned">Guest SSH host keys are not pinned</h3>
+<p><code>sand</code> reaches a Proxmox guest by SSH to the IP the guest's DHCP lease handed
+out — an address a prior, now-deleted VM very likely used before it. Those VMs
+are cattle: each is freshly created and presents a brand-new host key on an IP
+the last one already put a different key on. So the guest transport
+deliberately runs with <code>StrictHostKeyChecking=no</code> and
+<code>UserKnownHostsFile=/dev/null</code> — trust-on-first-use pinning would fail on the
+first reused IP, and the interactive prompt it falls back to cannot be answered
+from the TUI (it would just hang). The tradeoff is bounded to this backend: it
+means <code>sand</code>'s provisioning traffic to a guest is not protected against an
+on-path attacker <em>on the VM subnet</em> who can impersonate the guest's IP. The
+remote-Lima hop — SSH to a persistent host you configured — keeps host-key
+pinning on, because there the key is stable and a change is worth stopping for.
+Keep the VM subnet one you trust; it is the same network you must already trust
+to reach the guests at all.</p>
 
 
 

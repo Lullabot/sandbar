@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lullabot.github.io/sandbar/main/reference/files-and-state/">
       
       
-        <link rel="prev" href="../../using-sand/connection-profiles/">
+        <link rel="prev" href="../../using-sand/proxmox/">
       
       
         <link rel="next" href="../troubleshooting/">
@@ -858,6 +858,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1378,6 +1406,16 @@ out; every other page links here instead of restating them.</p>
 <td>Lima's own instance store — disk images, <code>lima.yaml</code>, per-instance logs. <code>sand</code> does not own this directory; Lima does.</td>
 <td><code>sand</code> never deletes it directly; use <code>limactl delete</code> or Lima's own tooling.</td>
 </tr>
+<tr>
+<td><code>${XDG_STATE_HOME:-~/.local/state}/sandbar/proxmox/&lt;host&gt;-&lt;node&gt;-&lt;pool&gt;/</code></td>
+<td>For a <a href="../../using-sand/proxmox/">Proxmox</a> profile only: <code>sand</code>'s local state <em>about</em> that endpoint's VMs (the base-version stamp and its lock). Proxmox itself owns the VMs — this holds only what has no home on the Proxmox host. One directory per host/node/pool.</td>
+<td>Yes — <code>sand</code> re-stamps the base on the next build. The VMs on the Proxmox host are untouched.</td>
+</tr>
+<tr>
+<td>Proxmox API <strong>token file</strong> (path you chose, e.g. <code>~/.config/sandbar/pve1.token</code>)</td>
+<td>The <code>user@realm!tokenid=value</code> credential a Proxmox profile's <code>token_file</code> points at. <strong>Not</strong> managed by <code>sand</code> and never written by it — you create it (see <a href="../../using-sand/proxmox/">Proxmox VE</a>). Must be mode <code>0600</code>; <code>sand</code> refuses to read a looser one.</td>
+<td>Only if you're prepared to re-issue the token — it's the sole secret that grants access to the pool.</td>
+</tr>
 </tbody>
 </table>
 <p>Sources: <code>internal/profiles/store.go</code> (<code>profiles.yaml</code> default path, schema, and CRUD), <code>internal/registry/registry.go:53</code> and <code>internal/registry/registry.go:62</code> (<code>managed-vms.json</code> default path), <code>internal/registry/registry.go:172</code> (the config saved into that index is the create config, stripped of the clone token), <code>internal/registry/registry.go:107</code>-<code>internal/registry/registry.go:129</code> (the v3 <code>(scope, name)</code>-keyed array shape), <code>internal/secrets/secrets.go:124</code> and <code>internal/secrets/secrets.go:133</code> (<code>secrets.json</code> default path), <code>internal/secrets/secrets.go:342</code>-<code>internal/secrets/secrets.go:350</code> (directory forced to <code>0700</code>) and <code>internal/secrets/secrets.go:357</code>-<code>internal/secrets/secrets.go:359</code> (file created at <code>0600</code>), <code>internal/provision/baseversion.go:62</code>-<code>internal/provision/baseversion.go:68</code> (<code>LIMA_HOME</code> fallback to <code>~/.lima</code>).</p>
@@ -1386,8 +1424,9 @@ out; every other page links here instead of restating them.</p>
 easy to conflate them:</p>
 <ul>
 <li>The <strong>connection scope</strong> (<code>registry.Scope</code>: which <a href="../../using-sand/connection-profiles/">Connection
-  Profile</a> — local, or a specific
-  <code>user@host:port</code> — a VM lives on) is what schema version 3 added to both
+  Profile</a> — local, a specific
+  <code>user@host:port</code> for remote-Lima, or a <code>host:node/pool</code> for
+  <a href="../../using-sand/proxmox/">Proxmox</a> — a VM lives on) is what schema version 3 added to both
   <code>managed-vms.json</code> and <code>secrets.json</code>. It's what lets the same VM <em>name</em>
   exist independently on two different profiles.</li>
 <li>The secrets store's pre-existing <strong>directory scope</strong> (<code>global</code>, or a

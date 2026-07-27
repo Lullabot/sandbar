@@ -858,6 +858,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1026,6 +1054,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#proxmox-base-provisioning-hangs-at-install-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: base provisioning hangs at "Install Claude Code"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proxmox-a-create-fails-with-exit-status-255" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: a create fails with exit status 255
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-proxmox-vms-flap-with-lost-the-guest-connection-retrying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two Proxmox VMs flap with "lost the guest connection; retrying"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limactl-list-fails-while-a-vm-is-being-cloned-or-deleted" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1041,6 +1102,17 @@
     <span class="md-ellipsis">
       
         A build failed and the tile is red
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-build-looks-stuck-on-one-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A build looks stuck on one task
       
     </span>
   </a>
@@ -1291,6 +1363,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#proxmox-base-provisioning-hangs-at-install-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: base provisioning hangs at "Install Claude Code"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proxmox-a-create-fails-with-exit-status-255" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proxmox: a create fails with exit status 255
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-proxmox-vms-flap-with-lost-the-guest-connection-retrying" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two Proxmox VMs flap with "lost the guest connection; retrying"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#limactl-list-fails-while-a-vm-is-being-cloned-or-deleted" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1306,6 +1411,17 @@
     <span class="md-ellipsis">
       
         A build failed and the tile is red
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-build-looks-stuck-on-one-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A build looks stuck on one task
       
     </span>
   </a>
@@ -1371,6 +1487,99 @@ pass <code>--rebuild</code> to force the rebuild-then-create in one step:</p>
 </code></pre></div>
 <p><code>--rebuild</code> deletes and recreates the base image first, then makes the VM.
 It always rebuilds, regardless of the staleness check.</p>
+<h2 id="proxmox-base-provisioning-hangs-at-install-claude-code">Proxmox: base provisioning hangs at "Install Claude Code"</h2>
+<p><strong>Symptom:</strong> on the Proxmox backend, building the base image runs the playbook
+fine until the <code>claude-code : Install Claude Code using the official installer</code>
+task, where it hangs indefinitely with no output. On the guest, the
+<code>claude … install</code> process sits pegged at ~100% CPU (state <code>R</code>) with no network
+sockets and making almost no syscalls.</p>
+<p><strong>Why:</strong> it is not <code>sand</code>, apt, or the network — it is a Claude Code bug
+(<a href="https://github.com/anthropics/claude-code/issues/77208">anthropics/claude-code#77208</a>).
+Proxmox's default CPU model, <code>kvm64</code>, masks modern x86-64 instruction
+extensions (no SSE4.2/POPCNT/AVX2) from the guest, and Claude Code ≥ 2.1.205 —
+built on a newer Bun runtime that assumes those instructions — livelocks in
+userspace at 100% CPU during startup instead of failing with an error. <code>curl</code>
+and the installer's own download succeed first (that host is reached over IPv4
+with a full instruction set on the <em>host</em> side), so provisioning gets all the
+way to the <code>claude install</code> step before wedging. It bites Proxmox specifically
+because Lima runs guests with host-CPU passthrough, so the Lima backends never
+see a feature-masked CPU.</p>
+<p><strong>Fix:</strong> <code>sand</code> now creates its Proxmox VMs with the CPU type set to <code>host</code>
+(full host-CPU passthrough), which exposes the real instruction set and is the
+fix the upstream issue confirms. You get this automatically once the base is
+rebuilt on a current <code>sand</code> — delete the base and recreate, or <code>sand create
+--rebuild</code>. If you provision VMs outside <code>sand</code>, set their CPU type to <code>host</code>
+(or any model exposing SSE4.2/POPCNT/AVX2, e.g. <code>x86-64-v2-AES</code>) rather than
+leaving the <code>kvm64</code> default. A quick check on a guest: <code>lscpu | grep -i sse4_2</code>
+— if it prints nothing, that VM has the feature-masked CPU that triggers the
+hang.</p>
+<h2 id="proxmox-a-create-fails-with-exit-status-255">Proxmox: a create fails with <code>exit status 255</code></h2>
+<p><strong>Symptom:</strong> a create dies part-way through provisioning with an error ending in
+<code>exit status 255</code>, and the streamed output simply stops — the last thing shown is
+an Ansible <code>TASK [...]</code> banner, with no <code>fatal:</code> line, no <code>PLAY RECAP</code>, and no
+error from the task itself. <code>sand</code> then removes the partial VM.</p>
+<p><strong>Why:</strong> 255 is <code>ssh</code>'s own status, not Ansible's. <code>sand</code> runs each provisioning
+phase as a single ssh session to the guest, and a playbook that genuinely fails a
+task exits 2 (or 4 for unreachable, 250 for an internal error) — statuses you
+would see reported verbatim. 255 means the layer underneath failed instead: the
+connection to the guest dropped, or the remote command was killed by a signal.
+The task banner on screen is simply the last one printed before the channel went
+away; it is not the task that failed.</p>
+<p>Whether <code>ssh</code> printed anything of its own is a useful first split. <code>sand</code> merges
+ssh's stderr into the same stream as the guest's output, and ssh reports a
+connection it <em>noticed</em> failing (<code>connect to host … failed</code>, <code>client_loop: send
+disconnect: Broken pipe</code>, <code>Connection reset by peer</code>) even at the quiet log level
+<code>sand</code> uses. A 255 with one of those lines is a connection that broke. A 255 with
+no ssh message at all points instead at the remote command being killed by a
+signal, which OpenSSH reports as 255 and says nothing about.</p>
+<p>Since <code>sand</code> deletes a partially-built VM, the guest's own logs — the best
+evidence for which of those happened — go with it. Two opt-ins change that:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Keep the failed VM instead of purging it, so you can inspect the guest.</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">SAND_KEEP_FAILED</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>sand<span class="w"> </span>create<span class="w"> </span>…
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Write ssh&#39;s own protocol log to a file (one per target, appended across every</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># connection to it) instead of to the output stream.</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nv">SAND_SSH_DEBUG</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>sand<span class="w"> </span>create<span class="w"> </span>…<span class="w">                 </span><span class="c1"># ~/.cache/sandbar/ssh-debug/</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nv">SAND_SSH_DEBUG</span><span class="o">=</span>/path/to/dir<span class="w"> </span>sand<span class="w"> </span>create<span class="w"> </span>…<span class="w">      </span><span class="c1"># or a directory you choose</span>
+</code></pre></div>
+<p>With both set, the failure names the log file it wrote, and the guest is still
+running. On it, <code>journalctl -u ssh</code>, <code>dmesg</code>, and <code>ps</code> for the <code>ansible-playbook</code>
+process answer the question the exit status cannot: whether the guest-side run
+was still alive when the client gave up (the connection died) or was already gone
+(the process died).</p>
+<p>A kept VM is <strong>not</strong> usable, holds its VMID, and blocks its own name until you
+remove it with <code>qm destroy &lt;vmid&gt; --purge</code>. If the create got as far as cloning
+your project, it also holds the clone token in the guest's per-org <code>.env</code> — so
+destroy it once you're done rather than leaving it around.</p>
+<p><code>SAND_KEEP_FAILED</code> applies to a create's finalize — everything from the moment
+the clone exists. A failure earlier than that (the base template build, or the
+clone itself) has no VM to keep. <code>sand reset</code> already leaves its VM in place when
+the finalize fails, so it needs no opt-in.</p>
+<p><code>SAND_SSH_DEBUG</code> is not Proxmox-specific: it logs every ssh <code>sand</code> runs, on any
+backend. It does not change scp transfers, which have nowhere to put a log but
+the payload stream.</p>
+<h2 id="two-proxmox-vms-flap-with-lost-the-guest-connection-retrying">Two Proxmox VMs flap with "lost the guest connection; retrying"</h2>
+<p><strong>Symptom:</strong> with two or more Proxmox VMs running, the board's log fills with
+alternating <code>lost the guest connection to &lt;vm&gt;; retrying in 5s</code> lines, every
+few seconds, forever. One VM alone is fine. You may also see the explicit
+refusal: <code>&lt;a&gt; and &lt;b&gt; both report the guest address &lt;ip&gt;</code>.</p>
+<p><strong>Why:</strong> the VMs were cloned from a base template built before <code>sand</code> reset
+the template's machine identity. Clones inherited its <code>/etc/machine-id</code>,
+systemd-networkd derives the DHCP client identifier from that id (the MAC
+plays no part), and a DHCP server keyed on client identity hands every clone
+the <strong>same lease</strong>. The guests then fight over one address at the ARP layer:
+each connection reaches whichever guest most recently won, and every VM's
+guest probe keeps killing its rival's. Current builds detect the collision and
+refuse the ambiguous address, naming both VMs, instead of silently connecting
+to a coin flip.</p>
+<p><strong>Fix:</strong> the template build now strips the machine identity before
+templatizing, and the old template is recognized as stale automatically — the
+next <code>sand create</code> rebuilds it. Existing VMs keep their cloned identity,
+though, so either recreate them from the rebuilt base, or fix each one in
+place:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>truncate<span class="w"> </span>-s<span class="w"> </span><span class="m">0</span><span class="w"> </span>/etc/machine-id<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sudo<span class="w"> </span>reboot
+</code></pre></div>
+<p>On its next boot the guest generates a fresh identity and gets its own lease.</p>
 <h2 id="limactl-list-fails-while-a-vm-is-being-cloned-or-deleted"><code>limactl list</code> fails while a VM is being cloned or deleted</h2>
 <p><strong>Symptom:</strong> the fleet briefly disappears from the board, or a headless
 <code>sand</code> command reports it can't list instances — even though nothing is
@@ -1398,6 +1607,26 @@ still running or already finished. You don't need to stay on the progress
 view to keep a build going: leaving it (or starting another VM) doesn't
 cancel anything, builds keep running in the background, and the tile itself
 carries the progress bar and pass/fail state so you can check back later.</p>
+<h2 id="a-build-looks-stuck-on-one-task">A build looks stuck on one task</h2>
+<p>Ansible prints a task's banner and then nothing at all until that task returns,
+so a slow task and a wedged one look identical on the tile: the same name, the
+same bar. To tell them apart, a building tile shows the <strong>current task's elapsed
+time</strong>, right-aligned on the <code>ansible: …</code> row, once that task has been running
+more than ten seconds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ansible: project · 72/72           8m14s
+</code></pre></div>
+<p>A number appearing there means the task is genuinely slow, not that anything is
+wrong — under ten seconds nothing is shown, so the row stays quiet through the
+hundreds of sub-second tasks a normal run steps through. A timer that keeps
+climbing well past what the task should need is the signal worth acting on;
+press <code>l</code> on the tile to read the log.</p>
+<p>Also note the bar reaching 100% does <strong>not</strong> mean the build is done — it tracks
+which task the run is on, and the last task still has to finish. A full bar with
+a climbing timer is a run working on its final task.</p>
+<p>The most common cause of a genuinely slow clone is submodules: <code>sand</code> clones
+recursively, so a small project can pull in a very large one. <code>rtl_433</code> is 5 MB
+and its test-data submodule is 1.2 GB — a multi-minute clone, all of it under a
+single silent task banner.</p>
 <h2 id="out-of-disk-on-the-lima-volume">Out of disk on the Lima volume</h2>
 <p>Each VM clone is grown to its configured <code>--disk</code> size, and that space has
 to actually exist on the volume backing Lima's instance store — cloning
@@ -1413,7 +1642,7 @@ or lower the <code>--disk</code> size on future creates.</p>
 installed Lima predates that command, <code>sand</code> detects it up front and refuses
 with an explicit "your Lima is too old" error rather than failing partway
 through a build. Upgrade Lima and try again:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>lima
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>lima
 </code></pre></div>
 <p>If you didn't install Lima via Homebrew, use whatever method you used
 originally — see the <a href="https://lima-vm.io/docs/installation/">Lima installation docs</a>.</p>

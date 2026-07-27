@@ -1,0 +1,2408 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+      
+      
+      
+        <link rel="canonical" href="https://lullabot.github.io/sandbar/main/using-sand/proxmox/">
+      
+      
+        <link rel="prev" href="../connection-profiles/">
+      
+      
+        <link rel="next" href="../../reference/files-and-state/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Proxmox VE - sandbar</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#proxmox-ve" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="sandbar" class="md-header__button md-logo" aria-label="sandbar" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <a href="../.." class="md-header__home-link" aria-label="sandbar">
+            <span class="md-ellipsis">
+              sandbar
+            </span>
+          </a>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Proxmox VE
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/lullabot/sandbar" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../tui/" class="md-tabs__link">
+          
+  
+  
+  Using sand
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/files-and-state/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../why/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Why Sandbar
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../contributing/development/" class="md-tabs__link">
+          
+  
+  
+  Contributing
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="sandbar" class="md-nav__button md-logo" aria-label="sandbar" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    sandbar
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/lullabot/sandbar" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About sand
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-vm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First VM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Provisioning Works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/available-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Available Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using sand
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Using sand
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Board (TUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../files-and-shells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shells and Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Servers and Ports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#all-of-it-in-one-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All of it in one script
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-create-a-dedicated-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Create a dedicated pool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-create-the-minimum-privilege-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Create the minimum-privilege role
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-create-a-user-and-an-api-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Create a user and an API token
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-bind-the-role-to-the-user-at-the-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — Bind the role to the user at the pool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-grant-the-three-privileges-that-cant-be-pool-scoped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5 — Grant the three privileges that can't be pool-scoped
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 5 — Grant the three privileges that can&#39;t be pool-scoped">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verify-the-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify the scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-point-sand-at-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6 — Point sand at the host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-separate-pool-for-automated-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A separate pool for automated tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/files-and-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Files and State
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../why/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why Sandbar
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/ansible-playbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Embedded Playbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#all-of-it-in-one-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        All of it in one script
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-create-a-dedicated-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Create a dedicated pool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-create-the-minimum-privilege-role" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Create the minimum-privilege role
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-create-a-user-and-an-api-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Create a user and an API token
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-bind-the-role-to-the-user-at-the-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — Bind the role to the user at the pool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-grant-the-three-privileges-that-cant-be-pool-scoped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5 — Grant the three privileges that can't be pool-scoped
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 5 — Grant the three privileges that can&#39;t be pool-scoped">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verify-the-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify the scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-point-sand-at-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6 — Point sand at the host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-separate-pool-for-automated-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A separate pool for automated tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="proxmox-ve">Proxmox VE</h1>
+<p><code>sand</code> can run VMs on a <a href="https://www.proxmox.com/">Proxmox VE</a> host through its
+REST API, alongside the local and remote-Lima backends. A Proxmox profile is
+selected the same way any other is — it's just another
+<a href="../connection-profiles/">Connection Profile</a> — but it needs some one-time setup
+on the Proxmox side, and that setup is what this page is about.</p>
+<p>The design goal is a <strong>least-privilege, pool-scoped</strong> token: <code>sand</code> gets exactly
+the permissions it needs to run its create/clone/delete workflow, confined to a
+dedicated <a href="https://pve.proxmox.com/wiki/User_Management#pveum_pools">resource pool</a>,
+so it <strong>cannot see or touch any VM outside that pool</strong> — not by accident, not by
+a bug, not at all. That isolation is structural (Proxmox enforces it), not a
+matter of <code>sand</code> behaving well.</p>
+<div class="admonition info">
+<p class="admonition-title">What you'll set up</p>
+<ol>
+<li>A dedicated <strong>pool</strong> for <code>sand</code>'s VMs.</li>
+<li>A custom <strong>role</strong> holding the minimum privileges.</li>
+<li>A dedicated <strong>user</strong> and an <strong>API token</strong> that inherits the user's rights.</li>
+<li><strong>ACLs</strong> binding the role to the <strong>user</strong> at the pool — plus three
+   privileges that Proxmox does not allow to be pool-scoped, granted at the
+   narrowest path that works.</li>
+<li>Optionally, a <strong>second isolated pool</strong> for automated tests.</li>
+</ol>
+</div>
+<p>Everything below is run on the Proxmox host (or any machine with <code>pveum</code> and
+cluster access) as a full admin — usually <code>root@pam</code>.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li><strong>Proxmox VE 9.0 or newer.</strong> <code>sand</code> checks the version at preflight and
+  refuses an older host. The minimum-privilege role below is expressed in PVE 9's
+  privilege vocabulary — it relies on the <code>VM.GuestAgent.*</code> privileges introduced
+  in PVE 9, and PVE 9 removed the old <code>VM.Monitor</code> privilege — so it cannot be
+  created on an 8.x host.</li>
+<li><strong>A storage that supports <code>images</code> content</strong> for VM disks (e.g. <code>local-lvm</code>, a
+  ZFS pool, or a directory storage with <em>Disk image</em> enabled). The built-in
+  <code>local</code> storage does <strong>not</strong> hold disk images by default, so <code>sand</code> cannot put
+  a VM disk or a cloud-init drive there.</li>
+<li>
+<p><strong>A file-based storage that supports <code>import</code> content</strong> for the one-time
+  cloud-image download — a <strong>directory</strong>, <strong>NFS</strong>, or <strong>CIFS</strong> storage. <code>sand</code>
+  downloads the base image with PVE's <code>download-url</code> (content type <code>import</code>),
+  which <strong>block</strong> storages (<code>zfspool</code>, <code>lvm-thin</code>, RBD) reject with <em>"not a file
+  based storage"</em>. This is a <strong>separate</strong> storage from the disk storage above and
+  defaults to <code>local</code>; set the profile's <code>image_storage</code> to override it. If your
+  disk storage is a directory that already enables <code>import</code>, point <code>image_storage</code>
+  at it and the same storage serves both.</p>
+<div class="admonition tip">
+<p class="admonition-title">Enabling <code>import</code> on <code>local</code></p>
+<p>The default <code>local</code> is a directory storage but often ships without the
+<code>import</code> content type. Enable it once with
+<code>pvesm set local --content iso,vztmpl,backup,import</code> (keep whatever it
+already lists), or point <code>image_storage</code> at another file-based storage.</p>
+</div>
+<ul>
+<li><strong>A Linux bridge</strong> for VM networking (usually <code>vmbr0</code>).</li>
+<li><strong>Network reachability from the machine running <code>sand</code> to the VM subnet.</strong>
+  <code>sand</code> talks to guests over SSH once they boot (it discovers each VM's IP from
+  the guest agent), so your workstation must be able to reach the addresses the
+  VMs get on that bridge.</li>
+<li><strong>An SSH key pair.</strong> <code>sand</code> installs your public key into each guest via
+  cloud-init and then connects with the private key, so the profile's
+  <code>identity_path</code> must point to a private key whose <code>.pub</code> sits beside it
+  (<code>ssh-keygen -t ed25519</code> if you need one). Unlike a <code>remote-ssh</code> profile, a
+  Proxmox profile cannot fall back to the SSH agent — it needs the <code>.pub</code> file to
+  hand to cloud-init.</li>
+<li><strong>The <code>qemu-guest-agent</code></strong> is installed by <code>sand</code>'s provisioning into the base
+  image, so you don't need to prepare an image yourself — <code>sand</code> builds its base
+  template from a cloud image the first time you create a VM.</li>
+</ul>
+</li>
+</ul>
+<h2 id="all-of-it-in-one-script">All of it in one script</h2>
+<p>Every command on this page, in order, is also packaged as a single script —
+<a href="../proxmox-setup.sh"><code>proxmox-setup.sh</code></a>. All of its settings are environment
+variables in one block at the top, so the usual case is overriding two or three
+of them. Copy it to the Proxmox host and run it there as a full admin
+(<code>root@pam</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">SAND_DISK_STORAGE</span><span class="o">=</span>local-lvm<span class="w"> </span><span class="nv">SAND_IMAGE_STORAGE</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span>./proxmox-setup.sh
+</code></pre></div>
+<p>It creates the pool, the three roles, the user and token, and every ACL, then
+prints the token's <strong>effective permissions</strong> so you can confirm the scope
+yourself. It finishes by printing the token line to save and a ready-to-paste
+<code>profiles.yaml</code> block.</p>
+<p>It builds <strong>one pool per run</strong>, named by <code>SAND_POOL</code>. A second, fully isolated
+scope — the <a href="#a-separate-pool-for-automated-tests">test pool</a>, or anything else
+that must never be able to touch your day-to-day VMs — is the <em>same run under a
+different name</em>, not a different procedure:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">SAND_POOL</span><span class="o">=</span>sandbar-test<span class="w"> </span>./proxmox-setup.sh
+</code></pre></div>
+<p>The user, the token and every ACL are derived from the pool name, so two runs
+produce two scopes that cannot see each other. (The roles are shared, which
+changes nothing: a role is a privilege set and grants nothing until an ACL binds
+it to a user at a path.) The token file each run tells you to write is named
+after the pool too, so the second never overwrites the first.</p>
+<p>Re-running is safe — the pool, roles, and ACLs are converged in place. The one
+exception is the API token: Proxmox reveals a token's secret <strong>exactly once</strong>,
+so an existing token is left untouched (and no secret is printed) unless you set
+<code>SAND_TOKEN_RECREATE=1</code>, which deletes and recreates it — invalidating the old
+secret everywhere it is configured.</p>
+<details class="example">
+<summary>The full script</summary>
+<div class="highlight"><span class="filename">proxmox-setup.sh</span><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="ch">#!/usr/bin/env bash</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># sandbar — one-shot Proxmox VE setup.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">#</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Creates the dedicated pool, the least-privilege roles, the user and API</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># token, and every ACL described in the &quot;Proxmox VE&quot; page of the sandbar docs.</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Run it ON the Proxmox host (or any machine with `pveum`/`pvesh` and cluster</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># access) as a full admin — usually root@pam.</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1">#</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Re-running is safe: the pool, roles and ACLs are converged in place. The one</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># exception is the API token, whose secret Proxmox reveals exactly once — an</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="c1"># existing token is left alone unless you set SAND_TOKEN_RECREATE=1.</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1">#</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># It builds ONE pool per run, named by SAND_POOL. A second, fully isolated pool</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c1"># — for the opt-in e2e suite, or anything else that must never be able to touch</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="c1"># your day-to-day VMs — is the SAME run with a different name, not a different</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="c1"># procedure: the user, the token and every ACL are derived from the pool, so two</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="c1"># runs produce two scopes that cannot see each other.</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="c1">#</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="c1">#   ./proxmox-setup.sh                            # the pool sand uses: sandbar</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="c1">#   SAND_DISK_STORAGE=tank ./proxmox-setup.sh</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="c1">#   SAND_POOL=sandbar-test ./proxmox-setup.sh     # an isolated pool for the e2e suite</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="nb">set</span><span class="w"> </span>-euo<span class="w"> </span>pipefail
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="c1"># --------------------------------------------------------------- settings --</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="c1"># Everything you might need to change lives in this block.</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="c1"># The PVE node name — the identifier in /nodes/&lt;node&gt;/… paths, which is not</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="c1"># always the same string as the host you point sand at.</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="nv">SAND_NODE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_NODE</span><span class="k">:-$(</span>hostname<span class="w"> </span>-s<span class="k">)</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="c1"># The dedicated pool. Every VM sand creates lands in it, and the token is scoped</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="c1"># to it — this name is the whole isolation boundary, and it is the ONE setting</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="c1"># you change to build a second, unrelated scope (e.g. sandbar-test for the e2e</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="c1"># suite).</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a><span class="nv">SAND_POOL</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_POOL</span><span class="k">:-</span><span class="nv">sandbar</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="c1"># The user that owns the token, and the token&#39;s id. The user DEFAULTS TO THE</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="c1"># POOL NAME, and that default is what makes two runs genuinely isolated rather</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="c1"># than two names for one set of rights: the confined ACLs are granted to the</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a><span class="c1"># user, so pointing a second pool&#39;s run at the same user would hand that one</span>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a><span class="c1"># user both pools. Override it only if you know you want that.</span>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="nv">SAND_USER</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_USER</span><span class="k">:-</span><span class="si">${</span><span class="nv">SAND_POOL</span><span class="si">}</span><span class="p">@pve</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a><span class="nv">SAND_TOKEN_ID</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_TOKEN_ID</span><span class="k">:-</span><span class="nv">prov</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a><span class="c1"># Storage backing VM disks (must support content type &quot;images&quot;), and the</span>
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a><span class="c1"># file-based storage the cloud image is downloaded to (must support &quot;import&quot; —</span>
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a><span class="c1"># dir/NFS/CIFS only). Set both to the same name if one storage serves both.</span>
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a><span class="nv">SAND_DISK_STORAGE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_DISK_STORAGE</span><span class="k">:-</span><span class="nv">local</span><span class="p">-lvm</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a><span class="nv">SAND_IMAGE_STORAGE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_IMAGE_STORAGE</span><span class="k">:-</span><span class="nv">local</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a><span class="c1"># The Linux bridge VMs attach to, and optionally the VLAN tag the profile uses</span>
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a><span class="c1"># (leave empty for untagged — the grant is then made on the bridge itself).</span>
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a><span class="nv">SAND_BRIDGE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_BRIDGE</span><span class="k">:-</span><span class="nv">vmbr0</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a><span class="nv">SAND_BRIDGE_VLAN</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_BRIDGE_VLAN</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a><span class="c1"># Where to write the token file, if you are running this on the same machine</span>
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a><span class="c1"># that runs sand. Empty (the default) just prints the line to copy across.</span>
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a><span class="nv">SAND_TOKEN_OUT</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_TOKEN_OUT</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>
+<a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a><span class="c1"># Set to 1 to delete and recreate an existing token — the only way to learn a</span>
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a><span class="c1"># secret again, and it invalidates the old one everywhere it is configured.</span>
+<a id="__codelineno-2-64" name="__codelineno-2-64" href="#__codelineno-2-64"></a><span class="nv">SAND_TOKEN_RECREATE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_TOKEN_RECREATE</span><span class="k">:-</span><span class="nv">0</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-65" name="__codelineno-2-65" href="#__codelineno-2-65"></a>
+<a id="__codelineno-2-66" name="__codelineno-2-66" href="#__codelineno-2-66"></a><span class="c1"># Role names. Change these only if the names collide with roles you already</span>
+<a id="__codelineno-2-67" name="__codelineno-2-67" href="#__codelineno-2-67"></a><span class="c1"># have — the privilege sets below are what sand actually needs.</span>
+<a id="__codelineno-2-68" name="__codelineno-2-68" href="#__codelineno-2-68"></a><span class="c1">#</span>
+<a id="__codelineno-2-69" name="__codelineno-2-69" href="#__codelineno-2-69"></a><span class="c1"># They are deliberately NOT derived from the pool: a role is a privilege set and</span>
+<a id="__codelineno-2-70" name="__codelineno-2-70" href="#__codelineno-2-70"></a><span class="c1"># grants nothing until an ACL binds it to a user at a path, so every pool can</span>
+<a id="__codelineno-2-71" name="__codelineno-2-71" href="#__codelineno-2-71"></a><span class="c1"># share one definition. A second run simply reconverges them.</span>
+<a id="__codelineno-2-72" name="__codelineno-2-72" href="#__codelineno-2-72"></a><span class="nv">SAND_ROLE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_ROLE</span><span class="k">:-</span><span class="nv">SandbarProv</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-73" name="__codelineno-2-73" href="#__codelineno-2-73"></a><span class="nv">SAND_NET_ROLE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_NET_ROLE</span><span class="k">:-</span><span class="nv">SandbarNet</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-74" name="__codelineno-2-74" href="#__codelineno-2-74"></a><span class="nv">SAND_NODE_ROLE</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_NODE_ROLE</span><span class="k">:-</span><span class="nv">SandbarNode</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-75" name="__codelineno-2-75" href="#__codelineno-2-75"></a>
+<a id="__codelineno-2-76" name="__codelineno-2-76" href="#__codelineno-2-76"></a><span class="c1"># The minimum-privilege set: create a base VM from a cloud image, clone it,</span>
+<a id="__codelineno-2-77" name="__codelineno-2-77" href="#__codelineno-2-77"></a><span class="c1"># resize, configure cloud-init, power on and off, snapshot, read node stats,</span>
+<a id="__codelineno-2-78" name="__codelineno-2-78" href="#__codelineno-2-78"></a><span class="c1"># and run a guest-agent command. Nothing more. Drop</span>
+<a id="__codelineno-2-79" name="__codelineno-2-79" href="#__codelineno-2-79"></a><span class="c1"># VM.GuestAgent.Unrestricted if you never need `sand` to exec via the agent.</span>
+<a id="__codelineno-2-80" name="__codelineno-2-80" href="#__codelineno-2-80"></a><span class="nv">SAND_PRIVS</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_PRIVS</span><span class="k">:-</span><span class="se">\</span>
+<a id="__codelineno-2-81" name="__codelineno-2-81" href="#__codelineno-2-81"></a><span class="nv">VM</span><span class="p">.Allocate VM.Clone VM.Audit VM.PowerMgmt VM.Snapshot </span><span class="se">\</span>
+<a id="__codelineno-2-82" name="__codelineno-2-82" href="#__codelineno-2-82"></a><span class="nv">VM</span><span class="p">.Config.Disk VM.Config.CPU VM.Config.Memory VM.Config.Network </span><span class="se">\</span>
+<a id="__codelineno-2-83" name="__codelineno-2-83" href="#__codelineno-2-83"></a><span class="nv">VM</span><span class="p">.Config.Options VM.Config.Cloudinit VM.Config.HWType VM.Config.CDROM </span><span class="se">\</span>
+<a id="__codelineno-2-84" name="__codelineno-2-84" href="#__codelineno-2-84"></a><span class="nv">VM</span><span class="p">.GuestAgent.Audit VM.GuestAgent.Unrestricted </span><span class="se">\</span>
+<a id="__codelineno-2-85" name="__codelineno-2-85" href="#__codelineno-2-85"></a><span class="nv">Datastore</span><span class="p">.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Audit</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-86" name="__codelineno-2-86" href="#__codelineno-2-86"></a>
+<a id="__codelineno-2-87" name="__codelineno-2-87" href="#__codelineno-2-87"></a><span class="c1"># ---------------------------------------------------------------- helpers --</span>
+<a id="__codelineno-2-88" name="__codelineno-2-88" href="#__codelineno-2-88"></a>
+<a id="__codelineno-2-89" name="__codelineno-2-89" href="#__codelineno-2-89"></a>step<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;\n==&gt; %s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$*</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<a id="__codelineno-2-90" name="__codelineno-2-90" href="#__codelineno-2-90"></a>info<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;    %s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$*</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<a id="__codelineno-2-91" name="__codelineno-2-91" href="#__codelineno-2-91"></a>warn<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;WARNING: %s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$*</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<a id="__codelineno-2-92" name="__codelineno-2-92" href="#__codelineno-2-92"></a>die<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;ERROR: %s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$*</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="p">&amp;</span><span class="m">2</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+<a id="__codelineno-2-93" name="__codelineno-2-93" href="#__codelineno-2-93"></a>
+<a id="__codelineno-2-94" name="__codelineno-2-94" href="#__codelineno-2-94"></a><span class="c1"># json_str &lt;key&gt; — pull one string field out of PVE&#39;s compact JSON on stdin.</span>
+<a id="__codelineno-2-95" name="__codelineno-2-95" href="#__codelineno-2-95"></a><span class="c1"># Avoids a jq dependency, which Proxmox does not install by default.</span>
+<a id="__codelineno-2-96" name="__codelineno-2-96" href="#__codelineno-2-96"></a>json_str<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-2-97" name="__codelineno-2-97" href="#__codelineno-2-97"></a><span class="w">  </span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;s/.*\&quot;</span><span class="nv">$1</span><span class="s2">\&quot;[[:space:]]*:[[:space:]]*\&quot;\([^\&quot;]*\)\&quot;.*/\1/p&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-n1
+<a id="__codelineno-2-98" name="__codelineno-2-98" href="#__codelineno-2-98"></a><span class="o">}</span>
+<a id="__codelineno-2-99" name="__codelineno-2-99" href="#__codelineno-2-99"></a>
+<a id="__codelineno-2-100" name="__codelineno-2-100" href="#__codelineno-2-100"></a><span class="c1"># storage_supports &lt;storage&gt; &lt;content&gt; — true if that storage advertises the</span>
+<a id="__codelineno-2-101" name="__codelineno-2-101" href="#__codelineno-2-101"></a><span class="c1"># content type (PVE filters `pvesm status` by it).</span>
+<a id="__codelineno-2-102" name="__codelineno-2-102" href="#__codelineno-2-102"></a>storage_supports<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-2-103" name="__codelineno-2-103" href="#__codelineno-2-103"></a><span class="w">  </span>pvesm<span class="w"> </span>status<span class="w"> </span>--content<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;NR&gt;1 {print $1}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-qx<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-104" name="__codelineno-2-104" href="#__codelineno-2-104"></a><span class="o">}</span>
+<a id="__codelineno-2-105" name="__codelineno-2-105" href="#__codelineno-2-105"></a>
+<a id="__codelineno-2-106" name="__codelineno-2-106" href="#__codelineno-2-106"></a>ensure_role<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="c1"># ensure_role &lt;role&gt; &lt;privs&gt;</span>
+<a id="__codelineno-2-107" name="__codelineno-2-107" href="#__codelineno-2-107"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--privs<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-108" name="__codelineno-2-108" href="#__codelineno-2-108"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;role </span><span class="nv">$1</span><span class="s2"> created&quot;</span>
+<a id="__codelineno-2-109" name="__codelineno-2-109" href="#__codelineno-2-109"></a><span class="w">  </span><span class="k">else</span>
+<a id="__codelineno-2-110" name="__codelineno-2-110" href="#__codelineno-2-110"></a><span class="w">    </span>pveum<span class="w"> </span>role<span class="w"> </span>modify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--privs<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-111" name="__codelineno-2-111" href="#__codelineno-2-111"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;role </span><span class="nv">$1</span><span class="s2"> updated&quot;</span>
+<a id="__codelineno-2-112" name="__codelineno-2-112" href="#__codelineno-2-112"></a><span class="w">  </span><span class="k">fi</span>
+<a id="__codelineno-2-113" name="__codelineno-2-113" href="#__codelineno-2-113"></a><span class="o">}</span>
+<a id="__codelineno-2-114" name="__codelineno-2-114" href="#__codelineno-2-114"></a>
+<a id="__codelineno-2-115" name="__codelineno-2-115" href="#__codelineno-2-115"></a>ensure_pool<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="c1"># ensure_pool &lt;pool&gt; &lt;comment&gt;</span>
+<a id="__codelineno-2-116" name="__codelineno-2-116" href="#__codelineno-2-116"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span>pveum<span class="w"> </span>pool<span class="w"> </span>add<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--comment<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-117" name="__codelineno-2-117" href="#__codelineno-2-117"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;pool </span><span class="nv">$1</span><span class="s2"> created&quot;</span>
+<a id="__codelineno-2-118" name="__codelineno-2-118" href="#__codelineno-2-118"></a><span class="w">  </span><span class="k">else</span>
+<a id="__codelineno-2-119" name="__codelineno-2-119" href="#__codelineno-2-119"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;pool </span><span class="nv">$1</span><span class="s2"> already exists&quot;</span>
+<a id="__codelineno-2-120" name="__codelineno-2-120" href="#__codelineno-2-120"></a><span class="w">  </span><span class="k">fi</span>
+<a id="__codelineno-2-121" name="__codelineno-2-121" href="#__codelineno-2-121"></a><span class="o">}</span>
+<a id="__codelineno-2-122" name="__codelineno-2-122" href="#__codelineno-2-122"></a>
+<a id="__codelineno-2-123" name="__codelineno-2-123" href="#__codelineno-2-123"></a>ensure_user<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="c1"># ensure_user &lt;user&gt;</span>
+<a id="__codelineno-2-124" name="__codelineno-2-124" href="#__codelineno-2-124"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span>pveum<span class="w"> </span>user<span class="w"> </span>add<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--comment<span class="w"> </span><span class="s2">&quot;sandbar automation&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-125" name="__codelineno-2-125" href="#__codelineno-2-125"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;user </span><span class="nv">$1</span><span class="s2"> created&quot;</span>
+<a id="__codelineno-2-126" name="__codelineno-2-126" href="#__codelineno-2-126"></a><span class="w">  </span><span class="k">else</span>
+<a id="__codelineno-2-127" name="__codelineno-2-127" href="#__codelineno-2-127"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;user </span><span class="nv">$1</span><span class="s2"> already exists&quot;</span>
+<a id="__codelineno-2-128" name="__codelineno-2-128" href="#__codelineno-2-128"></a><span class="w">  </span><span class="k">fi</span>
+<a id="__codelineno-2-129" name="__codelineno-2-129" href="#__codelineno-2-129"></a><span class="o">}</span>
+<a id="__codelineno-2-130" name="__codelineno-2-130" href="#__codelineno-2-130"></a>
+<a id="__codelineno-2-131" name="__codelineno-2-131" href="#__codelineno-2-131"></a><span class="c1"># token_exists &lt;user&gt; &lt;token-id&gt; — true if that API token is already present.</span>
+<a id="__codelineno-2-132" name="__codelineno-2-132" href="#__codelineno-2-132"></a><span class="c1"># PVE reveals a token&#39;s secret only at creation, so this is what decides between</span>
+<a id="__codelineno-2-133" name="__codelineno-2-133" href="#__codelineno-2-133"></a><span class="c1"># &quot;created it and here is the value&quot; and &quot;it is already there, reuse your file&quot;.</span>
+<a id="__codelineno-2-134" name="__codelineno-2-134" href="#__codelineno-2-134"></a>token_exists<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+<a id="__codelineno-2-135" name="__codelineno-2-135" href="#__codelineno-2-135"></a><span class="w">  </span>pveum<span class="w"> </span>user<span class="w"> </span>token<span class="w"> </span>list<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--output-format<span class="w"> </span>json<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="p">|</span>
+<a id="__codelineno-2-136" name="__codelineno-2-136" href="#__codelineno-2-136"></a><span class="w">    </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s2">&quot;\&quot;tokenid\&quot;[[:space:]]*:[[:space:]]*\&quot;</span><span class="nv">$2</span><span class="s2">\&quot;&quot;</span>
+<a id="__codelineno-2-137" name="__codelineno-2-137" href="#__codelineno-2-137"></a><span class="o">}</span>
+<a id="__codelineno-2-138" name="__codelineno-2-138" href="#__codelineno-2-138"></a>
+<a id="__codelineno-2-139" name="__codelineno-2-139" href="#__codelineno-2-139"></a>grant<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span><span class="c1"># grant &lt;path&gt; &lt;role&gt; &lt;user&gt;</span>
+<a id="__codelineno-2-140" name="__codelineno-2-140" href="#__codelineno-2-140"></a><span class="w">  </span>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span>--roles<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span><span class="w"> </span>--users<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$3</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-141" name="__codelineno-2-141" href="#__codelineno-2-141"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2"> on </span><span class="nv">$1</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-142" name="__codelineno-2-142" href="#__codelineno-2-142"></a><span class="o">}</span>
+<a id="__codelineno-2-143" name="__codelineno-2-143" href="#__codelineno-2-143"></a>
+<a id="__codelineno-2-144" name="__codelineno-2-144" href="#__codelineno-2-144"></a><span class="c1"># ------------------------------------------------------------- preflight ---</span>
+<a id="__codelineno-2-145" name="__codelineno-2-145" href="#__codelineno-2-145"></a>
+<a id="__codelineno-2-146" name="__codelineno-2-146" href="#__codelineno-2-146"></a>step<span class="w"> </span><span class="s2">&quot;Checking the host&quot;</span>
+<a id="__codelineno-2-147" name="__codelineno-2-147" href="#__codelineno-2-147"></a>
+<a id="__codelineno-2-148" name="__codelineno-2-148" href="#__codelineno-2-148"></a><span class="nb">command</span><span class="w"> </span>-v<span class="w"> </span>pveum<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span>
+<a id="__codelineno-2-149" name="__codelineno-2-149" href="#__codelineno-2-149"></a><span class="w">  </span>die<span class="w"> </span><span class="s2">&quot;pveum not found — run this on the Proxmox host, as an admin (root@pam)&quot;</span>
+<a id="__codelineno-2-150" name="__codelineno-2-150" href="#__codelineno-2-150"></a>
+<a id="__codelineno-2-151" name="__codelineno-2-151" href="#__codelineno-2-151"></a><span class="nv">pve_major</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>pveversion<span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;s|^pve-manager/\([0-9]\{1,\}\)\..*|\1|p&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-152" name="__codelineno-2-152" href="#__codelineno-2-152"></a><span class="k">if</span><span class="w"> </span>!<span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pve_major</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;^[0-9]\{1,\}$&#39;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pve_major</span><span class="s2">&quot;</span><span class="w"> </span>-lt<span class="w"> </span><span class="m">9</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-153" name="__codelineno-2-153" href="#__codelineno-2-153"></a><span class="w">  </span>die<span class="w"> </span><span class="s2">&quot;sand needs Proxmox VE 9.0 or newer (found: </span><span class="k">$(</span>pveversion<span class="k">)</span><span class="s2">)&quot;</span>
+<a id="__codelineno-2-154" name="__codelineno-2-154" href="#__codelineno-2-154"></a><span class="k">fi</span>
+<a id="__codelineno-2-155" name="__codelineno-2-155" href="#__codelineno-2-155"></a>info<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>pveversion<span class="k">)</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-156" name="__codelineno-2-156" href="#__codelineno-2-156"></a>
+<a id="__codelineno-2-157" name="__codelineno-2-157" href="#__codelineno-2-157"></a>pvesh<span class="w"> </span>get<span class="w"> </span><span class="s2">&quot;/nodes/</span><span class="nv">$SAND_NODE</span><span class="s2">/status&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span>
+<a id="__codelineno-2-158" name="__codelineno-2-158" href="#__codelineno-2-158"></a><span class="w">  </span>die<span class="w"> </span><span class="s2">&quot;no such node &#39;</span><span class="nv">$SAND_NODE</span><span class="s2">&#39; — set SAND_NODE to the name shown in the PVE tree&quot;</span>
+<a id="__codelineno-2-159" name="__codelineno-2-159" href="#__codelineno-2-159"></a>info<span class="w"> </span><span class="s2">&quot;node </span><span class="nv">$SAND_NODE</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-160" name="__codelineno-2-160" href="#__codelineno-2-160"></a>
+<a id="__codelineno-2-161" name="__codelineno-2-161" href="#__codelineno-2-161"></a>storage_supports<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span>images<span class="w"> </span><span class="o">||</span>
+<a id="__codelineno-2-162" name="__codelineno-2-162" href="#__codelineno-2-162"></a><span class="w">  </span>die<span class="w"> </span><span class="s2">&quot;storage &#39;</span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2">&#39; does not exist or does not hold disk images — set SAND_DISK_STORAGE&quot;</span>
+<a id="__codelineno-2-163" name="__codelineno-2-163" href="#__codelineno-2-163"></a>info<span class="w"> </span><span class="s2">&quot;disk storage </span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2"> (images)&quot;</span>
+<a id="__codelineno-2-164" name="__codelineno-2-164" href="#__codelineno-2-164"></a>
+<a id="__codelineno-2-165" name="__codelineno-2-165" href="#__codelineno-2-165"></a><span class="k">if</span><span class="w"> </span>storage_supports<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span>import<span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-166" name="__codelineno-2-166" href="#__codelineno-2-166"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;image storage </span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2"> (import)&quot;</span>
+<a id="__codelineno-2-167" name="__codelineno-2-167" href="#__codelineno-2-167"></a><span class="k">else</span>
+<a id="__codelineno-2-168" name="__codelineno-2-168" href="#__codelineno-2-168"></a><span class="w">  </span>warn<span class="w"> </span><span class="s2">&quot;storage &#39;</span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2">&#39; does not advertise content type &#39;import&#39;, so the</span>
+<a id="__codelineno-2-169" name="__codelineno-2-169" href="#__codelineno-2-169"></a><span class="s2">         one-time cloud-image download will fail. If it is a directory/NFS/CIFS</span>
+<a id="__codelineno-2-170" name="__codelineno-2-170" href="#__codelineno-2-170"></a><span class="s2">         storage, add the type — keeping whatever it already lists — with:</span>
+<a id="__codelineno-2-171" name="__codelineno-2-171" href="#__codelineno-2-171"></a>
+<a id="__codelineno-2-172" name="__codelineno-2-172" href="#__codelineno-2-172"></a><span class="s2">           pvesm set </span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2"> --content iso,vztmpl,backup,import</span>
+<a id="__codelineno-2-173" name="__codelineno-2-173" href="#__codelineno-2-173"></a>
+<a id="__codelineno-2-174" name="__codelineno-2-174" href="#__codelineno-2-174"></a><span class="s2">         Otherwise point SAND_IMAGE_STORAGE at a file-based storage. Continuing.&quot;</span>
+<a id="__codelineno-2-175" name="__codelineno-2-175" href="#__codelineno-2-175"></a><span class="k">fi</span>
+<a id="__codelineno-2-176" name="__codelineno-2-176" href="#__codelineno-2-176"></a>
+<a id="__codelineno-2-177" name="__codelineno-2-177" href="#__codelineno-2-177"></a>ip<span class="w"> </span>-o<span class="w"> </span>link<span class="w"> </span>show<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_BRIDGE</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span>
+<a id="__codelineno-2-178" name="__codelineno-2-178" href="#__codelineno-2-178"></a><span class="w">  </span>warn<span class="w"> </span><span class="s2">&quot;bridge &#39;</span><span class="nv">$SAND_BRIDGE</span><span class="s2">&#39; not found on this node — continuing, but check SAND_BRIDGE&quot;</span>
+<a id="__codelineno-2-179" name="__codelineno-2-179" href="#__codelineno-2-179"></a>
+<a id="__codelineno-2-180" name="__codelineno-2-180" href="#__codelineno-2-180"></a><span class="c1"># ----------------------------------------------------------------- roles ---</span>
+<a id="__codelineno-2-181" name="__codelineno-2-181" href="#__codelineno-2-181"></a><span class="c1"># Shared by every pool this script sets up, so they are created once.</span>
+<a id="__codelineno-2-182" name="__codelineno-2-182" href="#__codelineno-2-182"></a>
+<a id="__codelineno-2-183" name="__codelineno-2-183" href="#__codelineno-2-183"></a>step<span class="w"> </span><span class="s2">&quot;Creating the least-privilege roles&quot;</span>
+<a id="__codelineno-2-184" name="__codelineno-2-184" href="#__codelineno-2-184"></a>ensure_role<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_PRIVS</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-185" name="__codelineno-2-185" href="#__codelineno-2-185"></a>ensure_role<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_NET_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;SDN.Use&quot;</span>
+<a id="__codelineno-2-186" name="__codelineno-2-186" href="#__codelineno-2-186"></a>ensure_role<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_NODE_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;Sys.AccessNetwork Sys.Audit&quot;</span>
+<a id="__codelineno-2-187" name="__codelineno-2-187" href="#__codelineno-2-187"></a>
+<a id="__codelineno-2-188" name="__codelineno-2-188" href="#__codelineno-2-188"></a><span class="c1"># ----------------------------------------------------------------- scope ---</span>
+<a id="__codelineno-2-189" name="__codelineno-2-189" href="#__codelineno-2-189"></a>
+<a id="__codelineno-2-190" name="__codelineno-2-190" href="#__codelineno-2-190"></a><span class="c1"># ----------------------------------------------------------------- scope ---</span>
+<a id="__codelineno-2-191" name="__codelineno-2-191" href="#__codelineno-2-191"></a><span class="c1"># The pool, its user, its token, and the ACLs that confine that user to it.</span>
+<a id="__codelineno-2-192" name="__codelineno-2-192" href="#__codelineno-2-192"></a><span class="c1"># Everything below is derived from SAND_POOL, so a second run under a different</span>
+<a id="__codelineno-2-193" name="__codelineno-2-193" href="#__codelineno-2-193"></a><span class="c1"># name builds a second scope that shares nothing with this one but the roles.</span>
+<a id="__codelineno-2-194" name="__codelineno-2-194" href="#__codelineno-2-194"></a>
+<a id="__codelineno-2-195" name="__codelineno-2-195" href="#__codelineno-2-195"></a><span class="nv">full_token_id</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">SAND_USER</span><span class="si">}</span><span class="s2">!</span><span class="si">${</span><span class="nv">SAND_TOKEN_ID</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-196" name="__codelineno-2-196" href="#__codelineno-2-196"></a>
+<a id="__codelineno-2-197" name="__codelineno-2-197" href="#__codelineno-2-197"></a>step<span class="w"> </span><span class="s2">&quot;Pool </span><span class="nv">$SAND_POOL</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-198" name="__codelineno-2-198" href="#__codelineno-2-198"></a>ensure_pool<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_POOL</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;sandbar-managed VMs&quot;</span>
+<a id="__codelineno-2-199" name="__codelineno-2-199" href="#__codelineno-2-199"></a>
+<a id="__codelineno-2-200" name="__codelineno-2-200" href="#__codelineno-2-200"></a><span class="c1"># Add the VM disk storage to the pool so the role&#39;s Datastore privileges apply</span>
+<a id="__codelineno-2-201" name="__codelineno-2-201" href="#__codelineno-2-201"></a><span class="c1"># to it. Errors if it is already a member, which is fine — and two pools may</span>
+<a id="__codelineno-2-202" name="__codelineno-2-202" href="#__codelineno-2-202"></a><span class="c1"># share one storage: a pool holds VMIDs and whole storages, so this grants the</span>
+<a id="__codelineno-2-203" name="__codelineno-2-203" href="#__codelineno-2-203"></a><span class="c1"># role&#39;s Datastore privileges on that storage, never a pool-private slice of it.</span>
+<a id="__codelineno-2-204" name="__codelineno-2-204" href="#__codelineno-2-204"></a><span class="k">if</span><span class="w"> </span>pveum<span class="w"> </span>pool<span class="w"> </span>modify<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_POOL</span><span class="s2">&quot;</span><span class="w"> </span>--storage<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-205" name="__codelineno-2-205" href="#__codelineno-2-205"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;storage </span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2"> added to the pool&quot;</span>
+<a id="__codelineno-2-206" name="__codelineno-2-206" href="#__codelineno-2-206"></a><span class="k">else</span>
+<a id="__codelineno-2-207" name="__codelineno-2-207" href="#__codelineno-2-207"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;storage </span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2"> already in the pool&quot;</span>
+<a id="__codelineno-2-208" name="__codelineno-2-208" href="#__codelineno-2-208"></a><span class="k">fi</span>
+<a id="__codelineno-2-209" name="__codelineno-2-209" href="#__codelineno-2-209"></a>
+<a id="__codelineno-2-210" name="__codelineno-2-210" href="#__codelineno-2-210"></a>step<span class="w"> </span><span class="s2">&quot;User and API token&quot;</span>
+<a id="__codelineno-2-211" name="__codelineno-2-211" href="#__codelineno-2-211"></a>ensure_user<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-212" name="__codelineno-2-212" href="#__codelineno-2-212"></a>
+<a id="__codelineno-2-213" name="__codelineno-2-213" href="#__codelineno-2-213"></a><span class="nv">token_value</span><span class="o">=</span><span class="s2">&quot;&quot;</span>
+<a id="__codelineno-2-214" name="__codelineno-2-214" href="#__codelineno-2-214"></a><span class="k">if</span><span class="w"> </span>token_exists<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_ID</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-215" name="__codelineno-2-215" href="#__codelineno-2-215"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_RECREATE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-216" name="__codelineno-2-216" href="#__codelineno-2-216"></a><span class="w">    </span>pveum<span class="w"> </span>user<span class="w"> </span>token<span class="w"> </span>remove<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_ID</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null
+<a id="__codelineno-2-217" name="__codelineno-2-217" href="#__codelineno-2-217"></a><span class="w">    </span>info<span class="w"> </span><span class="s2">&quot;removed the existing token </span><span class="nv">$full_token_id</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-218" name="__codelineno-2-218" href="#__codelineno-2-218"></a><span class="w">  </span><span class="k">else</span>
+<a id="__codelineno-2-219" name="__codelineno-2-219" href="#__codelineno-2-219"></a><span class="w">    </span>warn<span class="w"> </span><span class="s2">&quot;token </span><span class="nv">$full_token_id</span><span class="s2"> already exists and its secret cannot be read back.</span>
+<a id="__codelineno-2-220" name="__codelineno-2-220" href="#__codelineno-2-220"></a><span class="s2">         Keeping it — reuse the token file you saved when it was created, or</span>
+<a id="__codelineno-2-221" name="__codelineno-2-221" href="#__codelineno-2-221"></a><span class="s2">         re-run with SAND_TOKEN_RECREATE=1 to replace it (which invalidates</span>
+<a id="__codelineno-2-222" name="__codelineno-2-222" href="#__codelineno-2-222"></a><span class="s2">         the old secret everywhere it is configured).&quot;</span>
+<a id="__codelineno-2-223" name="__codelineno-2-223" href="#__codelineno-2-223"></a><span class="w">  </span><span class="k">fi</span>
+<a id="__codelineno-2-224" name="__codelineno-2-224" href="#__codelineno-2-224"></a><span class="k">fi</span>
+<a id="__codelineno-2-225" name="__codelineno-2-225" href="#__codelineno-2-225"></a>
+<a id="__codelineno-2-226" name="__codelineno-2-226" href="#__codelineno-2-226"></a><span class="k">if</span><span class="w"> </span>!<span class="w"> </span>token_exists<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_ID</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-227" name="__codelineno-2-227" href="#__codelineno-2-227"></a><span class="w">  </span><span class="c1"># --privsep 0: the token inherits the user&#39;s rights. With separation on, a</span>
+<a id="__codelineno-2-228" name="__codelineno-2-228" href="#__codelineno-2-228"></a><span class="w">  </span><span class="c1"># token&#39;s rights are the INTERSECTION of its own and its user&#39;s — and this</span>
+<a id="__codelineno-2-229" name="__codelineno-2-229" href="#__codelineno-2-229"></a><span class="w">  </span><span class="c1"># user exists solely to own the token, so that intersection would be empty.</span>
+<a id="__codelineno-2-230" name="__codelineno-2-230" href="#__codelineno-2-230"></a><span class="w">  </span><span class="c1"># The confined ACLs below are granted to the user for that reason.</span>
+<a id="__codelineno-2-231" name="__codelineno-2-231" href="#__codelineno-2-231"></a><span class="w">  </span><span class="nv">token_value</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>pveum<span class="w"> </span>user<span class="w"> </span>token<span class="w"> </span>add<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_ID</span><span class="s2">&quot;</span><span class="w"> </span>--privsep<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-232" name="__codelineno-2-232" href="#__codelineno-2-232"></a><span class="w">    </span>--output-format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>json_str<span class="w"> </span>value<span class="k">)</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-233" name="__codelineno-2-233" href="#__codelineno-2-233"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$token_value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">||</span><span class="w"> </span>die<span class="w"> </span><span class="s2">&quot;could not read the new token&#39;s value for </span><span class="nv">$full_token_id</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-234" name="__codelineno-2-234" href="#__codelineno-2-234"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;token </span><span class="nv">$full_token_id</span><span class="s2"> created&quot;</span>
+<a id="__codelineno-2-235" name="__codelineno-2-235" href="#__codelineno-2-235"></a><span class="k">fi</span>
+<a id="__codelineno-2-236" name="__codelineno-2-236" href="#__codelineno-2-236"></a>
+<a id="__codelineno-2-237" name="__codelineno-2-237" href="#__codelineno-2-237"></a>step<span class="w"> </span><span class="s2">&quot;Granting the confined ACLs to </span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-238" name="__codelineno-2-238" href="#__codelineno-2-238"></a><span class="c1"># The pool: this is the whole isolation boundary.</span>
+<a id="__codelineno-2-239" name="__codelineno-2-239" href="#__codelineno-2-239"></a>grant<span class="w"> </span><span class="s2">&quot;/pool/</span><span class="nv">$SAND_POOL</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-240" name="__codelineno-2-240" href="#__codelineno-2-240"></a>
+<a id="__codelineno-2-241" name="__codelineno-2-241" href="#__codelineno-2-241"></a><span class="c1"># Three things a pool cannot hold, granted at the narrowest path that works.</span>
+<a id="__codelineno-2-242" name="__codelineno-2-242" href="#__codelineno-2-242"></a><span class="c1"># A plain Linux bridge lives under the synthetic SDN zone &quot;localnetwork&quot;; with</span>
+<a id="__codelineno-2-243" name="__codelineno-2-243" href="#__codelineno-2-243"></a><span class="c1"># a VLAN tag the path gains the tag as a further segment.</span>
+<a id="__codelineno-2-244" name="__codelineno-2-244" href="#__codelineno-2-244"></a><span class="nv">sdn_path</span><span class="o">=</span><span class="s2">&quot;/sdn/zones/localnetwork/</span><span class="nv">$SAND_BRIDGE</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-245" name="__codelineno-2-245" href="#__codelineno-2-245"></a><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_BRIDGE_VLAN</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-246" name="__codelineno-2-246" href="#__codelineno-2-246"></a><span class="w">  </span><span class="nv">sdn_path</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$sdn_path</span><span class="s2">/</span><span class="nv">$SAND_BRIDGE_VLAN</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-247" name="__codelineno-2-247" href="#__codelineno-2-247"></a><span class="k">fi</span>
+<a id="__codelineno-2-248" name="__codelineno-2-248" href="#__codelineno-2-248"></a>grant<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$sdn_path</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_NET_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-249" name="__codelineno-2-249" href="#__codelineno-2-249"></a>grant<span class="w"> </span><span class="s2">&quot;/nodes/</span><span class="nv">$SAND_NODE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_NODE_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-250" name="__codelineno-2-250" href="#__codelineno-2-250"></a>
+<a id="__codelineno-2-251" name="__codelineno-2-251" href="#__codelineno-2-251"></a><span class="c1"># Storage privileges on both storages sand uses — the disk storage to allocate</span>
+<a id="__codelineno-2-252" name="__codelineno-2-252" href="#__codelineno-2-252"></a><span class="c1"># VM disks, the image storage to download the cloud image.</span>
+<a id="__codelineno-2-253" name="__codelineno-2-253" href="#__codelineno-2-253"></a>grant<span class="w"> </span><span class="s2">&quot;/storage/</span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-254" name="__codelineno-2-254" href="#__codelineno-2-254"></a><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span>!<span class="o">=</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_DISK_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-255" name="__codelineno-2-255" href="#__codelineno-2-255"></a><span class="w">  </span>grant<span class="w"> </span><span class="s2">&quot;/storage/</span><span class="nv">$SAND_IMAGE_STORAGE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_ROLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_USER</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-256" name="__codelineno-2-256" href="#__codelineno-2-256"></a><span class="k">fi</span>
+<a id="__codelineno-2-257" name="__codelineno-2-257" href="#__codelineno-2-257"></a>
+<a id="__codelineno-2-258" name="__codelineno-2-258" href="#__codelineno-2-258"></a>step<span class="w"> </span><span class="s2">&quot;Verifying the scope of </span><span class="nv">$full_token_id</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-259" name="__codelineno-2-259" href="#__codelineno-2-259"></a><span class="nv">perms</span><span class="o">=</span><span class="s2">&quot;</span><span class="k">$(</span>pveum<span class="w"> </span>user<span class="w"> </span>permissions<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$full_token_id</span><span class="s2">&quot;</span><span class="w"> </span>--output-format<span class="w"> </span>json<span class="k">)</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-260" name="__codelineno-2-260" href="#__codelineno-2-260"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$perms</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-261" name="__codelineno-2-261" href="#__codelineno-2-261"></a><span class="k">case</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$perms</span><span class="s2">&quot;</span><span class="w"> </span><span class="k">in</span>
+<a id="__codelineno-2-262" name="__codelineno-2-262" href="#__codelineno-2-262"></a><span class="s1">&#39;{}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="o">)</span>
+<a id="__codelineno-2-263" name="__codelineno-2-263" href="#__codelineno-2-263"></a><span class="w">  </span>warn<span class="w"> </span><span class="s2">&quot;the token has NO effective permissions. This is almost always a</span>
+<a id="__codelineno-2-264" name="__codelineno-2-264" href="#__codelineno-2-264"></a><span class="s2">         privilege-separated (--privsep 1) token whose ACLs were granted to the</span>
+<a id="__codelineno-2-265" name="__codelineno-2-265" href="#__codelineno-2-265"></a><span class="s2">         token instead of the user. Re-run with SAND_TOKEN_RECREATE=1.&quot;</span>
+<a id="__codelineno-2-266" name="__codelineno-2-266" href="#__codelineno-2-266"></a><span class="w">  </span><span class="p">;;</span>
+<a id="__codelineno-2-267" name="__codelineno-2-267" href="#__codelineno-2-267"></a><span class="k">esac</span>
+<a id="__codelineno-2-268" name="__codelineno-2-268" href="#__codelineno-2-268"></a><span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$perms</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-q<span class="w"> </span><span class="s1">&#39;&quot;/&quot;[[:space:]]*:&#39;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-269" name="__codelineno-2-269" href="#__codelineno-2-269"></a><span class="w">  </span>warn<span class="w"> </span><span class="s2">&quot;a permission is granted at &#39;/&#39; for </span><span class="nv">$SAND_USER</span><span class="s2"> — the isolation guarantee</span>
+<a id="__codelineno-2-270" name="__codelineno-2-270" href="#__codelineno-2-270"></a><span class="s2">         does NOT hold. Find and remove that over-broad grant:</span>
+<a id="__codelineno-2-271" name="__codelineno-2-271" href="#__codelineno-2-271"></a><span class="s2">         pveum acl list&quot;</span>
+<a id="__codelineno-2-272" name="__codelineno-2-272" href="#__codelineno-2-272"></a><span class="k">fi</span>
+<a id="__codelineno-2-273" name="__codelineno-2-273" href="#__codelineno-2-273"></a><span class="c1"># The pool must be the ONLY pool this token can see. A second scope&#39;s pool</span>
+<a id="__codelineno-2-274" name="__codelineno-2-274" href="#__codelineno-2-274"></a><span class="c1"># showing up here means both runs were pointed at one user (see SAND_USER).</span>
+<a id="__codelineno-2-275" name="__codelineno-2-275" href="#__codelineno-2-275"></a><span class="k">if</span><span class="w"> </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$perms</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-o<span class="w"> </span><span class="s1">&#39;&quot;/pool/[^&quot;]*&quot;&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-qv<span class="w"> </span><span class="s2">&quot;\&quot;/pool/</span><span class="nv">$SAND_POOL</span><span class="s2">\&quot;&quot;</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-276" name="__codelineno-2-276" href="#__codelineno-2-276"></a><span class="w">  </span>warn<span class="w"> </span><span class="s2">&quot;this token can see a pool other than </span><span class="nv">$SAND_POOL</span><span class="s2">. Two scopes must not</span>
+<a id="__codelineno-2-277" name="__codelineno-2-277" href="#__codelineno-2-277"></a><span class="s2">         share a user — re-run the other pool with its own SAND_USER.&quot;</span>
+<a id="__codelineno-2-278" name="__codelineno-2-278" href="#__codelineno-2-278"></a><span class="k">fi</span>
+<a id="__codelineno-2-279" name="__codelineno-2-279" href="#__codelineno-2-279"></a>
+<a id="__codelineno-2-280" name="__codelineno-2-280" href="#__codelineno-2-280"></a><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$token_value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_OUT</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-281" name="__codelineno-2-281" href="#__codelineno-2-281"></a><span class="w">  </span><span class="o">(</span>
+<a id="__codelineno-2-282" name="__codelineno-2-282" href="#__codelineno-2-282"></a><span class="w">    </span><span class="nb">umask</span><span class="w"> </span><span class="m">077</span>
+<a id="__codelineno-2-283" name="__codelineno-2-283" href="#__codelineno-2-283"></a><span class="w">    </span><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;%s=%s\n&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$full_token_id</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$token_value</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_OUT</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-284" name="__codelineno-2-284" href="#__codelineno-2-284"></a><span class="w">  </span><span class="o">)</span>
+<a id="__codelineno-2-285" name="__codelineno-2-285" href="#__codelineno-2-285"></a><span class="w">  </span>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SAND_TOKEN_OUT</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-286" name="__codelineno-2-286" href="#__codelineno-2-286"></a><span class="w">  </span>info<span class="w"> </span><span class="s2">&quot;token file written to </span><span class="nv">$SAND_TOKEN_OUT</span><span class="s2"> (mode 600)&quot;</span>
+<a id="__codelineno-2-287" name="__codelineno-2-287" href="#__codelineno-2-287"></a><span class="k">fi</span>
+<a id="__codelineno-2-288" name="__codelineno-2-288" href="#__codelineno-2-288"></a>
+<a id="__codelineno-2-289" name="__codelineno-2-289" href="#__codelineno-2-289"></a><span class="c1"># --------------------------------------------------------------- summary ---</span>
+<a id="__codelineno-2-290" name="__codelineno-2-290" href="#__codelineno-2-290"></a><span class="c1">#</span>
+<a id="__codelineno-2-291" name="__codelineno-2-291" href="#__codelineno-2-291"></a><span class="c1"># The pool this run built can serve either purpose, and the script has no way to</span>
+<a id="__codelineno-2-292" name="__codelineno-2-292" href="#__codelineno-2-292"></a><span class="c1"># know which you meant — so it prints the mapping for both. Take the half you</span>
+<a id="__codelineno-2-293" name="__codelineno-2-293" href="#__codelineno-2-293"></a><span class="c1"># need and ignore the other.</span>
+<a id="__codelineno-2-294" name="__codelineno-2-294" href="#__codelineno-2-294"></a>
+<a id="__codelineno-2-295" name="__codelineno-2-295" href="#__codelineno-2-295"></a><span class="c1"># Display text only — this string is pasted into the reader&#39;s own shell, which</span>
+<a id="__codelineno-2-296" name="__codelineno-2-296" href="#__codelineno-2-296"></a><span class="c1"># is what expands the tilde. The path this script may WRITE to is</span>
+<a id="__codelineno-2-297" name="__codelineno-2-297" href="#__codelineno-2-297"></a><span class="c1"># SAND_TOKEN_OUT, which is used verbatim.</span>
+<a id="__codelineno-2-298" name="__codelineno-2-298" href="#__codelineno-2-298"></a><span class="c1"># shellcheck disable=SC2088</span>
+<a id="__codelineno-2-299" name="__codelineno-2-299" href="#__codelineno-2-299"></a><span class="nv">token_file</span><span class="o">=</span><span class="s2">&quot;~/.config/sandbar/</span><span class="si">${</span><span class="nv">SAND_POOL</span><span class="si">}</span><span class="s2">.token&quot;</span>
+<a id="__codelineno-2-300" name="__codelineno-2-300" href="#__codelineno-2-300"></a>
+<a id="__codelineno-2-301" name="__codelineno-2-301" href="#__codelineno-2-301"></a>step<span class="w"> </span><span class="s2">&quot;Done — finish the setup on the machine that runs sand&quot;</span>
+<a id="__codelineno-2-302" name="__codelineno-2-302" href="#__codelineno-2-302"></a>
+<a id="__codelineno-2-303" name="__codelineno-2-303" href="#__codelineno-2-303"></a><span class="k">if</span><span class="w"> </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$token_value</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<a id="__codelineno-2-304" name="__codelineno-2-304" href="#__codelineno-2-304"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+<a id="__codelineno-2-305" name="__codelineno-2-305" href="#__codelineno-2-305"></a>
+<a id="__codelineno-2-306" name="__codelineno-2-306" href="#__codelineno-2-306"></a><span class="s">The token secret below is shown ONCE and cannot be retrieved again. Save it on</span>
+<a id="__codelineno-2-307" name="__codelineno-2-307" href="#__codelineno-2-307"></a><span class="s">the machine that runs sand — the file is named after the POOL, so a second</span>
+<a id="__codelineno-2-308" name="__codelineno-2-308" href="#__codelineno-2-308"></a><span class="s">scope&#39;s token never overwrites this one:</span>
+<a id="__codelineno-2-309" name="__codelineno-2-309" href="#__codelineno-2-309"></a>
+<a id="__codelineno-2-310" name="__codelineno-2-310" href="#__codelineno-2-310"></a><span class="s">  mkdir -p ~/.config/sandbar</span>
+<a id="__codelineno-2-311" name="__codelineno-2-311" href="#__codelineno-2-311"></a><span class="s">  ( umask 077; printf &#39;%s\n&#39; &#39;${full_token_id}=${token_value}&#39; &gt; ${token_file} )</span>
+<a id="__codelineno-2-312" name="__codelineno-2-312" href="#__codelineno-2-312"></a><span class="s">  chmod 600 ${token_file}</span>
+<a id="__codelineno-2-313" name="__codelineno-2-313" href="#__codelineno-2-313"></a><span class="s">EOF</span>
+<a id="__codelineno-2-314" name="__codelineno-2-314" href="#__codelineno-2-314"></a><span class="k">else</span>
+<a id="__codelineno-2-315" name="__codelineno-2-315" href="#__codelineno-2-315"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+<a id="__codelineno-2-316" name="__codelineno-2-316" href="#__codelineno-2-316"></a>
+<a id="__codelineno-2-317" name="__codelineno-2-317" href="#__codelineno-2-317"></a><span class="s">No new token was created, so there is no secret to print. Reuse the token file</span>
+<a id="__codelineno-2-318" name="__codelineno-2-318" href="#__codelineno-2-318"></a><span class="s">you saved when the existing token was created.</span>
+<a id="__codelineno-2-319" name="__codelineno-2-319" href="#__codelineno-2-319"></a><span class="s">EOF</span>
+<a id="__codelineno-2-320" name="__codelineno-2-320" href="#__codelineno-2-320"></a><span class="k">fi</span>
+<a id="__codelineno-2-321" name="__codelineno-2-321" href="#__codelineno-2-321"></a>
+<a id="__codelineno-2-322" name="__codelineno-2-322" href="#__codelineno-2-322"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+<a id="__codelineno-2-323" name="__codelineno-2-323" href="#__codelineno-2-323"></a>
+<a id="__codelineno-2-324" name="__codelineno-2-324" href="#__codelineno-2-324"></a><span class="s">If this pool is for everyday use, add it to your profiles.yaml</span>
+<a id="__codelineno-2-325" name="__codelineno-2-325" href="#__codelineno-2-325"></a><span class="s">(~/.config/sandbar/profiles.yaml) — id is yours to choose, and must be unique</span>
+<a id="__codelineno-2-326" name="__codelineno-2-326" href="#__codelineno-2-326"></a><span class="s">across profiles:</span>
+<a id="__codelineno-2-327" name="__codelineno-2-327" href="#__codelineno-2-327"></a>
+<a id="__codelineno-2-328" name="__codelineno-2-328" href="#__codelineno-2-328"></a><span class="s">  profiles:</span>
+<a id="__codelineno-2-329" name="__codelineno-2-329" href="#__codelineno-2-329"></a><span class="s">    - id: ${SAND_NODE}</span>
+<a id="__codelineno-2-330" name="__codelineno-2-330" href="#__codelineno-2-330"></a><span class="s">      name: proxmox</span>
+<a id="__codelineno-2-331" name="__codelineno-2-331" href="#__codelineno-2-331"></a><span class="s">      type: proxmox</span>
+<a id="__codelineno-2-332" name="__codelineno-2-332" href="#__codelineno-2-332"></a><span class="s">      enabled: true</span>
+<a id="__codelineno-2-333" name="__codelineno-2-333" href="#__codelineno-2-333"></a><span class="s">      host: $(hostname -f 2&gt;/dev/null || hostname)</span>
+<a id="__codelineno-2-334" name="__codelineno-2-334" href="#__codelineno-2-334"></a><span class="s">      node: ${SAND_NODE}</span>
+<a id="__codelineno-2-335" name="__codelineno-2-335" href="#__codelineno-2-335"></a><span class="s">      pool: ${SAND_POOL}</span>
+<a id="__codelineno-2-336" name="__codelineno-2-336" href="#__codelineno-2-336"></a><span class="s">      storage: ${SAND_DISK_STORAGE}</span>
+<a id="__codelineno-2-337" name="__codelineno-2-337" href="#__codelineno-2-337"></a><span class="s">      image_storage: ${SAND_IMAGE_STORAGE}</span>
+<a id="__codelineno-2-338" name="__codelineno-2-338" href="#__codelineno-2-338"></a><span class="s">      bridge: ${SAND_BRIDGE}</span>
+<a id="__codelineno-2-339" name="__codelineno-2-339" href="#__codelineno-2-339"></a><span class="s">      token_file: ${token_file}</span>
+<a id="__codelineno-2-340" name="__codelineno-2-340" href="#__codelineno-2-340"></a><span class="s">      identity_path: ~/.ssh/id_ed25519   # the key sand installs and connects with</span>
+<a id="__codelineno-2-341" name="__codelineno-2-341" href="#__codelineno-2-341"></a><span class="s">      # insecure: true                   # only if the PVE cert is self-signed</span>
+<a id="__codelineno-2-342" name="__codelineno-2-342" href="#__codelineno-2-342"></a>
+<a id="__codelineno-2-343" name="__codelineno-2-343" href="#__codelineno-2-343"></a><span class="s">If it is the isolated pool for the opt-in e2e suite, this is its environment:</span>
+<a id="__codelineno-2-344" name="__codelineno-2-344" href="#__codelineno-2-344"></a>
+<a id="__codelineno-2-345" name="__codelineno-2-345" href="#__codelineno-2-345"></a><span class="s">  export PROXMOX_E2E=1</span>
+<a id="__codelineno-2-346" name="__codelineno-2-346" href="#__codelineno-2-346"></a><span class="s">  export PROXMOX_E2E_HOST=$(hostname -f 2&gt;/dev/null || hostname)</span>
+<a id="__codelineno-2-347" name="__codelineno-2-347" href="#__codelineno-2-347"></a><span class="s">  export PROXMOX_E2E_NODE=${SAND_NODE}</span>
+<a id="__codelineno-2-348" name="__codelineno-2-348" href="#__codelineno-2-348"></a><span class="s">  export PROXMOX_E2E_POOL=${SAND_POOL}</span>
+<a id="__codelineno-2-349" name="__codelineno-2-349" href="#__codelineno-2-349"></a><span class="s">  export PROXMOX_E2E_STORAGE=${SAND_DISK_STORAGE}</span>
+<a id="__codelineno-2-350" name="__codelineno-2-350" href="#__codelineno-2-350"></a><span class="s">  export PROXMOX_E2E_IMAGE_STORAGE=${SAND_IMAGE_STORAGE}</span>
+<a id="__codelineno-2-351" name="__codelineno-2-351" href="#__codelineno-2-351"></a><span class="s">  export PROXMOX_E2E_BRIDGE=${SAND_BRIDGE}</span>
+<a id="__codelineno-2-352" name="__codelineno-2-352" href="#__codelineno-2-352"></a><span class="s">  export PROXMOX_E2E_TOKEN_FILE=${token_file}</span>
+<a id="__codelineno-2-353" name="__codelineno-2-353" href="#__codelineno-2-353"></a><span class="s">  export PROXMOX_E2E_SSH_USER=debian</span>
+<a id="__codelineno-2-354" name="__codelineno-2-354" href="#__codelineno-2-354"></a><span class="s">  export PROXMOX_E2E_SSH_IDENTITY=~/.ssh/id_ed25519</span>
+<a id="__codelineno-2-355" name="__codelineno-2-355" href="#__codelineno-2-355"></a>
+<a id="__codelineno-2-356" name="__codelineno-2-356" href="#__codelineno-2-356"></a><span class="s">To build the OTHER one, run this again with a different pool name — same steps,</span>
+<a id="__codelineno-2-357" name="__codelineno-2-357" href="#__codelineno-2-357"></a><span class="s">same script, a scope that shares nothing with this one:</span>
+<a id="__codelineno-2-358" name="__codelineno-2-358" href="#__codelineno-2-358"></a>
+<a id="__codelineno-2-359" name="__codelineno-2-359" href="#__codelineno-2-359"></a><span class="s">  SAND_POOL=&lt;the other pool&gt; $0</span>
+<a id="__codelineno-2-360" name="__codelineno-2-360" href="#__codelineno-2-360"></a><span class="s">EOF</span>
+</code></pre></div>
+</details>
+<p>The rest of this page is the same setup done by hand, with the reasoning for
+each privilege — read it if you want to know <em>why</em> the script does what it does,
+or if your host differs enough that you'd rather drive it yourself.</p>
+<h2 id="step-1-create-a-dedicated-pool">Step 1 — Create a dedicated pool</h2>
+<p>Every VM <code>sand</code> creates is placed in this pool automatically, and the token is
+scoped to it. That membership is the whole isolation boundary.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pveum<span class="w"> </span>pool<span class="w"> </span>add<span class="w"> </span>sandbar<span class="w"> </span>--comment<span class="w"> </span><span class="s2">&quot;sandbar-managed VMs&quot;</span>
+</code></pre></div>
+<h2 id="step-2-create-the-minimum-privilege-role">Step 2 — Create the minimum-privilege role</h2>
+<p>This is the exact set of privileges <code>sand</code>'s workflow needs — create a base VM
+from a cloud image, clone it, resize, configure cloud-init, power on and off,
+snapshot, read node stats, and run a guest-agent command. Nothing more.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span>SandbarProv<span class="w"> </span>--privs<span class="w"> </span><span class="s2">&quot;\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s2">VM.Allocate VM.Clone VM.Audit VM.PowerMgmt VM.Snapshot \</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="s2">VM.Config.Disk VM.Config.CPU VM.Config.Memory VM.Config.Network \</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s2">VM.Config.Options VM.Config.Cloudinit VM.Config.HWType VM.Config.CDROM \</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s2">VM.GuestAgent.Audit VM.GuestAgent.Unrestricted \</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s2">Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Audit&quot;</span>
+</code></pre></div>
+<p>Some of these are non-obvious, and if you trim them further you'll get confusing
+failures — so, for the record, why each of the less-obvious ones is here:</p>
+<table>
+<thead>
+<tr>
+<th>Privilege</th>
+<th>Why <code>sand</code> needs it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VM.Config.HWType</code></td>
+<td>Setting <code>scsihw</code>, <code>vga</code>, and <code>machine</code> on the base VM. Cloud images need <code>virtio-scsi-pci</code>, not the PVE default.</td>
+</tr>
+<tr>
+<td><code>VM.Config.Options</code></td>
+<td>Setting <code>agent</code>, <code>name</code>, and <code>ostype</code>.</td>
+</tr>
+<tr>
+<td><code>VM.Config.Disk</code></td>
+<td>Covers disk devices <strong>and</strong> the <code>boot</code> order.</td>
+</tr>
+<tr>
+<td><code>VM.Config.Cloudinit</code></td>
+<td>Injecting the SSH key, user, and network config.</td>
+</tr>
+<tr>
+<td><code>Datastore.AllocateTemplate</code></td>
+<td>Downloading the cloud image into storage via the <code>download-url</code> endpoint (content type <code>import</code>). PVE gates that endpoint on this privilege specifically — <code>Datastore.AllocateSpace</code> alone is not enough, and its absence fails the very first base-build step with a 403.</td>
+</tr>
+<tr>
+<td><code>Pool.Audit</code></td>
+<td>So the pool name appears in listings — without it <code>sand</code> can't tell which VMs are its own.</td>
+</tr>
+<tr>
+<td><code>VM.GuestAgent.Unrestricted</code></td>
+<td>Only needed for guest-agent <code>exec</code>. It's the broadest privilege in the set; drop it if you never need <code>sand</code> to run a command via the agent (it uses SSH for shells regardless).</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Do not add <code>VM.Monitor</code> or <code>VM.Console</code></p>
+<p><code>VM.Monitor</code> was <strong>removed in PVE 9</strong> — including it makes <code>pveum role add</code>
+reject the whole command. <code>VM.Console</code> is only for the VNC/SPICE console,
+which <code>sand</code> never uses. Leaving both out is deliberate.</p>
+</div>
+<h2 id="step-3-create-a-user-and-an-api-token">Step 3 — Create a user and an API token</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pveum<span class="w"> </span>user<span class="w"> </span>add<span class="w"> </span>sandbar@pve<span class="w"> </span>--comment<span class="w"> </span><span class="s2">&quot;sandbar automation&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>pveum<span class="w"> </span>user<span class="w"> </span>token<span class="w"> </span>add<span class="w"> </span>sandbar@pve<span class="w"> </span>prov<span class="w"> </span>--privsep<span class="w"> </span><span class="m">0</span><span class="w"> </span>--output-format<span class="w"> </span>json
+</code></pre></div>
+<p>The second command prints the token <strong>value exactly once</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;full-tokenid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sandbar@pve!prov&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">&quot;info&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;privsep&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0&quot;</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>--privsep 0</code> turns privilege separation <strong>off</strong>, so the token inherits its
+user's permissions. That's deliberate: Proxmox computes a privilege-separated
+(<code>--privsep 1</code>) token's rights as the <strong>intersection</strong> of the user's permissions
+and the token's own. So if you grant the ACLs only to the token and its user has
+none — exactly the case here, where <code>sandbar@pve</code> exists solely to own this
+token — the token ends up with <strong>no permissions at all</strong>, and
+<code>pveum user permissions 'sandbar@pve!prov'</code> prints <code>{}</code>. With separation off you
+grant the least-privilege ACLs below to the <strong>user</strong> <code>sandbar@pve</code> instead, and
+the token carries exactly those. Because this user has no password and no other
+roles, its permissions <em>are</em> the confined set — there is nothing broader for the
+token to inherit. <strong>Save the value now</strong>; it cannot be retrieved again.</p>
+<p><code>sand</code> authenticates with the token's <strong>full identity</strong>, which is the two fields
+above joined by an <code>=</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>&lt;full-tokenid&gt;=&lt;value&gt;
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sandbar@pve!prov=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+</code></pre></div>
+<p>Write exactly that one line into a file <code>sand</code> will read (referenced as
+<code>token_file</code> in <a href="#step-6-point-sand-at-the-host">Step 6</a>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.config/sandbar
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">umask</span><span class="w"> </span><span class="m">077</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;sandbar@pve!prov=%s\n&#39;</span><span class="w"> </span><span class="s1">&#39;xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>&gt;<span class="w"> </span>~/.config/sandbar/pve1.token
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>~/.config/sandbar/pve1.token
+</code></pre></div>
+<p>The file holds <strong>one line</strong> and nothing else — the identity, an <code>=</code>, and the
+value. <code>sand</code> refuses to read it unless it is mode <code>600</code> (owner-only).</p>
+<h2 id="step-4-bind-the-role-to-the-user-at-the-pool">Step 4 — Bind the role to the user at the pool</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Scope the user (and so its token) to the pool: this confines it to sandbar&#39;s own VMs.</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/pool/sandbar<span class="w"> </span>--roles<span class="w"> </span>SandbarProv<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Add the VM storage to the pool so the role&#39;s Datastore privileges apply to it.</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1"># This grants them on the WHOLE storage object (see the note below), not a</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># pool-private slice — Proxmox has no notion of &quot;the pool&#39;s part&quot; of a storage.</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>pveum<span class="w"> </span>pool<span class="w"> </span>modify<span class="w"> </span>sandbar<span class="w"> </span>--storage<span class="w"> </span>local-lvm
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">A shared storage is trusted as a whole</p>
+<p>A pool can only contain VMIDs and <em>entire</em> storages — there is no "pool's
+slice" of a datastore. So if <code>local-lvm</code> also backs VMs outside the pool, the
+token's <code>Datastore.AllocateSpace</code> and <code>Datastore.Audit</code> reach the whole of it:
+it can <strong>enumerate</strong> every volume on that storage (volume names, sizes, and
+the owning VMID) and <strong>allocate space</strong> anywhere on it. It still <strong>cannot read
+or modify</strong> another VM's disk — and it never sees those VMs' configuration or
+state — because reading, attaching, or reassigning a volume owned by another
+guest requires access to that guest or the <code>Datastore.Allocate</code> privilege,
+neither of which this token has. If you want the storage boundary as tight as
+the VM one, give <code>sand</code> a <strong>dedicated storage</strong> (its own LVM-thin pool or
+dataset) rather than one shared with other VMs.</p>
+</div>
+<h2 id="step-5-grant-the-three-privileges-that-cant-be-pool-scoped">Step 5 — Grant the three privileges that can't be pool-scoped</h2>
+<p>Proxmox implements pool permissions by <em>projecting</em> a role onto the pool's
+members, and a pool can only contain <strong>VMs and storage</strong>. Three things <code>sand</code>
+needs are therefore not grantable at the pool, and have to be granted at the
+narrowest path that does work. None of them grants any access to another VM —
+that's exactly why they're named individually here instead of reaching for a
+broader role.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># 1. Attach a VM to the bridge. A plain Linux bridge lives under the synthetic</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1">#    SDN zone &quot;localnetwork&quot;; with a VLAN tag the path gains the tag as a further</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1">#    segment (…/vmbr0/&lt;tag&gt;).</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span>SandbarNet<span class="w"> </span>--privs<span class="w"> </span><span class="s2">&quot;SDN.Use&quot;</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/sdn/zones/localnetwork/vmbr0<span class="w"> </span>--roles<span class="w"> </span>SandbarNet<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># 2. Download the cloud image to storage, and read node CPU/memory for the board</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1">#    header. Both are node-scoped, not pool-scoped.</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span>SandbarNode<span class="w"> </span>--privs<span class="w"> </span><span class="s2">&quot;Sys.AccessNetwork Sys.Audit&quot;</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/nodes/pve1<span class="w"> </span>--roles<span class="w"> </span>SandbarNode<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="c1"># 3. Storage privileges on BOTH storages sand uses:</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1">#    - the DISK storage, so it can allocate VM disks (Datastore.AllocateSpace);</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1">#    - the IMAGE storage, so it can download the cloud image with content=import</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1">#      (Datastore.AllocateTemplate). These are the same command when a single</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="c1">#      file-based storage serves both — run it once in that case.</span>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/storage/local-lvm<span class="w"> </span>--roles<span class="w"> </span>SandbarProv<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/storage/local<span class="w">     </span>--roles<span class="w"> </span>SandbarProv<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Privilege</th>
+<th>Path</th>
+<th>What it allows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SDN.Use</code></td>
+<td><code>/sdn/zones/localnetwork/vmbr0</code></td>
+<td>Attaching a VM to <strong>that one bridge</strong> — nothing else on the network</td>
+</tr>
+<tr>
+<td><code>Sys.AccessNetwork</code></td>
+<td><code>/nodes/pve1</code></td>
+<td>Downloading the cloud image to storage</td>
+</tr>
+<tr>
+<td><code>Sys.Audit</code></td>
+<td><code>/nodes/pve1</code></td>
+<td>Reading node CPU/memory/disk stats for the board header</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">You won't see <code>localnetwork</code> under SDN → Zones</p>
+<p><code>localnetwork</code> is a built-in <em>synthetic</em> zone that Proxmox uses only as the
+permission path for plain Linux bridges — it is <strong>not</strong> a configured SDN
+zone, so it never appears under <strong>Datacenter → SDN → Zones</strong>, and that's
+expected. To confirm the bridge grant landed, look under <strong>Datacenter →
+Permissions</strong> (or run the verification command below), not the SDN panel.</p>
+</div>
+<h3 id="verify-the-scope">Verify the scope</h3>
+<p>Confirm the token ended up with <strong>only</strong> the paths you intended — this is the
+check that proves the isolation guarantee actually holds:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>pveum<span class="w"> </span>user<span class="w"> </span>permissions<span class="w"> </span><span class="s1">&#39;sandbar@pve!prov&#39;</span><span class="w"> </span>--output-format<span class="w"> </span>json
+</code></pre></div>
+<p>The result should list <strong>only</strong> <code>/pool/sandbar</code>, your disk <strong>and</strong> image
+storages, the bridge, and the node <code>/nodes/pve1</code>. <strong>If any permission appears at
+<code>/</code>, the isolation guarantee does not hold</strong> — go back and remove the over-broad
+grant.</p>
+<div class="admonition warning">
+<p class="admonition-title">If this prints <code>{}</code></p>
+<p>An empty result means the token has <strong>no</strong> effective permissions — almost
+always because it was created with <code>--privsep 1</code> and the ACLs were granted to
+the <strong>token</strong> instead of the <strong>user</strong>. A privilege-separated token's rights
+are the <em>intersection</em> of the user's and the token's, so a token whose user
+holds no ACLs gets nothing. Recreate it with <code>--privsep 0</code> (Step 3) and grant
+the ACLs to <code>--users sandbar@pve</code> (Steps 4–5).</p>
+</div>
+<h2 id="step-6-point-sand-at-the-host">Step 6 — Point <code>sand</code> at the host</h2>
+<div class="admonition note">
+<p class="admonition-title">Proxmox profiles are added by editing <code>profiles.yaml</code></p>
+<p>The TUI's profile screen (press <code>p</code>) can create and edit <code>local</code> and
+<code>remote-ssh</code> profiles, but <strong>not</strong> <code>proxmox</code> ones yet — so add a Proxmox
+profile by hand-editing <code>profiles.yaml</code> as shown here. Once it's in the file
+and <code>enabled</code>, it appears in the TUI's profile list and board like any other,
+and <code>sand --profile &lt;name&gt;</code> targets it from the CLI; only the <em>creation</em> form
+is CLI/YAML-only for now.</p>
+</div>
+<p>Add a <code>proxmox</code> profile to your
+<a href="../connection-profiles/#profilesyaml"><code>profiles.yaml</code></a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">profiles</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pve1</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">proxmox</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">proxmox</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pve1.example.com</span><span class="w">        </span><span class="c1"># the API host; add :8006 only if non-default</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">    </span><span class="nt">node</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pve1</span><span class="w">                    </span><span class="c1"># the PVE node name</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">    </span><span class="nt">pool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sandbar</span><span class="w">                 </span><span class="c1"># the dedicated pool from Step 1</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">    </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-lvm</span><span class="w">            </span><span class="c1"># images-capable storage for VM disks</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">    </span><span class="c1"># image_storage: local        # file-based (dir/NFS/CIFS) storage for the</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">    </span><span class="c1">#                             # cloud-image download; defaults to &quot;local&quot;</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">    </span><span class="c1"># base_image: https://…/sandbar-base.qcow2   # golden image URL; defaults to</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span><span class="c1">#                             # upstream Debian genericcloud (see note below)</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">    </span><span class="nt">bridge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vmbr0</span><span class="w">                 </span><span class="c1"># the Linux bridge</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.config/sandbar/pve1.token</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">    </span><span class="nt">identity_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ssh/id_ed25519</span><span class="w">   </span><span class="c1"># REQUIRED: the SSH key sand installs + connects with</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">    </span><span class="c1"># user: dev                   # the guest login user; defaults to your host username</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">    </span><span class="c1"># insecure: true              # only if the PVE cert is self-signed</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="w">    </span><span class="c1"># ca_file: /etc/pve/pve-root-ca.pem   # or pin the CA instead</span>
+</code></pre></div>
+<p>The profile fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>Hostname or IP the API answers on. A bare host uses port <code>8006</code>; append <code>:port</code> only if you've changed it.</td>
+</tr>
+<tr>
+<td><code>node</code></td>
+<td>The PVE <strong>node name</strong> (the identifier in <code>/nodes/&lt;node&gt;/…</code> paths) — often the same string as the host, but not always.</td>
+</tr>
+<tr>
+<td><code>pool</code></td>
+<td>The dedicated pool. Every VM <code>sand</code> creates lands here, and the token is scoped to it.</td>
+</tr>
+<tr>
+<td><code>storage</code></td>
+<td>The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based.</td>
+</tr>
+<tr>
+<td><code>image_storage</code></td>
+<td>Optional. The <strong>file-based</strong> storage (dir/NFS/CIFS) the cloud image is downloaded to with content <code>import</code> — block storages reject it. Defaults to <code>local</code>. The disk is then imported onto <code>storage</code> from here.</td>
+</tr>
+<tr>
+<td><code>base_image</code></td>
+<td>Optional. URL of the cloud image the base template is built from. Defaults to the <strong>project golden image</strong> (Debian genericcloud with <code>qemu-guest-agent</code> preinstalled, checksum-verified). Override only to use your own image — which must also ship the agent (see below). The download filename is derived from the URL.</td>
+</tr>
+<tr>
+<td><code>bridge</code></td>
+<td>The Linux bridge <code>net0</code> attaches to.</td>
+</tr>
+<tr>
+<td><code>token_file</code></td>
+<td>Path to a file holding <code>user@realm!tokenid=value</code>.</td>
+</tr>
+<tr>
+<td><code>identity_path</code></td>
+<td><strong>Required.</strong> Path to an SSH <strong>private</strong> key. <code>sand</code> installs the matching <code>&lt;identity_path&gt;.pub</code> into the guest via cloud-init and then connects over SSH with the private key — so the <code>.pub</code> must exist beside it. Generate one with <code>ssh-keygen -t ed25519</code> if you don't have it.</td>
+</tr>
+<tr>
+<td><code>user</code></td>
+<td>Optional. The guest login user <code>sand</code>'s cloud-init creates (and SSHes in as). Defaults to your host username.</td>
+</tr>
+<tr>
+<td><code>insecure</code></td>
+<td>Optional. Skip TLS verification (PVE ships a self-signed cert by default).</td>
+</tr>
+<tr>
+<td><code>ca_file</code></td>
+<td>Optional. Pin a CA certificate instead of disabling verification.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition danger">
+<p class="admonition-title">The token file must be <code>chmod 600</code></p>
+<p>Like <code>identity_path</code> for a remote profile, <code>token_file</code> is a <strong>path</strong>, never
+the credential itself — <code>profiles.yaml</code> stays
+<a href="../connection-profiles/#profilesyaml">secret-free</a> and safe to check into
+dotfiles. <code>sand</code> <strong>refuses to read</strong> a token file that is readable by group
+or other; a leaked API token is not a recoverable mistake. Create it with
+<code>umask 077</code> (as in Step 3) or run <code>chmod 600</code> on it.</p>
+</div>
+<p>That's it. <code>sand</code> builds its base template from a cloud image the first time you
+create a VM (this takes a few minutes — it downloads the image, runs the same
+Ansible provisioning the other backends use, and converts the result to a PVE
+template), then clones each new VM from it. The board header shows the node's
+real CPU, memory, and storage usage, sampled from the API.</p>
+<div class="admonition note">
+<p class="admonition-title">Why the default image is a project-built one, not stock Debian</p>
+<p><code>sand</code> learns a VM's IP address only from the QEMU guest agent (it is the
+only IP a pure-API client can read from PVE), and it needs that IP to SSH in
+and provision the base. So the base image must boot with <code>qemu-guest-agent</code>
+<strong>already running</strong> — but stock cloud images (including Debian genericcloud)
+don't ship it, and PVE's API can neither install packages through its
+built-in cloud-init nor upload a cloud-init snippet. So <code>base_image</code> defaults
+to a <strong>project-built golden image</strong> — upstream Debian genericcloud with the
+agent baked in, published as a GitHub release asset and checksum-verified on
+download. You don't need to do anything for this to work.</p>
+<p><strong>If you override <code>base_image</code> with your own URL</strong>, that image must likewise
+have <code>qemu-guest-agent</code> installed and enabled, or the base build will hang
+waiting for the agent. Bake it in offline on any Linux box with libguestfs'
+<code>guestfs-tools</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>virt-sysprep<span class="w"> </span>-a<span class="w"> </span>your-image.qcow2<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--install<span class="w"> </span>qemu-guest-agent<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--run-command<span class="w"> </span><span class="s1">&#39;systemctl enable qemu-guest-agent&#39;</span>
+</code></pre></div>
+<p><code>virt-sysprep</code> edits the disk offline (never boots the guest, so cloud-init's
+first-boot behaviour is untouched) and strips machine-specific state so clones
+stay independent.</p>
+</div>
+<h2 id="a-separate-pool-for-automated-tests">A separate pool for automated tests</h2>
+<p>If you run <code>sand</code>'s opt-in end-to-end test suite (or otherwise want a throwaway
+pool that can never touch your day-to-day VMs), set up a <strong>second</strong> pool and
+token exactly as above but with different names — <code>sandbar-test</code>, its own user,
+and its own token. The two pools are fully isolated from each other, so
+automated runs create and destroy VMs freely in <code>sandbar-test</code> with no
+possibility of affecting the VMs in <code>sandbar</code>.</p>
+<p><a href="../proxmox-setup.sh"><code>proxmox-setup.sh</code></a> does this for you — it is the same run
+you did for the everyday pool, with one variable changed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nv">SAND_POOL</span><span class="o">=</span>sandbar-test<span class="w"> </span>./proxmox-setup.sh
+</code></pre></div>
+<p>It derives the user (<code>sandbar-test@pve</code>) and every ACL from that name, so the
+second scope shares nothing with the first, and it prints the <code>PROXMOX_E2E_*</code>
+block below already filled in. If you override <code>SAND_USER</code> to a user that
+already owns another pool, the script's verification step says so rather than
+letting you build two pools one token can see.</p>
+<p>The test suite is documented in the repository's development guide; it's gated
+behind a build tag and skips unless you configure it, and it reads its target
+from these environment variables (which mirror the profile fields above):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_HOST</span><span class="o">=</span>pve1.example.com
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_NODE</span><span class="o">=</span>pve1
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_POOL</span><span class="o">=</span>sandbar-test<span class="w">          </span><span class="c1"># the ISOLATED test pool</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_STORAGE</span><span class="o">=</span>local-lvm
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1"># export PROXMOX_E2E_IMAGE_STORAGE=local       # file-based; defaults to &quot;local&quot;</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_BRIDGE</span><span class="o">=</span>vmbr0
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_TOKEN_FILE</span><span class="o">=</span>~/.config/sandbar/pve-test.token
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_SSH_USER</span><span class="o">=</span>debian<span class="w">            </span><span class="c1"># the cloud-init guest login user</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_SSH_IDENTITY</span><span class="o">=</span>~/.ssh/id_ed25519
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_IMAGE</span><span class="o">=</span>https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="c1"># export PROXMOX_E2E_INSECURE=1               # if the PVE cert is self-signed</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="c1"># Optional: a VMID OUTSIDE the test pool, to prove the token cannot touch it.</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="c1"># The isolation test never creates or deletes this VM — you own it.</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="nb">export</span><span class="w"> </span><span class="nv">PROXMOX_E2E_FOREIGN_VMID</span><span class="o">=</span><span class="m">100</span>
+</code></pre></div>
+<p>Setting <code>PROXMOX_E2E_FOREIGN_VMID</code> enables the <strong>pool-isolation test</strong>, which
+takes a VMID <em>outside</em> the test pool and asserts that the pool-scoped token is
+refused (with a permission error) when it tries to read, stop, or delete it —
+the live proof of the guarantee this whole page is built around. To confirm the
+other half by hand — that the foreign VM is <em>unchanged</em> afterward — check its
+status as an admin before and after; the test deliberately can't, because its
+token can't see the VM at all, which is the point.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.top", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/palette-sync.js"></script>
+      
+    
+  </body>
+</html>
