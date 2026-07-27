@@ -307,16 +307,13 @@ func (p *proxmoxProvider) lookupTemplate(ctx context.Context, name string) (vmid
 }
 
 // baseStale reports whether the existing template was built from a different
-// playbook version than the one that would be used now, and a short reason. A
-// missing/unreadable stamp counts as stale (build it once with a stamp); a
-// version-lookup failure counts as NOT stale (reuse rather than churn), matching
-// the Lima flow's posture.
+// version — playbook fileset, tool-set, or template preparation (see
+// templateGeneration) — than the one that would be used now, and a short
+// reason. A missing/unreadable stamp counts as stale (build it once with a
+// stamp); a version-lookup failure counts as NOT stale (reuse rather than
+// churn), matching the Lima flow's posture.
 func (p *proxmoxProvider) baseStale(cfg vm.CreateConfig) (bool, string) {
-	dir, err := locatePlaybookFn()
-	if err != nil {
-		return false, ""
-	}
-	want, err := provision.PlaybookVersion(os.DirFS(dir), cfg.ToolsetKey())
+	want, err := p.templateVersion(cfg)
 	if err != nil {
 		return false, ""
 	}
@@ -327,7 +324,7 @@ func (p *proxmoxProvider) baseStale(cfg vm.CreateConfig) (bool, string) {
 	case have == "":
 		return true, "it has no recorded playbook version"
 	default:
-		return true, "the playbook fileset or tool-set has changed since it was built"
+		return true, "the playbook fileset, tool-set, or template preparation has changed since it was built"
 	}
 }
 
@@ -410,6 +407,12 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 	if err := p.runPlaybookPhase(ctx, cfg.BaseName, cfg, "base", cfg.BaseName, out); err != nil {
 		return err
 	}
+	// LAST guest-side step, deliberately after everything that runs inside the
+	// VM: strip the machine identity the build's own boot committed, so every
+	// clone generates its own (see generalizeScript).
+	if err := p.generalizeBase(ctx, cfg.BaseName, out); err != nil {
+		return err
+	}
 	// A template must be built from an idle disk, so stop the VM first.
 	if err := p.stop(ctx, cfg.BaseName, out); err != nil {
 		return err
@@ -427,6 +430,65 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 	// stale and is rebuilt next time.
 	p.stampBaseVersion(cfg, out)
 	return nil
+}
+
+// generalizeScript strips the base VM's per-machine identity as the last
+// in-guest step before it becomes a template, and it exists because of a field
+// failure, reproduced against a real pool: two clones of one template inherit
+// its /etc/machine-id, systemd-networkd derives its DHCP client identifier
+// from that id (RFC 4361 — the MAC plays no part), and a DHCP server keyed on
+// client identity therefore hands EVERY clone the SAME lease. Two clones with
+// distinct MACs both reported one address; the guests fought over it at the
+// ARP layer, every ssh reached whichever guest had won most recently, and the
+// board's guest probes killed each other's in-guest loops in an endless
+// "lost the guest connection; retrying" cycle.
+//
+// Truncating (never deleting) /etc/machine-id returns the disk to the pristine
+// cloud image's own state: systemd sees the empty file on a clone's first boot
+// and commits a fresh id — its own DHCP identity, its own lease, its own
+// address. Debian ships /var/lib/dbus/machine-id as a symlink to it, which
+// follows along; the guard re-links it only on an image that ships it as a
+// REGULAR file, which would otherwise resurrect the cloned identity for D-Bus.
+const generalizeScript = `set -eu
+truncate -s 0 /etc/machine-id
+if [ -e /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
+  rm -f /var/lib/dbus/machine-id
+  ln -s /etc/machine-id /var/lib/dbus/machine-id
+fi
+`
+
+// generalizeBase runs generalizeScript in the base guest — the last thing the
+// build does inside the VM, so nothing after it can re-commit an identity.
+func (p *proxmoxProvider) generalizeBase(ctx context.Context, name string, out io.Writer) error {
+	progress(out, "Resetting %s's machine identity so every clone gets its own DHCP lease\n", name)
+	if err := p.Shell(ctx, name, nil, out, "sudo", "bash", "-c", generalizeScript); err != nil {
+		return fmt.Errorf("proxmox: resetting %s's machine identity: %w", name, err)
+	}
+	return nil
+}
+
+// templateGeneration versions the PROVIDER-SIDE template preparation — the
+// steps buildBaseTemplate performs around the playbook itself (today: the
+// machine-identity reset above). It is folded into the base version stamp
+// (templateVersion) because staleness is judged by the stamp alone: a template
+// built before the identity reset hands every clone a duplicated DHCP identity,
+// and no playbook change would ever rebuild it away. Bump this whenever the
+// preparation changes in a way existing templates must not survive.
+const templateGeneration = ":template-gen2"
+
+// templateVersion is the version stamp a base template is judged against: the
+// shared playbook content hash (provision.PlaybookVersion, identical across
+// providers) plus this backend's own template-preparation generation.
+func (p *proxmoxProvider) templateVersion(cfg vm.CreateConfig) (string, error) {
+	dir, err := locatePlaybookFn()
+	if err != nil {
+		return "", err
+	}
+	version, err := provision.PlaybookVersion(os.DirFS(dir), cfg.ToolsetKey())
+	if err != nil {
+		return "", err
+	}
+	return version + templateGeneration, nil
 }
 
 // ensureCloudImage returns the storage-backed import volid for the cloud image,
@@ -477,18 +539,13 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 	return volid, nil
 }
 
-// stampBaseVersion records the playbook version and time the base was built from,
-// through the shared provision machinery so staleness detection is identical to
-// the other providers. Best-effort, exactly like the Lima flow.
+// stampBaseVersion records the version the base was built from — the same
+// templateVersion baseStale compares against, so what is stamped is exactly
+// what is judged. Best-effort, exactly like the Lima flow.
 func (p *proxmoxProvider) stampBaseVersion(cfg vm.CreateConfig, out io.Writer) {
-	dir, err := locatePlaybookFn()
+	version, err := p.templateVersion(cfg)
 	if err != nil {
-		progress(out, "Note: could not locate the playbook to stamp the base version (%v); it will rebuild on the next create\n", err)
-		return
-	}
-	version, err := provision.PlaybookVersion(os.DirFS(dir), cfg.ToolsetKey())
-	if err != nil {
-		progress(out, "Note: could not compute the playbook version (%v); the base will rebuild on the next create\n", err)
+		progress(out, "Note: could not compute the base template's version (%v); it will rebuild on the next create\n", err)
 		return
 	}
 	if err := provision.WriteBaseVersion(p.files, cfg.BaseName, version, time.Now()); err != nil {
