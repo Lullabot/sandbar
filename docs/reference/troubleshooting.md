@@ -109,6 +109,35 @@ the finalize fails, so it needs no opt-in.
 backend. It does not change scp transfers, which have nowhere to put a log but
 the payload stream.
 
+## Two Proxmox VMs flap with "lost the guest connection; retrying"
+
+**Symptom:** with two or more Proxmox VMs running, the board's log fills with
+alternating `lost the guest connection to <vm>; retrying in 5s` lines, every
+few seconds, forever. One VM alone is fine. You may also see the explicit
+refusal: `<a> and <b> both report the guest address <ip>`.
+
+**Why:** the VMs were cloned from a base template built before `sand` reset
+the template's machine identity. Clones inherited its `/etc/machine-id`,
+systemd-networkd derives the DHCP client identifier from that id (the MAC
+plays no part), and a DHCP server keyed on client identity hands every clone
+the **same lease**. The guests then fight over one address at the ARP layer:
+each connection reaches whichever guest most recently won, and every VM's
+guest probe keeps killing its rival's. Current builds detect the collision and
+refuse the ambiguous address, naming both VMs, instead of silently connecting
+to a coin flip.
+
+**Fix:** the template build now strips the machine identity before
+templatizing, and the old template is recognized as stale automatically — the
+next `sand create` rebuilds it. Existing VMs keep their cloned identity,
+though, so either recreate them from the rebuilt base, or fix each one in
+place:
+
+```bash
+sudo truncate -s 0 /etc/machine-id && sudo reboot
+```
+
+On its next boot the guest generates a fresh identity and gets its own lease.
+
 ## `limactl list` fails while a VM is being cloned or deleted
 
 **Symptom:** the fleet briefly disappears from the board, or a headless
