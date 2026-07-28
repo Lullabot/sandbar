@@ -82,9 +82,44 @@ const (
 	// this screen could never launch a VM — it failed at Preflight with an
 	// error the form gave no way to fix.
 	ppIdentityPath
+	// ppUser, ppImageStorage and ppBaseImage are the OPTIONAL Proxmox fields:
+	// each has a provider-side default (the local username, "local", and the
+	// project's golden image respectively — see NewProxmox), so an empty input
+	// is a real answer here, not a missing one, and none of the three joins
+	// submitProfileForm's required-field table.
+	//
+	// Optional never meant invisible, though. A node whose file-based storage
+	// is not named "local" needs image_storage before it can build a single
+	// VM, and until these had inputs the only way to set one — or even to SEE
+	// what it was set to — was to leave the TUI and hand-edit profiles.yaml.
+	// Adding them is also what retires the edit path's carry-across of exactly
+	// these three fields (see submitProfileForm).
+	ppUser
+	ppImageStorage
+	ppBaseImage
 )
 
-var proxmoxFieldLabels = []string{"Name", "Host", "Node", "Pool", "Storage", "Bridge", "Token file", "CA file", "Identity path"}
+var proxmoxFieldLabels = []string{
+	"Name", "Host", "Node", "Pool", "Storage", "Bridge", "Token file", "CA file",
+	"Identity path", "User", "Image storage", "Base image",
+}
+
+// proxmoxFieldPlaceholders is the hint shown inside an EMPTY Proxmox input,
+// keyed by its ppXxx storage index. Only the optional fields carry one, and
+// each names the default the provider substitutes for a blank — which is the
+// whole point of showing them: a blank required field is an error the form
+// reports, while a blank optional one is a value the user cannot otherwise
+// see.
+//
+// Every string here MUST be a constant. The obvious phrasing for User is this
+// machine's actual login (what vm.HostUser() returns, and what the provider
+// really does default to), but baking that in would put the developer's own
+// username into every golden file and fail on the next machine to run them.
+var proxmoxFieldPlaceholders = map[int]string{
+	ppUser:         "defaults to your local username",
+	ppImageStorage: "file-based; defaults to local",
+	ppBaseImage:    "defaults to the sandbar golden image",
+}
 
 // profileFormFieldKind distinguishes a text row (backed by a
 // textinput.Model) from the one boolean row the form can show (Proxmox's
@@ -104,7 +139,7 @@ const (
 // new field KIND here, rather than overloading it onto profileInputs, keeps
 // the (byte-for-byte unchanged) text-input path untouched: profileInputs
 // stays a plain []textinput.Model for every type, including Proxmox's other
-// eight fields.
+// twelve fields.
 type profileFormField struct {
 	label    string
 	kind     profileFormFieldKind
@@ -132,16 +167,24 @@ func textOnlySlots(labels []string) []profileFormField {
 func (m model) profileFormSlots() []profileFormField {
 	switch m.profileFormType {
 	case profiles.TypeProxmox:
-		// On-screen order groups the guest-SSH identity before the API/TLS
-		// credentials (token file, insecure, CA file), which is why it is not
-		// simply the ppXxx storage order.
+		// On-screen order groups the form by what the reader is answering, not
+		// by ppXxx storage order: the two storages adjacent (they are a pair —
+		// disk images and the file-based staging area the cloud image is
+		// downloaded to) with the base image that lands in the second right
+		// after them; then the network; then the GUEST login pair, user and the
+		// identity whose .pub is installed into that account; and only then the
+		// API/TLS credentials (token file, insecure, CA file), which authenticate
+		// to Proxmox rather than to any VM.
 		return []profileFormField{
 			{label: proxmoxFieldLabels[ppName], kind: pffText, inputIdx: ppName},
 			{label: proxmoxFieldLabels[ppHost], kind: pffText, inputIdx: ppHost},
 			{label: proxmoxFieldLabels[ppNode], kind: pffText, inputIdx: ppNode},
 			{label: proxmoxFieldLabels[ppPool], kind: pffText, inputIdx: ppPool},
 			{label: proxmoxFieldLabels[ppStorage], kind: pffText, inputIdx: ppStorage},
+			{label: proxmoxFieldLabels[ppImageStorage], kind: pffText, inputIdx: ppImageStorage},
+			{label: proxmoxFieldLabels[ppBaseImage], kind: pffText, inputIdx: ppBaseImage},
 			{label: proxmoxFieldLabels[ppBridge], kind: pffText, inputIdx: ppBridge},
+			{label: proxmoxFieldLabels[ppUser], kind: pffText, inputIdx: ppUser},
 			{label: proxmoxFieldLabels[ppIdentityPath], kind: pffText, inputIdx: ppIdentityPath},
 			{label: proxmoxFieldLabels[ppTokenFile], kind: pffText, inputIdx: ppTokenFile},
 			{label: "Insecure", kind: pffCheckbox},
@@ -534,9 +577,9 @@ func (m *model) submitProfileEdit(p profiles.Profile) tea.Cmd {
 
 // newProfileInputs builds the form's TEXT inputs: just Name for a Local
 // profile (it has no connection fields and its Type is immutable), the full
-// six for a RemoteSSH profile, or the eight text fields for a Proxmox
-// profile (its ninth field, the insecure checkbox, is not a textinput.Model
-// at all — see model.profileInsecure and profileFormSlots).
+// six for a RemoteSSH profile, or the twelve text fields for a Proxmox
+// profile (its thirteenth row, the insecure checkbox, is not a
+// textinput.Model at all — see model.profileInsecure and profileFormSlots).
 func newProfileInputs(t profiles.Type) []textinput.Model {
 	n := 1
 	switch t {
@@ -551,6 +594,11 @@ func newProfileInputs(t profiles.Type) []textinput.Model {
 		ti.CharLimit = 256
 		ti.SetWidth(44)
 		inputs[i] = ti
+	}
+	if t == profiles.TypeProxmox {
+		for idx, ph := range proxmoxFieldPlaceholders {
+			inputs[idx].Placeholder = ph
+		}
 	}
 	return inputs
 }
@@ -628,6 +676,14 @@ func (m *model) openProfileEditForm(p profiles.Profile) tea.Cmd {
 		m.profileInputs[ppTokenFile].SetValue(p.TokenFile)
 		m.profileInputs[ppCAFile].SetValue(p.CAFile)
 		m.profileInputs[ppIdentityPath].SetValue(p.IdentityPath)
+		// The optional three. Prefilling them is not just symmetry: an empty
+		// input here means "unset, so take the provider's default", and the
+		// placeholder says which default that is — so a profile that HAS set
+		// one must show the stored value, or the form would claim it was on the
+		// default when it was not.
+		m.profileInputs[ppUser].SetValue(p.User)
+		m.profileInputs[ppImageStorage].SetValue(p.ImageStorage)
+		m.profileInputs[ppBaseImage].SetValue(p.BaseImage)
 	}
 	m.profileFormFocus = 0
 	m.profileFormErr = nil
@@ -709,6 +765,14 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		p.TokenFile = strings.TrimSpace(m.profileInputs[ppTokenFile].Value())
 		p.CAFile = strings.TrimSpace(m.profileInputs[ppCAFile].Value())
 		p.IdentityPath = strings.TrimSpace(m.profileInputs[ppIdentityPath].Value())
+		// The optional three: a blank input is a deliberate "use the default"
+		// (the local username, "local", the project golden image — see
+		// NewProxmox), so each is stored empty rather than being defaulted
+		// here. Resolving them in the form would freeze today's default into
+		// the saved profile and quietly opt that profile out of the next one.
+		p.User = strings.TrimSpace(m.profileInputs[ppUser].Value())
+		p.ImageStorage = strings.TrimSpace(m.profileInputs[ppImageStorage].Value())
+		p.BaseImage = strings.TrimSpace(m.profileInputs[ppBaseImage].Value())
 		p.Insecure = m.profileInsecure
 		// Mirrors profiles.validate's own Proxmox rule (store.go) for
 		// immediate in-form feedback; the store re-checks this (and
@@ -750,17 +814,17 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	p.Enabled = existing.Enabled
-	// Carry across the fields this form does not render. p was built from the
-	// inputs alone, and Store.Update replaces the stored record WHOLESALE, so
-	// anything the form cannot show would otherwise be erased from
-	// profiles.yaml by an edit as innocent as a rename — silently, since the
-	// user never saw the field to know they dropped it. Every hand-editable
-	// Proxmox field that has no input belongs here.
-	if p.Type == profiles.TypeProxmox {
-		p.User = existing.User
-		p.ImageStorage = existing.ImageStorage
-		p.BaseImage = existing.BaseImage
-	}
+	// NOTE: nothing is carried across from `existing` beyond Enabled, and that
+	// is a property of the FORMS, not a simplification. p is built from the
+	// inputs alone and Store.Update replaces the stored record WHOLESALE, so
+	// any field the form cannot show is erased from profiles.yaml by an edit as
+	// innocent as a rename — silently, since the user never saw it to know they
+	// dropped it. Each form renders every field its type uses (the RemoteSSH
+	// one always has; the Proxmox one now does too, which is what retired the
+	// User/ImageStorage/BaseImage carry-across this comment replaces), so there
+	// is nothing left to lose. Add a Proxmox field without an input and that
+	// silent erasure comes straight back — restore the carry-across here, or,
+	// better, give the field a row in profileFormSlots.
 	cmd := m.submitProfileEdit(p)
 	if m.profileFormErr == nil {
 		m.view = viewProfiles

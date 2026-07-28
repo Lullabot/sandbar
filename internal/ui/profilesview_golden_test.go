@@ -61,7 +61,7 @@ func TestTUIProfileTypePickerGolden(t *testing.T) {
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
-// GOLDEN: the Proxmox field form — all nine text fields plus the
+// GOLDEN: the Proxmox field form — all twelve text fields plus the
 // insecure checkbox row, unchecked in its initial state. Reaching it means
 // walking the picker's cursor down onto Proxmox (index 1 of
 // creatableProfileTypes) before selecting it; RemoteSSH's own form is

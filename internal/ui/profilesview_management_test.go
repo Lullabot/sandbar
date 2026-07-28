@@ -14,6 +14,7 @@ package ui
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -432,6 +434,12 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		{"token_file", m.profileInputs[ppTokenFile].Value(), p.TokenFile},
 		{"ca_file", m.profileInputs[ppCAFile].Value(), "/etc/sandbar/pve-ca.pem"},
 		{"identity_path", m.profileInputs[ppIdentityPath].Value(), p.IdentityPath},
+		// The optional three. A stored value must WIN over the placeholder:
+		// showing this profile's fields as blank would say "on the default"
+		// about three fields it deliberately overrides.
+		{"user", m.profileInputs[ppUser].Value(), "dev"},
+		{"image_storage", m.profileInputs[ppImageStorage].Value(), "nfs-images"},
+		{"base_image", m.profileInputs[ppBaseImage].Value(), p.BaseImage},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -516,13 +524,89 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		saved.IdentityPath != p.IdentityPath {
 		t.Fatalf("saved profile = %+v, every other field should round-trip unchanged", saved)
 	}
-	// The fields the form CANNOT show must survive a save. Store.Update
-	// replaces the record wholesale, so without an explicit carry-across an
-	// edit as innocent as a rename erases them from profiles.yaml — silently,
-	// since the user never saw them.
+	// The optional three must survive a save untouched. They used to have no
+	// inputs at all and were carried across from the stored record; now they
+	// round-trip through the form itself, and this assertion is what catches
+	// the failure mode that swap introduced — a prefill or a read-back missed
+	// on ONE of them silently rewrites the field to "" on the next save, which
+	// reads to the provider as "use the default", not as "unchanged".
 	if saved.User != p.User || saved.ImageStorage != p.ImageStorage || saved.BaseImage != p.BaseImage {
 		t.Fatalf("saved profile = %+v, want user/image_storage/base_image preserved from %+v", saved, p)
 	}
+}
+
+// TestProxmoxFormOptionalFieldsAreEditable covers the other half of the
+// optional three: not just that an edit preserves them, but that the form can
+// actually CHANGE one and CLEAR another. Clearing is the interesting case —
+// an empty input must persist as an empty field, so the provider applies its
+// own default, rather than the form resolving the default itself and freezing
+// today's value into the profile.
+func TestProxmoxFormOptionalFieldsAreEditable(t *testing.T) {
+	isolateHostState(t)
+
+	p := seedProxmoxProfile(t, "cluster", "pve.example.com", "pve1", "sandbar")
+	m := New(provider.Fleet{{Profile: p, Prov: &providerfake.Provider{}}}).(model)
+	m = resized(m, 100, 30)
+	m.openProfileEditForm(p)
+
+	m.profileInputs[ppUser].SetValue("builder")
+	m.profileInputs[ppImageStorage].SetValue("")
+	m.profileInputs[ppBaseImage].SetValue("  https://example.invalid/other.qcow2  ")
+
+	next, _ := m.Update(ctrlKey('s'))
+	m = next.(model)
+	if m.profileFormErr != nil {
+		t.Fatalf("the optional fields must not be required: %v", m.profileFormErr)
+	}
+
+	saved, ok := m.profileStore.Get(p.ID)
+	if !ok {
+		t.Fatal("the edited profile should still be in the store")
+	}
+	if saved.User != "builder" {
+		t.Errorf("user = %q, want the edited value %q", saved.User, "builder")
+	}
+	if saved.ImageStorage != "" {
+		t.Errorf("image_storage = %q, want a cleared field so the provider's own default applies", saved.ImageStorage)
+	}
+	if saved.BaseImage != "https://example.invalid/other.qcow2" {
+		t.Errorf("base_image = %q, want the edited value trimmed", saved.BaseImage)
+	}
+}
+
+// TestProxmoxPlaceholdersAreMachineIndependent guards the trap named in
+// proxmoxFieldPlaceholders' doc comment. The honest hint for User is this
+// machine's login — exactly what the provider defaults to — but a placeholder
+// computed from the environment lands in every golden file and fails on the
+// next machine to run the suite. Failing here says which string did it;
+// failing in the goldens says only that the form changed.
+func TestProxmoxPlaceholdersAreMachineIndependent(t *testing.T) {
+	volatile := map[string]string{
+		"the host user":      vm.HostUser(),
+		"$USER":              os.Getenv("USER"),
+		"$HOME":              os.Getenv("HOME"),
+		"the home directory": os.Getenv("HOME"),
+		"the working dir":    mustGetwd(t),
+	}
+	for _, ph := range proxmoxFieldPlaceholders {
+		for what, v := range volatile {
+			if v == "" {
+				continue
+			}
+			if strings.Contains(ph, v) {
+				t.Errorf("placeholder %q embeds %s (%q) — it must be a constant, or the goldens become machine-specific", ph, what, v)
+			}
+		}
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return wd
 }
 
 // TestProxmoxFormRequiredFieldValidation proves the in-form validation that

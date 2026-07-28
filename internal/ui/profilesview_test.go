@@ -364,11 +364,15 @@ func seedProxmoxProfile(t *testing.T, name, host, node, pool string) profiles.Pr
 		Storage: "local-lvm", Bridge: "vmbr0",
 		TokenFile:    proxmoxTokenFile(t),
 		IdentityPath: "/home/dev/.ssh/id_ed25519",
-		// User, ImageStorage and BaseImage have NO form field. They are seeded
-		// here precisely because of that: an edit must carry them across
-		// untouched rather than erasing them from profiles.yaml, which is what
-		// TestProxmoxEditFormPrefillToggleSave asserts after saving.
-		User:         "root@pam",
+		// The three OPTIONAL fields, seeded non-default on purpose: each has a
+		// provider-side fallback, so only a profile that overrides all three
+		// can prove the form prefills the stored value rather than the default
+		// and writes it back unchanged (TestProxmoxEditFormPrefillToggleSave).
+		//
+		// User is the GUEST login cloud-init creates — a plain account name,
+		// never a Proxmox API user like "root@pam". The API identity lives in
+		// the token file.
+		User:         "dev",
 		ImageStorage: "nfs-images",
 		BaseImage:    "https://example.invalid/golden.qcow2",
 	})
