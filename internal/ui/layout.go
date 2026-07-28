@@ -20,6 +20,20 @@ type layoutMode struct {
 	Columns   int
 	TileWidth int
 
+	// GutterWidth is the scroll gutter's column budget, to the RIGHT of the
+	// tiles: scrollGutterWidth when the terminal can afford it, 0 when it
+	// cannot (see gutterFor). It is charged against the width BEFORE Columns
+	// and TileWidth are derived, never painted on top of them — a gutter
+	// outside the budget is two cells of chrome hanging past the grid's right
+	// edge, the same class of drift the footer's unbudgeted rows once were.
+	//
+	// It is reserved WHETHER OR NOT the grid currently scrolls, and the
+	// renderer draws an empty track when it does not (scrollbar.go). Reserving
+	// it only while scrollable would re-flow every tile on the board the moment
+	// a create pushed the content past the viewport — a worse lie about the
+	// layout than two idle columns.
+	GutterWidth int
+
 	// HeaderHeight/HeaderFull: the header band sheds from full (title + VM
 	// counts) to compact (counts folded into one line) before anything else
 	// but the messages strip.
@@ -76,6 +90,11 @@ type layoutMode struct {
 // cells) is left over, and a pane drawn to ContentWidth overhangs the tiles it
 // sits with by exactly that much. Anything that must line up with the grid — the
 // messages box — measures itself against this, not against the terminal.
+//
+// It deliberately EXCLUDES GutterWidth. The scroll gutter is chrome sitting
+// outside the tiles, not part of the row: the messages box lines up with the
+// tiles' right edge and the scrollbar track stands two cells clear of it, which
+// is what makes the track read as a track rather than as a ragged tile border.
 func (l layoutMode) GridWidth() int {
 	cols := l.Columns
 	if cols < 1 {
@@ -99,6 +118,15 @@ const (
 	tileHeight   = 8
 	tileMinWidth = 40
 	tileGap      = 2 // blank columns rendered between adjacent tiles
+
+	// scrollGutterWidth is the scroll gutter to the right of the tiles: one
+	// blank separator column plus the one-cell track the scrollbar is drawn in
+	// (scrollbar.go). The affordance is spent in COLUMNS rather than rows on
+	// purpose — rows on this board are contested by the header bands, the
+	// messages strip and the help bar all at once (see classifyWithHeaderBands),
+	// and a scroll hint that cost one of them would be shed on exactly the short
+	// terminals where the grid scrolls hardest and the hint matters most.
+	scrollGutterWidth = 2
 )
 
 // appStyle's Padding(1, 2): 1 row top+bottom, 2 columns left+right.
@@ -210,11 +238,13 @@ func classifyWithHeaderBands(w, h, helpLines, headerBands int) layoutMode {
 	contentWidth := clamp(w-appPaddingH, minBudget)
 	contentHeight := clamp(h-appPaddingV, minBudget)
 
-	columns := (contentWidth + tileGap) / (tileMinWidth + tileGap)
+	gutter := gutterFor(contentWidth)
+	tileSpace := clamp(contentWidth-gutter, minBudget)
+	columns := (tileSpace + tileGap) / (tileMinWidth + tileGap)
 	if columns < 1 {
 		columns = 1
 	}
-	tileWidth := clamp((contentWidth-tileGap*(columns-1))/columns, minBudget)
+	tileWidth := clamp((tileSpace-tileGap*(columns-1))/columns, minBudget)
 
 	headerFull := h >= fullHeaderMinHeight
 	showMessages := h >= messagesMinHeight
@@ -319,8 +349,9 @@ func classifyWithHeaderBands(w, h, helpLines, headerBands int) layoutMode {
 		ContentWidth:  contentWidth,
 		ContentHeight: contentHeight,
 
-		Columns:   columns,
-		TileWidth: tileWidth,
+		Columns:     columns,
+		TileWidth:   tileWidth,
+		GutterWidth: gutter,
 
 		HeaderHeight:    headerHeight,
 		HeaderFull:      headerFull,
@@ -333,6 +364,29 @@ func classifyWithHeaderBands(w, h, helpLines, headerBands int) layoutMode {
 		FooterHeight: footerHeight,
 		HelpLines:    helpLines,
 	}
+}
+
+// gutterFor decides whether a terminal this wide can afford the scroll gutter.
+//
+// The threshold is one full-width tile PLUS the gutter. Below it the terminal is
+// already too narrow to seat a single tile at tileMinWidth — TileWidth is being
+// forced under its floor and the tile's own content is being cramped — and
+// taking two more columns for chrome there would make the tiles worse to buy an
+// affordance for a grid whose contents are already barely legible. At and above
+// it the gutter is always reserved, so the board's width behaviour is a single
+// threshold rather than a function of how many VMs happen to exist.
+//
+// The cost of reserving it is one tile column at exactly two widths in every
+// tileMinWidth+tileGap: a contentWidth of 82–83 seats two columns without the
+// gutter and one with it, 124–125 seats three against two, and so on. That is
+// the price of the affordance, and it is paid in the same currency classify
+// already spends everywhere else — a budget, taken up front, not discovered at
+// render time.
+func gutterFor(contentWidth int) int {
+	if contentWidth < tileMinWidth+scrollGutterWidth {
+		return 0
+	}
+	return scrollGutterWidth
 }
 
 // clamp floors n at min.

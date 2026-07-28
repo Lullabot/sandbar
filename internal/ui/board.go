@@ -984,7 +984,19 @@ func (m model) gridView() string {
 		}
 		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, blocks...))
 	}
-	return clipBlock(strings.Join(rows, "\n"), m.layout.GridHeight, m.layout.ContentWidth)
+	// The tiles are clipped to the space LEFT OF THE GUTTER, not to ContentWidth:
+	// the gutter's columns were taken out of the width budget in classify (see
+	// layoutMode.GutterWidth), so spending them here too would put the track two
+	// cells past the right edge of the terminal. The whole block is then clipped
+	// to ContentWidth once the gutter is on, as the last-resort honesty clip.
+	tiles := m.layout.ContentWidth - m.layout.GutterWidth
+	if tiles < 1 {
+		tiles = 1
+	}
+	block := clipBlock(strings.Join(rows, "\n"), m.layout.GridHeight, tiles)
+	block = attachScrollGutter(block, m.layout.GridWidth(), m.layout.GutterWidth,
+		rowsTotal, m.visibleTileRows(), first)
+	return clipBlock(block, m.layout.GridHeight, m.layout.ContentWidth)
 }
 
 // renderCell draws grid cell i: a VM's tile, or — for the cell just past the last
