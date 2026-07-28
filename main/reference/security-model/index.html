@@ -732,6 +732,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#guests-are-offered-only-the-identity_path-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guests are offered only the identity_path key
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1369,6 +1380,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#guests-are-offered-only-the-identity_path-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guests are offered only the identity_path key
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1600,6 +1622,23 @@ remote-Lima hop — SSH to a persistent host you configured — keeps host-key
 pinning on, because there the key is stable and a change is worth stopping for.
 Keep the VM subnet one you trust; it is the same network you must already trust
 to reach the guests at all.</p>
+<h3 id="guests-are-offered-only-the-identity_path-key">Guests are offered only the <code>identity_path</code> key</h3>
+<p>The other half of the guest transport's SSH stance is which key it presents. A
+guest trusts exactly one: the public half of <code>identity_path</code>, which <code>sand</code> has
+cloud-init install for the login user. So the guest transport runs with
+<code>IdentitiesOnly=yes</code> and offers that key alone — your SSH agent's other keys are
+never presented to a guest, and never leave your machine's agent for it.</p>
+<p>That is a privacy improvement, but the reason it is not optional is
+availability. A guest's <code>sshd</code> disconnects after <code>MaxAuthTries</code> failed attempts
+(6 by default), and every refused key burns one. Without this, an agent holding
+six or more keys can exhaust the budget <em>before</em> <code>ssh</code> ever offers the right
+one, so a correctly-provisioned guest and a perfectly good key still fail to
+connect — and a single locked agent key turns a clean <code>Permission denied</code> into a
+much more confusing <code>Too many authentication failures</code>.</p>
+<p>The remote-Lima hop again keeps the opposite default: that host is a machine you
+configured and authenticate to on your own terms, so an agent key or an
+<code>ssh_config</code> <code>IdentityFile</code> is a legitimate way in, and <code>sand</code> does not restrict
+it.</p>
 
 
 
