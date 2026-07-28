@@ -305,7 +305,10 @@ grant.
     — enter moves to the next field, as it does on every other row. The form
     covers every field below, including the optional `user`, `image_storage` and
     `base_image`; the focused field's description appears under the form, naming
-    the default an optional field falls back to when left blank.
+    the default an optional field falls back to when left blank. The form also
+    refuses to save without `storage`, `bridge` or `identity_path` — a
+    hand-edited `profiles.yaml` is *not* checked for those three, and a profile
+    missing one fails only later, when it tries to create a VM.
     Alternatively, add a Proxmox profile by hand-editing `profiles.yaml` as shown
     here — the YAML form is the reference and automation path.
 
@@ -341,10 +344,10 @@ The profile fields:
 | `host` | Hostname or IP the API answers on. A bare host uses port `8006`; append `:port` only if you've changed it. |
 | `node` | The PVE **node name** (the identifier in `/nodes/<node>/…` paths) — often the same string as the host, but not always. |
 | `pool` | The dedicated pool. Every VM `sand` creates lands here, and the token is scoped to it. |
-| `storage` | The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
+| `storage` | **Required.** The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
 | `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
 | `base_image` | Optional. URL of the cloud image the base template is built from. Defaults to the **project golden image** (Debian genericcloud with `qemu-guest-agent` preinstalled, checksum-verified). Override only to use your own image — which must also ship the agent (see below). The download filename is derived from the URL. |
-| `bridge` | The Linux bridge `net0` attaches to. |
+| `bridge` | **Required.** The Linux bridge `net0` attaches to. Omitting it does not mean "no network": QEMU falls back to user-mode NAT, so the guest boots and is simply unreachable over SSH. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
 | `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
 | `user` | Optional. The guest login user `sand`'s cloud-init creates (and SSHes in as). Defaults to your host username. |
