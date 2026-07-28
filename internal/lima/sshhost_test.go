@@ -402,6 +402,67 @@ func TestSSHEphemeralHostKeys(t *testing.T) {
 	})
 }
 
+// TestSSHIdentitiesOnly pins the single-key-offer contract
+// (SSHConfig.IdentitiesOnly): when set, EVERY ssh and scp argv must carry `-o
+// IdentitiesOnly=yes` alongside its `-i`, so ssh offers only the configured key
+// and never the ones the agent or ssh_config would volunteer.
+//
+// The regression it guards is an authentication failure on a correctly-built
+// guest. A Proxmox guest trusts exactly one key, so every extra offer is refused
+// and counts against the guest sshd's MaxAuthTries (6): a locked agent key turns
+// a clean "Permission denied" into a "Too many authentication failures"
+// disconnect, and an agent holding six or more keys exhausts the budget before
+// ssh ever offers the right one. When UNSET (the remote-Lima default) the option
+// must be absent — that hop authenticates on the user's own terms, where an agent
+// key or an ssh_config IdentityFile is a legitimate way in.
+func TestSSHIdentitiesOnly(t *testing.T) {
+	const opt = "IdentitiesOnly=yes"
+
+	t.Run("set: ssh and scp offer only the configured key", func(t *testing.T) {
+		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev", IdentityPath: "/k", IdentitiesOnly: true})
+		for _, argv := range [][]string{
+			h.SSHArgv(false, "true"),
+			h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a"),
+		} {
+			idx := slices.Index(argv, opt)
+			if idx <= 0 || argv[idx-1] != "-o" {
+				t.Errorf("argv %v: want %q preceded by its own -o", argv, opt)
+			}
+			// The restriction is meaningless without the key it restricts ssh TO.
+			if i := slices.Index(argv, "-i"); i < 0 || i+1 >= len(argv) || argv[i+1] != "/k" {
+				t.Errorf("argv %v: want `-i /k` alongside %q", argv, opt)
+			}
+		}
+	})
+
+	t.Run("unset: neither ssh nor scp restricts the offer", func(t *testing.T) {
+		h := NewSSHHost(SSHConfig{Host: "h", User: "u", IdentityPath: "/k"})
+		for _, argv := range [][]string{
+			h.SSHArgv(false, "true"),
+			h.SCPArgv(false, "/tmp/a", "u@h:/tmp/a"),
+		} {
+			if hasToken(argv, opt) {
+				t.Errorf("argv %v must not restrict key selection on a persistent host", argv)
+			}
+		}
+	})
+
+	t.Run("no identity: the option is not emitted on its own", func(t *testing.T) {
+		// Without an -i there is nothing to restrict ssh to, so the option would
+		// only narrow ssh to its built-in default key names — a behaviour change
+		// with nothing to gain.
+		h := NewSSHHost(SSHConfig{Host: "h", User: "u", IdentitiesOnly: true})
+		for _, argv := range [][]string{
+			h.SSHArgv(false, "true"),
+			h.SCPArgv(false, "/tmp/a", "u@h:/tmp/a"),
+		} {
+			if hasToken(argv, opt) {
+				t.Errorf("argv %v carries %q with no -i to restrict ssh to", argv, opt)
+			}
+		}
+	})
+}
+
 // TestSSHStdinReachesRemoteLimactl is the secret-hygiene proof for the hop: the
 // provision vars must arrive over STDIN, never argv, so a finalize token never
 // lands in the remote process listing. The stub echoes stdin (cat), so seeing the

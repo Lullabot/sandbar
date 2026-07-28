@@ -1112,6 +1112,15 @@ func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
 		Host:         host,
 		User:         p.ciUser,
 		IdentityPath: p.identityPath,
+		// The guest trusts EXACTLY ONE key: the identity_path public half sand had
+		// cloud-init install for the login user. Every other key the ssh agent or
+		// ssh_config would volunteer is certain to be refused, and offering them is
+		// not merely wasteful — the guest's sshd disconnects at MaxAuthTries (6 by
+		// default), so a locked agent key turns a clean "Permission denied" into
+		// "Too many authentication failures", and an agent holding six or more keys
+		// can burn the whole budget before ssh ever offers the right one, failing a
+		// correctly-provisioned guest. See IdentitiesOnly.
+		IdentitiesOnly: true,
 		// A guest is a VM sand just created, reached at whatever IP the DHCP lease
 		// handed out — an address a prior, now-deleted VM likely used, presenting a
 		// different host key. Without this the FIRST provisioning ssh blocks on
