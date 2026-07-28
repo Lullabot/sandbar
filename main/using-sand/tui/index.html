@@ -781,6 +781,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The tile board">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scrolling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scrolling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1377,6 +1394,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The tile board">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scrolling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scrolling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1511,6 +1545,14 @@ profile that VM runs on — useful since the same VM name can exist under two
 different profiles at once. The label is omitted while only the Local
 profile is enabled, so a single-profile setup's tiles look unchanged.</p>
 <p>Note: the paste-image verb (<code>v</code>) is only shown on running VMs.</p>
+<h3 id="scrolling">Scrolling</h3>
+<p>The board only draws as many tile rows as the window is tall enough for —
+in a short terminal that can be a single row. When there are more tiles than
+fit, a <strong>scroll bar</strong> appears down the right-hand side: the solid part shows
+how much of the board is on screen and where in it you are. Arrowing past the
+edge of the window scrolls the board, so everything stays reachable. There is
+no scroll bar when the whole board already fits, so seeing one always means
+there is more.</p>
 <p>Builds stream their output into a progress pane, but <strong>they keep running in
 the background if you navigate away</strong>. Leaving the progress screen does not
 cancel a build in progress; the job keeps going in the registry, and you can
