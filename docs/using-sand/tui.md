@@ -36,6 +36,16 @@ profile is enabled, so a single-profile setup's tiles look unchanged.
 
 Note: the paste-image verb (`v`) is only shown on running VMs.
 
+### Scrolling
+
+The board only draws as many tile rows as the window is tall enough for —
+in a short terminal that can be a single row. When there are more tiles than
+fit, a **scroll bar** appears down the right-hand side: the solid part shows
+how much of the board is on screen and where in it you are. Arrowing past the
+edge of the window scrolls the board, so everything stays reachable. There is
+no scroll bar when the whole board already fits, so seeing one always means
+there is more.
+
 Builds stream their output into a progress pane, but **they keep running in
 the background if you navigate away**. Leaving the progress screen does not
 cancel a build in progress; the job keeps going in the registry, and you can

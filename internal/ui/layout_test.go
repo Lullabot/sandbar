@@ -157,3 +157,65 @@ func TestClassifyWithHeaderBandsShedBeforeMessagesAndHeader(t *testing.T) {
 		t.Fatalf("bands must be shed before the full header, but the header compacted at height %d", h)
 	}
 }
+
+// THE SCROLL GUTTER IS A BUDGET, NOT AN OVERLAY. The tiles plus the gaps
+// between them plus the gutter must fit inside ContentWidth at every size —
+// a gutter painted on top of a full-width grid is two cells of chrome hanging
+// past the right edge of the terminal, which is exactly the class of drift
+// that once pushed the help bar off the bottom.
+func TestClassifyReservesTheScrollGutter(t *testing.T) {
+	for w := 0; w <= 300; w++ {
+		lm := classify(w, 40)
+		if lm.GutterWidth != 0 && lm.GutterWidth != scrollGutterWidth {
+			t.Fatalf("classify(%d,40).GutterWidth = %d, want 0 or %d", w, lm.GutterWidth, scrollGutterWidth)
+		}
+		if used := lm.GridWidth() + lm.GutterWidth; used > lm.ContentWidth && lm.ContentWidth > scrollGutterWidth {
+			t.Errorf("classify(%d,40): tiles (%d) + gutter (%d) = %d exceeds ContentWidth %d",
+				w, lm.GridWidth(), lm.GutterWidth, used, lm.ContentWidth)
+		}
+	}
+}
+
+// The gutter is reserved from the first width that can seat a full tile beside
+// it, and never below — a terminal already too narrow for one tile at
+// tileMinWidth is cramping the tile's own content, and two more columns of
+// chrome there would buy an affordance by making what it points at unreadable.
+func TestClassifyGutterThreshold(t *testing.T) {
+	cases := []struct {
+		contentWidth int
+		want         int
+	}{
+		{tileMinWidth + scrollGutterWidth - 1, 0},
+		{tileMinWidth + scrollGutterWidth, scrollGutterWidth},
+		{0, 0},
+	}
+	for _, c := range cases {
+		if got := gutterFor(c.contentWidth); got != c.want {
+			t.Errorf("gutterFor(%d) = %d, want %d", c.contentWidth, got, c.want)
+		}
+	}
+	// And at the sizes that matter in practice it is always there.
+	for _, w := range []int{80, 100, 120, 160, 200} {
+		if got := classify(w, 24).GutterWidth; got != scrollGutterWidth {
+			t.Errorf("classify(%d,24).GutterWidth = %d, want %d — the affordance must exist at every realistic size",
+				w, got, scrollGutterWidth)
+		}
+	}
+}
+
+// 80x24 is the minimum supported size and the one the gutter must not break:
+// still a single, still-navigable tile column, with the two columns taken out
+// of the tile's width rather than out of the column count.
+func TestClassify80x24KeepsItsColumnWithTheGutter(t *testing.T) {
+	lm := classify(80, 24)
+	if lm.Columns != 1 {
+		t.Fatalf("classify(80,24).Columns = %d, want 1", lm.Columns)
+	}
+	if lm.GutterWidth != scrollGutterWidth {
+		t.Fatalf("classify(80,24).GutterWidth = %d, want %d", lm.GutterWidth, scrollGutterWidth)
+	}
+	if lm.TileWidth < tileMinWidth {
+		t.Fatalf("classify(80,24).TileWidth = %d, below the %d floor — the gutter may not cramp the tile at the minimum supported size",
+			lm.TileWidth, tileMinWidth)
+	}
+}

@@ -367,6 +367,12 @@ func TestMessagesBoxTakesOnlySpareRows(t *testing.T) {
 // Columns-1 cells) is left over — and a box drawn to ContentWidth overhangs the
 // grid by exactly that much. At 160 and 200 columns that is a visible two cells,
 // which is what this pins.
+//
+// gridView's widest line includes the SCROLL GUTTER (scrollbar.go), which is
+// deliberately not part of GridWidth: the track is chrome standing clear to the
+// right of the tiles, the way a scrollbar sits outside the content it scrolls,
+// so the box lines up with the tiles' right edge and the gutter's columns are
+// subtracted off before the comparison rather than being handed to the box.
 func TestMessagesBoxLinesUpWithTheTiles(t *testing.T) {
 	widest := func(s string) int {
 		w := 0
@@ -382,18 +388,28 @@ func TestMessagesBoxLinesUpWithTheTiles(t *testing.T) {
 		m := newTestModel(t)
 		m = resized(m, w, 40)
 		// Enough VMs to fill a full row at every width under test, so the widest
-		// rendered tile row IS the grid's full width.
-		m = loadManaged(t, m,
-			vm.VM{Name: "api", Status: "Running"}, vm.VM{Name: "db", Status: "Running"},
-			vm.VM{Name: "web", Status: "Running"}, vm.VM{Name: "x1", Status: "Running"},
-		)
+		// rendered tile row IS the grid's full width — and enough to OVERFLOW the
+		// viewport at all six, so the scroll gutter actually draws its track and
+		// subtracting GutterWidth below is subtracting something that is there. A
+		// blank gutter is trimmed away by widest(), so a board that happened to fit
+		// would silently make this assertion two cells too strict.
+		var seed []vm.VM
+		for i := 0; i < 12; i++ {
+			seed = append(seed, vm.VM{Name: fmt.Sprintf("vm%02d", i), Status: "Running"})
+		}
+		m = loadManaged(t, m, seed...)
 		if m.layout.MessagesHeight < 1 {
 			t.Fatalf("w=%d: precondition: the box must be shown", w)
 		}
+		if rowsTotal := (m.gridCells() + m.gridColumns() - 1) / m.gridColumns(); rowsTotal <= m.visibleTileRows() {
+			t.Fatalf("w=%d: precondition: the grid must overflow its viewport, got %d rows in %d visible",
+				w, rowsTotal, m.visibleTileRows())
+		}
 
-		gridW, boxW := widest(m.gridView()), widest(m.messagesStripView())
-		if gridW != boxW {
-			t.Errorf("w=%d: the tiles are %d wide but the Messages box is %d — they must line up", w, gridW, boxW)
+		tilesW := widest(m.gridView()) - m.layout.GutterWidth
+		boxW := widest(m.messagesStripView())
+		if tilesW != boxW {
+			t.Errorf("w=%d: the tiles are %d wide but the Messages box is %d — they must line up", w, tilesW, boxW)
 		}
 	}
 }

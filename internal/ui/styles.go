@@ -85,6 +85,16 @@ var (
 	tileFocusedBorderColor   = lipgloss.Color("63")
 	tileUnfocusedBorderColor = lipgloss.Color("245")
 
+	// The tile grid's scroll gutter (scrollbar.go). Two dim greys — 245 for the
+	// thumb (statusStyle's, the repo's ordinary chrome grey) and 240 for the
+	// track behind it (the ghost tile's, dimmer still), so the bar never
+	// competes with a VM for attention. Colour is not what distinguishes them:
+	// the thumb and the track are different GLYPHS (█ against ░), so the
+	// affordance survives NO_COLOR, a monochrome terminal and ansi.Strip — the
+	// same rule the focus ring's border glyphs follow.
+	scrollThumbStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	scrollTrackStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
 	// tileGhostBorderColor outlines the board's empty-slot ghost tile (board.go).
 	// It is dimmer than an unfocused VM's border on purpose: the invitation to
 	// create a VM must never compete with a VM that actually exists.
