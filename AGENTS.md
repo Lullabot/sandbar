@@ -53,7 +53,16 @@ it is not where prose belongs.
   Remote SSH or Proxmox (Local is permanent/pre-seeded, never creatable) before
   presenting the form. The Proxmox form includes one boolean **checkbox** input
   (`insecure` for self-signed certs) — the sole non-text input in the profile
-  form family.
+  form family; **space** toggles it and enter does not, because enter is the
+  form's "next field" everywhere else and a row enter cannot leave is a trap.
+  **A form that does not render every field must carry the rest across on
+  save.** `Store.Update` replaces the record wholesale, so a field with no
+  input (`user`, `image_storage`, `base_image` today) is erased from
+  `profiles.yaml` by an edit as innocent as a rename unless `submitProfileForm`
+  copies it from the stored profile — silently, since the user never saw it.
+  For the same reason `connectionFieldsEqual` must compare every field
+  `provider.TargetConfigFor` reads: one left out is read as a pure rename and
+  never rebuilds the live binding.
   Deliberately does not import `provider` (to avoid an import
   cycle) — `provider.BuildFleet` is what converts a `Profile` into a
   `Binding`.

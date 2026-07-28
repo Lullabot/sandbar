@@ -43,7 +43,7 @@ var (
 
 // BuildFleet constructs one Binding per ENABLED profile in store: a Local
 // profile becomes NewDefault + registry.LocalScope; a RemoteSSH profile is
-// converted to a TargetConfig (targetConfigFor) and becomes NewRemoteLima +
+// converted to a TargetConfig (TargetConfigFor) and becomes NewRemoteLima +
 // cfg.Scope() — the existing "user@host:port" scope-key derivation
 // (TargetConfig.Scope, select.go), not a new format invented here.
 //
@@ -85,7 +85,7 @@ func buildBinding(p profiles.Profile) Binding {
 		if p.Host == "" {
 			return Binding{Profile: p, Err: fmt.Errorf("profile %q has no host", p.Name)}
 		}
-		cfg := targetConfigFor(p)
+		cfg := TargetConfigFor(p)
 		prov, err := newRemoteLima(cfg)
 		if err != nil {
 			return Binding{Profile: p, Err: err}
@@ -95,7 +95,7 @@ func buildBinding(p profiles.Profile) Binding {
 		if p.Host == "" {
 			return Binding{Profile: p, Err: fmt.Errorf("profile %q has no host", p.Name)}
 		}
-		cfg := targetConfigFor(p)
+		cfg := TargetConfigFor(p)
 		prov, err := newProxmox(cfg)
 		if err != nil {
 			return Binding{Profile: p, Err: err}
@@ -112,7 +112,7 @@ func buildBinding(p profiles.Profile) Binding {
 	}
 }
 
-// targetConfigFor converts a RemoteSSH or Proxmox profile into the
+// TargetConfigFor converts a RemoteSSH or Proxmox profile into the
 // secret-free TargetConfig that NewRemoteLima/NewProxmox and
 // TargetConfig.Scope() consume — a direct field-for-field mapping, reusing
 // the existing scope-key derivation rather than inventing a new one.
@@ -120,6 +120,14 @@ func buildBinding(p profiles.Profile) Binding {
 // PATH (a private key file, a remote LIMA_HOME, a token credential file
 // respectively), never secret material itself, matching TargetConfig's own
 // secret-free contract.
+//
+// Exported so every caller that turns a Profile into a provider shares ONE
+// mapping: internal/ui's live enable/rebuild path (profilesview.go's
+// buildProfileProvider) used to hand-copy it, and that copy silently dropped
+// IdentityPath/ImageStorage/BaseImage — a Proxmox profile that worked from
+// the CLI failed to build from the TUI. A hand-copied field list cannot be
+// kept in agreement by review alone; a field added here now reaches that
+// caller for free.
 //
 // This function stays TOTAL (no error return) even though the Proxmox path's
 // token can fail to load: NewProxmox itself calls profiles.LoadToken(cfg.TokenFile)
@@ -129,7 +137,7 @@ func buildBinding(p profiles.Profile) Binding {
 // above, which already has a distinct error path for construction failure —
 // simple, rather than plumbing a second error return through both this
 // function and its cmd/sand/resolve.go duplicate.
-func targetConfigFor(p profiles.Profile) TargetConfig {
+func TargetConfigFor(p profiles.Profile) TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return TargetConfig{
 			Provider:     ProxmoxProviderID,

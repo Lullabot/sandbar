@@ -25,7 +25,7 @@ const ProxmoxProviderID = "proxmox"
 // IdentityPath is a path to a private key FILE, never key material — so
 // every field is safe to derive a registry.Scope from (see Scope) and,
 // transitively, safe to persist in the managed-VM index. A RemoteSSH
-// profiles.Profile is converted into one of these by targetConfigFor
+// profiles.Profile is converted into one of these by TargetConfigFor
 // (fleet.go); this package never persists a TargetConfig itself.
 type TargetConfig struct {
 	// Provider is "" (local Lima, the default) or RemoteLimaProviderID.

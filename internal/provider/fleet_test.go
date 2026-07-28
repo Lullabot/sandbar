@@ -301,15 +301,15 @@ func TestTargetConfigFor_ConvertsProfile(t *testing.T) {
 		Host: "example.com", User: "dev", Port: 2222,
 		IdentityPath: "/home/dev/.ssh/id_ed25519", LimaHome: "/home/dev/.lima",
 	}
-	cfg := targetConfigFor(p)
+	cfg := TargetConfigFor(p)
 	if cfg.Provider != RemoteLimaProviderID {
-		t.Fatalf("targetConfigFor Provider = %q, want %q", cfg.Provider, RemoteLimaProviderID)
+		t.Fatalf("TargetConfigFor Provider = %q, want %q", cfg.Provider, RemoteLimaProviderID)
 	}
 	if cfg.Host != p.Host || cfg.User != p.User || cfg.Port != p.Port || cfg.IdentityPath != p.IdentityPath {
-		t.Fatalf("targetConfigFor = %+v, did not carry profile fields across faithfully (%+v)", cfg, p)
+		t.Fatalf("TargetConfigFor = %+v, did not carry profile fields across faithfully (%+v)", cfg, p)
 	}
 	if cfg.RemoteLimaHome != p.LimaHome {
-		t.Fatalf("targetConfigFor RemoteLimaHome = %q, want profile LimaHome %q", cfg.RemoteLimaHome, p.LimaHome)
+		t.Fatalf("TargetConfigFor RemoteLimaHome = %q, want profile LimaHome %q", cfg.RemoteLimaHome, p.LimaHome)
 	}
 	if strings.Contains(cfg.Scope().RemoteTarget, cfg.IdentityPath) {
 		t.Fatalf("derived scope must never carry the identity path, got %+v", cfg.Scope())
@@ -328,15 +328,15 @@ func TestTargetConfigFor_ConvertsProxmoxProfile(t *testing.T) {
 		Bridge: "vmbr0", TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
 		Insecure: true, CAFile: "/etc/ssl/pve-ca.pem",
 	}
-	cfg := targetConfigFor(p)
+	cfg := TargetConfigFor(p)
 	if cfg.Provider != ProxmoxProviderID {
-		t.Fatalf("targetConfigFor Provider = %q, want %q", cfg.Provider, ProxmoxProviderID)
+		t.Fatalf("TargetConfigFor Provider = %q, want %q", cfg.Provider, ProxmoxProviderID)
 	}
 	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
 		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.BaseImage != p.BaseImage ||
 		cfg.Bridge != p.Bridge || cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
 		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
-		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
+		t.Fatalf("TargetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
 	}
 }
 

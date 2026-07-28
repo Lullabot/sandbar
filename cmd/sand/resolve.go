@@ -125,7 +125,7 @@ func scopeForProfile(p profiles.Profile) registry.Scope {
 
 // targetConfigFor converts a RemoteSSH or Proxmox profile into the provider
 // layer's TargetConfig — a direct field-for-field mapping, duplicating
-// internal/provider/fleet.go's unexported targetConfigFor (which this
+// internal/provider/fleet.go's exported TargetConfigFor (which this
 // package cannot call). Keep the two in agreement if either changes; see
 // profiles.Profile.remoteTarget's doc comment for why this small duplication
 // is preferred over an import-cycle-inducing export.
