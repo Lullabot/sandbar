@@ -854,6 +854,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Shells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the board does while you're attached
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1372,6 +1389,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Shells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the board does while you're attached
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1539,6 +1573,15 @@ once.</p>
 <p>The VM must be running before you can shell into it; a stopped VM won't
 offer <code>S</code> on its tile, and <code>sand shell</code> refuses cleanly with an error
 telling you to start it first.</p>
+<h3 id="what-the-board-does-while-youre-attached">What the board does while you're attached</h3>
+<p>If sand is itself running inside a host tmux session, <code>S</code> opens the shell in
+a <strong>new host window</strong> and leaves the board on screen beside it, still live.
+Otherwise <code>S</code> <strong>suspends</strong> the board for as long as you're attached, and it
+returns on detach.</p>
+<p>Either way, a build already in flight keeps building: sand buffers the output
+of a board nobody is looking at rather than making the provisioner wait for a
+screen to draw on. On detach the tile shows where that build has actually got
+to — not a replay of every step it took while you were away.</p>
 <h2 id="uploading-and-downloading-files-data-not-code">Uploading and downloading files: data, not code</h2>
 <p><code>u</code> (upload) and <code>g</code> (download) on a focused tile open a file-transfer pane.
 Download is bound to <code>g</code>, not <code>d</code> — <code>d</code> is always delete; see the
