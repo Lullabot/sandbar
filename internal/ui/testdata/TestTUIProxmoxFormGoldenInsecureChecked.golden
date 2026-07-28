@@ -6,7 +6,10 @@
   Node:              >                                                       
   Pool:              >                                                       
   Storage:           >                                                       
+  Image storage:     > file-based; defaults to local                         
+  Base image:        > defaults to the sandbar golden image                  
   Bridge:            >                                                       
+  User:              > defaults to your local username                       
   Identity path:     >                                                       
   Token file:        >                                                       
   [x] Insecure                                                               

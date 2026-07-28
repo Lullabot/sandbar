@@ -57,9 +57,17 @@ it is not where prose belongs.
   form's "next field" everywhere else and a row enter cannot leave is a trap.
   **A form that does not render every field must carry the rest across on
   save.** `Store.Update` replaces the record wholesale, so a field with no
-  input (`user`, `image_storage`, `base_image` today) is erased from
-  `profiles.yaml` by an edit as innocent as a rename unless `submitProfileForm`
-  copies it from the stored profile — silently, since the user never saw it.
+  input is erased from `profiles.yaml` by an edit as innocent as a rename
+  unless `submitProfileForm` copies it from the stored profile — silently,
+  since the user never saw it. Both forms render every field of their type
+  today (`user`, `image_storage` and `base_image` used to be the exception, and
+  were carried across until they got inputs of their own), so the rule is
+  currently vacuous — and only stays that way if the next Proxmox field gets a
+  row in `profileFormSlots`. Optional is not a reason to omit one: an empty
+  input means "use the provider's default", which the field's `Placeholder`
+  names, and that must be a **constant** — deriving it from the environment
+  (`vm.HostUser()` is the tempting one) bakes the developer's machine into
+  every golden file.
   For the same reason `connectionFieldsEqual` must compare every field
   `provider.TargetConfigFor` reads: one left out is read as a pure rename and
   never rebuilds the live binding.

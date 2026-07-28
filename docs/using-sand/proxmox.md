@@ -302,11 +302,11 @@ grant.
     A Proxmox profile can be created in the TUI by pressing `p` → `n`, choosing
     **Proxmox** from the type picker, and filling the form. Its `insecure`
     checkbox (for self-signed certificates) is toggled with **space**, not enter
-    — enter moves to the next field, as it does on every other row.
+    — enter moves to the next field, as it does on every other row. The form
+    covers every field below, including the optional `user`, `image_storage` and
+    `base_image`: leave one blank to take the default the greyed-out hint names.
     Alternatively, add a Proxmox profile by hand-editing `profiles.yaml` as shown
-    here — the YAML form is the reference and automation path, and is the only
-    way to set `user`, `image_storage` and `base_image`, which the form does not
-    show (editing a profile in the TUI leaves those three untouched).
+    here — the YAML form is the reference and automation path.
 
 Add a `proxmox` profile to your
 [`profiles.yaml`](connection-profiles.md#profilesyaml):
@@ -323,8 +323,8 @@ profiles:
     storage: local-lvm            # images-capable storage for VM disks
     # image_storage: local        # file-based (dir/NFS/CIFS) storage for the
     #                             # cloud-image download; defaults to "local"
-    # base_image: https://…/sandbar-base.qcow2   # golden image URL; defaults to
-    #                             # upstream Debian genericcloud (see note below)
+    # base_image: https://…/my-base.qcow2   # cloud image URL; defaults to the
+    #                             # project golden image (see note below)
     bridge: vmbr0                 # the Linux bridge
     token_file: ~/.config/sandbar/pve1.token
     identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sand installs + connects with
