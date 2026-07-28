@@ -1,15 +1,16 @@
-                                                                      
-   New Connection Profile                                             
-                                                                      
-  Name:              >                                                
-  Host:              >                                                
-  Node:              >                                                
-  Pool:              >                                                
-  Storage:           >                                                
-  Bridge:            >                                                
-  Token file:        >                                                
-  [x] Insecure                                                        
-  CA file:           >                                                
-                                                                      
-  ↑ prev field • ↓/enter next field • ctrl+s save • esc back          
-                                                                      
+                                                                             
+   New Connection Profile                                                    
+                                                                             
+  Name:              >                                                       
+  Host:              >                                                       
+  Node:              >                                                       
+  Pool:              >                                                       
+  Storage:           >                                                       
+  Bridge:            >                                                       
+  Identity path:     >                                                       
+  Token file:        >                                                       
+  [x] Insecure                                                               
+  CA file:           >                                                       
+                                                                             
+  ↑ prev field • ↓/enter next field • space toggle • ctrl+s save • esc back  
+                                                                             

@@ -362,7 +362,15 @@ func seedProxmoxProfile(t *testing.T, name, host, node, pool string) profiles.Pr
 		Name: name, Type: profiles.TypeProxmox, Enabled: true,
 		Host: host, Node: node, Pool: pool,
 		Storage: "local-lvm", Bridge: "vmbr0",
-		TokenFile: proxmoxTokenFile(t),
+		TokenFile:    proxmoxTokenFile(t),
+		IdentityPath: "/home/dev/.ssh/id_ed25519",
+		// User, ImageStorage and BaseImage have NO form field. They are seeded
+		// here precisely because of that: an edit must carry them across
+		// untouched rather than erasing them from profiles.yaml, which is what
+		// TestProxmoxEditFormPrefillToggleSave asserts after saving.
+		User:         "root@pam",
+		ImageStorage: "nfs-images",
+		BaseImage:    "https://example.invalid/golden.qcow2",
 	})
 	if err != nil {
 		t.Fatalf("add profile: %v", err)

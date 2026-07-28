@@ -75,9 +75,16 @@ const (
 	ppBridge
 	ppTokenFile
 	ppCAFile
+	// ppIdentityPath is REQUIRED for Proxmox, unlike its RemoteSSH namesake
+	// (which may fall back to the ssh agent): sand installs
+	// <identity_path>.pub into every guest via cloud-init and then connects
+	// with the private key. Without a field for it here, a profile created on
+	// this screen could never launch a VM — it failed at Preflight with an
+	// error the form gave no way to fix.
+	ppIdentityPath
 )
 
-var proxmoxFieldLabels = []string{"Name", "Host", "Node", "Pool", "Storage", "Bridge", "Token file", "CA file"}
+var proxmoxFieldLabels = []string{"Name", "Host", "Node", "Pool", "Storage", "Bridge", "Token file", "CA file", "Identity path"}
 
 // profileFormFieldKind distinguishes a text row (backed by a
 // textinput.Model) from the one boolean row the form can show (Proxmox's
@@ -125,6 +132,9 @@ func textOnlySlots(labels []string) []profileFormField {
 func (m model) profileFormSlots() []profileFormField {
 	switch m.profileFormType {
 	case profiles.TypeProxmox:
+		// On-screen order groups the guest-SSH identity before the API/TLS
+		// credentials (token file, insecure, CA file), which is why it is not
+		// simply the ppXxx storage order.
 		return []profileFormField{
 			{label: proxmoxFieldLabels[ppName], kind: pffText, inputIdx: ppName},
 			{label: proxmoxFieldLabels[ppHost], kind: pffText, inputIdx: ppHost},
@@ -132,6 +142,7 @@ func (m model) profileFormSlots() []profileFormField {
 			{label: proxmoxFieldLabels[ppPool], kind: pffText, inputIdx: ppPool},
 			{label: proxmoxFieldLabels[ppStorage], kind: pffText, inputIdx: ppStorage},
 			{label: proxmoxFieldLabels[ppBridge], kind: pffText, inputIdx: ppBridge},
+			{label: proxmoxFieldLabels[ppIdentityPath], kind: pffText, inputIdx: ppIdentityPath},
 			{label: proxmoxFieldLabels[ppTokenFile], kind: pffText, inputIdx: ppTokenFile},
 			{label: "Insecure", kind: pffCheckbox},
 			{label: proxmoxFieldLabels[ppCAFile], kind: pffText, inputIdx: ppCAFile},
@@ -152,6 +163,18 @@ func (m model) profileFormFocusIsCheckbox() bool {
 	slots := m.profileFormSlots()
 	return m.profileFormFocus >= 0 && m.profileFormFocus < len(slots) &&
 		slots[m.profileFormFocus].kind == pffCheckbox
+}
+
+// isRemoteProfile reports whether p is reached over the NETWORK rather than
+// being the machine sand runs on — true for RemoteSSH and for Proxmox, which
+// is equally remote, just not over ssh. The one place that answers this, so
+// the connection lifecycle speaks with one voice: the sites that announce
+// "connecting to", "connected to", "reconnecting to" and "reconnected to"
+// have to agree about which members are remote, and when they did not, a
+// Proxmox member announced a connection attempt that then never resolved.
+// Local is deliberately excluded everywhere — see New's loop for why.
+func isRemoteProfile(p profiles.Profile) bool {
+	return p.Type == profiles.TypeRemoteSSH || p.Type == profiles.TypeProxmox
 }
 
 // profileCursorStyle highlights the row under the management screen's ring —
@@ -256,59 +279,40 @@ func (m model) profileBlockingJobForID(id string) (string, bool) {
 
 // buildProfileProvider constructs profile p's provider and registry scope —
 // the same conversion provider.BuildFleet applies per-profile
-// (internal/provider/fleet.go's unexported buildBinding), reimplemented here
-// exactly as cmd/sand/resolve.go's providerForProfile does: neither package
-// can call the other's unexported constructor without risking an import
-// cycle (see profiles.Profile's remoteTarget doc comment). Construction never
-// round-trips the network (NewDefault/NewRemoteLima do not connect), so this
-// is always fast and safe to call from the live enable/rebuild path.
+// (internal/provider/fleet.go's buildBinding). The FIELD MAPPING is not
+// reimplemented here: provider.TargetConfigFor is the one exported source of
+// truth for it, because the hand-copy that used to live here silently dropped
+// IdentityPath (and ImageStorage/BaseImage), so a Proxmox profile enabled
+// from this screen built a provider with no SSH key and failed at Preflight
+// while the identical profile worked from `sand --profile`. Only the
+// constructor choice and this package's own error wrapping stay local.
+// Construction never round-trips the network (NewDefault/NewRemoteLima/
+// NewProxmox do not connect), so this is always fast and safe to call from
+// the live enable/rebuild path.
 func buildProfileProvider(p profiles.Profile) (provider.Provider, registry.Scope, error) {
+	var (
+		cfg  provider.TargetConfig
+		prov provider.Provider
+		err  error
+	)
 	switch p.Type {
 	case profiles.TypeRemoteSSH:
-		cfg := provider.TargetConfig{
-			Provider:       provider.RemoteLimaProviderID,
-			Host:           p.Host,
-			User:           p.User,
-			Port:           p.Port,
-			IdentityPath:   p.IdentityPath,
-			RemoteLimaHome: p.LimaHome,
-		}
-		prov, err := provider.NewRemoteLima(cfg)
-		if err != nil {
-			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
-		}
-		return prov, cfg.Scope(), nil
+		cfg = provider.TargetConfigFor(p)
+		prov, err = provider.NewRemoteLima(cfg)
 	case profiles.TypeProxmox:
-		// A THIRD copy of the Profile->TargetConfig mapping — the other two are
-		// cmd/sand/resolve.go's targetConfigFor/providerForProfile and
-		// internal/provider/fleet.go's own targetConfigFor (see this function's
-		// doc comment for why neither can be called from here directly). Keep
-		// all three in agreement if the Proxmox fields ever change, exactly as
-		// the RemoteSSH mapping above already must.
-		cfg := provider.TargetConfig{
-			Provider:  provider.ProxmoxProviderID,
-			Host:      p.Host,
-			User:      p.User,
-			Node:      p.Node,
-			Pool:      p.Pool,
-			Storage:   p.Storage,
-			Bridge:    p.Bridge,
-			TokenFile: p.TokenFile,
-			Insecure:  p.Insecure,
-			CAFile:    p.CAFile,
-		}
-		prov, err := provider.NewProxmox(cfg)
-		if err != nil {
-			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
-		}
-		return prov, cfg.Scope(), nil
+		cfg = provider.TargetConfigFor(p)
+		prov, err = provider.NewProxmox(cfg)
 	default: // TypeLocal
-		prov, err := provider.NewDefault()
+		prov, err = provider.NewDefault()
 		if err != nil {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
 		}
 		return prov, registry.LocalScope, nil
 	}
+	if err != nil {
+		return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
+	}
+	return prov, cfg.Scope(), nil
 }
 
 // rebuildMember builds (or REBUILDS) profile p's live binding and appends —
@@ -331,10 +335,8 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 		}
 		// Live enable/edit of a remote starts a fresh connection attempt —
 		// same announcement New makes for the startup fleet (local stays
-		// silent there and here alike). Proxmox counts as remote here too:
-		// it is reached over the network exactly like RemoteSSH, just not
-		// over ssh.
-		if p.Type == profiles.TypeRemoteSSH || p.Type == profiles.TypeProxmox {
+		// silent there and here alike).
+		if isRemoteProfile(p) {
 			m.logMsg("connecting to " + p.Name + "…")
 		}
 	}
@@ -462,20 +464,23 @@ func (m *model) deleteProfile(id string) {
 
 // connectionFieldsEqual reports whether a and b would build the SAME
 // provider binding — same target, same identity, same remote LIMA_HOME (or,
-// for Proxmox, the same node/pool/storage/bridge/token file/insecure flag/CA
-// file). It is what tells a pure rename (or any other metadata-only edit)
-// apart from a connection-field edit: only the latter needs a
-// tear-down-and-rebuild and the idle gate. Always true for two Local
-// profiles (both sides zero), which is exactly right — Local has no
+// for Proxmox, the same node/pool/storage/image storage/base image/bridge/
+// token file/insecure flag/CA file). It is what tells a pure rename (or any
+// other metadata-only edit) apart from a connection-field edit: only the
+// latter needs a tear-down-and-rebuild and the idle gate. Always true for two
+// Local profiles (both sides zero), which is exactly right — Local has no
 // connection fields, so any edit to it is a rename.
 //
 // The Proxmox fields used to be missing here entirely — a real bug: editing
 // a Proxmox profile's node or pool was silently read as a pure rename and
-// never rebuilt the live binding against the new target.
+// never rebuilt the live binding against the new target. Every field
+// provider.TargetConfigFor reads has to be compared here, or that bug simply
+// comes back for whichever one is left out.
 func connectionFieldsEqual(a, b profiles.Profile) bool {
 	return a.Host == b.Host && a.User == b.User && a.Port == b.Port &&
 		a.IdentityPath == b.IdentityPath && a.LimaHome == b.LimaHome &&
 		a.Node == b.Node && a.Pool == b.Pool && a.Storage == b.Storage &&
+		a.ImageStorage == b.ImageStorage && a.BaseImage == b.BaseImage &&
 		a.Bridge == b.Bridge && a.TokenFile == b.TokenFile &&
 		a.Insecure == b.Insecure && a.CAFile == b.CAFile
 }
@@ -622,6 +627,7 @@ func (m *model) openProfileEditForm(p profiles.Profile) tea.Cmd {
 		m.profileInputs[ppBridge].SetValue(p.Bridge)
 		m.profileInputs[ppTokenFile].SetValue(p.TokenFile)
 		m.profileInputs[ppCAFile].SetValue(p.CAFile)
+		m.profileInputs[ppIdentityPath].SetValue(p.IdentityPath)
 	}
 	m.profileFormFocus = 0
 	m.profileFormErr = nil
@@ -629,12 +635,17 @@ func (m *model) openProfileEditForm(p profiles.Profile) tea.Cmd {
 	return m.profileInputs[0].Focus()
 }
 
-// profileFormFocusNext/Prev walk the form's fields (profileFormSlots),
+// profileFormStep walks the form's fields (profileFormSlots) by delta,
 // wrapping around. A single-field (Local, rename-only) form has nothing to
 // walk between. Landing on the insecure checkbox blurs whatever text input
 // was previously focused and focuses nothing — there is no textinput.Model
 // backing that row to call .Focus() on.
-func (m *model) profileFormFocusNext() tea.Cmd {
+//
+// One function for both directions, not a matched pair: forward and backward
+// traversal have to agree about which rows exist and which are focusable, and
+// two copies can only agree by being kept in step by hand — a row skipped in
+// one and not the other strands the user on a field they cannot leave.
+func (m *model) profileFormStep(delta int) tea.Cmd {
 	slots := m.profileFormSlots()
 	n := len(slots)
 	if n <= 1 {
@@ -643,25 +654,9 @@ func (m *model) profileFormFocusNext() tea.Cmd {
 	if cur := slots[m.profileFormFocus]; cur.kind == pffText {
 		m.profileInputs[cur.inputIdx].Blur()
 	}
-	m.profileFormFocus = (m.profileFormFocus + 1) % n
+	m.profileFormFocus = ((m.profileFormFocus+delta)%n + n) % n
 	if next := slots[m.profileFormFocus]; next.kind == pffText {
 		return m.profileInputs[next.inputIdx].Focus()
-	}
-	return nil
-}
-
-func (m *model) profileFormFocusPrev() tea.Cmd {
-	slots := m.profileFormSlots()
-	n := len(slots)
-	if n <= 1 {
-		return nil
-	}
-	if cur := slots[m.profileFormFocus]; cur.kind == pffText {
-		m.profileInputs[cur.inputIdx].Blur()
-	}
-	m.profileFormFocus = (m.profileFormFocus - 1 + n) % n
-	if prev := slots[m.profileFormFocus]; prev.kind == pffText {
-		return m.profileInputs[prev.inputIdx].Focus()
 	}
 	return nil
 }
@@ -713,12 +708,17 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		// same secret-free contract IdentityPath keeps above.
 		p.TokenFile = strings.TrimSpace(m.profileInputs[ppTokenFile].Value())
 		p.CAFile = strings.TrimSpace(m.profileInputs[ppCAFile].Value())
+		p.IdentityPath = strings.TrimSpace(m.profileInputs[ppIdentityPath].Value())
 		p.Insecure = m.profileInsecure
 		// Mirrors profiles.validate's own Proxmox rule (store.go) for
 		// immediate in-form feedback; the store re-checks this (and
 		// uniqueness) regardless, so this is a UX nicety, not the authority.
+		// Identity path is the one addition: validate does not demand it, but
+		// the provider does (it is the key sand installs into every guest), so
+		// saving without it would produce a profile that can never create a VM.
 		for _, req := range []struct{ v, name string }{
 			{p.Host, "host"}, {p.Node, "node"}, {p.Pool, "pool"}, {p.TokenFile, "token file"},
+			{p.IdentityPath, "identity path"},
 		} {
 			if req.v == "" {
 				m.profileFormErr = fmt.Errorf("%s is required", req.name)
@@ -750,6 +750,17 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	p.Enabled = existing.Enabled
+	// Carry across the fields this form does not render. p was built from the
+	// inputs alone, and Store.Update replaces the stored record WHOLESALE, so
+	// anything the form cannot show would otherwise be erased from
+	// profiles.yaml by an edit as innocent as a rename — silently, since the
+	// user never saw the field to know they dropped it. Every hand-editable
+	// Proxmox field that has no input belongs here.
+	if p.Type == profiles.TypeProxmox {
+		p.User = existing.User
+		p.ImageStorage = existing.ImageStorage
+		p.BaseImage = existing.BaseImage
+	}
 	cmd := m.submitProfileEdit(p)
 	if m.profileFormErr == nil {
 		m.view = viewProfiles
@@ -766,19 +777,21 @@ func (m model) updateProfileForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.view = viewProfiles
 		m.profileFormErr = nil
 		return m, nil
-	case onCheckbox && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter):
-		// Checked BEFORE m.keys.Down below, which also binds "enter" (it
-		// doubles as the form's other fields' "next field" key) — while the
-		// checkbox is focused, space AND enter both toggle it instead of
-		// advancing focus, mirroring form.go's own toggle rows.
+	case onCheckbox && msg.Code == tea.KeySpace:
+		// SPACE ONLY. Enter deliberately falls through to m.keys.Down below and
+		// advances focus like it does on every other row: the footer promises
+		// "↓/enter next field", so toggling on enter both broke that promise
+		// and made the row a trap — enter could never leave it, and each press
+		// silently flipped TLS verification off. The footer names space as the
+		// toggle whenever this row exists (profileFormHelp).
 		m.profileInsecure = !m.profileInsecure
 		return m, nil
 	case key.Matches(msg, m.keys.Save):
 		return m.submitProfileForm()
 	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
-		return m, m.profileFormFocusPrev()
+		return m, m.profileFormStep(-1)
 	case key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.Tab):
-		return m, m.profileFormFocusNext()
+		return m, m.profileFormStep(+1)
 	}
 	if onCheckbox {
 		// No textinput.Model backs this row, and text keys must never reach
@@ -796,9 +809,24 @@ func (m model) updateProfileForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// profileFormHelp is the create/edit form's footer.
+// profileFormToggle is the checkbox row's own key, screen-local like
+// profileMove/profileEdit. It earns a footer slot because the checkbox is
+// otherwise undiscoverable: every other row is a text input, so nothing tells
+// the reader that this one takes a key at all.
+var profileFormToggle = key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle"))
+
+// profileFormHelp is the create/edit form's footer. The toggle key appears
+// only for a form that actually HAS a checkbox row (Proxmox today), so the
+// Local/RemoteSSH footers stay exactly as they were.
 func (m model) profileFormHelp() []key.Binding {
-	return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Save, m.keys.Back}
+	binds := []key.Binding{m.keys.Up, m.keys.Down}
+	for _, s := range m.profileFormSlots() {
+		if s.kind == pffCheckbox {
+			binds = append(binds, profileFormToggle)
+			break
+		}
+	}
+	return append(binds, m.keys.Save, m.keys.Back)
 }
 
 // profileFormView renders the create/edit sub-form.

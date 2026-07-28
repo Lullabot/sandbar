@@ -379,8 +379,9 @@ func TestSubmitProfileEditRefusedWhileJobInFlightOnConnectionChange(t *testing.T
 // that is NOT a textinput.Model yet still participates in tab-based focus
 // traversal and toggles on space, and saving persists the toggled value —
 // with token_file carried as a PATH, never the token value itself, exactly
-// like identity_path. Creating a Proxmox profile is task 2's type picker;
-// this is the edit path task 1 makes verifiable on its own
+// like identity_path. This covers the EDIT path only — reaching the same
+// form via create goes through the type picker, which
+// TestProfileTypePickerCreateEntryPoint covers
 // (openProfileEditForm already opens the form for an existing profile,
 // whatever its type).
 func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
@@ -430,6 +431,7 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		{"bridge", m.profileInputs[ppBridge].Value(), "vmbr0"},
 		{"token_file", m.profileInputs[ppTokenFile].Value(), p.TokenFile},
 		{"ca_file", m.profileInputs[ppCAFile].Value(), "/etc/sandbar/pve-ca.pem"},
+		{"identity_path", m.profileInputs[ppIdentityPath].Value(), p.IdentityPath},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -440,15 +442,18 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		t.Fatal("insecure should prefill false for this profile")
 	}
 
-	// On-screen order is name,host,node,pool,storage,bridge,token_file,
-	// insecure,ca_file (profileFormSlots) — 7 tabs from Name (index 0)
-	// lands on the checkbox (index 7).
-	for i := 0; i < 7; i++ {
+	// Tab forward until the checkbox row has focus. Counted by walking rather
+	// than by a hardcoded index so inserting a field into profileFormSlots
+	// cannot silently retarget this test at the wrong row — the earlier
+	// hardcoded count did exactly that when Identity path was added, and the
+	// space below landed in a text input instead.
+	tabs := 0
+	for !m.profileFormFocusIsCheckbox() {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
-	}
-	if !m.profileFormFocusIsCheckbox() {
-		t.Fatalf("focus index %d should be the insecure checkbox after 7 tabs", m.profileFormFocus)
+		if tabs++; tabs > len(m.profileFormSlots()) {
+			t.Fatal("tabbing never reached the insecure checkbox row")
+		}
 	}
 
 	// Space toggles it on.
@@ -458,8 +463,25 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		t.Fatal("space should toggle the insecure checkbox on")
 	}
 
-	// One more tab must land on CA file's textinput, not stay stuck on the
-	// checkbox.
+	// Enter must LEAVE the row (the footer promises "↓/enter next field"),
+	// not toggle: a key that only ever flips the checkbox makes the row a
+	// trap and silently disables TLS verification on each press.
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if m.profileFormFocusIsCheckbox() {
+		t.Fatal("enter on the checkbox should advance focus, not toggle in place")
+	}
+	if !m.profileInsecure {
+		t.Fatal("enter must not have toggled the checkbox on its way past")
+	}
+
+	// And shift+tab back onto it, then tab forward again, must land on CA
+	// file's textinput rather than sticking to the checkbox.
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	m = next.(model)
+	if !m.profileFormFocusIsCheckbox() {
+		t.Fatal("shift+tab should walk back onto the checkbox")
+	}
 	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = next.(model)
 	if m.profileFormFocusIsCheckbox() {
@@ -490,8 +512,16 @@ func TestProxmoxEditFormPrefillToggleSave(t *testing.T) {
 		t.Fatal("token_file must be a PATH, never the token value itself")
 	}
 	if saved.Host != "pve.example.com" || saved.Node != "pve1" || saved.Pool != "sandbar" ||
-		saved.Storage != "local-lvm" || saved.Bridge != "vmbr0" || saved.CAFile != "/etc/sandbar/pve-ca.pem" {
+		saved.Storage != "local-lvm" || saved.Bridge != "vmbr0" || saved.CAFile != "/etc/sandbar/pve-ca.pem" ||
+		saved.IdentityPath != p.IdentityPath {
 		t.Fatalf("saved profile = %+v, every other field should round-trip unchanged", saved)
+	}
+	// The fields the form CANNOT show must survive a save. Store.Update
+	// replaces the record wholesale, so without an explicit carry-across an
+	// edit as innocent as a rename erases them from profiles.yaml — silently,
+	// since the user never saw them.
+	if saved.User != p.User || saved.ImageStorage != p.ImageStorage || saved.BaseImage != p.BaseImage {
+		t.Fatalf("saved profile = %+v, want user/image_storage/base_image preserved from %+v", saved, p)
 	}
 }
 
@@ -520,6 +550,11 @@ func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
 		{"node", ppNode},
 		{"pool", ppPool},
 		{"token file", ppTokenFile},
+		// identity path is the form's own addition to validate's list: the
+		// store accepts a Proxmox profile without one, but the provider cannot
+		// build a guest it can log into, so the form refuses it here rather
+		// than saving a profile that can never create a VM.
+		{"identity path", ppIdentityPath},
 	} {
 		t.Run(missing.field, func(t *testing.T) {
 			m := New(fleet).(model)
@@ -580,10 +615,9 @@ func TestProfileRowTextCoversEveryRuntimeState(t *testing.T) {
 // Proxmox — never Local, which is permanent and pre-seeded), and selecting
 // either one must open the right field form — Proxmox's nine-field set with
 // profileFormType == TypeProxmox, or the unchanged pre-existing RemoteSSH
-// form. This is task 2's whole job: task 1 already built the Proxmox form
-// itself (see TestProxmoxEditFormPrefillToggleSave, which reaches it via
-// edit); this test is what proves CREATE can reach it too, through the
-// picker rather than by hardcoding a type.
+// form. The form itself is covered via the edit path (see
+// TestProxmoxEditFormPrefillToggleSave); this test is what proves CREATE
+// can reach it too, through the picker rather than by hardcoding a type.
 func TestProfileTypePickerCreateEntryPoint(t *testing.T) {
 	isolateHostState(t)
 	m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)

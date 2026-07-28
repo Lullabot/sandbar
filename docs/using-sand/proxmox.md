@@ -300,10 +300,13 @@ grant.
 
 !!! info "Proxmox profiles can be created in the TUI or by editing `profiles.yaml`"
     A Proxmox profile can be created in the TUI by pressing `p` → `n`, choosing
-    **Proxmox** from the type picker, and filling the form (which includes an
-    optional `insecure` checkbox for self-signed certificates). Alternatively, add
-    a Proxmox profile by hand-editing `profiles.yaml` as shown here — the YAML
-    form is the reference and automation path.
+    **Proxmox** from the type picker, and filling the form. Its `insecure`
+    checkbox (for self-signed certificates) is toggled with **space**, not enter
+    — enter moves to the next field, as it does on every other row.
+    Alternatively, add a Proxmox profile by hand-editing `profiles.yaml` as shown
+    here — the YAML form is the reference and automation path, and is the only
+    way to set `user`, `image_storage` and `base_image`, which the form does not
+    show (editing a profile in the TUI leaves those three untouched).
 
 Add a `proxmox` profile to your
 [`profiles.yaml`](connection-profiles.md#profilesyaml):

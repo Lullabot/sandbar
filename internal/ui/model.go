@@ -515,7 +515,7 @@ func New(fleet provider.Fleet) tea.Model {
 	// pre-profiles TUI. (Deliberate user actions like disable still log for
 	// every profile — see disableProfile.)
 	for i := range m.members {
-		if m.members[i].profile.Type == profiles.TypeRemoteSSH && m.members[i].prov != nil {
+		if isRemoteProfile(m.members[i].profile) && m.members[i].prov != nil {
 			m.logMsg("connecting to " + m.members[i].profile.Name + "…")
 		}
 	}
@@ -1046,7 +1046,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// "reconnecting" — the backoff loop below is already doing exactly
 			// that. A first-connect failure is not a REconnect and stays with
 			// the plain "list failed" line.
-			if mem.state == connConnected && mem.profile.Type == profiles.TypeRemoteSSH {
+			if mem.state == connConnected && isRemoteProfile(mem.profile) {
 				m.logMsg("reconnecting to " + mem.profile.Name + "…")
 			}
 			mem.listRace = 0
@@ -1067,7 +1067,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// "connected", a recovery from an interruption says "reconnected",
 		// matching the "reconnecting" line the failure path logged. The local
 		// member stays silent (see New).
-		if mem.state != connConnected && mem.profile.Type == profiles.TypeRemoteSSH {
+		if mem.state != connConnected && isRemoteProfile(mem.profile) {
 			if mem.state == connErrored {
 				m.logMsg("reconnected to " + mem.profile.Name)
 			} else {
