@@ -52,6 +52,26 @@ type SSHConfig struct {
 	// IdentityPath is a private-key FILE path, or "" to fall back to the ambient
 	// ssh agent / ssh_config. Never key material.
 	IdentityPath string
+	// IdentitiesOnly, when true (and IdentityPath is set), adds `-o
+	// IdentitiesOnly=yes` so ssh offers ONLY IdentityPath and never the keys the
+	// ssh agent or ssh_config would otherwise volunteer.
+	//
+	// It is for a backend whose guest trusts exactly one key — the one sand had
+	// cloud-init install from identity_path (the Proxmox provider) — where every
+	// other key ssh could offer is guaranteed to be refused. Two failures follow
+	// from offering them anyway. A locked or unusable agent key turns a single
+	// refusal into a run of them, and the guest's sshd disconnects at MaxAuthTries
+	// (6 by default) with "Too many authentication failures" instead of a clean
+	// "Permission denied" — a far more confusing failure for the same underlying
+	// cause. Worse, an agent holding six or more keys can exhaust MaxAuthTries
+	// BEFORE ssh ever gets to offer the right one, so a correctly-provisioned
+	// guest and a perfectly good unlocked key still fail to connect.
+	//
+	// The remote-Lima hop deliberately leaves this FALSE: that host is a machine
+	// the user configured and authenticates to on their own terms, so an agent key
+	// or an ssh_config IdentityFile is a legitimate way in, and restricting the
+	// offer to IdentityPath would break connections that work today.
+	IdentitiesOnly bool
 	// EphemeralHostKeys, when true, adds `-o StrictHostKeyChecking=no -o
 	// UserKnownHostsFile=/dev/null -o LogLevel=ERROR` to every ssh and scp argv.
 	// It is for a backend whose "host" is a freshly-created VM reached at a
@@ -342,9 +362,7 @@ func (h *SSHHost) sshBase(tty, mux bool) []string {
 	if h.cfg.Port > 0 && h.cfg.Port != 22 {
 		a = append(a, "-p", strconv.Itoa(h.cfg.Port))
 	}
-	if h.cfg.IdentityPath != "" {
-		a = append(a, "-i", h.cfg.IdentityPath)
-	}
+	a = append(a, h.identityFlags()...)
 	a = append(a, h.ephemeralHostKeyFlags()...)
 	a = append(a, keepaliveFlags()...)
 	a = append(a, h.debugFlags()...)
@@ -398,6 +416,29 @@ func (h *SSHHost) debugFlags() []string {
 		return nil
 	}
 	return []string{"-vv", "-E", h.debugLogPath}
+}
+
+// identityFlags returns the key-selection options — `-i <path>`, plus `-o
+// IdentitiesOnly=yes` when the connection asked for it (see
+// SSHConfig.IdentitiesOnly) — or nil when no identity is configured and ssh
+// should fall back to the ambient agent / ssh_config. Shared by sshBase and
+// scpCommand so ssh and scp authenticate identically; an scp that offered a
+// different set of keys than the ssh beside it could fail a copy in the middle of
+// a run that was otherwise connecting fine.
+//
+// IdentitiesOnly is gated on IdentityPath being set on purpose: with no -i to
+// restrict ssh TO, the option would only narrow ssh to its built-in default key
+// names — a change in behaviour with nothing to gain, since the point is to offer
+// the one key the far side is known to trust.
+func (h *SSHHost) identityFlags() []string {
+	if h.cfg.IdentityPath == "" {
+		return nil
+	}
+	a := []string{"-i", h.cfg.IdentityPath}
+	if h.cfg.IdentitiesOnly {
+		a = append(a, "-o", "IdentitiesOnly=yes")
+	}
+	return a
 }
 
 // ephemeralHostKeyFlags returns the host-key options for a backend whose guests
@@ -464,9 +505,7 @@ func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
 	if h.cfg.Port > 0 && h.cfg.Port != 22 {
 		a = append(a, "-P", strconv.Itoa(h.cfg.Port))
 	}
-	if h.cfg.IdentityPath != "" {
-		a = append(a, "-i", h.cfg.IdentityPath)
-	}
+	a = append(a, h.identityFlags()...)
 	a = append(a, h.ephemeralHostKeyFlags()...)
 	a = append(a, keepaliveFlags()...)
 	a = append(a, h.muxFlags()...)

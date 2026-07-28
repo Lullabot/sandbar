@@ -165,6 +165,41 @@ func TestProxmoxGuestSSHAcceptsEphemeralHostKey(t *testing.T) {
 	}
 }
 
+// TestProxmoxGuestSSHOffersOnlyTheCloudInitKey is the regression guard for a
+// "Too many authentication failures" disconnect from a guest that was built
+// correctly. The guest trusts EXACTLY ONE key — the identity_path public half
+// cloud-init installed for the login user — so every key the ssh agent or
+// ssh_config volunteers is refused and spends one of the guest sshd's
+// MaxAuthTries (6 by default). A locked agent key therefore turns a clean
+// "Permission denied" into a disconnect, and an agent holding six or more keys
+// exhausts the budget before ssh ever offers the right one, failing a guest and
+// a key that are both perfectly good. Every guest ssh AND scp must pin the offer
+// to identity_path.
+func TestProxmoxGuestSSHOffersOnlyTheCloudInitKey(t *testing.T) {
+	_, p := withGuest(t) // caches web -> 192.168.1.50
+	argvs := recordSSH(p)
+
+	if err := p.Shell(context.Background(), "web", nil, &bytes.Buffer{}, "true"); err != nil {
+		t.Fatalf("Shell: %v", err)
+	}
+	if err := p.Copy(context.Background(), &bytes.Buffer{}, false, p.GuestPath("web", "/home/dev/f"), "/tmp/f"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if len(*argvs) != 2 {
+		t.Fatalf("recorded %d transport commands; want 2 (ssh + scp)", len(*argvs))
+	}
+	for _, argv := range *argvs {
+		joined := strings.Join(argv, " ")
+		if !strings.Contains(joined, "-o IdentitiesOnly=yes") {
+			t.Errorf("guest transport argv %q missing -o IdentitiesOnly=yes", joined)
+		}
+		// The restriction is only meaningful with the key it restricts ssh to.
+		if !strings.Contains(joined, "-i /keys/id_ed25519") {
+			t.Errorf("guest transport argv %q missing the identity_path key", joined)
+		}
+	}
+}
+
 // errAfterOutput is a stand-in for an ssh exit error that arrives after the
 // command has already written some output.
 type errAfterOutput struct{}

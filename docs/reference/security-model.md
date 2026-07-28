@@ -189,3 +189,24 @@ remote-Lima hop — SSH to a persistent host you configured — keeps host-key
 pinning on, because there the key is stable and a change is worth stopping for.
 Keep the VM subnet one you trust; it is the same network you must already trust
 to reach the guests at all.
+
+### Guests are offered only the `identity_path` key
+
+The other half of the guest transport's SSH stance is which key it presents. A
+guest trusts exactly one: the public half of `identity_path`, which `sand` has
+cloud-init install for the login user. So the guest transport runs with
+`IdentitiesOnly=yes` and offers that key alone — your SSH agent's other keys are
+never presented to a guest, and never leave your machine's agent for it.
+
+That is a privacy improvement, but the reason it is not optional is
+availability. A guest's `sshd` disconnects after `MaxAuthTries` failed attempts
+(6 by default), and every refused key burns one. Without this, an agent holding
+six or more keys can exhaust the budget *before* `ssh` ever offers the right
+one, so a correctly-provisioned guest and a perfectly good key still fail to
+connect — and a single locked agent key turns a clean `Permission denied` into a
+much more confusing `Too many authentication failures`.
+
+The remote-Lima hop again keeps the opposite default: that host is a machine you
+configured and authenticate to on your own terms, so an agent key or an
+`ssh_config` `IdentityFile` is a legitimate way in, and `sand` does not restrict
+it.
