@@ -726,6 +726,14 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	if lang := strings.TrimSpace(os.Getenv("LANG")); lang != "" {
 		cfg.Locale = lang // matches the script's LOCALE="${LANG:-en_US.UTF-8}"
 	}
+	// Same shape as the locale line above: a host-derived default resolved
+	// HERE, at the entrypoint, rather than inside DefaultCreateConfig — which
+	// stays free of filesystem I/O because the board calls it per VM. The form
+	// has no timezone field, so this is never "explicit"; an undetectable host
+	// leaves the Etc/UTC that DefaultCreateConfig already put there.
+	if zone, detected := vm.HostTimezone(); detected {
+		cfg.Timezone = zone
+	}
 	cfg.DockerProxyHost = m.field(fDockerProxyHost)
 	cfg.CloneURL = m.field(fCloneURL)
 	cfg.CloneToken = m.field(fCloneToken)

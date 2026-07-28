@@ -59,6 +59,40 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			// The timezone becomes a symlink target inside the guest, and
+			// --timezone is user input that reaches it unfiltered otherwise. A
+			// traversal resolves to a real readable file there, passes the
+			// guest's own existence check, and leaves /etc/localtime pointing
+			// at non-zone data — after which glibc silently falls back to UTC.
+			// Every entrypoint goes through Validate, so it is caught here.
+			name:    "timezone path traversal",
+			mutate:  func(c *CreateConfig) { c.Timezone = "../../../etc/hostname" },
+			wantErr: true,
+		},
+		{
+			name:    "timezone with shell metacharacters",
+			mutate:  func(c *CreateConfig) { c.Timezone = "America/Toronto; id" },
+			wantErr: true,
+		},
+		{
+			name:    "timezone absolute path",
+			mutate:  func(c *CreateConfig) { c.Timezone = "/usr/share/zoneinfo/UTC" },
+			wantErr: true,
+		},
+		{
+			name:    "ordinary timezone",
+			mutate:  func(c *CreateConfig) { c.Timezone = "America/Argentina/Salta" },
+			wantErr: false,
+		},
+		{
+			// Empty is allowed and means "the role's own default stands":
+			// BuildExtraVars omits the var entirely, which is what a caller
+			// predating the field produces.
+			name:    "empty timezone is allowed",
+			mutate:  func(c *CreateConfig) { c.Timezone = "" },
+			wantErr: false,
+		},
+		{
 			name:    "disk above the floor",
 			mutate:  func(c *CreateConfig) { c.Disk = "200GiB" },
 			wantErr: false,

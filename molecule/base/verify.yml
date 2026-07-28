@@ -41,18 +41,25 @@
     # doesn't assert on).
     #
     # Both halves of the timezone are asserted, because either one alone can be
-    # right while the guest is still wrong: /etc/localtime is what glibc reads,
-    # /etc/timezone is the name every other tool reads, and converge.yml sets a
-    # zone (America/Toronto) that the container is not already in.
+    # right while the guest is still wrong: /etc/localtime is what glibc reads
+    # and /etc/timezone is the name every other tool reads.
+    #
+    # The expected zone is Europe/Berlin, not the America/Toronto of converge's
+    # first play: the second play re-runs the role in the FINALIZE phase with
+    # Berlin, and finalize skips every other task in this role. So Berlin here
+    # proves two things at once — that the tasks drive the outcome at all (a
+    # container starts in UTC and cannot reach either zone by itself), and that
+    # they are not gated out of the finalize phase, which is what makes clones
+    # from an older base come out correctly zoned.
     - name: Assert the base role's foundational setup landed
       ansible.builtin.assert:
         that:
           - ansible_facts.hostname == "claude"
           - "'127.0.1.1 claude.lan claude' in (_etc_hosts.content | b64decode)"
           - "'LANG=en_CA.UTF-8' in (_etc_default_locale.content | b64decode)"
-          - (_etc_timezone.content | b64decode).strip() == "America/Toronto"
+          - (_etc_timezone.content | b64decode).strip() == "Europe/Berlin"
           - _etc_localtime.stat.islnk
-          - _etc_localtime.stat.lnk_target == "/usr/share/zoneinfo/America/Toronto"
+          - _etc_localtime.stat.lnk_target == "/usr/share/zoneinfo/Europe/Berlin"
         fail_msg: >-
           base role's foundational setup (hostname, /etc/hosts,
           /etc/default/locale, /etc/timezone + /etc/localtime) did not land as

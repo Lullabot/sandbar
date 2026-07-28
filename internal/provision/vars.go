@@ -56,8 +56,17 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 	//
 	// Empty means "say nothing and let roles/base's Etc/UTC default stand",
 	// which is what a caller that predates the field gets.
+	//
+	// base_timezone_required carries whether the user NAMED this zone. The role
+	// fails the run on a zone it does not have only when that is true; a zone
+	// sand merely detected degrades to a warning there instead, so a host
+	// carrying a name the guest lacks cannot turn a working `sand create` into
+	// a mid-provision failure. See CreateConfig.TimezoneExplicit.
 	if cfg.Timezone != "" {
-		items = append(items, varItem{"base_timezone", cfg.Timezone})
+		items = append(items,
+			varItem{"base_timezone", cfg.Timezone},
+			varItem{"base_timezone_required", cfg.TimezoneExplicit},
+		)
 	}
 
 	if cfg.DockerProxyHost != "" {

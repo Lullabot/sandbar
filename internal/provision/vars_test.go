@@ -320,10 +320,11 @@ func TestBuildExtraVars_TimezoneOmittedWhenUnset(t *testing.T) {
 	}
 }
 
-// The host's timezone reaches the playbook by default, without a flag. This is
-// the seam that would break silently if DefaultCreateConfig stopped consulting
-// the host, since every other test here sets Timezone explicitly.
-func TestBuildExtraVars_DefaultConfigCarriesHostTimezone(t *testing.T) {
+// DefaultCreateConfig must stay a PURE defaults accessor — no filesystem I/O —
+// because the board calls it once per VM just to read .BaseName. Host detection
+// therefore lives at the two provisioning entrypoints, not here, and this test
+// pins that: a TZ the process is running under must NOT leak in.
+func TestBuildExtraVars_DefaultConfigDoesNotDetectHostTimezone(t *testing.T) {
 	t.Setenv("TZ", "Australia/Sydney")
 	cfg := vm.DefaultCreateConfig()
 	cfg.User = "andrew"
@@ -331,7 +332,28 @@ func TestBuildExtraVars_DefaultConfigCarriesHostTimezone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
-	if got := parseVars(t, data)["base_timezone"]; got != "Australia/Sydney" {
-		t.Errorf("base_timezone = %v, want Australia/Sydney from the host", got)
+	if got := parseVars(t, data)["base_timezone"]; got != vm.FallbackTimezone {
+		t.Errorf("base_timezone = %v, want %q — DefaultCreateConfig must not read the host", got, vm.FallbackTimezone)
+	}
+}
+
+// base_timezone_required is what stops a DETECTED zone the guest lacks from
+// failing an otherwise-fine create, so its two states have to survive the
+// round trip as real YAML bools rather than being dropped or stringified.
+func TestBuildExtraVars_TimezoneRequiredTracksExplicitFlag(t *testing.T) {
+	for _, explicit := range []bool{true, false} {
+		cfg := fullConfig()
+		cfg.TimezoneExplicit = explicit
+		data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+		if err != nil {
+			t.Fatalf("BuildExtraVars: %v", err)
+		}
+		v, ok := parseVars(t, data)["base_timezone_required"]
+		if !ok {
+			t.Fatalf("base_timezone_required missing for TimezoneExplicit=%v", explicit)
+		}
+		if b, ok := v.(bool); !ok || b != explicit {
+			t.Errorf("base_timezone_required = %v (%T), want bool %v", v, v, explicit)
+		}
 	}
 }

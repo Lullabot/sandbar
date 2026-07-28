@@ -314,6 +314,26 @@
 # that a daemon already running keeps the old zone until it restarts; every
 # shell, command, and service started afterwards — which is all of them, from
 # the user's point of view — gets the new one.
+# The name becomes a symlink TARGET below, so it is checked for shape before it
+# is ever used to build a path. sand's own vm.ValidZoneName already rejects this
+# on the host, but this role is also a public entrypoint — `ansible-playbook -e
+# base_timezone=...` — and the check has to live on the side that does the
+# dereferencing. Without it, "../../../etc/hostname" resolves under the stat's
+# follow: true to a real, readable file, PASSES the existence check below, and
+# leaves /etc/localtime pointing at something that is not zone data; glibc then
+# silently falls back to UTC, which is the exact bug this block exists to fix.
+- name: Reject a timezone that is not shaped like an IANA zone name
+  ansible.builtin.assert:
+    that:
+      - base_timezone is string
+      - base_timezone is match('^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$')
+    fail_msg: >-
+      base_timezone is {{ base_timezone | quote }}, which is not shaped like an
+      IANA zone name. Expected letters, digits, "_", "-" or "+" in "/"-separated
+      segments — America/Toronto, Etc/UTC — with no "..", no leading "/", and no
+      other punctuation.
+    quiet: true
+
 - name: Confirm the requested timezone exists in the guest
   ansible.builtin.stat:
     path: "/usr/share/zoneinfo/{{ base_timezone }}"
@@ -326,10 +346,20 @@
     get_checksum: false
   register: _timezone_file
 
-# Without this, an unknown name leaves a DANGLING /etc/localtime and glibc
-# silently falls back to UTC — the exact bug this whole block exists to fix,
-# reintroduced with no error anywhere. Fail loudly instead.
-- name: Fail when the requested timezone is not a zone this guest knows
+# Whether an unknown zone is fatal depends on who chose it, because the two
+# cases have opposite right answers.
+#
+# The user NAMED it (`sand create --timezone`, or -e base_timezone=...):
+# stopping is the service. They asked for a specific zone; carrying on would
+# hand them a VM that is silently not in it.
+#
+# sand DETECTED it off the host: stopping would be a regression. The user asked
+# for nothing, and before sand set timezones at all this create succeeded — so
+# a host whose zone the guest happens not to have (a tzdata-legacy alias that
+# vm.canonicalZone could not resolve, a right/ zone) must not start failing
+# mid-provision on every retry. Warn and leave the guest's existing zone alone,
+# which is the pre-feature behaviour.
+- name: Fail when a REQUESTED timezone is not a zone this guest knows
   ansible.builtin.assert:
     that:
       - _timezone_file.stat.exists
@@ -345,7 +375,22 @@
       "America/Argentina". Or it may simply be a typo. Pass a canonical IANA
       name via `sand create --timezone`.
     quiet: true
+  when: base_timezone_required | default(true) | bool
 
+- name: Warn that a DETECTED timezone is unknown here, leaving the guest's own
+  ansible.builtin.debug:
+    msg: >-
+      Host timezone {{ base_timezone | quote }} is not in this guest's tzdata,
+      so the guest keeps its current zone (normally UTC). This is usually a
+      legacy alias from the host's tzdata-legacy package. Pass
+      `sand create --timezone <canonical IANA name>` to set one explicitly.
+  when:
+    - not (base_timezone_required | default(true) | bool)
+    - not (_timezone_file.stat.exists and _timezone_file.stat.isreg)
+
+# Both writes are skipped together when the zone is missing and was only
+# detected — the assert above has already stopped the run in every other case,
+# so reaching here with a bad zone means "warned, leave it alone".
 - name: Point /etc/localtime at the requested timezone
   ansible.builtin.file:
     src: "/usr/share/zoneinfo/{{ base_timezone }}"
@@ -354,8 +399,16 @@
     # Some images ship /etc/localtime as a copied regular file rather than a
     # symlink; without force this task fails on those instead of converting.
     force: true
+    # Act on the LINK, not on what it points at. ansible.builtin.file defaults
+    # follow: true, which rewrites the task's target to realpath(dest) once the
+    # symlink exists — so owner/group would be applied to the tzdata file in
+    # /usr/share/zoneinfo instead of to /etc/localtime. Harmless today only
+    # because those files are already root:root; adding a `mode:` here, as the
+    # sibling task below has, would chmod the guest's shared tzdata database.
+    follow: false
     owner: root
     group: root
+  when: _timezone_file.stat.exists and _timezone_file.stat.isreg
 
 - name: Record the timezone name in /etc/timezone
   ansible.builtin.copy:
@@ -364,6 +417,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: _timezone_file.stat.exists and _timezone_file.stat.isreg
 
 # Let an SSH client forward COLORTERM so truecolor terminals (iTerm2, WezTerm,
 # kitty, Ghostty, …) keep 24-bit color instead of being downgraded to 256-color:

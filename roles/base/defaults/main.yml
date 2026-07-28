@@ -8,6 +8,14 @@ base_locale: en_CA.UTF-8
 # ships — so a direct playbook run behaves exactly as it did before the timezone
 # tasks existed. Override with -e base_timezone=America/Toronto.
 base_timezone: Etc/UTC
+# Whether a base_timezone the guest does not have should FAIL the run (true) or
+# just warn and leave the guest's existing zone (false). Defaults to true
+# because a value set by hand — `-e base_timezone=...`, or `sand create
+# --timezone` — was deliberately chosen, and silently ignoring it would hand
+# back a VM that is not in the zone that was asked for. sand sets this to false
+# for a timezone it merely DETECTED off the host, so an undetectable or
+# unusual host zone can never turn a working create into a failed one.
+base_timezone_required: true
 base_nodejs_major_version: 24
 # Installed alongside base_packages in the single consolidated apt transaction
 # (roles/base/tasks/main.yml, "Install every base-phase package").

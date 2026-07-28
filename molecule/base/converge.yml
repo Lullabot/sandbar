@@ -26,3 +26,29 @@
     base_timezone: America/Toronto
   roles:
     - role: base
+
+# The timezone tasks are the only ones in roles/base that deliberately run in
+# the FINALIZE phase, surrounded by a wall of neighbours carrying
+# `when: provision_phase != 'finalize'`. That is what lets a clone taken from a
+# base built before the feature existed still land in the right zone — and
+# nothing else in the suite covers it, so a later edit adding the neighbours'
+# `when:` to these three tasks would silently put every such clone back in UTC.
+#
+# This second play is the guard. It re-runs the role in the finalize phase with
+# a DIFFERENT zone, so the final state verify.yml asserts (Europe/Berlin) is
+# reachable ONLY if the timezone tasks ran during finalize: the base play above
+# left the guest on America/Toronto, and finalize skips every other task here.
+- name: Converge again in the finalize phase
+  hosts: all
+  become: true
+  vars:
+    devtools_docker_packages: []
+    devtools_packages: []
+    devtools_ddev_packages: []
+    toolset_go: false
+    toolset_java: false
+    toolset_ddev: false
+    provision_phase: finalize
+    base_timezone: Europe/Berlin
+  roles:
+    - role: base

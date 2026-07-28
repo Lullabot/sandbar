@@ -107,17 +107,31 @@ guest to match, so `sand create` with no flags gives you a VM whose clock
 agrees with your own. Pass `--timezone` with an IANA name
 (`--timezone Asia/Tokyo`) to override.
 
-The host's zone is detected from, in order: `$TZ`, `/etc/timezone`, and the
-target of the `/etc/localtime` symlink — which covers Linux and macOS. If none
-of those give a usable answer, `sand` falls back to `Etc/UTC`, which is exactly
-the old behaviour.
+The host's zone is detected from, in order: `$TZ` (including the `:Zone` and
+`:/path/to/zoneinfo/Zone` forms, and an empty `TZ=`, which POSIX defines as
+UTC), `/etc/timezone`, and the target of the `/etc/localtime` symlink — which
+covers Linux and macOS. If none of those give a usable answer, `sand` falls
+back to `Etc/UTC`, which is exactly the old behaviour, and says so on stderr
+rather than quietly handing you a VM with the wrong clock.
 
-Use the **canonical** IANA name. Legacy aliases like `US/Eastern`,
-`Canada/Eastern`, and `Japan` live in Debian's separate `tzdata-legacy`
-package, which the base image does not install, so they are rejected with an
-error naming the canonical replacement (`America/New_York`,
-`America/Toronto`, `Asia/Tokyo`). A name the guest doesn't know fails the
-provisioning run loudly rather than silently leaving the VM in UTC.
+Legacy aliases (`US/Eastern`, `Canada/Eastern`, `Japan`) live in Debian's
+separate `tzdata-legacy` package, which the base image does not install. Where
+your host has one, `sand` resolves it to the canonical name by following the
+host's own tzdata symlink, so `US/Eastern` reaches the guest as
+`America/New_York` and simply works.
+
+What happens to a zone the guest genuinely doesn't have depends on **who chose
+it**:
+
+- **You named it** with `--timezone` — the run stops with an error. You asked
+  for a specific zone, and finishing would hand you a VM that is silently not
+  in it.
+- **`sand` detected it** from your host — the run continues, prints a warning,
+  and leaves the guest's existing zone. Your create can't be broken by
+  something you never asked for.
+
+Malformed names (a leading `/`, a `..`, shell metacharacters) are rejected up
+front by every entrypoint, before they can reach the playbook.
 
 The timezone is applied in **both** provisioning phases, so a VM cloned from a
 base image built before this feature existed — or built while you were in a

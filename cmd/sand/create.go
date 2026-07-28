@@ -140,12 +140,25 @@ Flags:
 	}
 	cfg.CPUs = n
 
-	// Only an explicitly passed --timezone overrides the host's, which
-	// cfg.Timezone already carries. The guest validates the name against its own
-	// tzdata (roles/base's "Confirm the requested timezone exists in the guest"),
-	// since that is the only side that can actually answer.
+	// An explicitly passed --timezone wins; otherwise detect the host's, which
+	// DefaultCreateConfig deliberately does not do (it is a hot, pure accessor —
+	// see the comment there). TimezoneExplicit rides along so the guest knows
+	// whether an unknown zone is worth failing the run over: a name the USER
+	// named is, a name sand guessed is not.
+	//
+	// Validate rejects a malformed value before any of it reaches the playbook;
+	// whether the zone actually EXISTS is a question only the guest can answer,
+	// and roles/base answers it there.
 	if *timezoneFlag != "" {
-		cfg.Timezone = *timezoneFlag
+		cfg.Timezone, cfg.TimezoneExplicit = *timezoneFlag, true
+	} else if zone, detected := vm.HostTimezone(); detected {
+		cfg.Timezone = zone
+	} else {
+		// Say so rather than quietly handing over a UTC VM: the documented
+		// promise is that the guest matches this host, and on a machine that
+		// will not reveal its zone sand cannot keep it. Without this line the
+		// only symptom is a VM with the wrong clock and nothing to explain it.
+		fmt.Fprintf(os.Stderr, "sand: could not determine this host's timezone; using %s. Pass --timezone to set it explicitly.\n", cfg.Timezone)
 	}
 
 	// Resolve the backend before anything that reads or defaults host-derived
