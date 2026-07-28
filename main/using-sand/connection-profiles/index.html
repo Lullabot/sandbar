@@ -1536,8 +1536,8 @@ environment variables for this; those are <strong>removed</strong> — see
 </ul>
 <p>There is always exactly one <strong>Local</strong> profile — permanent, created
 automatically the first time <code>sand</code> runs, and not deletable (though you can
-rename it). Every other profile is <code>remote-ssh</code>, and you can create, edit,
-enable, disable, or delete as many of those as you like.</p>
+rename it). Every other profile is <code>remote-ssh</code> or <code>proxmox</code>, and you can
+create, edit, enable, disable, or delete as many of those as you like.</p>
 <h2 id="profilesyaml"><code>profiles.yaml</code></h2>
 <p>Profiles are persisted at:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml
@@ -1610,6 +1610,13 @@ every profile, its type, and its enabled/disabled state.</p>
 </tr>
 </tbody>
 </table>
+<p>When creating a profile (press <code>n</code>), a type picker first asks whether to create
+a <strong>Remote SSH</strong> or a <strong>Proxmox</strong> profile, then opens the matching form. (Local
+is not offered — there is always exactly one Local profile, created for you and
+never deletable.) Each form covers every field of its type, so nothing needs
+hand-editing afterwards. Whichever field has focus, its description appears
+below the form — including, for an optional field, the default it falls back
+to when you leave it blank.</p>
 <p>Every change here is <strong>live</strong> — there is no restart, and no separate "apply"
 step:</p>
 <ul>

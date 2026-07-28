@@ -2171,14 +2171,20 @@ holds no ACLs gets nothing. Recreate it with <code>--privsep 0</code> (Step 3) a
 the ACLs to <code>--users sandbar@pve</code> (Steps 4–5).</p>
 </div>
 <h2 id="step-6-point-sand-at-the-host">Step 6 — Point <code>sand</code> at the host</h2>
-<div class="admonition note">
-<p class="admonition-title">Proxmox profiles are added by editing <code>profiles.yaml</code></p>
-<p>The TUI's profile screen (press <code>p</code>) can create and edit <code>local</code> and
-<code>remote-ssh</code> profiles, but <strong>not</strong> <code>proxmox</code> ones yet — so add a Proxmox
-profile by hand-editing <code>profiles.yaml</code> as shown here. Once it's in the file
-and <code>enabled</code>, it appears in the TUI's profile list and board like any other,
-and <code>sand --profile &lt;name&gt;</code> targets it from the CLI; only the <em>creation</em> form
-is CLI/YAML-only for now.</p>
+<div class="admonition info">
+<p class="admonition-title">Proxmox profiles can be created in the TUI or by editing <code>profiles.yaml</code></p>
+<p>A Proxmox profile can be created in the TUI by pressing <code>p</code> → <code>n</code>, choosing
+<strong>Proxmox</strong> from the type picker, and filling the form. Its <code>insecure</code>
+checkbox (for self-signed certificates) is toggled with <strong>space</strong>, not enter
+— enter moves to the next field, as it does on every other row. The form
+covers every field below, including the optional <code>user</code>, <code>image_storage</code> and
+<code>base_image</code>; the focused field's description appears under the form, naming
+the default an optional field falls back to when left blank. The form also
+refuses to save without <code>storage</code>, <code>bridge</code> or <code>identity_path</code> — a
+hand-edited <code>profiles.yaml</code> is <em>not</em> checked for those three, and a profile
+missing one fails only later, when it tries to create a VM.
+Alternatively, add a Proxmox profile by hand-editing <code>profiles.yaml</code> as shown
+here — the YAML form is the reference and automation path.</p>
 </div>
 <p>Add a <code>proxmox</code> profile to your
 <a href="../connection-profiles/#profilesyaml"><code>profiles.yaml</code></a>:</p>
@@ -2193,8 +2199,8 @@ is CLI/YAML-only for now.</p>
 <a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">    </span><span class="nt">storage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-lvm</span><span class="w">            </span><span class="c1"># images-capable storage for VM disks</span>
 <a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">    </span><span class="c1"># image_storage: local        # file-based (dir/NFS/CIFS) storage for the</span>
 <a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">    </span><span class="c1">#                             # cloud-image download; defaults to &quot;local&quot;</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">    </span><span class="c1"># base_image: https://…/sandbar-base.qcow2   # golden image URL; defaults to</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span><span class="c1">#                             # upstream Debian genericcloud (see note below)</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">    </span><span class="c1"># base_image: https://…/my-base.qcow2   # cloud image URL; defaults to the</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span><span class="c1">#                             # project golden image (see note below)</span>
 <a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">    </span><span class="nt">bridge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vmbr0</span><span class="w">                 </span><span class="c1"># the Linux bridge</span>
 <a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.config/sandbar/pve1.token</span>
 <a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">    </span><span class="nt">identity_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ssh/id_ed25519</span><span class="w">   </span><span class="c1"># REQUIRED: the SSH key sand installs + connects with</span>
@@ -2225,7 +2231,7 @@ is CLI/YAML-only for now.</p>
 </tr>
 <tr>
 <td><code>storage</code></td>
-<td>The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based.</td>
+<td><strong>Required.</strong> The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based.</td>
 </tr>
 <tr>
 <td><code>image_storage</code></td>
@@ -2237,7 +2243,7 @@ is CLI/YAML-only for now.</p>
 </tr>
 <tr>
 <td><code>bridge</code></td>
-<td>The Linux bridge <code>net0</code> attaches to.</td>
+<td><strong>Required.</strong> The Linux bridge <code>net0</code> attaches to. Omitting it does not mean "no network": QEMU falls back to user-mode NAT, so the guest boots and is simply unreachable over SSH.</td>
 </tr>
 <tr>
 <td><code>token_file</code></td>
