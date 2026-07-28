@@ -62,10 +62,15 @@ func resolveProfileName(store *profiles.Store, name string) (profiles.Profile, e
 // profile — the same conversion provider.BuildFleet applies per-profile
 // (fleet.go's buildBinding), reimplemented here so a one-shot CLI command
 // need not build (and risk failing on) every OTHER enabled profile's remote
-// just to act on this one. Construction never round-trips the network (see
-// BuildFleet's doc comment), so this is cheap and safe to call for a profile
-// that may turn out to be unreachable — that failure surfaces later, from
-// Preflight.
+// just to act on this one. Only the per-type dispatch and this package's
+// error wrapping are local: the FIELD MAPPING is provider.TargetConfigFor,
+// the one exported source of truth every caller shares. It used to be copied
+// here (and in the TUI), and the copies drifted — dropping IdentityPath, so a
+// Proxmox profile that set a key built a provider with none.
+//
+// Construction never round-trips the network (see BuildFleet's doc comment),
+// so this is cheap and safe to call for a profile that may turn out to be
+// unreachable — that failure surfaces later, from Preflight.
 func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, error) {
 	switch p.Type {
 	case profiles.TypeRemoteSSH:
@@ -77,7 +82,7 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 		if p.Host == "" {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q has no host", p.Name)
 		}
-		cfg := targetConfigFor(p)
+		cfg := provider.TargetConfigFor(p)
 		prov, err := provider.NewRemoteLima(cfg)
 		if err != nil {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
@@ -92,7 +97,7 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 		if p.Host == "" {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q has no host", p.Name)
 		}
-		cfg := targetConfigFor(p)
+		cfg := provider.TargetConfigFor(p)
 		prov, err := provider.NewProxmox(cfg)
 		if err != nil {
 			return nil, registry.Scope{}, fmt.Errorf("profile %q: %w", p.Name, err)
@@ -118,51 +123,9 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 // scope to query the registry, not a live connection to every remote.
 func scopeForProfile(p profiles.Profile) registry.Scope {
 	if p.Type == profiles.TypeRemoteSSH || p.Type == profiles.TypeProxmox {
-		return targetConfigFor(p).Scope()
+		return provider.TargetConfigFor(p).Scope()
 	}
 	return registry.LocalScope
-}
-
-// targetConfigFor converts a RemoteSSH or Proxmox profile into the provider
-// layer's TargetConfig — a direct field-for-field mapping, duplicating
-// internal/provider/fleet.go's exported TargetConfigFor (which this
-// package cannot call). Keep the two in agreement if either changes; see
-// profiles.Profile.remoteTarget's doc comment for why this small duplication
-// is preferred over an import-cycle-inducing export.
-//
-// Like its fleet.go counterpart, this stays total (no error return): the
-// Proxmox token file is a PATH here too (TokenFile), never loaded eagerly —
-// NewProxmox reads it at construction, so a bad token file surfaces from
-// providerForProfile's call to NewProxmox, not from this conversion.
-func targetConfigFor(p profiles.Profile) provider.TargetConfig {
-	if p.Type == profiles.TypeProxmox {
-		return provider.TargetConfig{
-			Provider:     provider.ProxmoxProviderID,
-			Host:         p.Host,
-			User:         p.User,
-			Node:         p.Node,
-			Pool:         p.Pool,
-			Storage:      p.Storage,
-			ImageStorage: p.ImageStorage,
-			BaseImage:    p.BaseImage,
-			Bridge:       p.Bridge,
-			TokenFile:    p.TokenFile,
-			// IdentityPath is REQUIRED for Proxmox (see the fleet.go twin): sand
-			// installs <identity_path>.pub via cloud-init and connects with the
-			// private key. Omitting it here is what left the profile's key unused.
-			IdentityPath: p.IdentityPath,
-			Insecure:     p.Insecure,
-			CAFile:       p.CAFile,
-		}
-	}
-	return provider.TargetConfig{
-		Provider:       provider.RemoteLimaProviderID,
-		Host:           p.Host,
-		User:           p.User,
-		Port:           p.Port,
-		IdentityPath:   p.IdentityPath,
-		RemoteLimaHome: p.LimaHome,
-	}
 }
 
 // bindingForProfileName resolves name to a profile (see resolveProfileName)
