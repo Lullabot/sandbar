@@ -64,10 +64,14 @@ it is not where prose belongs.
   were carried across until they got inputs of their own), so the rule is
   currently vacuous — and only stays that way if the next Proxmox field gets a
   row in `profileFormSlots`. Optional is not a reason to omit one: an empty
-  input means "use the provider's default", which the field's `Placeholder`
-  names, and that must be a **constant** — deriving it from the environment
-  (`vm.HostUser()` is the tempting one) bakes the developer's machine into
-  every golden file.
+  input means "use the provider's default", which the row's `info` help names
+  ("Blank → …"), rendered under the form for whichever row has focus — the
+  same treatment the VM create form's `fieldInfo` gets. Every such string must
+  be a **constant**: deriving one from the environment (`vm.HostUser()` is the
+  tempting one) bakes the developer's machine into every golden file. And the
+  help block is drawn under a height BUDGET, after the error and footer are
+  measured — a thirteen-row form plus unbudgeted help scrolled the footer off
+  the bottom at 80x24, hiding the only statement of how to save or leave.
   For the same reason `connectionFieldsEqual` must compare every field
   `provider.TargetConfigFor` reads: one left out is read as a pure rename and
   never rebuilds the live binding.

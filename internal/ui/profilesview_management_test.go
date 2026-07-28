@@ -25,6 +25,7 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // TestManagementScreenKeyDrivenCreateEditToggleDelete drives the ENTIRE
@@ -574,29 +575,184 @@ func TestProxmoxFormOptionalFieldsAreEditable(t *testing.T) {
 	}
 }
 
-// TestProxmoxPlaceholdersAreMachineIndependent guards the trap named in
-// proxmoxFieldPlaceholders' doc comment. The honest hint for User is this
-// machine's login — exactly what the provider defaults to — but a placeholder
-// computed from the environment lands in every golden file and fails on the
-// next machine to run the suite. Failing here says which string did it;
-// failing in the goldens says only that the form changed.
-func TestProxmoxPlaceholdersAreMachineIndependent(t *testing.T) {
+// TestProfileFormInfoIsPresentAndMachineIndependent covers the focused-row
+// help on two axes.
+//
+// Every row must HAVE help: the form is the only place several of these
+// fields are explained, and a row whose help is empty renders as the block
+// simply vanishing when focus lands on it, which reads as a rendering bug.
+//
+// And no help string may embed anything derived from the environment. The
+// honest phrasing for Proxmox's User is this machine's login — exactly what
+// the provider defaults to — but a string computed at init lands in every
+// golden file and fails on the next machine to run the suite. Failing here
+// names the offending string; failing in the goldens says only that the form
+// changed.
+func TestProfileFormInfoIsPresentAndMachineIndependent(t *testing.T) {
 	volatile := map[string]string{
 		"the host user":      vm.HostUser(),
 		"$USER":              os.Getenv("USER"),
 		"$HOME":              os.Getenv("HOME"),
-		"the home directory": os.Getenv("HOME"),
 		"the working dir":    mustGetwd(t),
+		"the temp directory": os.TempDir(),
 	}
-	for _, ph := range proxmoxFieldPlaceholders {
-		for what, v := range volatile {
-			if v == "" {
+	for _, typ := range []profiles.Type{profiles.TypeLocal, profiles.TypeRemoteSSH, profiles.TypeProxmox} {
+		m := model{profileFormType: typ}
+		slots := m.profileFormSlots()
+		if len(slots) == 0 {
+			t.Fatalf("%s: the form has no rows at all", typ)
+		}
+		for i, s := range slots {
+			if s.info == "" {
+				t.Errorf("%s: row %d (%q) has no help text", typ, i, s.label)
 				continue
 			}
-			if strings.Contains(ph, v) {
-				t.Errorf("placeholder %q embeds %s (%q) — it must be a constant, or the goldens become machine-specific", ph, what, v)
+			for what, v := range volatile {
+				if v == "" || v == "/" {
+					continue
+				}
+				if strings.Contains(s.info, v) {
+					t.Errorf("%s: help for %q embeds %s (%q) — it must be a constant, or the goldens become machine-specific",
+						typ, s.label, what, v)
+				}
 			}
 		}
+	}
+}
+
+// TestProfileFormInfoTracksFocus proves the help block follows focus rather
+// than being pinned to one row: walking the Proxmox form must show each row's
+// own text, including the checkbox row, which carries help from a literal
+// instead of the ppXxx-indexed table (it has no storage index of its own).
+func TestProfileFormInfoTracksFocus(t *testing.T) {
+	isolateHostState(t)
+	m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)
+	m = resized(m, 100, 30)
+	m.profileFormType = profiles.TypeProxmox
+	m.profileInputs = newProfileInputs(profiles.TypeProxmox)
+	m.view = viewProfileForm
+
+	slots := m.profileFormSlots()
+	sawCheckbox := false
+	for i, s := range slots {
+		m.profileFormFocus = i
+		if got := m.profileFormInfo(); got != s.info {
+			t.Errorf("focus on %q shows help %q, want %q", s.label, got, s.info)
+		}
+		if s.kind == pffCheckbox {
+			sawCheckbox = true
+			if m.profileFormInfo() != proxmoxInsecureInfo {
+				t.Errorf("the checkbox row should show its own help, got %q", m.profileFormInfo())
+			}
+		}
+	}
+	if !sawCheckbox {
+		t.Fatal("the proxmox form has no checkbox row, so its help went uncovered")
+	}
+
+	// Out of range must render nothing rather than panicking: a panic in the
+	// view takes the whole TUI down.
+	m.profileFormFocus = len(slots)
+	if got := m.profileFormInfo(); got != "" {
+		t.Errorf("an out-of-range focus should show no help, got %q", got)
+	}
+	m.profileFormFocus = -1
+	if got := m.profileFormInfo(); got != "" {
+		t.Errorf("a negative focus should show no help, got %q", got)
+	}
+}
+
+// TestProfileFormFitsShortTerminals pins the height budget the focused-row
+// help is drawn under. The Proxmox form is thirteen rows, and its help block
+// wraps to three or four lines on a narrow terminal — enough that at 80x24
+// with an error showing, an unbudgeted block pushed the form to 26 lines and
+// scrolled the FOOTER off the bottom, taking the only on-screen statement of
+// "ctrl+s save" and "esc back" with it.
+//
+// So the assertion is two-part and in priority order: the view must fit, and
+// the footer must survive. Help text is what a short terminal is allowed to
+// lose (clampBlockHeight cuts it with an ellipsis); the way out of the form
+// is not.
+func TestProfileFormFitsShortTerminals(t *testing.T) {
+	isolateHostState(t)
+
+	for _, size := range [][2]int{{80, 24}, {100, 30}, {120, 40}} {
+		w, h := size[0], size[1]
+		for _, typ := range []profiles.Type{profiles.TypeLocal, profiles.TypeRemoteSSH, profiles.TypeProxmox} {
+			for _, withErr := range []bool{false, true} {
+				m := New(singleFleet(&providerfake.Provider{}, registry.LocalScope)).(model)
+				m = resized(m, w, h)
+				m.profileFormType = typ
+				m.profileInputs = newProfileInputs(typ)
+				m.view = viewProfileForm
+				if withErr {
+					m.profileFormErr = errors.New("identity path is required")
+				}
+
+				// Every row, not just the first: the tallest render is whichever
+				// field happens to carry the longest help, and that moves as the
+				// text is edited.
+				for i, s := range m.profileFormSlots() {
+					m.profileFormFocus = i
+					out := m.profileFormView()
+					if got := lipgloss.Height(out); got > h {
+						t.Errorf("%dx%d %s err=%v focus=%q: form renders %d lines into a %d-line terminal",
+							w, h, typ, withErr, s.label, got, h)
+					}
+					if !strings.Contains(out, "esc") {
+						t.Errorf("%dx%d %s err=%v focus=%q: the footer was pushed off the bottom",
+							w, h, typ, withErr, s.label)
+					}
+					if withErr && !strings.Contains(out, "identity path is required") {
+						t.Errorf("%dx%d %s focus=%q: the error was pushed off the bottom",
+							w, h, typ, s.label)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestClampBlockHeightMarksTheCut covers clampBlockHeight's own edges: it is
+// what decides whether a truncated help block reads as "there is more" or as
+// a sentence that simply stops.
+func TestClampBlockHeightMarksTheCut(t *testing.T) {
+	style := fieldInfoStyle.Width(40)
+	block := style.Render("one two three four five six seven eight nine ten eleven twelve thirteen fourteen")
+	full := lipgloss.Height(block)
+	if full < 3 {
+		t.Fatalf("the fixture needs to wrap to at least 3 lines, got %d", full)
+	}
+
+	if got := clampBlockHeight(block, 0, style); got != "" {
+		t.Errorf("a zero budget should drop the block entirely, got %q", got)
+	}
+	if got := clampBlockHeight(block, -1, style); got != "" {
+		t.Errorf("a negative budget should drop the block entirely, got %q", got)
+	}
+	// One line is enough for the ellipsis alone, and that is exactly why it is
+	// refused: a lone "…" spends a scarce row saying nothing.
+	if got := clampBlockHeight(block, 1, style); got != "" {
+		t.Errorf("a one-line budget should drop the block rather than render a bare ellipsis, got %q", got)
+	}
+	if got := clampBlockHeight(block, full, style); got != block {
+		t.Error("a budget that fits should return the block unchanged")
+	}
+	if got := clampBlockHeight(block, full+5, style); got != block {
+		t.Error("a budget larger than the block should return it unchanged")
+	}
+
+	cut := clampBlockHeight(block, full-1, style)
+	if got := lipgloss.Height(cut); got != full-1 {
+		t.Errorf("a clamped block is %d lines, want the budget %d", got, full-1)
+	}
+	if !strings.Contains(cut, "…") {
+		t.Errorf("a clamped block must mark the cut with an ellipsis, got:\n%s", cut)
+	}
+	// The truncation must not have scribbled over the caller's block: lines is
+	// a fresh slice, so the original stays whole for any later reader.
+	if lipgloss.Height(block) != full {
+		t.Error("clamping mutated the block it was given")
 	}
 }
 

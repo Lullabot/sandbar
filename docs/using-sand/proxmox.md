@@ -304,7 +304,8 @@ grant.
     checkbox (for self-signed certificates) is toggled with **space**, not enter
     — enter moves to the next field, as it does on every other row. The form
     covers every field below, including the optional `user`, `image_storage` and
-    `base_image`: leave one blank to take the default the greyed-out hint names.
+    `base_image`; the focused field's description appears under the form, naming
+    the default an optional field falls back to when left blank.
     Alternatively, add a Proxmox profile by hand-editing `profiles.yaml` as shown
     here — the YAML form is the reference and automation path.
 
