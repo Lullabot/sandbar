@@ -107,8 +107,9 @@ When creating a profile (press `n`), a type picker first asks whether to create
 a **Remote SSH** or a **Proxmox** profile, then opens the matching form. (Local
 is not offered — there is always exactly one Local profile, created for you and
 never deletable.) Each form covers every field of its type, so nothing needs
-hand-editing afterwards; an optional field left blank shows a greyed-out hint
-naming the default it falls back to.
+hand-editing afterwards. Whichever field has focus, its description appears
+below the form — including, for an optional field, the default it falls back
+to when you leave it blank.
 
 Every change here is **live** — there is no restart, and no separate "apply"
 step:

@@ -60,6 +60,23 @@ const (
 
 var profileFieldLabels = []string{"Name", "Host", "User", "Port", "Identity path", "Lima home"}
 
+// profileFieldInfo is the FOCUSED row's help, parallel to profileFieldLabels
+// — the profile form's counterpart to the VM create form's fieldInfo
+// (form.go), rendered the same way and in the same voice: "Required."/
+// "Optional." first, and "Blank → <default>" for anything with a fallback,
+// so a blank field's meaning is legible without leaving the form.
+//
+// Local's rename-only form shows just the first entry (see profileFormSlots),
+// which is why that one must read true for a Local profile too.
+var profileFieldInfo = []string{
+	"Required. Display label for this profile. Rename it freely — VMs, jobs and the last-used pointer follow it by ID, not by name.",
+	"Required. Hostname or IP sand reaches this Lima host at over SSH.",
+	"Required. SSH login on that host. With host and port this forms the profile's registry scope, so editing it re-keys which VMs the profile owns.",
+	"SSH port. Blank → 22.",
+	"Optional. Path to the SSH private key. Blank → whatever your ssh agent and ~/.ssh/config already resolve for this host.",
+	"Optional. LIMA_HOME on the remote host, if Lima's instances do not live in that user's default ~/.lima.",
+}
+
 // Proxmox profile form field indices — this type's own set, distinct from
 // pfXxx above (a Local/RemoteSSH form never shows these, and vice versa: see
 // newProfileInputs). These are STORAGE positions into m.profileInputs only —
@@ -104,22 +121,35 @@ var proxmoxFieldLabels = []string{
 	"Identity path", "User", "Image storage", "Base image",
 }
 
-// proxmoxFieldPlaceholders is the hint shown inside an EMPTY Proxmox input,
-// keyed by its ppXxx storage index. Only the optional fields carry one, and
-// each names the default the provider substitutes for a blank — which is the
-// whole point of showing them: a blank required field is an error the form
-// reports, while a blank optional one is a value the user cannot otherwise
-// see.
+// proxmoxFieldInfo is the focused row's help, parallel to proxmoxFieldLabels
+// and keyed by the same ppXxx storage index — see profileFieldInfo above for
+// the shared voice, and profileFormInfo for where it is rendered.
 //
-// Every string here MUST be a constant. The obvious phrasing for User is this
-// machine's actual login (what vm.HostUser() returns, and what the provider
-// really does default to), but baking that in would put the developer's own
-// username into every golden file and fail on the next machine to run them.
-var proxmoxFieldPlaceholders = map[int]string{
-	ppUser:         "defaults to your local username",
-	ppImageStorage: "file-based; defaults to local",
-	ppBaseImage:    "defaults to the sandbar golden image",
+// This supersedes the per-field Placeholder hints these three optional fields
+// briefly carried. A placeholder can only say "defaults to local"; the space
+// here says WHY (block storages reject content=import) and, for User, that
+// changing it leaves existing VMs behind — neither of which fits in a 44-cell
+// input. Two channels saying the same thing in a 13-row form is noise, and
+// this is the one the VM create form already established.
+var proxmoxFieldInfo = []string{
+	profileFieldInfo[pfName],
+	"Required. Hostname or IP the Proxmox API answers on. A bare host uses port 8006; append :port only if you changed it.",
+	"Required. The PVE node name — the identifier in /nodes/<node>/… API paths, which is not always the same string as the host above.",
+	"Required. The resource pool sand's VMs are created in, and the pool the API token is scoped to. Host, node and pool together form this profile's registry scope.",
+	"Required. Storage backing VM disks — it must accept content type \"images\" (local-lvm, a ZFS pool, …).",
+	"Required. The Linux bridge each VM's NIC attaches to, usually vmbr0. A blank bridge is rejected when the VM is created, not here.",
+	"Required. PATH to a file holding user@realm!tokenid=value — never the token itself. It must not be readable by group or other.",
+	"Optional. PEM CA bundle to verify the Proxmox API certificate against — the safe alternative to Insecure for a self-signed cert.",
+	"Required. Path to your SSH private key. sand installs <path>.pub into every guest via cloud-init, then connects with the key.",
+	"Optional. The guest login cloud-init creates in each VM, and that sand SSHes in as. Blank → your local username. Existing VMs keep the account they were built with.",
+	"Optional. FILE-BASED storage (dir/NFS/CIFS) the cloud image downloads to with content=import, which block storages like zfspool and lvm-thin reject. Blank → local.",
+	"Optional. URL of the cloud image the base template is built from. Blank → the project golden image (Debian with qemu-guest-agent, checksum-verified).",
 }
+
+// proxmoxInsecureInfo is the checkbox row's help. It is a literal rather than
+// a proxmoxFieldInfo entry because that slice is indexed by ppXxx storage
+// position and the checkbox has none — it is not a textinput.Model at all.
+const proxmoxInsecureInfo = "Skip TLS verification of the Proxmox API certificate. Prefer the CA file field for a self-signed cert: this accepts ANY certificate, so anything on the path can read the API token. Space toggles."
 
 // profileFormFieldKind distinguishes a text row (backed by a
 // textinput.Model) from the one boolean row the form can show (Proxmox's
@@ -144,19 +174,41 @@ type profileFormField struct {
 	label    string
 	kind     profileFormFieldKind
 	inputIdx int
+	// info is the help shown under the form while THIS row has focus (see
+	// profileFormInfo). It lives on the row rather than in one table indexed by
+	// focus position — as the VM create form's fieldInfo is — because this
+	// form has three different layouts and reorders rows away from storage
+	// order, so a focus-indexed table would have to be re-derived per type and
+	// would silently mismatch the moment a row moved.
+	info string
 }
 
 // textOnlySlots builds an all-text profileFormField list whose inputIdx is
 // simply its position — true of every Local/RemoteSSH field today (pfName..
 // pfLimaHome are declared in that same order) and is what keeps
 // profileFormSlots's Local/RemoteSSH branches bit-identical to the form's
-// pre-Proxmox behaviour.
-func textOnlySlots(labels []string) []profileFormField {
+// pre-Proxmox behaviour. labels and infos are indexed together, so a caller
+// slicing one (Local takes just [:1]) must slice the other identically.
+func textOnlySlots(labels, infos []string) []profileFormField {
 	slots := make([]profileFormField, len(labels))
 	for i, l := range labels {
-		slots[i] = profileFormField{label: l, kind: pffText, inputIdx: i}
+		slots[i] = profileFormField{label: l, kind: pffText, inputIdx: i, info: infos[i]}
 	}
 	return slots
+}
+
+// proxmoxSlot builds the text row for one ppXxx storage index, taking its
+// label, its help AND its inputIdx from that single index — so a row cannot
+// be given one field's label beside another field's help or input, which a
+// hand-written literal per row invites every time the on-screen order is
+// rearranged (and it has been, twice).
+func proxmoxSlot(idx int) profileFormField {
+	return profileFormField{
+		label:    proxmoxFieldLabels[idx],
+		kind:     pffText,
+		inputIdx: idx,
+		info:     proxmoxFieldInfo[idx],
+	}
 }
 
 // profileFormSlots returns the form's fields for its CURRENT type, in the
@@ -176,24 +228,24 @@ func (m model) profileFormSlots() []profileFormField {
 		// API/TLS credentials (token file, insecure, CA file), which authenticate
 		// to Proxmox rather than to any VM.
 		return []profileFormField{
-			{label: proxmoxFieldLabels[ppName], kind: pffText, inputIdx: ppName},
-			{label: proxmoxFieldLabels[ppHost], kind: pffText, inputIdx: ppHost},
-			{label: proxmoxFieldLabels[ppNode], kind: pffText, inputIdx: ppNode},
-			{label: proxmoxFieldLabels[ppPool], kind: pffText, inputIdx: ppPool},
-			{label: proxmoxFieldLabels[ppStorage], kind: pffText, inputIdx: ppStorage},
-			{label: proxmoxFieldLabels[ppImageStorage], kind: pffText, inputIdx: ppImageStorage},
-			{label: proxmoxFieldLabels[ppBaseImage], kind: pffText, inputIdx: ppBaseImage},
-			{label: proxmoxFieldLabels[ppBridge], kind: pffText, inputIdx: ppBridge},
-			{label: proxmoxFieldLabels[ppUser], kind: pffText, inputIdx: ppUser},
-			{label: proxmoxFieldLabels[ppIdentityPath], kind: pffText, inputIdx: ppIdentityPath},
-			{label: proxmoxFieldLabels[ppTokenFile], kind: pffText, inputIdx: ppTokenFile},
-			{label: "Insecure", kind: pffCheckbox},
-			{label: proxmoxFieldLabels[ppCAFile], kind: pffText, inputIdx: ppCAFile},
+			proxmoxSlot(ppName),
+			proxmoxSlot(ppHost),
+			proxmoxSlot(ppNode),
+			proxmoxSlot(ppPool),
+			proxmoxSlot(ppStorage),
+			proxmoxSlot(ppImageStorage),
+			proxmoxSlot(ppBaseImage),
+			proxmoxSlot(ppBridge),
+			proxmoxSlot(ppUser),
+			proxmoxSlot(ppIdentityPath),
+			proxmoxSlot(ppTokenFile),
+			{label: "Insecure", kind: pffCheckbox, info: proxmoxInsecureInfo},
+			proxmoxSlot(ppCAFile),
 		}
 	case profiles.TypeRemoteSSH:
-		return textOnlySlots(profileFieldLabels)
+		return textOnlySlots(profileFieldLabels, profileFieldInfo)
 	default: // TypeLocal
-		return textOnlySlots(profileFieldLabels[:1])
+		return textOnlySlots(profileFieldLabels[:1], profileFieldInfo[:1])
 	}
 }
 
@@ -595,11 +647,6 @@ func newProfileInputs(t profiles.Type) []textinput.Model {
 		ti.SetWidth(44)
 		inputs[i] = ti
 	}
-	if t == profiles.TypeProxmox {
-		for idx, ph := range proxmoxFieldPlaceholders {
-			inputs[idx].Placeholder = ph
-		}
-	}
 	return inputs
 }
 
@@ -893,6 +940,20 @@ func (m model) profileFormHelp() []key.Binding {
 	return append(binds, m.keys.Save, m.keys.Back)
 }
 
+// profileFormInfo is the help text for the row that currently has focus, or
+// "" when there is none to show. Bounds-checked rather than indexed straight
+// into the slice: profileFormFocus is clamped by profileFormStep alone, and a
+// form opened at focus 0 on a type whose slots are shorter than the last
+// type's would otherwise panic in the VIEW, where a panic takes the whole TUI
+// down rather than surfacing as an error.
+func (m model) profileFormInfo() string {
+	slots := m.profileFormSlots()
+	if m.profileFormFocus < 0 || m.profileFormFocus >= len(slots) {
+		return ""
+	}
+	return slots[m.profileFormFocus].info
+}
+
 // profileFormView renders the create/edit sub-form.
 func (m model) profileFormView() string {
 	cw := m.layout.ContentWidth
@@ -925,12 +986,59 @@ func (m model) profileFormView() string {
 		b.WriteString(ls.Render(s.label+":") + " " + m.profileInputs[s.inputIdx].View() + "\n")
 	}
 
+	// The error and the footer are built BEFORE the help block so the help can
+	// be given only the lines those two leave behind. Order of precedence, not
+	// of rendering: the footer is the sole on-screen statement of how to save
+	// or leave the form, and the error is why a save did not happen — help
+	// text is the one part a short terminal can afford to lose. The Proxmox
+	// form is thirteen rows now, so at 80x24 with an error showing this is not
+	// hypothetical: unbudgeted, the footer scrolled off the bottom.
+	var tail strings.Builder
 	if m.profileFormErr != nil {
-		b.WriteString("\n" + errStyle.Width(cw).Render("Error: "+m.profileFormErr.Error()) + "\n")
+		tail.WriteString("\n" + errStyle.Width(cw).Render("Error: "+m.profileFormErr.Error()) + "\n")
+	}
+	tail.WriteString("\n" + m.footerView(m.profileFormHelp()))
+
+	if info := m.profileFormInfo(); info != "" {
+		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
+		// wrapped help still fits the content column — the same subtraction the
+		// VM create form makes (form.go).
+		style := fieldInfoStyle.Width(cw - 2)
+		// -1 for the blank line that separates the help from the fields above.
+		budget := m.layout.ContentHeight - lipgloss.Height(b.String()) - lipgloss.Height(tail.String()) - 1
+		if block := clampBlockHeight(style.Render(info), budget, style); block != "" {
+			b.WriteString("\n" + block + "\n")
+		}
 	}
 
-	b.WriteString("\n" + m.footerView(m.profileFormHelp()))
+	b.WriteString(tail.String())
 	return appStyle.Render(b.String())
+}
+
+// clampBlockHeight truncates an already-rendered block to at most n lines,
+// marking the cut with an ellipsis row drawn through the SAME style so the
+// truncation reads as "there is more" rather than as a sentence that just
+// stops.
+//
+// A budget under two lines drops the block entirely rather than spending the
+// one line it has on a bare "…", which says nothing a reader can use. A zero
+// or negative budget is the ordinary case on a short terminal, not an error:
+// the caller simply draws no help.
+func clampBlockHeight(block string, n int, style lipgloss.Style) string {
+	if n <= 0 {
+		return ""
+	}
+	lines := strings.Split(block, "\n")
+	if len(lines) <= n {
+		return block
+	}
+	if n < 2 {
+		return ""
+	}
+	// Full slice expression so the append writes into a fresh array: `lines`
+	// aliases the caller's block, and growing it in place would scribble the
+	// ellipsis over a line the caller may still read.
+	return strings.Join(append(lines[:n-1:n-1], style.Render("…")), "\n")
 }
 
 // profileTypePickerSelect is the picker's own local key.Binding, mirroring
