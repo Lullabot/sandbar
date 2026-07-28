@@ -31,6 +31,18 @@ The VM must be running before you can shell into it; a stopped VM won't
 offer `S` on its tile, and `sand shell` refuses cleanly with an error
 telling you to start it first.
 
+### What the board does while you're attached
+
+If sand is itself running inside a host tmux session, `S` opens the shell in
+a **new host window** and leaves the board on screen beside it, still live.
+Otherwise `S` **suspends** the board for as long as you're attached, and it
+returns on detach.
+
+Either way, a build already in flight keeps building: sand buffers the output
+of a board nobody is looking at rather than making the provisioner wait for a
+screen to draw on. On detach the tile shows where that build has actually got
+to — not a replay of every step it took while you were away.
+
 ## Uploading and downloading files: data, not code
 
 `u` (upload) and `g` (download) on a focused tile open a file-transfer pane.

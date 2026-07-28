@@ -431,25 +431,24 @@ func parseKB(rest []byte) (uint64, bool) {
 // so the whole heartbeat is ONE goroutine per VM (the one blocked in
 // ShellStreamOut) rather than a producer plus a reader.
 //
-// Its Write must never block forever, and that is not a nicety. os/exec copies the
+// Its Write must never block AT ALL, and that is not a nicety. os/exec copies the
 // child's stdout into this writer on a goroutine that cmd.Wait() joins, so a Write
 // that parks on a channel nobody is draining parks cmd.Wait() with it — and the
-// heartbeat can no longer be torn down at all. Hence the select on ctx.Done, and
-// hence the error return: an erroring Write also makes os/exec close the pipe,
-// which is what hands the orphaned ssh its SIGPIPE.
+// heartbeat can no longer be torn down at all. Hence the non-blocking send in
+// publish, and hence the error return: an erroring Write also makes os/exec close
+// the pipe, which is what hands the orphaned ssh its SIGPIPE.
+// The channel is bidirectional rather than send-only because publish RECEIVES from
+// it — see there: replacing a stale sample is the point, and it cannot be done
+// through a send-only end.
 type sampleWriter struct {
 	ctx context.Context
-	out chan<- guestSample
+	out chan guestSample
 	p   sampleParser
 }
 
 func (w *sampleWriter) Write(b []byte) (int, error) {
 	for _, s := range w.p.feed(b) {
-		select {
-		case w.out <- s:
-		case <-w.ctx.Done():
-			return 0, w.ctx.Err()
-		}
+		w.publish(s)
 	}
 	// Even a chunk that completes no record must fail once the heartbeat is done, so
 	// a cancelled stream tears down at the next byte rather than the next record.
@@ -457,6 +456,54 @@ func (w *sampleWriter) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return len(b), nil
+}
+
+// publish hands one reading to Update, REPLACING ANY READING NOBODY HAS TAKEN YET.
+// It never blocks, and it is the whole of this file's answer to a blocked Update
+// loop.
+//
+// The send used to block (with a ctx.Done escape), which was correct as far as
+// teardown goes and wrong for everything else. A suspending shell — the `s` verb's
+// tea.ExecProcess branch, commands.go — blocks Bubble Tea's ENTIRE event loop for
+// as long as the user is attached: no Update runs, so nothing receives from this
+// channel. The blocked send then parked this Write, which parked os/exec's copy
+// goroutine, which filled the ssh pipe (~64 KiB, about 45s of a 1.4 KB/s stream)
+// and finally stalled the in-guest loop itself. Every one of those buffered records
+// was still a real reading, so on detach they ALL drained through the cap-1 channel
+// one at a time — one message, one Update and one repaint each — and every tile's
+// gauges flickered through a minute of history in a fraction of a second. That
+// replay is what this drops.
+//
+// Dropping is safe in a way it would not be if the channel carried raw records: the
+// cpu delta is computed in the PARSER (sampleParser.complete), before anything
+// reaches here, so a discarded sample costs a reading, never a corrupted one. And
+// the tile renders latest() and nothing else — there is no history to keep — so a
+// reading nobody has taken has no value left at all once a newer one exists.
+//
+// It is the STALE one that goes, not the new one, and that is not interchangeable.
+// The very first record of every connection completes a sample with no cpu delta
+// (HasCPU false — one reading cannot make a rate), so keeping the pending sample and
+// dropping the new one would leave a gauge showing "no cpu reading" while a perfectly
+// good one was thrown away behind it.
+func (w *sampleWriter) publish(s guestSample) {
+	select {
+	case w.out <- s:
+		return
+	default:
+	}
+	// Full: Update has not taken the previous sample. Take it back out ourselves and
+	// put the newer one in its place.
+	select {
+	case <-w.out:
+	default:
+		// The reader took it in the meantime — the slot is free.
+	}
+	select {
+	case w.out <- s:
+	default:
+		// Unreachable: this writer is the channel's only sender, so the slot freed
+		// above cannot have been refilled. Dropping beats blocking if it ever is.
+	}
 }
 
 // guestShell is the one thing the heartbeat needs from the backend (today,

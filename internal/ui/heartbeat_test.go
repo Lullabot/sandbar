@@ -281,3 +281,68 @@ func TestParserRebaselinesOnACounterReset(t *testing.T) {
 		t.Fatalf("post-reset cpu = %.2f%%, want 10%%", got[3].CPUPct)
 	}
 }
+
+// THE SPAM THIS FIXES. A suspending shell (the `s` verb's tea.ExecProcess branch,
+// commands.go) blocks Bubble Tea's entire event loop for as long as the user is
+// attached, so nothing receives from a heartbeat's channel. The send here used to
+// block, which parked os/exec's copy goroutine, filled the ssh pipe and finally
+// stalled the in-guest loop — and then, on detach, delivered every buffered record
+// one at a time, flickering each tile's gauges through a minute of history.
+//
+// A guest that keeps streaming into a heartbeat nobody is reading must simply have
+// its readings dropped. This writes far more records than the cap-1 channel can
+// hold, with no reader at all, and every Write must return.
+func TestSampleWriterNeverBlocksOnAnUnreadChannel(t *testing.T) {
+	ch := make(chan guestSample, 1)
+	w := &sampleWriter{ctx: t.Context(), out: ch}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 200 {
+			if _, err := w.Write([]byte(record(100*i, 900*i, 1000, 600))); err != nil {
+				t.Errorf("write %d failed: %v", i, err)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the guest stream stalled behind a blocked Update loop — the backlog bug is back")
+	}
+}
+
+// And what survives the drop is the NEWEST reading, not the stale one that happened
+// to get there first. The distinction is not academic: the first record of every
+// connection carries no cpu delta (one reading cannot make a rate), so keeping the
+// pending sample would leave the gauge showing "no reading" with a good one thrown
+// away behind it.
+func TestSampleWriterKeepsTheNewestSample(t *testing.T) {
+	ch := make(chan guestSample, 1)
+	w := &sampleWriter{ctx: t.Context(), out: ch}
+
+	// Three records, nobody reading: 1 has no delta, 2 is 20% busy, 3 is 50%.
+	if _, err := w.Write([]byte(record(0, 0, 1000, 600))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := w.Write([]byte(record(20, 80, 1000, 600))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := w.Write([]byte(record(70, 130, 1000, 600))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	select {
+	case s := <-ch:
+		if !s.HasCPU {
+			t.Fatal("the reader was handed the connection's first (delta-less) sample, not the newest")
+		}
+		if !close2(s.CPUPct, 50) {
+			t.Fatalf("cpu = %.2f%%, want the newest reading's 50%%", s.CPUPct)
+		}
+	default:
+		t.Fatal("no sample waiting at all")
+	}
+}
