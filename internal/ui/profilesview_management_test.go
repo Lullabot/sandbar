@@ -765,10 +765,16 @@ func mustGetwd(t *testing.T) string {
 	return wd
 }
 
-// TestProxmoxFormRequiredFieldValidation proves the in-form validation that
-// mirrors profiles.validate's Proxmox rule (store.go): clearing host, node,
-// pool or token_file and saving sets profileFormErr, stays on the form (does
-// NOT return to the list), and never reaches the store.
+// TestProxmoxFormRequiredFieldValidation proves the in-form validation:
+// clearing any required field and saving sets profileFormErr, stays on the
+// form (does NOT return to the list), and never reaches the store.
+//
+// Host, node, pool and token_file mirror profiles.validate's Proxmox rule
+// (store.go). Identity path, storage and bridge are the form's own additions
+// — validate accepts a profile without them, but the layer that creates a VM
+// does not, so saving one produces a profile that can never build anything.
+// Those three are the cases this test exists for; the first four would be
+// caught by the store even if the form let them through.
 func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
 	isolateHostState(t)
 
@@ -790,11 +796,17 @@ func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
 		{"node", ppNode},
 		{"pool", ppPool},
 		{"token file", ppTokenFile},
-		// identity path is the form's own addition to validate's list: the
-		// store accepts a Proxmox profile without one, but the provider cannot
-		// build a guest it can log into, so the form refuses it here rather
-		// than saving a profile that can never create a VM.
+		// The three the store does NOT check.
+		//
+		// identity path: the provider cannot build a guest it can log into
+		// without the key sand installs via cloud-init.
 		{"identity path", ppIdentityPath},
+		// storage and bridge: pve.CreateVMOptions rejects either outright
+		// (internal/pve/vm.go). Bridge is the subtle one — an omitted bridge
+		// does not mean "no network", it gives QEMU user-mode NAT, so the
+		// guest boots fine and is simply unreachable over SSH.
+		{"storage", ppStorage},
+		{"bridge", ppBridge},
 	} {
 		t.Run(missing.field, func(t *testing.T) {
 			m := New(fleet).(model)
@@ -812,6 +824,62 @@ func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
 			}
 			if got, _ := m.profileStore.Get(p.ID); got.Host != p.Host || got.Node != p.Node || got.Pool != p.Pool || got.TokenFile != p.TokenFile {
 				t.Fatalf("a rejected submit must not have persisted, got %+v", got)
+			}
+		})
+	}
+}
+
+// TestProxmoxRequiredHelpMatchesValidation ties the two halves of "required"
+// together. Each row's help opens with "Required." or "Optional.", and the
+// required-field table in submitProfileForm decides which blanks are actually
+// refused — two hand-maintained lists that a reader has every reason to trust
+// as one. A row whose help says "Required." but saves blank is a promise the
+// form does not keep; a row that says "Optional." and then refuses to save is
+// worse, since the error names a field the user was told to leave alone.
+//
+// So this drives the real submit path once per row, with that row (and only
+// that row) cleared, and asserts the outcome the help advertises.
+func TestProxmoxRequiredHelpMatchesValidation(t *testing.T) {
+	isolateHostState(t)
+	seed := seedProxmoxProfile(t, "cluster", "pve.example.com", "pve1", "sandbar")
+
+	// Fill in the fields seedProxmoxProfile deliberately leaves empty, so the
+	// ONLY blank in each run below is the row under test.
+	full := seed
+	full.CAFile = "/etc/sandbar/pve-ca.pem"
+	full.ImageStorage = "nfs-images"
+	full.BaseImage = "https://example.invalid/golden.qcow2"
+	full.User = "dev"
+
+	for i, s := range (model{profileFormType: profiles.TypeProxmox}).profileFormSlots() {
+		if s.kind == pffCheckbox {
+			continue // a checkbox has no blank state to refuse
+		}
+		wantRequired := strings.HasPrefix(s.info, "Required.")
+		if !wantRequired && !strings.HasPrefix(s.info, "Optional.") && !strings.Contains(s.info, "Blank →") {
+			t.Errorf("row %d (%q): help must open with Required./Optional. or name its Blank → default, got %q", i, s.label, s.info)
+			continue
+		}
+
+		t.Run(s.label, func(t *testing.T) {
+			m := New(provider.Fleet{{Profile: full, Prov: &providerfake.Provider{}}}).(model)
+			m = resized(m, 100, 30)
+			if _, err := m.profileStore.Update(full); err != nil {
+				t.Fatalf("seed the fully-populated profile: %v", err)
+			}
+			m.openProfileEditForm(full)
+			m.profileInputs[s.inputIdx].SetValue("")
+
+			next, _ := m.submitProfileForm()
+			m = next.(model)
+
+			switch {
+			case wantRequired && m.profileFormErr == nil:
+				t.Fatalf("help for %q says Required., but saving it blank succeeded", s.label)
+			case wantRequired && !strings.Contains(m.profileFormErr.Error(), strings.ToLower(s.label)):
+				t.Fatalf("clearing %q errored with %v, which does not name the field", s.label, m.profileFormErr)
+			case !wantRequired && m.profileFormErr != nil:
+				t.Fatalf("help for %q says Optional., but saving it blank failed: %v", s.label, m.profileFormErr)
 			}
 		})
 	}

@@ -137,7 +137,7 @@ var proxmoxFieldInfo = []string{
 	"Required. The PVE node name — the identifier in /nodes/<node>/… API paths, which is not always the same string as the host above.",
 	"Required. The resource pool sand's VMs are created in, and the pool the API token is scoped to. Host, node and pool together form this profile's registry scope.",
 	"Required. Storage backing VM disks — it must accept content type \"images\" (local-lvm, a ZFS pool, …).",
-	"Required. The Linux bridge each VM's NIC attaches to, usually vmbr0. A blank bridge is rejected when the VM is created, not here.",
+	"Required. The Linux bridge each VM's NIC attaches to, usually vmbr0. Leaving it blank would not mean \"no network\" — it gives QEMU user-mode NAT, and the guest is then unreachable over SSH.",
 	"Required. PATH to a file holding user@realm!tokenid=value — never the token itself. It must not be readable by group or other.",
 	"Optional. PEM CA bundle to verify the Proxmox API certificate against — the safe alternative to Insecure for a self-signed cert.",
 	"Required. Path to your SSH private key. sand installs <path>.pub into every guest via cloud-init, then connects with the key.",
@@ -821,15 +821,35 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		p.ImageStorage = strings.TrimSpace(m.profileInputs[ppImageStorage].Value())
 		p.BaseImage = strings.TrimSpace(m.profileInputs[ppBaseImage].Value())
 		p.Insecure = m.profileInsecure
-		// Mirrors profiles.validate's own Proxmox rule (store.go) for
-		// immediate in-form feedback; the store re-checks this (and
-		// uniqueness) regardless, so this is a UX nicety, not the authority.
-		// Identity path is the one addition: validate does not demand it, but
-		// the provider does (it is the key sand installs into every guest), so
-		// saving without it would produce a profile that can never create a VM.
+		// The first four mirror profiles.validate's own Proxmox rule (store.go)
+		// for immediate in-form feedback; the store re-checks those (and
+		// uniqueness) regardless, so for them this is a UX nicety, not the
+		// authority.
+		//
+		// The last three are NOT in validate, and for them this table is the
+		// only gate. Each is demanded by the layer that actually creates a VM,
+		// so a profile saved without one is a profile that can never build
+		// anything — the form would have accepted a configuration that is dead
+		// on arrival:
+		//
+		//   identity path — the key sand installs into every guest via
+		//     cloud-init and then connects with (readPublicKey, then ssh -i).
+		//   storage       — backs scsi0/ide2; pve.CreateVMOptions rejects an
+		//     empty one outright (internal/pve/vm.go).
+		//   bridge        — likewise rejected there, and for a subtler reason:
+		//     an omitted bridge does not mean "no network", it silently gives
+		//     QEMU user-mode NAT, which leaves the guest unreachable over SSH
+		//     in a way that looks like a boot failure.
+		//
+		// Deliberately caught here rather than in profiles.validate: LoadFrom
+		// must keep loading a hand-edited profile that fails these (see its doc
+		// comment — quarantining the whole file over one field would lock the
+		// user out of every other profile), and buildBinding already surfaces
+		// what it can as a per-profile error binding. This is the create/edit
+		// path, the one place a human is present to fix it.
 		for _, req := range []struct{ v, name string }{
 			{p.Host, "host"}, {p.Node, "node"}, {p.Pool, "pool"}, {p.TokenFile, "token file"},
-			{p.IdentityPath, "identity path"},
+			{p.IdentityPath, "identity path"}, {p.Storage, "storage"}, {p.Bridge, "bridge"},
 		} {
 			if req.v == "" {
 				m.profileFormErr = fmt.Errorf("%s is required", req.name)

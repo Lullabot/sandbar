@@ -72,6 +72,13 @@ it is not where prose belongs.
   help block is drawn under a height BUDGET, after the error and footer are
   measured — a thirteen-row form plus unbudgeted help scrolled the footer off
   the bottom at 80x24, hiding the only statement of how to save or leave.
+  A row whose help says "Required." must be in `submitProfileForm`'s
+  required-field table, and vice versa. For `identity_path`, `storage` and
+  `bridge` that table is the ONLY gate — `profiles.validate` checks just
+  host/node/pool/token_file, deliberately, so `LoadFrom` keeps loading a
+  hand-edited file rather than locking the user out of every other profile.
+  Without the gate the form saves a profile that can never create a VM
+  (`pve.CreateVMOptions` rejects an empty storage or bridge outright).
   For the same reason `connectionFieldsEqual` must compare every field
   `provider.TargetConfigFor` reads: one left out is read as a pure rename and
   never rebuilds the live binding.
