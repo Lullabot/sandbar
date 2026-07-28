@@ -846,6 +846,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#-timezone-follows-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --timezone follows the host
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#-clone-token-is-a-credential" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1525,6 +1536,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#-timezone-follows-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --timezone follows the host
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#-clone-token-is-a-credential" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1814,6 +1836,12 @@ not a prompt.</p>
 <td>System locale.</td>
 </tr>
 <tr>
+<td><code>--timezone</code></td>
+<td>string</td>
+<td><em>the timezone this host is in</em></td>
+<td>IANA timezone for the guest, e.g. <code>America/Toronto</code>. See <a href="#-timezone-follows-the-host">timezone</a> below.</td>
+</tr>
+<tr>
 <td><code>--domain</code></td>
 <td>string</td>
 <td><code>lan</code></td>
@@ -1907,6 +1935,43 @@ configured, <code>sand create</code> with no flags at all is enough.</p>
 for a given field — it refuses to fabricate a commit author. The error names
 the missing field and tells you to pass the flag or set it with
 <code>git config --global user.name "..."</code> (or <code>user.email</code>).</p>
+<h3 id="-timezone-follows-the-host"><code>--timezone</code> follows the host</h3>
+<p>VMs used to run in <strong>UTC</strong> — not by choice, but because nothing set a timezone
+at all and the Debian/Ubuntu cloud images ship UTC. That made every log line,
+<code>ls -l</code>, <code>date</code>, and commit timestamp inside a VM disagree with the machine you
+were reading them on.</p>
+<p><code>sand</code> now reads the timezone of the host it is running on and provisions the
+guest to match, so <code>sand create</code> with no flags gives you a VM whose clock
+agrees with your own. Pass <code>--timezone</code> with an IANA name
+(<code>--timezone Asia/Tokyo</code>) to override.</p>
+<p>The host's zone is detected from, in order: <code>$TZ</code> (including the <code>:Zone</code> and
+<code>:/path/to/zoneinfo/Zone</code> forms, and an empty <code>TZ=</code>, which POSIX defines as
+UTC), <code>/etc/timezone</code>, and the target of the <code>/etc/localtime</code> symlink — which
+covers Linux and macOS. If none of those give a usable answer, <code>sand</code> falls
+back to <code>Etc/UTC</code>, which is exactly the old behaviour, and says so on stderr
+rather than quietly handing you a VM with the wrong clock.</p>
+<p>Legacy aliases (<code>US/Eastern</code>, <code>Canada/Eastern</code>, <code>Japan</code>) live in Debian's
+separate <code>tzdata-legacy</code> package, which the base image does not install. Where
+your host has one, <code>sand</code> resolves it to the canonical name by following the
+host's own tzdata symlink, so <code>US/Eastern</code> reaches the guest as
+<code>America/New_York</code> and simply works.</p>
+<p>What happens to a zone the guest genuinely doesn't have depends on <strong>who chose
+it</strong>:</p>
+<ul>
+<li><strong>You named it</strong> with <code>--timezone</code> — the run stops with an error. You asked
+  for a specific zone, and finishing would hand you a VM that is silently not
+  in it.</li>
+<li><strong><code>sand</code> detected it</strong> from your host — the run continues, prints a warning,
+  and leaves the guest's existing zone. Your create can't be broken by
+  something you never asked for.</li>
+</ul>
+<p>Malformed names (a leading <code>/</code>, a <code>..</code>, shell metacharacters) are rejected up
+front by every entrypoint, before they can reach the playbook.</p>
+<p>The timezone is applied in <strong>both</strong> provisioning phases, so a VM cloned from a
+base image built before this feature existed — or built while you were in a
+different timezone — still lands in the right zone. It is deliberately not part
+of the base image's version stamp, so changing timezone does not force a base
+rebuild.</p>
 <h3 id="-clone-token-is-a-credential"><code>--clone-token</code> is a credential</h3>
 <p><code>--clone-token</code> (and the rest of the create-time variables) is never placed on
 a command line inside the guest. <code>sand</code> streams the rendered Ansible
@@ -2010,18 +2075,20 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>        Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
 <a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>  -recreate
 <a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>        If the named instance exists and is sand-managed, delete and re-clone it
-<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>  -user string
-<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>        Primary VM user
-<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  -with-claude
-<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>        Install Claude Code in the base image (default true)
-<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>  -with-codex
-<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>        Install OpenAI Codex in the base image
-<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>  -with-ddev
-<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>        Install DDEV in the base image (default true)
-<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>  -with-go
-<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>        Install the Go toolchain in the base image (default true)
-<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>  -with-java
-<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>        Install a headless JDK in the base image (default true)
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>  -timezone string
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>        IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  -user string
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>        Primary VM user
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>  -with-claude
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>        Install Claude Code in the base image (default true)
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>  -with-codex
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>        Install OpenAI Codex in the base image
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>  -with-ddev
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>        Install DDEV in the base image (default true)
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>  -with-go
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>        Install the Go toolchain in the base image (default true)
+<a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a>  -with-java
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a>        Install a headless JDK in the base image (default true)
 </code></pre></div>
 <p>(<code>--user</code> has no printed default because it is resolved to the host username
 <em>after</em> flags are parsed, not at registration time — see the flags table
