@@ -34,9 +34,9 @@ package ui
 //   - The Update goroutine begins jobs, folds their output in, finishes,
 //     cancels, and reaps them. Every one of those goes through a method here and
 //     takes the lock.
-//   - The tea.Cmd goroutines — the run function feeding the pipe, and
-//     readNextCmd draining it — touch ONLY the io.Pipe, never the registry. A
-//     chunk read off the pipe travels back to Update as a KEYED
+//   - The tea.Cmd goroutines — the run function feeding the stream, and
+//     readNextCmd draining it — touch ONLY the jobStream (jobstream.go), never the
+//     registry. A chunk read off the stream travels back to Update as a KEYED
 //     provisionOutputMsg, and it is Update, under the lock, that appends and
 //     parses it. That is why the parser can be a mutable struct on the job.
 //
@@ -590,11 +590,11 @@ func stopperFor(j *job) stopper {
 }
 
 // stop tears the job down: it cancels the context AND closes the read end of its
-// pipe. The close is not belt-and-braces — it is the actual guarantee. Cancelling
+// stream. The close is not belt-and-braces — it is the actual guarantee. Cancelling
 // only ASKS the run function to return; closing the reader makes its next write
-// fail, so even a run that ignores its context (or is blocked writing to a pipe
-// nobody is draining any more) unblocks and its goroutine exits. That is the
-// difference between reaping a job and merely forgetting about it.
+// fail, so even a run that ignores its context entirely stops on its next line of
+// output. That is the difference between reaping a job and merely forgetting about
+// it.
 func (s stopper) stop() {
 	if s.cancel != nil {
 		s.cancel()
@@ -649,7 +649,7 @@ func (r *jobRegistry) config(scope registry.Scope, name string) (vm.CreateConfig
 	return j.cfg, true
 }
 
-// reader returns the read end of one job's pipe, for the next readNextCmd.
+// reader returns the read end of one job's stream, for the next readNextCmd.
 func (r *jobRegistry) reader(key jobKey) *readPipe {
 	if r == nil {
 		return nil

@@ -197,27 +197,48 @@ func (p *sweepParser) feed(chunk []byte) []checkouts.VMCheckouts {
 
 // sweepWriter is the io.Writer the streaming shell writes into: it parses
 // inline, so the whole sweep is ONE goroutine per VM, mirroring sampleWriter
-// exactly, including why its Write must never block forever (os/exec's copy
+// exactly, including why its Write must never block AT ALL (os/exec's copy
 // goroutine backs cmd.Wait() with it) and why an erroring Write is what hands
 // the orphaned ssh its SIGPIPE.
 type sweepWriter struct {
 	ctx context.Context
-	out chan<- checkouts.VMCheckouts
+	out chan checkouts.VMCheckouts
 	p   sweepParser
 }
 
 func (w *sweepWriter) Write(b []byte) (int, error) {
 	for _, vc := range w.p.feed(b) {
-		select {
-		case w.out <- vc:
-		case <-w.ctx.Done():
-			return 0, w.ctx.Err()
-		}
+		w.publish(vc)
 	}
 	if err := w.ctx.Err(); err != nil {
 		return 0, err
 	}
 	return len(b), nil
+}
+
+// publish is sampleWriter.publish for the sweep, and drops for the same reason:
+// a blocked Update loop (a suspending shell holds one for as long as the user is
+// attached) must not back the stream up into the guest, and must not be answered
+// with a replay of every reading it missed when it comes back. See
+// sampleWriter.publish for the full account.
+//
+// A sweep reading is an ABSOLUTE snapshot of one VM's checkouts — there is no
+// delta, and nothing accumulates across readings — so the newest one is simply the
+// true one, and an untaken older one is worth nothing beside it.
+func (w *sweepWriter) publish(vc checkouts.VMCheckouts) {
+	select {
+	case w.out <- vc:
+		return
+	default:
+	}
+	select {
+	case <-w.out:
+	default:
+	}
+	select {
+	case w.out <- vc:
+	default:
+	}
 }
 
 // sweepConn is one VM's live sweep connection. Like a heartbeat, it lives

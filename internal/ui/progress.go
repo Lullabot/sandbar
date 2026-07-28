@@ -13,11 +13,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// readPipe bundles the read end of one job's pipe. It is held by pointer (on the
+// readPipe bundles the read end of one job's stream. It is held by pointer (on the
 // job, inside the registry) so successive readNextCmds keep reading the same
 // stream.
 type readPipe struct {
-	r *io.PipeReader
+	r *jobStream
 }
 
 // close tears the read end down. Every subsequent write to the paired writer
@@ -26,7 +26,7 @@ type readPipe struct {
 // goroutine. See stop() in jobs.go.
 func (rp *readPipe) close() {
 	if rp != nil && rp.r != nil {
-		rp.r.CloseWithError(errJobReaped)
+		rp.r.closeRead(errJobReaped)
 	}
 }
 
@@ -72,7 +72,10 @@ func (m *model) beginStream(key jobKey, title string, run streamFunc) (tea.Cmd, 
 		return m.showJob(key), false
 	}
 
-	pr, pw := io.Pipe()
+	// A buffer, deliberately NOT an io.Pipe: the run must keep running while nothing
+	// is draining it, because a suspending shell blocks Update for as long as the
+	// user is attached to it. See jobstream.go.
+	stream := newJobStream()
 	// A cancellable context lets ctrl+c (in Update) abort this job — and only this
 	// job — mid-flight, killing the limactl subprocess it is blocked on.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -82,7 +85,7 @@ func (m *model) beginStream(key jobKey, title string, run streamFunc) (tea.Cmd, 
 		title:  title,
 		state:  jobRunning,
 		cancel: cancel,
-		reader: &readPipe{r: pr},
+		reader: &readPipe{r: stream},
 	}
 	if !m.jobs.begin(j) {
 		// Unreachable: the guard above already refused a live job, and only the
@@ -93,9 +96,9 @@ func (m *model) beginStream(key jobKey, title string, run streamFunc) (tea.Cmd, 
 	}
 
 	go func() {
-		// CloseWithError(nil) closes the writer cleanly, surfacing io.EOF to the
+		// CloseWrite(nil) closes the writer cleanly, surfacing io.EOF to the
 		// reader; a non-nil err surfaces as that error on the final Read.
-		pw.CloseWithError(run(ctx, pw))
+		stream.CloseWrite(run(ctx, stream))
 	}()
 
 	return tea.Batch(readNextCmd(key, j.reader), m.tickSpinner()), true
@@ -200,19 +203,25 @@ func (m *model) focusJob(key jobKey) {
 	m.setOutput()
 }
 
-// readNextCmd reads one chunk from a job's pipe. It emits a KEYED
+// readNextCmd reads one chunk from a job's stream. It emits a KEYED
 // provisionOutputMsg per chunk (Update re-issues it to read the next one) and a
 // provisionDoneMsg at EOF or on error. Reading happens off the Update goroutine,
 // and the key is what lets N of these run at once without their output crossing
 // streams — the message used to be a bare string, which is precisely why only one
 // job could ever exist, and a bare VM name, which is why a VM's copy and its
 // build could not both stream at once.
+//
+// The buffer is jobReadChunk, not a token 4 KiB, and the difference matters after a
+// suspending shell: jobStream.Read hands over everything it is holding, so a
+// backlog that built up while Update was blocked returns in a handful of messages
+// rather than one per 4 KiB — and the tile's progress bar arrives at where the
+// build actually is instead of replaying every task it missed.
 func readNextCmd(key jobKey, rp *readPipe) tea.Cmd {
 	return func() tea.Msg {
 		if rp == nil {
 			return provisionDoneMsg{job: key}
 		}
-		buf := make([]byte, 4096)
+		buf := make([]byte, jobReadChunk)
 		n, err := rp.r.Read(buf)
 		if n > 0 {
 			return provisionOutputMsg{job: key, chunk: string(buf[:n])}
