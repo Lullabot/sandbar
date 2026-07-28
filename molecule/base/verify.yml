@@ -19,18 +19,49 @@
         src: /etc/default/locale
       register: _etc_default_locale
 
-    # Three stable, role-specific outcomes from roles/base/tasks/main.yml:
-    # "Set hostname", "Deploy /etc/hosts" (templates hosts.j2), and "Set
-    # default locale". These are picked because they're plain fact/file
-    # checks independent of the role's heavier, network-dependent apt/repo
-    # work (which this scenario intentionally doesn't assert on).
+    - name: Read /etc/timezone
+      ansible.builtin.slurp:
+        src: /etc/timezone
+      register: _etc_timezone
+
+    # Read the LINK, not what it points at: the whole failure mode worth
+    # catching here is a dangling or stale /etc/localtime, and following the
+    # symlink would hide exactly that.
+    - name: Stat /etc/localtime without following it
+      ansible.builtin.stat:
+        path: /etc/localtime
+        follow: false
+      register: _etc_localtime
+
+    # Four stable, role-specific outcomes from roles/base/tasks/main.yml:
+    # "Set hostname", "Deploy /etc/hosts" (templates hosts.j2), "Set
+    # default locale", and the timezone pair. These are picked because they're
+    # plain fact/file checks independent of the role's heavier,
+    # network-dependent apt/repo work (which this scenario intentionally
+    # doesn't assert on).
+    #
+    # Both halves of the timezone are asserted, because either one alone can be
+    # right while the guest is still wrong: /etc/localtime is what glibc reads
+    # and /etc/timezone is the name every other tool reads.
+    #
+    # The expected zone is Europe/Berlin, not the America/Toronto of converge's
+    # first play: the second play re-runs the role in the FINALIZE phase with
+    # Berlin, and finalize skips every other task in this role. So Berlin here
+    # proves two things at once — that the tasks drive the outcome at all (a
+    # container starts in UTC and cannot reach either zone by itself), and that
+    # they are not gated out of the finalize phase, which is what makes clones
+    # from an older base come out correctly zoned.
     - name: Assert the base role's foundational setup landed
       ansible.builtin.assert:
         that:
           - ansible_facts.hostname == "claude"
           - "'127.0.1.1 claude.lan claude' in (_etc_hosts.content | b64decode)"
           - "'LANG=en_CA.UTF-8' in (_etc_default_locale.content | b64decode)"
+          - (_etc_timezone.content | b64decode).strip() == "Europe/Berlin"
+          - _etc_localtime.stat.islnk
+          - _etc_localtime.stat.lnk_target == "/usr/share/zoneinfo/Europe/Berlin"
         fail_msg: >-
           base role's foundational setup (hostname, /etc/hosts,
-          /etc/default/locale) did not land as expected.
+          /etc/default/locale, /etc/timezone + /etc/localtime) did not land as
+          expected.
         success_msg: "base role foundational setup verified."

@@ -1,6 +1,21 @@
 base_hostname: claude
 base_domain: lan
 base_locale: en_CA.UTF-8
+# UTC is the fallback, not the intent: `sand create` overrides this with the
+# timezone of the host it is running on (vm.HostTimezone), which is the whole
+# point of the setting. This default is what a bare `ansible-playbook site.yml`
+# run gets, and it deliberately matches what a Debian/Ubuntu cloud image already
+# ships — so a direct playbook run behaves exactly as it did before the timezone
+# tasks existed. Override with -e base_timezone=America/Toronto.
+base_timezone: Etc/UTC
+# Whether a base_timezone the guest does not have should FAIL the run (true) or
+# just warn and leave the guest's existing zone (false). Defaults to true
+# because a value set by hand — `-e base_timezone=...`, or `sand create
+# --timezone` — was deliberately chosen, and silently ignoring it would hand
+# back a VM that is not in the zone that was asked for. sand sets this to false
+# for a timezone it merely DETECTED off the host, so an undetectable or
+# unusual host zone can never turn a working create into a failed one.
+base_timezone_required: true
 base_nodejs_major_version: 24
 # Installed alongside base_packages in the single consolidated apt transaction
 # (roles/base/tasks/main.yml, "Install every base-phase package").
@@ -45,6 +60,14 @@ base_packages:
   - sudo
   - tmux
   - traceroute
+  # The timezone tasks in roles/base/tasks/main.yml symlink /etc/localtime into
+  # /usr/share/zoneinfo, which is this package. It is already present on every
+  # Debian/Ubuntu cloud image, so naming it costs nothing — but it arrives there
+  # as a dependency of something else, and with install_recommends off (see the
+  # comment at the top of this list) that is exactly the kind of thing that
+  # disappears quietly. A missing tzdata fails the "Confirm the requested
+  # timezone exists" assert with no hint that a PACKAGE is what's absent.
+  - tzdata
   - unzip
   - vim
   - wget

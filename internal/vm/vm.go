@@ -56,20 +56,36 @@ type VM struct {
 
 // CreateConfig mirrors the answers the original bash provisioner gathers.
 type CreateConfig struct {
-	Name            string
-	BaseName        string
-	Hostname        string
-	User            string
-	GitName         string
-	GitEmail        string
-	CPUs            int
-	Memory          string
-	Disk            string
-	Locale          string
-	Domain          string
-	DockerProxyHost string
-	CloneURL        string
-	CloneToken      string
+	Name     string
+	BaseName string
+	Hostname string
+	User     string
+	GitName  string
+	GitEmail string
+	CPUs     int
+	Memory   string
+	Disk     string
+	Locale   string
+	Timezone string
+	Domain   string
+
+	// TimezoneExplicit distinguishes a timezone the USER asked for
+	// (`sand create --timezone`) from one sand detected off the host, and the
+	// guest treats the two differently when the zone turns out not to exist in
+	// its tzdata.
+	//
+	// An explicit request that the guest cannot honour is an error worth
+	// stopping for — the user named a zone and would otherwise get a VM that is
+	// silently not in it. A DETECTED name that the guest lacks must not stop
+	// anything: the user asked for nothing, and failing there would turn a
+	// `sand create` that worked before sand set timezones at all into a hard
+	// mid-provision failure on any host carrying a legacy alias or a right/
+	// zone that canonicalZone could not resolve. That case degrades to the
+	// guest's existing zone with a warning instead.
+	TimezoneExplicit bool
+	DockerProxyHost  string
+	CloneURL         string
+	CloneToken       string
 
 	// WithClaude, WithDDEV, WithGo, WithJava, and WithCodex select the
 	// configurable base-image tool-set (sand create --with-claude/--with-ddev/
@@ -94,12 +110,25 @@ type CreateConfig struct {
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
 func DefaultCreateConfig() CreateConfig {
 	return CreateConfig{
-		Name:       "claude",
-		BaseName:   "sandbar-base",
-		Memory:     "8GiB",
-		Disk:       "100GiB",
-		Domain:     "lan",
-		Locale:     "en_US.UTF-8",
+		Name:     "claude",
+		BaseName: "sandbar-base",
+		Memory:   "8GiB",
+		Disk:     "100GiB",
+		Domain:   "lan",
+		Locale:   "en_US.UTF-8",
+		// Deliberately the CONSTANT fallback, not HostTimezone(): this function
+		// is a cheap defaults accessor that callers treat as free — board.go
+		// reads .BaseName from it once per VM, and registry/manage call it on
+		// every load — so doing filesystem I/O here would put two syscalls
+		// behind each of those, and would make a previously pure function's
+		// result depend on the developer's /etc in every test that touches it.
+		//
+		// The host's real zone is resolved at the two entrypoints that actually
+		// provision (cmd/sand/create.go's runCreate and the TUI's buildConfig),
+		// which is the same place --locale's host default (`$LANG`) and the git
+		// identity are resolved. Anything that skips both gets Etc/UTC, i.e.
+		// exactly the behaviour that predates this field.
+		Timezone:   FallbackTimezone,
 		CPUs:       2,
 		WithClaude: true,
 		WithDDEV:   true,
@@ -188,6 +217,14 @@ func (c CreateConfig) Validate() error {
 	}
 	if c.CPUs < 1 {
 		return fmt.Errorf("cpus must be a positive integer (got %d)", c.CPUs)
+	}
+	// Checked here, with the disk floor, for the same reason: every entrypoint
+	// — CLI create, TUI create, and reset — passes through Validate, and the
+	// timezone becomes a symlink target inside the guest. A name carrying ".."
+	// resolves to a real file there and would pass the guest's own existence
+	// check, so it has to be rejected on this side of the wire.
+	if err := validateTimezone(c.Timezone); err != nil {
+		return err
 	}
 	// A clone's qcow2 disk is grown from BaseDiskFloor and can never shrink live,
 	// so a smaller request must be rejected UP FRONT — otherwise a Proxmox create

@@ -92,6 +92,16 @@ Flags:
 	fs.StringVar(&cfg.Memory, "memory", cfg.Memory, "RAM, e.g. 8GiB")
 	fs.StringVar(&cfg.Disk, "disk", cfg.Disk, "Disk size, e.g. 100GiB")
 	fs.StringVar(&cfg.Locale, "locale", cfg.Locale, "System locale")
+	// Registered with an EMPTY default and applied after Parse, rather than
+	// bound straight to cfg.Timezone like --locale above. cfg.Timezone already
+	// holds this host's zone (vm.HostTimezone, via DefaultCreateConfig), and
+	// binding it directly would make the flag package print that value as the
+	// default — so `sand create --help` would read "(default
+	// "America/Toronto")" on one machine and "(default "Europe/Berlin")" on the
+	// next, and the copy of that help text in docs/using-sand/cli-reference.md
+	// would be wrong for almost every reader. Same reason --git-name describes
+	// its host-derived default in prose instead of showing one.
+	timezoneFlag := fs.String("timezone", "", "IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)")
 	fs.StringVar(&cfg.Domain, "domain", cfg.Domain, "Domain suffix")
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
@@ -129,6 +139,27 @@ Flags:
 		return err
 	}
 	cfg.CPUs = n
+
+	// An explicitly passed --timezone wins; otherwise detect the host's, which
+	// DefaultCreateConfig deliberately does not do (it is a hot, pure accessor —
+	// see the comment there). TimezoneExplicit rides along so the guest knows
+	// whether an unknown zone is worth failing the run over: a name the USER
+	// named is, a name sand guessed is not.
+	//
+	// Validate rejects a malformed value before any of it reaches the playbook;
+	// whether the zone actually EXISTS is a question only the guest can answer,
+	// and roles/base answers it there.
+	if *timezoneFlag != "" {
+		cfg.Timezone, cfg.TimezoneExplicit = *timezoneFlag, true
+	} else if zone, detected := vm.HostTimezone(); detected {
+		cfg.Timezone = zone
+	} else {
+		// Say so rather than quietly handing over a UTC VM: the documented
+		// promise is that the guest matches this host, and on a machine that
+		// will not reveal its zone sand cannot keep it. Without this line the
+		// only symptom is a VM with the wrong clock and nothing to explain it.
+		fmt.Fprintf(os.Stderr, "sand: could not determine this host's timezone; using %s. Pass --timezone to set it explicitly.\n", cfg.Timezone)
+	}
 
 	// Resolve the backend before anything that reads or defaults host-derived
 	// state: the existing base's tool-set stamp lives on whichever host limactl
