@@ -135,8 +135,8 @@ func buildBinding(p profiles.Profile) Binding {
 // function loading it eagerly. That keeps TargetConfig secret-free (only the
 // path is ever carried) and keeps this conversion — and buildBinding's shape
 // above, which already has a distinct error path for construction failure —
-// simple, rather than plumbing a second error return through both this
-// function and its cmd/sand/resolve.go duplicate.
+// simple, rather than plumbing a second error return through it and every
+// other caller.
 func TargetConfigFor(p profiles.Profile) TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return TargetConfig{

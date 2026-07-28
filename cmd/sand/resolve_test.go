@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/profiles"
-	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -511,30 +510,13 @@ func TestProviderForProfileProxmox(t *testing.T) {
 	}
 }
 
-// TestTargetConfigForProxmoxCarriesEveryField pins the CLI's own
-// profiles.Profile -> TargetConfig conversion (the resolve.go twin of
-// provider.targetConfigFor): every connection field must carry, including
-// identity_path (needed for the cloud-init key, previously dropped here) and
-// image_storage.
-func TestTargetConfigForProxmoxCarriesEveryField(t *testing.T) {
-	p := profiles.Profile{
-		ID: "cluster", Name: "cluster", Type: profiles.TypeProxmox, Enabled: true,
-		Host: "pve.example.com", User: "dev", Node: "pve1", Pool: "sandbar",
-		Storage: "local-lvm", ImageStorage: "local", BaseImage: "https://ex.test/img.qcow2",
-		Bridge: "vmbr0", TokenFile: "/tmp/tok", IdentityPath: "/home/dev/.ssh/id_ed25519",
-		Insecure: true, CAFile: "/etc/ssl/pve-ca.pem",
-	}
-	cfg := targetConfigFor(p)
-	if cfg.Provider != provider.ProxmoxProviderID {
-		t.Fatalf("Provider = %q, want %q", cfg.Provider, provider.ProxmoxProviderID)
-	}
-	if cfg.Host != p.Host || cfg.User != p.User || cfg.Node != p.Node || cfg.Pool != p.Pool ||
-		cfg.Storage != p.Storage || cfg.ImageStorage != p.ImageStorage || cfg.BaseImage != p.BaseImage ||
-		cfg.Bridge != p.Bridge || cfg.TokenFile != p.TokenFile || cfg.IdentityPath != p.IdentityPath ||
-		cfg.Insecure != p.Insecure || cfg.CAFile != p.CAFile {
-		t.Fatalf("targetConfigFor = %+v, did not carry every proxmox field across (%+v)", cfg, p)
-	}
-}
+// The CLI's own profiles.Profile -> TargetConfig field-carry test lived here
+// while resolve.go kept a copy of the mapping. It now calls
+// provider.TargetConfigFor directly, so the assertion belongs to that one
+// function: internal/provider's TestTargetConfigFor_ConvertsProxmoxProfile is
+// the single place it is pinned. Re-adding a copy here would test the
+// provider package from the CLI's tests and re-create exactly the parallel
+// maintenance the export removed.
 
 // TestProviderForProfileProxmoxEmptyHostErrors mirrors the RemoteSSH
 // empty-host regression for the Proxmox path.
