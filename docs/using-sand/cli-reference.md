@@ -55,6 +55,7 @@ not a prompt.
 | `--memory` | string | `8GiB` | RAM, e.g. `8GiB`. |
 | `--disk` | string | `100GiB` | Disk size, e.g. `100GiB`. See [disk sizing](#disk-sizing) below. |
 | `--locale` | string | `en_US.UTF-8` | System locale. |
+| `--timezone` | string | *the timezone this host is in* | IANA timezone for the guest, e.g. `America/Toronto`. See [timezone](#-timezone-follows-the-host) below. |
 | `--domain` | string | `lan` | Domain suffix. |
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sand` also forces on `devtools_docker_registry_proxy_enabled`. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
@@ -93,6 +94,36 @@ configured, `sand create` with no flags at all is enough.
 for a given field — it refuses to fabricate a commit author. The error names
 the missing field and tells you to pass the flag or set it with
 `git config --global user.name "..."` (or `user.email`).
+
+### `--timezone` follows the host
+
+VMs used to run in **UTC** — not by choice, but because nothing set a timezone
+at all and the Debian/Ubuntu cloud images ship UTC. That made every log line,
+`ls -l`, `date`, and commit timestamp inside a VM disagree with the machine you
+were reading them on.
+
+`sand` now reads the timezone of the host it is running on and provisions the
+guest to match, so `sand create` with no flags gives you a VM whose clock
+agrees with your own. Pass `--timezone` with an IANA name
+(`--timezone Asia/Tokyo`) to override.
+
+The host's zone is detected from, in order: `$TZ`, `/etc/timezone`, and the
+target of the `/etc/localtime` symlink — which covers Linux and macOS. If none
+of those give a usable answer, `sand` falls back to `Etc/UTC`, which is exactly
+the old behaviour.
+
+Use the **canonical** IANA name. Legacy aliases like `US/Eastern`,
+`Canada/Eastern`, and `Japan` live in Debian's separate `tzdata-legacy`
+package, which the base image does not install, so they are rejected with an
+error naming the canonical replacement (`America/New_York`,
+`America/Toronto`, `Asia/Tokyo`). A name the guest doesn't know fails the
+provisioning run loudly rather than silently leaving the VM in UTC.
+
+The timezone is applied in **both** provisioning phases, so a VM cloned from a
+base image built before this feature existed — or built while you were in a
+different timezone — still lands in the right zone. It is deliberately not part
+of the base image's version stamp, so changing timezone does not force a base
+rebuild.
 
 ### `--clone-token` is a credential
 
@@ -210,6 +241,8 @@ Flags:
     	Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
   -recreate
     	If the named instance exists and is sand-managed, delete and re-clone it
+  -timezone string
+    	IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)
   -user string
     	Primary VM user
   -with-claude

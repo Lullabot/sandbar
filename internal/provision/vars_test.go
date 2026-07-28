@@ -21,6 +21,7 @@ func fullConfig() vm.CreateConfig {
 		Disk:       "100GiB",
 		Domain:     "lan",
 		Locale:     "en_US.UTF-8",
+		Timezone:   "America/Toronto",
 		CPUs:       4,
 		CloneURL:   "https://github.com/example/repo.git",
 		CloneToken: `tok"en\with-specials`,
@@ -282,5 +283,55 @@ func TestBuildExtraVars_AptUpgradeIgnoredOnFinalize(t *testing.T) {
 	m := parseVars(t, data)
 	if _, ok := m["base_apt_upgrade"]; ok {
 		t.Errorf("finalize phase unexpectedly emitted base_apt_upgrade: %v", m["base_apt_upgrade"])
+	}
+}
+
+// The timezone is the one guest-identity var that is NOT phase-gated: the base
+// needs it, and finalize needs it too so a clone taken from a base that
+// predates the setting (or from a host that has since moved) still lands in the
+// right zone. Assert every phase, because the whole point is that none of them
+// skips it.
+func TestBuildExtraVars_TimezoneEmittedInEveryPhase(t *testing.T) {
+	for _, phase := range []string{"base", "finalize", "full"} {
+		t.Run(phase, func(t *testing.T) {
+			data, err := BuildExtraVars(fullConfig(), phase, "claude", false)
+			if err != nil {
+				t.Fatalf("BuildExtraVars: %v", err)
+			}
+			if got := parseVars(t, data)["base_timezone"]; got != "America/Toronto" {
+				t.Errorf("base_timezone = %v, want America/Toronto", got)
+			}
+		})
+	}
+}
+
+// An unset Timezone must emit NOTHING rather than an empty string: roles/base's
+// own Etc/UTC default is the intended fallback, and `base_timezone: ""` would
+// override it with a name that fails the guest's zoneinfo assert.
+func TestBuildExtraVars_TimezoneOmittedWhenUnset(t *testing.T) {
+	cfg := fullConfig()
+	cfg.Timezone = ""
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	if _, ok := parseVars(t, data)["base_timezone"]; ok {
+		t.Error("base_timezone present for an empty cfg.Timezone; want the key omitted so the role default stands")
+	}
+}
+
+// The host's timezone reaches the playbook by default, without a flag. This is
+// the seam that would break silently if DefaultCreateConfig stopped consulting
+// the host, since every other test here sets Timezone explicitly.
+func TestBuildExtraVars_DefaultConfigCarriesHostTimezone(t *testing.T) {
+	t.Setenv("TZ", "Australia/Sydney")
+	cfg := vm.DefaultCreateConfig()
+	cfg.User = "andrew"
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	if got := parseVars(t, data)["base_timezone"]; got != "Australia/Sydney" {
+		t.Errorf("base_timezone = %v, want Australia/Sydney from the host", got)
 	}
 }

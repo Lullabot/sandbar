@@ -19,5 +19,10 @@
     toolset_go: false
     toolset_java: false
     toolset_ddev: false
+    # Deliberately NOT the Etc/UTC default: containers already run UTC, so
+    # verifying the default would pass whether or not the role's timezone tasks
+    # ran at all. A zone the container cannot already be in is what proves
+    # base_timezone actually drives the outcome.
+    base_timezone: America/Toronto
   roles:
     - role: base

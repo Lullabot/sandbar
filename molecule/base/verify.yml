@@ -19,18 +19,42 @@
         src: /etc/default/locale
       register: _etc_default_locale
 
-    # Three stable, role-specific outcomes from roles/base/tasks/main.yml:
-    # "Set hostname", "Deploy /etc/hosts" (templates hosts.j2), and "Set
-    # default locale". These are picked because they're plain fact/file
-    # checks independent of the role's heavier, network-dependent apt/repo
-    # work (which this scenario intentionally doesn't assert on).
+    - name: Read /etc/timezone
+      ansible.builtin.slurp:
+        src: /etc/timezone
+      register: _etc_timezone
+
+    # Read the LINK, not what it points at: the whole failure mode worth
+    # catching here is a dangling or stale /etc/localtime, and following the
+    # symlink would hide exactly that.
+    - name: Stat /etc/localtime without following it
+      ansible.builtin.stat:
+        path: /etc/localtime
+        follow: false
+      register: _etc_localtime
+
+    # Four stable, role-specific outcomes from roles/base/tasks/main.yml:
+    # "Set hostname", "Deploy /etc/hosts" (templates hosts.j2), "Set
+    # default locale", and the timezone pair. These are picked because they're
+    # plain fact/file checks independent of the role's heavier,
+    # network-dependent apt/repo work (which this scenario intentionally
+    # doesn't assert on).
+    #
+    # Both halves of the timezone are asserted, because either one alone can be
+    # right while the guest is still wrong: /etc/localtime is what glibc reads,
+    # /etc/timezone is the name every other tool reads, and converge.yml sets a
+    # zone (America/Toronto) that the container is not already in.
     - name: Assert the base role's foundational setup landed
       ansible.builtin.assert:
         that:
           - ansible_facts.hostname == "claude"
           - "'127.0.1.1 claude.lan claude' in (_etc_hosts.content | b64decode)"
           - "'LANG=en_CA.UTF-8' in (_etc_default_locale.content | b64decode)"
+          - (_etc_timezone.content | b64decode).strip() == "America/Toronto"
+          - _etc_localtime.stat.islnk
+          - _etc_localtime.stat.lnk_target == "/usr/share/zoneinfo/America/Toronto"
         fail_msg: >-
           base role's foundational setup (hostname, /etc/hosts,
-          /etc/default/locale) did not land as expected.
+          /etc/default/locale, /etc/timezone + /etc/localtime) did not land as
+          expected.
         success_msg: "base role foundational setup verified."

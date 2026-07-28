@@ -40,6 +40,26 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 		{"samba_enabled", false},
 	}
 
+	// The timezone is emitted for EVERY phase, including finalize — unlike the
+	// locale, which roles/base applies in the base phase only. Two reasons:
+	// the base is shared and long-lived, so a base built before this existed
+	// (or on a host that has since moved) still yields correctly-zoned clones;
+	// and the guest-side work is a symlink, not a locale compile, so re-paying
+	// it per clone costs nothing worth gating on.
+	//
+	// The timezone VALUE is deliberately not an input to the base version stamp
+	// (internal/provision/baseversion.go hashes the playbook fileset and the
+	// toolset key, nothing from here). So a laptop that changes timezone, or two
+	// hosts sharing one base, do not mark that base stale and re-converge it —
+	// the finalize phase re-points each clone instead, which is the cheaper half
+	// and the only one the user actually looks at.
+	//
+	// Empty means "say nothing and let roles/base's Etc/UTC default stand",
+	// which is what a caller that predates the field gets.
+	if cfg.Timezone != "" {
+		items = append(items, varItem{"base_timezone", cfg.Timezone})
+	}
+
 	if cfg.DockerProxyHost != "" {
 		items = append(items,
 			varItem{"devtools_docker_registry_proxy_enabled", true},

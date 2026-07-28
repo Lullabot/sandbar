@@ -92,6 +92,16 @@ Flags:
 	fs.StringVar(&cfg.Memory, "memory", cfg.Memory, "RAM, e.g. 8GiB")
 	fs.StringVar(&cfg.Disk, "disk", cfg.Disk, "Disk size, e.g. 100GiB")
 	fs.StringVar(&cfg.Locale, "locale", cfg.Locale, "System locale")
+	// Registered with an EMPTY default and applied after Parse, rather than
+	// bound straight to cfg.Timezone like --locale above. cfg.Timezone already
+	// holds this host's zone (vm.HostTimezone, via DefaultCreateConfig), and
+	// binding it directly would make the flag package print that value as the
+	// default — so `sand create --help` would read "(default
+	// "America/Toronto")" on one machine and "(default "Europe/Berlin")" on the
+	// next, and the copy of that help text in docs/using-sand/cli-reference.md
+	// would be wrong for almost every reader. Same reason --git-name describes
+	// its host-derived default in prose instead of showing one.
+	timezoneFlag := fs.String("timezone", "", "IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)")
 	fs.StringVar(&cfg.Domain, "domain", cfg.Domain, "Domain suffix")
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
@@ -129,6 +139,14 @@ Flags:
 		return err
 	}
 	cfg.CPUs = n
+
+	// Only an explicitly passed --timezone overrides the host's, which
+	// cfg.Timezone already carries. The guest validates the name against its own
+	// tzdata (roles/base's "Confirm the requested timezone exists in the guest"),
+	// since that is the only side that can actually answer.
+	if *timezoneFlag != "" {
+		cfg.Timezone = *timezoneFlag
+	}
 
 	// Resolve the backend before anything that reads or defaults host-derived
 	// state: the existing base's tool-set stamp lives on whichever host limactl

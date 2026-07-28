@@ -283,6 +283,88 @@
   delay: 5
   when: provision_phase | default('full') != 'finalize'
 
+# --- Timezone. sand fills base_timezone from the HOST it is running on
+# (vm.HostTimezone), so a VM's clock, log timestamps, `ls -l`, and commit times
+# read the same as the machine the developer is watching them from. Without
+# this the guest keeps the cloud image's UTC.
+#
+# Unlike the locale block near the top, these tasks are NOT gated to the base
+# phase: they run in finalize too, so a base built before this existed — or on a
+# host that has since moved timezone — still produces correctly-zoned clones. A
+# symlink and a one-line file are nothing next to a locale compile, so there is
+# no cost worth gating on.
+#
+# Placement is load-bearing: this sits AFTER the single install transaction
+# above because it reads /usr/share/zoneinfo, which is the tzdata package
+# (named in base_packages for exactly this reason). Up with the locale block,
+# where it reads more naturally, a minimal image without tzdata yet would fail
+# the assert below on the very package the next task was about to install. The
+# finalize phase skips that install, but its guest is a clone of a base that
+# already has tzdata, so both phases are covered.
+#
+# The two files are Debian's complete answer, and both are needed: systemd,
+# glibc, and everything that calls localtime(3) read the /etc/localtime symlink,
+# while tzdata's own dpkg-reconfigure and a pile of tooling read the plain name
+# in /etc/timezone. Writing one without the other leaves the guest telling two
+# different stories about what time it is.
+#
+# `timedatectl set-timezone` would write both AND tell systemd, but it needs a
+# live systemd+D-Bus (absent in the molecule container, and not guaranteed at
+# every point of a base build), so this writes the files directly. The trade is
+# that a daemon already running keeps the old zone until it restarts; every
+# shell, command, and service started afterwards — which is all of them, from
+# the user's point of view — gets the new one.
+- name: Confirm the requested timezone exists in the guest
+  ansible.builtin.stat:
+    path: "/usr/share/zoneinfo/{{ base_timezone }}"
+    # Resolve symlinks. This is not a nicety: several extremely ordinary zone
+    # names are links inside the tzdata tree rather than regular files — on
+    # Debian trixie, "UTC" -> "Etc/UTC" and "GMT" -> "Etc/GMT" both are — and
+    # stat defaults to follow: false, which reports those as islnk and would
+    # fail the isreg check below on a name as common as plain "UTC".
+    follow: true
+    get_checksum: false
+  register: _timezone_file
+
+# Without this, an unknown name leaves a DANGLING /etc/localtime and glibc
+# silently falls back to UTC — the exact bug this whole block exists to fix,
+# reintroduced with no error anywhere. Fail loudly instead.
+- name: Fail when the requested timezone is not a zone this guest knows
+  ansible.builtin.assert:
+    that:
+      - _timezone_file.stat.exists
+      - _timezone_file.stat.isreg
+    fail_msg: >-
+      base_timezone is {{ base_timezone | quote }}, but
+      /usr/share/zoneinfo/{{ base_timezone }} is not a zone this guest has.
+      Three things cause this. It may be a LEGACY ALIAS — "US/Eastern",
+      "Canada/Eastern", "Japan" — which modern Debian ships in the separate
+      tzdata-legacy package, not tzdata; use the canonical name instead
+      (America/New_York, America/Toronto, Asia/Tokyo). It may be a multi-part
+      zone only half named: the zone is "America/Argentina/Salta", not
+      "America/Argentina". Or it may simply be a typo. Pass a canonical IANA
+      name via `sand create --timezone`.
+    quiet: true
+
+- name: Point /etc/localtime at the requested timezone
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ base_timezone }}"
+    dest: /etc/localtime
+    state: link
+    # Some images ship /etc/localtime as a copied regular file rather than a
+    # symlink; without force this task fails on those instead of converting.
+    force: true
+    owner: root
+    group: root
+
+- name: Record the timezone name in /etc/timezone
+  ansible.builtin.copy:
+    dest: /etc/timezone
+    content: "{{ base_timezone }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
 # Let an SSH client forward COLORTERM so truecolor terminals (iTerm2, WezTerm,
 # kitty, Ghostty, …) keep 24-bit color instead of being downgraded to 256-color:
 # Debian's sshd accepts only LANG/LC_* by default, so a client's `SendEnv COLORTERM`

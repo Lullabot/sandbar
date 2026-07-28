@@ -66,6 +66,7 @@ type CreateConfig struct {
 	Memory          string
 	Disk            string
 	Locale          string
+	Timezone        string
 	Domain          string
 	DockerProxyHost string
 	CloneURL        string
@@ -94,12 +95,19 @@ type CreateConfig struct {
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
 func DefaultCreateConfig() CreateConfig {
 	return CreateConfig{
-		Name:       "claude",
-		BaseName:   "sandbar-base",
-		Memory:     "8GiB",
-		Disk:       "100GiB",
-		Domain:     "lan",
-		Locale:     "en_US.UTF-8",
+		Name:     "claude",
+		BaseName: "sandbar-base",
+		Memory:   "8GiB",
+		Disk:     "100GiB",
+		Domain:   "lan",
+		Locale:   "en_US.UTF-8",
+		// Unlike every other field here, the timezone default is read from the
+		// HOST rather than hardcoded: a VM whose clock disagrees with the
+		// machine you are reading its output on is a papercut with no upside,
+		// and there is no sensible universal constant to pick instead. It
+		// degrades to FallbackTimezone ("Etc/UTC") — the old behaviour — when
+		// the host will not say. Override with `sand create --timezone`.
+		Timezone:   HostTimezone(),
 		CPUs:       2,
 		WithClaude: true,
 		WithDDEV:   true,
