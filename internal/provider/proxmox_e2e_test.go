@@ -30,10 +30,21 @@
 //	PROXMOX_E2E_TOKEN_FILE   path to a 0600 file holding user@realm!tokenid=uuid
 //	PROXMOX_E2E_SSH_USER     the cloud-init guest login user (the ciuser sand provisions)
 //	PROXMOX_E2E_SSH_IDENTITY path to the private key that reaches the guest
-//	PROXMOX_E2E_IMAGE        cloud-image URL to import for the base (qcow2/raw/…; NOT .img)
+//
+// A leading ~ in the two path vars is expanded here, exactly as the product
+// expands identity_path and token_file from a profile — the suite reads them
+// straight out of the environment, where no shell has done it for us.
 //
 // Optional:
 //
+//	PROXMOX_E2E_IMAGE            cloud-image URL the base template is built from
+//	                             (qcow2/raw/…; NOT .img), fed to TargetConfig.BaseImage.
+//	                             LEAVE IT UNSET to use sand's own default golden
+//	                             image: sand needs qemu-guest-agent running on
+//	                             first boot to learn a VM's IP, and a stock cloud
+//	                             image does not ship it, so most overrides here
+//	                             will hang the lifecycle test rather than teach
+//	                             you anything.
 //	PROXMOX_E2E_INSECURE=1       skip TLS verification (self-signed PVE cert)
 //	PROXMOX_E2E_FOREIGN_VMID     a VMID OUTSIDE the pool, for the isolation test.
 //	                             The isolation test skips if unset, and NEVER
@@ -45,7 +56,6 @@
 //	  PROXMOX_E2E_POOL=sandbar-test PROXMOX_E2E_STORAGE=local-lvm PROXMOX_E2E_BRIDGE=vmbr0 \
 //	  PROXMOX_E2E_TOKEN_FILE=~/.config/sandbar/pve-test.token \
 //	  PROXMOX_E2E_SSH_USER=debian PROXMOX_E2E_SSH_IDENTITY=~/.ssh/id_ed25519 \
-//	  PROXMOX_E2E_IMAGE=https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2 \
 //	  PROXMOX_E2E_FOREIGN_VMID=100 \
 //	  go test -tags proxmoxe2e -timeout 45m -run TestE2EProxmox -v ./internal/provider/
 package provider_test
@@ -60,6 +70,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
@@ -102,11 +113,28 @@ func proxmoxE2ETargetConfig(t *testing.T) provider.TargetConfig {
 		Storage:      os.Getenv(proxmoxE2EStorage),
 		ImageStorage: os.Getenv(proxmoxE2EImageStore), // "" -> NewProxmox defaults to "local"
 		Bridge:       os.Getenv(proxmoxE2EBridge),
-		TokenFile:    os.Getenv(proxmoxE2ETokenFile),
+		TokenFile:    proxmoxE2EPath(t, proxmoxE2ETokenFile),
 		User:         os.Getenv(proxmoxE2ESSHUser),
-		IdentityPath: os.Getenv(proxmoxE2ESSHIdentity),
+		IdentityPath: proxmoxE2EPath(t, proxmoxE2ESSHIdentity),
+		BaseImage:    os.Getenv(proxmoxE2EImage), // "" -> NewProxmox uses the default golden image
 		Insecure:     os.Getenv(proxmoxE2EInsecure) != "",
 	}
+}
+
+// proxmoxE2EPath reads a path-valued env var and expands a leading ~, which no
+// shell has done for us: these vars are usually set from a saved env file or a
+// CI secret, and every consumer here (os.ReadFile on the token, ssh -i on the
+// identity) hands the value to a syscall rather than to a shell. NewProxmox
+// expands both again on the way in — harmless, since expansion is idempotent —
+// but doing it at the boundary is what lets the RAW client below share one
+// already-resolved path with the provider instead of re-deriving it.
+func proxmoxE2EPath(t *testing.T, env string) string {
+	t.Helper()
+	expanded, err := profiles.ExpandHome(os.Getenv(env))
+	if err != nil {
+		t.Fatalf("%s: %v", env, err)
+	}
+	return expanded
 }
 
 // skipUnlessProxmoxE2EConfigured takes the clean-skip path on a box with no
@@ -122,7 +150,7 @@ func skipUnlessProxmoxE2EConfigured(t *testing.T) provider.TargetConfig {
 	for _, k := range []string{
 		proxmoxE2EHost, proxmoxE2ENode, proxmoxE2EPool, proxmoxE2EStorage,
 		proxmoxE2EBridge, proxmoxE2ETokenFile, proxmoxE2ESSHUser,
-		proxmoxE2ESSHIdentity, proxmoxE2EImage,
+		proxmoxE2ESSHIdentity,
 	} {
 		if os.Getenv(k) == "" {
 			t.Skipf("set %s (and %s=1) to run the Proxmox e2e test", k, proxmoxE2EEnabled)
@@ -160,7 +188,9 @@ func proxmoxContainsVM(vms []vm.VM, name string) bool {
 // or to cut a VM's power out from under a live session — drive this directly.
 func proxmoxE2EClient(t *testing.T, cfg provider.TargetConfig) *pve.Client {
 	t.Helper()
-	token, err := os.ReadFile(os.Getenv(proxmoxE2ETokenFile))
+	// cfg.TokenFile, not the raw env var: proxmoxE2ETargetConfig has already
+	// expanded a leading ~, and os.ReadFile would take "~/…" literally.
+	token, err := os.ReadFile(cfg.TokenFile)
 	if err != nil {
 		t.Fatalf("read token file: %v", err)
 	}
