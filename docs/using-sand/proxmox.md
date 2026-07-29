@@ -431,7 +431,10 @@ export PROXMOX_E2E_BRIDGE=vmbr0
 export PROXMOX_E2E_TOKEN_FILE=~/.config/sandbar/pve-test.token
 export PROXMOX_E2E_SSH_USER=debian            # the cloud-init guest login user
 export PROXMOX_E2E_SSH_IDENTITY=~/.ssh/id_ed25519
-export PROXMOX_E2E_IMAGE=https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+# export PROXMOX_E2E_IMAGE=https://…/my-base.qcow2   # optional; unset uses the
+                                                     # default golden image, the
+                                                     # only one with the guest
+                                                     # agent the suite needs
 # export PROXMOX_E2E_INSECURE=1               # if the PVE cert is self-signed
 
 # Optional: a VMID OUTSIDE the test pool, to prove the token cannot touch it.
