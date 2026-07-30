@@ -9,7 +9,6 @@ import (
 
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landgh"
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -403,10 +402,10 @@ func TestRequireRunningVM(t *testing.T) {
 }
 
 // requireRunningVM's not-running/unknown errors must be distinguishable from
-// lima.ErrNoSuchInstance's sentinel — sanity check that the wrapping doesn't
+// vm.ErrNotFound's sentinel — sanity check that the wrapping doesn't
 // accidentally hide it from a caller that wants errors.Is.
-func TestRequireRunningVMWrapsErrNoSuchInstance(t *testing.T) {
-	l := stubVMLister{err: lima.ErrNoSuchInstance}
+func TestRequireRunningVMWrapsErrNotFound(t *testing.T) {
+	l := stubVMLister{err: vm.ErrNotFound}
 	_, err := requireRunningVM(l, "foo")
 	if err == nil || !strings.Contains(err.Error(), `no VM named "foo"`) {
 		t.Errorf("requireRunningVM error = %v, want the friendly no-such-VM message", err)

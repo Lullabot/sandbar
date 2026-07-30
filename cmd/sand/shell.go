@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -171,7 +170,7 @@ connection profile, --profile picks which one to attach to.
 func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 	found, err := l.Get(name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return nil, fmt.Errorf("sand shell: no VM named %q (run 'sand' to list instances)", name)
 		}
 		return nil, fmt.Errorf("sand shell: %w", err)

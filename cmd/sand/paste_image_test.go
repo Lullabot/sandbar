@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -28,7 +27,7 @@ func (s stubVMGetter) Get(name string) (vm.VM, error) {
 			return v, nil
 		}
 	}
-	return vm.VM{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+	return vm.VM{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 }
 
 // TestPasteImageTargetNotRunning verifies the Running guard: a VM that exists

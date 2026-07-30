@@ -41,8 +41,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // sandbarTag is the tag MarkManaged adds and Unmark removes. Proxmox VE
@@ -291,7 +291,7 @@ func (p *proxmoxProvider) Provenance(ctx context.Context) (map[string]Provenance
 func (p *proxmoxProvider) ProvenanceOf(ctx context.Context, name string) (Provenance, bool, error) {
 	vmid, _, err := p.resolve(ctx, name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return Provenance{}, false, nil
 		}
 		return Provenance{}, false, err
@@ -312,14 +312,14 @@ func (p *proxmoxProvider) ProvenanceOf(ctx context.Context, name string) (Proven
 // observe the tag present without the block, or vice versa.
 //
 // Like the sidecar-file provider, this REFUSES to mark an instance that does
-// not exist — resolve's ErrNoSuchInstance becomes ErrNoInstance here for the
+// not exist — resolve's vm.ErrNotFound becomes ErrNoInstance here for the
 // same reason limaprovenance.go's Stat check exists: a marker write with
 // nowhere legitimate to land is a bug at the call site, not something to
 // paper over by inventing config for a VMID sand never created.
 func (p *proxmoxProvider) MarkManaged(ctx context.Context, name string, pv Provenance) error {
 	vmid, _, err := p.resolve(ctx, name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return fmt.Errorf("proxmox: mark %s managed: %w", name, ErrNoInstance)
 		}
 		return err
@@ -360,7 +360,7 @@ func (p *proxmoxProvider) MarkManaged(ctx context.Context, name string, pv Prove
 func (p *proxmoxProvider) Unmark(ctx context.Context, name string) error {
 	vmid, _, err := p.resolve(ctx, name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return nil
 		}
 		return err

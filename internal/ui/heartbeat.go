@@ -58,8 +58,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/sshx"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -659,8 +659,8 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	epoch := r.nextEpoch
 	// WithoutMux: this connection lives as long as the board does, so it must not
 	// ride (or become) the shared control master — one master's death would
-	// otherwise take every VM's gauges down with it. See lima.WithoutMux.
-	ctx, cancel := context.WithCancel(lima.WithoutMux(context.Background()))
+	// otherwise take every VM's gauges down with it. See sshx.WithoutMux.
+	ctx, cancel := context.WithCancel(sshx.WithoutMux(context.Background()))
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)

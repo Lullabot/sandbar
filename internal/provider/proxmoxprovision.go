@@ -46,7 +46,6 @@ import (
 	"time"
 
 	sandbar "github.com/lullabot/sandbar"
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -125,11 +124,11 @@ var cloneSerial sync.Map // key string -> *sync.Mutex
 func (p *proxmoxProvider) createInstance(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
 	// Existence check only: Status resolves the VM (name->VMID + status) WITHOUT
 	// Get's whole-storage content listing (diskUsedIndex), whose DiskUsed we would
-	// only discard here. It reports lima.ErrNoSuchInstance for an absent VM just
+	// only discard here. It reports vm.ErrNotFound for an absent VM just
 	// as Get does.
 	if _, err := p.Status(cfg.Name); err == nil {
 		return fmt.Errorf("proxmox: vm %q already exists in pool %q — delete it first, or choose a different name", cfg.Name, p.pool)
-	} else if !errors.Is(err, lima.ErrNoSuchInstance) {
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		// A permission error (or any non-absence failure) must not be read as
 		// "safe to create": that is how a duplicate gets built on a VM the token
 		// simply could not see.
@@ -143,7 +142,7 @@ func (p *proxmoxProvider) createInstance(ctx context.Context, cfg vm.CreateConfi
 // spuriously refuse the recreate before the delete has settled. opts carries the
 // base intent, so `create --recreate --rebuild` still asks for a base rebuild.
 func (p *proxmoxProvider) recreateInstance(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
+	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, vm.ErrNotFound) {
 		return fmt.Errorf("proxmox: deleting %s for recreate: %w", cfg.Name, err)
 	}
 	return p.provisionClone(ctx, cfg, opts, out)
@@ -298,7 +297,7 @@ func (p *proxmoxProvider) ensureBaseTemplate(ctx context.Context, cfg vm.CreateC
 func (p *proxmoxProvider) lookupTemplate(ctx context.Context, name string) (vmid int, exists bool, err error) {
 	vmid, err = p.lookupVMID(ctx, name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return 0, false, nil
 		}
 		return 0, false, err
@@ -843,7 +842,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 		if err != nil {
 			// Nothing to preserve from a VM that is not there; fall through to a
 			// clean recreate rather than fail.
-			if !errors.Is(err, lima.ErrNoSuchInstance) {
+			if !errors.Is(err, vm.ErrNotFound) {
 				return err
 			}
 		} else {
@@ -885,7 +884,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	}
 
 	// 2. Delete the existing VM (force), then re-clone from the base.
-	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
+	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, vm.ErrNotFound) {
 		return wrap(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
 	}
 

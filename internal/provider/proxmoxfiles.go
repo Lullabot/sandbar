@@ -7,6 +7,17 @@ package provider
 // the overlay read) is reaching for sand's own state ABOUT an instance, not for
 // anything Lima-specific. So the answer is not to fake a Lima host: it is to say
 // where that state lives when there is no shared filesystem to put it on.
+//
+// This is also the LAST thing this backend takes from internal/lima. The ssh
+// transport, the mux opt-out, the absence sentinel and the guest tmux expression
+// all moved to neutral homes (internal/sshx, internal/guestsh, internal/vm)
+// once a second backend needed them; HostFiles stayed because it is not just
+// misnamed, it is genuinely Lima-shaped — LimaHome, StagePlaybook (a path for
+// `limactl start` to bind-mount) and ReadInstanceMarkers (a walk of Lima
+// instance directories) all describe Lima's own layout, and the overrides below
+// are this backend translating that vocabulary rather than reusing it. Moving
+// the interface would mean renaming the Provider seam's whole file-state
+// contract, which is a change to the seam, not to where a helper lives.
 
 import (
 	"context"

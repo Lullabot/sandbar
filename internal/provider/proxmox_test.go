@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -502,18 +502,18 @@ func TestProxmoxGetUsesSingleVMEndpoint(t *testing.T) {
 	}
 }
 
-// TestProxmoxGetUnknownIsErrNoSuchInstance covers both ways a VM can be unknown:
+// TestProxmoxGetUnknownIsErrNotFound covers both ways a VM can be unknown:
 // absent from the pool entirely, and a cached id the API now 404s. Consumers
 // branch on this sentinel, so a differently-shaped error silently breaks them.
-func TestProxmoxGetUnknownIsErrNoSuchInstance(t *testing.T) {
+func TestProxmoxGetUnknownIsErrNotFound(t *testing.T) {
 	t.Run("absent from the pool", func(t *testing.T) {
 		m := newPVEMock(t)
 		m.data("/cluster/resources", clusterResources)
 		p := newProxmoxForTest(t, m)
 
 		_, err := p.Get("ghost")
-		if !errors.Is(err, lima.ErrNoSuchInstance) {
-			t.Fatalf("Get(ghost) err = %v; want lima.ErrNoSuchInstance", err)
+		if !errors.Is(err, vm.ErrNotFound) {
+			t.Fatalf("Get(ghost) err = %v; want vm.ErrNotFound", err)
 		}
 	})
 
@@ -527,8 +527,8 @@ func TestProxmoxGetUnknownIsErrNoSuchInstance(t *testing.T) {
 			t.Fatalf("List: %v", err)
 		}
 		_, err := p.Get("web")
-		if !errors.Is(err, lima.ErrNoSuchInstance) {
-			t.Fatalf("Get after a 404 err = %v; want lima.ErrNoSuchInstance", err)
+		if !errors.Is(err, vm.ErrNotFound) {
+			t.Fatalf("Get after a 404 err = %v; want vm.ErrNotFound", err)
 		}
 	})
 }
@@ -550,7 +550,7 @@ func TestProxmoxGetPermissionErrorIsNotMistakenForAbsence(t *testing.T) {
 	if err == nil {
 		t.Fatal("Get: want an error for a 403")
 	}
-	if errors.Is(err, lima.ErrNoSuchInstance) {
+	if errors.Is(err, vm.ErrNotFound) {
 		t.Fatalf("Get err = %v; a 403 must NOT be reported as a missing instance", err)
 	}
 	if !strings.Contains(err.Error(), "Forbidden") {
@@ -1271,7 +1271,7 @@ func TestProxmoxAttachArgvWrapsTheGuestTmuxExpression(t *testing.T) {
 	if idx < 0 {
 		t.Fatalf("AttachArgv missing the guest target: %v", got)
 	}
-	want := lima.GuestAttachArgv("truecolor")
+	want := guestsh.AttachArgv("truecolor")
 	if tail := got[idx+1:]; len(tail) != 3 || tail[0] != want[0] || tail[1] != want[1] {
 		t.Fatalf("AttachArgv tail = %v; want %v", tail, want)
 	}

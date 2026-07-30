@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // fakeRunner records the argv of every call and returns canned bytes/errors so
@@ -271,7 +273,7 @@ func TestGetAsksAboutOneInstanceNotTheWholeListing(t *testing.T) {
 // say "no VM named x" rather than leaking "unmatched instances" at the user.
 func TestGetUnknownInstance(t *testing.T) {
 	f := &fakeRunner{err: errors.New(`limactl list nope: fatal msg="unmatched instances"`)}
-	if _, err := New(f).Get("nope"); !errors.Is(err, ErrNoSuchInstance) {
-		t.Errorf("Get(unknown) = %v, want ErrNoSuchInstance", err)
+	if _, err := New(f).Get("nope"); !errors.Is(err, vm.ErrNotFound) {
+		t.Errorf("Get(unknown) = %v, want vm.ErrNotFound", err)
 	}
 }

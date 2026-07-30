@@ -8,19 +8,19 @@ package lima
 // filesystem). A remote-Lima provider (internal/provider) is the local Lima
 // provider configured with one of these instead of an execRunner + LocalFiles.
 //
-// Two things are load-bearing and easy to lose across the transport swap:
+// The ssh argvs themselves are built by internal/sshx, which owns everything
+// about reaching a machine sand does not run on — the shell-quoting of remote
+// tokens, the identity and host-key flags, the keepalives, the ControlMaster
+// socket sharing — for every backend. What is left here is the LIMA half: the
+// `LIMA_HOME=… limactl` prefix, the instance files read off the remote host, the
+// two-stage copy across the hop, and the remote base-image lock.
 //
-//   - STDOUT/STDERR SEPARATION and cmd.WaitDelay reaping, both exactly as the
-//     local execRunner does them (runner.go). Over SSH the orphan chain is one
-//     generation deeper — our ssh child forks a remote limactl which forks the
-//     guest ssh — which is PRECISELY the multi-generation orphan WaitDelay exists
-//     to reap; a cancel must still tear the whole chain down. See Stream/StreamOut.
-//   - SHELL QUOTING of every remote token. `ssh host a b c` joins the tokens with
-//     spaces and re-parses them through the remote login shell, so any token with
-//     a space or metacharacter (the provision script, an `edit --set` expression,
-//     the guest tmux attach expression) must be shell-quoted or the remote shell
-//     word-splits it. The local execRunner needs none of this — execve passes argv
-//     verbatim — so this quoting is the one genuinely new hazard here.
+// One thing is load-bearing on this side of that split: STDOUT/STDERR
+// SEPARATION and cmd.WaitDelay reaping, both exactly as the local execRunner
+// does them (runner.go). Over SSH the orphan chain is one generation deeper —
+// our ssh child forks a remote limactl which forks the guest ssh — which is
+// PRECISELY the multi-generation orphan WaitDelay exists to reap; a cancel must
+// still tear the whole chain down. See Stream/StreamOut.
 
 import (
 	"bufio"
@@ -30,83 +30,36 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/sshx"
 )
 
-// SSHConfig is the connection identity for a remote Lima host. It is secret-free:
-// IdentityPath is a PATH to a private key file, never key material (the same
-// contract provider.TargetConfig keeps so the target can be persisted in the
-// registry).
-type SSHConfig struct {
-	Host string // required
-	User string // "" lets ssh use its own default (ssh_config / local user)
-	Port int    // <=0 or 22 omits -p / -P entirely
-	// IdentityPath is a private-key FILE path, or "" to fall back to the ambient
-	// ssh agent / ssh_config. Never key material.
-	IdentityPath string
-	// IdentitiesOnly, when true (and IdentityPath is set), adds `-o
-	// IdentitiesOnly=yes` so ssh offers ONLY IdentityPath and never the keys the
-	// ssh agent or ssh_config would otherwise volunteer.
-	//
-	// It is for a backend whose guest trusts exactly one key — the one sand had
-	// cloud-init install from identity_path (the Proxmox provider) — where every
-	// other key ssh could offer is guaranteed to be refused. Two failures follow
-	// from offering them anyway. A locked or unusable agent key turns a single
-	// refusal into a run of them, and the guest's sshd disconnects at MaxAuthTries
-	// (6 by default) with "Too many authentication failures" instead of a clean
-	// "Permission denied" — a far more confusing failure for the same underlying
-	// cause. Worse, an agent holding six or more keys can exhaust MaxAuthTries
-	// BEFORE ssh ever gets to offer the right one, so a correctly-provisioned
-	// guest and a perfectly good unlocked key still fail to connect.
-	//
-	// The remote-Lima hop deliberately leaves this FALSE: that host is a machine
-	// the user configured and authenticates to on their own terms, so an agent key
-	// or an ssh_config IdentityFile is a legitimate way in, and restricting the
-	// offer to IdentityPath would break connections that work today.
-	IdentitiesOnly bool
-	// EphemeralHostKeys, when true, adds `-o StrictHostKeyChecking=no -o
-	// UserKnownHostsFile=/dev/null -o LogLevel=ERROR` to every ssh and scp argv.
-	// It is for a backend whose "host" is a freshly-created VM reached at a
-	// recycled IP (the Proxmox provider): that guest's host key is never in
-	// known_hosts, and a rebuilt VM presents a DIFFERENT key on an IP the last one
-	// used, so the OpenSSH default (StrictHostKeyChecking=ask) opens /dev/tty to
-	// prompt — hanging a TUI that owns the terminal, and then failing the
-	// provisioning ssh with "Host key verification failed" — while a strict-yes
-	// setup would hard-fail the moment an IP is reused. /dev/null keeps those
-	// throwaway keys out of the user's real known_hosts, and LogLevel=ERROR mutes
-	// the "Permanently added …" warning that would otherwise bleed into the
-	// message log.
-	//
-	// The remote-Lima hop deliberately leaves this FALSE: that host is a
-	// persistent machine the user configured, where trust-on-first-use host-key
-	// pinning is the right default and a changed key genuinely warrants a stop.
-	EphemeralHostKeys bool
-	// RemoteLimaHome is LIMA_HOME on the remote host. "" defaults to defaultRemoteLimaHome,
-	// a path RELATIVE to the remote login home (see LimaHome) — Lima's own default.
-	RemoteLimaHome string
-}
-
-// defaultRemoteLimaHome is where a remote host keeps its Lima state when
-// SSHConfig.RemoteLimaHome is unset/empty. It is RELATIVE (no leading / or ~)
-// on purpose:
-// the remote login home is unknown from here without a round trip, and a relative
-// path handed to `ssh host cat .lima/…` resolves against the remote $HOME, which
-// is exactly `~/.lima` — Lima's default — without us having to learn the remote
+// defaultRemoteLimaHome is where a remote host keeps its Lima state when the
+// caller names none. It is RELATIVE (no leading / or ~) on purpose: the remote
+// login home is unknown from here without a round trip, and a relative path
+// handed to `ssh host cat .lima/…` resolves against the remote $HOME, which is
+// exactly `~/.lima` — Lima's default — without us having to learn the remote
 // home first.
 const defaultRemoteLimaHome = ".lima"
 
 // SSHHost is the SSH host-access implementation: a Runner AND a HostFiles (i.e. a
 // Host), plus the two-stage copyAcrossHop and the ssh-wrapped interactive attach.
 type SSHHost struct {
-	cfg SSHConfig
+	// conn builds every ssh and scp argv this host runs. It is the shared,
+	// backend-agnostic transport (internal/sshx); nothing about the flags it
+	// threads in is specific to Lima.
+	conn *sshx.Conn
+
+	// limaHome is LIMA_HOME on the remote host — see LimaHome.
+	limaHome string
+
 	// newCmd is the injectable seam that turns a fully-built ssh/scp argv into an
 	// *exec.Cmd. Production is exec.CommandContext; a unit test swaps it to RECORD
 	// the argv (the assertion target) and return a stand-in command, so the exact
@@ -123,22 +76,6 @@ type SSHHost struct {
 	// after the first `stat -c` rejection every later Stat/DiskAllocBytes goes
 	// straight to the BSD `-f` form instead of paying a doomed GNU probe first.
 	statBSD atomic.Bool
-
-	// controlDir, when non-empty, holds the OpenSSH ControlMaster unix-domain
-	// sockets for this process's ssh connections (see muxFlags). It is resolved
-	// once at construction (NewSSHHost) and left EMPTY when it could not be
-	// determined or created — connection multiplexing is a pure optimization,
-	// never a hard requirement for reaching the remote host, so a failure here
-	// must silently fall back to the pre-multiplexing argv shape rather than
-	// failing construction or any later command.
-	controlDir string
-
-	// debugLogPath, when non-empty, is the file ssh appends its own verbose
-	// protocol log to (see debugFlags). It is opt-in via SAND_SSH_DEBUG and
-	// resolved once at construction, for the same reason controlDir is: a
-	// failure to resolve it must degrade to "no transport log", never to a
-	// failed command.
-	debugLogPath string
 }
 
 // Compile-time proof the SSH host satisfies the whole seam and the copy hook.
@@ -148,405 +85,35 @@ var (
 )
 
 // NewSSHHost builds an SSH host-access implementation for the given connection.
-func NewSSHHost(cfg SSHConfig) *SSHHost {
-	if cfg.RemoteLimaHome == "" {
-		cfg.RemoteLimaHome = defaultRemoteLimaHome
+// limaHome is LIMA_HOME on the remote host; "" takes Lima's own default (see
+// defaultRemoteLimaHome). The connection identity itself is sshx's — this
+// package adds only where Lima keeps its state on the far side.
+func NewSSHHost(cfg sshx.Config, limaHome string) *SSHHost {
+	if limaHome == "" {
+		limaHome = defaultRemoteLimaHome
 	}
-	h := &SSHHost{cfg: cfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
-		return exec.CommandContext(ctx, argv[0], argv[1:]...)
-	}}
-
-	// Resolve a per-user control-socket directory for OpenSSH connection
-	// multiplexing (see muxFlags). Best-effort: os.UserCacheDir or the MkdirAll
-	// can fail (a read-only/unset HOME, a sandboxed environment), and that must
-	// never make constructing an SSHHost — or any command it later runs — fail.
-	// It just means every command pays a fresh ssh handshake, exactly as before
-	// this feature existed.
-	if cacheDir, err := os.UserCacheDir(); err == nil {
-		dir := filepath.Join(cacheDir, "sandbar", "ssh")
-		if err := os.MkdirAll(dir, 0o700); err == nil {
-			h.controlDir = dir
-		}
+	return &SSHHost{
+		conn:     sshx.New(cfg),
+		limaHome: limaHome,
+		newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
+			return exec.CommandContext(ctx, argv[0], argv[1:]...)
+		},
 	}
-	h.debugLogPath = resolveDebugLog(cfg)
-	return h
-}
-
-// resolveDebugLog returns the file ssh should append its verbose log to for this
-// connection, or "" when the host did not ask for one.
-//
-// SAND_SSH_DEBUG is an ABSOLUTE directory path to write the logs into, or any
-// other non-empty value except "0" (e.g. "1") to use a default directory beside
-// the control sockets. Only an absolute path is read as a destination: a
-// relative one would resolve against whatever working directory the process
-// happens to have, which for a TUI launched from anywhere is not a place a user
-// can predict — so it is treated as a plain "on" instead.
-//
-// The log is per TARGET, not per command: a single provisioning run
-// makes many ssh calls to one guest and — with multiplexing on — some of them
-// are mux clients of a master started by an earlier one, so the only view that
-// explains a transport failure is all of them interleaved in one file, in order.
-//
-// Best-effort throughout: an unresolvable cache dir or an uncreatable directory
-// yields "", which just means no log. Diagnostics must never be able to fail a
-// command.
-func resolveDebugLog(cfg SSHConfig) string {
-	v := os.Getenv("SAND_SSH_DEBUG")
-	if v == "" || v == "0" {
-		return ""
-	}
-	dir := v
-	if !filepath.IsAbs(v) {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(cacheDir, "sandbar", "ssh-debug")
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return ""
-	}
-	return filepath.Join(dir, debugLogName(cfg)+".log")
-}
-
-// debugLogName renders a connection identity as a single filename-safe token, so
-// a target that is a bare IPv4 address, an IPv6 literal, or a user@host all
-// produce a name that is readable and cannot escape the log directory.
-func debugLogName(cfg SSHConfig) string {
-	name := cfg.Host
-	if cfg.User != "" {
-		name = cfg.User + "@" + name
-	}
-	if cfg.Port > 0 && cfg.Port != 22 {
-		name += "-" + strconv.Itoa(cfg.Port)
-	}
-	safe := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			return r
-		case r == '.', r == '-', r == '_', r == '@':
-			return r
-		}
-		return '-'
-	}, name)
-	if safe == "" {
-		return "ssh"
-	}
-	return safe
-}
-
-// DebugLogPath is the transport log this connection is writing, or "" when
-// SAND_SSH_DEBUG did not ask for one. A caller that reports an ssh-level failure
-// uses it to point the user at the evidence (see the Proxmox provider's
-// transport-error annotation), which is the whole reason the path is resolved
-// once and remembered rather than recomputed at the failure site.
-func (h *SSHHost) DebugLogPath() string { return h.debugLogPath }
-
-// --- ssh/scp argv construction --------------------------------------------------
-
-// shellSafe matches a token that needs no shell quoting: it survives the remote
-// shell's word-splitting and expansion untouched. Anything else is single-quoted.
-var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
-
-// shellQuote quotes s for the REMOTE shell that ssh re-parses the joined command
-// through. A safe token is returned verbatim (so `ssh host limactl list --format
-// json` reads cleanly); anything with a space or metacharacter is single-quoted,
-// with embedded single quotes handled by the standard '\” splice. The empty
-// string becomes ” rather than vanishing.
-func shellQuote(s string) string {
-	if s != "" && shellSafe.MatchString(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-// target is the ssh/scp destination: user@host, or host when no user is set.
-func (h *SSHHost) target() string {
-	if h.cfg.User != "" {
-		return h.cfg.User + "@" + h.cfg.Host
-	}
-	return h.cfg.Host
-}
-
-// muxFlags returns the OpenSSH connection-multiplexing flags shared by every
-// ssh and scp argv, or nil when controlDir could not be resolved (a pure
-// optimization, never a hard requirement — see NewSSHHost).
-//
-//   - ControlMaster=auto: the first connection to a target becomes the master;
-//     every later one to the SAME target (the 5s board refresh, a per-VM file
-//     read, a heartbeat restart, an interactive attach, an scp transfer, even
-//     the final refresh batched alongside tea.Quit) reuses its already
-//     -authenticated channel instead of paying a fresh handshake. Without this,
-//     a user whose ssh agent needs a per-connection unlock (a 1Password /
-//     SSH-agent prompt) gets re-prompted on EVERY one of those — on startup
-//     preflight, every refresh tick, and even at quit.
-//   - ControlPath=<controlDir>/%C: %C is ssh's OWN hash of local host + remote
-//     host + port + user, so the unix-domain socket path stays short (there is
-//     a hard AF_UNIX path-length limit) and unique per target without us
-//     computing anything.
-//   - ControlPersist=600: keeps the master alive for 600s after the LAST client
-//     disconnects, so a quick quit+relaunch (or the heartbeat's own periodic
-//     reconnect) finds the same still-authenticated master instead of
-//     re-prompting. The master exits on its own once idle that long — nothing
-//     is left running indefinitely.
-func (h *SSHHost) muxFlags() []string {
-	if h.controlDir == "" {
-		return nil
-	}
-	return []string{
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(h.controlDir, "%C"),
-		"-o", "ControlPersist=600",
-	}
-}
-
-// muxOptOutKey carries WithoutMux's opt-out on a context.
-type muxOptOutKey struct{}
-
-// WithoutMux marks a context's command as one that must NOT share (or become)
-// the connection-multiplexing master, and it exists because sharing is only a
-// good trade for SHORT commands.
-//
-// Every ssh sand runs to a given target reuses one master (see muxFlags), and
-// with ControlMaster=auto the master is whichever connection got there first —
-// which may be a command sand considers disposable and kills on a cancelled
-// context. When a master dies, EVERY session multiplexed through it dies in the
-// same instant. Field evidence: 28 master deaths in one session's transport log,
-// each taking down a burst of five or six sessions at once — every VM's gauges
-// and sweep, plus whatever provisioning was in flight.
-//
-// The long-lived probes (internal/ui's heartbeat and checkout sweep) hold one
-// connection each for their whole life, so multiplexing saves them nothing: they
-// pay one handshake either way. They are also the most likely candidates to
-// BECOME the master (they connect early and last longest) and the biggest losers
-// when one dies. Opting them out is therefore all upside — it costs one TCP
-// connection per running VM, which is what they already hold, and it decouples
-// their fate from every other command's.
-//
-// ControlPath=none as well as ControlMaster=no: without it, `ssh` still consults
-// (and can be blocked by) an existing socket. This does NOT stop the short
-// commands — refresh reads, file copies, provisioning steps, the interactive
-// attach — from multiplexing among themselves, which is where the saved
-// handshakes (and the un-repeated agent prompts) actually matter.
-func WithoutMux(ctx context.Context) context.Context {
-	return context.WithValue(ctx, muxOptOutKey{}, true)
-}
-
-// MuxSuppressed reports whether ctx carries WithoutMux's opt-out. Exported for
-// the Proxmox provider, whose guest transport is direct ssh built from this
-// package's argv rather than limactl over the hop.
-func MuxSuppressed(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	optedOut, _ := ctx.Value(muxOptOutKey{}).(bool)
-	return optedOut
-}
-
-// sshBase is the ssh argv prefix up to and INCLUDING the target: `ssh [-t] [-p
-// port] [-i identity] [host-key flags] [keepalives] [debug log] [mux flags]
-// target`. tty adds -t for the interactive attach. Port is omitted at the
-// default (<=0 or 22) and identity when unset, the multiplexing flags are
-// omitted when controlDir could not be resolved, and the debug flags only
-// appear when the host asked for a transport log — so the common case is the
-// bare `ssh <keepalives> target …` the tests pin.
-//
-// mux false replaces the multiplexing flags with an explicit opt-out, for a
-// long-lived command that must not share (or become) the master — see
-// WithoutMux, which is how a caller asks for it.
-func (h *SSHHost) sshBase(tty, mux bool) []string {
-	a := []string{"ssh"}
-	if tty {
-		a = append(a, "-t")
-	}
-	if h.cfg.Port > 0 && h.cfg.Port != 22 {
-		a = append(a, "-p", strconv.Itoa(h.cfg.Port))
-	}
-	a = append(a, h.identityFlags()...)
-	a = append(a, h.ephemeralHostKeyFlags()...)
-	a = append(a, keepaliveFlags()...)
-	a = append(a, h.debugFlags()...)
-	if mux {
-		a = append(a, h.muxFlags()...)
-	} else {
-		a = append(a, "-o", "ControlMaster=no", "-o", "ControlPath=none")
-	}
-	return append(a, h.target())
-}
-
-// keepaliveFlags returns the application-level keepalive options every ssh and
-// scp this package builds carries.
-//
-// They are unconditional because the alternative is not "a slower failure", it is
-// NO failure: a provisioning run streams one ssh session for a whole playbook,
-// and single tasks in it (a repo clone, an apt install) go minutes without
-// putting a byte on the channel. OpenSSH detects nothing in that window on its
-// own — TCPKeepAlive is on by default but fires at the kernel's two-hour idle
-// timer — so a session reaped by a stateful firewall or NAT on the path, or a
-// guest that stops answering, leaves the client blocked forever with no output
-// and no error. That is indistinguishable from a slow task, which makes it
-// undiagnosable.
-//
-// 15s x 8 declares a dead channel in about two minutes and exits, turning an
-// unbounded hang into a bounded, reported failure. The count is deliberately
-// generous: a guest pinned by a heavy apt install can miss several replies
-// without being gone, and a false positive here would kill a healthy build.
-func keepaliveFlags() []string {
-	return []string{
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=8",
-	}
-}
-
-// debugFlags returns `-vv -E <path>` when a transport log was asked for (see
-// resolveDebugLog), or nil.
-//
-// -E is what makes this safe to switch on during a real create: it sends ssh's
-// verbose log to a FILE rather than stderr, and every caller here merges ssh's
-// stderr into the same stream the guest's own output goes to. Without it, -vv
-// would interleave protocol chatter with the playbook output the user is reading
-// and with the TASK banners the TUI's progress parser matches on (internal/ui's
-// ansible.go), corrupting the display in exactly the run being diagnosed.
-//
-// ssh only: scp has no -E, so a debug scp would have nowhere to put its log but
-// the payload stream, which for a `tar -czf -` transfer is the one thing that
-// must not be written to.
-func (h *SSHHost) debugFlags() []string {
-	if h.debugLogPath == "" {
-		return nil
-	}
-	return []string{"-vv", "-E", h.debugLogPath}
-}
-
-// identityFlags returns the key-selection options — `-i <path>`, plus `-o
-// IdentitiesOnly=yes` when the connection asked for it (see
-// SSHConfig.IdentitiesOnly) — or nil when no identity is configured and ssh
-// should fall back to the ambient agent / ssh_config. Shared by sshBase and
-// scpCommand so ssh and scp authenticate identically; an scp that offered a
-// different set of keys than the ssh beside it could fail a copy in the middle of
-// a run that was otherwise connecting fine.
-//
-// IdentitiesOnly is gated on IdentityPath being set on purpose: with no -i to
-// restrict ssh TO, the option would only narrow ssh to its built-in default key
-// names — a change in behaviour with nothing to gain, since the point is to offer
-// the one key the far side is known to trust.
-func (h *SSHHost) identityFlags() []string {
-	if h.cfg.IdentityPath == "" {
-		return nil
-	}
-	a := []string{"-i", h.cfg.IdentityPath}
-	if h.cfg.IdentitiesOnly {
-		a = append(a, "-o", "IdentitiesOnly=yes")
-	}
-	return a
-}
-
-// ephemeralHostKeyFlags returns the host-key options for a backend whose guests
-// are throwaway VMs on recycled IPs (see SSHConfig.EphemeralHostKeys), or nil
-// when the connection is to a persistent host that should keep the OpenSSH
-// trust-on-first-use default. Shared by sshBase and scpCommand so ssh and scp
-// treat the guest's key identically.
-func (h *SSHHost) ephemeralHostKeyFlags() []string {
-	if !h.cfg.EphemeralHostKeys {
-		return nil
-	}
-	return []string{
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "LogLevel=ERROR",
-	}
-}
-
-// sshCommand builds the full ssh argv to run remoteArgv on the remote host, with
-// each remote token shell-quoted so ssh's space-join + remote reshell reconstruct
-// the identical argv the local execRunner would have passed via execve.
-func (h *SSHHost) sshCommand(tty bool, remoteArgv ...string) []string {
-	return h.sshCommandMux(true, tty, remoteArgv...)
-}
-
-// sshCommandMux is sshCommand with the multiplexing decision made explicitly:
-// mux false builds the long-lived, unshared form (see WithoutMux). Every
-// ctx-carrying entry point below routes through it so one context value decides
-// the shape of the argv.
-func (h *SSHHost) sshCommandMux(mux, tty bool, remoteArgv ...string) []string {
-	argv := h.sshBase(tty, mux)
-	for _, a := range remoteArgv {
-		argv = append(argv, shellQuote(a))
-	}
-	return argv
 }
 
 // limactlArgv is the remote argv for a `limactl` invocation: `LIMA_HOME=<v>
 // limactl <args…>`, with LIMA_HOME assigned ON THE REMOTE PROCESS (it is just
-// another shell-quoted token in the remote argv sshCommand builds — never an
-// ssh client env/SetEnv), so the remote limactl resolves the SAME instance
+// another shell-quoted token in the remote argv sshx builds — never an ssh
+// client env/SetEnv), so the remote limactl resolves the SAME instance
 // directory h.LimaHome() (and every HostFiles read) already uses. Always
 // setting it — even at the remote default — is deliberate: it is always what
 // sand intends, and it means discovery and reads can never silently diverge
-// the moment a profile sets a non-default RemoteLimaHome. Assigning ONLY this
+// the moment a profile sets a non-default Lima home. Assigning ONLY this
 // one var (never threading cmd.Env or forwarding the local environment)
 // preserves the hop's non-leak property: the laptop's own LIMA_HOME/XDG_* must
 // never cross to the remote host.
 func (h *SSHHost) limactlArgv(args ...string) []string {
 	return append([]string{"LIMA_HOME=" + h.LimaHome(), "limactl"}, args...)
-}
-
-// scpCommand builds an scp argv. Note scp's port flag is -P (capital), NOT ssh's
-// -p — getting this wrong silently ignores a non-default port. The same
-// keepalive and multiplexing flags as sshBase are threaded in before the
-// endpoints so an scp transfer benefits from (and can itself become) the shared
-// master connection, and so a stalled transfer of a multi-gigabyte project tree
-// fails in bounded time rather than hanging (see keepaliveFlags).
-func (h *SSHHost) scpCommand(recursive bool, from, to string) []string {
-	a := []string{"scp"}
-	if recursive {
-		a = append(a, "-r")
-	}
-	if h.cfg.Port > 0 && h.cfg.Port != 22 {
-		a = append(a, "-P", strconv.Itoa(h.cfg.Port))
-	}
-	a = append(a, h.identityFlags()...)
-	a = append(a, h.ephemeralHostKeyFlags()...)
-	a = append(a, keepaliveFlags()...)
-	a = append(a, h.muxFlags()...)
-	return append(a, from, to)
-}
-
-// SSHArgv builds the full ssh argv that runs remoteArgv on this connection's
-// host, with every remote token shell-quoted (see the file header: the quoting
-// is the one genuinely new hazard the transport introduces) and the port,
-// identity, and connection-multiplexing flags threaded in. tty adds -t.
-//
-// It is the argv-only half of Output/Stream — those two prepend `LIMA_HOME=…
-// limactl` and then run the result, while this returns the command for a caller
-// that runs it itself and whose remote command is not limactl at all. That
-// caller is the Proxmox provider (internal/provider), whose guest transport is
-// direct ssh to the VM: it reuses this so the quoting, the identity flag, and
-// the ControlMaster socket sharing are spelled once for every ssh sand runs,
-// rather than re-derived against a different backend.
-func (h *SSHHost) SSHArgv(tty bool, remoteArgv ...string) []string {
-	return h.sshCommand(tty, remoteArgv...)
-}
-
-// SSHArgvCtx is SSHArgv with the context's multiplexing opt-out honoured
-// (WithoutMux): a long-lived command gets its own unshared connection instead of
-// riding — or becoming — the master every other command depends on.
-//
-// It is separate from SSHArgv rather than a signature change because only one
-// caller has a context to consult at argv-build time. The Proxmox provider's
-// guest commands do; its interactive attach, which hands an argv to a terminal
-// it does not run itself, does not.
-func (h *SSHHost) SSHArgvCtx(ctx context.Context, tty bool, remoteArgv ...string) []string {
-	return h.sshCommandMux(!MuxSuppressed(ctx), tty, remoteArgv...)
-}
-
-// SCPArgv builds the scp argv for a transfer between from and to (either of
-// which may be a `user@host:path` endpoint), with the same port/identity/
-// multiplexing flags SSHArgv threads in — including scp's capital -P port flag,
-// which is the detail scpCommand exists to get right in one place. Exported for
-// the same non-limactl caller SSHArgv serves.
-func (h *SSHHost) SCPArgv(recursive bool, from, to string) []string {
-	return h.scpCommand(recursive, from, to)
 }
 
 // --- Runner: run limactl over ssh -----------------------------------------------
@@ -557,7 +124,7 @@ func (h *SSHHost) SCPArgv(recursive bool, from, to string) []string {
 // (ErrListRacedInstanceDir), which matches the remote limactl's stderr folded into
 // the error here, still fires over the hop.
 func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
-	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
+	argv := h.conn.ArgvCtx(ctx, false, h.limactlArgv(args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdout = &stdout
@@ -577,13 +144,13 @@ func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
 // for live display. cmd.WaitDelay reaps the ssh→limactl→guest-ssh orphan chain on
 // a cancelled ctx, one generation deeper than the local case but the same hazard.
 func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
+	argv := h.conn.ArgvCtx(ctx, false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
 	cmd.Stderr = out
-	cmd.WaitDelay = waitDelay // a cancel must REAP the whole ssh->limactl->guest chain
-	return SuccessDespiteHeldPipes(cmd.Run())
+	cmd.WaitDelay = sshx.WaitDelay // a cancel must REAP the whole ssh->limactl->guest chain
+	return sshx.SuccessDespiteHeldPipes(cmd.Run())
 }
 
 // StreamOut runs `ssh … limactl args…`, streaming stdout ONLY to out and keeping
@@ -591,14 +158,14 @@ func (h *SSHHost) Stream(ctx context.Context, stdin io.Reader, out io.Writer, ar
 // not corrupted by limactl's `cd` warning — exactly as execRunner.StreamOut does,
 // with the same stdin passthrough and WaitDelay reaping.
 func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
-	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, h.limactlArgv(args...)...)
+	argv := h.conn.ArgvCtx(ctx, false, h.limactlArgv(args...)...)
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
 	cmd.Stdout = out
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.WaitDelay = waitDelay
-	err := SuccessDespiteHeldPipes(cmd.Run())
+	cmd.WaitDelay = sshx.WaitDelay
+	err := sshx.SuccessDespiteHeldPipes(cmd.Run())
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			err = fmt.Errorf("%w: %s", err, msg)
@@ -611,7 +178,7 @@ func (h *SSHHost) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer,
 // the HostFiles methods for cat / stat / mkdir / rm), capturing stdout and stderr
 // separately. It mirrors Output's stdout/stderr discipline.
 func (h *SSHHost) runRemote(ctx context.Context, stdin io.Reader, remoteArgv ...string) ([]byte, []byte, error) {
-	argv := h.sshCommandMux(!MuxSuppressed(ctx), false, remoteArgv...)
+	argv := h.conn.ArgvCtx(ctx, false, remoteArgv...)
 	var stdout, stderr bytes.Buffer
 	cmd := h.newCmd(ctx, argv)
 	cmd.Stdin = stdin
@@ -784,11 +351,11 @@ func (h *SSHHost) DiskAllocBytes(path string) int64 {
 	return blocks * 512
 }
 
-// LimaHome is the Lima home on the REMOTE host: the configured RemoteLimaHome, or
+// LimaHome is the Lima home on the REMOTE host: the one NewSSHHost was given, or
 // defaultRemoteLimaHome (a path relative to the remote login home). Both Lima's
 // own per-instance state and sand's state ABOUT an instance (the base version
 // stamp and its lock, under _sand/) live beneath it — now on the remote host.
-func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
+func (h *SSHHost) LimaHome() string { return h.limaHome }
 
 // ReadInstanceMarkers reads filename from every instance directory directly
 // under limaHome in ONE ssh round trip: a remote sh script walks limaHome's
@@ -873,8 +440,8 @@ func parseMarkerStream(data []byte) (map[string][]byte, error) {
 // bind-mount it as /mnt/playbook. See lima.HostFiles.StagePlaybook.
 //
 // The returned path is ABSOLUTE: a Lima mount `location` is resolved on the remote
-// host and a relative one would be ambiguous, but RemoteLimaHome may be relative
-// to $HOME (its Lima default is the relative ".lima"), so the _sand directory is
+// host and a relative one would be ambiguous, but the remote Lima home may be
+// relative to $HOME (its Lima default is the relative ".lima"), so the _sand directory is
 // created and its absolute path resolved in one round trip before the copy.
 //
 // The staged copy is refreshed each build (the prior one is removed first) and
@@ -882,17 +449,17 @@ func parseMarkerStream(data []byte) (map[string][]byte, error) {
 // a clone's finalize re-mounts it, so it must outlive the build that created it —
 // the remote analogue of the local checkout the mount points at for local Lima.
 func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, error) {
-	sandDir := strings.TrimSuffix(h.cfg.RemoteLimaHome, "/") + "/_sand"
+	sandDir := strings.TrimSuffix(h.limaHome, "/") + "/_sand"
 	// One round trip: create _sand, drop any prior staged playbook (scp into an
 	// existing dir would nest the source under it), and echo _sand's ABSOLUTE path.
-	q := shellQuote(sandDir)
+	q := sshx.Quote(sandDir)
 	out, errb, err := h.runRemote(ctx, nil, "sh", "-c",
 		fmt.Sprintf("mkdir -p %s && rm -rf %s/playbook && cd %s && pwd", q, q, q))
 	if err != nil {
 		return "", fmt.Errorf("prepare remote playbook dir: %w: %s", err, strings.TrimSpace(string(errb)))
 	}
 	dst := strings.TrimSpace(string(out)) + "/playbook"
-	if err := h.scp(ctx, nil, true, localDir, h.target()+":"+dst); err != nil {
+	if err := h.scp(ctx, nil, true, localDir, h.conn.Target()+":"+dst); err != nil {
 		return "", fmt.Errorf("stage playbook to remote host: %w", err)
 	}
 	return dst, nil
@@ -914,7 +481,7 @@ func (h *SSHHost) HostUser() string {
 		if u := strings.TrimSpace(string(out)); err == nil && u != "" {
 			h.user = u
 		} else {
-			h.user = h.cfg.User
+			h.user = h.conn.User()
 		}
 	})
 	return h.user
@@ -934,13 +501,13 @@ func (h *SSHHost) HostUser() string {
 // /proc/meminfo on Linux, sysctl on macOS; df -Pk for free/total KiB on both,
 // falling back to $HOME when the Lima store dir does not exist yet.
 func (h *SSHHost) HostResources() (cpus int, memBytes, diskFreeBytes, diskTotalBytes int64) {
-	// RemoteLimaHome is never "" at runtime — NewSSHHost defaults it — so use it
+	// limaHome is never "" at runtime — NewSSHHost defaults it — so use it
 	// directly, as LimaHome and StagePlaybook do.
-	limaHome := h.cfg.RemoteLimaHome
+	limaHome := h.limaHome
 	script := `c=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)
 if [ -r /proc/meminfo ]; then m=$(awk '/^MemTotal:/{print $2*1024}' /proc/meminfo); else m=$(sysctl -n hw.memsize 2>/dev/null || echo 0); fi
-d=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $4*1024}')
-t=$(df -Pk ` + shellQuote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $2*1024}')
+d=$(df -Pk ` + sshx.Quote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $4*1024}')
+t=$(df -Pk ` + sshx.Quote(limaHome) + ` 2>/dev/null | awk 'NR==2{print $2*1024}')
 if [ -z "$d" ]; then
   d=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4*1024}')
   t=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $2*1024}')
@@ -1005,7 +572,7 @@ func (h *SSHHost) uploadAcrossHop(ctx context.Context, out io.Writer, recursive 
 	defer h.rmRemote(tmp)
 
 	// scp the source INTO the temp dir; scp then names it tmp/<basename(localSrc)>.
-	if err := h.scp(ctx, out, recursive, localSrc, h.target()+":"+tmp); err != nil {
+	if err := h.scp(ctx, out, recursive, localSrc, h.conn.Target()+":"+tmp); err != nil {
 		return fmt.Errorf("stage %s to remote host: %w", localSrc, err)
 	}
 	staged := tmp + "/" + filepath.Base(localSrc)
@@ -1033,7 +600,7 @@ func (h *SSHHost) downloadAcrossHop(ctx context.Context, out io.Writer, recursiv
 	staged := tmp + "/" + filepath.Base(guestSrcPath)
 	// scp the staged copy back to the local destination; scp nests it inside
 	// localDst, matching the local single-stage placement.
-	if err := h.scp(ctx, out, recursive, h.target()+":"+staged, localDst); err != nil {
+	if err := h.scp(ctx, out, recursive, h.conn.Target()+":"+staged, localDst); err != nil {
 		return fmt.Errorf("retrieve %s from remote host: %w", guestSrcPath, err)
 	}
 	return nil
@@ -1064,9 +631,9 @@ func (h *SSHHost) rmRemote(path string) {
 // scp runs scp with the connection's port/identity, streaming its progress to out
 // (through the same scpDebugFilter Copy uses, since scp -v is just as chatty).
 func (h *SSHHost) scp(ctx context.Context, out io.Writer, recursive bool, from, to string) error {
-	argv := h.scpCommand(recursive, from, to)
+	argv := h.conn.SCPArgv(recursive, from, to)
 	cmd := h.newCmd(ctx, argv)
-	cmd.WaitDelay = waitDelay
+	cmd.WaitDelay = sshx.WaitDelay
 	if out == nil {
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("scp %s %s: %w", from, to, err)
@@ -1076,7 +643,7 @@ func (h *SSHHost) scp(ctx context.Context, out io.Writer, recursive bool, from, 
 	f := &scpDebugFilter{w: out}
 	cmd.Stdout = f
 	cmd.Stderr = f
-	err := SuccessDespiteHeldPipes(cmd.Run())
+	err := sshx.SuccessDespiteHeldPipes(cmd.Run())
 	if ferr := f.Flush(); err == nil {
 		err = ferr
 	}
@@ -1110,10 +677,10 @@ func splitGuestEndpoint(s string) (instance, path string, isGuest bool) {
 // still precedes the instance name, because AttachArgv put it there and quoting
 // preserves order. The caller execs the result against its real TTY.
 func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
-	// The `ssh -t <target> <shell-quoted local argv>` construction IS sshCommand
-	// with tty=true; reuse it rather than re-spelling the quoting loop the file's
-	// header calls load-bearing.
-	return h.sshCommand(true, AttachArgv(name, guestHome, colorterm)...)
+	// The `ssh -t <target> <shell-quoted local argv>` construction is exactly what
+	// sshx.Conn.Argv builds; reuse it rather than re-spelling the quoting loop
+	// internal/sshx calls the transport's one genuinely new hazard.
+	return h.conn.Argv(true, AttachArgv(name, guestHome, colorterm)...)
 }
 
 // --- base-image lock over ssh ---------------------------------------------------
@@ -1163,9 +730,9 @@ func (l *sshLock) TryLock() (bool, error) {
 	// the lock lasts exactly until we close that pipe (Unlock/Close).
 	remote := []string{"flock", "-n", l.path, "sh", "-c", fmt.Sprintf("printf '%s\\n'; exec cat", remoteLockSentinel)}
 
-	argv := l.h.sshCommand(false, remote...)
+	argv := l.h.conn.Argv(false, remote...)
 	cmd := l.h.newCmd(ctx, argv)
-	cmd.WaitDelay = waitDelay
+	cmd.WaitDelay = sshx.WaitDelay
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
 
@@ -1264,8 +831,8 @@ func (l *sshLock) Close() error { return l.Unlock() }
 
 // RunArgv is RunArgv's remote form: the same guest expression, ssh-wrapped
 // with a TTY, so the Landing pane's commit-and-push action behaves identically
-// against a remote-profile VM. Like AttachArgv, it reuses sshCommand's quoting
-// rather than re-spelling it.
+// against a remote-profile VM. Like AttachArgv, it reuses sshx's quoting rather
+// than re-spelling it.
 func (h *SSHHost) RunArgv(name, workdir, expr, colorterm string) []string {
-	return h.sshCommand(true, RunArgv(name, workdir, expr, colorterm)...)
+	return h.conn.Argv(true, RunArgv(name, workdir, expr, colorterm)...)
 }

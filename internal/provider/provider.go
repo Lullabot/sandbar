@@ -46,7 +46,7 @@ type Provider interface {
 	// lima.ErrListRacedInstanceDir (see that error) — callers keep the fleet they
 	// already have rather than treating a routine clone as a failure.
 	List() ([]vm.VM, error)
-	// Get looks up ONE instance by name, returning lima.ErrNoSuchInstance when the
+	// Get looks up ONE instance by name, returning vm.ErrNotFound when the
 	// backend knows no such instance. It is not a convenience over List: scanning a
 	// full listing to find one VM is broken for the 40-60s any OTHER instance is
 	// mid-clone (lima#5236), so a single-VM lookup must ask about that VM alone.

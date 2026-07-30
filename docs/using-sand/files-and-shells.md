@@ -5,7 +5,7 @@
 `S` on a tile in the [Board](tui.md), and `sand shell NAME` from the command
 line, both attach you to the same thing: the VM's **persistent tmux
 session** inside the guest, prefixed with `C-a`. They share the same attach
-path (`internal/lima.AttachArgv`), so they are two doors onto one session,
+path (`internal/guestsh.AttachArgv`), so they are two doors onto one session,
 not two different mechanisms.
 
 Because the session is persistent, detaching — with `C-a d`, or by just
