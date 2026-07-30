@@ -114,6 +114,14 @@
     group: "{{ user_name }}"
   when: provision_phase | default('full') != 'finalize'
 
+# Deliberately UNGATED, unlike its identity-free neighbours above. Rendering a
+# small template is cheap enough to re-pay per clone, and paying it in finalize
+# too is what lets a change to tmux.conf.j2 reach a new VM WITHOUT rebuilding
+# the base image it was cloned from — a base can be up to 30 days old before its
+# self-refresh fires, and a stale ~/.tmux.conf is silently wrong rather than
+# broken (the template's clipboard block is what got noticed missing that way).
+# Nothing hand-edited is lost by re-rendering it: finalize only ever runs on a
+# guest that create or reset has just built.
 - name: Deploy ~/.tmux.conf
   ansible.builtin.template:
     src: tmux.conf.j2
@@ -121,7 +129,6 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.gitconfig
   ansible.builtin.template:

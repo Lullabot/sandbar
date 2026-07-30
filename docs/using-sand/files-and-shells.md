@@ -31,6 +31,32 @@ The VM must be running before you can shell into it; a stopped VM won't
 offer `S` on its tile, and `sand shell` refuses cleanly with an error
 telling you to start it first.
 
+### Copying text out of the guest
+
+Select with the mouse, or `C-a [` then `v`/`y` in copy mode, and the text
+lands on the clipboard of the terminal you're sitting at — not just in the
+guest's tmux buffer. Because the mouse belongs to tmux (`mouse on` is part
+of the shipped config), a drag no longer makes a terminal-native selection
+you could copy yourself, so this is the path.
+
+It works over [OSC 52](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands),
+an escape sequence tmux writes back through the shell to your terminal
+emulator, which then puts the text on your system clipboard. Two things have
+to be true on your side for it to arrive:
+
+- **Your terminal has to support OSC 52.** Most current ones do, but a few
+  gate it behind a setting (iTerm2's "Applications in terminal may access
+  clipboard", xterm's `allowWindowOps`) because a program that can write
+  your clipboard can also clobber it. If a copy silently does nothing,
+  that's the first thing to check.
+- **If you run `sand` inside your own tmux**, that tmux passes the guest's
+  sequence through by default (`set-clipboard external`), so nothing is
+  needed — unless you've set `set-clipboard off`, which drops it.
+
+A VM created before sand shipped this doesn't need rebuilding: the setting
+is applied at attach time as well as baked into the guest's `~/.tmux.conf`,
+so the next `S` or `sand shell` has it.
+
 ### What the board does while you're attached
 
 If sand is itself running inside a host tmux session, `S` opens the shell in

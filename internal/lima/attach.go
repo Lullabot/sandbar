@@ -14,9 +14,9 @@ import "regexp"
 //
 //	if tmux has-session -t =main 2>/dev/null; then
 //	  s=sand-$$
-//	  tmux new-session -t =main -s "$s" \; set-option -t "$s" destroy-unattached on
+//	  tmux <clipboard> new-session -t =main -s "$s" \; set-option -t "$s" destroy-unattached on
 //	else
-//	  tmux new-session -s main
+//	  tmux <clipboard> new-session -s main
 //	fi
 //
 // **The branch is decided in the guest**, not on the host, because the host cannot
@@ -84,9 +84,57 @@ import "regexp"
 // NEW windows it opens inside its grouped session. Two clients of different colour
 // capability therefore do NOT each re-skin main's existing panes — the first client
 // wins those — they only diverge on windows opened after attaching.
+//
+// **clipboardCmds is prepended to BOTH new-session commands** — see its own comment
+// for what it does and why it is here rather than only in the shipped ~/.tmux.conf.
 func guestAttachExpr(colortermEnv string) string {
-	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux new-session` + colortermEnv + ` -s main; fi`
+	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux ` + clipboardCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux ` + clipboardCmds + `new-session` + colortermEnv + ` -s main; fi`
 }
+
+// clipboardCmds is the `start-server \; set -s … \; ` prefix that turns on tmux's
+// OSC 52 clipboard bridge, so a copy inside the guest (mouse drag, or copy-mode
+// `y`) reaches the clipboard of the terminal the user is actually sitting at,
+// several hops away. Both settings are also in the ~/.tmux.conf roles/user ships
+// — this prefix is what reaches a VM PROVISIONED BEFORE THAT CONF CARRIED THEM,
+// which is every VM already in existence when this landed. They are cheap and
+// idempotent, so the duplication costs a VM with a current conf nothing.
+//
+// The two settings, and why neither alone is enough:
+//
+//   - `set-clipboard on`: the default is `external`, which only forwards OSC 52
+//     that programs INSIDE tmux emit. tmux's own copies never leave the guest.
+//   - `terminal-features[…] '*:clipboard'`: tmux writes OSC 52 only to a terminal
+//     it believes has the `Ms` capability, and its built-in list is `xterm*` and
+//     nothing else. A guest reached from inside a host tmux sees TERM=screen-256color
+//     or tmux-256color — which is precisely what sand's own host-tmux fast path
+//     (internal/ui.runHostTmuxNewWindow) produces — so without this the clipboard is
+//     dead on the most common path in the product. Measured, not assumed: under
+//     TERM=screen-256color with `set-clipboard on` alone, a copy emits no OSC 52 at
+//     all; with this line it emits it.
+//
+// Three details, each load-bearing:
+//
+//   - **The settings must precede `new-session` in the command sequence**, not
+//     follow it. tmux latches a client's terminal features when the client ATTACHES,
+//     and new-session attaches before later commands in the same sequence run — so
+//     `new-session \; set -s terminal-features…` leaves the attaching client without
+//     the feature. Verified against tmux 3.5a.
+//   - **`start-server` is what makes the else branch work.** With no server running,
+//     `set -s` would have to start one, and a session-less server exits immediately
+//     (`exit-empty`, on by default), taking the options with it. Inside ONE command
+//     sequence the server survives to the `new-session` that gives it a session.
+//     Where a server is already up it is a no-op, so both branches share the prefix.
+//   - **An explicit array index rather than `set -as`.** terminal-features is an
+//     array and `-a` appends a NEW entry every time; this runs on every attach
+//     against a server that lives for weeks. Assigning one index is idempotent. 99
+//     is past tmux's built-in entries (0-2) with room to spare, and the quotes keep
+//     bash from reading `[99]` as a glob and `*` as one. DOUBLE quotes, matching
+//     `"$s"` above: the ssh-transport provider wraps this whole expression in single
+//     quotes (internal/lima.SSHHost), where an embedded single quote survives only
+//     as the unreadable close-reopen escape (quote, backslash, quote, quote) and
+//     TestSSHAttachArgvPreservesGuestExpr stops recognising it. Neither string
+//     contains a `$`, so double quotes cost nothing.
+const clipboardCmds = `start-server \; set -s set-clipboard on \; set -s "terminal-features[99]" "*:clipboard" \; `
 
 // AttachArgv returns the full argv that attaches a caller to instance name's
 // persistent guest tmux session (see guestAttachExpr for the tmux semantics).

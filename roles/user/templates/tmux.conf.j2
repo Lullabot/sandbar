@@ -14,6 +14,26 @@ set -g focus-events on  # forward terminal focus in/out to apps (Claude Code, vi
 # Vi copy mode
 setw -g mode-keys vi
 
+# Copy to the CLIPBOARD OF THE TERMINAL YOU ARE SITTING AT, which is on the far
+# side of an ssh / limactl hop. OSC 52 is the only channel that crosses it, and
+# with `mouse on` above there is no fallback: the mouse belongs to tmux, so a
+# drag no longer makes a terminal-native selection you could copy yourself.
+#
+# set-clipboard defaults to `external`, which only FORWARDS the sequence when a
+# program running inside tmux emits one. tmux's own copies — mouse drag, or
+# copy-mode `y` — never leave the guest under that default. `on` makes tmux emit
+# the sequence for those too.
+set -s set-clipboard on
+# ...and tmux only writes OSC 52 to a terminal it believes supports it (the `Ms`
+# capability, matched against TERM). Its built-in list is `xterm*` and nothing
+# else, so without this line the clipboard is silently dead for a guest reached
+# from inside a host tmux (TERM=screen-256color / tmux-256color — exactly what
+# sand's host-tmux fast path produces) and for alacritty, foot, wezterm and the
+# rest. Claiming the capability for every terminal is safe in a way the reverse
+# is not: a terminal that does not understand the sequence ignores it, while a
+# terminal wrongly assumed not to support it loses copy entirely.
+set -as terminal-features ',*:clipboard'
+
 # Intuitive splits (and keep current path)
 bind | split-window -h -c "#{pane_current_path}"
 bind S split-window -v -c "#{pane_current_path}"
