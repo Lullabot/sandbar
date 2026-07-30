@@ -1,12 +1,25 @@
-# Documentation site. Two behaviours:
+# Documentation site. Three behaviours:
 #
 #   * pull_request — `mkdocs build --strict` so a broken link or nav
 #     reference fails CI instead of reaching `main`.
+#   * pull_request, in-repo branches only — publish a browsable preview to
+#     `gh-pages` under `pr-preview/pr-N/`, removed again when the PR closes.
 #   * push to main / release tags — publish with `mike`, which commits and
 #     pushes the built site straight to the `gh-pages` branch. This is NOT
 #     the OIDC `actions/deploy-pages` flow: no `pages:` permission, no
 #     `id-token:`, no `environment:` block, just `contents: write` and a git
 #     identity for mike to commit as.
+#
+# Previews and mike share the `gh-pages` branch without stepping on each
+# other: mike only rewrites the version directory it is deploying plus
+# `versions.json` and the root redirect, leaving unrelated top-level
+# directories (here, `pr-preview/`) alone. The reverse guard the action's
+# README asks for — `clean-exclude: pr-preview/` — applies to deploying via
+# JamesIves/github-pages-deploy-action, which this workflow does not do.
+#
+# The workflow-level `concurrency` group covers every job below, so preview
+# and mike deploys serialise instead of racing each other's push to
+# `gh-pages`. Do not move it to the job level.
 #
 # Tags are `vX.Y.Z` (release-please's default `include-v-in-tag`, confirmed
 # against `git tag --list` and `release-please-config.json`), so release
@@ -21,7 +34,10 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # `closed` is not in the default set of types and is what tells the preview
+  # job to tear its directory back down; the other three all deploy.
   pull_request:
+    types: [opened, reopened, synchronize, closed]
   workflow_dispatch:
 
 permissions:
@@ -33,7 +49,9 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name == 'pull_request'
+    # Closing a PR changes nothing about whether the docs build, so gate this
+    # on the three types that carry new commits.
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -42,6 +60,43 @@ jobs:
 
       - name: Strict docs build
         run: uvx --with-requirements docs/requirements.txt mkdocs build --strict
+
+  preview:
+    # Fork PRs get a read-only GITHUB_TOKEN, so the deploy would fail rather
+    # than degrade — skip them and let the `build` job be their only gate.
+    # (pr-preview-action has no fork support in v1 regardless.)
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Narrower than it looks: naming any permission here replaces the
+    # workflow-level block wholesale, and the sticky preview comment needs
+    # `pull-requests: write` that the workflow-level `contents: write` alone
+    # would deny.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        if: github.event.action != 'closed'
+
+      # mkdocs.preview.yml drops mike's version selector, which would
+      # otherwise offer to navigate out of the preview. See that file.
+      - name: Build preview
+        if: github.event.action != 'closed'
+        run: uvx --with-requirements docs/requirements.txt mkdocs build --strict -f mkdocs.preview.yml
+
+      # `action: auto` reads the event type: deploy on opened/reopened/
+      # synchronize, remove on closed. On removal `source-dir` is unused,
+      # which is why the build above can be skipped entirely.
+      - uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          source-dir: site
+          # Default is a third-party QR image service in every comment.
+          qr-code: false
 
   deploy:
     if: github.event_name != 'pull_request'

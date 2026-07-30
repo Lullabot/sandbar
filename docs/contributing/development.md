@@ -83,6 +83,20 @@ build on any broken link or nav entry pointing at a missing page — and it
 runs on every pull request. A contributor changing docs should run it
 locally before pushing.
 
+### PR previews
+
+A pull request from a branch **in this repository** also gets a rendered
+preview of the site, published to `gh-pages` under `pr-preview/pr-N/` and
+linked from a comment on the PR. It refreshes on every push and is deleted
+when the PR closes.
+
+Two limits are worth knowing. A PR from a **fork** gets no preview: forks
+receive a read-only token, so there is nothing to publish with — the strict
+build is their only docs gate. And a preview is built from
+`mkdocs.preview.yml`, which drops the version selector, because that
+dropdown navigates relative to the site root and would quietly take a
+reader out of the preview and into the published docs.
+
 ## CI
 
 `.github/workflows/test.yml` triggers on `push` to `main`, on

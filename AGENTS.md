@@ -245,6 +245,15 @@ or a release tag (`v*`), a `mike deploy` that commits the built site to the
 `gh-pages` branch (`push`-to-branch, not the OIDC `actions/deploy-pages`
 flow). A release tag additionally moves the `latest` alias.
 
+That workflow also publishes a per-PR preview to `gh-pages` under
+`pr-preview/pr-N/` via `rossjrw/pr-preview-action`, for PRs from in-repo
+branches only (a fork's token cannot write). Previews build from
+`mkdocs.preview.yml`, an `INHERIT` overlay whose only job is to null out
+`extra.version`. Previews and `mike` coexist on `gh-pages` because `mike`
+rewrites only the version directory it deploys plus `versions.json` and the
+root redirect; the workflow-level `concurrency` group keeps the two from
+racing each other's push.
+
 To validate a branch before a PR exists, dispatch it:
 
 ```

@@ -1,0 +1,18 @@
+# Config overlay used only for per-PR preview builds (see .github/workflows/docs.yml).
+#
+# A preview is served from a subdirectory of the Pages site
+# (/sandbar/pr-preview/pr-N/) rather than from the site root. Everything MkDocs
+# generates for internal navigation is relative, so it survives that move
+# untouched — but mike's version selector does not: it fetches `versions.json`
+# relative to the *site root*, which in a preview is the real published site.
+# The dropdown would render, and then silently offer to navigate out of the
+# preview and back into production docs.
+#
+# Setting `extra.version` to null drops the key during INHERIT's deep merge, so
+# preview builds get no version selector at all. Nothing else is overridden;
+# `site_url` deliberately still points at production, which keeps the canonical
+# link tags pointing at the real page rather than at a throwaway preview URL.
+INHERIT: mkdocs.yml
+
+extra:
+  version: null
