@@ -66,8 +66,8 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/sshx"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -354,8 +354,8 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 	epoch := r.nextEpoch
 	// WithoutMux, for the same reason the heartbeat's connection is: a long-lived
 	// probe must not share the fate of the control master every short command
-	// uses. See lima.WithoutMux.
-	ctx, cancel := context.WithCancel(lima.WithoutMux(context.Background()))
+	// uses. See sshx.WithoutMux.
+	ctx, cancel := context.WithCancel(sshx.WithoutMux(context.Background()))
 	// Buffered by one so the sweeper can hand off a completed pass and get
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.

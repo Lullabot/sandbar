@@ -202,7 +202,7 @@ func TestProxmoxUnmarkPreservesOperatorText(t *testing.T) {
 
 // TestProxmoxMarkManagedRefusesMissingInstance mirrors the sidecar-file
 // provider's refusal to conjure a marker for a VM that does not exist:
-// resolve's lima.ErrNoSuchInstance must surface as provider.ErrNoInstance.
+// resolve's vm.ErrNotFound must surface as provider.ErrNoInstance.
 func TestProxmoxMarkManagedRefusesMissingInstance(t *testing.T) {
 	m := newPVEMock(t)
 	m.data("/cluster/resources", `[]`)

@@ -30,7 +30,10 @@ it is not where prose belongs.
   then reuses the SSH transport for shells/copy, satisfies `HostFiles` with a
   local per-endpoint state dir (no "host where limactl runs" exists), and
   implements `Provenancer` via PVE tags + the description field rather than a
-  sidecar marker. There is no
+  sidecar marker. It builds its ssh from `internal/sshx` and its guest attach
+  from `internal/guestsh`, so the only thing it still takes from `lima` is the
+  `HostFiles` seam the `Provider` interface returns — see `proxmoxfiles.go` for
+  why that one is genuinely Lima-shaped rather than merely misfiled. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
@@ -41,7 +44,9 @@ it is not where prose belongs.
   configuration surface now. The `lima` package exports a host-access seam
   (`Host` = `Runner` + `HostFiles`, local vs SSH) that the two providers
   differ on; the local provider is behaviourally identical to sand's
-  previous direct use of `*lima.Client`.
+  previous direct use of `*lima.Client`. Note the `Provider` seam predates the
+  non-Lima backends: `Get` reports absence as `vm.ErrNotFound`, and
+  `HostFiles()` still names Lima's file layout.
 - `profiles` — the persisted, secret-free Connection Profile model
   (`profiles.yaml`) that is now the single source of truth for every
   location `sand` can run VMs on: a permanent Local profile plus any number
@@ -97,6 +102,31 @@ it is not where prose belongs.
   (`ExecRunner` for local, `SSHHost` for remote-Lima-over-SSH), so code is
   testable without a real binary. When provisioning, the provisioner itself
   depends on `*lima.Client` and the `Host` seam, never on `Provider`.
+  It owns only what is genuinely Lima: the `limactl` argvs, the instance
+  files, the two-stage copy across the hop. **Anything a non-Lima backend also
+  needs does not belong here** — see `sshx` and `guestsh` below, which is
+  where that plumbing was moved once a second backend had to reach for it.
+- `sshx` — the backend-agnostic ssh/scp **argv builder**, and the only place
+  the flags that decide whether a connection works are spelled: the
+  shell-quoting of every remote token (`Quote`, applied by `Argv` so no caller
+  can forget), the identity and `IdentitiesOnly` selection, the
+  throwaway-guest host-key posture (`EphemeralHostKeys`), the unconditional
+  keepalives, the `ControlMaster` socket sharing and its per-context opt-out
+  (`WithoutMux`/`MuxSuppressed`), the `SAND_SSH_DEBUG` transport log, and the
+  `WaitDelay`/`SuccessDespiteHeldPipes` pair every executor must use. It
+  builds argvs and runs nothing: each backend owns its own executor
+  (`lima.SSHHost` wants separated stdout/stderr and a `LIMA_HOME` prefix, the
+  Proxmox provider wants its transport-error annotation), and an executor is a
+  few lines around an argv while a re-derived argv is a connection that hangs
+  or prompts.
+- `guestsh` — the commands that run INSIDE a VM, independent of the transport:
+  the persistent tmux session `AttachArgv` joins and the COLORTERM handshake
+  (`ColortermSafe`) that rides with it. **The only place in sand that knows
+  tmux exists.** Every backend wraps these same argv elements — `limactl shell
+  <name> …` for Lima, `ssh -t <ip> …` for Proxmox — and a second hand-rolled
+  copy of the expression is the most destructive drift possible here: one that
+  drifts into setting `destroy-unattached` on `main` silently destroys the
+  user's long-running work on detach.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
@@ -109,6 +139,12 @@ it is not where prose belongs.
   profile's VMs never mix with the local list.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
+- `vm` also owns `ErrNotFound`, the ONE "no such VM" sentinel every backend
+  wraps and every caller tests for. It lives in the domain package rather than
+  in whichever backend defined it first so `sand create`'s exists-guard, `sand
+  shell`, the Landing pane and the TUI branch on absence without knowing which
+  backend answered; a backend that invented its own sentinel would fall
+  through all of those to the generic error path.
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
   now also keyed by connection scope — distinct from its pre-existing
   per-directory scope, see `docs/reference/files-and-state.md`), shared
@@ -384,9 +420,11 @@ every bullet, not the constraint itself.
 - **`limactl shell` forks an ssh child that inherits the exec pipes.**
   Cancelling the context orphans the ssh process, which keeps the pipes open
   and leaks the goroutine holding the SSH connection (this is how the guest
-  heartbeat talks to a running VM). `internal/lima/runner.go` sets
-  `cmd.WaitDelay` for exactly this reason — do not remove it as dead-looking
-  configuration.
+  heartbeat talks to a running VM). Every executor sets `cmd.WaitDelay` to
+  `sshx.WaitDelay` for exactly this reason — do not remove it as dead-looking
+  configuration — and routes its `Run` error through
+  `sshx.SuccessDespiteHeldPipes`, since a lingering ControlMaster holding the
+  pipes past the delay is a SUCCESS, not a failure.
 - **Ansible prints no task count anywhere in its own output.** The in-guest
   script derives an exact denominator via `ansible-playbook --list-tasks` and
   echoes `SAND_ANSIBLE_TASK_TOTAL` so the tile's build progress bar has an
@@ -676,7 +714,7 @@ comment at `roles/claude-code/tasks/main.yml`.
   destroy the guest journal holding the explanation, and `SAND_SSH_DEBUG` writes
   ssh's protocol log to a FILE (`-E`) — never to stderr, which every guest-command
   caller merges into the stream the TUI's progress parser reads. The
-  keepalive options in `sshBase` (`internal/lima/sshhost.go`) belong to the same
+  keepalive options every argv carries (`internal/sshx`) belong to the same
   story: without them a reaped connection hangs forever instead of failing, and a
   hang carries no evidence at all.
 

@@ -44,10 +44,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -103,10 +105,6 @@ var (
 	// the board (the remote provider's AttachArgv makes an ssh round trip on the
 	// same goroutine, so a bounded API call here is no new hazard).
 	attachResolveTimeout = 10 * time.Second
-
-	// sshWaitDelay reaps the orphaned ssh child of a cancelled guest command, the
-	// same hazard and the same treatment as internal/lima's runner.
-	sshWaitDelay = 2 * time.Second
 )
 
 // proxmoxProvider drives one POOL on one PVE node. The pool is the isolation
@@ -442,9 +440,8 @@ func (p *proxmoxProvider) Status(name string) (string, error) {
 }
 
 // resolve maps a name to its VMID and that VM's current status, returning
-// lima.ErrNoSuchInstance when the pool holds no such VM — the sentinel every
-// consumer already branches on, reused here on purpose: it is the interface's
-// shared vocabulary, not a Lima implementation detail.
+// vm.ErrNotFound when the pool holds no such VM — the ONE absence sentinel
+// every consumer already branches on, whichever backend answered.
 //
 // The cached id is VERIFIED against the name the VM reports before it is
 // returned. That check is the whole reason caching an id is safe: PVE allocates
@@ -475,14 +472,14 @@ func (p *proxmoxProvider) resolve(ctx context.Context, name string) (int, pve.VM
 	st, err := p.client.GetStatus(ctx, vmid)
 	if err != nil {
 		if pve.IsNotFound(err) {
-			return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+			return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 		}
 		return 0, pve.VMStatus{}, fmt.Errorf("proxmox: reading %s (VMID %d): %w", name, vmid, err)
 	}
 	if st.Name != name {
 		// The listing raced a rename or a delete-and-recreate. Report absence
 		// rather than acting on a VM the caller did not ask for.
-		return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+		return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 	}
 	p.setVMID(name, vmid)
 	return vmid, st, nil
@@ -498,7 +495,7 @@ func (p *proxmoxProvider) lookupVMID(ctx context.Context, name string) (int, err
 	p.setIndex(index)
 	vmid, ok := index[name]
 	if !ok {
-		return 0, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+		return 0, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 	}
 	return vmid, nil
 }
@@ -923,7 +920,7 @@ func (p *proxmoxProvider) guestIP(ctx context.Context, name string) (string, err
 
 // guardSharedAddress refuses to use an address that two VMs are BOTH claiming,
 // because a connection to it is a coin flip: ssh reaches whichever guest most
-// recently won the ARP fight, the ephemeral host-key posture (sshHost) means
+// recently won the ARP fight, the ephemeral host-key posture (sshConn) means
 // nothing detects the swap, and sand would happily stream one VM's provisioning
 // — secrets included — into the other. Observed for real: two clones of a
 // template that still carried its build's /etc/machine-id presented the same
@@ -1098,7 +1095,7 @@ func firstRoutable(addrs []pve.IPAddress) string {
 
 // --- guest transport ------------------------------------------------------------
 
-// sshHost builds the ssh connection identity for one guest address. It is
+// sshConn builds the ssh connection identity for one guest address. It is
 // constructed per call rather than cached because the host varies per VM (and
 // can change across a boot); that costs nothing meaningful, and OpenSSH
 // connection multiplexing still shares one authenticated channel per target
@@ -1107,8 +1104,8 @@ func firstRoutable(addrs []pve.IPAddress) string {
 // The port is deliberately not configurable: the guest's sshd is the one
 // cloud-init provisions, on 22. TargetConfig.Port belongs to the remote-Lima
 // provider's hop, which has no counterpart here.
-func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
-	return lima.NewSSHHost(lima.SSHConfig{
+func (p *proxmoxProvider) sshConn(host string) *sshx.Conn {
+	return sshx.New(sshx.Config{
 		Host:         host,
 		User:         p.ciUser,
 		IdentityPath: p.identityPath,
@@ -1135,16 +1132,16 @@ func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
 // the connection it was built for alongside it. The caller needs that handle to
 // annotate an ssh-level failure (see transportError) — it is the only thing that
 // knows whether a transport log was being written and where.
-func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, *lima.SSHHost, error) {
+func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, *sshx.Conn, error) {
 	ip, err := p.guestIP(ctx, name)
 	if err != nil {
 		return nil, nil, err
 	}
-	h := p.sshHost(ip)
-	// SSHArgvCtx, not SSHArgv: a caller that marked its context WithoutMux (the
-	// board's long-lived heartbeat and sweep) must get its own connection rather
-	// than share the control master every other guest command rides.
-	return h.SSHArgvCtx(ctx, tty, argv...), h, nil
+	c := p.sshConn(ip)
+	// ArgvCtx, not Argv: a caller that marked its context WithoutMux (the board's
+	// long-lived heartbeat and sweep) must get its own connection rather than
+	// share the control master every other guest command rides.
+	return c.ArgvCtx(ctx, tty, argv...), c, nil
 }
 
 // sshExitTransport is the status ssh exits with when the CONNECTION failed
@@ -1169,15 +1166,15 @@ const sshExitTransport = 255
 // the task never reported anything at all. The annotation says which layer
 // failed, and names the two env vars that make the NEXT occurrence
 // self-diagnosing instead of leaving the same two-line trace.
-func transportError(err error, h *lima.SSHHost) error {
+func transportError(err error, c *sshx.Conn) error {
 	var ee *exec.ExitError
 	if err == nil || !errors.As(err, &ee) || ee.ExitCode() != sshExitTransport {
 		return err
 	}
 	detail := "the ssh transport failed, not the guest command: the connection to the guest dropped, or the remote command was killed by a signal. " +
 		"Nothing the guest printed is missing — it never reported a failure"
-	if h != nil {
-		if path := h.DebugLogPath(); path != "" {
+	if c != nil {
+		if path := c.DebugLogPath(); path != "" {
 			return fmt.Errorf("%w: %s. The ssh debug log for this connection is at %s", err, detail, path)
 		}
 	}
@@ -1193,24 +1190,24 @@ func transportError(err error, h *lima.SSHHost) error {
 // reading. The one path that genuinely needs a terminal is the interactive
 // attach, which the caller execs against its own TTY (see AttachArgv).
 func (p *proxmoxProvider) Shell(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
-	full, h, err := p.guestArgv(ctx, name, false, argv...)
+	full, c, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return err
 	}
-	return transportError(p.runSSH(ctx, full, stdin, out, out), h)
+	return transportError(p.runSSH(ctx, full, stdin, out, out), c)
 }
 
 // ShellStreamOut streams the guest command's stdout ONLY to out, keeping stderr
 // out of the payload (it is folded into the error) so a binary stream — a
 // `tar -czf -` piped into an archive — cannot be corrupted by a warning.
 func (p *proxmoxProvider) ShellStreamOut(ctx context.Context, name string, stdin io.Reader, out io.Writer, argv ...string) error {
-	full, h, err := p.guestArgv(ctx, name, false, argv...)
+	full, c, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return err
 	}
 	var stderr bytes.Buffer
 	if err := p.runSSH(ctx, full, stdin, out, &stderr); err != nil {
-		return foldStderr(transportError(err, h), stderr.Bytes())
+		return foldStderr(transportError(err, c), stderr.Bytes())
 	}
 	return nil
 }
@@ -1218,13 +1215,13 @@ func (p *proxmoxProvider) ShellStreamOut(ctx context.Context, name string, stdin
 // ShellOut returns the guest command's stdout, with stderr kept separate for the
 // same reason ShellStreamOut does: every caller of this parses what it gets back.
 func (p *proxmoxProvider) ShellOut(ctx context.Context, name string, argv ...string) ([]byte, error) {
-	full, h, err := p.guestArgv(ctx, name, false, argv...)
+	full, c, err := p.guestArgv(ctx, name, false, argv...)
 	if err != nil {
 		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
 	if err := p.runSSH(ctx, full, nil, &stdout, &stderr); err != nil {
-		return stdout.Bytes(), foldStderr(transportError(err, h), stderr.Bytes())
+		return stdout.Bytes(), foldStderr(transportError(err, c), stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
 }
@@ -1249,8 +1246,8 @@ func (p *proxmoxProvider) Copy(ctx context.Context, out io.Writer, recursive boo
 	// contributes only the flags (identity file, multiplexing) — which is why an
 	// already-resolved endpoint, whose address this provider never learned, is
 	// still copied correctly.
-	h := p.sshHost(guest)
-	return transportError(p.runSSH(ctx, h.SCPArgv(recursive, src, dst), nil, out, out), h)
+	c := p.sshConn(guest)
+	return transportError(p.runSSH(ctx, c.SCPArgv(recursive, src, dst), nil, out, out), c)
 }
 
 // GuestPath forms a transport endpoint for Copy. For an ssh transport that is
@@ -1321,22 +1318,22 @@ func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.WaitDelay = sshWaitDelay
+	cmd.WaitDelay = sshx.WaitDelay
 	// A held-pipe success is a SUCCESS: the first mux ssh to a guest forks the
 	// ControlPersist master, which on some OpenSSH builds inherits (and keeps)
 	// the stderr pipe — and without this mapping, the base build's first, and
 	// longest, guest command succeeded and was then reported "Failed: … exec:
-	// WaitDelay expired before I/O complete". See lima.SuccessDespiteHeldPipes.
-	return lima.SuccessDespiteHeldPipes(cmd.Run())
+	// WaitDelay expired before I/O complete". See sshx.SuccessDespiteHeldPipes.
+	return sshx.SuccessDespiteHeldPipes(cmd.Run())
 }
 
 // --- interactive attach & guest identity ----------------------------------------
 
 // AttachArgv wraps the SAME guest tmux expression the Lima providers use in an
 // `ssh -t` to the VM, so `sand shell` and the TUI's S verb behave identically on
-// every backend. The expression comes from lima.GuestAttachArgv rather than
-// being retyped here — see that function and internal/lima/attach.go for why a
-// second copy of it is the most destructive drift in the codebase.
+// every backend. The expression comes from guestsh.AttachArgv rather than being
+// retyped here — see that function and internal/guestsh for why a second copy of
+// it is the most destructive drift in the codebase.
 //
 // Unlike the Lima providers there is no --workdir to pass: `limactl shell`
 // injects a `cd <host-cwd>` that the flag exists to override, while sshd starts
@@ -1356,7 +1353,7 @@ func (p *proxmoxProvider) AttachArgv(v vm.VM) []string {
 	if err != nil {
 		return failArgv(fmt.Sprintf("sand: cannot attach to %q: %v", v.Name, err))
 	}
-	return p.sshHost(ip).SSHArgv(true, lima.GuestAttachArgv(os.Getenv("COLORTERM"))...)
+	return p.sshConn(ip).Argv(true, guestsh.AttachArgv(os.Getenv("COLORTERM"))...)
 }
 
 // RunArgv returns the full argv that runs ONE interactive guest command (expr)
@@ -1389,7 +1386,7 @@ func (p *proxmoxProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 [ -n "$2" ] && export COLORTERM="$2"
 shift 2
 ` + expr
-	return p.sshHost(ip).SSHArgv(true, "bash", "-c", script, "sand-run", workdir, os.Getenv("COLORTERM"))
+	return p.sshConn(ip).Argv(true, "bash", "-c", script, "sand-run", workdir, os.Getenv("COLORTERM"))
 }
 
 // failArgv is a real, runnable command that prints msg and exits non-zero — the

@@ -119,11 +119,10 @@ func parseListJSON(out []byte) ([]vm.VM, error) {
 	return vms, nil
 }
 
-// ErrNoSuchInstance reports that limactl knows no instance by that name.
-var ErrNoSuchInstance = errors.New("no such instance")
-
 // Get looks up ONE instance by name, and is what every caller that wants a single
-// VM should use instead of scanning List().
+// VM should use instead of scanning List(). An unknown name reports
+// vm.ErrNotFound — the sentinel every backend shares, so a caller can branch on
+// "no such VM" without knowing which one answered.
 //
 // It is not a convenience. `limactl list` with no name FAILS OUTRIGHT — exit 1,
 // no output — while ANY instance directory is mid-clone or mid-delete
@@ -141,7 +140,7 @@ func (c *Client) Get(name string) (vm.VM, error) {
 	if err != nil {
 		// limactl says "No instance matching <name> found." / "unmatched instances".
 		if strings.Contains(err.Error(), "unmatched instance") || strings.Contains(err.Error(), "No instance matching") {
-			return vm.VM{}, fmt.Errorf("%w: %s", ErrNoSuchInstance, name)
+			return vm.VM{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 		}
 		return vm.VM{}, fmt.Errorf("limactl list %s: %w", name, err)
 	}
@@ -154,7 +153,7 @@ func (c *Client) Get(name string) (vm.VM, error) {
 			return v, nil
 		}
 	}
-	return vm.VM{}, fmt.Errorf("%w: %s", ErrNoSuchInstance, name)
+	return vm.VM{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 }
 
 // Status reports a single instance's status (e.g. "Running", "Stopped").

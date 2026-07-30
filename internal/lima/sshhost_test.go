@@ -6,23 +6,30 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/guestsh"
+	"github.com/lullabot/sandbar/internal/sshx"
 )
 
 // These tests are the executable specification of the SSH host-access
-// implementation. They assert on the ARGV the ssh command-runner builds (and the
-// stdin/stdout wiring) over a FAKE exec seam — no test spawns a real ssh or needs
-// a remote host, exactly as no test may spawn a real limactl (AGENTS.md). The
-// genuine loopback end-to-end is the limae2e-gated remote e2e test
-// (internal/provider/remote_e2e_test.go).
+// implementation: what this package puts AFTER the ssh prefix (the `LIMA_HOME=…
+// limactl` composition, the instance files read over the hop, the two-stage
+// copy, the remote lock) and how it wires stdin/stdout. They run over a FAKE
+// exec seam — no test spawns a real ssh or needs a remote host, exactly as no
+// test may spawn a real limactl (AGENTS.md). The genuine loopback end-to-end is
+// the limae2e-gated remote e2e test (internal/provider/remote_e2e_test.go).
+//
+// The ssh PREFIX itself — the quoting, identity, host-key, keepalive and
+// multiplexing flags — is internal/sshx's subject and is pinned by its own
+// tests; the helpers below take it from the connection rather than re-spelling
+// it, so a flag change is asserted in one place instead of two.
 
 // recordingExec is the fake newCmd seam: it records every ssh/scp argv the
 // SSHHost builds (the assertion target) and returns a stand-in *exec.Cmd — by
@@ -42,9 +49,16 @@ func (r *recordingExec) newCmd(ctx context.Context, argv []string) *exec.Cmd {
 	return exec.CommandContext(ctx, "true")
 }
 
-// hostWith builds an SSHHost over the recording seam for cfg.
-func hostWith(cfg SSHConfig, rec *recordingExec) *SSHHost {
-	h := NewSSHHost(cfg)
+// hostWith builds an SSHHost over the recording seam for cfg, with Lima's own
+// default remote home.
+func hostWith(cfg sshx.Config, rec *recordingExec) *SSHHost {
+	return hostWithHome(cfg, "", rec)
+}
+
+// hostWithHome is hostWith for a connection whose remote LIMA_HOME is not the
+// default.
+func hostWithHome(cfg sshx.Config, limaHome string, rec *recordingExec) *SSHHost {
+	h := NewSSHHost(cfg, limaHome)
 	h.newCmd = rec.newCmd
 	return h
 }
@@ -68,221 +82,26 @@ func anyContains(argv []string, sub string) bool {
 	return false
 }
 
-var testCfg = SSHConfig{Host: "example.com", User: "dev"}
+var testCfg = sshx.Config{Host: "example.com", User: "dev"}
 
-// muxFlags returns the ssh/scp connection-multiplexing flags a pinned test
-// should expect from h — the exact three -o tokens sshBase/scpCommand thread
-// in when h.controlDir was resolved at construction, or nil when it was not
-// (the graceful-degradation path). Reading h.controlDir directly (this file is
-// in package lima) means no pinned test hardcodes a real cache-dir path; each
-// only pins ssh's own argv SHAPE around whatever NewSSHHost actually resolved.
-func muxFlags(h *SSHHost) []string {
-	if h.controlDir == "" {
-		return nil
-	}
-	return []string{
-		"-o", "ControlMaster=auto",
-		"-o", "ControlPath=" + filepath.Join(h.controlDir, "%C"),
-		"-o", "ControlPersist=600",
-	}
-}
+// sshPrefix is the `ssh [flags…] <target>` prefix h's connection builds — every
+// token up to and including the target, and nothing after it.
+//
+// It comes FROM the connection rather than being re-spelled here on purpose. The
+// flag set is internal/sshx's subject, pinned there against literal argvs
+// (including the cache-dir-derived ControlPath no test here should hardcode);
+// what these tests assert is what THIS package appends to it, so taking the
+// prefix as given keeps a flag change from having to be edited in two suites.
+func sshPrefix(h *SSHHost, tty bool) []string { return h.conn.Argv(tty) }
 
-// sshArgv builds the expected `ssh <preTarget...> <keepalives> <mux-flags>
-// <target> <tail...>` argv for h, factoring the always-present splice
-// (keepalives then multiplexing, immediately before the target) so no pinned
-// test hand-repeats it.
-func sshArgv(h *SSHHost, preTarget []string, target string, tail ...string) []string {
-	argv := []string{"ssh"}
-	argv = append(argv, preTarget...)
-	argv = append(argv, keepaliveFlags()...)
-	argv = append(argv, muxFlags(h)...)
-	argv = append(argv, target)
-	argv = append(argv, tail...)
+// sshArgv builds the expected `<ssh prefix> <shell-quoted tail…>` argv for h, so
+// a pinned test spells only the remote command it cares about.
+func sshArgv(h *SSHHost, tty bool, tail ...string) []string {
+	argv := sshPrefix(h, tty)
+	for _, a := range tail {
+		argv = append(argv, sshx.Quote(a))
+	}
 	return argv
-}
-
-// TestSSHControlDirAndMuxFlags proves NewSSHHost resolves a per-user control
-// dir (0o700) for OpenSSH connection multiplexing, and that both sshBase and
-// scpCommand thread ControlMaster=auto / ControlPath=<dir>/%C /
-// ControlPersist=600 in before the target — the fix for a user with an
-// SSH-agent prompt (1Password etc.) being re-prompted on every 5s board
-// refresh, per-VM file read, heartbeat restart, and the final batched refresh
-// at quit: every one of those commands now shares one already-authenticated
-// master connection instead of paying a fresh handshake.
-func TestSSHControlDirAndMuxFlags(t *testing.T) {
-	h := NewSSHHost(testCfg)
-	if h.controlDir == "" {
-		t.Fatalf("NewSSHHost left controlDir empty in a normal environment")
-	}
-	info, err := os.Stat(h.controlDir)
-	if err != nil {
-		t.Fatalf("controlDir was not created: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o700 {
-		t.Fatalf("controlDir perm = %o, want 0700", perm)
-	}
-
-	wantControlPath := "ControlPath=" + filepath.Join(h.controlDir, "%C")
-	for _, tc := range []struct {
-		name string
-		argv []string
-	}{
-		{"sshBase", h.sshBase(false, true)},
-		{"scpCommand", h.scpCommand(false, "/local", "remote:/path")},
-	} {
-		argv := tc.argv
-		for _, val := range []string{"ControlMaster=auto", wantControlPath, "ControlPersist=600"} {
-			idx := slices.Index(argv, val)
-			if idx <= 0 || argv[idx-1] != "-o" {
-				t.Fatalf("%s = %v: want %q preceded by its own -o", tc.name, argv, val)
-			}
-		}
-	}
-}
-
-// TestSSHKeepalivesAlwaysThreaded pins the liveness options onto EVERY ssh and
-// scp this package builds, whatever the connection's shape.
-//
-// The regression it guards is not a wrong argv, it is a hang: a provisioning run
-// streams one ssh session for a whole playbook, and a task that goes minutes
-// without writing to the channel (a repo clone, an apt install) is
-// indistinguishable from a session a firewall silently reaped — OpenSSH's own
-// defaults notice neither for two hours. Dropping these options anywhere, for
-// any connection, turns a reported failure back into an unbounded wait with no
-// output to explain it.
-func TestSSHKeepalivesAlwaysThreaded(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cfg  SSHConfig
-	}{
-		{"plain", testCfg},
-		{"port and identity", SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}},
-		{"ephemeral guest", SSHConfig{Host: "10.0.0.9", User: "dev", EphemeralHostKeys: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := NewSSHHost(tc.cfg)
-			for _, cmd := range []struct {
-				name string
-				argv []string
-			}{
-				{"sshBase", h.sshBase(false, true)},
-				{"sshBase tty", h.sshBase(true, true)},
-				{"scpCommand", h.scpCommand(true, "/local", "remote:/path")},
-			} {
-				for _, val := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=8"} {
-					idx := slices.Index(cmd.argv, val)
-					if idx <= 0 || cmd.argv[idx-1] != "-o" {
-						t.Fatalf("%s = %v: want %q preceded by its own -o", cmd.name, cmd.argv, val)
-					}
-				}
-			}
-		})
-	}
-}
-
-// TestSSHDebugLogOptIn proves the transport log is opt-in, lands in a file
-// rather than on stderr, and is per-target.
-//
-// The -E is the load-bearing half. Every guest-command caller in the Proxmox
-// provider merges ssh's stderr into the stream carrying the guest's own output,
-// which is also the stream the TUI's progress parser reads TASK banners from —
-// so a -vv that logged to stderr would corrupt the display of the very run being
-// diagnosed, and the tool would be unusable for the failures it exists to catch.
-func TestSSHDebugLogOptIn(t *testing.T) {
-	t.Run("off by default", func(t *testing.T) {
-		t.Setenv("SAND_SSH_DEBUG", "")
-		h := NewSSHHost(testCfg)
-		if got := h.DebugLogPath(); got != "" {
-			t.Fatalf("DebugLogPath = %q with SAND_SSH_DEBUG unset, want empty", got)
-		}
-		if argv := h.sshBase(false, true); hasToken(argv, "-vv") {
-			t.Fatalf("sshBase = %v, want no -vv when the debug log is off", argv)
-		}
-	})
-
-	t.Run("explicit directory", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("SAND_SSH_DEBUG", dir)
-		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
-
-		want := filepath.Join(dir, "dev@10.0.0.9.log")
-		if got := h.DebugLogPath(); got != want {
-			t.Fatalf("DebugLogPath = %q, want %q", got, want)
-		}
-		argv := h.sshBase(false, true)
-		idx := slices.Index(argv, "-E")
-		if idx < 0 || idx+1 >= len(argv) || argv[idx+1] != want {
-			t.Fatalf("sshBase = %v, want `-E %s`", argv, want)
-		}
-		if !hasToken(argv, "-vv") {
-			t.Fatalf("sshBase = %v, want -vv alongside the log file", argv)
-		}
-		// scp has no -E, so a debug log must never be requested for it: its only
-		// outlet would be the payload stream.
-		if scp := h.scpCommand(false, "/local", "remote:/path"); hasToken(scp, "-E") || hasToken(scp, "-vv") {
-			t.Fatalf("scpCommand = %v, want no debug flags (scp has no -E)", scp)
-		}
-	})
-
-	t.Run("one file per target", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("SAND_SSH_DEBUG", dir)
-		a := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
-		b := NewSSHHost(SSHConfig{Host: "10.0.0.10", User: "dev"})
-		if a.DebugLogPath() == b.DebugLogPath() {
-			t.Fatalf("two targets shared one log file: %q", a.DebugLogPath())
-		}
-		// A second connection to the SAME target must append to the same file:
-		// with multiplexing on, a mux client's failure is only explicable next to
-		// the master's log lines, in order.
-		if again := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"}); again.DebugLogPath() != a.DebugLogPath() {
-			t.Fatalf("same target got two log files: %q and %q", a.DebugLogPath(), again.DebugLogPath())
-		}
-	})
-
-	t.Run("IPv6 literal stays a safe filename", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("SAND_SSH_DEBUG", dir)
-		h := NewSSHHost(SSHConfig{Host: "fd00::1", User: "dev"})
-		got := h.DebugLogPath()
-		if filepath.Dir(got) != dir {
-			t.Fatalf("DebugLogPath = %q, want it inside %q", got, dir)
-		}
-		if strings.ContainsAny(filepath.Base(got), ":/") {
-			t.Fatalf("log filename %q kept a separator-unsafe character", filepath.Base(got))
-		}
-	})
-}
-
-// TestSSHNoControlDirOmitsMuxFlags proves the graceful-degradation path: when
-// controlDir could not be resolved (simulated here by constructing the struct
-// directly, standing in for os.UserCacheDir/MkdirAll failing in NewSSHHost),
-// sshBase/scpCommand argv carries no multiplexing flags — connection
-// multiplexing is a pure optimization and must NEVER become a hard
-// requirement for reaching the remote host.
-//
-// The keepalive options stay, and that asymmetry is the point: multiplexing is
-// an optimization that can be dropped, while a connection with no liveness check
-// can hang forever instead of failing (see keepaliveFlags). One degrades, the
-// other does not.
-func TestSSHNoControlDirOmitsMuxFlags(t *testing.T) {
-	h := &SSHHost{cfg: testCfg, newCmd: func(ctx context.Context, argv []string) *exec.Cmd {
-		return exec.CommandContext(ctx, argv[0], argv[1:]...)
-	}}
-	// controlDir left at its zero value "" — the failure path.
-	want := append(append([]string{"ssh"}, keepaliveFlags()...), "dev@example.com")
-	if got := h.sshBase(false, true); !slices.Equal(got, want) {
-		t.Fatalf("sshBase with empty controlDir = %v, want %v", got, want)
-	}
-	wantScp := append(append([]string{"scp"}, keepaliveFlags()...), "/local", "remote:/path")
-	if got := h.scpCommand(false, "/local", "remote:/path"); !slices.Equal(got, wantScp) {
-		t.Fatalf("scpCommand with empty controlDir = %v, want %v", got, wantScp)
-	}
-	for _, tok := range []string{"-vv", "-E"} {
-		if hasToken(h.sshBase(false, true), tok) {
-			t.Fatalf("sshBase carried %q with no SAND_SSH_DEBUG set: %v", tok, h.sshBase(false, true))
-		}
-	}
 }
 
 // TestSSHRunnerArgv pins the exact ssh argv the runner builds for representative
@@ -312,155 +131,12 @@ func TestSSHRunnerArgv(t *testing.T) {
 			if len(rec.calls) != 1 {
 				t.Fatalf("got %d calls, want 1: %v", len(rec.calls), rec.calls)
 			}
-			want := sshArgv(h, nil, "dev@example.com", tc.tail...)
+			want := sshArgv(h, false, tc.tail...)
 			if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
 				t.Fatalf("argv = %v\nwant %v", got, want)
 			}
 		})
 	}
-}
-
-// TestSSHPortAndIdentityThreading proves the port and identity flags are threaded
-// onto the ssh argv when set — and OMITTED when unset (or the default port 22), so
-// the common case is the bare `ssh user@host …` the test above pins.
-func TestSSHPortAndIdentityThreading(t *testing.T) {
-	t.Run("port and identity set", func(t *testing.T) {
-		rec := &recordingExec{}
-		h := hostWith(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}, rec)
-		c := New(h)
-		_, _ = c.List()
-		want := sshArgv(h, []string{"-p", "2222", "-i", "/k"}, "u@h", "LIMA_HOME=.lima", "limactl", "list", "--format", "json")
-		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("argv = %v\nwant %v", got, want)
-		}
-	})
-	t.Run("default port 22 omits -p", func(t *testing.T) {
-		rec := &recordingExec{}
-		c := New(hostWith(SSHConfig{Host: "h", User: "u", Port: 22}, rec))
-		_, _ = c.List()
-		if got := rec.calls[0]; hasToken(got, "-p") {
-			t.Fatalf("port 22 should omit -p, got %v", got)
-		}
-	})
-	t.Run("no user omits user@", func(t *testing.T) {
-		rec := &recordingExec{}
-		h := hostWith(SSHConfig{Host: "h"}, rec)
-		c := New(h)
-		_, _ = c.List()
-		want := sshArgv(h, nil, "h", "LIMA_HOME=.lima", "limactl", "list", "--format", "json")
-		if got := rec.calls[0]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("argv = %v\nwant %v", got, want)
-		}
-	})
-}
-
-// TestSSHEphemeralHostKeys pins the throwaway-guest host-key contract
-// (SSHConfig.EphemeralHostKeys): when set, EVERY ssh and scp argv must carry
-// `-o StrictHostKeyChecking=no`, `-o UserKnownHostsFile=/dev/null`, and
-// `-o LogLevel=ERROR` — the flags that stop the Proxmox provider's first
-// provisioning ssh from blocking on OpenSSH's interactive host-key prompt (a
-// hang the TUI cannot answer) and from hard-failing when a rebuilt VM reuses a
-// prior VM's IP with a new key. When UNSET (the remote-Lima default), none of
-// those options may appear — that hop pins host keys on first use.
-func TestSSHEphemeralHostKeys(t *testing.T) {
-	// hasOptPair reports whether argv contains the contiguous `-o <opt>` pair, so
-	// a stray "-o" or a lookalike value elsewhere cannot pass the assertion.
-	hasOptPair := func(argv []string, opt string) bool {
-		for i := 0; i+1 < len(argv); i++ {
-			if argv[i] == "-o" && argv[i+1] == opt {
-				return true
-			}
-		}
-		return false
-	}
-	opts := []string{"StrictHostKeyChecking=no", "UserKnownHostsFile=/dev/null", "LogLevel=ERROR"}
-
-	t.Run("set: ssh and scp carry every option", func(t *testing.T) {
-		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev", EphemeralHostKeys: true})
-		ssh := h.SSHArgv(false, "true")
-		scp := h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a")
-		for _, argv := range [][]string{ssh, scp} {
-			for _, opt := range opts {
-				if !hasOptPair(argv, opt) {
-					t.Errorf("argv %v missing `-o %s`", argv, opt)
-				}
-			}
-		}
-	})
-
-	t.Run("unset: neither ssh nor scp mentions host-key options", func(t *testing.T) {
-		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev"})
-		ssh := h.SSHArgv(false, "true")
-		scp := h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a")
-		for _, argv := range [][]string{ssh, scp} {
-			for _, opt := range opts {
-				if hasToken(argv, opt) {
-					t.Errorf("argv %v must not weaken host-key checking for a persistent host (found %q)", argv, opt)
-				}
-			}
-		}
-	})
-}
-
-// TestSSHIdentitiesOnly pins the single-key-offer contract
-// (SSHConfig.IdentitiesOnly): when set, EVERY ssh and scp argv must carry `-o
-// IdentitiesOnly=yes` alongside its `-i`, so ssh offers only the configured key
-// and never the ones the agent or ssh_config would volunteer.
-//
-// The regression it guards is an authentication failure on a correctly-built
-// guest. A Proxmox guest trusts exactly one key, so every extra offer is refused
-// and counts against the guest sshd's MaxAuthTries (6): a locked agent key turns
-// a clean "Permission denied" into a "Too many authentication failures"
-// disconnect, and an agent holding six or more keys exhausts the budget before
-// ssh ever offers the right one. When UNSET (the remote-Lima default) the option
-// must be absent — that hop authenticates on the user's own terms, where an agent
-// key or an ssh_config IdentityFile is a legitimate way in.
-func TestSSHIdentitiesOnly(t *testing.T) {
-	const opt = "IdentitiesOnly=yes"
-
-	t.Run("set: ssh and scp offer only the configured key", func(t *testing.T) {
-		h := NewSSHHost(SSHConfig{Host: "10.0.0.9", User: "dev", IdentityPath: "/k", IdentitiesOnly: true})
-		for _, argv := range [][]string{
-			h.SSHArgv(false, "true"),
-			h.SCPArgv(false, "/tmp/a", "dev@10.0.0.9:/tmp/a"),
-		} {
-			idx := slices.Index(argv, opt)
-			if idx <= 0 || argv[idx-1] != "-o" {
-				t.Errorf("argv %v: want %q preceded by its own -o", argv, opt)
-			}
-			// The restriction is meaningless without the key it restricts ssh TO.
-			if i := slices.Index(argv, "-i"); i < 0 || i+1 >= len(argv) || argv[i+1] != "/k" {
-				t.Errorf("argv %v: want `-i /k` alongside %q", argv, opt)
-			}
-		}
-	})
-
-	t.Run("unset: neither ssh nor scp restricts the offer", func(t *testing.T) {
-		h := NewSSHHost(SSHConfig{Host: "h", User: "u", IdentityPath: "/k"})
-		for _, argv := range [][]string{
-			h.SSHArgv(false, "true"),
-			h.SCPArgv(false, "/tmp/a", "u@h:/tmp/a"),
-		} {
-			if hasToken(argv, opt) {
-				t.Errorf("argv %v must not restrict key selection on a persistent host", argv)
-			}
-		}
-	})
-
-	t.Run("no identity: the option is not emitted on its own", func(t *testing.T) {
-		// Without an -i there is nothing to restrict ssh to, so the option would
-		// only narrow ssh to its built-in default key names — a behaviour change
-		// with nothing to gain.
-		h := NewSSHHost(SSHConfig{Host: "h", User: "u", IdentitiesOnly: true})
-		for _, argv := range [][]string{
-			h.SSHArgv(false, "true"),
-			h.SCPArgv(false, "/tmp/a", "u@h:/tmp/a"),
-		} {
-			if hasToken(argv, opt) {
-				t.Errorf("argv %v carries %q with no -i to restrict ssh to", argv, opt)
-			}
-		}
-	})
 }
 
 // TestSSHStdinReachesRemoteLimactl is the secret-hygiene proof for the hop: the
@@ -571,8 +247,8 @@ func TestSSHStreamReapsOrphan(t *testing.T) {
 
 			select {
 			case <-done:
-			case <-time.After(waitDelay + 5*time.Second):
-				t.Fatalf("%s did not return within %v of cancel: WaitDelay is not reaping the orphaned ssh chain", tc.name, waitDelay)
+			case <-time.After(sshx.WaitDelay + 5*time.Second):
+				t.Fatalf("%s did not return within %v of cancel: WaitDelay is not reaping the orphaned ssh chain", tc.name, sshx.WaitDelay)
 			}
 		})
 	}
@@ -583,11 +259,11 @@ func TestSSHStreamReapsOrphan(t *testing.T) {
 // tmux expression byte-for-byte identical to the local form and --workdir before
 // the instance name. Reversing/altering either is silently fatal (see attach.go).
 func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
-	h := NewSSHHost(SSHConfig{Host: "example.com", User: "dev"})
+	h := NewSSHHost(sshx.Config{Host: "example.com", User: "dev"}, "")
 	got := h.AttachArgv("web", "/home/debian.guest", "")
 
-	// ssh -t <mux flags> <target> prefix.
-	prefix := sshArgv(h, []string{"-t"}, "dev@example.com")
+	// `ssh -t <flags…> <target>` prefix.
+	prefix := sshPrefix(h, true)
 	if len(got) < len(prefix) || !slices.Equal(got[:len(prefix)], prefix) {
 		t.Fatalf("remote attach must start `%v`, got %v", prefix, got)
 	}
@@ -604,10 +280,12 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	}
 
 	// The guest expression survives BYTE-FOR-BYTE (only shell-quoted for the remote
-	// shell), and destroy-unattached still never touches `main`.
+	// shell), and destroy-unattached still never touches `main`. It is taken from
+	// guestsh — the one place it is spelled — so a drift there fails here too.
+	guestExpr := guestsh.AttachArgv("")[2]
 	last := got[len(got)-1]
-	if !strings.Contains(last, guestAttachExpr("")) {
-		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr(""))
+	if !strings.Contains(last, guestExpr) {
+		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestExpr)
 	}
 
 	// The remote argv's tail (after the `ssh -t <mux flags> target` prefix) must
@@ -617,7 +295,7 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	local := AttachArgv("web", "/home/debian.guest", "")
 	wantTail := make([]string, len(local))
 	for i, a := range local {
-		wantTail[i] = shellQuote(a)
+		wantTail[i] = sshx.Quote(a)
 	}
 	if tail := got[len(prefix):]; !slices.Equal(tail, wantTail) {
 		t.Fatalf("remote attach tail = %v\nwant the local attach argv quoted: %v", tail, wantTail)
@@ -627,9 +305,9 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 // TestSSHAttachArgvThreadsPortIdentity: the attach argv threads -p/-i just like
 // the runner does, after the -t.
 func TestSSHAttachArgvThreadsPortIdentity(t *testing.T) {
-	h := NewSSHHost(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"})
+	h := NewSSHHost(sshx.Config{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"}, "")
 	got := h.AttachArgv("web", "", "")
-	wantPrefix := sshArgv(h, []string{"-t", "-p", "2222", "-i", "/k"}, "u@h", "limactl", "shell", "web")
+	wantPrefix := sshArgv(h, true, "limactl", "shell", "web")
 	if !slices.Equal(got[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("attach prefix = %v\nwant %v", got[:len(wantPrefix)], wantPrefix)
 	}
@@ -666,7 +344,7 @@ func TestSSHTwoStageUpload(t *testing.T) {
 	copyCall := findLimactlCopy(t, rec.calls)
 	// The limactl copy must run over ssh, pin --backend=scp, and take the STAGED
 	// remote path (temp/basename) as its host endpoint, and web:/guest/dir as guest.
-	wantCopy := sshArgv(h, nil, "dev@example.com", "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", tmp+"/file.txt", "web:/guest/dir")
+	wantCopy := sshArgv(h, false, "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", tmp+"/file.txt", "web:/guest/dir")
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -694,7 +372,7 @@ func TestSSHTwoStageDownload(t *testing.T) {
 	}
 
 	copyCall := findLimactlCopy(t, rec.calls)
-	wantCopy := sshArgv(h, nil, "dev@example.com", "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp)
+	wantCopy := sshArgv(h, false, "LIMA_HOME=.lima", "limactl", "copy", "-v", "--backend=scp", "-r", "web:/guest/src", tmp)
 	if !reflect.DeepEqual(copyCall, wantCopy) {
 		t.Fatalf("remote limactl copy (download) = %v\nwant %v", copyCall, wantCopy)
 	}
@@ -758,27 +436,6 @@ func TestSplitGuestEndpoint(t *testing.T) {
 	}
 }
 
-// TestShellQuote covers the remote-shell quoting: safe tokens pass through, and a
-// token with a space/metacharacter (the whole point over ssh) is single-quoted so
-// the remote shell does not word-split it.
-func TestShellQuote(t *testing.T) {
-	cases := map[string]string{
-		"limactl":       "limactl",
-		"--format":      "--format",
-		"web:/home/u":   "web:/home/u",
-		"a b":           "'a b'",
-		"":              "''",
-		"{{.Status}}":   "'{{.Status}}'",
-		"it's":          `'it'\''s'`,
-		"/home/x.guest": "/home/x.guest",
-	}
-	for in, want := range cases {
-		if got := shellQuote(in); got != want {
-			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // --- HostFiles over ssh ---------------------------------------------------------
 
 // TestSSHReadFile proves ReadFile cats the remote path and maps a missing file to
@@ -797,7 +454,7 @@ func TestSSHReadFile(t *testing.T) {
 		if string(b) != "hello" {
 			t.Fatalf("ReadFile = %q, want %q", b, "hello")
 		}
-		want := sshArgv(h, nil, "dev@example.com", "cat", "/remote/.lima/web/cloud-config.yaml")
+		want := sshArgv(h, false, "cat", "/remote/.lima/web/cloud-config.yaml")
 		if !reflect.DeepEqual(rec.calls[0], want) {
 			t.Fatalf("ReadFile argv = %v, want %v", rec.calls[0], want)
 		}
@@ -919,7 +576,7 @@ func TestSSHFileMutations(t *testing.T) {
 		if err := h.RemoveAll("/remote/.lima/web"); err != nil {
 			t.Fatalf("RemoveAll: %v", err)
 		}
-		want := sshArgv(h, nil, "dev@example.com", "rm", "-rf", "--", "/remote/.lima/web")
+		want := sshArgv(h, false, "rm", "-rf", "--", "/remote/.lima/web")
 		if !reflect.DeepEqual(rec.calls[0], want) {
 			t.Fatalf("RemoveAll argv = %v, want %v", rec.calls[0], want)
 		}
@@ -956,10 +613,10 @@ func TestSSHDiskAllocBytes(t *testing.T) {
 // TestSSHLimaHome pins the remote LIMA_HOME resolution: the configured value, or
 // the relative default that resolves against the remote login home.
 func TestSSHLimaHome(t *testing.T) {
-	if got := NewSSHHost(SSHConfig{Host: "h", RemoteLimaHome: "/srv/lima"}).LimaHome(); got != "/srv/lima" {
+	if got := NewSSHHost(sshx.Config{Host: "h"}, "/srv/lima").LimaHome(); got != "/srv/lima" {
 		t.Fatalf("LimaHome(configured) = %q, want /srv/lima", got)
 	}
-	if got := NewSSHHost(SSHConfig{Host: "h"}).LimaHome(); got != defaultRemoteLimaHome {
+	if got := NewSSHHost(sshx.Config{Host: "h"}, "").LimaHome(); got != defaultRemoteLimaHome {
 		t.Fatalf("LimaHome(default) = %q, want %q", got, defaultRemoteLimaHome)
 	}
 }
@@ -977,7 +634,7 @@ func TestSSHLimaHome(t *testing.T) {
 func TestSSHLimaHomeExportedToRemoteLimactl(t *testing.T) {
 	t.Run("configured RemoteLimaHome reaches the remote limactl", func(t *testing.T) {
 		rec := &recordingExec{}
-		h := hostWith(SSHConfig{Host: "h", RemoteLimaHome: "/srv/lima"}, rec)
+		h := hostWithHome(sshx.Config{Host: "h"}, "/srv/lima", rec)
 		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
 			t.Fatalf("Output: %v", err)
 		}
@@ -992,7 +649,7 @@ func TestSSHLimaHomeExportedToRemoteLimactl(t *testing.T) {
 
 	t.Run("default RemoteLimaHome is still always exported", func(t *testing.T) {
 		rec := &recordingExec{}
-		h := hostWith(SSHConfig{Host: "h"}, rec)
+		h := hostWith(sshx.Config{Host: "h"}, rec)
 		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
 			t.Fatalf("Output: %v", err)
 		}
@@ -1011,7 +668,7 @@ func TestSSHLimaHomeExportedToRemoteLimactl(t *testing.T) {
 		t.Setenv("LIMA_HOME", "/should/never/leak")
 		t.Setenv("XDG_CONFIG_HOME", "/should/never/leak/xdg")
 		rec := &recordingExec{}
-		h := hostWith(SSHConfig{Host: "h", RemoteLimaHome: "/srv/lima"}, rec)
+		h := hostWithHome(sshx.Config{Host: "h"}, "/srv/lima", rec)
 		if _, err := h.Output(context.Background(), "list", "--format", "json"); err != nil {
 			t.Fatalf("Output: %v", err)
 		}
@@ -1103,8 +760,8 @@ func TestSSHStagePlaybook(t *testing.T) {
 	// The local playbook is scp'd RECURSIVELY to that remote path so `limactl
 	// start` on the remote host can bind-mount it as /mnt/playbook.
 	scpCall := findCall(t, rec.calls, "scp")
-	if !hasToken(scpCall, "-r") || !hasToken(scpCall, "/local/playbook") || !hasToken(scpCall, h.target()+":"+dst) {
-		t.Fatalf("stage scp = %v, want it to scp -r /local/playbook to %s", scpCall, h.target()+":"+dst)
+	if !hasToken(scpCall, "-r") || !hasToken(scpCall, "/local/playbook") || !hasToken(scpCall, h.conn.Target()+":"+dst) {
+		t.Fatalf("stage scp = %v, want it to scp -r /local/playbook to %s", scpCall, h.conn.Target()+":"+dst)
 	}
 }
 
@@ -1269,51 +926,11 @@ func TestSSHReadInstanceMarkersProvenance(t *testing.T) {
 	})
 }
 
-// A context marked WithoutMux must produce an argv that neither joins nor
-// becomes the shared control master, while an ordinary context keeps
-// multiplexing — the whole point being that ONE dying master must not be able to
-// take every long-lived session down with it (see WithoutMux).
-func TestWithoutMuxOptsOneCommandOutOfTheSharedMaster(t *testing.T) {
-	h := NewSSHHost(testCfg)
-	if h.controlDir == "" {
-		t.Skip("no control dir resolved in this environment; multiplexing is off entirely")
-	}
-
-	shared := h.SSHArgvCtx(context.Background(), false, "true")
-	if slices.Index(shared, "ControlMaster=auto") <= 0 {
-		t.Fatalf("an ordinary command must still multiplex, got %v", shared)
-	}
-
-	alone := h.SSHArgvCtx(WithoutMux(context.Background()), false, "true")
-	for _, val := range []string{"ControlMaster=no", "ControlPath=none"} {
-		idx := slices.Index(alone, val)
-		if idx <= 0 || alone[idx-1] != "-o" {
-			t.Fatalf("WithoutMux argv = %v: want %q preceded by its own -o", alone, val)
-		}
-	}
-	if slices.Contains(alone, "ControlMaster=auto") {
-		t.Fatalf("WithoutMux argv must not also ask to multiplex: %v", alone)
-	}
-	// ControlPath=none as well as ControlMaster=no: without it ssh still
-	// consults (and can block on) an existing socket.
-	if i := slices.IndexFunc(alone, func(s string) bool {
-		return strings.HasPrefix(s, "ControlPath=") && s != "ControlPath=none"
-	}); i >= 0 {
-		t.Fatalf("WithoutMux argv must not name a control socket: %v", alone)
-	}
-	// The keepalives are not negotiable, whichever shape the argv takes.
-	for _, val := range []string{"ServerAliveInterval=15", "ServerAliveCountMax=8"} {
-		if !slices.Contains(alone, val) {
-			t.Fatalf("WithoutMux argv dropped %q: %v", val, alone)
-		}
-	}
-}
-
 // The opt-out travels on the context, so every ctx-carrying runner must honour
 // it — not just the argv builder the Proxmox provider calls.
 func TestWithoutMuxHonouredByTheStreamingRunners(t *testing.T) {
-	h := NewSSHHost(testCfg)
-	if h.controlDir == "" {
+	h := NewSSHHost(testCfg, "")
+	if !slices.Contains(h.conn.Argv(false), "ControlMaster=auto") {
 		t.Skip("no control dir resolved in this environment; multiplexing is off entirely")
 	}
 	var got []string
@@ -1322,7 +939,7 @@ func TestWithoutMuxHonouredByTheStreamingRunners(t *testing.T) {
 		return exec.CommandContext(ctx, "true")
 	}
 
-	_ = h.Stream(WithoutMux(context.Background()), nil, io.Discard, "list")
+	_ = h.Stream(sshx.WithoutMux(context.Background()), nil, io.Discard, "list")
 	if !slices.Contains(got, "ControlMaster=no") {
 		t.Fatalf("Stream ignored the context's opt-out: %v", got)
 	}

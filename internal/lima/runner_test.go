@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/sshx"
 )
 
 // StreamOut must write only the command's stdout to out and keep its stderr
@@ -90,12 +92,12 @@ func TestStreamReapsAnOrphanedGrandchildHoldingThePipe(t *testing.T) {
 			time.Sleep(300 * time.Millisecond)
 			cancel()
 
-			// The grandchild sleeps far longer than waitDelay. Without WaitDelay the
+			// The grandchild sleeps far longer than WaitDelay. Without it the
 			// wait lasts as long as the ORPHAN does; with it, it is bounded.
 			select {
 			case <-done:
-			case <-time.After(waitDelay + 5*time.Second):
-				t.Fatalf("%s did not return within %v of cancel: its goroutine is blocked on a pipe the orphaned grandchild still holds — that is the leak", tc.name, waitDelay)
+			case <-time.After(sshx.WaitDelay + 5*time.Second):
+				t.Fatalf("%s did not return within %v of cancel: its goroutine is blocked on a pipe the orphaned grandchild still holds — that is the leak", tc.name, sshx.WaitDelay)
 			}
 		})
 	}
@@ -130,8 +132,8 @@ func TestAHeldPipeAfterSuccessIsNotAFailure(t *testing.T) {
 	}
 	// The wait really was bounded by WaitDelay — proving the holder held the
 	// pipes and the suppression (not a fast clean exit) is what was exercised.
-	if elapsed := time.Since(start); elapsed < waitDelay {
-		t.Fatalf("Stream returned in %s, before WaitDelay (%s) — the grandchild did not hold the pipes and this test proved nothing", elapsed, waitDelay)
+	if elapsed := time.Since(start); elapsed < sshx.WaitDelay {
+		t.Fatalf("Stream returned in %s, before WaitDelay (%s) — the grandchild did not hold the pipes and this test proved nothing", elapsed, sshx.WaitDelay)
 	}
 }
 
@@ -152,6 +154,6 @@ func TestAHeldPipeDoesNotMaskARealFailure(t *testing.T) {
 }
 
 // holderScript backgrounds a child that inherits and holds the shell's
-// stdout/stderr past waitDelay while the shell itself exits promptly — the
+// stdout/stderr past WaitDelay while the shell itself exits promptly — the
 // ssh -> ControlPersist-master relationship, in one line of POSIX sh.
 const holderScript = `(sleep 5 &)`

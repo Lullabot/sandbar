@@ -5,6 +5,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -79,13 +80,12 @@ func (p *remoteLimaProvider) HostResources() HostResources {
 // provider can coexist in the same process without one's base-image touches
 // leaking onto the other's host.
 func NewRemoteLima(cfg TargetConfig) (Provider, error) {
-	host := lima.NewSSHHost(lima.SSHConfig{
-		Host:           cfg.Host,
-		User:           cfg.User,
-		Port:           cfg.Port,
-		IdentityPath:   cfg.IdentityPath,
-		RemoteLimaHome: cfg.RemoteLimaHome,
-	})
+	host := lima.NewSSHHost(sshx.Config{
+		Host:         cfg.Host,
+		User:         cfg.User,
+		Port:         cfg.Port,
+		IdentityPath: cfg.IdentityPath,
+	}, cfg.RemoteLimaHome)
 	// PlaybookDir left empty — located lazily on first create/reset (see
 	// NewDefault and Provisioner.playbookDir); a remote `sand shell` must not
 	// trigger playbook extraction either.
