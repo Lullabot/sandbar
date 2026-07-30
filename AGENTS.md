@@ -605,6 +605,14 @@ The clipboard read is one-shot and runs on the machine executing `sand`, not
 the remote host (for remote-Lima deployments). Only the image bytes cross
 the network.
 
+**This invariant is about the HOST → GUEST direction only.** Copying text the
+other way — guest → host, a selection the user makes inside the VM's tmux
+reaching their own clipboard over OSC 52 — is a separate, deliberate feature
+(`internal/lima.clipboardCmds` plus `set -s set-clipboard on` in
+`roles/user/templates/tmux.conf.j2`), and enabling it does not weaken anything
+above. The password-leak surface is a host clipboard the guest can read at
+will; a copy the user performs inside the guest is neither.
+
 For the security rationale, see the plan's Risk Considerations and the spec
 comment at `roles/claude-code/tasks/main.yml`.
 
@@ -662,6 +670,17 @@ comment at `roles/claude-code/tasks/main.yml`.
   bounces the VM only when the guest itself reports
   `/var/run/reboot-required` (a kernel/libc upgrade), and `Reset` warns
   instead of silently destroying a live tmux session before bouncing one.
+
+- **`roles/user`'s `~/.tmux.conf` deploy is deliberately UNGATED**, unlike its
+  identity-free neighbours that all carry `when: provision_phase != 'finalize'`.
+  Adding that gate looks like a consistency fix and passes every manual test,
+  because a VM cloned from a CURRENT base still comes out right. What it breaks
+  is a clone taken from an older base (up to 30 days, per the self-refresh):
+  it silently keeps whatever config that base was built with, and a stale tmux
+  config is wrong rather than broken — no error, just a dead clipboard or a
+  missing binding. Re-rendering one small template per clone is the cheaper
+  side of that trade. `TestTmuxConfDeployedInEveryPhase` guards it, the way
+  `molecule/base` guards the same property for the timezone tasks.
 
 - **A provisioning failure must say WHICH LAYER failed.** Each phase runs as one
   ssh session to the guest, so an `exit status 255` from it is ssh's own status —

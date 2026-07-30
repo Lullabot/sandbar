@@ -232,10 +232,14 @@ func TestAttachArgvColorterm(t *testing.T) {
 	if strings.Contains(expr, "export COLORTERM") {
 		t.Errorf("COLORTERM is set via a fragile `export` rather than `tmux new-session -e`:\n\t%s", expr)
 	}
-	if !strings.Contains(mainBranch, `tmux new-session -e COLORTERM=truecolor -s main`) {
+	// `new-session` is no longer the first word after `tmux` — the clipboard
+	// settings run ahead of it in the same command sequence, and must (see
+	// clipboardCmds) — so the assertion is on `-e` landing on the new-session
+	// itself, not on its adjacency to the `tmux` that starts the sequence.
+	if !strings.Contains(mainBranch, `new-session -e COLORTERM=truecolor -s main`) {
 		t.Errorf("the `main` branch does not set COLORTERM via `-e`:\n\t%s", mainBranch)
 	}
-	if !strings.Contains(grouped, `tmux new-session -e COLORTERM=truecolor -t =main`) {
+	if !strings.Contains(grouped, `new-session -e COLORTERM=truecolor -t =main`) {
 		t.Errorf("the grouped branch does not set COLORTERM via `-e`:\n\t%s", grouped)
 	}
 
@@ -267,6 +271,57 @@ func TestAttachArgvColorterm(t *testing.T) {
 	got := AttachArgv("claude", "/home/debian.guest", "24bit")
 	if e := got[len(got)-1]; !strings.Contains(e, "-e COLORTERM=24bit -s main") {
 		t.Errorf("a valid COLORTERM=24bit was not forwarded:\n\t%s", e)
+	}
+}
+
+// TestAttachArgvTurnsOnTheClipboard pins the OSC 52 bridge that carries a copy
+// made inside the guest out to the clipboard of the terminal the user is sitting
+// at. All three assertions are about ORDER or COMPLETENESS, because the ways this
+// breaks are all silent — a copy that simply does nothing, with no error anywhere.
+func TestAttachArgvTurnsOnTheClipboard(t *testing.T) {
+	expr, grouped, mainBranch := splitGuestExpr(t, AttachArgv("claude", "/home/debian.guest", "truecolor"))
+
+	for _, b := range []struct{ name, branch string }{{"main", mainBranch}, {"grouped", grouped}} {
+		// Both settings, in both branches. Either one alone is a dead clipboard:
+		// `set-clipboard on` without the terminal feature emits nothing at all
+		// under TERM=screen-256color (i.e. from sand's host-tmux fast path), and
+		// the feature without `set-clipboard on` only forwards what programs
+		// inside tmux emit, never tmux's own copies.
+		if !strings.Contains(b.branch, "set -s set-clipboard on") {
+			t.Errorf("the %s branch does not `set -s set-clipboard on`; tmux's own copies never leave the guest:\n\t%s", b.name, b.branch)
+		}
+		if !strings.Contains(b.branch, `"terminal-features[99]" "*:clipboard"`) {
+			t.Errorf("the %s branch does not claim the `clipboard` terminal feature; tmux writes OSC 52 only to a"+
+				" terminal it believes supports it, and its built-in list is `xterm*` alone — so this is what a guest"+
+				" reached from inside a host tmux depends on entirely:\n\t%s", b.name, b.branch)
+		}
+
+		// ORDER. tmux latches a client's terminal features when the client
+		// ATTACHES, and new-session attaches before later commands in the same
+		// sequence run. Settings that follow it reach the SERVER and never the
+		// client doing the attaching, which is the one that needs them.
+		set := strings.Index(b.branch, "terminal-features")
+		sess := strings.Index(b.branch, "new-session")
+		if set > sess {
+			t.Errorf("the %s branch sets terminal-features AFTER `new-session`. tmux latches a client's terminal"+
+				" features at attach, so the attaching client never gets the clipboard feature:\n\t%s", b.name, b.branch)
+		}
+
+		// And `start-server` ahead of the settings, or the `main` branch loses
+		// them: with no server running, `set -s` starts a session-less one that
+		// exits immediately (exit-empty), taking the options with it.
+		if start := strings.Index(b.branch, "start-server"); start < 0 || start > set {
+			t.Errorf("the %s branch does not run `start-server` before the settings; with no server up, a"+
+				" session-less one started by `set -s` exits again immediately and the settings go with it:\n\t%s",
+				b.name, b.branch)
+		}
+	}
+
+	// No single quotes anywhere. The ssh-transport provider wraps this whole
+	// expression in single quotes, where one embedded survives only as `'\''`.
+	if strings.Contains(expr, "'") {
+		t.Errorf("the guest expression contains a single quote; the remote provider single-quotes the whole"+
+			" expression, so use double quotes:\n\t%s", expr)
 	}
 }
 
