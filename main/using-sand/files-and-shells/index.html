@@ -858,6 +858,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#copying-text-out-of-the-guest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copying text out of the guest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1393,6 +1404,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#copying-text-out-of-the-guest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Copying text out of the guest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1573,6 +1595,29 @@ once.</p>
 <p>The VM must be running before you can shell into it; a stopped VM won't
 offer <code>S</code> on its tile, and <code>sand shell</code> refuses cleanly with an error
 telling you to start it first.</p>
+<h3 id="copying-text-out-of-the-guest">Copying text out of the guest</h3>
+<p>Select with the mouse, or <code>C-a [</code> then <code>v</code>/<code>y</code> in copy mode, and the text
+lands on the clipboard of the terminal you're sitting at — not just in the
+guest's tmux buffer. Because the mouse belongs to tmux (<code>mouse on</code> is part
+of the shipped config), a drag no longer makes a terminal-native selection
+you could copy yourself, so this is the path.</p>
+<p>It works over <a href="https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands">OSC 52</a>,
+an escape sequence tmux writes back through the shell to your terminal
+emulator, which then puts the text on your system clipboard. Two things have
+to be true on your side for it to arrive:</p>
+<ul>
+<li><strong>Your terminal has to support OSC 52.</strong> Most current ones do, but a few
+  gate it behind a setting (iTerm2's "Applications in terminal may access
+  clipboard", xterm's <code>allowWindowOps</code>) because a program that can write
+  your clipboard can also clobber it. If a copy silently does nothing,
+  that's the first thing to check.</li>
+<li><strong>If you run <code>sand</code> inside your own tmux</strong>, that tmux passes the guest's
+  sequence through by default (<code>set-clipboard external</code>), so nothing is
+  needed — unless you've set <code>set-clipboard off</code>, which drops it.</li>
+</ul>
+<p>A VM created before sand shipped this doesn't need rebuilding: the setting
+is applied at attach time as well as baked into the guest's <code>~/.tmux.conf</code>,
+so the next <code>S</code> or <code>sand shell</code> has it.</p>
 <h3 id="what-the-board-does-while-youre-attached">What the board does while you're attached</h3>
 <p>If sand is itself running inside a host tmux session, <code>S</code> opens the shell in
 a <strong>new host window</strong> and leaves the board on screen beside it, still live.
