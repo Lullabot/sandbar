@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.9.0](https://github.com/Lullabot/sandbar/compare/v0.8.0...v0.9.0) (2026-07-31)
+
+
+### Features
+
+* **provider:** implement Provider.RunArgv for the Proxmox backend ([71cafc5](https://github.com/Lullabot/sandbar/commit/71cafc535996adfc923da834c1bfa550774e78d0))
+* **provider:** Proxmox golden-template methods and opt-in e2e suite ([a9025b7](https://github.com/Lullabot/sandbar/commit/a9025b762795d39bbf4d54b5677934643debed23))
+* **provider:** Proxmox host and per-VM stats from the API ([5e78b64](https://github.com/Lullabot/sandbar/commit/5e78b641eafdfe9fe3f654da02e873658af3204d))
+* **provider:** Proxmox provider core — discovery, power, guest transport ([16d83e9](https://github.com/Lullabot/sandbar/commit/16d83e9e07baab05fc1e2fa9a460e8311fb79836))
+* **provider:** Proxmox provisioning, provenance, and profile wiring ([34e5ede](https://github.com/Lullabot/sandbar/commit/34e5edef2cfdc6535807a9a04534f9479d104393))
+* **provider:** require Proxmox VE 9.0, drop 8.x support ([77f123e](https://github.com/Lullabot/sandbar/commit/77f123e0b096031ed638496c39c6161b49d55b82))
+* **provision:** set the guest timezone from the host instead of UTC ([#109](https://github.com/Lullabot/sandbar/issues/109)) ([f09a15d](https://github.com/Lullabot/sandbar/commit/f09a15dd036d85243cdf63d3979381fb59720445))
+* **proxmox,ui:** show a Proxmox VM's architecture, and never a blank badge ([10f68a3](https://github.com/Lullabot/sandbar/commit/10f68a3b6d9fba5ef65576949fb3ba5ddbfd7f4b))
+* **proxmox:** configurable base_image (golden-image support) ([bece4a9](https://github.com/Lullabot/sandbar/commit/bece4a931f40cddef954830b538cef29e9aa18e4))
+* **proxmox:** decouple the cloud-image storage from the VM-disk storage ([a965aeb](https://github.com/Lullabot/sandbar/commit/a965aeb18882cd51eb10b10a2bbb6895c5a83b16))
+* **proxmox:** default base_image to the project golden image ([c264963](https://github.com/Lullabot/sandbar/commit/c264963bcc21fb4f9c473b644796b32212136830))
+* **proxmox:** name the layer that failed, and keep a failed VM on request ([0fab6aa](https://github.com/Lullabot/sandbar/commit/0fab6aaf2dd1493bf870b69d4218da271d769c1a))
+* **pve,profiles:** Proxmox API client foundations and proxmox profile type ([bd364f9](https://github.com/Lullabot/sandbar/commit/bd364f9bb2947d6471a5b8a6279e8d3384330ad4))
+* **pve:** VM lifecycle, guest-agent, and node/storage stats endpoints ([ce0f526](https://github.com/Lullabot/sandbar/commit/ce0f52661c15b81c0912785eca0f8baa23b31b34))
+* **ui:** per-field help on the connection profile forms ([7bd148e](https://github.com/Lullabot/sandbar/commit/7bd148e3c4362db1df4dcf37ed2b9433cb7d7943))
+* **ui:** Proxmox connection-profile form with an insecure checkbox ([2fadd1b](https://github.com/Lullabot/sandbar/commit/2fadd1be6e1a96f1a4522090697e79d506bbb9fd))
+* **ui:** scroll bar on the tile grid, so a small window stops lying ([9782afa](https://github.com/Lullabot/sandbar/commit/9782afa0a44807e46d67c7adf4508d510c75bd6b))
+* **ui:** show every Proxmox field in the profile form ([7a21fe0](https://github.com/Lullabot/sandbar/commit/7a21fe0172bc9437c81855a3e8a43ebeaf79e3bc))
+* **ui:** show the current Ansible task's elapsed time on a building tile ([b97703d](https://github.com/Lullabot/sandbar/commit/b97703dc8e398e9a6b4337c617fc7aac4bb6f392))
+* **ui:** type picker when creating a connection profile ([848d770](https://github.com/Lullabot/sandbar/commit/848d7700cc18c29a5d7784d44642adab09a065d9))
+
+
+### Bug Fixes
+
+* address code-review findings across the proxmox/TUI branch ([78e9ed9](https://github.com/Lullabot/sandbar/commit/78e9ed98946605b479dc92a266b63edd23670d69))
+* **ansible:** retry base-package apt install on transient mirror resets ([baf5bc2](https://github.com/Lullabot/sandbar/commit/baf5bc2c47cf77a7f7dd3b1db75f0bc04fe32ad7))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 3eef36e ([#102](https://github.com/Lullabot/sandbar/issues/102)) ([ae82a38](https://github.com/Lullabot/sandbar/commit/ae82a38a9d0a92424d3354a25b484c3ce490b58f))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 41c9e6b ([#114](https://github.com/Lullabot/sandbar/issues/114)) ([56751e6](https://github.com/Lullabot/sandbar/commit/56751e6a5625e0b850013a81541ed251b877f2de))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260720091843-3eef36eaaa28 ([#100](https://github.com/Lullabot/sandbar/issues/100)) ([93a092c](https://github.com/Lullabot/sandbar/commit/93a092cdfe4a337095142c67607ecf87e61ac86b))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260727090823-41c9e6be3365 ([#115](https://github.com/Lullabot/sandbar/issues/115)) ([a93c49d](https://github.com/Lullabot/sandbar/commit/a93c49d598a2b7b77bb2d855b7f56133be0093e2))
+* **provider,pve:** collision-safe clones, exact resize, graceful snapshot stop ([920073d](https://github.com/Lullabot/sandbar/commit/920073d597c32d36a38b5fdf7705562c255b119c))
+* **provider:** offer Proxmox guests only the cloud-init key ([2fc9310](https://github.com/Lullabot/sandbar/commit/2fc9310f28106e9597fe466f7b2e980dea279445))
+* **proxmox:** accept ephemeral guest host keys so provisioning ssh never hangs ([ddabaad](https://github.com/Lullabot/sandbar/commit/ddabaadf4e60146b79119bd31a848003fd9ed270))
+* **proxmox:** create VMs with cpu=host so Claude Code install doesn't livelock ([0297592](https://github.com/Lullabot/sandbar/commit/0297592a42a53e70811c6801e99d6c59146300e5))
+* **proxmox:** refuse a guest address two VMs both claim ([75f3496](https://github.com/Lullabot/sandbar/commit/75f349679955cbd2d6e342117c25da4d29a19c1d))
+* **proxmox:** reset the template's machine identity so clones get distinct DHCP leases ([04d18b2](https://github.com/Lullabot/sandbar/commit/04d18b2b695c75a750b35750add0e9247b60c383))
+* **proxmox:** retry base bootstrap apt until first-boot apt releases the lock ([2402a93](https://github.com/Lullabot/sandbar/commit/2402a93c41f5da55fcab4620026d37f95ac682cb))
+* **ssh,lima,proxmox:** stop reporting a held-pipe success as WaitDelay failure ([d20da7f](https://github.com/Lullabot/sandbar/commit/d20da7f5d09a2dd7f8401396fb78a09d64a9c9ed))
+* **ssh:** keep long provisioning sessions alive, and log the transport on demand ([de82a36](https://github.com/Lullabot/sandbar/commit/de82a36e921fc8fee36275c13a9b1e9683d24411))
+* **test:** make PROXMOX_E2E_IMAGE optional and expand ~ in the Proxmox e2e suite ([217d47a](https://github.com/Lullabot/sandbar/commit/217d47a6d30d100f95c2039eff44f5419b368a8c))
+* **ui,ansible:** stop the board's guest probes from piling up inside a VM ([d56a5d7](https://github.com/Lullabot/sandbar/commit/d56a5d75ae01d533f0b65b33a2948dac1a57b86f))
+* **ui,provider:** stop the Proxmox profile form from losing fields ([6cc0768](https://github.com/Lullabot/sandbar/commit/6cc07683497fe0ad5fdaecd37a2508c5e15e10fd))
+* **ui,proxmox:** stop drawing PVE's provisioned size as a full disk gauge ([981c49d](https://github.com/Lullabot/sandbar/commit/981c49d0c13c2ab4d95a09925a72f9c804358cf7))
+* **ui:** let a copy inside a VM reach the host clipboard ([dd7cdb5](https://github.com/Lullabot/sandbar/commit/dd7cdb59d36e6226858114009ce6408b607fc0da))
+* **ui:** refuse a Proxmox profile with no storage or bridge ([01ca224](https://github.com/Lullabot/sandbar/commit/01ca2249ebfca5645aca8de7f2c045d256a94b42))
+* **ui:** stop a suspended board replaying its backlog on detach ([6c68cc6](https://github.com/Lullabot/sandbar/commit/6c68cc68430759000209774b6addbd94303dd96f))
+* **ui:** stop announcing the guest loop's scheduled exit as a lost connection ([ac0893e](https://github.com/Lullabot/sandbar/commit/ac0893ec1848920de262c95e08123c51e7e15904))
+* **ui:** surface provision/transfer failures in the Messages log ([a71a41a](https://github.com/Lullabot/sandbar/commit/a71a41ac5f2f53d99f968725a75b133dc9ab691b))
+* **ui:** wrap long Messages-pane entries instead of truncating them ([6b87853](https://github.com/Lullabot/sandbar/commit/6b87853884dd08d7757f3d22b02137171e022448))
+
 ## [0.8.0](https://github.com/Lullabot/sandbar/compare/v0.7.0...v0.8.0) (2026-07-20)
 
 
