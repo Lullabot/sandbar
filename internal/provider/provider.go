@@ -120,6 +120,24 @@ type Provider interface {
 	// its own argv element precisely so a sweep-discovered checkout path never
 	// reaches the guest shell as text. See lima.RunArgv.
 	RunArgv(v vm.VM, workdir, expr string) []string
+	// ForwardArgv returns the argv of a long-running process that makes the
+	// guest's 127.0.0.1:guestPort reachable at 127.0.0.1:hostPort on the
+	// WORKSTATION, or nil when the backend already does so on its own — the
+	// nil-means-already-reachable contract. The caller execs a non-nil argv as
+	// a child and kills it when the forward is no longer needed; a nil argv
+	// means there is nothing to start.
+	//
+	// Local Lima returns nil: Lima auto-forwards a guest loopback port to the
+	// SAME port on ITS OWN host's loopback, and for local Lima that host IS the
+	// workstation, so the port is already there. Remote Lima and Proxmox both
+	// return an `ssh -N -L hostPort:127.0.0.1:guestPort …` argv — remote Lima
+	// against the configured SSHHost (bridging the workstation to the REMOTE
+	// host's loopback, where Lima's own auto-forward already landed the guest
+	// port), Proxmox straight to the guest address (there is no Lima involved
+	// at all). Follows the AttachArgv/RunArgv idiom: pure, no I/O, so each
+	// backend's behavior is asserted as an exact argv with no real ssh, network
+	// or VM.
+	ForwardArgv(v vm.VM, hostPort, guestPort int) []string
 	// GuestHome returns v's guest login-user home directory, read from the backend's
 	// instance files (for local Lima, Lima's generated cloud-config.yaml). Returns
 	// "" when it cannot be determined so the caller can fall back.

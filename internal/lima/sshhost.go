@@ -345,16 +345,21 @@ func MuxSuppressed(ctx context.Context) bool {
 
 // sshBase is the ssh argv prefix up to and INCLUDING the target: `ssh [-t] [-p
 // port] [-i identity] [host-key flags] [keepalives] [debug log] [mux flags]
-// target`. tty adds -t for the interactive attach. Port is omitted at the
-// default (<=0 or 22) and identity when unset, the multiplexing flags are
-// omitted when controlDir could not be resolved, and the debug flags only
-// appear when the host asked for a transport log — so the common case is the
-// bare `ssh <keepalives> target …` the tests pin.
+// [preTarget…] target`. tty adds -t for the interactive attach. Port is
+// omitted at the default (<=0 or 22) and identity when unset, the
+// multiplexing flags are omitted when controlDir could not be resolved, and
+// the debug flags only appear when the host asked for a transport log — so
+// the common case is the bare `ssh <keepalives> target …` the tests pin.
 //
 // mux false replaces the multiplexing flags with an explicit opt-out, for a
 // long-lived command that must not share (or become) the master — see
 // WithoutMux, which is how a caller asks for it.
-func (h *SSHHost) sshBase(tty, mux bool) []string {
+//
+// preTarget carries any further ssh OPTION flags that must land before the
+// target — e.g. ForwardArgv's `-N -L …` — as opposed to a remote command,
+// which every caller here appends (shell-quoted) after sshBase returns. It is
+// empty for every caller except ForwardArgv.
+func (h *SSHHost) sshBase(tty, mux bool, preTarget ...string) []string {
 	a := []string{"ssh"}
 	if tty {
 		a = append(a, "-t")
@@ -371,6 +376,7 @@ func (h *SSHHost) sshBase(tty, mux bool) []string {
 	} else {
 		a = append(a, "-o", "ControlMaster=no", "-o", "ControlPath=none")
 	}
+	a = append(a, preTarget...)
 	return append(a, h.target())
 }
 
@@ -1114,6 +1120,31 @@ func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
 	// with tty=true; reuse it rather than re-spelling the quoting loop the file's
 	// header calls load-bearing.
 	return h.sshCommand(true, AttachArgv(name, guestHome, colorterm)...)
+}
+
+// ForwardArgv builds the ssh argv for a long-running LOCAL port forward:
+// `ssh <flags> -N -L <hostPort>:127.0.0.1:<guestPort> target`. -N requests no
+// remote command at all — the connection exists purely to forward, and the
+// caller (provider.Provider.ForwardArgv) execs this as a child it kills when
+// the forward is no longer needed, so there is nothing for -N to run. -L's
+// far end is 127.0.0.1 (the REMOTE host's own loopback, where Lima already
+// landed the guest port — see the local Lima provider's ForwardArgv doc for
+// why), never 0.0.0.0: binding wider would defeat the whole point, which is
+// that a checkout under review never becomes reachable from anything but the
+// workstation. It reuses sshBase's flag-building (port, identity, host-key
+// posture, keepalives, debug log) via the preTarget parameter, so this hop
+// authenticates identically to every other ssh this connection makes.
+//
+// Mux is deliberately OFF (the WithoutMux shape, spelled directly here rather
+// than read off a context — a port forward has no ctx-carrying call site to
+// read one from). A port forward is long-lived by construction, and
+// ControlMaster=auto would let it become — or ride — the shared master:
+// killing it (the normal way a caller tears a forward down) would then kill
+// every OTHER session sharing that master, or an unrelated master death would
+// silently take the forward down too. See WithoutMux for the same reasoning
+// applied to the long-lived heartbeat and sweep probes.
+func (h *SSHHost) ForwardArgv(hostPort, guestPort int) []string {
+	return h.sshBase(false, false, "-N", "-L", fmt.Sprintf("%d:127.0.0.1:%d", hostPort, guestPort))
 }
 
 // --- base-image lock over ssh ---------------------------------------------------
