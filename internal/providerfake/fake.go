@@ -51,6 +51,7 @@ type Provider struct {
 	AttachArgvFunc        func(v vm.VM) []string
 	AttachArgvControlFunc func(v vm.VM) []string
 	RunArgvFunc           func(v vm.VM, workdir, expr string) []string
+	ForwardArgvFunc       func(v vm.VM, hostPort, guestPort int) []string
 	GuestHomeFunc         func(v vm.VM) string
 	GuestUserFunc         func(v vm.VM) string
 	GuestPathFunc         func(name, path string) string
@@ -196,6 +197,17 @@ func (f *Provider) AttachArgv(v vm.VM) []string {
 func (f *Provider) AttachArgvControl(v vm.VM) []string {
 	if f.AttachArgvControlFunc != nil {
 		return f.AttachArgvControlFunc(v)
+	}
+	return nil
+}
+
+// ForwardArgv defaults to nil — the same "already reachable" zero value the
+// local Lima provider returns unconditionally, and the least surprising
+// default for a test that never sets ForwardArgvFunc and does not care about
+// forwarding.
+func (f *Provider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
+	if f.ForwardArgvFunc != nil {
+		return f.ForwardArgvFunc(v, hostPort, guestPort)
 	}
 	return nil
 }
