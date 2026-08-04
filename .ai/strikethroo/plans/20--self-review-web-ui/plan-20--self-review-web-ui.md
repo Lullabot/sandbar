@@ -516,9 +516,24 @@ These are the only zero-dependency tasks and they touch disjoint trees
 (`roles/self-review/files/webapp/` and `internal/provider/`), so they run
 concurrently with no contention.
 
-### Phase 2: Browser client
+### ✅ Phase 2: Browser client
 **Parallel Tasks:**
-- Task 02: Browser client and vite bundle (depends on: 01)
+- ✔️ Task 02: Browser client and vite bundle (depends on: 01) — `completed`
+
+**Phase verification:** `rm -rf dist && npm run build` exits 0 and reproduces
+`dist/index.html` + hashed assets; `tsc --noEmit` clean. A headless Chromium
+render against the real server was inspected directly by the orchestrator (not
+taken on report): the UI shows the changed file in the tree with its `M` badge
+and `+5/-1` stats, and the split diff renders the actual hunks. Console and
+page errors were both empty. Finish Review wrote a `urn:self-review:v3`
+`review.xml` and the server exited, releasing the port. Playwright was installed
+in a scratch project and deliberately kept **out** of the webapp manifest, which
+is `npm ci`'d in every guest.
+
+**Note for task 03:** the built bundle is ~5.7 MB across 66 files (upstream's
+mermaid/cytoscape/katex chunks dominate). That is what the role must build in
+the guest, and it must NOT reach the embedded playbook — see task 03's measured
+embed defect.
 
 ### Phase 3: Provisioning
 **Parallel Tasks:**

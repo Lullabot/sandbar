@@ -45,9 +45,21 @@ that participates in the existing base-image version stamp.
       both succeed in the guest.
 - [ ] Re-running the role is idempotent: a second run reports `changed=0` for
       the role's tasks.
-- [ ] `TestGuestSyncCopiesOnlyThePlaybook` still passes, and a locally present
-      `roles/self-review/files/webapp/node_modules` or `dist` does not end up in
-      the binary's embedded playbook.
+- [ ] **(Confirmed defect — must be fixed by this task.)** The embed excludes
+      the webapp's local build artifacts. Measured on this branch: with
+      `node_modules` (358 MB) and `dist` (5.7 MB) present on disk,
+      `go build -o /tmp/x ./cmd/sand` produces a **288.7 MB** binary against a
+      **16.7 MB** baseline — a 17× bloat, because `go:embed all:roles` embeds
+      what is on disk and does not consult `.gitignore`. After the fix, building
+      with `node_modules` and `dist` present must produce a binary within ~1 MB
+      of the no-webapp baseline. Verify by building and printing the byte size,
+      both with and without those directories present.
+- [ ] `TestGuestSyncCopiesOnlyThePlaybook` still passes, and the in-guest rsync
+      filter in `internal/provision` is updated in lockstep with the embed list
+      (the two are required to mirror each other; that test fails if they drift).
+- [ ] A regression test asserts the embedded FS contains
+      `roles/self-review/files/webapp/package.json` but does **not** contain any
+      `node_modules` or `dist` path, so this cannot silently regress.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -132,13 +144,52 @@ compare a checksum of `package-lock.json` against a stamp file in the install
 directory, so a re-run does not reinstall. The acceptance criterion requires
 `changed=0` on a second pass.
 
-**The embed hazard.** `playbook_embed.go` embeds `all:roles`, and
-`internal/provision`'s in-guest rsync mirrors that list — `TestGuestSyncCopiesOnlyThePlaybook`
-fails if they drift. Adding a role with a `files/` subtree is fine, but a
-`node_modules` or `dist` directory left in the working tree by a local build
-would be embedded into a locally built binary and rsynced to the guest. Confirm
-both are git-ignored (task 1 added the `node_modules` entry; add `dist` too) and
-that the role's copy step excludes them regardless.
+**The embed hazard — this is REAL and MEASURED, not theoretical. Fix it.**
+`playbook_embed.go` embeds `all:roles`, and `go:embed` embeds whatever is on
+disk — it does **not** consult `.gitignore`. The orchestrator measured this on
+this branch after task 2 built the bundle:
+
+```
+roles/self-review/files/webapp/node_modules  358M
+roles/self-review/files/webapp/dist          5.7M
+go build ./cmd/sand  ->  288.7 MB   (baseline without the webapp: 16.7 MB)
+```
+
+Because `internal/provision` rsyncs the embedded playbook into the guest, a
+developer who runs `npm ci` in that directory would also push ~270 MB into every
+VM they create. Release builds happen from a clean checkout so published
+binaries are unaffected — but this is a landmine that must not ship.
+
+`go:embed` has no exclusion syntax, so the fix is to stop using a blanket
+`all:roles` and enumerate what "the playbook" actually is. Something like:
+
+```go
+//go:embed site.yml ansible.cfg inventory all:group_vars
+//go:embed all:roles/base all:roles/claude-code all:roles/codex
+//go:embed all:roles/dev-tools all:roles/project all:roles/samba all:roles/user
+//go:embed all:roles/self-review/defaults all:roles/self-review/tasks
+//go:embed roles/self-review/files/webapp/package.json
+//go:embed roles/self-review/files/webapp/package-lock.json
+//go:embed roles/self-review/files/webapp/index.html
+//go:embed roles/self-review/files/webapp/vite.config.ts
+//go:embed roles/self-review/files/webapp/tsconfig.json
+//go:embed all:roles/self-review/files/webapp/server
+//go:embed all:roles/self-review/files/webapp/src
+var PlaybookFS embed.FS
+```
+
+Adjust to match whatever files tasks 1 and 2 actually created — read the
+directory rather than trusting this sketch. This is consistent with the existing
+doc comment's own framing ("This list defines what 'the playbook' is"), but it
+does mean a future role must be added to the list; say so in the comment, and
+make the comment explain WHY the blanket pattern was abandoned (the measured
+bloat above), so nobody "simplifies" it back.
+
+**Then update the rsync filter in `internal/provision` to mirror the new list**
+— the two are required to stay in sync and `TestGuestSyncCopiesOnlyThePlaybook`
+enforces it. Add a regression test asserting the embedded FS has the webapp's
+`package.json` but no `node_modules`/`dist` entry, and verify the binary size
+before and after with real `ls -la` output.
 
 **Verification.** For the "role does not run when disabled" criterion, prefer
 the cheapest honest signal: run the playbook with `--check` and
