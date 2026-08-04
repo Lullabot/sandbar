@@ -50,6 +50,11 @@
   ],
   "packageRules": [
     {
+      "description": "Dependency bumps are chores, not user-facing fixes. config:recommended pulls in :semanticPrefixFixDepsChoreOthers, which types gomod's `require` deps as fix(deps); release-please then treats those as patch releases and lists them under Bug Fixes.",
+      "matchManagers": ["gomod"],
+      "semanticCommitType": "chore"
+    },
+    {
       "description": "Tagged action releases: cooldown, then automerge",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch"],
