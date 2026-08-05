@@ -373,13 +373,10 @@ jobs:
           grep -qF "review written to $REPO/review.xml in claude-ci" review.log \
             || { echo "::error::sand did not report the written review path"; exit 1; }
 
-          # Teardown, both ends. The workstation port must be released...
-          if ss -ltn | awk -v p=":$PORT\$" '$4 ~ p {print $4}' | grep -q .; then
-            echo "::error::port $PORT is still bound after the session ended"
-            ss -ltn | grep ":$PORT" || true
-            exit 1
-          fi
-          # ...and no guest-side server may survive it. An orphan here is the
+          # Teardown, both ends — guest first, because that is the end sand is
+          # actually responsible for and the only one that fails instantly.
+          #
+          # No guest-side server may survive the session. An orphan here is the
           # defect landreview's stopGuestServer exists to prevent, and it is
           # invisible from the host without asking the guest directly.
           #
@@ -393,6 +390,28 @@ jobs:
           orphans=$(limactl shell claude-ci pgrep -af '[s]elf-review/server' || true)
           if [ -n "$orphans" ]; then
             echo "::error::a review server process survived in the guest: $orphans"
+            exit 1
+          fi
+
+          # ...and the workstation port must end up released. POLLED, not
+          # asserted instantly, and the distinction is the whole point on this
+          # backend: with local Lima there is no ssh child, because Lima already
+          # forwards guest loopback ports itself (Provider.ForwardArgv returns
+          # nil here). The listener therefore belongs to Lima's HOSTAGENT, not
+          # to sand — and the hostagent learns the guest port is gone by polling
+          # the guest, so it withdraws the forward on its own interval rather
+          # than the instant the guest server exits. Demanding immediate release
+          # asserted something sand does not control and cannot make true; it
+          # passed once on timing and then failed. What is worth asserting is
+          # that the port does not stay bound indefinitely.
+          for _ in $(seq 1 30); do
+            still=$(ss -ltn | awk -v p=":$PORT\$" '$4 ~ p {print $4}')
+            [ -z "$still" ] && break
+            sleep 1
+          done
+          if [ -n "$still" ]; then
+            echo "::error::port $PORT was still bound 30s after the session ended"
+            ss -ltnp 2>/dev/null | grep ":$PORT" || true
             exit 1
           fi
 
