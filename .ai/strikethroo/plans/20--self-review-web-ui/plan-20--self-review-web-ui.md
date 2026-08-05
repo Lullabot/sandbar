@@ -580,12 +580,44 @@ this host, so it never reaches Ready — `--set '.mounts=[]'` avoids it), and
 `kex_exchange_identification: read: Connection reset by peer`. Poll for
 readiness rather than trusting status.
 
-### Phase 4: CLI action
+### ✅ Phase 4: CLI action
 **Parallel Tasks:**
-- Task 05: `sand land NAME PATH --review` action (depends on: 03, 04)
+- ✔️ Task 05: `sand land NAME PATH --review` action (depends on: 03, 04) — `completed`
 
 The linchpin task, and the first point at which the whole path — flag, guest
-server, forwarding, browser — is exercised together.
+server, forwarding, browser — was exercised together.
+
+**Phase verification:** `go build ./...` clean, the `-run Review` suite and the
+new `internal/landreview` package pass under `-race`, the full suite is green,
+and coverage holds at **89.6%** (floor 87). The orchestration was extracted to
+`internal/landreview` rather than `cmd/sand`, because `internal/ui` cannot
+import a `main` package — without that move, task 06 would have had to duplicate
+it.
+
+**Proven on a real VM, verified independently by the orchestrator.** A full
+`sand create --with-review` (16m52s on Lima 2.2.0) produced a guest with
+`/opt/sandbar/self-review/{dist,server,node_modules}` on Node v24.19.0. Two
+checkouts were reviewed **concurrently** on distinct ports, each serving its own
+diff, and both `review.xml` files were confirmed present in the guest afterwards
+with valid `urn:self-review:v3` content. Local Lima started no forwarder, and
+the host listener was `127.0.0.1` only. The diff range correctly covered
+committed *and* uncommitted work via the guest-computed merge base.
+
+**A real defect was found and fixed here.** The first ctrl-C run left an
+orphaned guest `node` still listening: cancelling the context kills `limactl`
+but not the ssh child it forked — the hazard AGENTS.md already documents.
+Cancellation alone is necessary but not sufficient. The fix confirms a candidate
+process against `/proc/<pid>/cmdline` before signalling it (a name match would
+have failed, since `ss` reports the process as `MainThread`), and runs only on
+abnormal exits. Re-verified on the VM: ctrl-C now returns in ~3s with the guest
+server gone, the port released, and no `review.xml` written.
+
+**Known gaps carried forward:** the remote-Lima and Proxmox `ssh -L` branches
+were exercised only through fakes and a real-child forward test — no such host
+exists here. No real browser was opened (this host has no `xdg-open`), so the
+opener-failure path is what ran and the URL was fetched with `curl`. If a
+project `.self-review.yaml` overrides `outputFile`, the path `sand` prints is
+the default rather than the real one.
 
 ### Phase 5: TUI parity
 **Parallel Tasks:**

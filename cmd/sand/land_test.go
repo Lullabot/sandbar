@@ -447,6 +447,56 @@ func TestReorderLandFlags(t *testing.T) {
 	}
 }
 
+// --- --review: usage text and argument validation ---
+
+// The --review action is only discoverable if `sand land --help` names it
+// beside --pr/--web AND says the thing that distinguishes it: it needs no
+// pushed branch. landUsage is a plain io.Writer function precisely so this can
+// be asserted without capturing the process's real stderr.
+func TestLandUsageDocumentsReview(t *testing.T) {
+	var buf strings.Builder
+	landUsage(&buf)
+	out := buf.String()
+
+	for _, want := range []string{
+		"--review",
+		"sand land NAME PATH --review",
+		"no pushed branch",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sand land usage missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunLandReviewArgValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "review with pr", args: []string{"vm", "/path", "--review", "--pr"}, wantErr: "cannot be used together"},
+		{name: "review with web", args: []string{"vm", "/path", "--review", "--web"}, wantErr: "cannot be used together"},
+		{name: "review without path", args: []string{"vm", "--review"}, wantErr: "run 'sand land NAME' to list them"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runLand(tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("runLand(%v) error = %v, want it to contain %q", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestReorderLandFlagsMovesReview(t *testing.T) {
+	got := reorderLandFlags([]string{"myvm", "/path/to/repo", "--review"})
+	want := []string{"--review", "myvm", "/path/to/repo"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("reorderLandFlags = %v, want %v", got, want)
+	}
+}
+
 // --- runLand argument validation (no store/provider touched on these paths) ---
 
 func TestRunLandArgValidation(t *testing.T) {
