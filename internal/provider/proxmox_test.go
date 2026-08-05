@@ -1298,11 +1298,18 @@ func TestProxmoxForwardArgv(t *testing.T) {
 		t.Fatalf("ForwardArgv missing -N (no remote command): %v", got)
 	}
 	idx := slices.Index(got, "-L")
-	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "8080:127.0.0.1:3000" {
-		t.Fatalf("ForwardArgv missing `-L 8080:127.0.0.1:3000`: %v", got)
+	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "127.0.0.1:8080:127.0.0.1:3000" {
+		t.Fatalf("ForwardArgv missing `-L 127.0.0.1:8080:127.0.0.1:3000`: %v", got)
 	}
 	if got[len(got)-1] != "dev@192.168.1.50" {
 		t.Fatalf("ForwardArgv must target the resolved guest address dev@192.168.1.50, got %v", got)
+	}
+	// Shared with the remote-Lima backend via SSHHost.ForwardArgv, and required
+	// for the same reason: without it, losing the race for hostPort leaves a
+	// live ssh with no forward attached and a readiness probe that can succeed
+	// against an unrelated local service.
+	if !slices.Contains(got, "ExitOnForwardFailure=yes") {
+		t.Fatalf("ForwardArgv must pass -o ExitOnForwardFailure=yes so a failed local bind is fatal: %v", got)
 	}
 }
 

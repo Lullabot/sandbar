@@ -18,6 +18,9 @@ import {
   computePayloadStats,
   countTotalLines,
 } from '@self-review/core';
+import path from 'node:path';
+
+import { BACKUP_SUFFIX, resolveOutputPath } from './review.mjs';
 
 /**
  * @param {object} options
@@ -47,8 +50,25 @@ export async function buildDiffPayload({ repoPath, diffArgs, config }) {
     }
   }
 
+  // The review's own output file is never part of the diff. @self-review/core's
+  // default ignore list does not mention it (it is written by the Electron app
+  // into a directory the app does not then re-scan), and nothing here adds it
+  // to the checkout's .gitignore — so a second review of the same checkout
+  // listed the reviewer's PREVIOUS review as an untracked "added" file and
+  // presented their own comments back to them as code to review. The single-slot
+  // backup writeReview keeps goes with it, for the same reason.
+  const outputPath = resolveOutputPath(repository, config);
+  const outputRel = path.relative(repository, outputPath);
+  const outputRelBackup = outputRel + BACKUP_SUFFIX;
+
   const shouldKeep = createIgnoreFilter(config.ignore);
-  const filteredFiles = files.filter(f => shouldKeep(f.newPath || f.oldPath));
+  const filteredFiles = files.filter(f => {
+    const p = f.newPath || f.oldPath;
+    if (p === outputRel || p === outputRelBackup) {
+      return false;
+    }
+    return shouldKeep(p);
+  });
 
   const stats = computePayloadStats(filteredFiles.length, countTotalLines(filteredFiles), config);
 
