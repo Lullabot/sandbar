@@ -31,6 +31,17 @@ covers how to reach it from your browser — locally and on a remote profile.
   `--with-codex` to `sand create` (or enable the toggle in the TUI create
   form). Codex is not provisioned by default; only include it if you want to
   use it alongside Claude Code.
+- A **self-review web UI** — **opt-in**: pass `--with-review` to `sand
+  create` (or enable "Install self-review web UI" in the TUI create form).
+  Not provisioned by default; when enabled, `sand land NAME PATH --review`
+  opens a browser-based review of that checkout's diff, served from inside
+  the VM. See [Reviewing changes in a browser](../using-sand/review.md).
+
+Like every `--with-*` flag, `--with-codex` and `--with-review` configure the
+**shared base image**: toggling either one from what the base was last built
+with invalidates it, so the next `sand create` rebuilds the base before
+cloning — see [`--with-*` flags](../using-sand/cli-reference.md#sand-create)
+in the CLI reference.
 
 ## Shell & utilities
 
