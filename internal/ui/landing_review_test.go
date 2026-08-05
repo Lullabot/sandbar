@@ -15,6 +15,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -65,10 +66,10 @@ func TestUpdateLandingReviewKeyDispatchesAndMarksRowInProgress(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the review key produced no command — it must dispatch asynchronously")
 	}
-	if m2.landing.reviewPath != "/home/user/repo" {
-		t.Fatalf("reviewPath = %q, want the selected checkout's path", m2.landing.reviewPath)
+	if m2.review.path != "/home/user/repo" {
+		t.Fatalf("reviewPath = %q, want the selected checkout's path", m2.review.path)
 	}
-	if m2.landing.reviewCancel == nil {
+	if m2.review.cancel == nil {
 		t.Fatal("no cancel func retained — leaving the pane or quitting could not tear the review down")
 	}
 	if !strings.Contains(m2.landingView(), "reviewing") {
@@ -78,7 +79,7 @@ func TestUpdateLandingReviewKeyDispatchesAndMarksRowInProgress(t *testing.T) {
 	// Run the returned command (as the Bubble Tea runtime would) and confirm
 	// it actually called through to m.reviewRun with the right Session.
 	msgCh := make(chan tea.Msg, 1)
-	go func() { msgCh <- cmd() }()
+	go runBatchedCmd(cmd, msgCh)
 
 	var sess *landreview.Session
 	select {
@@ -127,8 +128,8 @@ func TestUpdateLandingReviewKeyNoOpOnEmptySweep(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("the review key dispatched a command with no row under the cursor")
 	}
-	if m2.landing.reviewPath != "" {
-		t.Fatalf("reviewPath = %q, want \"\" (nothing was dispatched)", m2.landing.reviewPath)
+	if m2.review.path != "" {
+		t.Fatalf("reviewPath = %q, want \"\" (nothing was dispatched)", m2.review.path)
 	}
 }
 
@@ -157,7 +158,7 @@ func TestUpdateLandingReviewKeySecondPressWhileInFlightIsNoOp(t *testing.T) {
 	if cmd2 != nil {
 		t.Fatal("second press while a review is in flight must be a no-op")
 	}
-	if m3.landing.reviewPath != "/home/user/repo" {
+	if m3.review.path != "/home/user/repo" {
 		t.Fatal("the in-flight review's state must be untouched by the second press")
 	}
 	close(block)
@@ -206,8 +207,8 @@ func TestUpdateLandingReviewKeyDoesNotBlock(t *testing.T) {
 	// invoked: cancel it directly through the pane rather than running cmd,
 	// which this test never needs to.
 	m2 := r.next.(model)
-	if m2.landing.reviewCancel != nil {
-		m2.landing.reviewCancel()
+	if m2.review.cancel != nil {
+		m2.review.cancel()
 	}
 }
 
@@ -219,17 +220,18 @@ func TestHandleLandingReviewDoneClearsInProgressAndLogsSuccess(t *testing.T) {
 	seedOneCheckout(t, m, v, "/home/user/repo")
 	m.ghActions = &fakeGhActions{}
 	m.openLandingPane(v)
-	m.landing.reviewPath = "/home/user/repo"
-	m.landing.reviewCancel = func() {}
+	m.review.scope, m.review.vm = v.scope, v.Name
+	m.review.path = "/home/user/repo"
+	m.review.cancel = func() {}
 
 	m.handleLandReviewDone(landReviewDoneMsg{
 		scope: v.scope, vm: v.Name, path: "/home/user/repo", written: "/home/user/repo/review.xml",
 	})
 
-	if m.landing.reviewPath != "" {
-		t.Fatalf("reviewPath = %q after completion, want \"\" (the row must return to normal)", m.landing.reviewPath)
+	if m.review.path != "" {
+		t.Fatalf("reviewPath = %q after completion, want \"\" (the row must return to normal)", m.review.path)
 	}
-	if m.landing.reviewCancel != nil {
+	if m.review.cancel != nil {
 		t.Fatal("reviewCancel must be cleared once the session has finished")
 	}
 	if strings.Contains(m.landingView(), "reviewing") {
@@ -249,13 +251,14 @@ func TestHandleLandingReviewDoneSurfacesErrorRatherThanDroppingIt(t *testing.T) 
 	seedOneCheckout(t, m, v, "/home/user/repo")
 	m.ghActions = &fakeGhActions{}
 	m.openLandingPane(v)
-	m.landing.reviewPath = "/home/user/repo"
-	m.landing.reviewCancel = func() {}
+	m.review.scope, m.review.vm = v.scope, v.Name
+	m.review.path = "/home/user/repo"
+	m.review.cancel = func() {}
 
 	wantErr := errors.New("the review server never answered")
 	m.handleLandReviewDone(landReviewDoneMsg{scope: v.scope, vm: v.Name, path: "/home/user/repo", err: wantErr})
 
-	if m.landing.reviewPath != "" {
+	if m.review.path != "" {
 		t.Fatal("reviewPath must be cleared even when the review failed")
 	}
 	if len(m.messages) == 0 || !strings.Contains(m.messages[len(m.messages)-1].text, "the review server never answered") {
@@ -272,13 +275,13 @@ func TestHandleLandingReviewDoneDropsStaleResult(t *testing.T) {
 	seedOneCheckout(t, m, v, "/home/user/repo")
 	m.ghActions = &fakeGhActions{}
 	m.openLandingPane(v)
-	m.landing.reviewPath = "/home/user/repo"
+	m.review.path = "/home/user/repo"
 	cancelCalled := false
-	m.landing.reviewCancel = func() { cancelCalled = true }
+	m.review.cancel = func() { cancelCalled = true }
 
 	m.handleLandReviewDone(landReviewDoneMsg{scope: v.scope, vm: "some-other-vm", path: "/home/user/repo"})
 
-	if m.landing.reviewPath != "/home/user/repo" {
+	if m.review.path != "/home/user/repo" {
 		t.Fatal("a stale result must not clear the CURRENT pane's in-progress marker")
 	}
 	if cancelCalled {
@@ -329,7 +332,7 @@ func TestUpdateLandingBackCancelsInFlightReview(t *testing.T) {
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m2 := next.(model)
-	go cmd()
+	go runBatchedCmd(cmd, nil)
 
 	var ctx context.Context
 	select {
@@ -370,7 +373,7 @@ func TestLandingQuitCmdCancelsInFlightReview(t *testing.T) {
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m2 := next.(model)
-	go cmd()
+	go runBatchedCmd(cmd, nil)
 
 	var ctx context.Context
 	select {
@@ -413,7 +416,7 @@ func TestLandingQuitCmdWaitsForTeardownBeforeQuitting(t *testing.T) {
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m2 := next.(model)
-	go cmd()
+	go runBatchedCmd(cmd, nil)
 	// Give the goroutine above a moment to actually start and block on
 	// ctx.Done(), so the elapsed measurement below times the teardown wait
 	// and not scheduling jitter.
@@ -453,7 +456,7 @@ func TestLandingQuitCmdGivesUpAfterTeardownTimeout(t *testing.T) {
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m2 := next.(model)
-	go cmd()
+	go runBatchedCmd(cmd, nil)
 	time.Sleep(10 * time.Millisecond)
 
 	done := make(chan tea.Msg, 1)
@@ -511,4 +514,167 @@ func (fakeReviewProvider) ShellOut(ctx context.Context, name string, argv ...str
 }
 func (fakeReviewProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
 	return nil
+}
+
+// runBatchedCmd executes cmd the way the Bubble Tea runtime does: a command
+// whose message is a tea.BatchMsg has its constituent commands run
+// concurrently rather than that message delivered anywhere.
+//
+// runLandingReview returns such a batch — the review session itself, plus the
+// waiter that reports the review UI's URL back while the session is still
+// blocking on the human — so a test that simply called cmd() would run
+// neither half and see the session never start.
+func runBatchedCmd(cmd tea.Cmd, out chan<- tea.Msg) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			go runBatchedCmd(c, out)
+		}
+		return
+	}
+	if out != nil {
+		out <- msg
+	}
+}
+
+// TestOpenLandingPaneKeepsAnInFlightReviewsTeardownHandles is a regression test
+// for the orphan this package's review state was moved onto the model to
+// prevent: reopening the Landing pane (for the same VM or any other) replaces
+// the landingPane value wholesale, and while the review's cancel func and done
+// channel lived on that struct, reopening silently discarded both without ever
+// calling cancel. quitCmd then had nothing to cancel or wait for, so `sand`
+// exited while the guest `node` server was still listening.
+func TestOpenLandingPaneKeepsAnInFlightReviewsTeardownHandles(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	seedOneCheckout(t, m, v, "/home/user/repo")
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	cancelled := make(chan struct{})
+	done := make(chan struct{})
+	m.review = activeReview{
+		scope:  v.scope,
+		vm:     v.Name,
+		path:   "/home/user/repo",
+		cancel: func() { close(cancelled) },
+		done:   done,
+	}
+
+	// Reopening the pane — the ordinary consequence of pressing enter on
+	// another row and coming back — must not disturb the live review.
+	m.openLandingPane(v)
+
+	if m.review.path != "/home/user/repo" {
+		t.Fatalf("review path = %q after reopening the pane, want it preserved", m.review.path)
+	}
+	if m.review.cancel == nil {
+		t.Fatal("the review's cancel func was dropped by reopening the pane — quitting could no longer tear the guest server down")
+	}
+	if m.review.done == nil {
+		t.Fatal("the review's done channel was dropped by reopening the pane — quitCmd could no longer wait for teardown")
+	}
+
+	// And the handles must still be the LIVE ones: quitCmd has to reach the
+	// real session, not a zero value that merely looks non-nil.
+	close(done)
+	if msg := m.quitCmd()(); msg == nil {
+		t.Fatal("quitCmd produced no message")
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("quitCmd did not cancel the review that survived the pane reopen")
+	}
+}
+
+// TestHandleLandReviewDoneIgnoresAnOlderReviewsCompletion is a regression test
+// for the second half of the same defect: the staleness check compared only
+// (scope, vm), so a previous review's completion — which can arrive seconds
+// later, since Session.Run keeps tearing down after its context is cancelled —
+// cleared the teardown handles of a NEWER review running for the same VM.
+// After that, quitting cancelled nothing at all.
+func TestHandleLandReviewDoneIgnoresAnOlderReviewsCompletion(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	seedOneCheckout(t, m, v, "/home/user/repo")
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+
+	live := make(chan struct{})
+	m.review = activeReview{
+		scope:  v.scope,
+		vm:     v.Name,
+		path:   "/home/user/second-repo", // the review actually running now
+		cancel: func() { close(live) },
+		done:   make(chan struct{}),
+	}
+
+	// The EARLIER review of a different checkout, on the same VM, reports in.
+	m.handleLandReviewDone(landReviewDoneMsg{
+		scope: v.scope, vm: v.Name, path: "/home/user/repo",
+		written: "/home/user/repo/review.xml",
+	})
+
+	if m.review.path != "/home/user/second-repo" {
+		t.Fatalf("review path = %q, want the still-running review untouched", m.review.path)
+	}
+	if m.review.cancel == nil {
+		t.Fatal("an older review's completion cleared the live review's cancel func — its guest server would be orphaned on quit")
+	}
+	if m.review.done == nil {
+		t.Fatal("an older review's completion cleared the live review's done channel")
+	}
+}
+
+// TestReviewURLReachesThePaneWhenTheBrowserCannotOpen covers the headless case:
+// Session.Run's browser-open is best-effort and simply fails over ssh or on a
+// locked-down desktop, so the URL it prints is the only way to reach the
+// session. It used to be written to io.Discard, leaving the row claiming
+// "browser open" and the randomly-chosen port unguessable.
+func TestReviewURLReachesThePaneWhenTheBrowserCannotOpen(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	seedOneCheckout(t, m, v, "/home/user/repo")
+	m.ghActions = &fakeGhActions{}
+
+	release := make(chan struct{})
+	m.reviewRun = func(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error) {
+		// Exactly what Session.Run writes, in order, when the opener fails.
+		fmt.Fprintf(w, "review UI ready at http://127.0.0.1:45231\n")
+		fmt.Fprintf(w, "could not open a browser automatically (exec: \"xdg-open\": executable file not found in $PATH) — open the URL above yourself\n")
+		<-release
+		return "/home/user/repo/review.xml", nil
+	}
+	m.openLandingPane(v)
+
+	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	m2 := next.(model)
+	msgCh := make(chan tea.Msg, 4)
+	go runBatchedCmd(cmd, msgCh)
+	defer close(release)
+
+	var urlMsg landReviewURLMsg
+	deadline := time.After(2 * time.Second)
+	for urlMsg.url == "" {
+		select {
+		case msg := <-msgCh:
+			if u, ok := msg.(landReviewURLMsg); ok {
+				urlMsg = u
+			}
+		case <-deadline:
+			t.Fatal("the review URL never reached the pane — a headless workstation could not reach the session")
+		}
+	}
+	if urlMsg.url != "http://127.0.0.1:45231" {
+		t.Fatalf("url = %q, want the URL Session.Run reported", urlMsg.url)
+	}
+
+	m2.handleLandReviewURL(urlMsg)
+	if !strings.Contains(m2.landingView(), "http://127.0.0.1:45231") {
+		t.Fatalf("the row does not show the review URL:\n%s", m2.landingView())
+	}
+	if len(m2.messages) == 0 || !strings.Contains(m2.messages[len(m2.messages)-1].text, "http://127.0.0.1:45231") {
+		t.Fatalf("messages = %+v, want the URL in the pane's session log", m2.messages)
+	}
 }

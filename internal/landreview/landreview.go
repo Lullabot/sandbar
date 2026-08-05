@@ -75,6 +75,12 @@ const (
 	// same remedy, as internal/lima's runner (an ssh child can outlive the
 	// process that spawned it and keep the pipes open forever).
 	forwardWaitDelay = 2 * time.Second
+	// diffBaseTimeout bounds the merge-base lookup, the FIRST thing Run does
+	// and the only guest round trip that happens before any output reaches the
+	// user. Generous enough for a cold ssh handshake plus a `git merge-base` on
+	// a large repository, short enough that a stalled guest surfaces as a
+	// working-tree review rather than a silent hang.
+	diffBaseTimeout = 20 * time.Second
 	// guestStopTimeout bounds the guest-side half of teardown. It is short
 	// on purpose: this runs while the user is waiting for ctrl-C to take
 	// effect, and a wedged guest must degrade to a warning rather than a
@@ -253,7 +259,41 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		return "", fmt.Errorf("the review server failed: %w%s", srvErr, detail(srvOut.String(), fwdOut.String()))
 	}
 	submitted = true
-	return path.Join(s.Checkout.Path, outputFile), nil
+	return writtenPath(srvOut.String(), s.Checkout.Path), nil
+}
+
+// reviewWrittenPrefix is the marker the guest server prints on stdout naming
+// the file it wrote. It must match server/index.mjs's REVIEW_WRITTEN_PREFIX
+// exactly; both spell it out as a named constant so the pairing is findable
+// from either side.
+const reviewWrittenPrefix = "self-review: review written to "
+
+// serverHeader is the response header the guest server sets on every response
+// to identify itself to the readiness probe. It must match server/index.mjs's
+// SERVER_HEADER exactly; both spell it out as a named constant so the pairing
+// is findable from either side.
+const serverHeader = "X-Sandbar-Review"
+
+// writtenPath reports where the review actually landed, preferring what the
+// guest server announced over this side's assumption.
+//
+// The assumption — <checkout>/review.xml — is only right when the project does
+// not override it. A `.self-review.yaml` in the checkout can set outputFile to
+// anything (the server chdir's into the repo precisely so that file applies),
+// and reporting the default regardless named a path that did not exist, which
+// is worse than useless: docs/using-sand/review.md tells the user to point
+// their agent at it, so a wrong path sends the agent to read nothing.
+//
+// Falls back to the default when no marker is present, so a guest running an
+// older build of the web app still reports something sensible rather than "".
+func writtenPath(serverOut, checkoutPath string) string {
+	for _, line := range strings.Split(serverOut, "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, reviewWrittenPrefix); ok && after != "" {
+			return after
+		}
+	}
+	return path.Join(checkoutPath, outputFile)
 }
 
 // stopServerScript stops the review server the guest is running on port $1.
@@ -376,6 +416,17 @@ var objectID = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // a broken lookup must degrade to reviewing the working tree, never fail the
 // command.
 func (s *Session) diffBase(ctx context.Context) string {
+	// Bounded, like every other guest interaction in this package (waitReady's
+	// ReadyTimeout, probeHTTP's probeTimeout, stopGuestServer's
+	// guestStopTimeout) — and this one needs it most. It runs BEFORE Run has
+	// printed a single line, so on a guest whose sshd accepts the connection
+	// and then stalls, an unbounded ShellOut left `sand land --review` hanging
+	// forever having produced no output at all: no port, no URL, no hint that
+	// anything was happening. Its own contract already degrades every failure
+	// to "review the working tree", so a timeout costs nothing but the
+	// merge-base refinement.
+	ctx, cancel := context.WithTimeout(ctx, diffBaseTimeout)
+	defer cancel()
 	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", mergeBaseScript, "sh", s.Checkout.Path, s.Checkout.DefaultBranch)
 	if err != nil {
 		return ""
@@ -477,8 +528,19 @@ var probeClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: tru
 // Lima and Proxmox and open the browser onto a connection error. A completed
 // request round trip means the same thing on all three backends.
 //
-// Any HTTP response counts, including an error status: the question is
-// whether the server is there, not whether it likes the request.
+// Any STATUS counts, including an error status: the question is whether the
+// server is there, not whether it likes the request. But it must be OUR server,
+// which is what serverHeader settles.
+//
+// Accepting any HTTP responder was a real hazard, not a theoretical one. The
+// port is chosen by what is free on the WORKSTATION and the same number is
+// reused in the guest; on remote Lima it must ALSO be free on the remote host's
+// loopback, where Lima's own auto-forward lands the guest port, and nothing
+// verifies that. When it is not, the tunnel reaches whatever else holds that
+// port — and a probe satisfied by any response would declare readiness, open
+// the reviewer's browser onto an unrelated application, and then block forever
+// waiting for a submission that could never arrive. Requiring the header turns
+// every one of those into an ordinary readiness timeout naming the problem.
 func probeHTTP(ctx context.Context, addr string) error {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -493,6 +555,10 @@ func probeHTTP(ctx context.Context, addr string) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<12))
+	if resp.Header.Get(serverHeader) == "" {
+		return fmt.Errorf("something is listening on %s but it is not the review server "+
+			"(no %s header) — most likely another process holds this port", addr, serverHeader)
+	}
 	return nil
 }
 

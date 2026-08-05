@@ -1143,8 +1143,30 @@ func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
 // every OTHER session sharing that master, or an unrelated master death would
 // silently take the forward down too. See WithoutMux for the same reasoning
 // applied to the long-lived heartbeat and sweep probes.
+// ExitOnForwardFailure=yes turns a failed LOCAL bind from a warning into a
+// fatal error, and that is a correctness requirement here rather than a
+// preference. The caller picks hostPort by binding and immediately releasing it
+// (landreview.freePort), so anything else on the workstation can claim it in
+// the gap. ssh's default is to print "bind: Address already in use" and carry
+// on serving the connection with no forward attached — at which point the
+// caller's readiness probe, which deliberately accepts ANY HTTP response,
+// succeeds against whatever unrelated service holds that port, the reviewer's
+// browser opens onto it, and the session blocks forever on a review that can
+// never arrive. Exiting non-zero makes the collision a reported failure.
+// The listen side is spelled 127.0.0.1 EXPLICITLY rather than left as a bare
+// port, and that is what makes ExitOnForwardFailure actually bite. A bare
+// `-L <port>:...` asks ssh to bind every loopback address getaddrinfo returns,
+// and on a dual-stack host ssh treats the forward as established if ANY of them
+// succeeds. Measured: with something already holding 127.0.0.1:<port>, ssh
+// bound ::1, printed "bind [127.0.0.1]:<port>: Address already in use" as a
+// mere warning, and kept running — while the caller's probe and browser, which
+// both use 127.0.0.1, reached the OTHER service. Naming the address makes the
+// bind singular, so a collision is unambiguously a failure, and drops the ::1
+// listener nobody wanted.
 func (h *SSHHost) ForwardArgv(hostPort, guestPort int) []string {
-	return h.sshBase(false, false, "-N", "-L", fmt.Sprintf("%d:127.0.0.1:%d", hostPort, guestPort))
+	return h.sshBase(false, false,
+		"-o", "ExitOnForwardFailure=yes",
+		"-N", "-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", hostPort, guestPort))
 }
 
 // --- base-image lock over ssh ---------------------------------------------------

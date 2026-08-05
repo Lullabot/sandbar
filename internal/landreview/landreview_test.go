@@ -44,17 +44,43 @@ func TestFreePortReturnsABindableLoopbackPort(t *testing.T) {
 
 // --- probeHTTP ---
 
-func TestProbeHTTPAcceptsAnyResponse(t *testing.T) {
+func TestProbeHTTPAcceptsAnyStatusFromTheReviewServer(t *testing.T) {
 	// An error status still means "the server is there", which is the only
 	// question readiness asks — a guest whose dist/ was not built answers 500
-	// and is nonetheless ready to be looked at.
+	// and is nonetheless ready to be looked at. What identifies it as the
+	// review server is the header, not the status.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(serverHeader, "1")
 		http.Error(w, "dist/ not built", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
 
 	if err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://")); err != nil {
-		t.Fatalf("probeHTTP against a live server: %v, want nil", err)
+		t.Fatalf("probeHTTP against a live review server: %v, want nil", err)
+	}
+}
+
+// TestProbeHTTPRejectsAForeignListener covers the port-collision hazard. sand
+// picks the port by what is free on the WORKSTATION and reuses the number in
+// the guest; on remote Lima it must ALSO be free on the remote host's loopback,
+// where Lima's auto-forward lands it, and nothing verifies that. When something
+// else holds it, a probe satisfied by any HTTP response declared readiness and
+// opened the reviewer's browser onto an unrelated application, then blocked
+// forever waiting for a submission that could never come.
+func TestProbeHTTPRejectsAForeignListener(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A perfectly healthy, entirely unrelated web application.
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<html>some other app</html>"))
+	}))
+	defer srv.Close()
+
+	err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"))
+	if err == nil {
+		t.Fatal("probeHTTP accepted a listener that is not the review server — the browser would open onto the wrong application and the session would hang forever")
+	}
+	if !strings.Contains(err.Error(), "not the review server") {
+		t.Fatalf("probeHTTP error = %v, want it to name the collision plainly", err)
 	}
 }
 
@@ -461,5 +487,45 @@ func TestDescribeBaseNamesTheRange(t *testing.T) {
 	got := describeBase(sha)
 	if !strings.Contains(got, sha[:12]) || strings.Contains(got, sha) {
 		t.Errorf("describeBase(%q) = %q, want an abbreviated object name", sha, got)
+	}
+}
+
+// TestWrittenPathPrefersWhatTheServerAnnounced covers the output-path fidelity
+// defect: a project's .self-review.yaml can point outputFile anywhere, and this
+// side used to report <checkout>/review.xml regardless — naming a file that did
+// not exist, which matters because the docs tell the user to point their agent
+// at that path.
+func TestWrittenPathPrefersWhatTheServerAnnounced(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		serverOut string
+		want      string
+	}{
+		{
+			name:      "configured outputFile is honoured",
+			serverOut: "self-review server listening on 127.0.0.1:4100 (repo: /src/repo)\nself-review: review written to /src/repo/reviews/latest.xml\n",
+			want:      "/src/repo/reviews/latest.xml",
+		},
+		{
+			name:      "no marker falls back to the documented default",
+			serverOut: "self-review server listening on 127.0.0.1:4100 (repo: /src/repo)\n",
+			want:      "/src/repo/review.xml",
+		},
+		{
+			name:      "login-shell noise before the marker does not hide it",
+			serverOut: "Welcome to Debian\nMOTD line\nself-review: review written to /src/repo/review.xml\n",
+			want:      "/src/repo/review.xml",
+		},
+		{
+			name:      "an empty path is ignored rather than reported as \"\"",
+			serverOut: "self-review: review written to \n",
+			want:      "/src/repo/review.xml",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := writtenPath(tc.serverOut, "/src/repo"); got != tc.want {
+				t.Fatalf("writtenPath() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

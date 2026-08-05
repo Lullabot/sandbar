@@ -53,18 +53,36 @@
 
 # npm ci + the vite build together take real time (a full dependency install
 # plus a bundle that pulls in mermaid/cytoscape/katex chunks), so they are
-# gated on whether package-lock.json actually changed since the last run
-# rather than always re-running — the same "changed=0 on a re-run" bar every
-# other role in this playbook is held to. A checksum of the deployed
-# package-lock.json is compared against a stamp file written after a
-# successful build; the stamp is the version that changed most recently
-# from a genuine dependency bump, so it is what would actually invalidate
-# node_modules or the built bundle, unlike source-only edits.
-- name: Stat the deployed package-lock.json
-  ansible.builtin.stat:
-    path: "{{ selfreview_install_dir }}/package-lock.json"
-    checksum_algorithm: sha256
-  register: selfreview_lockfile
+# gated on whether their INPUTS actually changed since the last run rather
+# than always re-running — the same "changed=0 on a re-run" bar every other
+# role in this playbook is held to. A digest over every deployed build input
+# is compared against a stamp file written after a successful build.
+#
+# "Every input" is the correction: gating on package-lock.json alone was
+# wrong in the direction that ships broken software. A source-only change is
+# exactly what a bug fix to the browser client looks like, and it left the
+# stamp matching, the build skipped, and the old bundle still being served.
+- name: Checksum every deployed input the build depends on
+  ansible.builtin.shell:
+    # A checksum of the LOCKFILE ALONE was not enough, and shipped a stale
+    # bundle every time. dist/ is built from src/ + index.html + the vite and
+    # tsconfig settings, so a release that fixes the browser client without
+    # touching a dependency left selfreview_build_needed false: the copy tasks
+    # above installed the new source, `npm run build` was skipped, and every
+    # `sand land --review` on that converged base kept serving the bundle built
+    # from the OLD source until someone happened to run `sand create --rebuild`.
+    #
+    # `find | sort | sha256sum` over the deployed tree covers the same inputs
+    # vite reads. Sorted so the digest is order-independent, and -type f so
+    # directory mtimes cannot perturb it.
+    cmd: >-
+      find package-lock.json index.html vite.config.ts tsconfig.json src -type f
+      | LC_ALL=C sort
+      | xargs -r sha256sum
+      | sha256sum
+    chdir: "{{ selfreview_install_dir }}"
+  register: selfreview_inputs
+  changed_when: false
 
 - name: Stat the existing build stamp
   ansible.builtin.stat:
@@ -81,7 +99,7 @@
   ansible.builtin.set_fact:
     selfreview_build_needed: >-
       {{ not selfreview_stamp_file.stat.exists
-         or (selfreview_stamp_raw.content | b64decode | trim) != selfreview_lockfile.stat.checksum }}
+         or (selfreview_stamp_raw.content | b64decode | trim) != (selfreview_inputs.stdout | trim) }}
 
 - name: Install web app dependencies with npm ci
   ansible.builtin.command:
@@ -115,7 +133,7 @@
 
 - name: Record the build stamp
   ansible.builtin.copy:
-    content: "{{ selfreview_lockfile.stat.checksum }}"
+    content: "{{ selfreview_inputs.stdout | trim }}"
     dest: "{{ selfreview_install_dir }}/.build-stamp"
     owner: "{{ user_name }}"
     group: "{{ user_name }}"

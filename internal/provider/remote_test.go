@@ -84,11 +84,19 @@ func TestRemoteProviderForwardArgv(t *testing.T) {
 		t.Fatalf("remote ForwardArgv missing -N (no remote command): %v", got)
 	}
 	idx := slices.Index(got, "-L")
-	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "8080:127.0.0.1:3000" {
-		t.Fatalf("remote ForwardArgv missing `-L 8080:127.0.0.1:3000`: %v", got)
+	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "127.0.0.1:8080:127.0.0.1:3000" {
+		t.Fatalf("remote ForwardArgv missing `-L 127.0.0.1:8080:127.0.0.1:3000`: %v", got)
 	}
 	if got[len(got)-1] != "dev@example.com" {
 		t.Fatalf("remote ForwardArgv must target dev@example.com, got %v", got)
+	}
+	// ExitOnForwardFailure=yes is a correctness requirement, not a preference:
+	// without it a lost race for hostPort leaves ssh running with no forward
+	// attached, and landreview's readiness probe (which accepts ANY HTTP
+	// response) then succeeds against whatever unrelated local service holds
+	// that port. See SSHHost.ForwardArgv.
+	if !slices.Contains(got, "ExitOnForwardFailure=yes") {
+		t.Fatalf("%s ForwardArgv must pass -o ExitOnForwardFailure=yes so a failed local bind is fatal: %v", "remote", got)
 	}
 	// A port forward must never ride (or become) the shared ControlMaster — see
 	// WithoutMux — so it carries the explicit opt-out, not ControlMaster=auto.

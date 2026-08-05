@@ -83,9 +83,8 @@ except for the browser tab rendering it.
 ## Reachability
 
 The server inside the VM always binds `127.0.0.1` — never a VM-wide
-address — so a review is never reachable from anything on the VM's network,
-only from your own workstation's loopback. How that loopback connection is
-made depends on where the VM lives:
+address — so a review is never reachable from anything on the VM's network.
+How the connection reaches it depends on where the VM lives:
 
 - **Local Lima** needs nothing extra: Lima already forwards every guest
   loopback port to the same port on your machine's own loopback (the same
@@ -97,9 +96,28 @@ made depends on where the VM lives:
   guest (Proxmox). It's torn down — along with the guest server — when the
   review ends or you cancel with Ctrl-C.
 
-Either way, the reviewed code itself never crosses that boundary: only the
-rendered diff and your comments do, over a connection that terminates on
-your own machine's loopback.
+The reviewed code itself never crosses that boundary: only the rendered diff
+and your comments do, over a connection that terminates on your own machine's
+loopback.
+
+!!! warning "On a shared remote Lima host, the review is readable by that host's other users"
+
+    The local-Lima case really is workstation-only. Remote Lima is not, and
+    the difference is worth knowing before you review sensitive work.
+
+    Lima's automatic forwarding runs on the machine the VM lives on. On a
+    remote host it therefore publishes the guest's port to *that host's*
+    `127.0.0.1` — which is where sandbar's `ssh -L` then connects. For as long
+    as the review is open, anyone else logged into that remote host can reach
+    it: `curl http://127.0.0.1:<port>/api/diff` returns the full diff,
+    including your uncommitted work, with no authentication. The review server
+    has no notion of accounts.
+
+    This does not apply to local Lima (the "remote host" is your own machine)
+    and does not apply to Proxmox, where the tunnel runs straight to the
+    guest's own sshd with no intermediate loopback publication. If you share a
+    remote Lima host with people who should not read the work in progress,
+    review it from a VM on a host you do not share.
 
 ## What this isn't (yet)
 

@@ -20,9 +20,26 @@ import { fileURLToPath } from 'node:url';
 import { getRepoRootAsync, loadConfig, checkWritability } from '@self-review/core';
 
 import { buildDiffPayload } from './payload.mjs';
+import { expandFileContext } from './expand.mjs';
 import { resolveOutputPath, writeReview } from './review.mjs';
 
 const WEBAPP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Prefix of the stdout line announcing where a submitted review was written.
+ * The Go side matches on it (internal/landreview's reviewWrittenPrefix); the
+ * two must stay in step, which is why both spell it out as a named constant
+ * rather than inline.
+ * @type {string}
+ */
+const REVIEW_WRITTEN_PREFIX = 'self-review: review written to ';
+
+/**
+ * Response header identifying this server to sand's readiness probe. Matched on
+ * the Go side by internal/landreview's serverHeader; the two must stay in step.
+ * @type {string}
+ */
+const SERVER_HEADER = 'x-sandbar-review';
 
 const STATIC_CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -135,6 +152,22 @@ async function handleRequest(req, res, ctx) {
     return sendJson(res, 200, payload);
   }
 
+  // Backs the panel's "show all hidden lines" bar, which it renders between
+  // every pair of hunks for a git source — i.e. on every tracked file here.
+  if (req.method === 'GET' && url.pathname === '/api/expand') {
+    const filePath = url.searchParams.get('path');
+    if (!filePath) {
+      return sendError(res, 400, new Error('missing ?path='));
+    }
+    const expanded = await expandFileContext({
+      repoPath: repoRoot,
+      diffArgs,
+      filePath,
+      contextLines: url.searchParams.get('contextLines') ?? 0,
+    });
+    return sendJson(res, 200, expanded);
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/config') {
     const outputPath = resolveOutputPath(repoRoot, config);
     const outputPathInfo = {
@@ -148,6 +181,14 @@ async function handleRequest(req, res, ctx) {
     const body = await readRequestBody(req);
     const state = JSON.parse(body);
     const outputPath = await writeReview({ state, repoRoot, config });
+    // Announce the path on stdout as well as in the response body. sand captures
+    // this stream but is not the HTTP client (the browser is), so this line is
+    // the only way it can learn where the review actually went — and it is not
+    // always <checkout>/review.xml: a project's .self-review.yaml can point
+    // outputFile anywhere, and sand used to report the default regardless,
+    // naming a file that did not exist. Prefixed so it is unambiguous among
+    // whatever else a login shell prints.
+    console.log(`${REVIEW_WRITTEN_PREFIX}${outputPath}`);
     const json = JSON.stringify({ path: outputPath });
     res.writeHead(200, {
       'content-type': 'application/json; charset=utf-8',
@@ -190,9 +231,40 @@ async function main() {
 
   const ctx = { repoRoot, diffArgs, config, distDir };
   const server = http.createServer((req, res) => {
+    // Identify every response as this server's. The workstation-side readiness
+    // probe accepts any HTTP answer by design (the question is "is it up", not
+    // "does it like the request"), which means a port collision could otherwise
+    // hand the reviewer's browser to an unrelated local application: sand picks
+    // the port by what is free on the WORKSTATION, but on remote Lima the same
+    // number must also be free on the REMOTE host's loopback, where Lima's
+    // auto-forward lands it — and nothing checks that. A header the probe can
+    // require turns that from "browser opens onto the wrong app and the session
+    // hangs forever" into a clean readiness failure.
+    res.setHeader(SERVER_HEADER, '1');
     handleRequest(req, res, ctx).catch(err => sendError(res, 500, err));
   });
   ctx.server = server;
+
+  // A bind failure must be a diagnosable message, not an uncaught exception.
+  // Without this listener Node rethrows the 'error' event and the process dies
+  // on a stack trace, which sand cannot distinguish from any other early exit:
+  // it reports the server as gone and appends its "was this image built with
+  // --with-review?" hint, sending the user to rebuild a base image that is
+  // perfectly fine when all that happened is that the guest already had
+  // something on this port. (sand picks the port by what is free on the
+  // WORKSTATION and reuses the number in the guest, so a collision here is a
+  // normal, expected outcome — not a bug in the image.)
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `self-review server: port ${port} is already in use inside this VM — ` +
+          `nothing is wrong with the image; retry to have a different port picked`
+      );
+    } else {
+      console.error(`self-review server: could not listen on 127.0.0.1:${port}: ${err.message}`);
+    }
+    process.exit(1);
+  });
 
   server.listen(port, '127.0.0.1', () => {
     console.log(`self-review server listening on 127.0.0.1:${port} (repo: ${repoRoot})`);

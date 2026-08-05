@@ -635,13 +635,19 @@ func TestSSHAttachArgvThreadsPortIdentity(t *testing.T) {
 	}
 }
 
-// TestSSHForwardArgv proves ForwardArgv builds `ssh <flags> -N -L
-// <hostPort>:127.0.0.1:<guestPort> target`: -N because the caller execs this as
-// a long-running child purely to forward the port, never to run a remote
-// command, and -L binds the far end to the REMOTE host's OWN loopback
-// (127.0.0.1) so the guest port stays unreachable from anything else on that
-// host's network. Port and identity thread through exactly as every other ssh
-// argv this package builds.
+// TestSSHForwardArgv proves ForwardArgv builds `ssh <flags> -o
+// ExitOnForwardFailure=yes -N -L 127.0.0.1:<hostPort>:127.0.0.1:<guestPort>
+// target`: -N because the caller execs this as a long-running child purely to
+// forward the port, never to run a remote command, and -L binds the far end to
+// the REMOTE host's OWN loopback (127.0.0.1) so the guest port stays
+// unreachable from anything else on that host's network.
+//
+// BOTH halves of the -L spec are explicit. The listen address is named rather
+// than left implicit so ssh performs exactly ONE bind — a bare port asks it to
+// bind every loopback address, and a dual-stack host where ::1 succeeds and
+// 127.0.0.1 collides leaves ssh running with ExitOnForwardFailure never firing
+// while the caller's IPv4 probe reaches an unrelated service. Port and identity
+// thread through exactly as every other ssh argv this package builds.
 func TestSSHForwardArgv(t *testing.T) {
 	h := NewSSHHost(SSHConfig{Host: "h", User: "u", Port: 2222, IdentityPath: "/k"})
 	got := h.ForwardArgv(8080, 3000)
@@ -650,7 +656,7 @@ func TestSSHForwardArgv(t *testing.T) {
 	if len(got) < len(wantPrefix) || !slices.Equal(got[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("ForwardArgv prefix = %v\nwant %v", got, wantPrefix)
 	}
-	wantTail := []string{"-N", "-L", "8080:127.0.0.1:3000", "u@h"}
+	wantTail := []string{"-o", "ExitOnForwardFailure=yes", "-N", "-L", "127.0.0.1:8080:127.0.0.1:3000", "u@h"}
 	if len(got) < len(wantTail) || !slices.Equal(got[len(got)-len(wantTail):], wantTail) {
 		t.Fatalf("ForwardArgv tail = %v\nwant %v", got, wantTail)
 	}

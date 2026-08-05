@@ -3,7 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { ReviewPanel, Toolbar } from '@self-review/react';
 import type { ReviewPanelHandle } from '@self-review/react';
 import type { ReviewAdapter } from '@self-review/react';
-import type { AppConfig, DiffLoadPayload } from '@self-review/react';
+import type {
+  AppConfig,
+  DiffLoadPayload,
+  ExpandContextRequest,
+  ExpandContextResponse,
+} from '@self-review/react';
 import '@self-review/react/styles.css';
 
 // Browser half of the sandbar review web app. Mirrors upstream's own
@@ -19,6 +24,28 @@ const adapter: ReviewAdapter = {
     const res = await fetch('/api/diff');
     if (!res.ok) {
       throw new Error(`/api/diff: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  // Not optional in practice, despite being optional in the interface. The
+  // panel decides to render its "show all hidden lines" bar from the diff
+  // SOURCE (`type === 'git'`, which the server always reports), not from
+  // whether the adapter can service it — so leaving this out put an expand
+  // control between every pair of hunks on every tracked file, each of which
+  // flipped to a loading state on click and then silently did nothing, forever.
+  expandContext: async (
+    request: ExpandContextRequest
+  ): Promise<ExpandContextResponse | null> => {
+    const params = new URLSearchParams({
+      path: request.filePath,
+      contextLines: String(request.contextLines),
+    });
+    const res = await fetch(`/api/expand?${params}`);
+    if (!res.ok) {
+      // Null is the interface's "nothing to show" answer; the panel restores
+      // the bar rather than hanging on a spinner.
+      return null;
     }
     return res.json();
   },

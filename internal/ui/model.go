@@ -226,6 +226,13 @@ type model struct {
 	// child. A plain func value, mirroring ghActions immediately above.
 	reviewRun reviewRunFunc
 
+	// review is the in-flight Landing-pane review session's identity and
+	// teardown state, or the zero value when none is running. It lives here,
+	// beside reviewRun, rather than on landing below, because a review session
+	// outlives the landingPane value that started it — see activeReview's doc
+	// in landing.go for the orphaned guest processes that placement prevents.
+	review activeReview
+
 	// landing is the Landing pane's own state (landing.go): the focused VM
 	// identity it was opened for, its grouped/flattened rows, the resolved
 	// per-checkout PR results, and which gh mode it is in. Plain value state —
@@ -928,6 +935,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// One checkout's AUTHORITATIVE gh PR-state result (landing.go). Purely
 		// a model-state fold — nothing further to dispatch.
 		m.handleLandingPRState(msg)
+		return m, nil
+
+	case landReviewURLMsg:
+		// The review UI's URL, reported while the session is still running
+		// (landing.go's runLandingReview). Purely a model-state fold plus a
+		// session-log entry — nothing further to dispatch.
+		m.handleLandReviewURL(msg)
 		return m, nil
 
 	case landReviewDoneMsg:

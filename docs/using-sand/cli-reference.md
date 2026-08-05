@@ -428,12 +428,21 @@ listing, and are mutually exclusive.
   reviewing uncommitted or unpushed work is the point. See
   [Reviewing changes in a browser](review.md) for the full workflow.
 
-`sand land` never pushes, commits, or otherwise touches the checkout's
-working state — it only reads what the guest already has and, for `--pr`,
-calls `gh` on the workstation. `--review` keeps that same property: the diff
-is rendered by a server running *inside* the VM, and only a browser tab on
-your workstation talks to it over its own loopback — no code is copied out
-(see [Reachability](review.md#reachability)).
+`sand land` never pushes or commits — it only reads what the guest already
+has and, for `--pr`, calls `gh` on the workstation. No code is copied out of
+the VM by any of the three actions: with `--review` the diff is rendered by a
+server running *inside* the VM, and only a browser tab on your workstation
+talks to it over its own loopback (see
+[Reachability](review.md#reachability)).
+
+`--review` is the one action that **writes** to the checkout: submitting a
+review saves `review.xml` into the checkout root (or wherever a project's
+`.self-review.yaml` points `outputFile`), which is the whole delivery
+mechanism — that file is what you hand to the agent. It is untracked, and it
+is deliberately excluded from any subsequent review's own diff, but nothing
+adds it to your `.gitignore`. If an agent in that VM runs `git add -A`, it
+will commit your review comments along with everything else, so add
+`review.xml` to the repository's ignore rules if that matters to you.
 
 ## `sand version` / `sand --version`
 
