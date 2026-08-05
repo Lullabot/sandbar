@@ -233,6 +233,12 @@ type model struct {
 	// git.drupalcode.org. A plain interface value, for the same reason
 	// ghActions is.
 	drupalOrgActions drupalOrgActions
+	// reviewRun is the Landing pane's seam (landing.go) over internal/landreview's
+	// orchestration (task 5's Session.Run) that the review key runs. Defaulted to
+	// defaultReviewRun in New(); tests fake it so no test picks a real workstation
+	// port, probes a real HTTP server, or spawns a real ssh/limactl forwarder
+	// child. A plain func value, mirroring ghActions immediately above.
+	reviewRun reviewRunFunc
 
 	// landing is the Landing pane's own state (landing.go): the focused VM
 	// identity it was opened for, its grouped/flattened rows, the resolved
@@ -590,6 +596,7 @@ func New(fleet provider.Fleet) tea.Model {
 		sweeps:           newSweepsResolver(fleetShellResolver(members)),
 		ghActions:        landgh.New(),
 		drupalOrgActions: newDrupalOrgActions(),
+		reviewRun:        defaultReviewRun,
 		keys:             newKeyMap(),
 		help:             help.New(),
 		view:             viewBoard,
@@ -1029,6 +1036,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (landing.go). Folding it in advances the flow to its confirmation —
 		// nothing further to dispatch.
 		return m, m.handleLandingFork(msg)
+	case landReviewDoneMsg:
+		// A Landing-pane review session finished, failed, or was cancelled
+		// (landing.go's runLandingReview). Purely a model-state fold plus a
+		// session-log entry — nothing further to dispatch.
+		m.handleLandReviewDone(msg)
+		return m, nil
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after
