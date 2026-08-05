@@ -647,9 +647,21 @@ Taken together with phase 4's orphan fix, the lesson is consistent: process
 teardown across the `limactl shell` boundary is where this feature's real bugs
 lived, and only live-VM runs exposed them.
 
-### Phase 6: Documentation
+### ✅ Phase 6: Documentation
 **Parallel Tasks:**
-- Task 07: Document browser-based review (depends on: 05, 06)
+- ✔️ Task 07: Document browser-based review (depends on: 05, 06) — `completed`
+
+**Phase verification:** `uvx --with-requirements docs/requirements.txt mkdocs
+build --strict` exits 0 with no warnings (the exact command CI runs; the
+orchestrator established a green baseline before this phase so any failure would
+be attributable to the new content). `AGENTS.md` carries `internal/landreview`
+in the package layout, `ForwardArgv`'s nil contract, the web app's location and
+guest-build story, and the `@self-review/*` "must always be bumped together, to
+the identical version" rule with its Renovate grouping. Docs were written from
+real `--help` output, and the new page states the v1 non-goals as *not* wired
+up rather than silently implying support. The task also corrected a pre-existing
+inaccuracy: `--with-codex` was documented as "the one opt-in toolset flag",
+which `--with-review` had made false.
 
 ### Post-phase Actions
 
@@ -662,3 +674,112 @@ floor check from `.github/workflows/test.yml`.
 ### Execution Summary
 - Total Phases: 6
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-08-05
+
+### Results
+
+self-review is now available in a web browser, served from inside a sandbar VM,
+per checkout.
+
+- **Web app** (`roles/self-review/files/webapp/`) — a `node:http` server over
+  `@self-review/core` that assembles the diff payload, serves the app config,
+  and on submit serializes `review.xml` into the checkout and exits; plus a
+  React client rendering `@self-review/react`'s `ReviewPanel` through a
+  fetch-backed `ReviewAdapter`.
+- **`sand land NAME PATH --review`** — a third action beside `--pr`/`--web`,
+  requiring no pushed branch, no remote and no `gh`. Reviews default to the
+  guest-computed merge base with the default branch, so committed and
+  uncommitted work are both covered.
+- **TUI Landing pane `v`** — the same review for the selected checkout, run in a
+  `tea.Cmd` so the board stays responsive, with the row showing
+  `reviewing… (browser open)`.
+- **`Provider.ForwardArgv`** — nil for local Lima (Lima already forwards guest
+  localhost to host localhost on the same port), `ssh -N -L` for remote Lima and
+  Proxmox.
+- **`sand create --with-review`** — opt-in tool-set flag (CLI and TUI form) that
+  builds the app into the base image and participates in the version stamp.
+- **Renovate** — the three `@self-review/*` packages are pinned to one exact
+  version with a committed lockfile and grouped so they can never move apart.
+
+Final end-to-end validation was performed by the orchestrator directly, not
+taken on report: `sand land reviewbox /home/andrew.guest/src/alpha --review`
+against a live Lima VM served the real checkout diff, a headless Chromium
+screenshot confirmed the UI rendered both the committed and uncommitted lines
+plus the untracked file, submitting the review wrote valid `urn:self-review:v3`
+XML **inside the guest**, `sand` printed that path and exited 0, and afterwards
+the host port was released with zero node processes left in the guest.
+
+### Noteworthy Events
+
+**Three defects were found and fixed during execution, all by running things
+rather than reading them.**
+
+1. **`go:embed` bloat (caught by the orchestrator, contradicting a subagent's
+   report).** Task 01 reported the embed was clean, its evidence being that
+   `go build` exited 0 — which proves nothing about what got embedded. Measured:
+   once the web app had a real `node_modules` (358 MB), the binary went from
+   **16.7 MB to 288.7 MB**, and because `internal/provision` rsyncs the embedded
+   playbook into the guest, a locally built binary would have pushed ~270 MB
+   into every VM created. Release builds use clean checkouts so nothing
+   published was affected. Fixed by replacing the blanket `all:roles` with an
+   enumerated playbook list, mirrored in the rsync filter, with a regression
+   test. Binary is now byte-identical with and without the artifacts present.
+2. **Orphaned guest server on ctrl-C (phase 4).** Cancelling the context kills
+   `limactl` but not the `ssh` child it forked, so the guest `node` kept
+   listening. The fix confirms a candidate against `/proc/<pid>/cmdline` before
+   signalling — a process-name match would have failed, since `ss` reports the
+   server as `MainThread`.
+3. **Orphaned guest server on TUI quit (phase 5).** Subtler: cancelling is not
+   waiting. `main()` returns the instant `tea.Program.Run()` does, cutting off
+   the goroutine doing the killing, orphaning the server on *every* quit. Fixed
+   with a `reviewDone` channel that quit blocks on under a bounded timeout.
+
+Both teardown bugs lived across the `limactl shell` boundary and neither was
+visible without a real VM. Lima was not available when phases 1–3 ran; the user
+asked for it to be installed mid-execution, which is what made phases 4–6
+provable.
+
+**A subagent correctly challenged the orchestrator.** Task 03 flagged an
+orchestrator edit to this plan as a possible attempt to induce a fabricated
+end-to-end claim, and refused to act on it. It was wrong about intent — Lima had
+genuinely just been installed — but right that the wording ("must not be
+reported as unverifiable") pushed toward a conclusion rather than toward running
+the test. The step was rewritten to say *run it and report whatever happens,
+including failure.*
+
+**Environment work.** Lima 2.2.0, QEMU 10.0.11 and OVMF were installed. Two Lima
+gotchas cost time and are recorded for future runs: an instance can report
+`Running` while stuck in guest provisioning (the default template's
+reverse-sshfs `fuse to allow_other` script retry-loops on this host — use
+`--set '.mounts=[]'`), and `limactl shell` briefly refuses after boot with
+`kex_exchange_identification: read: Connection reset by peer`.
+
+### Necessary follow-ups
+
+1. **Exercise the `ssh -L` branches on real hardware.** Remote Lima and Proxmox
+   forwarding is covered by argv assertions and a real-child forward test, but
+   has never run against an actual remote host or PVE guest. This is the largest
+   remaining gap.
+2. **Optional adapter methods.** `expandContext`, `loadFileContent`,
+   `readAttachment`, `loadImage`, `changeOutputPath` and the walkthrough-guide
+   `onGuideLoad` subscription are unimplemented v1 non-goals; each is a small
+   additive server endpoint plus an adapter method.
+3. **`--resume-from`.** Deferred at the approval gate. Roughly one endpoint plus
+   `parseReviewXml`.
+4. **Output path fidelity.** A project `.self-review.yaml` overriding
+   `outputFile` makes the path `sand` prints the default rather than the real
+   one; only the browser learns the true path.
+5. **`kill -9` teardown.** A hard kill of `sand` bypasses guest teardown. A
+   stdin-watchdog wrapper would cover it, at ~2s of latency on every successful
+   exit — deliberately not paid.
+6. **Opt-out image was verified in two parts, not one run.** The role-skip
+   (`toolset_review=false`, `changed=0`) was proven in a container and the
+   missing-app error path on a real VM, but no single "base image built without
+   the flag" end-to-end run was performed.
+7. **Bundle size.** The guest bundle is ~5.7 MB / 66 files, dominated by
+   upstream's mermaid/cytoscape/katex chunks. Acceptable, but worth revisiting
+   if base-image size becomes a concern.

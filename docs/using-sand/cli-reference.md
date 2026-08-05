@@ -10,7 +10,7 @@ There are five entry points:
   host clipboard on a running VM's guest clipboard.
 
 - [`sand land NAME`](#sand-land-name) — list a VM's git checkouts, or open a
-  draft PR / browser for one of them.
+  draft PR / browser / [browser-based review](review.md) for one of them.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
 
@@ -64,10 +64,11 @@ not a prompt.
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | `true` | Install Claude Code in the base image. |
-| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — the one **opt-in** toolset flag. |
+| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — one of two **opt-in** toolset flags. |
 | `--with-ddev` | bool | `true` | Install DDEV in the base image. |
 | `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
 | `--with-java` | bool | `true` | Install a headless JDK in the base image. |
+| `--with-review` | bool | `false` | Install the self-review web UI in the base image — the other **opt-in** toolset flag. See [Reviewing changes in a browser](review.md). |
 
 The `--with-*` flags configure the **shared base image**, not the individual
 VM. A flag you don't pass adopts whatever the existing base was actually
@@ -269,6 +270,8 @@ Flags:
     	Install the Go toolchain in the base image (default true)
   -with-java
     	Install a headless JDK in the base image (default true)
+  -with-review
+    	Install the self-review web UI in the base image
 ```
 
 (`--user` has no printed default because it is resolved to the host username
@@ -375,19 +378,26 @@ This is the same detection and the same `gh` actions the TUI's `l` (Land)
 key uses — see [Landing](files-and-shells.md#landing).
 
 ```
-Usage: sand land NAME [PATH] [--pr | --web] [--profile <name>]
+Usage: sand land NAME [PATH] [--pr | --web | --review] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
   sand land NAME                list checkouts + branch/push/PR state
   sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
   sand land NAME PATH --web     open PATH's branch (or PR) in a browser
+  sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
 
 --pr uses the workstation's own 'gh' (never the guest's token). Without gh
 it prints the compare URL and, on a terminal, offers to open it; piped or
 scripted, it exits non-zero with the URL on stderr so automation can react.
 --web never needs gh: it opens a constructed GitHub URL, which redirects to
 an existing PR for the branch on its own.
+
+--review needs no pushed branch, no remote and no gh at all: it runs a review
+server inside the VM against PATH, opens it in a browser on this machine, and
+blocks until you finish the review — which writes review.xml into PATH inside
+the VM, where the agent can read it. Nothing leaves the VM. It requires a base
+image built with 'sand create --with-review'.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
@@ -399,11 +409,12 @@ PUSH PR`) of every checkout the sweep found, including an ahead count for an
 unpushed branch (`unpushed (+3)`) and the PR's number/state when one exists
 (`#42 open (draft)`).
 
-`--pr PATH` and `--web PATH` require a `PATH` from that listing, and are
-mutually exclusive. Both refuse a checkout that isn't pushed or has no
-recognized remote — there's nothing to open a PR or browser page against
-yet.
+`--pr PATH`, `--web PATH` and `--review PATH` require a `PATH` from that
+listing, and are mutually exclusive.
 
+- **`--pr`** and **`--web`** both refuse a checkout that isn't pushed or has
+  no recognized remote — there's nothing to open a PR or browser page
+  against yet.
 - **`--pr`** opens a one-shot **draft PR** via the workstation's own `gh`.
   Without `gh` installed, it instead prints the branch's compare URL: on a
   real terminal it offers to open that URL in a browser (`y`/`N` prompt); in
@@ -413,10 +424,16 @@ yet.
 - **`--web`** is **gh-free by construction**: it never calls `gh` at all. It
   opens a constructed GitHub compare URL in a browser, which GitHub's own
   routing redirects to an existing open PR for that branch when one exists.
+- **`--review`** has no pushed-branch or remote precondition at all —
+  reviewing uncommitted or unpushed work is the point. See
+  [Reviewing changes in a browser](review.md) for the full workflow.
 
 `sand land` never pushes, commits, or otherwise touches the checkout's
 working state — it only reads what the guest already has and, for `--pr`,
-calls `gh` on the workstation.
+calls `gh` on the workstation. `--review` keeps that same property: the diff
+is rendered by a server running *inside* the VM, and only a browser tab on
+your workstation talks to it over its own loopback — no code is copied out
+(see [Reachability](review.md#reachability)).
 
 ## `sand version` / `sand --version`
 

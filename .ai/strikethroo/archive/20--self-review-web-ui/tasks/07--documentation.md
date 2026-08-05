@@ -2,7 +2,7 @@
 id: 7
 group: "documentation"
 dependencies: [5, 6]
-status: "pending"
+status: "completed"
 created: 2026-08-04
 model: "sonnet"
 effort: "medium"
