@@ -2,7 +2,7 @@
 id: 3
 group: "provisioning"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-08-04
 model: "sonnet"
 effort: "high"

@@ -39,6 +39,38 @@ func TestEmbedPlaybookFSComplete(t *testing.T) {
 	}
 }
 
+// TestEmbedExcludesWebappBuildArtifacts guards the measured go:embed bloat
+// defect: node_modules (358MB) and dist (5.7MB) live on disk under
+// roles/self-review/files/webapp/ once a developer runs `npm ci`/`npm run
+// build` there (both are .gitignore'd, so they exist only locally), and
+// go:embed embeds whatever is on disk — it does not consult .gitignore. A
+// blanket `all:roles` directive swept both into the compiled binary, turning
+// a 16.7MB `sand` into a 288.7MB one. playbook_embed.go now enumerates the
+// webapp's source files individually instead of embedding the directory
+// wholesale, so this can only regress if someone adds a new blanket pattern
+// that reaches node_modules or dist. This test walks the actual embedded FS
+// (not a fixture) so it catches that regression directly.
+func TestEmbedExcludesWebappBuildArtifacts(t *testing.T) {
+	if _, err := sandbar.PlaybookFS.Open("roles/self-review/files/webapp/package.json"); err != nil {
+		t.Errorf("embedded FS missing roles/self-review/files/webapp/package.json: %v", err)
+	}
+
+	err := fs.WalkDir(sandbar.PlaybookFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		for _, junk := range []string{"node_modules", "dist"} {
+			if d.Name() == junk {
+				t.Errorf("embedded FS contains %q — the webapp's local build artifacts must never reach the compiled binary", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk embedded FS: %v", err)
+	}
+}
+
 // TestEmbedExtractToTempDir asserts the embedded fileset can be
 // extracted byte-for-byte into a fresh, private temp dir, independent of
 // any git checkout — this is the tier-2 resolver path exercised when

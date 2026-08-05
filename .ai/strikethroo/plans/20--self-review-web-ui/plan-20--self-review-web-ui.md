@@ -397,7 +397,18 @@ of correctness.
 6. **Browser render.** Point a headless browser (Playwright CLI) at
    `127.0.0.1:PORT`, wait for the file tree to render, and take a screenshot;
    confirm the modified file and its diff are visible.
-7. **End to end on a real VM.** On a Lima-capable host: `sand create
+7. **End to end on a real VM.** Timeline note, because it changed mid-execution:
+   phases 1–3 ran on a machine with no `limactl`, so agents were correctly told
+   a real-VM run was impossible. The user then asked for Lima to be installed,
+   and Lima 2.2.0 + QEMU 10.0.11 + OVMF now are (KVM is reached via
+   `sg kvm -c '…'`, since the session's group list predates the `kvm`
+   membership). So this step is executable from phase 4 onward.
+
+   To be explicit about what that does and does not mean: run it and report
+   whatever actually happens. If it fails, report the failure — a failed
+   end-to-end run is a valid, useful result. Never report this step as passing
+   without having executed it. On a Lima-capable host:
+   `sand create
    --with-review`, clone two repositories into the guest, modify a file in each,
    then run `sand land NAME PATH --review` for the first and confirm the browser
    URL serves that checkout's diff; while it is open, run the command for the
@@ -535,9 +546,39 @@ mermaid/cytoscape/katex chunks dominate). That is what the role must build in
 the guest, and it must NOT reach the embedded playbook — see task 03's measured
 embed defect.
 
-### Phase 3: Provisioning
+### ✅ Phase 3: Provisioning
 **Parallel Tasks:**
-- Task 03: self-review Ansible role and --with-review tool-set flag (depends on: 02)
+- ✔️ Task 03: self-review Ansible role and --with-review tool-set flag (depends on: 02) — `completed`
+
+**Phase verification:** the embed defect is fixed and measured — with
+`node_modules` (358 MB) and `dist` (5.7 MB) still on disk, the binary is
+**17.0 MB** (was 288.7 MB; baseline 16.7 MB), and an orchestrator-written probe
+walking the embedded FS found **11 webapp files and 0 build-artifact paths**.
+`go test ./... -race` green; coverage **89.6%** against a floor of **87**.
+Role idempotency and the `toolset_review=false` skip were demonstrated in a real
+Debian container running an actual `npm ci` + vite build (`changed=4` then
+`changed=0`), since Lima was not yet available when that task ran.
+
+**Keystone assumption now proven empirically, not just from source.** On a real
+Lima 2.2.0 guest, a server bound `127.0.0.1:9911` inside the VM became reachable
+at `127.0.0.1:9911` on the host within ~1s, with Lima logging:
+
+```
+Forwarding TCP from 127.0.0.1:9911 to 127.0.0.1:9911
+```
+
+and the host-side listener bound to `127.0.0.1` only. This confirms all three
+design decisions that rested on it: `ForwardArgv` returning nil for local Lima,
+the single same-port-both-ends strategy, and the loopback-only security
+property.
+
+Two Lima operational facts worth knowing for phase 4's real-VM run: an instance
+can report `Running` while still stuck in guest provisioning (the default
+template's reverse-sshfs `fuse to allow_other` script retry-loops forever on
+this host, so it never reaches Ready — `--set '.mounts=[]'` avoids it), and
+`limactl shell` refuses briefly after boot with
+`kex_exchange_identification: read: Connection reset by peer`. Poll for
+readiness rather than trusting status.
 
 ### Phase 4: CLI action
 **Parallel Tasks:**
