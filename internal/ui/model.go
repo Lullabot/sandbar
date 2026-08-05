@@ -219,6 +219,13 @@ type model struct {
 	// copy carries it for free exactly like every other seam here.
 	ghActions ghActions
 
+	// reviewRun is the Landing pane's seam (landing.go) over internal/landreview's
+	// orchestration (task 5's Session.Run) that the review key runs. Defaulted to
+	// defaultReviewRun in New(); tests fake it so no test picks a real workstation
+	// port, probes a real HTTP server, or spawns a real ssh/limactl forwarder
+	// child. A plain func value, mirroring ghActions immediately above.
+	reviewRun reviewRunFunc
+
 	// landing is the Landing pane's own state (landing.go): the focused VM
 	// identity it was opened for, its grouped/flattened rows, the resolved
 	// per-checkout PR results, and which gh mode it is in. Plain value state —
@@ -498,6 +505,7 @@ func New(fleet provider.Fleet) tea.Model {
 		checkouts:    checkoutReg,
 		sweeps:       newSweepsResolver(fleetShellResolver(members)),
 		ghActions:    landgh.New(),
+		reviewRun:    defaultReviewRun,
 		keys:         newKeyMap(),
 		help:         help.New(),
 		view:         viewBoard,
@@ -920,6 +928,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// One checkout's AUTHORITATIVE gh PR-state result (landing.go). Purely
 		// a model-state fold — nothing further to dispatch.
 		m.handleLandingPRState(msg)
+		return m, nil
+
+	case landReviewDoneMsg:
+		// A Landing-pane review session finished, failed, or was cancelled
+		// (landing.go's runLandingReview). Purely a model-state fold plus a
+		// session-log entry — nothing further to dispatch.
+		m.handleLandReviewDone(msg)
 		return m, nil
 
 	case refreshTickMsg:
@@ -1455,7 +1470,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setOutput()
 				return m, nil
 			}
-			return m, tea.Quit
+			return m, m.quitCmd()
 		}
 		switch m.view {
 		case viewBoard:

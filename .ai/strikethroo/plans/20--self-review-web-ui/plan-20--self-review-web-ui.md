@@ -619,9 +619,33 @@ opener-failure path is what ran and the URL was fetched with `curl`. If a
 project `.self-review.yaml` overrides `outputFile`, the path `sand` prints is
 the default rather than the real one.
 
-### Phase 5: TUI parity
+### ✅ Phase 5: TUI parity
 **Parallel Tasks:**
-- Task 06: TUI Landing pane review key (depends on: 05)
+- ✔️ Task 06: TUI Landing pane review key (depends on: 05) — `completed`
+
+**Phase verification:** `v` ("review") bound on the Landing pane, shown in the
+help footer, with the row rendering `reviewing… (browser open)` while a review
+is open. `go build ./...` clean, `go test ./internal/ui/... -race -run Landing`
+and the full suite green, coverage **89.7%** (up from 89.6%, floor 87). The
+non-blocking requirement is proven by a test that runs `updateLanding` on a
+goroutine with a deadline and asserts the orchestration never ran inline. The
+pane calls `landreview.Session.Run` rather than duplicating any of it.
+
+**A second real cancellation defect was found and fixed here** — again only
+because the TUI was driven against the live `reviewbox` VM through
+`tmux send-keys`/`capture-pane`, not merely inspected. Cancelling a context is
+not a wait: `main()` returns the instant `tea.Program.Run()` does, so on ctrl+c
+the goroutine responsible for killing the guest server was cut off mid-flight
+and orphaned it **every time**. The fix adds a `reviewDone` channel closed only
+once the review goroutine has actually returned, and `quitCmd` blocks on it
+under a 15s bound (above `landreview`'s own 10s guest-stop timeout). Re-verified
+on the VM: ctrl+c now takes ~2.2s and the guest process and port are confirmed
+gone. The orchestrator independently re-checked the guest afterwards and found
+**no stray `server/index.mjs` processes and no review ports listening**.
+
+Taken together with phase 4's orphan fix, the lesson is consistent: process
+teardown across the `limactl shell` boundary is where this feature's real bugs
+lived, and only live-VM runs exposed them.
 
 ### Phase 6: Documentation
 **Parallel Tasks:**

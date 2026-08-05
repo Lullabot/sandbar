@@ -2,7 +2,7 @@
 id: 6
 group: "sand-commands"
 dependencies: [5]
-status: "pending"
+status: "completed"
 created: 2026-08-04
 model: "sonnet"
 effort: "high"
