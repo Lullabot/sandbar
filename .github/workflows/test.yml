@@ -171,7 +171,7 @@ jobs:
           # pipefail`). The whole point of this job is to go red when the base
           # build breaks; without this it goes red later, somewhere confusing.
           set -o pipefail
-          ./sand create --rebuild \
+          ./sand create --rebuild --with-review \
             --name claude-ci \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee cold.log
@@ -218,6 +218,204 @@ jobs:
             node --version
           '
 
+      # The review web app is an opt-in tool-set member (--with-review on the
+      # create above), so the first thing worth asserting is that the role both
+      # ran AND produced a bundle: dist/index.html is the file the review server
+      # actually serves, so its absence is the difference between "the role ran"
+      # and "the review UI exists". The node_modules check guards the pruning
+      # step specifically — roles/self-review drops devDependencies after the
+      # build, and over-pruning would leave a VM that builds fine here and then
+      # fails to start the server at review time.
+      - name: Assert the self-review web app was built into the image
+        run: |
+          limactl shell claude-ci bash -lc '
+            set -e
+            test -f /opt/sandbar/self-review/dist/index.html
+            test -f /opt/sandbar/self-review/server/index.mjs
+            test -d /opt/sandbar/self-review/node_modules/@self-review/core
+          '
+
+      # TWO checkouts, because "a VM may have multiple checkouts" is a stated
+      # requirement of this feature: the review must cover the checkout named on
+      # the command line and no other. Each gets work in all three states —
+      # committed on the branch, uncommitted in the working tree, and untracked
+      # — so one /api/diff response can be checked for all of them at once. That
+      # combination is the point of the merge-base-to-worktree range: reviewing
+      # unpushed, uncommitted work is what this feature exists for, and a plain
+      # `git diff HEAD` or a plain `git diff <base>` would each miss one of
+      # these lines.
+      - name: Seed two checkouts with committed, uncommitted and untracked work
+        run: |
+          limactl shell claude-ci bash -lc '
+            set -eu
+            for d in alpha beta; do
+              mkdir -p "$HOME/src/$d"
+              cd "$HOME/src/$d"
+              git init -q -b main .
+              printf "one\ntwo\nthree\n" > README.md
+              git add README.md
+              git commit -q -m "initial commit"
+              git checkout -q -b "feature-$d"
+              printf "one\ntwo\nthree\nfour committed in %s\n" "$d" > README.md
+              git commit -q -am "committed work on the branch"
+              printf "one\ntwo\nthree\nfour committed in %s\nfive uncommitted in %s\n" "$d" "$d" > README.md
+              printf "untracked note for %s\n" "$d" > "NOTES-$d.md"
+            done
+            git -C "$HOME/src/alpha" status --porcelain
+          '
+
+      # The feature end to end, headless. This is the only place in CI where the
+      # review server actually starts in a guest, Lima's loopback-to-loopback
+      # forward is actually relied on, and a submitted review actually reaches
+      # disk — everything else about --review is unit-tested against fakes.
+      #
+      # No browser is involved: xdg-open does not exist on the runner, and
+      # landreview treats an opener failure as non-fatal (it prints the URL and
+      # keeps serving), which is exactly the headless path this drives.
+      - name: Drive `sand land --review` end to end (serve, submit, tear down)
+        run: |
+          set -euo pipefail
+          GUEST_HOME=$(limactl shell claude-ci bash -lc 'printf %s "$HOME"')
+          REPO="$GUEST_HOME/src/alpha"
+          echo "reviewing $REPO"
+
+          ./sand land claude-ci "$REPO" --review > review.log 2>&1 &
+          SAND_PID=$!
+
+          # Poll for the readiness line rather than sleeping a fixed amount: the
+          # variable part is the guest's cold `node` start plus Lima noticing
+          # the new guest listener, and a fixed sleep would be either flaky or
+          # wastefully long.
+          PORT=""
+          for _ in $(seq 1 120); do
+            PORT=$(grep -o 'review UI ready at http://127\.0\.0\.1:[0-9]\+' review.log 2>/dev/null | head -1 | sed 's/.*://') || true
+            [ -n "$PORT" ] && break
+            kill -0 "$SAND_PID" 2>/dev/null || break
+            sleep 1
+          done
+          if [ -z "$PORT" ]; then
+            echo "::error::the review UI never became ready"
+            cat review.log
+            exit 1
+          fi
+          echo "review UI on port $PORT"
+
+          # A SECURITY PROPERTY, not a nicety. internal/landreview's package doc
+          # commits to unfinished work never becoming reachable from the VM's
+          # network, which holds only if the forwarded port is bound to
+          # loopback. Assert it on the wire rather than trusting the flag.
+          bound=$(ss -ltn | awk -v p=":$PORT\$" '$4 ~ p {print $4}')
+          echo "listeners on $PORT: ${bound:-none}"
+          if [ -z "$bound" ]; then
+            echo "::error::nothing is listening on $PORT despite the ready banner"
+            exit 1
+          fi
+          if printf '%s\n' "$bound" | grep -qv '^127\.0\.0\.1:'; then
+            echo "::error::port $PORT is bound beyond loopback: $bound"
+            exit 1
+          fi
+
+          DIFF=$(curl -sS --max-time 60 "http://127.0.0.1:$PORT/api/diff")
+          jq -r '.files[] | "  \(.newPath // .oldPath) untracked=\(.isUntracked // false) hunks=\(.hunks | length)"' <<<"$DIFF"
+
+          # All three working-tree states must be present in ONE response.
+          jq -e '[.files[] | .newPath // .oldPath] | index("README.md")' <<<"$DIFF" >/dev/null \
+            || { echo "::error::README.md is missing from the diff"; exit 1; }
+          jq -e '[.files[] | .newPath // .oldPath] | index("NOTES-alpha.md")' <<<"$DIFF" >/dev/null \
+            || { echo "::error::the untracked file is missing from the diff"; exit 1; }
+          grep -q 'four committed in alpha' <<<"$DIFF" \
+            || { echo "::error::the committed-on-branch line is missing from the diff"; exit 1; }
+          grep -q 'five uncommitted in alpha' <<<"$DIFF" \
+            || { echo "::error::the uncommitted working-tree line is missing from the diff"; exit 1; }
+
+          # ...and the OTHER checkout must not leak into it. This is the
+          # multiple-checkouts requirement, asserted rather than assumed.
+          if grep -qE 'NOTES-beta\.md|committed in beta|uncommitted in beta' <<<"$DIFF"; then
+            echo "::error::the review of alpha contains content from the beta checkout"
+            exit 1
+          fi
+
+          # Echo the server's own source block back, so the submitted payload's
+          # diff range matches the session exactly instead of hard-coding a
+          # merge base that differs on every run.
+          jq -n --argjson source "$(jq -c .source <<<"$DIFF")" '{
+            timestamp: "2026-01-01T00:00:00.000Z",
+            source: $source,
+            files: [{
+              path: "README.md", changeType: "modified", viewed: true,
+              comments: [{
+                id: "lima-e2e", filePath: "README.md",
+                lineRange: {side: "new", start: 5, end: 5},
+                body: "lima-e2e round-trip marker", category: "nit", suggestion: null
+              }]
+            }]
+          }' > review-state.json
+
+          echo "=== POST /api/review ==="
+          curl -sS --max-time 60 -X POST "http://127.0.0.1:$PORT/api/review" \
+            -H 'content-type: application/json' --data-binary @review-state.json
+          echo
+
+          # Submitting IS the completion signal: the guest server writes the
+          # file and exits 0, and that exit is what unblocks the session. A sand
+          # still running here means that signal never propagated.
+          for _ in $(seq 1 60); do kill -0 "$SAND_PID" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$SAND_PID" 2>/dev/null; then
+            echo "::error::sand did not exit after the review was submitted"
+            cat review.log
+            kill "$SAND_PID" 2>/dev/null || true
+            exit 1
+          fi
+          rc=0
+          wait "$SAND_PID" || rc=$?
+          cat review.log
+          [ "$rc" -eq 0 ] || { echo "::error::sand land --review exited $rc"; exit 1; }
+          grep -qF "review written to $REPO/review.xml in claude-ci" review.log \
+            || { echo "::error::sand did not report the written review path"; exit 1; }
+
+          # Teardown, both ends. The workstation port must be released...
+          if ss -ltn | awk -v p=":$PORT\$" '$4 ~ p {print $4}' | grep -q .; then
+            echo "::error::port $PORT is still bound after the session ended"
+            ss -ltn | grep ":$PORT" || true
+            exit 1
+          fi
+          # ...and no guest-side server may survive it. An orphan here is the
+          # defect landreview's stopGuestServer exists to prevent, and it is
+          # invisible from the host without asking the guest directly.
+          #
+          # The bracket around the first letter is load-bearing, not a typo.
+          # `limactl shell` hands the command to the guest's sshd, which runs it
+          # through a shell; a plain 'self-review/server' would appear in THAT
+          # shell's own cmdline and pgrep would report it as a survivor on every
+          # run. `[s]elf-review/server` matches the literal path but not the
+          # bracketed pattern sitting in the checking process's arguments. (This
+          # exact self-match produced a false orphan reading during development.)
+          orphans=$(limactl shell claude-ci pgrep -af '[s]elf-review/server' || true)
+          if [ -n "$orphans" ]; then
+            echo "::error::a review server process survived in the guest: $orphans"
+            exit 1
+          fi
+
+          # The written review must be real, namespaced XML carrying the comment
+          # that was actually submitted — not merely a file that appeared.
+          limactl shell claude-ci cat "$REPO/review.xml" > review.xml
+          wc -c review.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("review.xml")' \
+            || { echo "::error::review.xml is not well-formed XML"; exit 1; }
+          grep -q 'urn:self-review:v3' review.xml \
+            || { echo "::error::review.xml lacks the v3 namespace"; exit 1; }
+          grep -qF 'lima-e2e round-trip marker' review.xml \
+            || { echo "::error::the submitted comment is missing from review.xml"; exit 1; }
+          echo "review round-trip verified"
+
+      - name: Dump the review session log on failure
+        if: failure()
+        run: |
+          echo "=== review.log ==="
+          cat review.log || true
+          echo "=== review.xml ==="
+          cat review.xml || true
+
       # Free the clone's disk before the second create — the BASE (sandbar-base)
       # is a separate `limactl clone` source and is untouched by deleting a
       # clone taken from it. This is what keeps a second qcow2 within budget:
@@ -239,11 +437,18 @@ jobs:
       # vm.DefaultCreateConfig), no --rebuild. The base already exists, so this
       # must take the in-place re-apply branch of ensureBaseStopped, not the
       # cold-build branch.
+      #
+      # --with-review is repeated here deliberately. The tool-set selection
+      # feeds the base image's version stamp (vm.CreateConfig.ToolsetKey), so
+      # dropping it would change the stamp and make the base stale for a second
+      # reason on top of the deliberate content edit below — muddying exactly
+      # the assertion the next step makes. Same toolset on both creates keeps
+      # the playbook content hash the only moving part.
       - name: Create a second VM (warm — must re-apply the base in place, not rebuild it)
         run: |
           # See the cold create above: `| tee` without pipefail hides a failure.
           set -o pipefail
-          ./sand create \
+          ./sand create --with-review \
             --name claude-ci-warm \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee warm.log
