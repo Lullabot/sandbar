@@ -105,6 +105,12 @@ type CreateConfig struct {
 	WithGo     bool
 	WithJava   bool
 	WithCodex  bool
+	// WithReview selects the self-review web UI (sand create --with-review),
+	// the second opt-in tool after WithCodex and for the same reason: it is a
+	// heavy `npm ci` + vite build that most bases should not pay for, so its
+	// zero value (false) IS the default (see DefaultCreateConfig, which
+	// deliberately omits it) rather than being flipped on there.
+	WithReview bool
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
@@ -134,8 +140,8 @@ func DefaultCreateConfig() CreateConfig {
 		WithDDEV:   true,
 		WithGo:     true,
 		WithJava:   true,
-		// WithCodex is deliberately omitted: its zero value (false) IS the
-		// default — codex is opt-in, unlike the four tools above.
+		// WithCodex and WithReview are deliberately omitted: their zero value
+		// (false) IS the default — both are opt-in, unlike the four tools above.
 	}
 }
 
@@ -152,6 +158,7 @@ func (c *CreateConfig) ToolPtrs() map[string]*bool {
 		"go":     &c.WithGo,
 		"java":   &c.WithJava,
 		"codex":  &c.WithCodex,
+		"review": &c.WithReview,
 	}
 }
 

@@ -281,6 +281,7 @@ func (m *model) openForm() tea.Cmd {
 	m.toolDDEV = cfg.WithDDEV
 	m.toolGo = cfg.WithGo
 	m.toolJava = cfg.WithJava
+	m.toolReview = cfg.WithReview
 	m.toolRebuild = false
 	m.view = viewForm
 	return tea.Batch(m.inputs[0].Focus(), m.kickFormToolsetLoad())
@@ -369,6 +370,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetWithDDEV = cfg.WithDDEV
 	m.resetWithGo = cfg.WithGo
 	m.resetWithJava = cfg.WithJava
+	m.resetWithReview = cfg.WithReview
 	m.preserveClaude = false
 	m.preserveProject = false
 	orgRel, ok := provision.OrgRelDir(cfg.CloneURL)
@@ -556,6 +558,12 @@ func (m model) createToggles() []formToggle {
 			help:  baseWideHelp("Java"),
 			get:   func(m *model) bool { return m.toolJava },
 			set:   func(m *model, v bool) { m.toolJava = v },
+		},
+		{
+			label: "Install self-review web UI",
+			help:  baseWideHelp("the self-review web UI"),
+			get:   func(m *model) bool { return m.toolReview },
+			set:   func(m *model, v bool) { m.toolReview = v },
 		},
 		{
 			label: "Rebuild base image",
@@ -750,17 +758,20 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
-		// Codex is replayed like its siblings: the RECORDED selection is the
-		// truth here, not the default. WithCodex's default-off only protects the
-		// ADD direction (an unconfigured create never installs it); a VM reset
-		// from a recorded WithCodex=true must still replay true, or the reset
-		// would silently de-select it and mark the shared base stale.
+		cfg.WithReview = m.resetWithReview
+		// Codex and review are replayed like their siblings: the RECORDED
+		// selection is the truth here, not the default. Their default-off
+		// only protects the ADD direction (an unconfigured create never
+		// installs them); a VM reset from a recorded WithCodex/WithReview=true
+		// must still replay true, or the reset would silently de-select the
+		// tool and mark the shared base stale.
 	} else {
 		cfg.WithClaude = m.toolClaude
 		cfg.WithCodex = m.toolCodex
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava
+		cfg.WithReview = m.toolReview
 	}
 	return cfg, nil
 }

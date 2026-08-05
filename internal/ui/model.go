@@ -288,6 +288,7 @@ type model struct {
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
+	resetWithReview      bool
 	preserveClaude       bool
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
@@ -307,6 +308,7 @@ type model struct {
 	toolDDEV    bool
 	toolGo      bool
 	toolJava    bool
+	toolReview  bool
 	toolRebuild bool
 
 	// Progress / streaming. Everything that used to be a single job's state on the
@@ -1424,12 +1426,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolDDEV = cfg.WithDDEV
 			m.toolGo = cfg.WithGo
 			m.toolJava = cfg.WithJava
-			// Codex must be refreshed too, or the probed base's codex state is
-			// silently dropped: the checkbox stays at openForm's default (false)
-			// while the base was built WITH codex, and submitting reconverges the
-			// shared base without it (the silent de-select form.go's reset path
-			// guards against, reintroduced here for the create/probe path).
+			// Codex and review must be refreshed too, or the probed base's
+			// state is silently dropped: the checkbox stays at openForm's
+			// default (false) while the base was built WITH the tool, and
+			// submitting reconverges the shared base without it (the silent
+			// de-select form.go's reset path guards against, reintroduced
+			// here for the create/probe path).
 			m.toolCodex = cfg.WithCodex
+			m.toolReview = cfg.WithReview
 		}
 		return m, nil
 
