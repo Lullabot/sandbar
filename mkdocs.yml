@@ -73,6 +73,7 @@ nav:
     - Secrets: using-sand/secrets.md
     - Shells and Files: using-sand/files-and-shells.md
     - Web Servers and Ports: using-sand/web-servers.md
+    - Reviewing changes in a browser: using-sand/review.md
     - Connection Profiles: using-sand/connection-profiles.md
     - Proxmox VE: using-sand/proxmox.md
   - Reference:

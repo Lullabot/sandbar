@@ -38,6 +38,13 @@ for the full walkthrough, or the
 [CLI Reference](https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/)
 for every command and flag.
 
+Want to look over what Claude wrote before it's pushed anywhere? `sand
+create --with-review` opts a VM into a browser-based review UI, served
+entirely from inside it — `sand land NAME PATH --review` (or `v` in the
+TUI's Landing pane) opens the real diff of an uncommitted or unpushed
+checkout in your browser and writes your comments back into it. See
+[Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
+
 By default `sand` manages VMs on a local Lima. It can also manage a **fleet**
 of VMs spread across your local machine and one or more remote hosts over
 SSH, all at once — each host you add is a named **Connection Profile**,

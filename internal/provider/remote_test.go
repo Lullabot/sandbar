@@ -63,6 +63,48 @@ func TestRemoteProviderAttachArgv(t *testing.T) {
 	}
 }
 
+// TestRemoteProviderForwardArgv proves the remote provider bridges the
+// workstation to the REMOTE host's loopback with `ssh -N -L
+// <hostPort>:127.0.0.1:<guestPort> …`: -N because the caller execs this as a
+// long-running child solely to forward, and the far end is 127.0.0.1 because
+// that is where Lima's own auto-forward already landed the guest port on the
+// remote host (see the local provider's ForwardArgv doc for why local Lima
+// needs no such hop at all). The target is located by value, exactly as
+// TestRemoteProviderAttachArgv does, since NewSSHHost may thread
+// connection-multiplexing flags this black-box test cannot predict.
+func TestRemoteProviderForwardArgv(t *testing.T) {
+	p := newRemote(t)
+	got := p.ForwardArgv(vm.VM{Name: "web"}, 8080, 3000)
+	t.Logf("remote ForwardArgv(web, 8080, 3000) = %v", got)
+
+	if len(got) == 0 || got[0] != "ssh" {
+		t.Fatalf("remote ForwardArgv must start with `ssh`, got %v", got)
+	}
+	if !slices.Contains(got, "-N") {
+		t.Fatalf("remote ForwardArgv missing -N (no remote command): %v", got)
+	}
+	idx := slices.Index(got, "-L")
+	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "127.0.0.1:8080:127.0.0.1:3000" {
+		t.Fatalf("remote ForwardArgv missing `-L 127.0.0.1:8080:127.0.0.1:3000`: %v", got)
+	}
+	if got[len(got)-1] != "dev@example.com" {
+		t.Fatalf("remote ForwardArgv must target dev@example.com, got %v", got)
+	}
+	// ExitOnForwardFailure=yes is a correctness requirement, not a preference:
+	// without it a lost race for hostPort leaves ssh running with no forward
+	// attached, and landreview's readiness probe (which accepts ANY HTTP
+	// response) then succeeds against whatever unrelated local service holds
+	// that port. See SSHHost.ForwardArgv.
+	if !slices.Contains(got, "ExitOnForwardFailure=yes") {
+		t.Fatalf("%s ForwardArgv must pass -o ExitOnForwardFailure=yes so a failed local bind is fatal: %v", "remote", got)
+	}
+	// A port forward must never ride (or become) the shared ControlMaster — see
+	// WithoutMux — so it carries the explicit opt-out, not ControlMaster=auto.
+	if slices.Contains(got, "ControlMaster=auto") {
+		t.Fatalf("remote ForwardArgv must not multiplex: %v", got)
+	}
+}
+
 // TestRemoteProviderGuestIdentityFallback: with no instance dir there are no
 // remote instance files to read, so GuestHome/GuestUser return "" and the caller
 // falls back — the same contract the local provider honours, proven here without a

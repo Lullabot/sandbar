@@ -608,7 +608,7 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 func (m *model) requestQuit() tea.Cmd {
 	busy := m.busyVMs()
 	if len(busy) == 0 {
-		return tea.Quit
+		return m.quitCmd()
 	}
 	noun := "VM"
 	if len(busy) > 1 {
@@ -620,7 +620,7 @@ func (m *model) requestQuit() tea.Cmd {
 	m.confirm = &confirmState{
 		prompt: fmt.Sprintf("Quit and abandon work in flight on %d %s (%s)?",
 			len(busy), noun, summarizeNames(busy, m.width)),
-		run: tea.Quit,
+		run: m.quitCmd(),
 	}
 	return nil
 }

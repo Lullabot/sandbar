@@ -30,7 +30,18 @@ it is not where prose belongs.
   then reuses the SSH transport for shells/copy, satisfies `HostFiles` with a
   local per-endpoint state dir (no "host where limactl runs" exists), and
   implements `Provenancer` via PVE tags + the description field rather than a
-  sidecar marker. There is no
+  sidecar marker. `Provider.ForwardArgv(v, hostPort, guestPort)` returns the
+  argv of a long-running process that makes a guest loopback port reachable
+  at the same-numbered port on the workstation, or **nil when the backend
+  already does so on its own** — local Lima returns nil (Lima auto-forwards
+  guest loopback to the SAME port on its own host's loopback, and for local
+  Lima that host IS the workstation); remote Lima and Proxmox both return an
+  `ssh -N -L` argv (remote Lima against the configured `SSHHost`, bridging to
+  where Lima already landed the port; Proxmox straight to the guest address).
+  Follows the `AttachArgv`/`RunArgv` idiom: pure, no I/O, so each backend's
+  argv is asserted exactly with no real ssh, network or VM. `internal/landreview`
+  is the caller: it execs a non-nil argv as a child and kills it when the
+  forward is no longer needed. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
@@ -109,6 +120,16 @@ it is not where prose belongs.
   profile's VMs never mix with the local list.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
+- `landreview` — orchestrates ONE browser review session against ONE guest
+  checkout: picks a workstation port, starts the guest review server
+  (`ServerPath`, `/opt/sandbar/self-review/server/index.mjs`), starts
+  `Provider.ForwardArgv`'s
+  child when non-nil, polls for readiness, opens the browser, and blocks
+  until the server exits (the guest writing `review.xml` into the checkout
+  and exiting is the completion signal). Lives here rather than under
+  `cmd/sand` because both `sand land NAME PATH --review` and the TUI's
+  Landing pane (`internal/ui`, which cannot import a `main` package) need it
+  — one orchestration, two entry points.
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
   now also keyed by connection scope — distinct from its pre-existing
   per-directory scope, see `docs/reference/files-and-state.md`), shared
@@ -639,13 +660,40 @@ comment at `roles/claude-code/tasks/main.yml`.
 - **`playbook_embed.go`'s `go:embed` set and the rsync filter in
   `internal/provision/provision.go` (`inGuestScript`) must stay in step.**
   Both spell out the same fileset — `site.yml`, `ansible.cfg`, `inventory`,
-  `roles/`, `group_vars/` — and the base version stamp
+  `group_vars/`, and every role directory — and the base version stamp
   (`internal/provision/baseversion.go`, `playbookFileset`) now hashes exactly
   that fileset too, so a test pinning the embed set to the rsync filter
   (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's correctness as
   well. Add a file to one and forget the other two, and either the guest gets
   content the stamp never sees, or the stamp churns on content the guest
-  never gets.
+  never gets. **`roles/` is NOT one blanket `all:roles/***` embed** —
+  `playbook_embed.go` enumerates every role directory individually, and
+  `roles/self-review/files/webapp/` down to its *individual source files*
+  (`package.json`, `server/***`, `src/***`, …), never `all:` over the whole
+  webapp directory. That is deliberate: `go:embed` does not consult
+  `.gitignore`, so a blanket embed there would pull in `node_modules/` and
+  `dist/` (a real, measured defect: it inflated the binary from 16.7 MB to
+  288.7 MB) the moment either exists on a contributor's disk, and ship them
+  to every VM the binary provisions, not just ones built with
+  `--with-review`. **Adding a new role — or a new file under
+  `roles/self-review/files/webapp/` — means adding it to BOTH
+  `playbook_embed.go`'s `go:embed` directives AND `playbookSyncCmd`'s rsync
+  `--include` list in `provision.go`**; `TestGuestSyncCopiesOnlyThePlaybook`
+  and `TestEmbedExcludesWebappBuildArtifacts` (`internal/provision/embed_test.go`)
+  both enforce the two lists agreeing, but neither can tell you what the
+  *right* list is — that's a human call every time a role's fileset changes.
+- **The self-review web app's source lives in this repository**, at
+  `roles/self-review/files/webapp/` (`server/` the Node review server,
+  `src/` the browser client, a real `package.json` + lockfile pinning
+  `@self-review/core`, `@self-review/react` and `@self-review/types`). It is
+  NOT prebuilt and committed: the `self-review` Ansible role runs `npm ci`
+  and the vite build **inside the guest**, at base-image build time, gated
+  behind `toolset_review` (`sand create --with-review`, default off) the
+  same way `toolset_codex` gates the codex role. The three `@self-review/*`
+  packages are upstream's own internal seams (`ReviewAdapter`,
+  `DiffLoadPayload`, `ReviewState`) — **they must always be bumped together,
+  to the identical version**; `renovate.json` groups `@self-review/**` into
+  one `packageRules` entry so Renovate can never propose moving them apart.
 - **Every base mutation belongs inside the base lock held by
   `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
   refresh, and `--rebuild`'s destroy are all reached through

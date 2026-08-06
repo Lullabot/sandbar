@@ -37,6 +37,17 @@ import (
 // whether it came from a checkout or the embedded copy. --delete-excluded makes
 // /root/playbook match that set exactly, clearing junk a pre-filter base baked in.
 //
+// roles/self-review/files/webapp/ is spelled out file-by-file for the same
+// reason playbook_embed.go's go:embed directive is: node_modules and dist are
+// real, gitignored, on-disk state once a developer has run `npm ci`/`npm run
+// build` in that directory, and an unfiltered `--include='/roles/***'` would
+// rsync them straight into every VM this filter provisions — hundreds of MB
+// pushed into a guest on every create, not just baked into the binary. Naming
+// the exact files that belong closes that off the same way the embed does:
+// node_modules and dist are never matched by any rule, so they always fall
+// through to the trailing --exclude='*' regardless of what a checkout's disk
+// happens to have sitting next to them.
+//
 // The SAND_ANSIBLE_TASK_TOTAL line exists because Ansible's default stdout
 // callback prints no task count ANYWHERE in its output, so the TUI — which
 // renders a progress bar on a building VM's tile — has no denominator to fill it
@@ -57,15 +68,36 @@ vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
 install -m 600 /dev/null "$vars"
 cat > "$vars"
-rsync -a --delete --delete-excluded \
-  --include=/site.yml --include=/ansible.cfg --include=/inventory \
-  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
-  /mnt/playbook/ /root/playbook/
+` + playbookSyncCmd + `
 cd /root/playbook
 listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
 ` + taskTotalGuard + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
+
+// playbookSyncCmd is the rsync invocation shared by inGuestScript and
+// profileGuestScript. It is its own constant, rather than being duplicated
+// inline in both scripts as it used to be when it was three lines, because it
+// now enumerates every role directory and every self-review/files/webapp file
+// individually (see inGuestScript's doc comment) — long enough that copy-pasted
+// duplicates would drift the moment one of them gets an edit the other misses.
+const playbookSyncCmd = `rsync -a --delete --delete-excluded \
+  --include=/site.yml --include=/ansible.cfg --include=/inventory --include='/group_vars/***' \
+  --include=/roles/ \
+  --include=/roles/base/*** --include=/roles/claude-code/*** --include=/roles/codex/*** \
+  --include=/roles/dev-tools/*** --include=/roles/project/*** --include=/roles/samba/*** --include=/roles/user/*** \
+  --include=/roles/self-review/ \
+  --include=/roles/self-review/defaults/*** --include=/roles/self-review/tasks/*** \
+  --include=/roles/self-review/files/ --include=/roles/self-review/files/webapp/ \
+  --include=/roles/self-review/files/webapp/package.json \
+  --include=/roles/self-review/files/webapp/package-lock.json \
+  --include=/roles/self-review/files/webapp/index.html \
+  --include=/roles/self-review/files/webapp/vite.config.ts \
+  --include=/roles/self-review/files/webapp/tsconfig.json \
+  --include=/roles/self-review/files/webapp/server/*** \
+  --include=/roles/self-review/files/webapp/src/*** \
+  --exclude='*' \
+  /mnt/playbook/ /root/playbook/`
 
 // taskTotalGuard turns the raw count from `grep -c` into the denominator the tile's
 // build bar uses, and it is a const of its own so a test can execute it under a real
@@ -106,10 +138,7 @@ vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
 install -m 600 /dev/null "$vars"
 cat > "$vars"
-rsync -a --delete --delete-excluded \
-  --include=/site.yml --include=/ansible.cfg --include=/inventory \
-  --include='/roles/***' --include='/group_vars/***' --exclude='*' \
-  /mnt/playbook/ /root/playbook/
+` + playbookSyncCmd + `
 cd /root/playbook
 ansible-galaxy collection install ansible.posix
 export ANSIBLE_CALLBACKS_ENABLED=profile_tasks ANSIBLE_CALLBACK_WHITELIST=profile_tasks

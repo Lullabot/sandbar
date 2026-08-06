@@ -194,6 +194,24 @@ func TestToolsetKey_WithCodex(t *testing.T) {
 	}
 }
 
+// TestToolsetKey_WithReview proves review — like codex, a second opt-in
+// tool — slots alphabetically into the key (last, after java) when enabled,
+// and that a default (review-off) config still renders the exact
+// byte-identical stamp that existed before review was added, so an existing
+// base does not read as stale against its own recorded stamp merely because
+// this binary now knows a new tool name.
+func TestToolsetKey_WithReview(t *testing.T) {
+	c := DefaultCreateConfig()
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+		t.Errorf("ToolsetKey() with review omitted = %q, want %q (unchanged stamp for existing users)", got, want)
+	}
+
+	c.WithReview = true
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
+		t.Errorf("ToolsetKey() with review enabled = %q, want %q", got, want)
+	}
+}
+
 // TestApplyToolset_RoundTripsCodex proves ApplyToolset (how `sand create`
 // adopts an existing base's recorded selection) correctly assigns codex both
 // on and off, the same as any other tool.

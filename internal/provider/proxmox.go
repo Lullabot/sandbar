@@ -1392,6 +1392,31 @@ shift 2
 	return p.sshHost(ip).SSHArgv(true, "bash", "-c", script, "sand-run", workdir, os.Getenv("COLORTERM"))
 }
 
+// ForwardArgv returns the ssh -N -L argv that bridges hostPort on the
+// workstation DIRECTLY to guestPort on 127.0.0.1 inside the VM. There is no
+// Lima auto-forward to ride here at all — Proxmox has no Lima in front of the
+// guest — so the guest's own sshd is the far end, exactly as AttachArgv and
+// RunArgv already reach it, over the SAME connection identity (sshHost),
+// never a second hand-rolled one.
+//
+// The address lookup is bounded by attachResolveTimeout for the same reason
+// AttachArgv's is: this method has no error return and runs on the TUI's
+// update goroutine, so it trades completeness for not freezing the board. A
+// resolution failure returns failArgv rather than nil or a bare "ssh
+// <name>": nil would panic a caller that indexes argv[0] the way the AttachArgv
+// contract already documents, and an unresolved name could reach an unrelated
+// host that happens to answer to it on the local network.
+func (p *proxmoxProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), attachResolveTimeout)
+	defer cancel()
+
+	ip, err := p.guestIP(ctx, v.Name)
+	if err != nil {
+		return failArgv(fmt.Sprintf("sand: cannot forward to %q: %v", v.Name, err))
+	}
+	return p.sshHost(ip).ForwardArgv(hostPort, guestPort)
+}
+
 // failArgv is a real, runnable command that prints msg and exits non-zero — the
 // only honest answer for an argv-returning method that has just failed. The
 // message travels as $0 rather than being spliced into the script, so nothing in
