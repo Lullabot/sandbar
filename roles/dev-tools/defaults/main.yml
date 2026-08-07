@@ -33,7 +33,7 @@ devtools_docker_registry_proxy_port: 3128
 devtools_user_name: "{{ user_name }}"
 
 # GitLab CLI (glab) — pinned official .deb release asset
-devtools_glab_version: "1.111.0"
+devtools_glab_version: "1.112.0"
 devtools_glab_deb_arch_map:
   x86_64: amd64
   aarch64: arm64
