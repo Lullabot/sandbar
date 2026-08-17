@@ -1580,9 +1580,9 @@ never runs it. Turn that render into the PNG with
 the freeze module, so no font install is needed):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>BOARD_SHOT_OUT=/tmp/board.ansi go test ./internal/ui/ -run TestGenerateHomeBoardShot -count=1
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>freeze /tmp/board.ansi -o docs/images/board.png \
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  --font.file &quot;$(go env GOMODCACHE)&quot;/github.com/charmbracelet/freeze@*/font/JetBrainsMono-Regular.ttf \
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  --font.family &quot;JetBrains Mono&quot; --font.size 20 --line-height 1.6 \
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  --background &quot;#0d1117&quot; --padding 24 --window --border.radius 8
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  --font.file "$(go env GOMODCACHE)"/github.com/charmbracelet/freeze@*/font/JetBrainsMono-Regular.ttf \
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  --font.family "JetBrains Mono" --font.size 20 --line-height 1.6 \
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  --background "#0d1117" --padding 24 --window --border.radius 8
 </code></pre></div>
 <p>To change what the board shows, edit the seeded values in the generator — that
 keeps the image reproducible instead of hand-captured. If you would rather shoot

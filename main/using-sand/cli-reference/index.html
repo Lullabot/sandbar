@@ -1754,11 +1754,11 @@ delete/start/stop lifecycle as the headless commands below. See
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Usage: sand create [flags]
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>flag has a default: --git-name/--git-email fall back to the host&#39;s git config
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>flag has a default: --git-name/--git-email fall back to the host's git config
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>(user.name/user.email), so on a machine with git configured `sand create`
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>needs no flags. If neither the flags nor the host git config supply an
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>identity, sand errors rather than fabricate a commit author. Flags mirror the
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>original bash provisioner&#39;s, minus --ref (the playbook is embedded in this
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>original bash provisioner's, minus --ref (the playbook is embedded in this
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>binary, so there is no ref to pin).
 </code></pre></div>
 <p>It never prompts: every flag has a default (or falls back to something on the
@@ -2016,11 +2016,11 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Clone a private repo into the VM at create time.</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sand<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>myproj<span class="w"> </span>--clone-url<span class="w"> </span>https://github.com/org/repo.git<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span>--clone-token<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$GITHUB_TOKEN</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span>--clone-token<span class="w"> </span><span class="s2">"</span><span class="nv">$GITHUB_TOKEN</span><span class="s2">"</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Non-default resources, explicit identity.</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>sand<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>big<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB<span class="w"> </span>--disk<span class="w"> </span>200GiB<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">  </span>--git-name<span class="w"> </span><span class="s2">&quot;Jane Dev&quot;</span><span class="w"> </span>--git-email<span class="w"> </span>jane@example.com
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">  </span>--git-name<span class="w"> </span><span class="s2">"Jane Dev"</span><span class="w"> </span>--git-email<span class="w"> </span>jane@example.com
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1"># Create on a specific connection profile (see Connection Profiles).</span>
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>sand<span class="w"> </span>create<span class="w"> </span>--profile<span class="w"> </span>work
@@ -2030,33 +2030,33 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Usage: sand create [flags]
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>flag has a default: --git-name/--git-email fall back to the host&#39;s git config
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>flag has a default: --git-name/--git-email fall back to the host's git config
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>(user.name/user.email), so on a machine with git configured `sand create`
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>needs no flags. If neither the flags nor the host git config supply an
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>identity, sand errors rather than fabricate a commit author. Flags mirror the
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>original bash provisioner&#39;s, minus --ref (the playbook is embedded in this
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>original bash provisioner's, minus --ref (the playbook is embedded in this
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>binary, so there is no ref to pin).
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>Examples:
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>  sand create                                                   # host git identity
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>  sand create --git-name &quot;Your Name&quot; --git-email you@example.com
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>  sand create --profile work                                    # create on the &quot;work&quot; connection profile
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>  sand create --git-name "Your Name" --git-email you@example.com
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>  sand create --profile work                                    # create on the "work" connection profile
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>Flags:
 <a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>  -base-name string
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>        Base image instance name (default &quot;sandbar-base&quot;)
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>        Base image instance name (default "sandbar-base")
 <a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>  -clone-token string
 <a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>        Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)
 <a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>  -clone-url string
 <a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>        HTTPS repo to clone into the VM (optional)
 <a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>  -cpus string
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>        vCPUs (default &quot;2&quot;)
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>        vCPUs (default "2")
 <a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>  -disk string
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>        Disk size, e.g. 100GiB (default &quot;100GiB&quot;)
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>        Disk size, e.g. 100GiB (default "100GiB")
 <a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>  -docker-proxy-host string
 <a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>        Docker registry pull-through proxy host (optional)
 <a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>  -domain string
-<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>        Domain suffix (default &quot;lan&quot;)
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>        Domain suffix (default "lan")
 <a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>  -git-email git config user.email
 <a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>        git user.email (default: host git config user.email)
 <a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>  -git-name git config user.name
@@ -2064,13 +2064,13 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>  -hostname string
 <a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>        VM hostname (default: same as --name)
 <a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>  -locale string
-<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>        System locale (default &quot;en_US.UTF-8&quot;)
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>        System locale (default "en_US.UTF-8")
 <a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>  -memory string
-<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>        RAM, e.g. 8GiB (default &quot;8GiB&quot;)
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>        RAM, e.g. 8GiB (default "8GiB")
 <a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>  -name string
-<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>        Lima instance name (default &quot;claude&quot;)
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>        Lima instance name (default "claude")
 <a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>  -profile string
-<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>        Connection profile to create on (default: the last-used profile, else &quot;local&quot;)
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>        Connection profile to create on (default: the last-used profile, else "local")
 <a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>  -rebuild
 <a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>        Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
 <a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>  -recreate
@@ -2098,22 +2098,22 @@ above.)</p>
 same attach path the TUI's <code>S</code> key uses, so the two entrypoints never drift.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Usage: sand shell NAME [--profile &lt;name&gt;]
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Attach a shell to NAME&#39;s persistent tmux session in the guest.
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Attach a shell to NAME's persistent tmux session in the guest.
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  C-a c   new window          C-a d   detach
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  C-a |   split vertically    C-a S   split horizontally
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>Detaching — or just closing the terminal — leaves the session and everything
 <a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>running in it alive; attach again with this same command and it is all still
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>there. Note C-a is tmux&#39;s prefix here, so it no longer moves the cursor to the
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>there. Note C-a is tmux's prefix here, so it no longer moves the cursor to the
 <a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>start of the line.
 <a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>A second terminal running this command shares the same windows but keeps its
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>own current one, so two terminals can look at two different windows of the
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>same VM.
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>The named VM must already exist and be running (see &#39;sand&#39; to list instances,
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>or &#39;sand create&#39; to make one). If NAME is managed under more than one
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>The named VM must already exist and be running (see 'sand' to list instances,
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>or 'sand create' to make one). If NAME is managed under more than one
 <a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>connection profile, --profile picks which one to attach to.
 </code></pre></div>
 <p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> may appear
@@ -2142,11 +2142,11 @@ which one you mean like this:</p>
 Ctrl-V inside Claude Code in the guest.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Usage: sand paste-image NAME [--profile &lt;name&gt;]
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Read the host clipboard image and stage it on NAME&#39;s guest clipboard at
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Read the host clipboard image and stage it on NAME's guest clipboard at
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>&lt;guest-home&gt;/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>The named VM must already exist and be running (see &#39;sand&#39; to list instances,
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>or &#39;sand create&#39; to make one). If NAME is managed under more than one
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>The named VM must already exist and be running (see 'sand' to list instances,
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>or 'sand create' to make one). If NAME is managed under more than one
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>connection profile, --profile picks which one to target.
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>If the host clipboard holds no image, nothing is staged and the command
@@ -2176,20 +2176,20 @@ This is the same detection and the same <code>gh</code> actions the TUI's <code>
 key uses — see <a href="../files-and-shells/#landing">Landing</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Usage: sand land NAME [PATH] [--pr | --web] [--profile &lt;name&gt;]
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>List NAME&#39;s git checkouts and their branch/push/PR state, or act on one:
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>List NAME's git checkouts and their branch/push/PR state, or act on one:
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  sand land NAME                list checkouts + branch/push/PR state
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH&#39;s pushed branch
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  sand land NAME PATH --web     open PATH&#39;s branch (or PR) in a browser
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>--pr uses the workstation&#39;s own &#39;gh&#39; (never the guest&#39;s token). Without gh
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>--pr uses the workstation's own 'gh' (never the guest's token). Without gh
 <a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
 <a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
 <a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
 <a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>an existing PR for the branch on its own.
 <a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>The named VM must already exist and be running (see &#39;sand&#39; to list
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>instances, or &#39;sand create&#39; to make one). If NAME is managed under more than
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
 <a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>one connection profile, --profile picks which one to act on.
 </code></pre></div>
 <p>With no <code>PATH</code> or flags, <code>sand land NAME</code> prints a table (<code>PATH KIND BRANCH
