@@ -19,6 +19,10 @@ type fakeHostFiles struct {
 	id   string
 	home string
 	log  *[]string
+	// files, when non-nil, is the content ReadFile serves, keyed by full path.
+	// A path absent from it reads back as fs.ErrNotExist — the nil-map default,
+	// and the behaviour every test that predates this field relies on.
+	files map[string][]byte
 }
 
 // note records "<id>:<method>:<path>" so a test can tell not just THAT a
@@ -29,6 +33,9 @@ func (f *fakeHostFiles) note(method, detail string) {
 
 func (f *fakeHostFiles) ReadFile(path string) ([]byte, error) {
 	f.note("ReadFile", path)
+	if data, ok := f.files[path]; ok {
+		return data, nil
+	}
 	return nil, fs.ErrNotExist
 }
 

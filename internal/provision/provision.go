@@ -398,8 +398,11 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		}
 		return nil
 	}); err != nil {
-		// Still "never finished being created": the clone exists but has never
-		// booted, so there is nothing in it to inspect and nothing to keep.
+		// Still "never finished being created": the clone exists but never came up,
+		// so it is not a VM anyone can shell into and it does not survive. It is,
+		// however, the failure with the MOST to read — a start that fails is exactly
+		// when Lima has written ha.stderr.log and the serial consoles — so
+		// cleanupInstance saves those off before removing the directory.
 		p.cleanupInstance(cfg.Name, out)
 		return err
 	}
