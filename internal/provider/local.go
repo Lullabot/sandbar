@@ -131,6 +131,22 @@ func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 	return lima.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
 }
 
+// ForwardArgv returns nil: for LOCAL Lima there is nothing to start, because
+// Lima already forwards a guest loopback port to the SAME port number on its
+// own host's loopback — and for local Lima that host IS this machine.
+//
+// Verified against Lima's own source, not assumed: FillPortForwardDefaults in
+// pkg/limayaml/defaults.go defaults a port-forward rule's GuestIP AND HostIP
+// to IPv4 loopback, and Lima's port-forwarding documentation states it
+// "supports automatic port-forwarding of localhost ports from guest to host".
+// So a guest process bound to 127.0.0.1:guestPort is already reachable at
+// 127.0.0.1:guestPort on the workstation with nothing to start — returning nil
+// here (rather than inventing a no-op process) is what keeps that fact visible
+// at the seam. See Provider.ForwardArgv's nil-means-already-reachable
+// contract, and the remote provider's ForwardArgv for the ONE hop that same
+// auto-forward needs when the Lima host is not this machine.
+func (p *limaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string { return nil }
+
 // HostUser returns this machine's user — for local Lima the limactl host IS this
 // machine, and Lima creates a guest account matching it (see Provider.HostUser).
 func (p *limaProvider) HostUser() string { return vm.HostUser() }

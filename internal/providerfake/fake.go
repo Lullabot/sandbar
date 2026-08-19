@@ -48,11 +48,12 @@ type Provider struct {
 	ShellOutFunc       func(ctx context.Context, name string, argv ...string) ([]byte, error)
 	CopyFunc           func(ctx context.Context, out io.Writer, recursive bool, src, dst string) error
 
-	AttachArgvFunc func(v vm.VM) []string
-	RunArgvFunc    func(v vm.VM, workdir, expr string) []string
-	GuestHomeFunc  func(v vm.VM) string
-	GuestUserFunc  func(v vm.VM) string
-	GuestPathFunc  func(name, path string) string
+	AttachArgvFunc  func(v vm.VM) []string
+	RunArgvFunc     func(v vm.VM, workdir, expr string) []string
+	ForwardArgvFunc func(v vm.VM, hostPort, guestPort int) []string
+	GuestHomeFunc   func(v vm.VM) string
+	GuestUserFunc   func(v vm.VM) string
+	GuestPathFunc   func(name, path string) string
 
 	PreflightFunc     func() error
 	HostResourcesFunc func() provider.HostResources
@@ -188,6 +189,17 @@ func (f *Provider) RunArgv(v vm.VM, workdir, expr string) []string {
 func (f *Provider) AttachArgv(v vm.VM) []string {
 	if f.AttachArgvFunc != nil {
 		return f.AttachArgvFunc(v)
+	}
+	return nil
+}
+
+// ForwardArgv defaults to nil — the same "already reachable" zero value the
+// local Lima provider returns unconditionally, and the least surprising
+// default for a test that never sets ForwardArgvFunc and does not care about
+// forwarding.
+func (f *Provider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
+	if f.ForwardArgvFunc != nil {
+		return f.ForwardArgvFunc(v, hostPort, guestPort)
 	}
 	return nil
 }

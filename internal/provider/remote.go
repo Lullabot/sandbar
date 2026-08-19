@@ -49,6 +49,17 @@ func (p *remoteLimaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 	return p.host.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
 }
 
+// ForwardArgv bridges the workstation to the REMOTE host's loopback, where
+// Lima's own auto-forward has already landed the guest port (see the local
+// provider's ForwardArgv doc for why local Lima needs no such hop at all: this
+// is exactly the one hop that arises the moment the Lima host is not the
+// workstation). v is unused — the connection identity is per-HOST, not
+// per-VM, so it is the same SSHHost AttachArgv and RunArgv already reuse
+// rather than a second hand-rolled one.
+func (p *remoteLimaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
+	return p.host.ForwardArgv(hostPort, guestPort)
+}
+
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH
 // HostFiles), not the local filesystem where they do not exist.
 func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }

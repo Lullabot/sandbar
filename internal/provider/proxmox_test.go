@@ -1282,6 +1282,62 @@ func TestProxmoxAttachArgvWrapsTheGuestTmuxExpression(t *testing.T) {
 	}
 }
 
+// TestProxmoxForwardArgv proves the Proxmox provider forwards DIRECTLY to the
+// guest's own sshd — there is no Lima auto-forward to ride here at all — with
+// `ssh -N -L <hostPort>:127.0.0.1:<guestPort> <ciUser>@<guestIP>`, over the
+// SAME connection identity (sshHost) AttachArgv and RunArgv already use.
+func TestProxmoxForwardArgv(t *testing.T) {
+	_, p := withGuest(t)
+
+	got := p.ForwardArgv(vm.VM{Name: "web"}, 8080, 3000)
+	t.Logf("proxmox ForwardArgv(web, 8080, 3000) = %v", got)
+	if len(got) == 0 || got[0] != "ssh" {
+		t.Fatalf("ForwardArgv must start with `ssh`, got %v", got)
+	}
+	if !slices.Contains(got, "-N") {
+		t.Fatalf("ForwardArgv missing -N (no remote command): %v", got)
+	}
+	idx := slices.Index(got, "-L")
+	if idx < 0 || idx+1 >= len(got) || got[idx+1] != "127.0.0.1:8080:127.0.0.1:3000" {
+		t.Fatalf("ForwardArgv missing `-L 127.0.0.1:8080:127.0.0.1:3000`: %v", got)
+	}
+	if got[len(got)-1] != "dev@192.168.1.50" {
+		t.Fatalf("ForwardArgv must target the resolved guest address dev@192.168.1.50, got %v", got)
+	}
+	// Shared with the remote-Lima backend via SSHHost.ForwardArgv, and required
+	// for the same reason: without it, losing the race for hostPort leaves a
+	// live ssh with no forward attached and a readiness probe that can succeed
+	// against an unrelated local service.
+	if !slices.Contains(got, "ExitOnForwardFailure=yes") {
+		t.Fatalf("ForwardArgv must pass -o ExitOnForwardFailure=yes so a failed local bind is fatal: %v", got)
+	}
+}
+
+// TestProxmoxForwardArgvUnresolvableFailsLoudly mirrors
+// TestProxmoxAttachArgvUnresolvableFailsLoudly: an unreachable guest must never
+// produce an argv that could connect to something else, and nil would panic a
+// caller that indexes argv[0].
+func TestProxmoxForwardArgvUnresolvableFailsLoudly(t *testing.T) {
+	m := newPVEMock(t)
+	m.data("/cluster/resources", `[]`)
+	p := newProxmoxForTest(t, m)
+
+	got := p.ForwardArgv(vm.VM{Name: "ghost"}, 8080, 3000)
+	if len(got) == 0 {
+		t.Fatal("ForwardArgv returned nothing; the caller indexes argv[0] and would panic")
+	}
+	if slices.Contains(got, "ssh") {
+		t.Fatalf("ForwardArgv built an ssh command for an unresolvable guest: %v", got)
+	}
+	out, err := runArgvForTest(t, got)
+	if err == nil {
+		t.Fatalf("the fallback argv exited 0; it must fail: %v", got)
+	}
+	if !strings.Contains(out, "ghost") {
+		t.Errorf("fallback argv output = %q; want it to name the VM", out)
+	}
+}
+
 // TestProxmoxAttachArgvUnresolvableFailsLoudly proves an unreachable guest never
 // produces an argv that could connect to SOMETHING ELSE. Returning `ssh …web…`
 // with an unresolved name could reach an unrelated host of that name on the

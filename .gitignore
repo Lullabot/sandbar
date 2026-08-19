@@ -14,3 +14,8 @@ site/
 # Local env for the opt-in e2e suites (host names, pool, token file paths).
 # `sand` itself reads no env vars — these belong to the tests alone.
 .env
+
+# The self-review web app's installed dependencies. `roles/` is go:embed'd
+# into the sand binary (playbook_embed.go), so a stray tree here would ship
+# inside a locally built binary; the role installs its own copy in the guest.
+roles/self-review/files/webapp/node_modules/
