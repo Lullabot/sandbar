@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/Lullabot/sandbar/compare/v0.9.0...v0.9.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 3755eba ([#125](https://github.com/Lullabot/sandbar/issues/125)) ([32bd07e](https://github.com/Lullabot/sandbar/commit/32bd07eb8a101faec7740d9d87a49920d29f4b93))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 68d539d ([#135](https://github.com/Lullabot/sandbar/issues/135)) ([56ebfe3](https://github.com/Lullabot/sandbar/commit/56ebfe3eb8c3b645425e295f7c80062ef298ff5a))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 7e2d3e6 ([#120](https://github.com/Lullabot/sandbar/issues/120)) ([b374344](https://github.com/Lullabot/sandbar/commit/b3743442c09b48201820ccd3595b5a7f804dc61f))
+* **deps:** update module charm.land/lipgloss/v2 to v2.0.6 ([#129](https://github.com/Lullabot/sandbar/issues/129)) ([26b003f](https://github.com/Lullabot/sandbar/commit/26b003f896bc451ad0e2190b03ea9454f84b4247))
+* **deps:** update module github.com/charmbracelet/x/ansi to v0.11.8 ([#130](https://github.com/Lullabot/sandbar/issues/130)) ([ef7687f](https://github.com/Lullabot/sandbar/commit/ef7687fe321f773c9db9949031077f7a45b906a4))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260730164118-7e2d3e6c5238 ([#121](https://github.com/Lullabot/sandbar/issues/121)) ([feb9bb8](https://github.com/Lullabot/sandbar/commit/feb9bb8c2cf39d5f3920c456c9f8921d9a75cf83))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260803091719-3755ebad01b1 ([#126](https://github.com/Lullabot/sandbar/issues/126)) ([903bbf3](https://github.com/Lullabot/sandbar/commit/903bbf31aef1969977b4e82e9f2d883d213ebed6))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260816001655-68d539dca504 ([#136](https://github.com/Lullabot/sandbar/issues/136)) ([7926f8b](https://github.com/Lullabot/sandbar/commit/7926f8bf78875f2e250b66564f038285641bc6c3))
+
 ## [0.9.0](https://github.com/Lullabot/sandbar/compare/v0.8.0...v0.9.0) (2026-07-31)
 
 
