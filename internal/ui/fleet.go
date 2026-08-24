@@ -140,6 +140,31 @@ type fleetMember struct {
 	// once, and re-armed on the next success so a later regression speaks again.
 	provenanceWarned bool
 
+	// healing is the set of VM names in this member with an abandoned-marker
+	// repair IN FLIGHT (see healAbandonedMarkers, model.go). This handler runs on
+	// every refresh while the repair is a host round trip, so without it a single
+	// stuck marker would dispatch a fresh write every few seconds until one
+	// landed. Entries are removed when the repair reports back, so a failed one
+	// is retried on the next refresh rather than being latched off forever.
+	healing map[string]bool
+
+	// healSaid is the set of VM names whose repair has already been NARRATED in
+	// the Messages log. The repair itself is retried on every refresh while it
+	// keeps failing (see healing, above) — but the log line is not a retry, it is
+	// an announcement, and re-announcing it every 5s would fill the 50-entry ring
+	// with one sentence inside four minutes, evicting the very warning that
+	// explains why the repair is not sticking. A name is dropped again once its
+	// marker is observed no longer abandoned, so a marker that really is repaired
+	// (or a genuinely NEW interrupted build later in the session) speaks again.
+	healSaid map[string]bool
+
+	// healWarned latches the ONE message logged when a marker repair fails on
+	// this member, for the same reason provenanceWarned does: the repair reruns
+	// every refresh, and a persistently unwritable marker would otherwise narrate
+	// its failure into the Messages log indefinitely. Re-armed on the next
+	// success so a later regression still speaks.
+	healWarned bool
+
 	state   connState
 	lastErr error
 

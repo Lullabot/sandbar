@@ -1184,7 +1184,26 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// budgeting a resize would, so the fleet's FIRST successful list already
 		// gets its band without waiting on a resize.
 		m.applySize(m.width, m.height)
-		return m, adoptCmd
+		// Repair any ABANDONED in-flight marker this member just reported: a VM
+		// left flagged "building" by a run that never finished reporting, which
+		// pins a healthy VM's tile to Building on every controller forever (see
+		// markerheal.go). Dispatched as background commands for the same reason
+		// adoptCmd is — each is a marker write over this member's transport — and
+		// gated on the local job registry inside, so a build THIS controller is
+		// running is never healed out from under itself.
+		//
+		// Sequenced onto its own line, NOT inlined into the return: this call logs
+		// (so it mutates m), and a `return m, ...expr calling it...` leaves the
+		// order in which the returned copy of m is taken relative to that mutation
+		// unspecified — the Go spec orders the CALLS in an expression, not a plain
+		// operand against them. Inlined, the repair's Messages-log line could be
+		// dropped depending on the compiler.
+		heals := m.healAbandonedMarkers(mem, time.Now())
+		return m, tea.Batch(append(heals, adoptCmd)...)
+
+	case markerHealedMsg:
+		m.applyMarkerHealed(msg)
+		return m, nil
 
 	case actionDoneMsg:
 		m.acting = false // the action finished; stop the list spinner

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -633,4 +634,76 @@ func TestProxmoxMarkAndUnmarkPropagateFailures(t *testing.T) {
 			t.Error("Unmark: expected the config write failure to propagate")
 		}
 	})
+}
+
+// TestHealingRewritesTheNotesFieldCleanly is the end-of-the-line assertion for
+// the stale-marker repair: what the operator actually sees in a Proxmox VM's
+// Notes pane afterwards.
+//
+// The payload below is a REAL marker taken off a VM that had been wedged on
+// "Building" for ten days, so this pins the repair against the shape that
+// actually occurs rather than one composed to pass. Two things must hold: the
+// keys that cause the wedge are GONE from the JSON (not merely false — a
+// lingering "provisioning":false would be noise in a field humans read), and
+// everything describing the build survives byte-for-byte.
+func TestHealingRewritesTheNotesFieldCleanly(t *testing.T) {
+	const wedged = `<!-- sandbar:begin -->
+{"schema":3,"base":"sandbar-base","config":{"Name":"lullabot-proposals","BaseName":"sandbar-base","CPUs":8,"Memory":"8GiB","Disk":"100GiB"},"sandbar_version":"318afb4","created_at":"2026-08-14T19:25:48Z","provisioning":true,"progress":{"role":"project","index":204}}
+<!-- sandbar:end -->`
+
+	pv, ok := decodeProvenanceBlock(wedged)
+	if !ok {
+		t.Fatal("could not decode the wedged marker")
+	}
+	if !pv.BuildAbandoned(time.Now()) {
+		t.Fatal("a marker ten days in-flight must read as abandoned")
+	}
+
+	payload, err := json.Marshal(pv.Ready())
+	if err != nil {
+		t.Fatalf("encoding the repaired marker: %v", err)
+	}
+	got := string(payload)
+
+	// The wedge is gone from the text, not just from the decoded struct.
+	if strings.Contains(got, "provisioning") {
+		t.Errorf("the repaired marker still mentions provisioning: %s", got)
+	}
+	if strings.Contains(got, "progress") {
+		t.Errorf("the repaired marker still carries a progress block: %s", got)
+	}
+	// The build's record survives — recreate-gating reads Base and Config, and
+	// created_at/sandbar_version are the only trace of which build made this VM.
+	for _, want := range []string{
+		`"schema":3`,
+		`"base":"sandbar-base"`,
+		`"Name":"lullabot-proposals"`,
+		`"CPUs":8`,
+		`"Disk":"100GiB"`,
+		`"sandbar_version":"318afb4"`,
+		`"created_at":"2026-08-14T19:25:48Z"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the repair dropped %s from the marker: %s", want, got)
+		}
+	}
+
+	// And the repaired block splices back over the old one in place, so operator
+	// text around it in the same Notes field is untouched.
+	spliced := spliceDescriptionBlock("Ticket: OPS-441\n\n"+wedged+"\n\nDo not delete.", payload)
+	if !strings.Contains(spliced, "Ticket: OPS-441") || !strings.Contains(spliced, "Do not delete.") {
+		t.Errorf("the repair disturbed operator text in the description: %s", spliced)
+	}
+	if strings.Contains(spliced, `"provisioning":true`) {
+		t.Errorf("the wedged payload survived the splice: %s", spliced)
+	}
+	// Re-decoding what we would write back must yield a ready marker: the repair
+	// has to survive its own round trip through the host, not just look right.
+	back, ok := decodeProvenanceBlock(spliced)
+	if !ok {
+		t.Fatal("the repaired description no longer decodes")
+	}
+	if back.Provisioning || back.BuildAbandoned(time.Now()) {
+		t.Errorf("the repaired marker still reads as building: %+v", back)
+	}
 }

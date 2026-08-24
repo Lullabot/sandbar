@@ -82,9 +82,17 @@ func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts pro
 	// non-fatal).
 	if opts.OnCloned == nil {
 		name := cfg.Name
-		pv := NewProvenance(cfg, true)
 		opts.OnCloned = func(ctx context.Context) error {
-			return p.MarkManaged(ctx, name, pv)
+			// Stamped HERE, when the marker is actually written, not when Create was
+			// called. CreatedAt means "the marker's creation time" (see Provenance),
+			// and a cold base build runs BEFORE this hook fires — so hoisting
+			// NewProvenance out of the closure back-dated every clone's marker by the
+			// length of that build. It matters beyond tidiness: on an in-flight marker
+			// CreatedAt is what says how long ago this build last reported in, and a
+			// headless create has no progress republisher to refresh it afterwards
+			// (that lives in the TUI), so the stamp taken here is the only one it will
+			// ever get. See Provenance.BuildAbandoned.
+			return p.MarkManaged(ctx, name, NewProvenance(cfg, true))
 		}
 	}
 	return p.prov.CreateVMWithOptions(ctx, cfg, opts, out)

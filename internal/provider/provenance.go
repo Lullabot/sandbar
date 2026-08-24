@@ -133,6 +133,94 @@ func NewProvenance(cfg vm.CreateConfig, provisioning bool) Provenance {
 	}
 }
 
+// AbandonedBuildAfter is how long an IN-FLIGHT marker may sit un-rewritten
+// before sand treats it as the leftover of a build that is no longer running
+// anywhere, rather than as a build still in progress.
+//
+// THE CUTOFF IS MEASURED AGAINST CreatedAt, WHICH ON AN IN-FLIGHT MARKER READS
+// AS "when this build last reported in" rather than as a birthday. NewProvenance
+// stamps CreatedAt with the current time on every call, and the marker is
+// rewritten as the build proceeds, so the stamp tracks the build rather than its
+// start. A ready marker's CreatedAt is a true creation time; only the in-flight
+// reading is consulted here.
+//
+// HOW FRESH that stamp actually stays depends on who is driving the build, and
+// the cutoff has to cover the weakest case:
+//
+//   - A TUI-driven build republishes Progress into the marker at every Ansible
+//     role boundary (ui.publishProgressCmd), so its stamp is at most one role
+//     old — minutes.
+//   - A HEADLESS `sand create` has no republisher at all; that code lives in the
+//     TUI. Its marker is stamped once, when the clone lands and the in-flight
+//     marker is written (provider.limaProvider.Create), and then not touched
+//     again until the build finishes. Its stamp therefore ages by the whole
+//     finalize phase.
+//
+// Two hours is chosen to clear the second case with room to spare, not merely
+// the first: the cold base build happens BEFORE the marker is written, so what
+// has to fit inside the cutoff is a clone's finalize — minutes, not hours — plus
+// a wide margin for slow hardware. Erring long is the cheap direction:
+// healing a marker early costs an observer a tile that reads Running for the
+// rest of a build that is about to overwrite the marker anyway (RecordSuccess
+// has the last word), and a marker-only "Building" gates nothing — every
+// destructive verb gates on the LOCAL job registry (ui.vmBuilding), never on
+// this. Erring short is therefore not dangerous, only noisy; erring long merely
+// delays a repair no one is waiting on by the clock.
+const AbandonedBuildAfter = 2 * time.Hour
+
+// BuildAbandoned reports whether p is an in-flight marker left behind by a build
+// that has stopped reporting in — the state that used to pin a perfectly healthy
+// VM's tile to "Building" forever.
+//
+// It exists because NOTHING ever cleared such a marker. Provisioning is set at
+// clone time (or, on the Proxmox backend, at the first role boundary) and
+// cleared only by manage.RecordSuccess when the build job completes in the
+// controller that started it. A controller that never reaches that handler — its
+// TUI quit or killed mid-build, its ssh transport dropped, its final marker
+// write failed — leaves the flag set on a VM that is finished and working. Every
+// controller then reads that marker on every refresh and renders "Building", and
+// because remoteProvisioning is checked before the VM's real status, the tile
+// cannot even fall through to Stopped.
+//
+// An UNPARSEABLE (or absent) CreatedAt counts as abandoned. That is the
+// deliberate choice: a marker whose timestamp cannot be read cannot be dated, so
+// the alternative is to leave it in-flight forever — and there is no manual
+// escape by design (sand ships no clear-the-marker verb, because a state the
+// tool can repair itself is a state the user should never have to know about).
+// Healing is the recoverable direction; a permanently wedged tile is not.
+//
+// The caller must ALSO establish that it is not itself building this VM before
+// acting on a true result: this function can only see the marker, and the
+// controller running the build is exactly the one whose own long-running role
+// could outlast the cutoff. ui's caller gates on the local job registry.
+func (p Provenance) BuildAbandoned(now time.Time) bool {
+	if !p.Provisioning {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, p.CreatedAt)
+	if err != nil {
+		return true
+	}
+	return now.Sub(t) > AbandonedBuildAfter
+}
+
+// Ready returns p as a COMPLETED marker: the in-flight flag cleared and the
+// build position dropped, with every other field — Base, Config, SandbarVersion,
+// CreatedAt — carried through untouched.
+//
+// Preserving the rest is the whole point. The obvious repair, rebuilding the
+// marker with NewProvenance, would substitute the healing controller's own idea
+// of the config for the one the build actually used, and restamp CreatedAt to
+// now; the VM would go on reading as managed while quietly losing the record of
+// what it was built from, which recreate-gating depends on. This is a two-field
+// edit of the marker that is already there, and a value receiver makes that
+// literal — the caller's copy is untouched.
+func (p Provenance) Ready() Provenance {
+	p.Provisioning = false
+	p.Progress = BuildProgress{}
+	return p
+}
+
 // Provenancer is the seam a Provider backend implements (or inherits) to
 // persist and read back Provenance markers on the instances it manages. It is
 // deliberately small and provider-agnostic: today's local/remote Lima

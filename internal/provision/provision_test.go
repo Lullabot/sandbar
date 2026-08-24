@@ -2448,3 +2448,91 @@ func TestCreateVM_AMarkerWriteFailureDoesNotFailTheBuild(t *testing.T) {
 		t.Errorf("the failure must be said in the build log, not swallowed:\n%s", out.String())
 	}
 }
+
+// guestShell resolves the shell the guest scripts ACTUALLY run under. Every
+// in-guest script in this package is handed to `sudo bash -c` (see runPhase),
+// and they open with `set -eu -o pipefail` — an option dash does not have. A
+// test that reached for /bin/sh instead passed on a developer box where that is
+// bash and failed on CI where it is dash, testing the wrong shell in both cases.
+func guestShell(t *testing.T) string {
+	t.Helper()
+	sh, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available; the guest scripts are bash and cannot be checked under another shell")
+	}
+	return sh
+}
+
+// TestTaskTotalPreamble runs the REAL preamble under a real shell against a
+// stub ansible-playbook, so it proves the thing the tile actually depends on:
+// that a `--list-tasks` pass over a playbook ends with a correct
+// SAND_ANSIBLE_TASK_TOTAL line on stdout. TestTaskTotalGuard above covers the
+// arithmetic in isolation; this covers the pipeline that feeds it — the
+// `grep -cE` indent pattern, the `|| true`, and the command substitution — none
+// of which can be checked by reading Go, and all of which are what the Proxmox
+// backend was missing entirely.
+func TestTaskTotalPreamble(t *testing.T) {
+	// A faithful slice of `ansible-playbook --list-tasks` output: the task lines
+	// carry SIX leading spaces, the play and "tasks:" headers carry fewer, and
+	// the banner carries none. Only the three task lines must be counted.
+	const listing = `
+playbook: site.yml
+
+  play #1 (all): Provision Claude Code development VM	TAGS: []
+    tasks:
+      base : Set the hostname	TAGS: []
+      base : Install packages	TAGS: []
+      project : Clone the repository	TAGS: []
+`
+	dir := t.TempDir()
+	stub := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = --list-tasks ]; then\n    cat <<'EOF'" + listing + "EOF\n    exit 0\n  fi\ndone\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "ansible-playbook"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// PREPENDED, not replaced: the preamble pipes through grep, so a PATH holding
+	// only the stub would fail on a missing coreutils rather than on anything this
+	// test is about.
+	cmd := exec.Command(guestShell(t), "-c", "vars=/dev/null\n"+TaskTotalPreamble)
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("preamble failed to run: %v\n%s", err, out)
+	}
+	// 3 listed tasks + 1 for the implicit gather_facts the listing omits.
+	if got, want := strings.TrimSpace(string(out)), "SAND_ANSIBLE_TASK_TOTAL=4"; got != want {
+		t.Fatalf("preamble printed %q, want %q", got, want)
+	}
+}
+
+// TestTaskTotalPreambleSurvivesAListingFailure pins the best-effort contract the
+// preamble's doc claims: a guest whose --list-tasks pass FAILS (no ansible on
+// PATH at all, a playbook that will not parse) must still leave the script
+// running and announce a total of 0, which the tile renders as an indeterminate
+// bar. A progress bar must never be able to break a build — so a non-zero exit
+// here, under `set -e`, would be the serious failure.
+func TestTaskTotalPreambleSurvivesAListingFailure(t *testing.T) {
+	// A stub that FAILS the listing (an unparseable playbook, a missing
+	// collection). Stubbing the failure beats relying on this machine not having
+	// ansible installed, which would make the test pass for the wrong reason on a
+	// developer box and stop testing anything at all on a CI image that has it.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ansible-playbook"), []byte("#!/bin/sh\necho 'ERROR! could not parse' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The full strictness the real scripts open with, which is the point: under
+	// `set -e` a failing listing must not take the build down with it.
+	cmd := exec.Command(guestShell(t), "-c", "set -eu -o pipefail\nvars=/dev/null\n"+TaskTotalPreamble+"\necho STILL-RUNNING")
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("a failed listing must not abort the script: %v\n%s", err, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "SAND_ANSIBLE_TASK_TOTAL=0") {
+		t.Errorf("want a 0 total when the listing fails, got:\n%s", got)
+	}
+	if !strings.Contains(got, "STILL-RUNNING") {
+		t.Errorf("the script must continue past the preamble, got:\n%s", got)
+	}
+}
