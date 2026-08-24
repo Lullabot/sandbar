@@ -2449,7 +2449,21 @@ func TestCreateVM_AMarkerWriteFailureDoesNotFailTheBuild(t *testing.T) {
 	}
 }
 
-// TestTaskTotalPreamble runs the REAL preamble under a real /bin/sh against a
+// guestShell resolves the shell the guest scripts ACTUALLY run under. Every
+// in-guest script in this package is handed to `sudo bash -c` (see runPhase),
+// and they open with `set -eu -o pipefail` — an option dash does not have. A
+// test that reached for /bin/sh instead passed on a developer box where that is
+// bash and failed on CI where it is dash, testing the wrong shell in both cases.
+func guestShell(t *testing.T) string {
+	t.Helper()
+	sh, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available; the guest scripts are bash and cannot be checked under another shell")
+	}
+	return sh
+}
+
+// TestTaskTotalPreamble runs the REAL preamble under a real shell against a
 // stub ansible-playbook, so it proves the thing the tile actually depends on:
 // that a `--list-tasks` pass over a playbook ends with a correct
 // SAND_ANSIBLE_TASK_TOTAL line on stdout. TestTaskTotalGuard above covers the
@@ -2479,7 +2493,7 @@ playbook: site.yml
 	// PREPENDED, not replaced: the preamble pipes through grep, so a PATH holding
 	// only the stub would fail on a missing coreutils rather than on anything this
 	// test is about.
-	cmd := exec.Command("/bin/sh", "-c", "vars=/dev/null\n"+TaskTotalPreamble)
+	cmd := exec.Command(guestShell(t), "-c", "vars=/dev/null\n"+TaskTotalPreamble)
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -2506,7 +2520,9 @@ func TestTaskTotalPreambleSurvivesAListingFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ansible-playbook"), []byte("#!/bin/sh\necho 'ERROR! could not parse' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("/bin/sh", "-c", "set -eu -o pipefail\nvars=/dev/null\n"+TaskTotalPreamble+"\necho STILL-RUNNING")
+	// The full strictness the real scripts open with, which is the point: under
+	// `set -e` a failing listing must not take the build down with it.
+	cmd := exec.Command(guestShell(t), "-c", "set -eu -o pipefail\nvars=/dev/null\n"+TaskTotalPreamble+"\necho STILL-RUNNING")
 	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {

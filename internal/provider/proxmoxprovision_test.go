@@ -1475,14 +1475,24 @@ func TestRunPlaybookScriptAnnouncesTheTaskTotal(t *testing.T) {
 	}
 }
 
-// TestRunPlaybookScriptIsValidShell parses the COMPOSED script with `sh -n`.
+// TestRunPlaybookScriptIsValidShell parses the COMPOSED script with `bash -n`.
 // runPlaybookScript is built by concatenating Go string constants across two
 // packages, which is exactly the kind of seam where a missing newline produces
 // shell that is still a valid Go string and no longer a valid script — a break
 // that would surface as a failed build against a real Proxmox node and nowhere
 // earlier.
+//
+// BASH specifically, because that is what runs it: runPlaybookPhase hands this
+// script to `sudo bash -c`, and it opens with `set -eu -o pipefail`, an option
+// dash does not have. Checking it under /bin/sh would parse a script no one
+// runs, and would quietly mean something different on a box where /bin/sh is
+// bash than on one where it is dash.
 func TestRunPlaybookScriptIsValidShell(t *testing.T) {
-	cmd := exec.Command("/bin/sh", "-n")
+	sh, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available; this script is bash and cannot be checked under another shell")
+	}
+	cmd := exec.Command(sh, "-n")
 	cmd.Stdin = strings.NewReader(runPlaybookScript)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("runPlaybookScript is not valid shell: %v\n%s\n--- script ---\n%s", err, out, runPlaybookScript)
