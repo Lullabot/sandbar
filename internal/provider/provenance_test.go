@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
@@ -412,5 +413,114 @@ func TestMarkManagedRefusesToConjureAnInstance(t *testing.T) {
 	}
 	if _, ok, err := p.ProvenanceOf(ctx, "not-cloned-yet"); err != nil || !ok {
 		t.Fatalf("ProvenanceOf = (ok=%v, err=%v), want the marker just written", ok, err)
+	}
+}
+
+// TestBuildAbandoned pins the rule that decides whether an in-flight marker is a
+// live build or the wreckage of a dead one. Getting it wrong in one direction
+// wedges a healthy VM's tile on "Building" forever; in the other it declares a
+// running build finished.
+func TestBuildAbandoned(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	stamp := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
+
+	for _, tc := range []struct {
+		name string
+		pv   provider.Provenance
+		want bool
+	}{
+		{
+			// The whole point: a READY marker is never abandoned, however ancient.
+			// A VM built a year ago is not a stalled build, and rewriting its
+			// marker every refresh would be pure churn.
+			"a ready marker is never abandoned, at any age",
+			provider.Provenance{CreatedAt: stamp(365 * 24 * time.Hour)},
+			false,
+		},
+		{
+			"a build that reported in seconds ago is live",
+			provider.Provenance{Provisioning: true, CreatedAt: stamp(30 * time.Second)},
+			false,
+		},
+		{
+			// Inside the cutoff by a wide margin: a long dev-tools or project role
+			// between republishes, which is minutes, not hours.
+			"a build mid-role is live",
+			provider.Provenance{Provisioning: true, CreatedAt: stamp(20 * time.Minute)},
+			false,
+		},
+		{
+			// The boundary is exclusive: exactly at the cutoff is still live, so a
+			// marker is never healed a nanosecond early.
+			"exactly at the cutoff is still live",
+			provider.Provenance{Provisioning: true, CreatedAt: stamp(provider.AbandonedBuildAfter)},
+			false,
+		},
+		{
+			"past the cutoff is abandoned",
+			provider.Provenance{Provisioning: true, CreatedAt: stamp(provider.AbandonedBuildAfter + time.Second)},
+			true,
+		},
+		{
+			// The real-world case this was written for: a marker left in-flight for
+			// days by a controller that quit mid-build.
+			"a marker days old is abandoned",
+			provider.Provenance{Provisioning: true, CreatedAt: stamp(10 * 24 * time.Hour)},
+			true,
+		},
+		{
+			// An undateable marker counts as abandoned BY CHOICE. sand ships no
+			// manual clear, so the alternative is a tile wedged forever with no
+			// escape — see BuildAbandoned's doc.
+			"an unparseable timestamp is abandoned",
+			provider.Provenance{Provisioning: true, CreatedAt: "not a date"},
+			true,
+		},
+		{
+			"an absent timestamp is abandoned",
+			provider.Provenance{Provisioning: true},
+			true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.pv.BuildAbandoned(now); got != tc.want {
+				t.Errorf("BuildAbandoned = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProvenanceReady pins that the repair is a two-field EDIT of the marker
+// that is already on the host, not a fresh one. Base and Config are what
+// recreate-gating reads, CreatedAt records when the VM was built, and the
+// controller doing the healing may not be the one that built it — so
+// substituting its own idea of any of them would quietly corrupt the record
+// while appearing to fix the tile.
+func TestProvenanceReady(t *testing.T) {
+	before := provider.Provenance{
+		SchemaVersion:  provider.MarkerSchemaVersion,
+		Base:           "sandbar-base",
+		Config:         vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 8, Memory: "8GiB"},
+		SandbarVersion: "318afb4",
+		CreatedAt:      "2026-08-14T19:25:48Z",
+		Provisioning:   true,
+		Progress:       provider.BuildProgress{Role: "project", Index: 204},
+	}
+	want := before
+	want.Provisioning = false
+	want.Progress = provider.BuildProgress{}
+
+	if got := before.Ready(); got != want {
+		t.Errorf("Ready() = %+v, want %+v", got, want)
+	}
+	// A value receiver means the caller's copy is untouched — the heal path holds
+	// the member's cached marker and must not have it mutated underneath.
+	if !before.Provisioning || before.Progress.Index != 204 {
+		t.Errorf("Ready() mutated its receiver: %+v", before)
+	}
+	// Idempotent: healing an already-ready marker is a no-op, which is what makes
+	// a duplicate repair harmless.
+	if got := want.Ready(); got != want {
+		t.Errorf("Ready() is not idempotent: %+v", got)
 	}
 }

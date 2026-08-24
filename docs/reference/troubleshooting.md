@@ -198,6 +198,38 @@ recursively, so a small project can pull in a very large one. `rtl_433` is 5 MB
 and its test-data submodule is 1.2 GB — a multi-minute clone, all of it under a
 single silent task banner.
 
+## A tile says "Building" for a VM that is finished
+
+A tile can be pinned to **Building** by a build that never got to say it had
+finished — its `sand` was quit or killed partway through, its connection to the
+host dropped, or its final bookkeeping write failed. The VM itself is fine: it
+booted, it works, you can shell into it. Only the record is wrong.
+
+That record is the VM's **provenance marker**, which is how one `sand` tells
+another that a VM is managed and what it was built from. It carries an
+"in-flight" flag that is raised when a build starts and lowered when it
+succeeds, and the tile trusts the flag over the VM's actual power state — which
+is why such a VM can read Building even while it is stopped.
+
+**`sand` repairs this by itself.** A build republishes its position into the
+marker at every Ansible role boundary, so the marker doubles as a heartbeat; one
+that has not been touched for two hours is treated as the leftover of a build
+that is no longer running, and the next board refresh rewrites it as finished.
+You'll see a line in the Messages log (`m`) when it happens:
+
+```
+lullabot-proposals was still marked as building by an interrupted run — recording it as finished
+```
+
+A build that `sand` is running *on this machine* is never repaired this way, no
+matter how long a role takes — the local job always outranks the marker's clock.
+
+There is deliberately no command to clear a marker by hand. If you are watching
+a tile that has been wrong for less than two hours, waiting is the fix. If one
+is still wrong well after that, the repair itself is failing, and the Messages
+log will say why (`could not clear the stale building marker on …`) — a
+permissions problem on the host is the usual cause.
+
 ## Out of disk on the Lima volume
 
 Each VM clone is grown to its configured `--disk` size, and that space has
