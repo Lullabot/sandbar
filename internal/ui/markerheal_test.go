@@ -265,6 +265,45 @@ func TestHealFailureIsWarnedOnceAndRetried(t *testing.T) {
 	if warns != 1 {
 		t.Errorf("want the failure stated exactly once, got %d times in %v", warns, m.messages)
 	}
+	// The ANNOUNCEMENT is latched for the same reason the warning is. The repair
+	// is retried every 5s refresh; narrating each attempt would fill the 50-entry
+	// Messages ring with this one sentence in about four minutes and evict the
+	// warning above — the only line that says why the repair is not sticking.
+	var said int
+	for _, line := range m.messages {
+		if strings.Contains(line.text, "interrupted run") {
+			said++
+		}
+	}
+	if said != 1 {
+		t.Errorf("want the repair announced exactly once across the retries, got %d times in %v", said, m.messages)
+	}
+}
+
+// TestHealIsAnnouncedAgainForALaterStuckMarker is the other half of the latch:
+// it must not be permanent. A repair that lands clears the latch, so a build
+// interrupted LATER in the same session — same VM, same member — is announced
+// again rather than repaired in a silence the user cannot account for.
+func TestHealIsAnnouncedAgainForALaterStuckMarker(t *testing.T) {
+	m, _ := healModel(t, "web", 10*24*time.Hour)
+	stale := m.members[0].provenance["web"]
+
+	m = runCmds(t, m, m.healAbandonedMarkers(&m.members[0], time.Now()))
+	// A refresh over the repaired marker clears the latch.
+	m.healAbandonedMarkers(&m.members[0], time.Now())
+	// A second interrupted build leaves the same VM stuck again.
+	m.members[0].provenance["web"] = stale
+	m = runCmds(t, m, m.healAbandonedMarkers(&m.members[0], time.Now()))
+
+	var said int
+	for _, line := range m.messages {
+		if strings.Contains(line.text, "interrupted run") {
+			said++
+		}
+	}
+	if said != 2 {
+		t.Errorf("a later interrupted build must be announced too, got %d announcements in %v", said, m.messages)
+	}
 }
 
 // TestHealSaysWhatItDid keeps the repair from being invisible magic. The user

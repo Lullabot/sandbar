@@ -73,10 +73,23 @@ func healMarkerCmd(pv provider.Provenancer, scope registry.Scope, name string, p
 // Names are sorted so a member with several stale markers dispatches (and logs)
 // them deterministically, which is what makes the behaviour testable.
 func (m *model) healAbandonedMarkers(mem *fleetMember, now time.Time) []tea.Cmd {
+	// Re-arm the narration latch for every name whose marker this refresh reports
+	// as no longer abandoned — the repair landed, or someone else's did, or the VM
+	// is gone. Done FIRST (before the empty-map early return) so an emptied
+	// provenance map cannot strand a name latched forever.
+	for name := range mem.healSaid {
+		if p, ok := mem.provenance[name]; !ok || !p.BuildAbandoned(now) {
+			delete(mem.healSaid, name)
+		}
+	}
 	if len(mem.provenance) == 0 {
 		return nil
 	}
-	pv, ok := m.provFor(mem.scope).(provider.Provenancer)
+	// mem.prov, not m.provFor(mem.scope): the member is already in hand, so
+	// re-resolving it by scope is a needless scan of the fleet that would, for two
+	// members sharing a scope, hand back the FIRST one's backend rather than this
+	// one's — writing the repair over the wrong transport.
+	pv, ok := mem.prov.(provider.Provenancer)
 	if !ok {
 		return nil // no marker facility on this backend: nothing to repair
 	}
@@ -99,7 +112,20 @@ func (m *model) healAbandonedMarkers(mem *fleetMember, now time.Time) []tea.Cmd 
 		// to be building for however long the marker sat there; a line in the
 		// Messages log is what connects the tile they remember to the tile they
 		// now see, and distinguishes a repair from the board simply glitching.
-		m.logMsg(name + " was still marked as building by an interrupted run — recording it as finished")
+		//
+		// ONCE per stuck marker, though, not once per attempt. A repair that keeps
+		// failing is re-dispatched on every 5s refresh (that is deliberate — a
+		// transport blip must not latch the repair off), and narrating each of those
+		// attempts would flood the 50-entry Messages ring with this one sentence in
+		// about four minutes, pushing out the latched warning that says WHY it is
+		// failing. The latch clears above, once the marker is seen repaired.
+		if !mem.healSaid[name] {
+			if mem.healSaid == nil {
+				mem.healSaid = map[string]bool{}
+			}
+			mem.healSaid[name] = true
+			m.logMsg(name + " was still marked as building by an interrupted run — recording it as finished")
+		}
 		cmds = append(cmds, healMarkerCmd(pv, mem.scope, name, mem.provenance[name]))
 	}
 	return cmds
