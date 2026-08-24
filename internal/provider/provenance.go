@@ -137,19 +137,29 @@ func NewProvenance(cfg vm.CreateConfig, provisioning bool) Provenance {
 // before sand treats it as the leftover of a build that is no longer running
 // anywhere, rather than as a build still in progress.
 //
-// THE CUTOFF IS MEASURED AGAINST CreatedAt, WHICH IS A HEARTBEAT ON AN
-// IN-FLIGHT MARKER, not a birthday. NewProvenance stamps CreatedAt with the
-// current time on every call, and the building controller calls it again at
-// every Ansible role boundary to republish Progress (see ui.publishProgressCmd)
-// — so an in-flight marker's CreatedAt is "when this build last reported in".
-// A ready marker's CreatedAt is a true creation time; the two readings differ,
-// and only the in-flight one is consulted here.
+// THE CUTOFF IS MEASURED AGAINST CreatedAt, WHICH ON AN IN-FLIGHT MARKER READS
+// AS "when this build last reported in" rather than as a birthday. NewProvenance
+// stamps CreatedAt with the current time on every call, and the marker is
+// rewritten as the build proceeds, so the stamp tracks the build rather than its
+// start. A ready marker's CreatedAt is a true creation time; only the in-flight
+// reading is consulted here.
 //
-// Two hours is deliberately far longer than the widest real gap between
-// republishes. Republishing is throttled to role boundaries (a per-task write
-// would be an ssh round trip per Ansible task), and the widest of those gaps is
-// the tail of a build — a cold dev-tools role, or a project role cloning a large
-// repository — which is minutes, not hours. Erring long is the cheap direction:
+// HOW FRESH that stamp actually stays depends on who is driving the build, and
+// the cutoff has to cover the weakest case:
+//
+//   - A TUI-driven build republishes Progress into the marker at every Ansible
+//     role boundary (ui.publishProgressCmd), so its stamp is at most one role
+//     old — minutes.
+//   - A HEADLESS `sand create` has no republisher at all; that code lives in the
+//     TUI. Its marker is stamped once, when the clone lands and the in-flight
+//     marker is written (provider.limaProvider.Create), and then not touched
+//     again until the build finishes. Its stamp therefore ages by the whole
+//     finalize phase.
+//
+// Two hours is chosen to clear the second case with room to spare, not merely
+// the first: the cold base build happens BEFORE the marker is written, so what
+// has to fit inside the cutoff is a clone's finalize — minutes, not hours — plus
+// a wide margin for slow hardware. Erring long is the cheap direction:
 // healing a marker early costs an observer a tile that reads Running for the
 // rest of a build that is about to overwrite the marker anyway (RecordSuccess
 // has the last word), and a marker-only "Building" gates nothing — every
