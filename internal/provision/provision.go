@@ -62,8 +62,7 @@ rsync -a --delete --delete-excluded \
   --include='/roles/***' --include='/group_vars/***' --exclude='*' \
   /mnt/playbook/ /root/playbook/
 cd /root/playbook
-listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
-` + taskTotalGuard + `
+` + TaskTotalPreamble + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 
@@ -90,6 +89,22 @@ const taskTotalGuard = `case "${listed:-}" in
 esac
 echo "SAND_ANSIBLE_TASK_TOTAL=$total"`
 
+// TaskTotalPreamble counts the TASK banners the ansible-playbook invocation that
+// FOLLOWS it will print, and echoes them as the SAND_ANSIBLE_TASK_TOTAL marker
+// internal/ui/ansible.go parses for its progress bar's denominator. It is the
+// `--list-tasks` pass and taskTotalGuard as ONE unit, exported because it is not
+// only this package's concern: the Proxmox backend runs the same playbook through
+// its own harness (internal/provider's runPlaybookScript), and when these two
+// lines lived only in this file's scripts that backend silently shipped without
+// them — every Proxmox build drew a 0% bar and counted "204/0" for its whole run,
+// while an identical Lima build drew a real one. Sharing the constant is what
+// stops a third harness from inheriting that same gap by omission.
+//
+// It assumes its caller has already cd'd to the playbook directory and left the
+// run's extra-vars at $vars, which every script using it sets up first.
+const TaskTotalPreamble = `listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
+` + taskTotalGuard
+
 // profileGuestScript is the opt-in variant of inGuestScript, selected when the
 // host has SAND_PROFILE set (see sandProfileEnabled). The profile_tasks callback
 // lives in the ansible.posix collection, not ansible-core, and the default Lima
@@ -113,8 +128,7 @@ rsync -a --delete --delete-excluded \
 cd /root/playbook
 ansible-galaxy collection install ansible.posix
 export ANSIBLE_CALLBACKS_ENABLED=profile_tasks ANSIBLE_CALLBACK_WHITELIST=profile_tasks
-listed=$(ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars" --list-tasks 2>/dev/null | grep -cE '^ {6}[^ ]' || true)
-` + taskTotalGuard + `
+` + TaskTotalPreamble + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1439,5 +1440,51 @@ func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
 	}
 	if stale, why := p.baseStale(webConfig()); stale {
 		t.Fatalf("a template stamped with the current version was judged stale (%s); it must be reused", why)
+	}
+}
+
+// TestRunPlaybookScriptAnnouncesTheTaskTotal is the regression guard for a gap
+// that shipped silently: this backend runs the SAME playbook as the Lima flow
+// through its own harness, and that harness omitted the `--list-tasks` preamble
+// the Lima scripts carry. Nothing failed — the build worked — but the TUI's
+// parser never received a SAND_ANSIBLE_TASK_TOTAL line, so every Proxmox build
+// drew a bar pinned at 0% and a task count of "N/0" for its whole run, while an
+// identical Lima build drew a real one.
+//
+// ORDER is asserted, not just presence: the total is the denominator for the
+// TASK banners that follow it, and ansible.go resets the counter when it parses
+// the marker. A preamble emitted AFTER the run would zero the index at the end
+// of the build instead of establishing the total at the start.
+func TestRunPlaybookScriptAnnouncesTheTaskTotal(t *testing.T) {
+	total := strings.Index(runPlaybookScript, provision.TaskTotalPreamble)
+	if total < 0 {
+		t.Fatalf("runPlaybookScript must carry provision.TaskTotalPreamble, or the TUI's build bar has no denominator; got:\n%s", runPlaybookScript)
+	}
+	run := strings.LastIndex(runPlaybookScript, "ansible-playbook -i localhost, --connection=local site.yml --extra-vars @\"$vars\"\n")
+	if run < 0 {
+		t.Fatalf("runPlaybookScript no longer contains the playbook invocation this test anchors on:\n%s", runPlaybookScript)
+	}
+	if total > run {
+		t.Errorf("the task-total preamble must run BEFORE the playbook, not after it (preamble at %d, run at %d)", total, run)
+	}
+	// The preamble reads $vars and expects the playbook directory as its cwd —
+	// both established by this script's own prologue. A reordering that moved the
+	// cd below the preamble would silently list the wrong playbook.
+	if cd := strings.Index(runPlaybookScript, "cd /root/playbook"); cd < 0 || cd > total {
+		t.Errorf("the preamble must run from the playbook directory (cd at %d, preamble at %d)", cd, total)
+	}
+}
+
+// TestRunPlaybookScriptIsValidShell parses the COMPOSED script with `sh -n`.
+// runPlaybookScript is built by concatenating Go string constants across two
+// packages, which is exactly the kind of seam where a missing newline produces
+// shell that is still a valid Go string and no longer a valid script — a break
+// that would surface as a failed build against a real Proxmox node and nowhere
+// earlier.
+func TestRunPlaybookScriptIsValidShell(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-n")
+	cmd.Stdin = strings.NewReader(runPlaybookScript)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("runPlaybookScript is not valid shell: %v\n%s\n--- script ---\n%s", err, out, runPlaybookScript)
 	}
 }

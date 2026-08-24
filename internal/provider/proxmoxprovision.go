@@ -692,12 +692,19 @@ tar -xzf - -C /root/playbook
 // internal/provision's own script; the playbook and the extra-vars are reused
 // verbatim (LocatePlaybook + BuildExtraVars), only the invocation harness is
 // local to this backend.
+//
+// provision.TaskTotalPreamble is part of that reuse and NOT optional decoration:
+// without it this script announces no SAND_ANSIBLE_TASK_TOTAL, the TUI's parser
+// never learns a denominator, and every Proxmox build renders a build bar frozen
+// at 0% with a task count like "204/0" for its entire run — the exact symptom the
+// Lima path does not have, because its scripts carry the same preamble.
 const runPlaybookScript = `set -eu -o pipefail
 vars=/dev/shm/sand-vars.yml
 trap 'rm -f "$vars"' EXIT
 install -m 600 /dev/null "$vars"
 cat > "$vars"
 cd /root/playbook
+` + provision.TaskTotalPreamble + `
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 
