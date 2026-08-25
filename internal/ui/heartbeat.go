@@ -49,8 +49,20 @@ package ui
 // refreshes lastInput, reopening the gate, and this file's reconcile then starts
 // one per running VM inside the very Update that returns tea.Quit. So the quit now
 // closes the gate first (see model.quitting), which turns that last reconcile into
-// stopAll: the contexts are cancelled, the subprocesses killed, and nothing is left
-// holding an agent's attention.
+// stopAll.
+//
+// NOT OPENING THEM IS THE HALF THAT ACTUALLY HOLDS. The stopAll half is
+// best-effort and worth being precise about, because two things are outside this
+// package's reach. cancel() closes the context; os/exec's watcher goroutine is
+// what signals the child, and nothing synchronizes that against the process exit
+// a moment later. And on the LOCAL Lima path the direct child is limactl, not
+// ssh: cancelling kills limactl and leaves the ssh GRANDCHILD running until
+// WaitDelay closes the pipes two seconds on (lima.waitDelay), which a quitting
+// process never reaches. Where the reported prompts actually come from — a remote
+// member or Proxmox, whose transport execs ssh directly (lima.SSHHost,
+// proxmoxProvider.runSSH) — ssh IS the direct child and the cancel does reach it.
+// Local Lima's own ssh authenticates against ~/.lima/_config/user, so it is not
+// the one asking an agent anything.
 //
 // # The concurrency contract (the same one jobs.go established)
 //

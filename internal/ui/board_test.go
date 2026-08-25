@@ -1074,7 +1074,7 @@ func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
 	// branches the other way round would have this one reconciling against a
 	// board that the abandoned quit had already torn down.
 	declined, cmd := press(t, quit, runeKey('n'))
-	if isQuitCmd(cmd) || isQuitCmd(batchQuit(cmd)) || declined.confirm != nil {
+	if isQuitCmd(cmd) || declined.confirm != nil {
 		t.Fatal("declining the quit should dismiss the overlay without quitting")
 	}
 	if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
@@ -1082,30 +1082,12 @@ func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
 	}
 	// And confirming it really does quit.
 	confirmed, cmd := press(t, quit, runeKey('y'))
-	if !isQuitCmd(cmd) && !isQuitCmd(batchQuit(cmd)) {
+	if !isQuitCmd(cmd) {
 		t.Fatal("confirming the quit should quit")
 	}
 	if confirmed.confirm != nil {
 		t.Fatal("confirming should clear the overlay")
 	}
-}
-
-// batchQuit unwraps a tea.Batch (beginAction batches the confirmed action with
-// the spinner tick) far enough to find a tea.Quit inside it.
-func batchQuit(cmd tea.Cmd) tea.Cmd {
-	if cmd == nil {
-		return nil
-	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		return nil
-	}
-	for _, c := range batch {
-		if isQuitCmd(c) {
-			return c
-		}
-	}
-	return nil
 }
 
 // THE GHOST TILE IS THE BOARD'S CALL TO ACTION, AND IT HAS TO BE REACHABLE.

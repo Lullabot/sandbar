@@ -35,7 +35,9 @@ package ui
 //     the reverse. Process exit closing the read ends only reaches a connection
 //     that is far enough along to write; one still waiting on an ssh agent is
 //     not, and outlives sand parked on the agent socket. The quit closes the
-//     idle gate (model.quitting), so the last reconcile is a stopAll.
+//     idle gate (model.quitting), so the last reconcile opens nothing and runs
+//     a stopAll — the first half unconditionally, the second best-effort, for
+//     the reasons heartbeat.go's header sets out.
 //
 // # The concurrency contract (identical to heartbeat.go's)
 //

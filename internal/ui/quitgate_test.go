@@ -44,6 +44,15 @@ func openCount(sh *fakeShell, names []string) int {
 	return n
 }
 
+// closeCount is openCount's mirror, for the shells a fake has ever closed.
+func closeCount(sh *fakeShell, names []string) int {
+	n := 0
+	for _, name := range names {
+		n += sh.closed(name)
+	}
+	return n
+}
+
 // THE KEY THAT QUITS MUST NOT OPEN CONNECTIONS. This is the regression this file
 // exists for, reported from the field as several 1Password prompts arriving
 // AFTER sand had already exited.
@@ -212,7 +221,7 @@ func TestPendingQuitConfirmNeitherOpensNorCloses(t *testing.T) {
 	l.m.view = viewBoard // seedJob leaves the model on the progress screen
 
 	opensBefore := openCount(hb, names) + openCount(sw, names)
-	closesBefore := hb.closed("web") + hb.closed("api") + sw.closed("web") + sw.closed("api")
+	closesBefore := closeCount(hb, names) + closeCount(sw, names)
 
 	// 'q' with work in flight raises the overlay rather than quitting.
 	l.send(runeKey('q'))
@@ -224,7 +233,7 @@ func TestPendingQuitConfirmNeitherOpensNorCloses(t *testing.T) {
 	if got := openCount(hb, names) + openCount(sw, names) - opensBefore; got != 0 {
 		t.Fatalf("a pending quit prompt opened %d connection(s); it must open nothing it may have to orphan", got)
 	}
-	if got := hb.closed("web") + hb.closed("api") + sw.closed("web") + sw.closed("api") - closesBefore; got != 0 {
+	if got := closeCount(hb, names) + closeCount(sw, names) - closesBefore; got != 0 {
 		t.Fatalf("a pending quit prompt closed %d connection(s); the gauges must not blank under a prompt the user is still reading", got)
 	}
 

@@ -262,6 +262,15 @@ type model struct {
 	// to its own exit. Hence a flag, set at every site that returns tea.Quit and
 	// read by shouldTick — which turns the last reconcile from "open everything"
 	// into stopAll, tearing the live connections down instead of adding to them.
+	//
+	// THE FLAG COVERS EVERY QUIT THE USER TYPES, WHICH IS NOT EVERY WAY SAND ENDS.
+	// Bubble Tea installs its own SIGINT/SIGTERM handler that pushes QuitMsg
+	// straight onto the message queue, and the loop returns on it without calling
+	// Update — so `kill <pid>`, or a supervisor stopping sand, exits with this
+	// never set and no stopAll. That is not a regression (in raw mode ctrl+c
+	// arrives as a KeyPressMsg, which IS covered, and it is the same state every
+	// quit used to leave behind); it is the residue, and closing it means a
+	// teardown on the model Program.Run returns, in cmd/sand/main.go.
 	quitting bool
 
 	// Incremental name search. When searching is true, typed keys edit
