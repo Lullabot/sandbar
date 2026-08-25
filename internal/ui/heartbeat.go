@@ -946,6 +946,7 @@ func heartbeatReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan
 // blanking the gauges of a user who was still watching. The bound is now "at most
 // heartbeatIdleAfter of connections after the user stops interacting", which is the
 // guarantee that was actually wanted.
+//
 // A THIRD CONDITION, AND IT IS THE QUIT: sand is leaving, so the last thing it
 // may do is open connections it will orphan on the way out. Without it the key
 // that quits refreshes lastInput like any other, reopens this gate, and the

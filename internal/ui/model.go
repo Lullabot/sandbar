@@ -257,20 +257,34 @@ type model struct {
 	// mid-authentication and the prompts outlive sand itself. Reported from the
 	// field as "several 1Password prompts after quitting".
 	//
-	// Bubble Tea cannot help here: its event loop answers QuitMsg by returning
-	// from the loop (tea.go), so Update never sees it and the model cannot react
-	// to its own exit. Hence a flag, set at every site that returns tea.Quit and
-	// read by shouldTick — which turns the last reconcile from "open everything"
-	// into stopAll, tearing the live connections down instead of adding to them.
+	// WHY A FLAG AND NOT A CHOKEPOINT, precisely — because the obvious objection
+	// is that Bubble Tea offers one. It does: tea.WithFilter runs at tea.go:757,
+	// BEFORE the `case QuitMsg` that returns from the event loop at tea.go:765,
+	// and it is handed the model. A filter could therefore reach these registries
+	// (they are pointer fields, so a value copy still finds them) and stop
+	// everything on the way out.
+	//
+	// What it cannot do is stop them being STARTED, and that is the ordering that
+	// decides this. Update calls syncHeartbeats directly (see below), and start()
+	// execs its shell from a goroutine it launches then and there — all of it
+	// before Update has returned tea.Quit, let alone before that Cmd has been run
+	// on another goroutine and its QuitMsg has made it back round to the filter.
+	// By then the handshakes are in flight and the agent has already asked. A
+	// filter can tear down; only the Update itself can decline to build. So the
+	// decision "this is the last Update" has to be made inside the Update that
+	// makes it — hence a flag, set at every site that returns tea.Quit (all of
+	// them via quit(), board.go) and read by shouldTick.
 	//
 	// THE FLAG COVERS EVERY QUIT THE USER TYPES, WHICH IS NOT EVERY WAY SAND ENDS.
-	// Bubble Tea installs its own SIGINT/SIGTERM handler that pushes QuitMsg
-	// straight onto the message queue, and the loop returns on it without calling
+	// Bubble Tea's own signal handler pushes InterruptMsg on SIGINT and QuitMsg on
+	// SIGTERM (tea.go:671-673), and the loop returns on either without calling
 	// Update — so `kill <pid>`, or a supervisor stopping sand, exits with this
 	// never set and no stopAll. That is not a regression (in raw mode ctrl+c
 	// arrives as a KeyPressMsg, which IS covered, and it is the same state every
-	// quit used to leave behind); it is the residue, and closing it means a
-	// teardown on the model Program.Run returns, in cmd/sand/main.go.
+	// quit used to leave behind); it is the residue. Closing it is exactly what a
+	// WithFilter teardown in cmd/sand/main.go is good for — it catches both signal
+	// messages — and it would make forgetting the flag cost only the burst rather
+	// than the burst AND the orphans.
 	quitting bool
 
 	// Incremental name search. When searching is true, typed keys edit
@@ -1509,12 +1523,11 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setOutput()
 				return m, nil
 			}
-			// The escape hatch quits too, so it closes the idle gate for the rest of
-			// this Update exactly as 'q' does — see model.quitting. It matters most
-			// here: ctrl+c is what a user reaches for on a wedged remote, which is
-			// the worst moment to add N connections nobody will ever answer for.
-			m.quitting = true
-			return m, tea.Quit
+			// Through quit(), like every other exit: the escape hatch must close the
+			// idle gate exactly as 'q' does. It matters most here — ctrl+c is what a
+			// user reaches for on a wedged remote, which is the worst moment to add N
+			// connections nobody will ever answer for.
+			return m, m.quit()
 		}
 		switch m.view {
 		case viewBoard:
@@ -1642,10 +1655,13 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.logMsg(m.confirm.working)
 		}
 		if m.confirm.quits {
-			// The 'y' that ends the program is still a keypress, and would otherwise
-			// reopen the idle gate and rebuild every guest connection on its way out.
-			// See model.quitting.
-			m.quitting = true
+			// Routed through quit() like every other exit, rather than setting the
+			// flag by hand: the 'y' that ends the program is still a keypress, and
+			// would otherwise reopen the idle gate and rebuild every guest connection
+			// on its way out. quit() RETURNS tea.Quit, which is exactly the run this
+			// confirmation was built with (board.go), so this replaces run with an
+			// identical Cmd and picks up the flag on the way. See model.quitting.
+			run = m.quit()
 		}
 		m.confirm = nil
 		return m, m.beginAction(run)

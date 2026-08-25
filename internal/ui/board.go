@@ -608,12 +608,7 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 func (m *model) requestQuit() tea.Cmd {
 	busy := m.busyVMs()
 	if len(busy) == 0 {
-		// Closes the idle gate for the rest of this Update, so the reconcile that
-		// follows tears the guest connections down instead of opening a fresh
-		// (unmultiplexed, agent-prompting) one per VM to abandon on exit. See
-		// model.quitting.
-		m.quitting = true
-		return tea.Quit
+		return m.quit()
 	}
 	noun := "VM"
 	if len(busy) > 1 {
@@ -622,9 +617,9 @@ func (m *model) requestQuit() tea.Cmd {
 	// The count is of VMs, not runs, and the noun says so: a VM can hold two runs at
 	// once (jobs.go), and "abandon 1 run" while abandoning two would be a small lie
 	// told at the exact moment the user is deciding whether to walk away from work.
-	// quits: the flag cannot be set here — this branch OPENS an overlay and does
-	// not quit — so it travels on the confirmation and is set by updateConfirm
-	// when the user actually answers 'y'.
+	// quits: this branch OPENS an overlay and does not quit, so quit() cannot be
+	// called here. The fact travels on the confirmation instead, and updateConfirm
+	// calls quit() when the user actually answers 'y'.
 	m.confirm = &confirmState{
 		prompt: fmt.Sprintf("Quit and abandon work in flight on %d %s (%s)?",
 			len(busy), noun, summarizeNames(busy, m.width)),
@@ -632,6 +627,18 @@ func (m *model) requestQuit() tea.Cmd {
 		quits: true,
 	}
 	return nil
+}
+
+// quit is THE ONLY WAY THIS PACKAGE MAY RETURN tea.Quit, and the rule is worth
+// stating as a rule: closing the idle gate is what stops the quitting Update from
+// opening a guest connection per running VM and orphaning it on exit (see
+// model.quitting), and a `return tea.Quit` that forgot to do it would reintroduce
+// the bug silently — nothing fails, the board just costs an agent prompt apiece on
+// the way out. One symbol is greppable; three hand-written assignments are an
+// invariant a fourth quit site can quietly break.
+func (m *model) quit() tea.Cmd {
+	m.quitting = true
+	return tea.Quit
 }
 
 // updateBoard handles keys on the board. Order matters: a pending confirmation
