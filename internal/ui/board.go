@@ -608,6 +608,11 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 func (m *model) requestQuit() tea.Cmd {
 	busy := m.busyVMs()
 	if len(busy) == 0 {
+		// Closes the idle gate for the rest of this Update, so the reconcile that
+		// follows tears the guest connections down instead of opening a fresh
+		// (unmultiplexed, agent-prompting) one per VM to abandon on exit. See
+		// model.quitting.
+		m.quitting = true
 		return tea.Quit
 	}
 	noun := "VM"
@@ -617,10 +622,14 @@ func (m *model) requestQuit() tea.Cmd {
 	// The count is of VMs, not runs, and the noun says so: a VM can hold two runs at
 	// once (jobs.go), and "abandon 1 run" while abandoning two would be a small lie
 	// told at the exact moment the user is deciding whether to walk away from work.
+	// quits: the flag cannot be set here — this branch OPENS an overlay and does
+	// not quit — so it travels on the confirmation and is set by updateConfirm
+	// when the user actually answers 'y'.
 	m.confirm = &confirmState{
 		prompt: fmt.Sprintf("Quit and abandon work in flight on %d %s (%s)?",
 			len(busy), noun, summarizeNames(busy, m.width)),
-		run: tea.Quit,
+		run:   tea.Quit,
+		quits: true,
 	}
 	return nil
 }

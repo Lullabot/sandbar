@@ -31,9 +31,11 @@ package ui
 //   - A VM stopped underneath the stream ends the shell on its own within
 //     ~300ms (`exit status 255`); the sweep needs no separate detection for
 //     that, exactly like the heartbeat.
-//   - Quitting sand needs no teardown of its own: process exit closes the read
-//     ends, the orphaned ssh takes a SIGPIPE on its next write, and the guest
-//     loop dies with the session.
+//   - Quitting sand DOES need a teardown of its own, and this line used to say
+//     the reverse. Process exit closing the read ends only reaches a connection
+//     that is far enough along to write; one still waiting on an ssh agent is
+//     not, and outlives sand parked on the agent socket. The quit closes the
+//     idle gate (model.quitting), so the last reconcile is a stopAll.
 //
 // # The concurrency contract (identical to heartbeat.go's)
 //
@@ -567,6 +569,10 @@ func (m model) syncSweeps() tea.Cmd {
 	}
 	if !m.shouldTick() {
 		m.sweeps.stopAll()
+		return nil
+	}
+	if m.awaitingQuitAnswer() {
+		// Hold, exactly as syncHeartbeats does — see awaitingQuitAnswer.
 		return nil
 	}
 

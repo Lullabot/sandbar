@@ -1041,14 +1041,20 @@ func offersQuit(bindings []key.Binding) bool {
 // user with a background build in flight could end the session — and the
 // half-built VM — with the reflex that ends every other TUI. It now confirms.
 func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
-	m := newTestModel(t)
-	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
-
-	// Nothing in flight: q quits, as it always did.
-	if _, cmd := press(t, m, runeKey('q')); !isQuitCmd(cmd) {
+	// Nothing in flight: q quits, as it always did. On ITS OWN model, because
+	// quitting is no longer free of side effects — it closes the idle gate and
+	// stops every guest connection (model.quitting), and the heartbeat/sweep
+	// registries are POINTER fields shared by every copy of a model, so a
+	// discarded quit would leave the model below with its connections already
+	// torn down and the reconcile on any later keypress rebuilding them.
+	idle := newTestModel(t)
+	idle = loadManaged(t, idle, vm.VM{Name: "web", Status: "Running"})
+	if _, cmd := press(t, idle, runeKey('q')); !isQuitCmd(cmd) {
 		t.Fatal("q on an idle board should quit")
 	}
 
+	m := newTestModel(t)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
 	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
 	m.view = viewBoard
 
@@ -1062,21 +1068,25 @@ func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
 	if !strings.Contains(quit.confirm.prompt, "newvm") {
 		t.Fatalf("the quit prompt %q should name the run it would abandon", quit.confirm.prompt)
 	}
-	// Confirming it really does quit.
+	// Declining leaves the session — and the build — alone. Answered FIRST, and
+	// off the same `quit` model as the confirm below: 'y' stops every guest
+	// connection through the shared (pointer) registries, so taking the two
+	// branches the other way round would have this one reconciling against a
+	// board that the abandoned quit had already torn down.
+	declined, cmd := press(t, quit, runeKey('n'))
+	if isQuitCmd(cmd) || isQuitCmd(batchQuit(cmd)) || declined.confirm != nil {
+		t.Fatal("declining the quit should dismiss the overlay without quitting")
+	}
+	if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
+		t.Fatal("declining the quit must not touch the build")
+	}
+	// And confirming it really does quit.
 	confirmed, cmd := press(t, quit, runeKey('y'))
 	if !isQuitCmd(cmd) && !isQuitCmd(batchQuit(cmd)) {
 		t.Fatal("confirming the quit should quit")
 	}
 	if confirmed.confirm != nil {
 		t.Fatal("confirming should clear the overlay")
-	}
-	// And declining leaves the session — and the build — alone.
-	declined, cmd := press(t, quit, runeKey('n'))
-	if cmd != nil || declined.confirm != nil {
-		t.Fatal("declining the quit should dismiss the overlay and do nothing else")
-	}
-	if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
-		t.Fatal("declining the quit must not touch the build")
 	}
 }
 

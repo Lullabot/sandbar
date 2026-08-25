@@ -83,6 +83,13 @@ type confirmState struct {
 	// overlay. Cancel is always accepted, checking or not.
 	checking bool
 
+	// quits marks the confirmation whose run ENDS THE PROGRAM (today only the
+	// quit-with-work-in-flight guard, board.go). A tea.Cmd cannot be inspected,
+	// so the fact travels beside it: updateConfirm reads this to set
+	// model.quitting on the way out, which is what stops the confirming
+	// keypress from reopening every guest connection a moment before exit.
+	quits bool
+
 	// scope/vmName identify the VM this confirmation is about, so a refresh
 	// result that arrives after the user cancelled — or moved on and raised a
 	// DIFFERENT confirmation — is recognized as stale and dropped rather than
@@ -233,6 +240,29 @@ type model struct {
 	// signal — but a FocusMsg still refreshes this, because returning to the terminal
 	// is the user saying "I'm back".
 	lastInput time.Time
+
+	// quitting marks the Update that is on its way out, and it exists because the
+	// KEY THAT QUITS IS JUST ANOTHER MESSAGE. It refreshes lastInput (any key does
+	// — that is what wakes an idle session), and Update then reconciles the
+	// heartbeats, the sweeps and the refresh loop against a gate it has just
+	// reopened. On a session that was idle, or that has been anywhere but the
+	// board, that reconcile OPENS a fresh connection per running VM — two, counting
+	// the sweep — synchronously, inside the very Update that returns tea.Quit.
+	//
+	// Both probes are lima.WithoutMux, so none of those connections can ride the
+	// control master: each is a full handshake and, for anyone whose agent asks
+	// (1Password, a hardware key), its own approval prompt. Worse, the process
+	// exits moments later while they are still handshaking — nothing kills them,
+	// their contexts are rooted at context.Background() — so they are orphaned
+	// mid-authentication and the prompts outlive sand itself. Reported from the
+	// field as "several 1Password prompts after quitting".
+	//
+	// Bubble Tea cannot help here: its event loop answers QuitMsg by returning
+	// from the loop (tea.go), so Update never sees it and the model cannot react
+	// to its own exit. Hence a flag, set at every site that returns tea.Quit and
+	// read by shouldTick — which turns the last reconcile from "open everything"
+	// into stopAll, tearing the live connections down instead of adding to them.
+	quitting bool
 
 	// Incremental name search. When searching is true, typed keys edit
 	// searchQuery instead of firing actions; searchQuery is a case-insensitive
@@ -1470,6 +1500,11 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setOutput()
 				return m, nil
 			}
+			// The escape hatch quits too, so it closes the idle gate for the rest of
+			// this Update exactly as 'q' does — see model.quitting. It matters most
+			// here: ctrl+c is what a user reaches for on a wedged remote, which is
+			// the worst moment to add N connections nobody will ever answer for.
+			m.quitting = true
 			return m, tea.Quit
 		}
 		switch m.view {
@@ -1596,6 +1631,12 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// against an empty or stale status line.
 		if m.confirm.working != "" {
 			m.logMsg(m.confirm.working)
+		}
+		if m.confirm.quits {
+			// The 'y' that ends the program is still a keypress, and would otherwise
+			// reopen the idle gate and rebuild every guest connection on its way out.
+			// See model.quitting.
+			m.quitting = true
 		}
 		m.confirm = nil
 		return m, m.beginAction(run)
