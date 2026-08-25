@@ -1040,62 +1040,67 @@ func offersQuit(bindings []key.Binding) bool {
 // 'q' must not orphan work. The board's quit used to be unconditional, so a
 // user with a background build in flight could end the session — and the
 // half-built VM — with the reflex that ends every other TUI. It now confirms.
+// EACH CASE BUILDS ITS OWN MODEL, and that is not tidiness. Quitting is no longer
+// free of side effects — it closes the idle gate and stops every guest connection
+// (model.quitting) — and the heartbeat/sweep registries are POINTER fields shared
+// by every copy of a model. Branching two answers off one `quit` model therefore
+// leaves whichever branch runs second reconciling against registries the first one
+// already tore down, and the order that happens to work is invisible: swapping the
+// blocks compiles, reads fine, and fails for a reason no assertion explains.
 func TestQuitConfirmsWhileAJobIsInFlight(t *testing.T) {
-	m := newTestModel(t)
-	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
-
-	// Nothing in flight: q quits, as it always did.
-	if _, cmd := press(t, m, runeKey('q')); !isQuitCmd(cmd) {
-		t.Fatal("q on an idle board should quit")
+	// busyBoard is a board with one running VM and a build in flight on another,
+	// sitting on the confirm overlay that 'q' just raised.
+	busyBoard := func(t *testing.T) model {
+		t.Helper()
+		m := newTestModel(t)
+		m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+		seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
+		m.view = viewBoard // seedJob leaves the model on the progress screen
+		return m
 	}
 
-	seedJob(t, &m, "newvm", vm.CreateConfig{Name: "newvm", BaseName: "sandbar-base"})
-	m.view = viewBoard
-
-	quit, cmd := press(t, m, runeKey('q'))
-	if isQuitCmd(cmd) {
-		t.Fatal("q with a build in flight must not quit outright — it would orphan the build")
-	}
-	if quit.confirm == nil {
-		t.Fatal("q with a build in flight should raise the confirm overlay")
-	}
-	if !strings.Contains(quit.confirm.prompt, "newvm") {
-		t.Fatalf("the quit prompt %q should name the run it would abandon", quit.confirm.prompt)
-	}
-	// Confirming it really does quit.
-	confirmed, cmd := press(t, quit, runeKey('y'))
-	if !isQuitCmd(cmd) && !isQuitCmd(batchQuit(cmd)) {
-		t.Fatal("confirming the quit should quit")
-	}
-	if confirmed.confirm != nil {
-		t.Fatal("confirming should clear the overlay")
-	}
-	// And declining leaves the session — and the build — alone.
-	declined, cmd := press(t, quit, runeKey('n'))
-	if cmd != nil || declined.confirm != nil {
-		t.Fatal("declining the quit should dismiss the overlay and do nothing else")
-	}
-	if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
-		t.Fatal("declining the quit must not touch the build")
-	}
-}
-
-// batchQuit unwraps a tea.Batch (beginAction batches the confirmed action with
-// the spinner tick) far enough to find a tea.Quit inside it.
-func batchQuit(cmd tea.Cmd) tea.Cmd {
-	if cmd == nil {
-		return nil
-	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		return nil
-	}
-	for _, c := range batch {
-		if isQuitCmd(c) {
-			return c
+	t.Run("nothing in flight quits outright", func(t *testing.T) {
+		m := newTestModel(t)
+		m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+		if _, cmd := press(t, m, runeKey('q')); !isQuitCmd(cmd) {
+			t.Fatal("q on an idle board should quit")
 		}
-	}
-	return nil
+	})
+
+	t.Run("a build in flight confirms instead", func(t *testing.T) {
+		quit, cmd := press(t, busyBoard(t), runeKey('q'))
+		if isQuitCmd(cmd) {
+			t.Fatal("q with a build in flight must not quit outright — it would orphan the build")
+		}
+		if quit.confirm == nil {
+			t.Fatal("q with a build in flight should raise the confirm overlay")
+		}
+		if !strings.Contains(quit.confirm.prompt, "newvm") {
+			t.Fatalf("the quit prompt %q should name the run it would abandon", quit.confirm.prompt)
+		}
+	})
+
+	t.Run("declining leaves the session and the build alone", func(t *testing.T) {
+		quit, _ := press(t, busyBoard(t), runeKey('q'))
+		declined, cmd := press(t, quit, runeKey('n'))
+		if isQuitCmd(cmd) || declined.confirm != nil {
+			t.Fatal("declining the quit should dismiss the overlay without quitting")
+		}
+		if !declined.jobs.isRunning(registry.LocalScope, "newvm") {
+			t.Fatal("declining the quit must not touch the build")
+		}
+	})
+
+	t.Run("confirming really does quit", func(t *testing.T) {
+		quit, _ := press(t, busyBoard(t), runeKey('q'))
+		confirmed, cmd := press(t, quit, runeKey('y'))
+		if !isQuitCmd(cmd) {
+			t.Fatal("confirming the quit should quit")
+		}
+		if confirmed.confirm != nil {
+			t.Fatal("confirming should clear the overlay")
+		}
+	})
 }
 
 // THE GHOST TILE IS THE BOARD'S CALL TO ACTION, AND IT HAS TO BE REACHABLE.

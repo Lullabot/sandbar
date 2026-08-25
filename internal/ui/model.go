@@ -83,6 +83,13 @@ type confirmState struct {
 	// overlay. Cancel is always accepted, checking or not.
 	checking bool
 
+	// quits marks the confirmation whose run ENDS THE PROGRAM (today only the
+	// quit-with-work-in-flight guard, board.go). A tea.Cmd cannot be inspected,
+	// so the fact travels beside it: updateConfirm reads this to set
+	// model.quitting on the way out, which is what stops the confirming
+	// keypress from reopening every guest connection a moment before exit.
+	quits bool
+
 	// scope/vmName identify the VM this confirmation is about, so a refresh
 	// result that arrives after the user cancelled — or moved on and raised a
 	// DIFFERENT confirmation — is recognized as stale and dropped rather than
@@ -233,6 +240,52 @@ type model struct {
 	// signal — but a FocusMsg still refreshes this, because returning to the terminal
 	// is the user saying "I'm back".
 	lastInput time.Time
+
+	// quitting marks the Update that is on its way out, and it exists because the
+	// KEY THAT QUITS IS JUST ANOTHER MESSAGE. It refreshes lastInput (any key does
+	// — that is what wakes an idle session), and Update then reconciles the
+	// heartbeats, the sweeps and the refresh loop against a gate it has just
+	// reopened. On a session that was idle, or that has been anywhere but the
+	// board, that reconcile OPENS a fresh connection per running VM — two, counting
+	// the sweep — synchronously, inside the very Update that returns tea.Quit.
+	//
+	// Both probes are lima.WithoutMux, so none of those connections can ride the
+	// control master: each is a full handshake and, for anyone whose agent asks
+	// (1Password, a hardware key), its own approval prompt. Worse, the process
+	// exits moments later while they are still handshaking — nothing kills them,
+	// their contexts are rooted at context.Background() — so they are orphaned
+	// mid-authentication and the prompts outlive sand itself. Reported from the
+	// field as "several 1Password prompts after quitting".
+	//
+	// WHY A FLAG AND NOT A CHOKEPOINT, precisely — because the obvious objection
+	// is that Bubble Tea offers one. It does: tea.WithFilter runs at tea.go:757,
+	// BEFORE the `case QuitMsg` that returns from the event loop at tea.go:765,
+	// and it is handed the model. A filter could therefore reach these registries
+	// (they are pointer fields, so a value copy still finds them) and stop
+	// everything on the way out.
+	//
+	// What it cannot do is stop them being STARTED, and that is the ordering that
+	// decides this. Update calls syncHeartbeats directly (see below), and start()
+	// execs its shell from a goroutine it launches then and there — all of it
+	// before Update has returned tea.Quit, let alone before that Cmd has been run
+	// on another goroutine and its QuitMsg has made it back round to the filter.
+	// By then the handshakes are in flight and the agent has already asked. A
+	// filter can tear down; only the Update itself can decline to build. So the
+	// decision "this is the last Update" has to be made inside the Update that
+	// makes it — hence a flag, set at every site that returns tea.Quit (all of
+	// them via quit(), board.go) and read by shouldTick.
+	//
+	// THE FLAG COVERS EVERY QUIT THE USER TYPES, WHICH IS NOT EVERY WAY SAND ENDS.
+	// Bubble Tea's own signal handler pushes InterruptMsg on SIGINT and QuitMsg on
+	// SIGTERM (tea.go:671-673), and the loop returns on either without calling
+	// Update — so `kill <pid>`, or a supervisor stopping sand, exits with this
+	// never set and no stopAll. That is not a regression (in raw mode ctrl+c
+	// arrives as a KeyPressMsg, which IS covered, and it is the same state every
+	// quit used to leave behind); it is the residue. Closing it is exactly what a
+	// WithFilter teardown in cmd/sand/main.go is good for — it catches both signal
+	// messages — and it would make forgetting the flag cost only the burst rather
+	// than the burst AND the orphans.
+	quitting bool
 
 	// Incremental name search. When searching is true, typed keys edit
 	// searchQuery instead of firing actions; searchQuery is a case-insensitive
@@ -1470,7 +1523,11 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setOutput()
 				return m, nil
 			}
-			return m, tea.Quit
+			// Through quit(), like every other exit: the escape hatch must close the
+			// idle gate exactly as 'q' does. It matters most here — ctrl+c is what a
+			// user reaches for on a wedged remote, which is the worst moment to add N
+			// connections nobody will ever answer for.
+			return m, m.quit()
 		}
 		switch m.view {
 		case viewBoard:
@@ -1596,6 +1653,15 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// against an empty or stale status line.
 		if m.confirm.working != "" {
 			m.logMsg(m.confirm.working)
+		}
+		if m.confirm.quits {
+			// Routed through quit() like every other exit, rather than setting the
+			// flag by hand: the 'y' that ends the program is still a keypress, and
+			// would otherwise reopen the idle gate and rebuild every guest connection
+			// on its way out. quit() RETURNS tea.Quit, which is exactly the run this
+			// confirmation was built with (board.go), so this replaces run with an
+			// identical Cmd and picks up the flag on the way. See model.quitting.
+			run = m.quit()
 		}
 		m.confirm = nil
 		return m, m.beginAction(run)

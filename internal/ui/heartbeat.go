@@ -36,10 +36,33 @@ package ui
 //     it does not need to be noticed and killed. The gauge disappears at once,
 //     rather than freezing at its last value until the next list refresh.
 //
-// Quitting sand needs no teardown of its own, which was also checked rather than
-// assumed: the process exiting closes the read ends of these pipes, the orphaned ssh
-// takes a SIGPIPE on its next write (so, within one interval), and the guest loop
-// dies with the session. Nothing is left running.
+// QUITTING SAND DOES NEED A TEARDOWN OF ITS OWN, and this comment used to say the
+// opposite. The claim was that process exit closes the read ends of these pipes,
+// the orphaned ssh takes a SIGPIPE on its next write, and the guest loop dies with
+// the session — all true, and all beside the point for a connection that has not
+// finished CONNECTING. An ssh still waiting on the agent has written nothing, so
+// there is no next write to fail: it sits on the agent socket, outliving sand,
+// until someone answers a prompt for a session that no longer exists. Reported
+// from the field as several 1Password prompts arriving after sand had exited.
+//
+// Worse, the key that quits is the key that CAUSES those connections — it
+// refreshes lastInput, reopening the gate, and this file's reconcile then starts
+// one per running VM inside the very Update that returns tea.Quit. So the quit now
+// closes the gate first (see model.quitting), which turns that last reconcile into
+// stopAll.
+//
+// NOT OPENING THEM IS THE HALF THAT ACTUALLY HOLDS. The stopAll half is
+// best-effort and worth being precise about, because two things are outside this
+// package's reach. cancel() closes the context; os/exec's watcher goroutine is
+// what signals the child, and nothing synchronizes that against the process exit
+// a moment later. And on the LOCAL Lima path the direct child is limactl, not
+// ssh: cancelling kills limactl and leaves the ssh GRANDCHILD running until
+// WaitDelay closes the pipes two seconds on (lima.waitDelay), which a quitting
+// process never reaches. Where the reported prompts actually come from — a remote
+// member or Proxmox, whose transport execs ssh directly (lima.SSHHost,
+// proxmoxProvider.runSSH) — ssh IS the direct child and the cancel does reach it.
+// Local Lima's own ssh authenticates against ~/.lima/_config/user, so it is not
+// the one asking an agent anything.
 //
 // # The concurrency contract (the same one jobs.go established)
 //
@@ -923,9 +946,38 @@ func heartbeatReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan
 // blanking the gauges of a user who was still watching. The bound is now "at most
 // heartbeatIdleAfter of connections after the user stops interacting", which is the
 // guarantee that was actually wanted.
+//
+// A THIRD CONDITION, AND IT IS THE QUIT: sand is leaving, so the last thing it
+// may do is open connections it will orphan on the way out. Without it the key
+// that quits refreshes lastInput like any other, reopens this gate, and the
+// reconcile at the bottom of that same Update starts a shell per running VM —
+// unmultiplexed, one agent prompt each, all abandoned mid-handshake when the
+// process exits a moment later. See model.quitting for the whole account.
 func (m model) shouldTick() bool {
-	return m.view == viewBoard &&
+	return !m.quitting &&
+		m.view == viewBoard &&
 		time.Since(m.lastInput) < heartbeatIdleAfter
+}
+
+// awaitingQuitAnswer reports that a quit confirmation is on screen and the user
+// has not answered yet — 'q' with work in flight raises the overlay instead of
+// quitting (requestQuit, board.go).
+//
+// It is a HOLD, deliberately NOT a third term in shouldTick, and the difference
+// is the whole point. shouldTick drives stop AND start together, so folding this
+// into it would tear every connection down the moment the overlay appears: the
+// gauges would blank under a prompt the user is still reading, and answering 'n'
+// would rebuild them all — which on an agent that asks per connection means
+// DECLINING a quit costs a burst of prompts. Trading prompts-on-quit for
+// prompts-on-decline is not a fix.
+//
+// So this gates the start half only. While the answer is pending, sand holds
+// exactly the connections it already had: it opens nothing (the burst cannot
+// move one keystroke earlier and be orphaned by the 'y' a second later) and
+// closes nothing (a declined quit resumes with no handshake at all). 'y' sets
+// model.quitting and shouldTick takes it from there.
+func (m model) awaitingQuitAnswer() bool {
+	return m.confirm != nil && m.confirm.quits
 }
 
 // syncHeartbeats reconciles the open heartbeats against the VMs that should have
@@ -959,6 +1011,10 @@ func (m model) syncHeartbeats() tea.Cmd {
 	}
 	if !m.shouldTick() {
 		m.heartbeats.stopAll()
+		return nil
+	}
+	if m.awaitingQuitAnswer() {
+		// Hold: neither open nor close while the quit prompt is unanswered.
 		return nil
 	}
 
