@@ -42,6 +42,18 @@ created: 2026-08-26
 | What on-disk topology should a module and its issues use? | User challenged the proposal: *"Claude code for example will create its own worktrees in .claude. How would that work with this?"* Resolved by evidence (see Background): **do not mandate a topology**; work wherever a harness drops the worktree. |
 | Is backwards compatibility required? | **Yes — additive, no BC break.** The existing directory-scoped `GH_TOKEN` wiring stays byte-identical; URL-keyed credentials are a parallel path used only for `git.drupalcode.org`. |
 
+### Refinement session, 2026-08-26
+
+| Question | Answer | Source |
+| --- | --- | --- |
+| How does sand learn *which* issue fork a checkout needs a token for, and what triggers minting? The original plan left this seam — between the ddev half and the credential half — entirely unspecified. | **Issue number, user-initiated.** The developer names an issue number against an existing drupal.org checkout; that one command derives the fork URL, mints, places the token, and creates the worktree for the issue branch. | User |
+| (Challenge) *"How could use the drupalorg cli inside the VM, when the token minting needs to be on the user's workstation?"* | Valid contradiction in the original recommendation. Resolved by evidence: the host needs **neither** the `drupalorg` CLI nor an authenticated API call. See Background — fork URLs follow a documented convention, are anonymously readable, and the mint call accepts a URL-encoded project path. | User challenge, resolved by verification |
+| Where does sand's own command place the worktree it creates, given the plan mandates no topology? | Sand's command uses a **default sibling path** under the issue namespace, overridable. "No mandated topology" is preserved because the `post-checkout` hook bootstraps a worktree created anywhere by any tool — the default binds only sand's own convenience command. | Assumption, with rationale |
+| Where does the host-held account PAT live? The original plan said only "the same place sandbar already keeps host-side credentials" without confirming such a place exists. | It exists: `internal/profiles/token.go` establishes the pattern — config records only the *path* to a credential, and the loader refuses a file readable by group or other. The drupal.org PAT follows it. | Auto-resolved from codebase |
+| Does the plan correctly distinguish GitLab's token scopes from access levels? | **No — the original plan conflated them.** They are independent axes deciding different things, and MR tooling depends on the scope axis. Corrected in Host-side token minting. | Auto-resolved; defect in prior revision |
+| What happens to a drupal.org checkout and its worktrees across a `sand reset`? Unaddressed in the original plan. | A real gap. Reset stages only the clone's own org directory and restores it *after* finalize, while ddev's project registry lives in the guest's global state. Sibling worktrees under a different org directory are not staged at all. Recorded as a risk with an explicit requirement. | Auto-resolved from codebase; new requirement |
+| Are minted tokens revoked when a worktree is removed? | Not resolvable without a `git worktree remove` hook, which git does not provide. Recorded as **unresolved** with mitigation: bounded expiry at mint time, plus an explicit listing/revocation surface so outstanding tokens are visible and killable. | Unresolved, mitigated |
+
 ## Executive Summary
 
 A Drupal developer should be able to install `sand`, create a VM, point it at a
@@ -64,6 +76,16 @@ ddev global command and error messages that name it. The credential half
 delivers per-issue-fork GitLab project access tokens into the guest keyed by
 **remote URL** rather than by directory, with the powerful account-level PAT
 held on the host and never exposed to an agent-controlled VM.
+
+The two halves meet at a single user-facing action: naming an issue number
+against a drupal.org checkout. From the module name sand already holds and the
+issue number the developer supplies, the host derives the fork URL by drupal.org's
+documented convention, confirms it anonymously, mints a token scoped to that fork
+alone, places it in the guest, and creates the worktree for the issue branch. The
+host needs no PHP, no Drupal tooling, and exactly one authenticated API call; the
+`drupalorg` CLI stays in the guest for the merge-request work it is actually good
+at. Everything else in the design is automatic or discoverable, which is what
+makes the workflow portable to any tool the developer prefers.
 
 The URL-keying is the load-bearing discovery of this plan's investigation, and
 it is what makes worktrees work. Directory-scoped credentials cannot express
@@ -92,6 +114,9 @@ put its worktrees.
 | A per-issue token requires a manual GitLab Settings → Access tokens round-trip | `sand` mints the per-fork token from a host-held account PAT | The stated pain; the UI round-trip per issue is the main friction in the current workflow |
 | The account-level PAT would have to live wherever pushes happen | The account PAT stays on the host and never enters a VM | An agent-controlled VM holding account-wide push access defeats the purpose of narrow tokens |
 | Nothing tells an agent how to run tests in a contrib module | `ddev drupal-contrib-init` self-lists in `ddev help`; `ddev start` in an unbootstrapped module names it | Harness-neutral discovery, no Claude-Code-specific files |
+| Starting work on an issue means: find the fork, add a remote, make a branch, make a token, place it, configure ddev | Naming the issue number does all of it | This is the "SIMPLE for a Drupal developer" goal made concrete and testable |
+| A `sand reset` would restore a drupal.org checkout with no registered ddev project, and would not stage sibling issue worktrees at all | Reset either restores drupal.org checkouts to a working state or refuses clearly and says what will be lost | Verified in the reset flow; silently returning a broken environment is worse than a clear refusal |
+| Outstanding minted tokens are invisible | The developer can list and revoke every token sand has minted | Every minted token is a live credential on the developer's real account |
 
 ### Background
 
@@ -174,6 +199,44 @@ token for one's own use is arguably the former, but the boundary is not
 explicitly drawn. These unknowns are why the plan builds placement first and
 minting on top.
 
+**Issue forks are derivable and anonymously readable (verified empirically).**
+A `ls-remote` against `git.drupalcode.org/issue/drupal-3181657.git` succeeded
+with no credential presented, returning the fork's branches including one named
+for the issue. Three consequences follow, and together they resolve what looked
+like an architectural contradiction — that the host must mint tokens while the
+`drupalorg` CLI lives only in the guest. The fork URL is derivable from the
+module name (which sand already holds from the clone URL) plus the issue number,
+by drupal.org's documented `PROJECT-ISSUE_NUMBER` naming. Its existence and its
+branch list can be confirmed anonymously, needing no token and no API access.
+And the GitLab mint call accepts a URL-encoded project path, so it needs no
+project-ID lookup either. The host therefore requires no PHP runtime, no Drupal
+tooling, and exactly one authenticated API call — the mint itself.
+
+This also rules out a guest-to-host minting broker, which would have been the
+obvious alternative resolution. Such a broker would let a compromised guest
+request a token for *any* fork, quietly restoring the account-wide push reach the
+whole least-privilege design exists to prevent.
+
+**A host-side credential pattern already exists (confirmed in the codebase).**
+`internal/profiles/token.go` establishes it: `profiles.yaml` is secret-free and
+records only where a credential lives, `LoadToken` is the single read site, and a
+file readable by group or other is refused outright rather than warned about. The
+drupal.org account PAT should follow this exact pattern rather than introducing a
+new store. Note that `internal/secrets` is *not* the right home — it exists to
+deliver secrets into guests, which is precisely what this credential must never
+do.
+
+**Reset does not currently accommodate this workflow (confirmed in the
+codebase).** The reset flow re-clones during finalize and restores a preserved
+project tree only *afterwards*, and it stages exactly one org directory derived
+from the clone URL. Two consequences follow. ddev's project registry lives in the
+guest's global state, not inside the checkout, so a preserved checkout returns
+with its ddev configuration present but no registered project. And a sibling
+issue worktree — living under the `issue/` org directory rather than the clone's
+`project/` one — is never staged, so reset would destroy it while leaving the
+main clone's worktree administrative files referencing paths that no longer
+exist. Neither is acceptable silently.
+
 **What the VM already provides.** Every sand VM ships ddev, Docker, `mkcert`,
 `glab`, and the `drupalorg` CLI — which already offers `issue:get-fork`,
 `issue:setup-remote`, `issue:checkout`, and the `mr:*` family, and authenticates
@@ -191,12 +254,19 @@ triggered by the same event — a clone or a worktree appearing.
 
 ```mermaid
 graph TD
+    DEV["Developer names an issue number<br/>against a drupal.org checkout"]
+
     subgraph HOST["Host (trusted)"]
-        PAT["Account PAT<br/>api scope<br/>never enters a VM"]
-        MINT["sand: mint per-fork<br/>project access token"]
+        DERIVE["Derive fork URL:<br/>module (already known)<br/>+ issue number"]
+        VERIFY["Confirm fork + branches<br/>anonymous ls-remote, no token"]
+        PAT["Account PAT<br/>never enters a VM"]
+        MINT["Mint fork-scoped token<br/>one authenticated API call"]
         SEC["Secrets store"]
-        PAT --> MINT --> SEC
+        DERIVE --> VERIFY --> MINT --> SEC
+        PAT --> MINT
     end
+
+    DEV --> DERIVE
 
     subgraph GUEST["Guest VM (agent-controlled)"]
         CRED["git-credential-store<br/>one entry per fork URL"]
@@ -215,8 +285,10 @@ graph TD
     end
 
     SEC -->|"delivered per fork URL"| CRED
+    DEV -.->|"also creates the worktree,<br/>which the hook bootstraps"| T2
     PROJ -.->|"push to issue fork"| CRED
 
+    style DEV fill:#1f4a2f,color:#fff
     style PAT fill:#4a2020,color:#fff
     style CRED fill:#1f3a5f,color:#fff
     style BOOT fill:#1f3a5f,color:#fff
@@ -364,14 +436,28 @@ it in the guest.
 **Objective**: Remove the per-issue GitLab UI round-trip while keeping the
 powerful credential off the agent-controlled machine.
 
-The account-level PAT is held on the host, in the same place sandbar already
-keeps host-side credentials, and is used only to call the GitLab API. For a
-given issue fork, `sand` mints a project access token scoped to that fork alone,
-at the lowest access level that permits pushing, with a bounded expiry, and
-delivers only that minted token into the guest. The account PAT never enters a
-VM. Because GitLab refuses to mint from a project access token, a leaked guest
-token cannot escalate by minting more — the privilege ceiling is structural
-rather than merely conventional.
+The account-level PAT is held on the host following the pattern
+`internal/profiles/token.go` already establishes — configuration records the
+*path* to the credential, a single loader reads it, and a file readable by group
+or other is refused rather than warned about. It is used only to call the GitLab
+API. `internal/secrets` is explicitly not the right home: that store exists to
+deliver secrets into guests, which is exactly what this credential must never do.
+
+For a given issue fork, `sand` mints a project access token bounded on **two
+independent axes**, which the previous revision of this plan wrongly conflated.
+The `scopes` axis decides what the token may *do* — repository write for pushing,
+and API access if the guest's merge-request tooling is to work against that fork.
+The `access_level` axis decides what role the token acts *as*, and may be set
+below the caller's own. Both must be chosen deliberately: an over-scoped token
+defeats the purpose, while a token with repository write but no API scope will
+push fine and then fail confusingly the first time the `drupalorg` CLI or `glab`
+tries to read the merge request. Which scope set is actually required is a
+question for the validation probe, not an assumption.
+
+Expiry is bounded at mint time. The account PAT never enters a VM, and because
+GitLab refuses to mint from a project access token, a leaked guest token cannot
+escalate by minting more — the privilege ceiling is structural rather than
+merely conventional.
 
 Minting is layered on top of placement, not fused with it. Placement — the
 credential mechanism of the previous section — must work standalone with a token
@@ -382,12 +468,55 @@ lifecycle should use the API's rotation and revocation operations rather than
 accumulating tokens indefinitely, since every minted token is a live credential
 on the developer's account until it expires.
 
+Because every minted token is a live credential on the developer's real
+drupal.org account, the set of outstanding tokens must be **listable and
+revocable** through sand, using the API's revoke operation. Without that, tokens
+accumulate invisibly and the least-privilege posture erodes over time — a
+developer with thirty forgotten fork tokens is not meaningfully better off than
+one with a single account PAT.
+
 One boundary is worth stating explicitly: issue **forks** cannot be created this
 way. drupal.org's documentation is clear that forks are created from the issue
 page and warns against creating them from GitLab. The workflow therefore begins
-with a fork that already exists, and the `drupalorg` CLI's existing fork-lookup
-and remote-setup commands are the natural bridge from an issue number to a fork
-URL.
+with a fork that already exists — created by the developer in the browser, which
+is also where they click "Get push access".
+
+### The issue-number entry point
+
+**Objective**: Give the whole workflow one user-facing action, and place the
+host/guest boundary so that neither side needs the other's tooling.
+
+*Resolves the seam left unspecified in the original revision — see the refinement
+clarifications.*
+
+The developer names an issue number against an existing drupal.org checkout.
+Everything else follows from information sand already has. The module name comes
+from the clone URL; combined with the issue number it yields the fork URL by
+drupal.org's documented `PROJECT-ISSUE_NUMBER` convention. The fork's existence
+and its branch list are confirmed by an anonymous fetch — verified to need no
+credential — which also identifies the issue branch to check out. The mint call
+accepts a URL-encoded project path, so no project-ID lookup is needed. Then the
+token is placed in the guest keyed by that fork URL, and the worktree for the
+issue branch is created, which the `post-checkout` hook bootstraps into a ddev
+project.
+
+The division of labor matters as much as the sequence. The host does the
+derivation, the anonymous verification, and the one authenticated call, because
+that is where the account PAT lives and where it must stay. The guest does the
+development work, and keeps the `drupalorg` CLI for the merge-request operations
+it is genuinely good at — status, pipeline logs, diffs, patches. Neither side
+needs the other's tooling: the host needs no PHP runtime or Drupal knowledge, and
+the guest never sees a credential broader than one fork.
+
+The alternative — a guest-to-host broker that mints on the guest's request — is
+rejected deliberately. It would let a compromised guest obtain a token for any
+fork, restoring account-wide push reach through the back door.
+
+Where sand creates a worktree itself, it uses a default path under the issue
+namespace, overridable by the developer. This does not reintroduce a mandated
+topology: the default binds only sand's own convenience command, while the
+`post-checkout` hook continues to bootstrap a worktree created anywhere, by any
+tool. The default's interaction with reset is recorded under risks.
 
 ## Risk Considerations and Mitigation Strategies
 
@@ -436,6 +565,26 @@ URL.
     - **Mitigation**: Detect an existing hooks configuration and defer to it
       rather than overwriting, surfacing that the automatic worktree bootstrap is
       unavailable in that checkout.
+- **Reset returns a broken or truncated environment**: Confirmed in the reset
+  flow. A preserved checkout comes back with its ddev configuration but no
+  registered ddev project, because that registry lives in the guest's global
+  state rather than in the checkout. Worse, reset stages only the org directory
+  derived from the clone URL, so a sibling issue worktree under the `issue/`
+  namespace is not staged at all — reset destroys it while leaving the main
+  clone's worktree administrative files pointing at paths that no longer exist.
+    - **Mitigation**: Treat reset as in scope for this work rather than
+      discovering it later. Either stage every drupal.org checkout belonging to
+      the VM and re-register its ddev project after restore, or detect the
+      situation and refuse with a message naming exactly what would be lost. A
+      silent broken restore is the one outcome that must not ship.
+- **Remote and Proxmox profiles cannot reach ddev URLs directly**: Lima forwards
+  guest ports to the *remote host's* loopback, not the developer's browser, and
+  Linux hosts additionally cannot bind privileged ports unprivileged. Several
+  parallel ddev projects compound both.
+    - **Mitigation**: Document the constraint and point at the existing
+      `ddev share --provider=cloudflared` path already covered in the web-servers
+      documentation. Do not build port-forwarding machinery; sand deliberately
+      manages no tunnels.
 
 </details>
 
@@ -462,6 +611,16 @@ URL.
     - **Mitigation**: Keep minting an explicitly user-initiated action rather than
       a background process, document the policy in the user-facing docs, and
       raise it with the DA if the feature is to be promoted broadly.
+- **The required token scope set is unknown**: Pushing needs repository write;
+  the guest's merge-request tooling needs API access. A token minted with too
+  narrow a scope set pushes successfully and then fails confusingly on the first
+  merge-request operation, which is a worse failure than being refused outright.
+  Whether issue-fork branches are protected — which would raise the required
+  access level from Developer to Maintainer — is likewise unverified.
+    - **Mitigation**: Determine both empirically in the same early probe that
+      settles the other drupal.org unknowns, by minting a token at the narrowest
+      plausible setting and exercising a real push and a real merge-request read
+      against a real fork. Do not infer either from documentation.
 - **Upstream ddev-drupal-contrib changes its setup sequence**: The bootstrap
   encodes a sequence owned by another project.
     - **Mitigation**: Keep the sequence in one place so a change is a
@@ -480,10 +639,15 @@ URL.
       worktree-inherits-main-clone-token behavior this investigation uncovered —
       as an explicit follow-up rather than leaving two mechanisms unexplained.
 - **Minted tokens accumulate as live credentials**: Every mint creates a real
-  credential on the developer's account that persists until expiry.
-    - **Mitigation**: Bound expiry at mint time, use the API's revoke operation
-      when a checkout or VM is torn down, and make the set of outstanding tokens
-      visible to the developer.
+  credential on the developer's account that persists until expiry. Git provides
+  no `worktree remove` hook, so the natural teardown moment for a per-issue token
+  **cannot** be observed automatically — this is recorded as an unresolved gap,
+  not a solved one.
+    - **Mitigation**: Bound expiry at mint time so orphans die on their own; use
+      the API's revoke operation at the teardown points that *are* observable
+      (VM delete, explicit revoke); and make outstanding tokens listable so a
+      developer can audit and revoke by hand. Do not claim automatic cleanup on
+      worktree removal.
 - **Bootstrap failures inside provisioning are opaque**: A long, network-dependent
   step buried in an Ansible run produces poor diagnostics.
     - **Mitigation**: Surface bootstrap failure as a distinct outcome that names
@@ -522,6 +686,19 @@ URL.
 8. Every automated behavior is reachable by a human or any agent through
    documented, harness-neutral commands; nothing depends on a Claude-Code-specific
    file or convention.
+9. Naming an issue number against a drupal.org checkout produces, in one step, a
+   worktree on the issue branch, a bootstrapped ddev project, and push access
+   scoped to that issue's fork.
+10. The host requires no PHP runtime and no Drupal tooling, and makes exactly one
+    authenticated GitLab call per mint; fork resolution and verification use no
+    credential at all.
+11. Running the bootstrap twice on the same checkout changes nothing and reports
+    success — idempotency is asserted by test, since two of the three trigger
+    surfaces can fire repeatedly.
+12. A `sand reset` of a VM holding a drupal.org checkout and its worktrees either
+    restores them to a working state, or refuses and names precisely what would be
+    lost. It never returns a silently broken environment.
+13. Every token sand has minted can be listed and revoked through sand.
 
 ## Self Validation
 
@@ -535,42 +712,70 @@ real issue fork.
    Record whether the access level permits minting and whether the endpoint is
    permitted. Report both outcomes explicitly — a negative result reduces scope
    to the placement layer and must not be silently worked around.
-2. **Verify credential resolution by URL.** In a provisioned VM with entries for
+2. **Settle the scope and access-level question in the same probe.** Mint a token
+   at the narrowest plausible scope set and access level, then exercise both a
+   real `git push` to a branch on that fork *and* a real merge-request read
+   through the guest's tooling. Widen only until both succeed, and record the
+   minimum that works. Neither axis may be inferred from documentation.
+3. **Verify fork resolution needs no credential.** With no credential available,
+   resolve a real issue number plus module name to a fork URL by convention and
+   list its branches. Confirm success and confirm the issue branch appears. This
+   is the check that keeps the host free of Drupal tooling.
+4. **Verify credential resolution by URL.** In a provisioned VM with entries for
    two different issue forks, run git's credential-fill for each fork URL and
    confirm each returns its own distinct token, that a third, unlisted fork URL
    returns no credential, and that the canonical project URL returns whatever was
    configured for it and not an issue fork's token.
-3. **Verify the same resolution from a worktree.** Repeat step 2 from inside a
-   linked worktree at a nested path and confirm byte-identical results, proving
-   path independence.
-4. **Verify GitHub is unbroken.** In the same VM, run git's credential-fill for a
+5. **Verify the same resolution from a worktree.** Repeat the previous step from
+   inside a linked worktree at a nested path and confirm byte-identical results,
+   proving path independence.
+6. **Verify GitHub is unbroken.** In the same VM, run git's credential-fill for a
    `github.com` URL and confirm the existing `GH_TOKEN` still resolves. This is
    the explicit BC check and must be run *after* the drupal.org wiring is applied.
-5. **Verify end-to-end create.** Run `sand create` against a real drupal.org
+7. **Verify end-to-end create.** Run `sand create` against a real drupal.org
    module URL. Confirm the checkout is a ddev project, that it starts, and fetch
    its project URL over HTTP from inside the guest, confirming a Drupal response
    rather than an error page.
-6. **Verify worktree bootstrap and non-clobbering.** Record the main clone's ddev
+8. **Verify the one-step issue entry point.** Against that checkout, name a real
+   issue number and confirm all three outcomes in one action: a worktree exists on
+   the issue branch, it is a running ddev project reachable over HTTP, and a push
+   to that issue's fork authenticates. This is the plan's headline claim and must
+   be demonstrated, not argued.
+9. **Verify worktree bootstrap and non-clobbering.** Record the main clone's ddev
    configuration, add a worktree at a nested path, and confirm: a new independent
    ddev project exists at the worktree; its name differs from the parent's; the
    parent's configuration is byte-identical to what was recorded. Then run a ddev
    command inside the worktree and re-check the parent's configuration is still
    unchanged — this is the regression test for the verified clobbering hazard.
-7. **Verify parallelism.** With two issue worktrees of one module started
-   simultaneously, fetch both project URLs and confirm two distinct running sites.
-8. **Verify least privilege by attempting to violate it.** From one issue
-   worktree, attempt a push to a different issue fork and to the canonical
-   project. Both must fail with an authentication error. Capture the output.
-9. **Verify the account PAT's absence.** Search the guest filesystem — environment
-   files, the credential store, per-directory `.env` files, and shell
-   configuration — for the account PAT value and confirm zero matches.
-10. **Verify discovery surfaces.** Confirm the bootstrap command appears in `ddev
+10. **Verify idempotency.** Run the bootstrap a second time on an already
+    bootstrapped checkout and on a worktree. Confirm both report success, leave
+    the ddev configuration byte-identical, and leave `git status --porcelain`
+    unchanged.
+11. **Verify parallelism.** With two issue worktrees of one module started
+    simultaneously, fetch both project URLs and confirm two distinct running sites.
+12. **Verify least privilege by attempting to violate it.** From one issue
+    worktree, attempt a push to a different issue fork and to the canonical
+    project. Both must fail with an authentication error. Capture the output.
+13. **Verify the account PAT's absence.** Search the guest filesystem — environment
+    files, the credential store, per-directory `.env` files, and shell
+    configuration — for the account PAT value and confirm zero matches.
+14. **Verify reset behavior explicitly.** Reset a VM holding a bootstrapped
+    checkout plus at least one issue worktree. Confirm the outcome is either a
+    working restored environment — checkout present, ddev project registered and
+    startable, worktree intact — or a refusal that names what would be lost.
+    Confirm it is never a silent partial restore, and specifically that the main
+    clone is never left with worktree administrative files pointing at absent
+    paths.
+15. **Verify token listing and revocation.** List outstanding minted tokens through
+    sand and confirm a token minted earlier in this validation appears. Revoke it,
+    confirm it disappears from the listing, and confirm a push using it now fails.
+16. **Verify discovery surfaces.** Confirm the bootstrap command appears in `ddev
     help` output in a fresh VM, and that a ddev start in an unbootstrapped
     drupal.org checkout produces an error naming it.
-11. **Verify checkout cleanliness.** In a bootstrapped module checkout and in a
+17. **Verify checkout cleanliness.** In a bootstrapped module checkout and in a
     worktree, confirm `git status --porcelain` reports nothing attributable to
     the bootstrap.
-12. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
+18. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
     not fall below the committed floor enforced in CI.
 
 ## Documentation
@@ -592,6 +797,13 @@ Yes — this plan requires documentation updates, both human- and agent-facing.
   multiple simultaneous projects and the Linux privileged-port interaction.
 - **`docs/getting-started/available-tools.md`** — note that drupal.org checkouts
   are bootstrapped automatically and name the command.
+- **`docs/reference/files-and-state.md`** — document the host-side account PAT
+  file, its required mode, and that it is deliberately not part of the guest
+  secrets store.
+- **Reset documentation** — whichever of the reset sections applies, updated to
+  state what happens to drupal.org checkouts and issue worktrees across a reset.
+  The existing documentation already warns that a reset re-clones before secrets
+  land; this workflow adds cases that warning does not currently cover.
 - **`AGENTS.md`** — yes, this needs updating: it is the repository's own
   agent-facing documentation and must describe the new credential mechanism, the
   `useHttpPath` host-scoping constraint, and the worktree/ddev clobbering hazard
@@ -636,6 +848,18 @@ existing clone step. Hook installation joins the guest git configuration that
 role already manages. The ddev global command lands in the guest's ddev
 configuration, which the `dev-tools` role already provisions.
 
+The host-side account PAT follows the credential pattern
+`internal/profiles/token.go` already establishes — a path recorded in
+configuration, one loader, and a hard refusal of over-permissive file modes —
+rather than introducing a new store or extending the guest-facing secrets store.
+
+The reset path in `internal/provision` **is** touched, which the previous
+revision of this plan did not acknowledge. Reset's staging is currently derived
+from the clone URL's single org directory, and this workflow legitimately
+produces checkouts outside it. That is a change to existing behavior, but not a
+compatibility break: reset's behavior for a VM holding no drupal.org checkout is
+unchanged.
+
 Nothing in this plan changes the Lima, Proxmox, or remote-SSH provider layers, the
 TUI's board model, or the create form's existing fields. `internal/checkouts`
 already discovers worktrees during its sweep and may later surface per-checkout
@@ -665,3 +889,39 @@ surfaces are the fallback layer, not the mechanism. That ordering is what the
 "SIMPLE for a Drupal developer" goal actually demands, and it is also what makes
 the result harness-neutral: a workflow that requires no instructions is
 automatically portable to any tool.
+
+### Known unresolved gaps
+
+Carried deliberately rather than papered over. Downstream task generation should
+treat these as known, not as oversights.
+
+- **Automatic token cleanup on worktree removal is not possible.** Git exposes no
+  `worktree remove` hook. Mitigated by bounded expiry, revocation at the teardown
+  points that *are* observable, and a listing surface — not solved.
+- **Three drupal.org facts are unverified** and gate the minting layer: whether
+  push access grants Maintainer, whether the token-creation endpoint is permitted,
+  and which scope set and access level are actually required. All three are
+  settled by the first validation steps, before minting work begins.
+- **Whether Drupal's extension discovery skips dot-directories is assumed, not
+  verified.** If it does not, nested worktrees pollute the parent site's extension
+  scan. The plan requires explicit exclusion rather than relying on this.
+
+### Change Log
+
+- **2026-08-26 (creation)**: Initial plan, following an investigation that
+  established the four verified findings in Background.
+- **2026-08-26 (refinement)**: Specified the previously-missing seam between the
+  ddev and credential halves as a user-initiated issue-number entry point, and
+  added it as an architectural component and to the diagram. Resolved the
+  host/guest contradiction it exposed — the host needs neither the `drupalorg`
+  CLI nor an authenticated call to resolve a fork — by verifying that fork URLs
+  are convention-derivable and anonymously readable; recorded why a guest-to-host
+  minting broker is rejected. Corrected a genuine defect in the prior revision
+  that conflated GitLab's `scopes` and `access_level` axes. Grounded the
+  host-side PAT in the existing `internal/profiles/token.go` pattern rather than
+  an unnamed store. Added the previously-unrecorded reset interaction as a risk,
+  a requirement, and a validation step, and brought reset into the integration
+  scope. Added risks for remote-profile ddev reachability and unknown token
+  scopes. Added five success criteria and six validation steps, fixed the
+  validation list's numbering and a stale cross-reference, and recorded the
+  unresolved gaps above.
