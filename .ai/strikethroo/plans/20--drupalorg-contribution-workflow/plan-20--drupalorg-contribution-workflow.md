@@ -54,6 +54,18 @@ created: 2026-08-26
 | What happens to a drupal.org checkout and its worktrees across a `sand reset`? Unaddressed in the original plan. | A real gap. Reset stages only the clone's own org directory and restores it *after* finalize, while ddev's project registry lives in the guest's global state. Sibling worktrees under a different org directory are not staged at all. Recorded as a risk with an explicit requirement. | Auto-resolved from codebase; new requirement |
 | Are minted tokens revoked when a worktree is removed? | Not resolvable without a `git worktree remove` hook, which git does not provide. Recorded as **unresolved** with mitigation: bounded expiry at mint time, plus an explicit listing/revocation surface so outstanding tokens are visible and killable. | Unresolved, mitigated |
 
+### Refinement session 2 — multiple projects per VM, 2026-08-26
+
+| Question | Answer | Source |
+| --- | --- | --- |
+| *"How does this plan work if a user has a single VM for multiple drupal.org projects? Any complications?"* | Three real complications, one of them a defect in the prior revision. Folded in below. The credential half needs no change and is in fact vindicated by this case. | User |
+| Does the clone-time trigger cover a second, third, or fourth module? | **No — this was a silent gap.** `CloneURL` is a single value per VM, so the Ansible path fires once. Resolved by installing the hook through git's template directory, which was verified to cover every clone in the VM through the same code path. | Auto-resolved by verification |
+| Can the mint entry point identify the right module in a multi-module VM? | **No — defect in the prior revision**, which derived the module from the VM's create-time `CloneURL`. It must be read from the targeted checkout instead. Corrected. | Defect in prior revision |
+| Does the multi-module case break the credential design? | No — it argues *for* it. All canonical drupal.org modules share one org directory, so a directory-scoped scheme would have given them a single shared token. | Auto-resolved from codebase |
+| Was the reset risk stated correctly? | Partly. Because all canonical modules share one org directory, preserve-project stages every module clone, not just the first. The worktree half of the risk stands. Corrected in Background and in the risk entry. | Correction to prior revision |
+| What actually limits how many projects can run at once? | Memory, not disk — 8 GiB against 100 GiB by default. Quantified in Background and in the risk entry. | Auto-resolved from shipped defaults |
+| Must each task be verified before it is considered complete? | **Yes.** Every task runs `/code-review --fix` and then `/simplify` before it may be marked complete. Recorded as a per-task completion gate under Self Validation. | User |
+
 ## Executive Summary
 
 A Drupal developer should be able to install `sand`, create a VM, point it at a
@@ -117,6 +129,9 @@ put its worktrees.
 | Starting work on an issue means: find the fork, add a remote, make a branch, make a token, place it, configure ddev | Naming the issue number does all of it | This is the "SIMPLE for a Drupal developer" goal made concrete and testable |
 | A `sand reset` would restore a drupal.org checkout with no registered ddev project, and would not stage sibling issue worktrees at all | Reset either restores drupal.org checkouts to a working state or refuses clearly and says what will be lost | Verified in the reset flow; silently returning a broken environment is worse than a clear refusal |
 | Outstanding minted tokens are invisible | The developer can list and revoke every token sand has minted | Every minted token is a live credential on the developer's real account |
+| Only the module named in `--clone-url` could ever be bootstrapped automatically | Every drupal.org clone in the VM bootstraps, whoever cloned it and however | One VM commonly holds several modules; a single create-time URL cannot cover them |
+| A global hooks path would override every repository's own hooks | Hooks arrive via git's template directory, leaving existing and non-Drupal repositories alone | Drupal work shares the VM with unrelated repositories that have their own hooks |
+| A task could be marked complete without a review or simplification pass | No task completes until `/code-review --fix` and then `/simplify` have run and their tests re-run | Correctness and quality gates belong at task boundaries, not as one sweep at the end |
 
 ### Background
 
@@ -237,6 +252,43 @@ issue worktree — living under the `issue/` org directory rather than the clone
 main clone's worktree administrative files referencing paths that no longer
 exist. Neither is acceptable silently.
 
+**One VM can hold many drupal.org modules, and that changes three things
+(verified empirically and in the codebase).** The plan was originally reasoned
+around one module and many issues; several modules in one VM is a separate axis.
+
+*The template directory closes the multi-module trigger gap.* A test confirmed
+that `init.templateDir` installs hooks into every freshly created repository and
+that `post-checkout` fires during `git clone` itself, with the new clone as the
+working directory. The same test confirmed the null-SHA discriminator: git passes
+an all-zero previous-HEAD for both clone and worktree-add, and a real SHA for an
+ordinary branch switch. Without this, only the module named in `--clone-url` —
+one value per VM — would ever be bootstrapped automatically.
+
+*Multi-module is an argument for URL-keyed credentials, not merely compatible
+with them.* Every canonical drupal.org module lives flat under
+`git.drupalcode.org/project/<name>` — confirmed against a real contrib module —
+so `OrgRelDir` returns the identical org directory, `git.drupalcode.org/project`,
+for every module a developer clones. A directory-scoped credential scheme would
+therefore have given every drupal.org module in the VM one shared token. Keying
+by remote URL is what keeps them distinct.
+
+*The same fact softens the reset risk for clones while leaving it intact for
+worktrees.* Because all canonical modules share that one org directory, a
+preserve-project reset stages every module clone together rather than only the
+first — the earlier statement of this risk was accurate but misleading. Issue
+worktrees under the `issue/` namespace remain a different org directory and are
+still not staged.
+
+**Memory, not disk, bounds parallelism (from the shipped defaults).** A VM
+defaults to 8 GiB of memory and 100 GiB of disk. A running ddev project is a web
+container plus a database container; a handful of concurrently *running* projects
+is what 8 GiB supports, while 100 GiB comfortably holds many times that number of
+*stopped* ones, since each project's cost on disk is its vendor tree, core, and
+database volume. The practical shape of the workflow follows from this: many
+projects may exist, few should run at once, and stopping a project rather than
+destroying it is the normal move. Concurrent dependency resolution across several
+bootstraps at once is the most likely way to exhaust memory.
+
 **What the VM already provides.** Every sand VM ships ddev, Docker, `mkcert`,
 `glab`, and the `drupalorg` CLI — which already offers `issue:get-fork`,
 `issue:setup-remote`, `issue:checkout`, and the `mr:*` family, and authenticates
@@ -275,9 +327,9 @@ graph TD
         CRED --- HTTP
 
         BOOT["drupal-contrib bootstrap<br/>idempotent, harness-neutral"]
-        T1["Ansible project role<br/>at clone time"]
-        T2["post-checkout hook<br/>at worktree time"]
-        T3["ddev drupal-contrib-init<br/>+ real error messages"]
+        T2["post-checkout hook<br/>via init.templateDir<br/>fires on EVERY clone<br/>and every worktree add"]
+        T1["Ansible project role<br/>diagnostics for the<br/>create-time clone"]
+        T3["ddev drupal-contrib-init<br/>+ real error messages<br/>(recovery path)"]
         T1 --> BOOT
         T2 --> BOOT
         T3 --> BOOT
@@ -356,32 +408,53 @@ mysteriously later.
 **Objective**: Make the bootstrapped state the default state, so that neither a
 developer nor an agent needs to know the bootstrap exists.
 
-**Clone time (Ansible).** The `project` role already clones `--clone-url` into
-`~/<host>/<org>/<repo>`. When detection matches, the role invokes the bootstrap
-after the clone. This is the path that makes "install sand, create a VM, start
-contributing" true for the first module. Because bootstrap is slow — it resolves
-Drupal core and its dependencies — and provisioning failures are opaque, the
-role must surface bootstrap failure as a distinct, recognizable outcome rather
-than failing the whole provision run ambiguously.
+**One hook covers both clone time and worktree time.** The `post-checkout` hook
+fires on `git clone` as well as on `git worktree add` — verified, with the new
+clone's directory as the working directory in both cases. Installing it via
+git's **template directory** therefore collapses what looked like two separate
+trigger surfaces into one: with `init.templateDir` set in the guest's global git
+configuration, *every* repository created in the VM receives the hook at creation
+time, and the hook fires immediately on the initial checkout.
 
-**Worktree time (git hook).** A provisioned `post-checkout` hook bootstraps a
-newly created worktree. `git worktree add` fires `post-checkout`, so a plain
-`git worktree add` — whatever tool runs it, wherever it places the result —
-produces a configured ddev project with no new command to learn. This is the
-surface that makes the work order's "parallel instances with worktrees" true,
-and it is also the correctness mechanism from the previous section: it closes
-the window in which an agent's first `ddev config` would rewrite the parent. The
-hook must be cheap and must no-op quickly on the ordinary branch-checkout case,
-which fires the same hook far more often. Hook installation is a guest-level git
-configuration concern and must not overwrite a hooks path the repository or the
-user has already set.
+This matters most for the multi-project case. `CloneURL` is a single value, so
+the Ansible clone-time path fires exactly once, for the module named at create
+time; a developer working on several drupal.org modules in one VM clones the rest
+by hand, and those would otherwise reach only the weakest discovery layer. The
+template directory covers them all, through the same code path, regardless of
+which tool did the cloning.
+
+*Resolves the multi-project gap recorded in the second refinement.*
+
+The hook must be cheap, and must no-op on the ordinary branch-checkout case that
+fires it far more often. The discriminator is exact and was verified: git passes
+the all-zero null SHA as the previous-HEAD argument for both a clone and a
+worktree add, and a real commit SHA for an ordinary branch switch. Bootstrapping
+only on the null SHA is therefore precise, not heuristic.
+
+Installation must use the **template directory**, not a global `core.hooksPath`.
+A template directory *copies* hooks into newly created repositories and leaves
+existing repositories alone; a global hooks path *overrides* per-repository hooks
+for every repository in the VM, including unrelated non-Drupal work sharing that
+VM. The hook must also defer to a hooks path a repository or developer has
+already set.
+
+**Clone time (Ansible).** The `project` role still clones `--clone-url` into
+`~/<host>/<org>/<repo>`, and with the template directory in place the hook fires
+there too. The role's remaining responsibility is diagnostic rather than
+triggering: because bootstrap is slow — it resolves Drupal core and its
+dependencies — and provisioning failures are opaque, the role must surface
+bootstrap failure as a distinct, recognizable outcome rather than failing the
+whole provision run ambiguously.
 
 **Point of need (ddev command and errors).** The bootstrap is also exposed as a
 ddev **global custom command**, which self-lists in `ddev help` — a discovery
 surface any agent that has decided to use ddev will encounter without being
 told. It is reinforced by making a ddev start in an unbootstrapped drupal.org
-checkout fail with a message that names the command. This covers repositories
-cloned by hand inside the VM, which no sandbar-controlled trigger sees.
+checkout fail with a message that names the command. With the template directory
+in place this is no longer the only path for hand-cloned repositories, but it
+remains the recovery path for the cases the hook cannot reach: a repository
+created before the template directory existed, one whose bootstrap failed, and
+one in a checkout whose hooks path is owned by someone else.
 
 No `AGENTS.md` or other file is written into the checkout; that was explicitly
 excluded from scope.
@@ -490,9 +563,14 @@ host/guest boundary so that neither side needs the other's tooling.
 clarifications.*
 
 The developer names an issue number against an existing drupal.org checkout.
-Everything else follows from information sand already has. The module name comes
-from the clone URL; combined with the issue number it yields the fork URL by
-drupal.org's documented `PROJECT-ISSUE_NUMBER` convention. The fork's existence
+Everything else follows from information sand already has. The module name is
+read from **the checkout being targeted** — its origin remote, or the path the
+developer names — and explicitly *not* from the VM's create-time `CloneURL`. That
+distinction is load-bearing and was wrong in the previous revision: `CloneURL` is
+a single value recorded once per VM, so in a VM holding several drupal.org
+modules it identifies only the first, and deriving from it would mint against the
+wrong fork. Combined with the issue number, the module name yields the fork URL
+by drupal.org's documented `PROJECT-ISSUE_NUMBER` convention. The fork's existence
 and its branch list are confirmed by an anonymous fetch — verified to need no
 credential — which also identifies the issue branch to check out. The mint call
 accepts a URL-encoded project path, so no project-ID lookup is needed. Then the
@@ -548,18 +626,32 @@ tool. The default's interaction with reset is recorded under risks.
       on it. Independently, exclude worktree directories from the parent
       project's site scanning so correctness does not depend on a naming
       accident.
-- **Resource exhaustion from parallel projects**: Each checkout is a full ddev
+- **Memory exhaustion from parallel projects**: Each checkout is a full ddev
   project with its own containers and database, and each resolves its own copy of
-  Drupal core. A handful of parallel issues can exceed a default VM's memory and
-  disk.
-    - **Mitigation**: Document the per-project cost and the VM sizing it implies.
-      Prefer a shared package cache where ddev supports one. Make it easy to stop
-      a project without destroying it.
+  Drupal core. Against the shipped defaults of 8 GiB memory and 100 GiB disk,
+  **memory is the binding constraint and disk is not** — a modest number of
+  concurrently running projects saturates 8 GiB, while 100 GiB holds many times
+  that number of stopped ones. Several modules each with several issue worktrees
+  reaches the limit quickly. Running multiple dependency resolutions at once is
+  the sharpest case.
+    - **Mitigation**: Document the per-project memory cost and the sizing it
+      implies, and state the operating rule plainly — many projects may exist,
+      few should run at once. Prefer a shared package cache where ddev supports
+      one. Make stopping a project (rather than destroying it) the obvious move,
+      and avoid bootstrapping several modules concurrently.
 - **`post-checkout` fires far more often than worktree creation**: The same hook
   runs on ordinary branch checkouts, where bootstrapping would be wasteful or
   actively disruptive.
     - **Mitigation**: The hook must detect the worktree-creation case and no-op
       cheaply otherwise, and must be idempotent so a spurious run is harmless.
+- **Hook installation hijacks unrelated repositories**: A single VM commonly holds
+  non-Drupal work alongside drupal.org modules. A global `core.hooksPath` would
+  *override* per-repository hooks for every repository in the VM, silently
+  disabling hooks that other projects depend on.
+    - **Mitigation**: Install through git's template directory, which copies hooks
+      into newly created repositories and leaves existing ones alone. Gate the
+      hook on drupal.org detection so it no-ops immediately elsewhere, and gate it
+      on the null previous-HEAD SHA so ordinary branch switches do nothing.
 - **Hook installation collides with existing configuration**: A repository or
   developer may already set a hooks path.
     - **Mitigation**: Detect an existing hooks configuration and defer to it
@@ -568,10 +660,14 @@ tool. The default's interaction with reset is recorded under risks.
 - **Reset returns a broken or truncated environment**: Confirmed in the reset
   flow. A preserved checkout comes back with its ddev configuration but no
   registered ddev project, because that registry lives in the guest's global
-  state rather than in the checkout. Worse, reset stages only the org directory
+  state rather than in the checkout. Reset also stages only the org directory
   derived from the clone URL, so a sibling issue worktree under the `issue/`
   namespace is not staged at all — reset destroys it while leaving the main
   clone's worktree administrative files pointing at paths that no longer exist.
+  For *module clones* this is narrower than it first appears: every canonical
+  drupal.org module shares the single org directory `git.drupalcode.org/project`,
+  so staging that one directory captures all of them, not just the module named
+  at create time. The worktree half of the problem is unaffected.
     - **Mitigation**: Treat reset as in scope for this work rather than
       discovering it later. Either stage every drupal.org checkout belonging to
       the VM and re-register its ddev project after restore, or detect the
@@ -699,8 +795,47 @@ tool. The default's interaction with reset is recorded under risks.
     restores them to a working state, or refuses and names precisely what would be
     lost. It never returns a silently broken environment.
 13. Every token sand has minted can be listed and revoked through sand.
+14. A second drupal.org module, cloned by hand inside the VM with a plain
+    `git clone` and no sand involvement, becomes a working ddev project — and the
+    first module is unaffected.
+15. In a VM holding several modules, naming an issue number mints for the fork of
+    the module actually being targeted, never the VM's create-time clone URL.
+16. A non-Drupal repository in the same VM keeps its own hooks and never triggers
+    a bootstrap, and an ordinary branch switch in any repository triggers nothing.
+17. Every task in the blueprint passes the per-task completion gate —
+    `/code-review --fix`, then `/simplify`, then tests re-run — before being
+    marked complete.
 
 ## Self Validation
+
+### Per-Task Completion Gate
+
+This gate applies to **every task** generated from this plan, and is a
+precondition for marking any task complete — not a final sweep at the end.
+
+Before a task may be considered done, and after its own tests pass:
+
+1. Run `/code-review --fix` against the task's changes, and apply or consciously
+   reject every finding. This pass hunts correctness defects.
+2. Then run `/simplify`, and apply or consciously reject its findings. This pass
+   is quality only — reuse, simplification, efficiency — and deliberately does
+   not look for bugs, which is why it runs second rather than instead.
+3. Re-run the task's tests afterwards. Both commands modify the working tree, so
+   a green result from before they ran is not evidence the task is still correct.
+
+A task whose gate has not been run is not complete, regardless of whether its
+functional work appears finished.
+
+One point of possible confusion is worth pre-empting, because a future reader may
+otherwise try to "fix" it: these are Claude Code commands, and this plan elsewhere
+requires strict harness neutrality. There is no contradiction. Harness neutrality
+is a constraint on **what sandbar ships to Drupal developers** — the workflow must
+not depend on any particular assistant. It is not a constraint on the tooling used
+to *build* sandbar. An implementer working in a different harness should run that
+harness's closest equivalent review and simplification passes; the requirement is
+the two passes and their order, not these two command names.
+
+### Post-Implementation Validation
 
 These steps inspect the real system and must be executed after implementation.
 Several require a live VM; the drupal.org probes require a real account and a
@@ -775,7 +910,25 @@ real issue fork.
 17. **Verify checkout cleanliness.** In a bootstrapped module checkout and in a
     worktree, confirm `git status --porcelain` reports nothing attributable to
     the bootstrap.
-18. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
+18. **Verify the second module bootstraps with no sand involvement.** In a VM
+    created against module A, clone an unrelated drupal.org module B by hand
+    inside the guest, using plain `git clone` and nothing else. Confirm B becomes
+    a running ddev project with a distinct name and URL, and that A is untouched.
+    This is the multi-project claim, and it must be demonstrated with the same
+    command a developer would type.
+19. **Verify the mint entry point targets the right module.** With both A and B
+    present, name an issue number against B and confirm the token is minted for
+    B's fork — not A's, and not the VM's create-time clone URL. Then confirm a
+    push from B's worktree to A's fork fails to authenticate.
+20. **Verify the hook does not hijack unrelated repositories.** In the same VM,
+    clone a non-Drupal repository and confirm the bootstrap does not run, that
+    the repository's own hooks still execute, and that an ordinary branch switch
+    in any repository triggers no bootstrap.
+21. **Verify reset across multiple modules.** Reset a VM holding modules A and B
+    plus at least one issue worktree. Confirm both module clones survive or are
+    named as lost, per step 14's standard, and that the outcome is never silently
+    partial.
+22. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
     not fall below the committed floor enforced in CI.
 
 ## Documentation
@@ -907,6 +1060,25 @@ treat these as known, not as oversights.
   scan. The plan requires explicit exclusion rather than relying on this.
 
 ### Change Log
+
+- **2026-08-26 (refinement 2 — multiple projects per VM)**: Consolidated the
+  clone-time and worktree-time triggers into a single `post-checkout` hook
+  installed through git's template directory, after verifying that the hook fires
+  on `git clone` and that the null previous-HEAD SHA cleanly distinguishes
+  clone/worktree-add from an ordinary branch switch. This closes a silent gap in
+  which only the module named in `--clone-url` — one value per VM — was ever
+  bootstrapped automatically. Corrected a defect that derived the module for
+  minting from the VM's create-time `CloneURL`, which identifies only the first
+  module in a multi-module VM; it now comes from the targeted checkout. Corrected
+  the reset risk, which overstated the loss for module clones (all canonical
+  drupal.org modules share one org directory, so staging it captures all of them)
+  while leaving the worktree half intact. Quantified the resource risk as
+  memory-bound rather than disk-bound against the shipped 8 GiB / 100 GiB
+  defaults. Added a risk for a global hooks path hijacking unrelated repositories.
+  Recorded why multi-module argues *for* URL-keyed credentials. Added a per-task
+  completion gate requiring `/code-review --fix` then `/simplify` before any task
+  may be marked complete, with a note distinguishing product harness-neutrality
+  from build-process tooling. Added 4 success criteria and 4 validation steps.
 
 - **2026-08-26 (creation)**: Initial plan, following an investigation that
   established the four verified findings in Background.
