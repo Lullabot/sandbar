@@ -707,6 +707,22 @@ tool. The default's interaction with reset is recorded under risks.
     - **Mitigation**: Keep minting an explicitly user-initiated action rather than
       a background process, document the policy in the user-facing docs, and
       raise it with the DA if the feature is to be promoted broadly.
+- **A project access token on a shared issue fork is a shared artifact**:
+  drupal.org grants push access to issue forks broadly — anyone with a Git
+  account can request it — so an issue fork is not private to one contributor. A
+  project access token lives on the *project*, not on the person who created it,
+  which means it is visible to, and revocable by, others with sufficient access on
+  that fork. It may also count against per-project token limits. This is not a
+  confidentiality problem — the token grants only what that fork already grants
+  broadly — but it makes minting a socially visible act on someone else's
+  collaboration space, and a token could vanish for reasons outside the
+  developer's control.
+    - **Mitigation**: Name minted tokens unambiguously so their origin is obvious
+      to other contributors. Treat an unexpectedly-missing token as a normal,
+      recoverable condition that re-mints rather than an error state. Confirm
+      during the probe whether drupal.org imposes a per-project token limit, and
+      include this behavior in the user-facing documentation so the developer is
+      not surprised to find their token listed on a shared fork.
 - **The required token scope set is unknown**: Pushing needs repository write;
   the guest's merge-request tooling needs API access. A token minted with too
   narrow a scope set pushes successfully and then fails confusingly on the first
