@@ -39,8 +39,11 @@ import (
 // The critical section is a small read-modify-write measured in milliseconds,
 // so a holder still there after the budget is a stuck or crashed-but-somehow-
 // still-open one, and blocking a user's create on it indefinitely would be
-// worse than the lost-update this exists to prevent.
-const (
+// worse than the lost update this exists to prevent.
+//
+// Vars, not consts, so the give-up path can be tested without a two-second
+// test. Nothing in production writes them.
+var (
 	pollInterval = 5 * time.Millisecond
 	waitBudget   = 2 * time.Second
 )
