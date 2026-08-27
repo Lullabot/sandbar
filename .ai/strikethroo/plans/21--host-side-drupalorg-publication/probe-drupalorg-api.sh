@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Plan 20 — drupal.org GitLab API capability map.
+# Plan 21 — drupal.org GitLab API capability map.
 #
 # Supersedes probe-gitlab-token-minting.sh. What that probe settled (verified
 # 2026-08-27) is that *project access tokens* are unavailable here:
@@ -19,7 +19,7 @@
 # boundary and a `Code: Push` permission, and they need no Maintainer. This
 # instance serves their documentation and runs GitLab 19.x. They cannot be
 # created through the API (only via the web UI), so this script cannot probe
-# them — see plan 20's Background and its manual verification step.
+# them — see plan 21's Background and its manual verification step.
 #
 # Also note: this allowlist is NOT a security boundary. POST /api/graphql is not
 # blocked, and git push over HTTPS bypasses the REST allowlist entirely. Do not
@@ -27,7 +27,7 @@
 #
 # What drupal.org DOES allow is every content-write endpoint, which is what the
 # plan's host-side publication design depends on. This script re-verifies that,
-# and is plan 20's validation step "re-run the endpoint map" — run it whenever
+# and is plan 21's validation step "re-run the endpoint map" — run it whenever
 # publication starts failing, to tell a platform policy change apart from a bug.
 #
 # Runs entirely UNAUTHENTICATED on purpose: routing is decided before auth, so
@@ -120,7 +120,7 @@ if [ "$fail" -eq 0 ]; then
   echo "drupal.org still permits content writes and still blocks credential minting."
 else
   printf '\033[31m%d of %d checks DIVERGED from the plan'"'"'s assumptions.\033[0m\n' "$fail" "$((pass+fail))"
-  echo "drupal.org's API policy has changed. Re-read plan 20's Background before"
+  echo "drupal.org's API policy has changed. Re-read plan 21's Background before"
   echo "assuming this is a bug in sand: a newly-routed access_tokens endpoint would"
   echo "reopen the per-fork token design, and a newly-blocked content endpoint would"
   echo "break publication."
