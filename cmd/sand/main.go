@@ -1,6 +1,14 @@
 // Command sand is the interactive TUI for managing Claude Code development
 // VMs: list/inspect instances, create new ones (streaming the provisioner), and
-// run lifecycle actions (start/stop/restart/delete/recreate).
+// run lifecycle actions (start/stop/restart/delete/reset).
+//
+// Its headless subcommands are the same verbs under the same names — `sand
+// create` is the form's `n`, `sand reset` is the board's `R`, `sand shell` is
+// `S`, `sand land` is `l`, `sand paste-image` is `v` — because a verb that
+// exists in only one of the two entrypoints is a verb users have to discover
+// twice. Each shares the TUI's implementation rather than reimplementing it
+// (internal/manage's gates and bookkeeping, provider.AttachArgv, internal/
+// checkouts' sweep), so the pairs cannot drift.
 package main
 
 import (
@@ -36,6 +44,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "reset":
+			if err := runReset(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		case "shell":
 			if err := runShell(os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -55,7 +69,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand land NAME    list/land a VM's git checkouts (see 'sand land -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand reset NAME   rebuild a VM from its base image (see 'sand reset -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand land NAME    list/land a VM's git checkouts (see 'sand land -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}
