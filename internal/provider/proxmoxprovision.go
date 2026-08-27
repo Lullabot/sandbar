@@ -838,8 +838,19 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	}
 	home := "/home/" + user
 
-	var stageDir, orgRel string
-	var haveOrg bool
+	var stageDir string
+	var project provision.ProjectPlan
+
+	// wrap adds the recovery path to any error raised once host data exists, so
+	// the one statement of that contract lives here rather than at each return.
+	// It reads stageDir at CALL time, so it is correct before staging has run as
+	// well as after.
+	wrap := func(err error) error {
+		if err == nil || stageDir == "" {
+			return err
+		}
+		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+	}
 
 	// 1. Stage out the selected state while the source VM is still alive.
 	if opts.PreserveClaude || opts.PreserveProject {
@@ -870,25 +881,21 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 			}
 			if opts.PreserveClaude {
 				if err := provision.StageOut(ctx, p, cfg.Name, home, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-					return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+					return wrap(err)
 				}
 			}
 			if opts.PreserveProject {
-				if orgRel, haveOrg = provision.OrgRelDir(cfg.CloneURL); haveOrg {
-					if err := provision.StageOut(ctx, p, cfg.Name, home, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
-						return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-					}
+				// Shared with the Lima Reset rather than reimplemented: what the
+				// guest ACTUALLY holds decides this, and the rules for reading an
+				// unreachable one are subtle enough that two copies would drift.
+				if project, err = provision.PlanProject(ctx, p, cfg.Name, home, cfg.CloneURL, filepath.Join(stageDir, "project.tgz")); err != nil {
+					return wrap(err)
+				}
+				if !project.Staged && project.OrgRel != "" {
+					progress(out, "Note: %s has no ~/%s to preserve; the project will be cloned fresh instead\n", cfg.Name, project.OrgRel)
 				}
 			}
 		}
-	}
-
-	staged := stageDir != ""
-	wrap := func(err error) error {
-		if err == nil || !staged {
-			return err
-		}
-		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
 	}
 
 	// 2. Delete the existing VM (force), then re-clone from the base.
@@ -919,7 +926,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	}
 
 	// 4. Restore Claude BEFORE finalize so the playbook layers settings on top.
-	if opts.PreserveClaude && staged {
+	if opts.PreserveClaude && stageDir != "" {
 		if err := provision.StageIn(ctx, p, cfg.Name, home, user, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
 			return wrap(fmt.Errorf("proxmox: restoring Claude into %s: %w", cfg.Name, err))
 		}
@@ -927,7 +934,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 
 	// 5. Finalize, omitting the project clone only when a tree was actually staged.
 	finCfg := cfg
-	if opts.PreserveProject && haveOrg {
+	if project.RestoresCheckout {
 		finCfg.CloneURL = ""
 	}
 	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out); err != nil {
@@ -935,17 +942,17 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	}
 
 	// 6. Restore the project tree AFTER finalize, then re-approve its .env.
-	if opts.PreserveProject && haveOrg && staged {
-		if err := provision.StageIn(ctx, p, cfg.Name, home, user, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
+	if project.Staged {
+		if err := provision.StageIn(ctx, p, cfg.Name, home, user, []string{project.OrgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
 			return wrap(fmt.Errorf("proxmox: restoring the project into %s: %w", cfg.Name, err))
 		}
-		if err := p.Shell(ctx, cfg.Name, nil, out, "sudo", "-iu", user, "direnv", "allow", home+"/"+orgRel); err != nil {
+		if err := provision.AllowDirenv(ctx, p, cfg.Name, user, home+"/"+project.OrgRel, out); err != nil {
 			return wrap(fmt.Errorf("proxmox: approving the restored .env in %s: %w", cfg.Name, err))
 		}
 	}
 
 	// 7. Full success: drop the staging dir.
-	if staged {
+	if stageDir != "" {
 		_ = os.RemoveAll(stageDir)
 	}
 	progress(out, "%s is ready\n", cfg.Name)

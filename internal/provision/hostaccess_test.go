@@ -69,7 +69,7 @@ func (f *fakeHostFiles) LimaHome() string {
 	return f.home
 }
 
-func (f *fakeHostFiles) StagePlaybook(_ context.Context, localDir string) (string, error) {
+func (f *fakeHostFiles) StagePlaybook(_ context.Context, localDir, _ string) (string, error) {
 	f.note("StagePlaybook", localDir)
 	return localDir, nil
 }

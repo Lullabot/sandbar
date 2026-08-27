@@ -60,7 +60,7 @@ not a prompt.
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sand` also forces on `devtools_docker_registry_proxy_enabled`. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
-| `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. |
+| `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. Flags you omit are taken from that VM's recorded settings — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | `true` | Install Claude Code in the base image. |
@@ -163,6 +163,27 @@ These sound similar and do different things to different objects:
   recreate a target that is not already a sand-managed VM, since recreate
   would otherwise delete and replace *any* instance it is pointed at,
   sand-managed or not.
+
+  A recreate rebuilds a VM `sand` already knows, so **every flag you leave off
+  comes from that VM's own recorded settings** — its base image, sizing,
+  hostname, git identity and clone URL — rather than from this command's
+  defaults. That is the same rule the `--with-*` flags follow, and it makes
+  `sand create --recreate --name mybox` mean "give me this VM back", not "give
+  me a default VM with this name". A flag you *do* pass still wins, so
+  `--recreate --disk 200GiB` remains the way to resize one. This matches the
+  TUI's Reset, which has always pre-filled its form from the same recorded
+  settings.
+
+  The one thing that is *not* remembered is `--clone-token`: tokens are never
+  written to the managed index (see [credential
+  handling](#-clone-token-is-a-credential)). If the recorded `--clone-url`
+  points at a private repo, pass `--clone-token` again or the clone inside the
+  VM will fail; `sand` warns when it reuses a recorded URL with no token.
+
+  What a recreate does **not** do is preserve anything inside the guest: the
+  disk is deleted. To keep the Claude Code login or the project checkout across
+  a rebuild, use the TUI's Reset and its preserve toggles ([The
+  TUI](tui.md#resetting-a-vm)).
 
 ### Disk sizing
 
