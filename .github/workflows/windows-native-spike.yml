@@ -191,7 +191,7 @@ jobs:
         continue-on-error: true
         run: |
           $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
-          limactl.exe start --tty=false --name=spike template://default
+          limactl.exe start --tty=false --name=spike template:default
           "RESULT: lima-start-exit=$LASTEXITCODE"
           limactl.exe list
           limactl.exe shell spike uname -a
@@ -244,12 +244,16 @@ jobs:
             "https://github.com/lima-vm/lima/releases/download/v${{ env.LIMA_VERSION }}/lima-${{ env.LIMA_VERSION }}-Linux-x86_64.tar.gz" \
             || echo "RESULT: lima-download=FAILED"
           tar -C /usr/local -xzf /tmp/lima.tar.gz || echo "RESULT: lima-extract=FAILED"
-          limactl --version || echo "RESULT: limactl=MISSING"
+          # limactl refuses to run as root, so probe the file rather than run it.
+          [ -x /usr/local/bin/limactl ] && echo "RESULT: limactl=INSTALLED" \
+            || echo "RESULT: limactl=MISSING"
 
           # Lima refuses to run as root, so the boot happens as an ordinary user
           # -- which also mirrors how a real WSL2 user would run sand.
           useradd -m -s /bin/bash limauser 2>/dev/null
-          su - limauser -c 'limactl start --tty=false --name=spike template://default'
+          usermod -aG kvm limauser
+          echo "RESULT: kvm-group=$(id -nG limauser)"
+          su - limauser -c 'limactl start --tty=false --name=spike template:default'
           echo "RESULT: lima-start-exit=$?"
           su - limauser -c 'limactl list'
           su - limauser -c 'limactl shell spike uname -a'
