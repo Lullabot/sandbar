@@ -2,18 +2,28 @@
 #
 # Plan 20 — drupal.org GitLab API capability map.
 #
-# Supersedes probe-gitlab-token-minting.sh, whose question is settled: per-issue
-# -fork tokens are impossible on drupal.org. Two independent reasons, both
-# verified 2026-08-27:
+# Supersedes probe-gitlab-token-minting.sh. What that probe settled (verified
+# 2026-08-27) is that *project access tokens* are unavailable here:
 #
 #   1. "Get push access" on an issue fork grants Developer (access_level 30).
-#      GitLab requires Maintainer/Owner to create a project access token by ANY
+#      GitLab requires Maintainer/Owner to create a PROJECT ACCESS TOKEN by ANY
 #      route, including the web UI. So there is no UI to script either.
-#   2. drupal.org runs a per-path, per-method allowlist in front of the GitLab
-#      API and blocks POST .../access_tokens, .../deploy_tokens and
-#      .../deploy_keys outright — for everyone, on every project, authenticated
-#      or not. A blocked request never reaches GitLab; it returns a ~56KB HTML
-#      404 from the drupal.org Drupal site instead of GitLab JSON.
+#   2. drupal.org blocks POST .../access_tokens, .../deploy_tokens and
+#      .../deploy_keys at its edge — for everyone, on every project,
+#      authenticated or not. A blocked request never reaches GitLab; it returns a
+#      ~56KB HTML 404 from the drupal.org Drupal site instead of GitLab JSON.
+#
+# IMPORTANT — that is NOT the whole story, and an earlier version of this comment
+# overstated it. GitLab FINE-GRAINED access tokens are a different mechanism: GA
+# on Self-Managed since 19.2, Free tier, with a project/group/instance access
+# boundary and a `Code: Push` permission, and they need no Maintainer. This
+# instance serves their documentation and runs GitLab 19.x. They cannot be
+# created through the API (only via the web UI), so this script cannot probe
+# them — see plan 20's Background and its manual verification step.
+#
+# Also note: this allowlist is NOT a security boundary. POST /api/graphql is not
+# blocked, and git push over HTTPS bypasses the REST allowlist entirely. Do not
+# rely on it to contain a leaked credential.
 #
 # What drupal.org DOES allow is every content-write endpoint, which is what the
 # plan's host-side publication design depends on. This script re-verifies that,
