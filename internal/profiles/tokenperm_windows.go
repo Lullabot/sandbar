@@ -16,12 +16,19 @@ import (
 // anyone but me read this?" -- has to be asked of the file's DACL instead.
 //
 // The rule enforced here mirrors the unix one as closely as Windows allows:
-// every access-allowed ACE that grants read must name the file's OWNER,
-// LocalSystem, or the built-in Administrators group. Those last two can read
-// anything on the machine by other means (SeBackupPrivilege, taking
-// ownership), so refusing them would fail every file on a normal Windows
-// install without buying any real protection -- the same reason the unix
-// check ignores root.
+// every access-allowed ACE that grants read must name the CURRENT USER, the
+// file's owner, LocalSystem, or the built-in Administrators group.
+//
+// The current user has to be on that list independently of the owner. When a
+// member of Administrators creates a file, Windows records the owner as
+// BUILTIN\Administrators rather than that user, so an owner-only rule refuses
+// a file you created yourself and are the only one able to read -- exactly
+// what the CI spike hit.
+//
+// LocalSystem and Administrators are allowed because they can read anything
+// on the machine by other means (SeBackupPrivilege, taking ownership), so
+// refusing them would fail every file on a normal Windows install without
+// buying any real protection -- the same reason the unix check ignores root.
 //
 // This matters beyond ticking a box: %USERPROFILE% carries a restrictive
 // default ACL, but nothing stops a profile pointing token_file at C:\temp,
@@ -52,6 +59,11 @@ func checkTokenPerms(path string) error {
 	owner, _, err := sd.Owner()
 	if err != nil {
 		return fmt.Errorf("proxmox token file %s: reading its owner: %w", path, err)
+	}
+
+	self, err := currentUserSID()
+	if err != nil {
+		return fmt.Errorf("proxmox token file %s: resolving the current user: %w", path, err)
 	}
 
 	dacl, _, err := sd.DACL()
@@ -86,7 +98,7 @@ func checkTokenPerms(path string) error {
 			continue
 		}
 		sid := (*windows.SID)(unsafe.Pointer(uintptr(unsafe.Pointer(ace)) + unsafe.Offsetof(ace.SidStart)))
-		if sid.Equals(owner) || sid.Equals(system) || sid.Equals(admins) {
+		if sid.Equals(self) || sid.Equals(owner) || sid.Equals(system) || sid.Equals(admins) {
 			continue
 		}
 		return fmt.Errorf("proxmox token file %s grants read access to %s; it must be readable only by your own account", path, sidLabel(sid))
@@ -106,4 +118,14 @@ func sidLabel(sid *windows.SID) string {
 		return account
 	}
 	return domain + `\` + account
+}
+
+// currentUserSID returns the SID of the user this process runs as.
+func currentUserSID() (*windows.SID, error) {
+	token := windows.GetCurrentProcessToken()
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return nil, err
+	}
+	return user.User.Sid, nil
 }
