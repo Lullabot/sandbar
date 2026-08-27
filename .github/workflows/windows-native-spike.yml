@@ -263,3 +263,72 @@ jobs:
           tail -60 /home/limauser/.lima/spike/ha.stderr.log 2>/dev/null || echo "(none)"
 
           echo "SPIKE-END"
+
+  # ---------------------------------------------------------------- job 5 ---
+  # The one thing that could still sink option B. internal/lima/client.go holds
+  # a standing invariant that work VMs carry NO writable host mount, and the
+  # only mount sand actually needs is a READ-ONLY bind of the staged playbook
+  # at /mnt/playbook. The default template's automatic home mount failed over
+  # sshfs in the first run -- but that is Lima's own convenience mount, not
+  # ours. This asks the narrow question that matters: can Lima on Windows bind
+  # a host directory into the guest read-only, and can the guest read it?
+  lima-whpx-mount:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install QEMU
+        continue-on-error: true
+        run: choco install qemu -y --no-progress
+
+      - name: Install limactl.exe
+        continue-on-error: true
+        run: |
+          $url = "https://github.com/lima-vm/lima/releases/download/v${{ env.LIMA_VERSION }}/lima-${{ env.LIMA_VERSION }}-Windows-AMD64.zip"
+          Invoke-WebRequest -Uri $url -OutFile lima.zip
+          Expand-Archive -Path lima.zip -DestinationPath "$env:USERPROFILE\lima" -Force
+
+      - name: Stage a host directory to mount
+        run: |
+          $d = "$env:USERPROFILE\mnttest"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Set-Content -Path "$d\sentinel.txt" -Value "mounted-ok-from-windows-host"
+          "RESULT: staged=$d"
+
+      # Forward slashes on purpose: they dodge YAML/PowerShell backslash
+      # escaping entirely, and Lima normalizes them on Windows.
+      - name: Boot with an explicit read-only mount
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          $loc = ("$env:USERPROFILE/mnttest") -replace '\\','/'
+          # Built by concatenation from single-quoted parts: embedded double
+          # quotes never pass through pwsh's native-argument escaping, and the
+          # whole expression reaches limactl as one argv entry.
+          $expr = '.mounts=[{"location":"' + $loc + '","mountPoint":"/mnt/spike","writable":false}]'
+          "using --set $expr"
+          limactl.exe start --tty=false --name=mnt template:default --set $expr
+          "RESULT: mount-start-exit=$LASTEXITCODE"
+
+      - name: Read the mount from inside the guest
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          limactl.exe shell mnt ls -la /mnt/spike
+          "RESULT: mount-ls-exit=$LASTEXITCODE"
+          limactl.exe shell mnt cat /mnt/spike/sentinel.txt
+          "RESULT: mount-cat-exit=$LASTEXITCODE"
+          limactl.exe shell mnt sh -c "mount | grep -i spike || echo NO-MOUNT-LINE"
+
+      - name: Dump Lima logs
+        if: always()
+        continue-on-error: true
+        run: |
+          $d = "$env:USERPROFILE\.lima\mnt"
+          if (Test-Path $d) {
+            foreach ($f in @('ha.stderr.log','serial.log')) {
+              if (Test-Path "$d\$f") { "--- $f ---"; Get-Content "$d\$f" -Tail 40 }
+            }
+          } else { "RESULT: lima-dir=MISSING" }
