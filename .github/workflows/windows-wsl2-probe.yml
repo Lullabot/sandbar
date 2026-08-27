@@ -16,6 +16,17 @@ name: windows-wsl2-probe
 # firewall, keepalive, path handling) and the VM boot itself needs real
 # hardware or a self-hosted runner.
 #
+# ANSWER (measured 2026-08-27, run 33110986636, windows-2025):
+#   virt-extensions=PRESENT, dev-kvm=PRESENT, kvm-ok=YES ("KVM acceleration
+#   can be used"), and `qemu-system-x86_64 -accel kvm` ran until `timeout`
+#   killed it rather than failing to initialize. WSL 2.7.12.0, kernel
+#   6.18.33.2-2, Windows 10.0.26100.33296.
+#
+#   So the second level of nesting IS available: a Lima guest can run under
+#   QEMU+KVM inside WSL2 on a free hosted Windows runner. GitHub still calls
+#   nested virt unsupported and experimental, so treat this as "works today,
+#   could regress" and keep any Windows job non-blocking.
+#
 # This is a one-off measurement, not a gate. Delete it once the answer is
 # recorded on issue #99.
 
@@ -90,6 +101,14 @@ jobs:
         shell: wsl-bash {0}
         continue-on-error: true
         run: |
+          # setup-wsl's wsl-bash shell runs with `set -e`, which aborted the
+          # first good run: `timeout` returns 124 when it fires, so the qemu
+          # accelerator test killed the script before the sshd check and
+          # PROBE-END could report. Every check below is individually guarded,
+          # and an "ABSENT" is a result worth printing rather than a reason to
+          # stop, so opt out.
+          set +e
+
           echo "PROBE-START"
           uname -a
 
@@ -121,8 +140,11 @@ jobs:
           # non-zero at once with "failed to initialize kvm" when KVM is
           # unusable, and otherwise gets as far as complaining about having no
           # bootable disk. That distinction is the actual answer.
+          # Exit 124 means `timeout` fired, i.e. qemu initialized KVM and sat
+          # there -- the good outcome. A fast non-zero exit with "failed to
+          # initialize kvm" on stderr is the bad one.
           if command -v qemu-system-x86_64 >/dev/null; then
-            timeout 30 qemu-system-x86_64 -accel kvm -display none -m 128 -no-reboot
+            timeout 20 qemu-system-x86_64 -accel kvm -display none -m 128 -no-reboot
             echo "RESULT: qemu-kvm-exit=$?"
           else
             echo "RESULT: qemu-kvm-exit=NOT-INSTALLED"
