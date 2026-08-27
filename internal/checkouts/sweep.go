@@ -323,9 +323,26 @@ func parseRemoteURL(raw string) (forge, orgRepo string) {
 	default:
 		// scp-like syntax: [user@]host:path
 		rest := raw
+		hadUserinfo := false
 		if i := strings.Index(rest, "@"); i >= 0 {
 			rest = rest[i+1:]
+			hadUserinfo = true
 		}
+		// A Windows drive letter is a LOCAL PATH, not scp-like [user@]host:path.
+		// Without this guard "C:\\src\\repo" parses as host "C" — which then
+		// gets persisted as the checkout's Forge. A POSIX local path has no
+		// colon and already falls through to ("", ""); this makes the Windows
+		// spelling agree with it.
+		//
+		// Two conditions keep a genuine single-letter host (git@h:org/repo)
+		// out of this branch: a drive letter never carries userinfo, and it
+		// is always followed by a separator or nothing, where an scp-like
+		// path after the colon is relative ("org/repo").
+		if !hadUserinfo && len(rest) > 1 && rest[1] == ':' && isDriveLetter(rest[0]) &&
+			(len(rest) == 2 || rest[2] == '\\' || rest[2] == '/') {
+			return "", ""
+		}
+
 		i := strings.Index(rest, ":")
 		if i < 0 {
 			return "", ""
@@ -384,4 +401,11 @@ func atoiOr(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// isDriveLetter reports whether c is an ASCII letter, i.e. the "C" of a
+// Windows path like "C:\src\repo". Deliberately not unicode.IsLetter: drive
+// letters are ASCII only.
+func isDriveLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
