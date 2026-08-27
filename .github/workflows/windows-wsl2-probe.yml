@@ -19,8 +19,16 @@ name: windows-wsl2-probe
 # Manual dispatch only: this is a one-off measurement, not a gate. Delete it
 # once the answer is recorded on issue #99.
 
+# workflow_dispatch alone cannot run this before it lands: Actions only
+# registers dispatchable workflows that already exist on the default branch,
+# so `gh workflow run --ref <branch>` 404s until merge. The paths filter fires
+# the probe on the PR that introduces it -- which is where the evidence
+# belongs -- while leaving every other PR untouched.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/windows-wsl2-probe.yml
 
 permissions:
   contents: read
