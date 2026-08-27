@@ -285,3 +285,37 @@ func TestRecreateRefusesToChangeTheCloneURL(t *testing.T) {
 		t.Errorf("a recreate that does not restate --clone-url must be allowed: %v", err)
 	}
 }
+
+// TestResetValidationBlamesTheRightValue: a validation failure must point at
+// whoever supplied the bad value. Observed against a real VM: `sand reset web
+// --disk 10GiB` reported "web's recorded config is unusable" about a number the
+// user had just typed, sending them to fix an index file that was fine.
+func TestResetValidationBlamesTheRightValue(t *testing.T) {
+	// The user's own flag: report it plainly.
+	_, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base",
+		map[string]bool{"disk": true}, resetFlagValues{disk: "10GiB"}, "hostuser")
+	if err == nil {
+		t.Fatal("a disk below the base floor should be refused")
+	}
+	if strings.Contains(err.Error(), "recorded config") {
+		t.Errorf("a bad --disk was blamed on the recorded config: %q", err.Error())
+	}
+
+	// Nothing restated, and the record itself is unusable: name the record, and
+	// the way out.
+	reg := registry.NewEmpty()
+	bad := recordedVM()
+	bad.Disk = "10GiB"
+	if err := reg.AddScoped(bad, registry.LocalScope); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	_, err = resetConfigFor(reg, "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
+	if err == nil {
+		t.Fatal("an unusable recorded config should be refused")
+	}
+	for _, want := range []string{"recorded config", "pass the settings explicitly"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err.Error(), want)
+		}
+	}
+}

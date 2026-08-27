@@ -1,9 +1,11 @@
 # CLI Reference
 
-There are five entry points:
+There are six entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
+- [`sand reset NAME`](#sand-reset-name) — rebuild an existing VM from its base
+  image, optionally keeping the Claude login or the project.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
 - [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
@@ -16,10 +18,15 @@ There are five entry points:
 
 Any other first argument is an unknown subcommand and exits `2`.
 
+Each headless command is the same verb as a TUI key, under the same name and
+sharing the same implementation: `sand create` is the form behind `n`, `sand
+reset` is `R`, `sand shell` is `S`, `sand land` is `l`, `sand paste-image` is
+`v`. Whichever you reach for, the gates, defaults and bookkeeping are the same.
+
 ## `sand`
 
 Run with no arguments, `sand` launches the interactive TUI: it lists
-instances, streams a build's progress, and drives the same create/recreate/
+instances, streams a build's progress, and drives the same create/reset/
 delete/start/stop lifecycle as the headless commands below. See
 [The TUI](tui.md) for the keybindings and screens.
 
@@ -60,7 +67,7 @@ not a prompt.
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sand` also forces on `devtools_docker_registry_proxy_enabled`. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
-| `--recreate` | bool | `false` | If `--name` already exists **and is sand-managed**, delete and re-clone it. Flags you omit are taken from that VM's recorded settings — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
+| `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sand reset NAME`](#sand-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | `true` | Install Claude Code in the base image. |
@@ -158,21 +165,25 @@ These sound similar and do different things to different objects:
   is not going to get, or if the base image is corrupted. It is independent of
   `--recreate` and the two may be combined.
 - **`--recreate`** deletes and re-clones **this VM** (`--name`) from the
-  (possibly still-old) base image. Use it to throw away one VM's disk and get
-  a clean clone without touching anything else. It is gated: `sand` refuses to
-  recreate a target that is not already a sand-managed VM, since recreate
-  would otherwise delete and replace *any* instance it is pointed at,
-  sand-managed or not.
+  (possibly still-old) base image. It is the older spelling of
+  [`sand reset NAME`](#sand-reset-name) and does exactly what that command does
+  with neither preserve flag: the same managed-VM gate, the same recorded
+  settings, the same bookkeeping. Prefer `sand reset` in new scripts — it is the
+  same verb the TUI calls Reset, and it is the only spelling that can keep
+  anything from inside the guest.
 
   A recreate rebuilds a VM `sand` already knows, so **every flag you leave off
   comes from that VM's own recorded settings** — its base image, sizing,
   hostname, git identity and clone URL — rather than from this command's
-  defaults. That is the same rule the `--with-*` flags follow, and it makes
-  `sand create --recreate --name mybox` mean "give me this VM back", not "give
-  me a default VM with this name". A flag you *do* pass still wins, so
-  `--recreate --disk 200GiB` remains the way to resize one. This matches the
-  TUI's Reset, which has always pre-filled its form from the same recorded
-  settings.
+  defaults. That makes `sand create --recreate --name mybox` mean "give me this
+  VM back", not "give me a default VM with this name". A flag you *do* pass
+  still wins, so `--recreate --disk 200GiB` remains the way to resize one.
+
+  `--clone-url` is the exception: `--recreate --clone-url ...` is **refused**.
+  A rebuild keeps the VM's project, and asking to change it in the same breath
+  used to leave the old checkout stranded beside a freshly cloned different
+  repo. Rebuild the VM as it is with `sand reset mybox`, or create another VM
+  for the other repo. (The TUI's reset form locks the same field.)
 
   The one thing that is *not* remembered is `--clone-token`: tokens are never
   written to the managed index (see [credential
@@ -182,7 +193,8 @@ These sound similar and do different things to different objects:
 
   What a recreate does **not** do is preserve anything inside the guest: the
   disk is deleted. To keep the Claude Code login or the project checkout across
-  a rebuild, use the TUI's Reset and its preserve toggles ([The
+  a rebuild, use [`sand reset`](#sand-reset-name)'s `--preserve-claude` /
+  `--preserve-project`, or the TUI's equivalent toggles ([The
   TUI](tui.md#resetting-a-vm)).
 
 ### Disk sizing
@@ -275,7 +287,7 @@ Flags:
   -rebuild
     	Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
   -recreate
-    	If the named instance exists and is sand-managed, delete and re-clone it
+    	Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild
   -timezone string
     	IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)
   -user string
@@ -295,6 +307,159 @@ Flags:
 (`--user` has no printed default because it is resolved to the host username
 *after* flags are parsed, not at registration time — see the flags table
 above.)
+
+## `sand reset NAME`
+
+Delete a sand-managed VM and clone it fresh from its base image, keeping its
+name, its project, and every setting it was built with. This is the headless
+spelling of the TUI's `R` ([Resetting a VM](tui.md#resetting-a-vm)) — same
+gate, same defaults, same preserve options.
+
+```sh
+sand reset web                                    # clean rebuild, same settings
+sand reset web --preserve-claude                  # keep the Claude Code login
+sand reset web --preserve-claude --preserve-project
+sand reset web --cpus 8 --memory 16GiB            # rebuild bigger
+```
+
+It is **gated**: `sand` refuses a target that is not a sand-managed VM, since a
+reset clones from a sandbar base image and would otherwise replace whatever
+instance it was pointed at. Ownership is resolved from the VM's provenance
+marker first, then the managed index — the same resolution `sand shell` uses,
+so a VM created by another controller on the same host is still resettable.
+
+Everything inside the guest is destroyed unless you ask for it back:
+
+| Flag | What survives |
+|---|---|
+| `--preserve-claude` | `~/.claude` and `~/.claude.json` — the Claude Code login and its history. |
+| `--preserve-project` | The cloned project's per-org directory: the checkout, its uncommitted work, and the `.env` beside it. Also **skips the re-clone**, so a private repo needs no token. |
+
+Both copy that data out of the VM to a private (`0700`) host temp directory and
+restore it into the rebuilt VM, then delete the copy. **Do not preserve
+anything from a VM you believe is compromised** — you would be copying its
+Claude Code login and its project token onto your workstation. See
+[Security Model](../reference/security-model.md).
+
+Nothing outside `~/.claude` and the cloned project's org directory survives: a
+second org's checkouts, other forges, `~/.ssh`, `~/.config/gh`, shell history
+and anything under `/srv` are all gone with the disk.
+
+### Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--preserve-claude` | bool | `false` | Keep the Claude Code login and history. |
+| `--preserve-project` | bool | `false` | Keep the project's per-org directory. |
+| `--cpus` | string (parsed as int) | *this VM's* | vCPUs. |
+| `--memory` | string | *this VM's* | RAM, e.g. `16GiB`. |
+| `--disk` | string | *this VM's* | Disk size. A clone's disk can grow but never shrink, so a smaller value is not something you can actually get (see [disk sizing](#disk-sizing)). |
+| `--hostname` | string | *this VM's* | VM hostname. |
+| `--user` | string | *this VM's* | Primary VM user. |
+| `--git-name` / `--git-email` | string | *this VM's* | git identity written into the guest. |
+| `--locale` | string | *this VM's* | System locale. |
+| `--timezone` | string | *this VM's* | IANA timezone. Naming one explicitly makes an unknown zone fatal in the guest, exactly as it does on `sand create`. |
+| `--domain` | string | *this VM's* | Domain suffix. |
+| `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
+| `--clone-token` | string | *(empty)* | Token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless `--preserve-project` is keeping the checkout, in which case nothing is cloned. |
+| `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. |
+
+`NAME` is required (exactly one positional argument), and flags may appear
+before or after it.
+
+**A flag you omit means "whatever this VM already was"**, taken from its own
+recorded settings rather than from any default — which is what makes `sand
+reset web` mean "give me this VM back". A flag you pass wins, and the result is
+recorded, so the *next* reset defaults to what this one produced.
+
+### There is no `--clone-url`
+
+A reset rebuilds the VM it is pointed at, project included. Pointing it at a
+different repo would make it a different VM: the preserve option is named for
+the org directory the VM *has*, so a changed URL means asking to keep a tree
+and having the old one discarded, and even without preserving you would get the
+new repo cloned beside a stranded old checkout. To work on another repo, make
+another VM with `sand create`. `sand create --recreate --clone-url ...` is
+refused for the same reason, and the TUI's reset form locks the same field.
+
+There is no `--base-name` either (the base comes from the VM's own provenance
+record — resetting onto a different base is a create), and no `--rebuild`: that
+one acts on the **shared** base image every other VM clones from, so it stays on
+`sand create` where it cannot be a side effect of rebuilding one VM.
+
+### Secrets are re-applied
+
+A reset ends by writing the VM's host-stored [secrets](secrets.md) into the
+rebuilt guest, so the VM comes back with the environment it had. `sand create`
+does the same after a build, and additionally records `--clone-token` as the
+VM's `GH_TOKEN` secret so it can be rotated later without a rebuild — the same
+thing the TUI has always done with the create form's token.
+
+### Verified `--help` output
+
+```
+$ sand reset --help
+Usage: sand reset NAME [flags]
+
+Delete a sand-managed VM and clone it fresh from its base image, keeping its
+name, its project, and every setting it was built with. This is the headless
+spelling of the TUI's R (Reset).
+
+Everything inside the guest is lost unless you ask for it back:
+
+  --preserve-claude    keep ~/.claude and ~/.claude.json (the Claude Code login
+                       and its history)
+  --preserve-project   keep the cloned project's per-org directory (the checkout,
+                       its uncommitted work, and the .env alongside it)
+
+Both copy data out of the VM to this host and back in afterwards. Do NOT
+preserve anything from a VM you believe is compromised.
+
+Every other flag you omit is taken from the VM's own recorded settings, so
+'sand reset web' means "give me this VM back". Pass one to change it:
+'sand reset web --disk 200GiB' resizes on the way through.
+
+There is no --clone-url: a reset rebuilds the project this VM already has. To
+work on a different repo, create another VM with 'sand create'.
+
+Examples:
+  sand reset web                                  # clean rebuild, same settings
+  sand reset web --preserve-claude                # keep the Claude login
+  sand reset web --preserve-claude --preserve-project
+  sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
+
+Flags:
+  -clone-token string
+    	Token for this VM's recorded repo (tokens are never stored in the index; pass it again for a private repo)
+  -cpus string
+    	vCPUs (default: whatever this VM has)
+  -disk string
+    	Disk size, e.g. 100GiB (default: whatever this VM has; a clone's disk can grow but never shrink)
+  -docker-proxy-host string
+    	Docker registry pull-through proxy host (default: whatever this VM has)
+  -domain string
+    	Domain suffix (default: whatever this VM has)
+  -git-email string
+    	git user.email written into the VM (default: whatever this VM has)
+  -git-name string
+    	git user.name written into the VM (default: whatever this VM has)
+  -hostname string
+    	VM hostname (default: whatever this VM has)
+  -locale string
+    	System locale (default: whatever this VM has)
+  -memory string
+    	RAM, e.g. 8GiB (default: whatever this VM has)
+  -preserve-claude
+    	Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild
+  -preserve-project
+    	Keep the cloned project's per-org directory (checkout + .env) across the rebuild
+  -profile string
+    	Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)
+  -timezone string
+    	IANA timezone for the guest (default: whatever this VM has)
+  -user string
+    	Primary VM user (default: whatever this VM has)
+```
 
 ## `sand shell NAME`
 

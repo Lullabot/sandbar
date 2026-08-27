@@ -315,6 +315,10 @@ func resetConfigFor(reg *registry.Registry, name string, scope registry.Scope, b
 	if cfg.GitEmail == "" {
 		cfg.GitEmail = vm.HostGitConfig("user.email")
 	}
+	// Lima names the guest account after whoever runs limactl, which for a
+	// remote provider is the REMOTE host's user — hence the provider's HostUser
+	// first, and only then this machine's. An empty user_name would override the
+	// user role's own default and break the guest's user creation.
 	if cfg.User == "" {
 		cfg.User = hostUser
 	}
@@ -323,12 +327,38 @@ func resetConfigFor(reg *registry.Registry, name string, scope registry.Scope, b
 	}
 
 	if err := cfg.Validate(); err != nil {
-		if found {
+		// Whose value was it? A config the user restated nothing of can only have
+		// failed on what the index holds — a record written by an older sand, or
+		// hand-edited — and the way out is to pass the settings. A config with a
+		// flag in it most likely failed on THAT, so the bare error is the honest
+		// one; blaming the record would send the user to fix a file that is fine
+		// (`sand reset web --disk 10GiB` reported "web's recorded config is
+		// unusable", about a disk size the user had just typed).
+		if found && !anyExplicitSetting(explicit) {
 			return cfg, fmt.Errorf("%s's recorded config is unusable (%w); pass the settings explicitly", name, err)
 		}
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// settingFlags are the flags that change the REBUILT VM's configuration, as
+// opposed to how the reset itself runs (--preserve-*, --profile) or what it
+// authenticates with (--clone-token). Only these can be responsible for a
+// Validate failure.
+var settingFlags = []string{
+	"cpus", "hostname", "user", "git-name", "git-email",
+	"memory", "disk", "locale", "timezone", "domain", "docker-proxy-host",
+}
+
+// anyExplicitSetting reports whether the user restated any of the VM's settings.
+func anyExplicitSetting(explicit map[string]bool) bool {
+	for _, f := range settingFlags {
+		if explicit[f] {
+			return true
+		}
+	}
+	return false
 }
 
 // doReset runs the reset and then performs the SAME managed-registry and

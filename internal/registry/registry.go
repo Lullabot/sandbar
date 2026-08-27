@@ -243,7 +243,7 @@ func LoadFrom(path string) (*Registry, error) {
 // all: one stamped with a schema version this build does not understand. Every
 // other read failure still yields a usable (empty) registry that may later be
 // written; this one must not be, so LoadFrom hands back a pathless registry.
-var errNewerSchema = errors.New("managed index was written by a newer sand")
+var errNewerSchema = errors.New("upgrade sand")
 
 // readIndex reads and migrates the on-disk index at path WITHOUT writing
 // anything back, returning the entries, whether the file needs rewriting in the
@@ -274,7 +274,7 @@ func readIndex(path string) (map[scopedKey]entry, bool, error) {
 	}
 	if version > currentVersion {
 		return out, false, fmt.Errorf(
-			"managed index %s has schema version %d, but this sand only understands %d; upgrade sand: %w",
+			"managed index %s has schema version %d, but this sand only understands %d; %w",
 			path, version, currentVersion, errNewerSchema)
 	}
 
