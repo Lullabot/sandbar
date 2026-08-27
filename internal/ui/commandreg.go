@@ -183,7 +183,8 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "reset")),
-		about:   "Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the form opens pre-filled so you can change the settings first.",
+		about: "Delete this VM and clone it fresh from its base image, keeping its name and its project. Everything inside the guest is lost unless you preserve it; the form opens pre-filled so you can change the sizing first. " +
+			"The name and repo are fixed — a reset gives you THIS VM again; a different repo is a new VM (n).",
 		// Reset clones from a Claude base, so it is only offered for VMs we
 		// created — otherwise it would replace an unrelated VM with a sandbox.
 		// Shared with the headless `sand create` path (internal/manage) so the

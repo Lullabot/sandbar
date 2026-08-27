@@ -326,11 +326,17 @@ type model struct {
 	// reset always targets its own VM's already-fixed member.
 	formProfileIdx int
 
-	// Reset mode reuses the create form to reset a managed VM: the Name is locked
-	// to the target and two preserve toggles follow the inputs.
+	// Reset mode reuses the create form to reset a managed VM: the Name and the
+	// repo URL are locked to the target (see fieldLocked) and two preserve
+	// toggles follow the inputs.
 	resetMode     bool
 	resetName     string // locked Name when in reset mode
 	resetBaseName string // base image the reset clones from
+	// resetCloneURL is the target VM's RECORDED repo, and the reset's clone URL
+	// full stop: a reset rebuilds the project this VM already has. It is also
+	// what projectToggleLabel/projectToggleEnabled below are derived from, so the
+	// toggle and the clone can never name two different orgs.
+	resetCloneURL string
 	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
 	// form shows no tool toggles, so without carrying these the rebuilt config
 	// would fall back to DefaultCreateConfig()'s all-on selection and a reset
