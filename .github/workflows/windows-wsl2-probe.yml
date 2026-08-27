@@ -1,0 +1,109 @@
+name: windows-wsl2-probe
+
+# Throwaway capability probe for issue #99 (Windows support via WSL2).
+#
+# It answers ONE question that no amount of documentation reading settles:
+# does /dev/kvm exist inside a WSL2 distro on a GitHub-hosted Windows runner?
+#
+# Why it is in doubt. The runner is already a guest (Azure host -> runner VM).
+# WSL2's utility VM is the first level of nesting, and GitHub's Windows images
+# have supported that since the move to Dadsv5 in January 2024 — that is why
+# WSL2 works there at all. A Lima guest under QEMU+KVM inside the distro would
+# be a SECOND level of nesting, and Azure documents support for one. If this
+# probe finds /dev/kvm, `sand`'s whole remote-Lima path can be exercised on a
+# free Windows runner exactly like `remote-lima-e2e` does on ubuntu-24.04. If
+# it does not, hosted Windows CI is limited to Windows-side plumbing (sshd,
+# firewall, keepalive, path handling) and the VM boot itself needs real
+# hardware or a self-hosted runner.
+#
+# Manual dispatch only: this is a one-off measurement, not a gate. Delete it
+# once the answer is recorded on issue #99.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      # Written before WSL starts: .wslconfig is read at utility-VM boot, so
+      # setting it afterwards would need a `wsl --shutdown` to take effect.
+      # nestedVirtualization defaults to true on Windows 11 but the runner
+      # image is Windows Server 2025, so state it explicitly rather than
+      # assume the default carries over.
+      - name: Request nested virtualization from WSL
+        shell: pwsh
+        run: |
+          $cfg = "[wsl2]`nnestedVirtualization=true`n"
+          Set-Content -Path "$env:USERPROFILE\.wslconfig" -Value $cfg
+          Get-Content "$env:USERPROFILE\.wslconfig"
+
+      # Option B (native sand.exe driving limactl.exe) needs QEMU's WHPX
+      # accelerator, which needs the HypervisorPlatform feature. Report
+      # whether the image has it; enabling it would need a reboot.
+      - name: Report host hypervisor features
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-WindowsOptionalFeature -Online |
+            Where-Object FeatureName -match 'Hyper-V|HypervisorPlatform|Microsoft-Windows-Subsystem-Linux|VirtualMachinePlatform' |
+            Select-Object FeatureName, State | Format-Table -AutoSize
+          (Get-ComputerInfo -Property 'HyperV*') | Format-List
+
+      - name: Install WSL2 + Ubuntu
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          set-as-default: "true"
+
+      - name: Report WSL version
+        shell: pwsh
+        continue-on-error: true
+        run: wsl --version
+
+      # The measurement. `vmx`/`svm` in /proc/cpuinfo is the necessary
+      # condition; /dev/kvm existing is the sufficient one; kvm-ok explains a
+      # negative. Non-fatal throughout — a "no" is a result, not a failure.
+      - name: Probe for KVM inside the distro
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          wsl -d Ubuntu-24.04 -u root bash -euxc @'
+          uname -a
+          grep -o -m1 -E "vmx|svm" /proc/cpuinfo || echo "NO-VIRT-EXTENSIONS"
+          ls -l /dev/kvm || echo "NO-DEV-KVM"
+          apt-get update -qq
+          apt-get install -y -qq cpu-checker qemu-system-x86
+          kvm-ok || true
+          '@
+
+      # A real accelerator init, not just a device-node check: qemu exits
+      # non-zero immediately with "failed to initialize kvm" when KVM is
+      # unusable, and otherwise gets as far as complaining about no bootable
+      # disk. That distinction is the actual answer.
+      - name: Smoke-test KVM acceleration
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          wsl -d Ubuntu-24.04 -u root bash -euxc @'
+          timeout 30 qemu-system-x86_64 -accel kvm -display none -m 128 -no-reboot ; echo "qemu exit: $?"
+          '@
+
+      # Independent of KVM: Phase 1 of issue #99 needs an sshd inside the
+      # distro that a Linux `sand` client can reach. Confirm it starts and
+      # answers on loopback, since that part is testable here either way.
+      - name: Probe sshd inside the distro
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          wsl -d Ubuntu-24.04 -u root bash -euxc @'
+          apt-get install -y -qq openssh-server
+          mkdir -p /run/sshd && /usr/sbin/sshd
+          sleep 2
+          ss -ltnp | grep :22 || echo "NO-SSHD-LISTENER"
+          '@
