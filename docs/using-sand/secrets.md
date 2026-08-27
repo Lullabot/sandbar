@@ -119,15 +119,16 @@ there:
 - It's written into the cloned repo's per-org `.env` as `GH_TOKEN` (treat
   that file as a secret; it's what makes the git/gh wiring above work for
   that directory).
-- The create form seeds it into the host secrets store's **global** scope,
-  so — per the exception above — it does **not** get the automatic
-  git-credential wiring on its own. The per-org `.env` written at clone time
-  is what authenticates `~/<host>/<org>/`. To get the same token wired for
-  other scopes too, copy it into a `[host/org]` section with the secrets
-  editor (`e`).
-- It's applied to the guest's `~/.config/sandbar/secrets.env` on every VM
-  start (see [scopes](#scopes-global-vs-per-directory) above), so it's
-  always present in the environment, even after a reset.
+- It's seeded into the host secrets store's **global** scope — by the create
+  form and by `sand create --clone-token` alike — so it can be rotated later
+  without a rebuild. Per the exception above it does **not** get the automatic
+  git-credential wiring on its own; the per-org `.env` written at clone time is
+  what authenticates `~/<host>/<org>/`. To get the same token wired for other
+  scopes too, copy it into a `[host/org]` section with the secrets editor (`e`).
+- It's applied to the guest's `~/.config/sandbar/secrets.env` at the end of
+  every create and reset, and on every VM start (see
+  [scopes](#scopes-global-vs-per-directory) above), so it's always present in
+  the environment, even after a reset.
 
 ### Precedence and multiple orgs
 
@@ -148,10 +149,12 @@ GitHub's settings.
 ### Reset and the token
 
 The token lives in the host secrets store, not in the managed-VM index (see
-[Files and State](../reference/files-and-state.md)), so it survives a
-[reset](tui.md#resetting-a-vm) and is re-applied to the rebuilt VM. But a
-reset re-clones the project during its finalize pass, which runs **before**
-stored secrets are written into the guest — so resetting a VM that cloned a
-**private** repo still needs the clone token re-supplied on the reset form,
-unless you enable the reset form's project-directory preserve toggle, which
-skips the re-clone entirely. See [Resetting a VM](tui.md#resetting-a-vm).
+[Files and State](../reference/files-and-state.md)), so it survives a reset
+and is re-applied to the rebuilt VM — from the TUI's `R` and from
+[`sand reset`](cli-reference.md#sand-reset-name) alike. But a reset re-clones
+the project during its finalize pass, which runs **before** stored secrets are
+written into the guest, so resetting a VM that cloned a **private** repo still
+needs the clone token re-supplied — the reset form's `GitHub token` field, or
+`sand reset NAME --clone-token …` — unless you preserve the project directory,
+which skips the re-clone entirely. See
+[Resetting a VM](tui.md#resetting-a-vm).

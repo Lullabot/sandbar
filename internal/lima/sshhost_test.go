@@ -1091,7 +1091,7 @@ func TestSSHStagePlaybook(t *testing.T) {
 	}}
 	h := hostWith(testCfg, rec)
 
-	dst, err := h.StagePlaybook(context.Background(), "/local/playbook")
+	dst, err := h.StagePlaybook(context.Background(), "/local/playbook", "hash-abc")
 	if err != nil {
 		t.Fatalf("StagePlaybook: %v", err)
 	}

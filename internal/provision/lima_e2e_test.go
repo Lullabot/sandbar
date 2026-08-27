@@ -87,7 +87,10 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 	if err := cli.Clone(base, clone); err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if err := cli.Configure(clone, 2, "2GiB", "30GiB"); err != nil {
+	// Configure also repoints the clone's playbook mount; this fixture's overlay
+	// declares no such mount, so the assignment is a no-op here and any real
+	// directory will do.
+	if err := cli.Configure(clone, 2, "2GiB", "30GiB", t.TempDir()); err != nil {
 		t.Fatalf("configure (edit --set): %v", err)
 	}
 	if err := cli.Start(clone); err != nil {

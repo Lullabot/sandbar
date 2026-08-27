@@ -118,7 +118,7 @@ Flags:
 	// false): an unconfigured `sand create` must not start installing a tool no
 	// existing base has.
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
-	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
+	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
@@ -132,6 +132,22 @@ Flags:
 			return nil // usage was already printed; -h/--help is not a failure
 		}
 		return err // flag package already printed usage
+	}
+
+	// Which flags the user ACTUALLY passed. It decides two things: the refusal
+	// just below, and (further down) that an omitted flag means "whatever this
+	// VM already was" rather than this flag set's default.
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	// A recreate is a reset, and a reset never changes which project the VM has.
+	// The two settings mean opposite things — "rebuild this VM" and "make it a
+	// different VM" — and the combination silently threw the existing checkout
+	// away for the new URL's sake. Say so instead, before anything touches a
+	// backend. (The TUI's reset form locks the same field — internal/ui's
+	// fieldLocked.)
+	if err := refuseRecreateWithCloneURL(*recreate, explicit, cfg.Name); err != nil {
+		return err
 	}
 
 	n, err := vm.ParseCPUs(*cpusFlag)
@@ -197,15 +213,11 @@ Flags:
 	// (p.HostFiles()) rather than reading a process-global: the base's stamp
 	// lives on whichever host limactl actually runs (the remote host for a
 	// remote provider), not necessarily this one.
-	explicit := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
-	if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
-		for tool, selected := range cfg.ToolPtrs() {
-			if !explicit["with-"+tool] {
-				*selected = base[tool]
-			}
-		}
-	}
+	//
+	// The adoption itself is deferred until after the --recreate block below,
+	// because it is keyed by cfg.BaseName and that block may still change which
+	// base this VM belongs to. (`explicit` — the set fs.Visit reported — is built
+	// right after Parse, above.)
 
 	// Default the VM user to the provider's host user (the remote host for remote
 	// Lima, this machine for local), falling back to the local user if the host
@@ -254,6 +266,55 @@ Flags:
 		fmt.Fprintln(os.Stderr, "warning: could not update managed index:", err)
 	}
 
+	// --recreate rebuilds a VM sand ALREADY KNOWS, so every setting the user did
+	// not restate on the command line comes from that VM's own recorded config
+	// rather than from this flag set's defaults. Without this, `sand create
+	// --recreate --name mybox` — the obvious spelling of "give me this VM back" —
+	// silently returned a DIFFERENT VM: memory and disk reset to the flag
+	// defaults, and the clone URL dropped entirely, so the project checkout the
+	// VM existed for was simply not there. The recreate then recorded those
+	// defaults, making the loss permanent for the next recreate too.
+	//
+	// It is the same rule the tool-set flags above already follow, applied to the
+	// rest of the config: fs.Visit reports only what was actually passed, so an
+	// explicit flag still wins and `--recreate --disk 200GiB` remains the way to
+	// resize. This is also what makes the CLI agree with the TUI's Reset, which
+	// has always pre-filled its form from the recorded config.
+	//
+	// The tool-set is deliberately NOT adopted from the record: those flags
+	// configure the SHARED base image, and the block below adopts them from what
+	// the base was actually built with — a better source than one VM's recorded
+	// wish. Which is also why that block runs AFTER this one: --base-name is
+	// adopted here, and the tool-set has to be read off the base this VM is
+	// really cloned from.
+	if *recreate {
+		if rec, ok := reg.ConfigInScope(cfg.Name, scope); ok && rec.Name != "" {
+			adoptRecordedConfig(&cfg, rec, explicit)
+			// A recorded clone URL comes back without its token — registry.Add
+			// strips the secret before it ever reaches disk — so say so rather than
+			// let the finalize playbook fail on `git clone` with no credentials.
+			if cfg.CloneURL != "" && cfg.CloneToken == "" && !explicit["clone-url"] {
+				fmt.Fprintf(os.Stderr, "sand: reusing %s's recorded --clone-url %s; tokens are never stored, so pass --clone-token if that repo is private.\n", cfg.Name, cfg.CloneURL)
+			}
+			// The record was valid when it was written, but it is a file on disk
+			// and this is the last point anything checks it.
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("sand create: %s's recorded config is unusable (%w); pass the settings explicitly", cfg.Name, err)
+			}
+		}
+	}
+
+	// Now that cfg.BaseName is final, adopt the tool-set from that base's stamp
+	// (see the fs.Visit block above for why an omitted --with-* flag defers to
+	// the base instead of to DefaultCreateConfig's all-on default).
+	if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
+		for tool, selected := range cfg.ToolPtrs() {
+			if !explicit["with-"+tool] {
+				*selected = base[tool]
+			}
+		}
+	}
+
 	// A cancellable context lets ctrl+c abort the run mid-flight, killing the
 	// limactl subprocess it is currently blocked on — matching the TUI's cancel.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -278,6 +339,14 @@ Flags:
 		return err
 	}
 
+	// Seed --clone-token as the VM's GH_TOKEN secret and write its stored
+	// secrets into the guest — the same follow-up the TUI performs on a
+	// successful build. Without it a headless create's token was usable for
+	// exactly one clone and then unrecorded (nothing to rotate later from the
+	// secrets editor), and a --recreate came back with none of the secrets the
+	// VM had before. See settleSecrets.
+	settleSecrets(ctx, p, scope, cfg, os.Stdout)
+
 	// Record the profile as last-used only on a successful create — by ID, so
 	// a later rename of the profile does not lose the pointer (see
 	// Store.SetLastUsed). Best-effort: a failure to persist it must not turn a
@@ -286,6 +355,86 @@ Flags:
 		fmt.Fprintln(os.Stdout, "warning: could not record last-used profile:", err)
 	}
 	return nil
+}
+
+// refuseRecreateWithCloneURL rejects `sand create --recreate --clone-url ...`.
+//
+// --recreate rebuilds the VM it names; --clone-url says which project a VM is
+// for. Together they asked for a rebuild that is a different VM, and what
+// happened was the quiet worst case: the old org directory was left behind (or,
+// with --preserve-project's TUI equivalent, discarded to protect a tree that had
+// never been staged) and the new repo cloned beside it. The error names both
+// ways out rather than picking one.
+//
+// It runs on the parsed flags alone, before any provider or registry work, so a
+// contradictory command line costs nothing and fails the same way on a machine
+// with no limactl at all.
+func refuseRecreateWithCloneURL(recreate bool, explicit map[string]bool, name string) error {
+	if !recreate || !explicit["clone-url"] {
+		return nil
+	}
+	return fmt.Errorf("sand create: --recreate cannot change --clone-url — a rebuild keeps the VM's project. "+
+		"Run 'sand reset %s' to rebuild it as it is, or 'sand create --name <new-name> --clone-url ...' for the other repo", name)
+}
+
+// adoptRecordedConfig copies rec's settings into cfg for every field whose flag
+// the user did not pass, leaving explicitly-passed flags untouched. It is the
+// --recreate half of the "an omitted flag means 'whatever this already was'"
+// rule (see its call site); explicit is the set fs.Visit reported.
+//
+// Each field is listed by hand rather than reflected over, because the mapping
+// from field to flag name is exactly what a reader needs to check and the
+// omissions are deliberate: CloneToken is never recorded (registry.Add strips
+// it), and the tool-set flags adopt from the base image instead.
+func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map[string]bool) {
+	// The base image this VM was cloned from is part of "whatever this already
+	// was" too: recreating a VM built on `--base-name work-base` against the
+	// DEFAULT base would clone a different image — and, if no default base
+	// exists yet, silently build a whole second one.
+	if !explicit["base-name"] && rec.BaseName != "" {
+		cfg.BaseName = rec.BaseName
+	}
+	if !explicit["hostname"] && rec.Hostname != "" {
+		cfg.Hostname = rec.Hostname
+	}
+	if !explicit["user"] && rec.User != "" {
+		cfg.User = rec.User
+	}
+	if !explicit["git-name"] && rec.GitName != "" {
+		cfg.GitName = rec.GitName
+	}
+	if !explicit["git-email"] && rec.GitEmail != "" {
+		cfg.GitEmail = rec.GitEmail
+	}
+	if !explicit["cpus"] && rec.CPUs > 0 {
+		cfg.CPUs = rec.CPUs
+	}
+	if !explicit["memory"] && rec.Memory != "" {
+		cfg.Memory = rec.Memory
+	}
+	if !explicit["disk"] && rec.Disk != "" {
+		cfg.Disk = rec.Disk
+	}
+	if !explicit["locale"] && rec.Locale != "" {
+		cfg.Locale = rec.Locale
+	}
+	if !explicit["domain"] && rec.Domain != "" {
+		cfg.Domain = rec.Domain
+	}
+	if !explicit["docker-proxy-host"] {
+		cfg.DockerProxyHost = rec.DockerProxyHost
+	}
+	// The clone URL adopts even when the record is empty: "this VM cloned
+	// nothing" is an answer, and the flag default says the same thing anyway.
+	if !explicit["clone-url"] {
+		cfg.CloneURL = rec.CloneURL
+	}
+	// TimezoneExplicit rides along with the zone it describes — it records
+	// whether a HUMAN named that zone, which decides whether the guest treats an
+	// unknown one as fatal, and it would be a lie carried over on its own.
+	if !explicit["timezone"] && rec.Timezone != "" {
+		cfg.Timezone, cfg.TimezoneExplicit = rec.Timezone, rec.TimezoneExplicit
+	}
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs

@@ -163,6 +163,10 @@ func TestStageIn(t *testing.T) {
 	want := [][]string{
 		// Extract MUST precede chown.
 		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-xzf", "-"},
+		// Each path is probed before the chown, which covers only what the
+		// extract actually produced (see StageIn).
+		{"shell", "claude", "sudo", "test", "-e", "/home/andrew/.claude"},
+		{"shell", "claude", "sudo", "test", "-e", "/home/andrew/.claude.json"},
 		{"shell", "claude", "sudo", "chown", "-R", "andrew:andrew", "/home/andrew/.claude", "/home/andrew/.claude.json"},
 	}
 	if !reflect.DeepEqual(f.calls, want) {

@@ -172,7 +172,11 @@ func e2eCloneAndStart(t *testing.T, cli *lima.Client, name string) {
 		t.Fatalf("clone %s from %s: %v\n%s", name, sharedBaseName, err, out.String())
 	}
 	out.Reset()
-	if err := cli.Configure(name, 2, "2GiB", vm.BaseDiskFloor); err != nil {
+	// Configure also repoints the clone's playbook mount. This test never runs the
+	// playbook — it clones a ready-made base and attaches a shell — so the mount's
+	// location is immaterial and a scratch directory keeps limactl from warning
+	// about one that does not exist.
+	if err := cli.Configure(name, 2, "2GiB", vm.BaseDiskFloor, t.TempDir()); err != nil {
 		t.Fatalf("configure %s: %v", name, err)
 	}
 	if err := cli.StartStreaming(ctx, name, &out); err != nil {
