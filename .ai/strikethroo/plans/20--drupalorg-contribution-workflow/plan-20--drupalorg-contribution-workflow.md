@@ -1,6 +1,6 @@
 ---
 id: 20
-summary: "Make drupal.org contribution work out of the box in a sand VM: auto-bootstrapped ddev-drupal-contrib and per-issue-fork GitLab tokens"
+summary: "Make drupal.org contribution work out of the box in a sand VM: auto-bootstrapped ddev-drupal-contrib, and publication from the host so the VM holds no drupal.org credential"
 created: 2026-08-26
 ---
 
@@ -84,10 +84,24 @@ created: 2026-08-26
 | Is it true that GitLab PATs can never be project-scoped? | **No — this plan was wrong.** That holds for *classic* PATs only. **Fine-grained access tokens** went generally available on GitLab Self-Managed in **19.2**, carry a project/group/instance **access boundary**, include a `Code: Push` permission, are **Free tier**, and intersect with the user's own permissions — so **Maintainer is not required**. Verified against git.drupalcode.org's own served documentation; the instance runs GitLab 19.x. | Research, verified independently |
 | Does that reopen a per-fork credential? | Yes, and better than per-fork: the `issue` namespace is a real group (`{"id":49196,"name":"Issue forks"}`), so **one** token bounded to that group reaches every issue fork while being structurally unable to touch any canonical `project/<module>` repository. | Verified |
 | Can fine-grained tokens be minted via API? | **No.** `POST /user/personal_access_tokens` accepts only `k8s_proxy` and `self_rotate` and has no boundary parameter. Creation stays a web-UI act; only rotation is automatable. So the original "rough UI" friction returns — but once, not per issue. | Verified |
-| What is still unverified? | Whether git.drupalcode.org's token UI actually exposes the fine-grained option, and whether the boundary picker allows selecting the `issue` group as a non-member. Both are minutes of manual checking and are recorded as validation steps. | Unresolved |
+| What is still unverified? | Whether git.drupalcode.org's token UI actually exposes the fine-grained option, and whether the boundary picker allows selecting the `issue` group as a non-member. Both are minutes of manual checking and are recorded as validation steps. **Answered in refinement 5: the first yes, the second no.** | Resolved in refinement 5 |
 | Was the edge allowlist a security boundary? | **No — the plan overstated it.** `POST /api/graphql` is not blocked, and git push over HTTPS bypasses the REST allowlist entirely. DA staff note their load balancer cannot inspect request bodies. The allowlist must not be treated as containment. | Research, corrected |
 | Does the DA's automation policy forbid AI-assisted merge requests? | **No.** That policy governs site access and automation registration, and contains no rule about merge requests, commits, or pushes. Disclosure attaches to *approved automation tools*. A human reviewing and publishing the agent's work is "an individual action a user could already perform". Per-MR AI disclosure is proposed in governance issue 3565917 but is **not ratified policy**. | Research |
 | Which design does the plan adopt? | **Deferred deliberately.** Host-side publication is verified working and needs nothing unverified; the fine-grained token restores the ordinary push loop at the cost of two unverified facts. They compose. The plan records both honestly rather than picking before the facts are in. | Open decision |
+
+### Refinement session 5 — the token boundary is per-project, 2026-08-27
+
+| Question | Answer | Source |
+| --- | --- | --- |
+| Does git.drupalcode.org's token UI expose fine-grained tokens at all? | **Yes.** The Generate token dropdown offers "Fine-grained token", the form exposes Group and project access, and resource `Code` -> permission `Push` is present. Refinement 4's first unverified fact resolves **positive**. | User, on a real account |
+| Can the boundary select a single issue-fork project? | **Yes**, and a token so bounded was created and used to push to an issue fork successfully. | User, verified by pushing |
+| Can the boundary select the `issue` group ("Issue forks")? | **No — projects only.** Refinement 4's second unverified fact resolves **negative**, and it inverts that session's conclusion. Corroborated by the access probe: `group_access` is `null` on an issue fork, so the developer's access there is a direct project membership and they are not a member of the `issue` group — and GitLab offers only boundaries the user belongs to. | User; corroborated by probe |
+| What does that do to the fine-grained option? | It reduces it to **one hand-made token per issue fork**. The blast radius becomes *tighter* than the group option would have been — a single fork rather than every fork — but creation cannot be automated, so this is precisely the friction the work order opened with: *"every new issue needs a new gitlab fine-grained token, and the UI for creating those is pretty rough."* | Derived |
+| Does a higher access level on a maintained module reopen project access tokens? | **No, and the finding is now structural rather than sampled.** The developer is a full maintainer of dubbot, created a brand-new issue and its fork, and still holds `access_level: 30` (Developer) on that fork. If the parent project's own maintainer is Developer on a fork they created themselves, no drupal.org user can hold Maintainer on an issue fork. Project access tokens are closed permanently, not merely unavailable to one account. | User probe |
+| Which credential design does the plan build? | **Host-side publication only** — refinement 4's deliberate deferral is closed. The per-fork token is recorded as a manual escape hatch a developer may set up for themselves, but no sand machinery is built for it. Building one path honours the PRE_PLAN scope-control hook; the second would spend the URL-keyed credential store and host-scoped `useHttpPath` work to reinstate a friction the work order asked to remove. | User decision |
+| Should the credential half become its own plan? | **No — keep one plan.** The split was proposed because two mutually-exclusive designs blocked decomposition. With one design chosen the plan decomposes end to end, and its length is accumulated reasoning rather than scope: the build is the ddev bootstrap, the issue entry point, and one publish command. | User decision |
+| What remains unverified about the token option? | The negative control — that a token bounded to one issue fork **fails** to push to a canonical `project/<module>` — has not been run. It does not block this plan, which builds no token path, but it must pass before the escape hatch is documented as safe. | Unresolved |
+| Did refinement 3's redesign leave stale artefacts behind? | **Yes.** Four success criteria and one validation step still described the deleted per-fork-token design, and validation step 8 contradicted step 12 outright — requiring a push to authenticate where step 12 requires every push to fail. Corrected in this session. | Defect in prior revision |
 
 ## Executive Summary
 
@@ -106,13 +120,20 @@ through git's template directory so it fires on every clone and every worktree
 in the VM, whoever created them — and discoverable at point of need via a
 self-listing ddev command and error messages that name it.
 
-The publication half is shaped by a hard constraint the plan's own validation
-probe established: **a Drupal developer often holds push access to modules
-installed on tens of thousands of sites, and drupal.org offers no way to hold a
-narrower credential.** Personal access tokens cannot be scoped to a project;
-project access tokens require Maintainer, which an issue fork does not grant; and
-drupal.org blocks the token-minting endpoints outright. Every attempt to give the
-guest a *small* credential fails. So the guest is given **none**.
+The publication half is shaped by a hard constraint the plan's own probes
+established: **a Drupal developer often holds push access to modules installed on
+tens of thousands of sites, and drupal.org's only narrow credential cannot be
+automated.** Project access tokens require Maintainer, and an issue fork grants
+Developer to everyone — the parent project's own maintainer included, on a fork
+they created themselves — so that route is closed permanently rather than merely
+closed to one account. Fine-grained access tokens *can* be bounded to a single
+issue fork, and one was verified pushing successfully; but the boundary picker
+offers projects rather than the `issue` group, and no API can mint them, so the
+developer would hand-build a token in GitLab's web UI for every issue — the exact
+friction this work order set out to remove. The guest is therefore given **no
+credential at all**, and the per-fork token is kept only as a documented manual
+escape hatch for a contributor who wants an in-guest push loop badly enough to
+pay for it each time.
 
 The guest clones anonymously, reads merge requests, pipelines and CI results
 anonymously — all verified — and commits only to its own local git. Publication
@@ -138,7 +159,7 @@ already chose, in a form the human can read before it is sent.
 | A new git worktree is an unconfigured directory | A new worktree is automatically its own ddev project with a unique name and URL | Parallel issue work is the stated goal, and per-worktree ddev projects are the only way to get true parallelism |
 | `ddev config` in a fresh nested worktree silently rewrites the *parent* project's config | The worktree's own `.ddev/config.yaml` exists before any ddev command can run there | Verified destructive behavior; an agent can corrupt the main clone's setup by doing the obvious thing |
 | Nothing tells an agent how to run tests in a contrib module | `ddev drupal-contrib-init` self-lists in `ddev help`; `ddev start` in an unbootstrapped module names it | Harness-neutral discovery, no Claude-Code-specific files |
-| An agent that can push holds a credential reaching every project the developer can push to, including modules on tens of thousands of sites | No drupal.org credential exists inside the VM at all | Blast radius. drupal.org offers no narrower credential, so the only safe amount is none |
+| An agent that can push holds a credential reaching every project the developer can push to, including modules on tens of thousands of sites | No drupal.org credential exists inside the VM at all | Blast radius. The only narrower credential drupal.org offers must be hand-made per issue and cannot be minted by API, so the safe amount that is also automatable is none |
 | Publishing requires the git protocol, a checkout, and credentials wherever the push happens | The host publishes over HTTPS through GitLab's content API — no git repository, no checkout, no git objects | Keeps agent-written code off the workstation, and removes the need for any guest credential |
 | An agent could push anywhere its credential reaches | The agent decides content; the host decides destination | A structural boundary: no credential in the VM to steal, no destination field in the payload to poison |
 | A push publishes first and shows a diff afterwards | The payload is a readable list of paths and resulting contents, reviewable before it is sent | Human review of agent work should happen before publication, not after |
@@ -222,28 +243,44 @@ version's documentation: `/help/auth/tokens/fine_grained_access_tokens.md` and
 `gitlab_20_changes.md` does not — so the instance runs GitLab 19.x, at or past
 the version where this went generally available.
 
-Two consequences, one enabling and one limiting. The enabling one: the `issue`
-namespace is a real group (`GET /api/v4/groups/issue` returns
-`{"id":49196,"name":"Issue forks","path":"issue"}`), so a token bounded to that
-group would reach **every** issue fork while being structurally unable to touch
-any `project/<module>` canonical repository — one token, created once, with the
-catastrophic case removed by construction rather than by policy. The limiting
-one: fine-grained tokens **cannot be created through the API**. The self-service
-endpoint `POST /user/personal_access_tokens` accepts only `k8s_proxy` and
-`self_rotate` scopes and has no boundary parameter, so creation remains a web-UI
-act. Only rotation is automatable.
+One consequence is limiting and permanent: fine-grained tokens **cannot be
+created through the API**. The self-service endpoint
+`POST /user/personal_access_tokens` accepts only `k8s_proxy` and `self_rotate`
+scopes and has no boundary parameter, so creation remains a web-UI act. Only
+rotation is automatable.
 
-Two things remain **unverified** and must be checked before any design depends on
-them: whether the token UI on git.drupalcode.org actually exposes the
-fine-grained option (a feature flag could be off), and whether the boundary
-picker permits selecting the `issue` group by a user who is not a member of it.
-Both are a few minutes of manual checking on a real account.
+**The boundary is per-project, not per-group (verified in the UI, 2026-08-27).**
+Refinement 4 hoped that because the `issue` namespace is a real group (`GET
+/api/v4/groups/issue` returns `{"id":49196,"name":"Issue forks","path":"issue"}`),
+one token bounded to that group would reach every issue fork while being unable to
+touch any canonical `project/<module>` — one token, created once, with the
+catastrophic case removed by construction. It does not work. On a real account the
+Generate token dropdown *does* offer **Fine-grained token**, the form *does* expose
+resource `Code` -> permission `Push`, and a boundary of a **single issue-fork
+project** works — a token so bounded was created and verified by pushing to that
+fork. But the boundary picker offers individual projects only; the `issue` group is
+not selectable. The access probe explains why: `group_access` is `null` on an issue
+fork, so a developer's Developer role there is a *direct project membership* and
+they hold no membership in the `issue` group — and GitLab offers only boundaries
+the user belongs to.
 
-For completeness, the older path is genuinely closed: a *project access token*
-requires Maintainer or Owner, which an issue fork does not grant.
+The practical consequence is decisive, and it inverts refinement 4's reading. A
+fine-grained token is a **per-issue-fork credential that must be hand-built in the
+web UI for every issue**. Its blast radius is excellent — one fork, tighter than
+the group option would have given — but it restores in full the friction the work
+order named at the outset, and no amount of sand automation can remove it, because
+there is no minting API to call. That is what settled the design on host-side
+publication rather than on a narrower token.
 
-**The minting API exists and has a natural privilege ceiling (from GitLab API
-documentation).** `POST /projects/:id/access_tokens` accepts `name`, `scopes[]`,
+For completeness, the older path is closed permanently rather than situationally: a
+*project access token* requires Maintainer or Owner, and no drupal.org user holds
+that on an issue fork — see the access-level finding below.
+
+**The minting API exists and has a natural privilege ceiling — but is unreachable
+on drupal.org, and is recorded here only as history (from GitLab API
+documentation).** Two independent findings below kill it: nobody holds Maintainer
+on an issue fork, and drupal.org blocks the endpoint at its edge. Nothing in the
+current design calls it. `POST /projects/:id/access_tokens` accepts `name`, `scopes[]`,
 `expires_at`, and an optional `access_level`, and returns the token value in the
 response. It must be called with a *personal* access token — "You cannot
 authenticate with a project access token" — so a minted per-fork token can never
@@ -253,35 +290,43 @@ also API operations. Project access tokens require Premium on GitLab.com but are
 available under any license on self-managed instances, and drupal.org is
 self-managed, so the feature is not license-blocked there.
 
-**Two drupal.org-specific unknowns remain, and are treated as risks rather than
-assumptions.** First, whether clicking "Get push access" on an issue fork grants
-Maintainer (required to mint) or only Developer. Second, whether
-`POST /projects/:id/access_tokens` is among the API endpoints the Drupal
-Association restricts by default; their documentation states new endpoints
-require a request to the Infrastructure project. Additionally, drupal.org's PAT
-policy permits any *individual action* a user could perform in a session but
-bars using PATs to build "automation/bots" without prior DA approval — minting a
-token for one's own use is arguably the former, but the boundary is not
-explicitly drawn. These unknowns are why the plan builds placement first and
-minting on top.
+**Both drupal.org-specific unknowns above have since been answered, and both
+negatively.** They are retained because they record why the design moved. The
+first — whether push access to an issue fork grants Maintainer or only Developer —
+is Developer, for everyone, as the probe findings below establish. The second —
+whether `POST /projects/:id/access_tokens` is among the endpoints the Drupal
+Association restricts — it is blocked, at the edge, for every project and every
+caller. What remains genuinely open is only the policy question: drupal.org's PAT
+policy permits any *individual action* a user could perform in a session but bars
+using PATs to build "automation/bots" without prior DA approval. A human-confirmed
+publish reads as the former, but the boundary is not explicitly drawn and the DA
+has not been asked. That is tracked under Known unresolved gaps.
 
 **Issue forks are derivable and anonymously readable (verified empirically).**
 A `ls-remote` against `git.drupalcode.org/issue/drupal-3181657.git` succeeded
 with no credential presented, returning the fork's branches including one named
 for the issue. Three consequences follow, and together they resolve what looked
-like an architectural contradiction — that the host must mint tokens while the
-`drupalorg` CLI lives only in the guest. The fork URL is derivable from the
-module name (which sand already holds from the clone URL) plus the issue number,
-by drupal.org's documented `PROJECT-ISSUE_NUMBER` naming. Its existence and its
-branch list can be confirmed anonymously, needing no token and no API access.
-And the GitLab mint call accepts a URL-encoded project path, so it needs no
-project-ID lookup either. The host therefore requires no PHP runtime, no Drupal
-tooling, and exactly one authenticated API call — the mint itself.
+like an architectural contradiction — that the host must act on a fork while the
+`drupalorg` CLI lives only in the guest. The fork URL is derivable from the module
+name (read from the targeted checkout) plus the issue number, by drupal.org's
+documented `PROJECT-ISSUE_NUMBER` naming. Its existence and its branch list can be
+confirmed anonymously, needing no token and no API access. And GitLab's project
+endpoints accept a URL-encoded project path, so no project-ID lookup is needed
+either. The host therefore requires no PHP runtime and no Drupal tooling, and
+authenticates for one purpose only: publishing.
 
-This also rules out a guest-to-host minting broker, which would have been the
-obvious alternative resolution. Such a broker would let a compromised guest
-request a token for *any* fork, quietly restoring the account-wide push reach the
-whole least-privilege design exists to prevent.
+*(This finding was originally written to justify host-side minting, which no
+longer exists. It survives that design unchanged and is if anything more important
+under the current one, since anonymous fork resolution is what keeps both sides
+free of the other's tooling.)*
+
+This also rules out a guest-to-host broker, which would have been the obvious
+alternative resolution and which returns in a new form under the current design.
+A broker that let the guest request a credential would have restored account-wide
+push reach through the back door; a broker that lets the guest name its own
+publication target gives away the destination decision the whole split of
+authority depends on. Both are rejected for the same reason: the guest must not be
+able to widen its own reach by asking.
 
 **A host-side credential pattern already exists (confirmed in the codebase).**
 `internal/profiles/token.go` establishes it: `profiles.yaml` is secret-free and
@@ -340,14 +385,26 @@ projects may exist, few should run at once, and stopping a project rather than
 destroying it is the normal move. Concurrent dependency resolution across several
 bootstraps at once is the most likely way to exhaust memory.
 
-**Per-issue-fork tokens are impossible on drupal.org (proven by probe, both
-halves negative).** The probe answered both open questions, and neither answer is
-recoverable by permissions or effort.
+**Per-issue-fork *project access* tokens are impossible on drupal.org (proven by
+probe, both halves negative; strengthened 2026-08-27).** The probe answered both
+open questions, and neither answer is recoverable by permissions or effort. Note
+the qualifier added in refinement 5: what is closed here is the *project access
+token* specifically. A per-fork **fine-grained** token is possible, as recorded
+above — but it must be created by hand, once per issue.
 
-*The developer holds Developer, not Maintainer, on an issue fork.* A real probe
-returned `access_level = 30`. GitLab requires Maintainer or Owner to create a
-project access token **by any route, including the web UI**. So a per-fork token
-cannot be minted, and cannot be created by hand either. Scripting the GitLab web
+*Nobody holds Maintainer on an issue fork — not even the parent project's own
+maintainer.* A first probe returned `access_level = 30` (Developer) on an issue
+fork of a module where the developer was an ordinary contributor, which left open
+the possibility that a maintainer would fare better on their own module. A second
+probe closed that door: on `issue/dubbot-3619492` — a brand-new issue fork, of a
+module the developer fully maintains, created by that developer moments earlier —
+the access level is still `30`, with `group_access: null`. If the parent project's
+own maintainer is merely a Developer on a fork they created themselves, the role is
+a property of how drupal.org provisions issue forks rather than of any account's
+standing. GitLab requires Maintainer or Owner to create a project access token **by
+any route, including the web UI**, so this path is closed for every drupal.org
+user, permanently. A per-fork project access token therefore cannot be minted, and
+cannot be created by hand either. Scripting the GitLab web
 UI — considered explicitly — does not help: at Developer there is no
 access-tokens settings page to drive, so the obstacle is the role, not the API.
 Such a script would also need the developer's SSO session or password, a
@@ -651,76 +708,98 @@ policy that a token perform "any individual action a user could already perform
 with a regular authenticated session", and keeps the workflow clear of the
 automation-and-bots provision that requires prior Drupal Association approval.
 
-### The fine-grained token option, and how it relates to publication
+### The fine-grained token option, and why the plan does not build it
 
-**Objective**: Record a second, independent way to bound blast radius, so the
-choice between them is made deliberately rather than by default.
+**Objective**: Close refinement 4's deliberate deferral, record precisely what is
+given up, and state the condition under which the decision should be reopened.
 
-*Added after research contradicted an earlier assumption — see Background and the
-refinement-4 clarifications.*
+*Refinement 4 recorded two credential designs and declined to choose between them,
+because the choice turned on two unverified facts. Both are now verified — see
+Background — and the choice is made: **this plan builds host-side publication
+only.***
 
-Host-side publication bounds blast radius to **zero inside the guest**, and needs
-nothing from drupal.org that is not already verified working. A fine-grained
-token bounded to the `issue` group bounds it differently: the guest **can** push,
-but only ever to issue forks, and structurally never to a `project/<module>`
-canonical repository. The catastrophic case — bad code reaching a module on tens
-of thousands of sites — is removed by the token's own boundary rather than by the
-credential's absence.
+The fine-grained token is real, and the plan should not pretend otherwise. It
+exists on git.drupalcode.org, it carries a `Code: Push` permission, it can be
+bounded to a single issue-fork project, and a token so bounded was verified
+pushing to its fork. What refinement 4 hoped for and did not get is the **group**
+boundary: the `issue` namespace cannot be selected, so there is no
+one-token-forever. What is on offer is one hand-built token per issue fork.
 
-These are not competing answers to the same question; they trade different things:
+That reduces the comparison to a single honest trade:
 
-| | Host publishes | Fine-grained `issue`-group token |
+| | Host publishes (**chosen**) | Fine-grained per-fork token |
 | --- | --- | --- |
-| Credential in the guest | none | one, bounded to issue forks |
-| Worst case if the guest is hostile | nothing | garbage pushed to issue forks |
+| Credential in the guest | none | one, bounded to a single issue fork |
+| Worst case if the guest is hostile | nothing | garbage pushed to that one fork |
 | Canonical project reachable | no | no |
 | Guest can iterate against CI directly | no — each publish is a host step | yes, ordinary `git push` |
-| Depends on unverified platform behavior | no | yes — UI exposure, group boundary selection |
-| Setup cost | none | one manual web-UI token creation, once |
+| Setup cost | none | a manual web-UI token, **per issue** |
+| Can sand automate that setup | n/a | **no** — GitLab exposes no creation API |
 
-The workflow difference is the substantive one. A contributor responding to
-review feedback or a failing pipeline pushes repeatedly, and routing every
-iteration through a host-side confirmation is friction that will be felt on every
-cycle. A token bounded to the `issue` group restores the ordinary git loop while
-still making the outcome the work order actually fears impossible.
+The token's blast radius is genuinely excellent — one fork, tighter than the group
+boundary would have given. It loses on cost, and it loses on the work order's own
+terms. The work order opens by naming this exact friction — *"every new issue needs
+a new gitlab fine-grained token, and the UI for creating those is pretty rough"* —
+and asks for it to go away. A design whose first step is a trip through that UI,
+once per issue, does not answer the question that was asked; and sand cannot soften
+it, because there is no endpoint to call.
 
-They also compose. The token can carry day-to-day iteration inside the guest
-while host-side publication remains available as a stricter mode for a contributor
-who wants no credential in the VM at all — the two share no machinery, so
-supporting both costs little beyond the decision itself.
+Building both was considered and rejected under the plan's scope-control hook. The
+second path is not free: it would reinstate the URL-keyed credential store,
+host-scoped `credential.useHttpPath`, and per-fork placement and lifecycle — a
+substantial mechanism, bought to serve a workflow the developer must hand-configure
+anyway, for a pain no one has yet reported feeling.
 
-This plan does **not** pick between them, because the choice depends on two facts
-that are not yet verified and on a judgement the developer should make about their
-own risk posture. What the plan requires is that the choice be explicit, that
-whichever is built states its actual guarantee honestly, and that neither is
-described as bounding blast radius further than it does. The verification steps
-that settle it are in Self Validation.
+**What is given up, stated plainly.** A contributor iterating against a failing
+pipeline pushes repeatedly, and under host-side publication every one of those
+iterations is a host-side confirmed step rather than a `git push`. That is real
+friction on a real workflow, and it is the price of holding no credential in the
+guest. The plan pays it deliberately rather than by oversight.
+
+**The escape hatch is documentation, not code.** A contributor who wants the
+in-guest loop can create a fine-grained token bounded to their issue fork and place
+it in the guest themselves. The documentation should say how, and should state what
+it costs: a credential then exists inside an agent-controlled VM, and while its
+boundary confines it to one issue fork, drupal.org's edge will not contain it if it
+leaks — Background records that git push over HTTPS bypasses the REST allowlist
+entirely. Before this is written up as safe, the negative control must pass: a
+token bounded to one fork must be shown to **fail** when pushing to a canonical
+`project/<module>`. That test has not been run.
+
+**When to reopen this.** The decision rests on one fact: token creation cannot be
+automated. If the Drupal Association ever allowlists fine-grained token creation,
+or if GitLab makes a group-level boundary selectable by non-members, the in-guest
+loop becomes cheap and this section should be revisited.
 
 ### Consequences for the guest credential machinery
 
-**Objective**: Record what is not needed under either credential design, so
-later work does not rebuild it.
+**Objective**: Record what this plan does not build, so later work does not
+rebuild it by reflex — and correct a claim the previous revision got wrong.
 
-Under host-side publication the guest never authenticates to drupal.org, so the
-credential mechanisms earlier revisions specified are **not needed**: no
-recognized-forge entry for `git.drupalcode.org`, no per-fork entries in the
-guest's credential store, and no `useHttpPath` configuration. The existing GitHub
-`GH_TOKEN` wiring is untouched, exactly as the compatibility decision requires.
+The guest never authenticates to drupal.org, so the credential mechanisms earlier
+revisions specified are **not needed**: no recognized-forge entry for
+`git.drupalcode.org`, no per-fork entries in the guest's credential store, and no
+`useHttpPath` configuration. The existing GitHub `GH_TOKEN` wiring is untouched —
+this plan changes nothing about it whatsoever, which over-satisfies the
+compatibility decision.
 
-Under the fine-grained token option this changes, but far less than the earlier
-per-fork design would have. A single token bounded to the `issue` group is **one
-credential for the whole host** — not one per fork — so it needs no per-fork
-entries and no URL keying. A plain host-level credential entry for
-`git.drupalcode.org` is sufficient, and `useHttpPath` stays off. The elaborate
-per-fork machinery earlier revisions specified is unnecessary under **either**
-design, which is the point worth carrying forward.
+A correction belongs here, because the previous revision was wrong in a way that
+would mislead someone reopening the question. It claimed the elaborate per-fork
+machinery was unnecessary under **either** credential design, reasoning that a
+token bounded to the `issue` group would be one credential for the whole host and
+so need no URL keying. That group boundary turned out not to exist. Had the token
+design been chosen, it would have needed **exactly** the per-fork machinery —
+URL-keyed store entries and host-scoped `credential.useHttpPath` — that the plan
+had just declared moot. The machinery is unnecessary here because host-side
+publication was chosen, not because no design needs it.
 
-The `includeIf`/worktree findings in Background remain accurate and are kept
-because they are non-obvious and were expensively established: they explain why a
-directory-scoped credential can never express per-worktree identity, and they
-would resurface immediately if anyone later tries to give worktrees distinct
-GitHub tokens. Neither drupal.org design needs per-worktree credentials, so they
-do not bear on this plan's implementation.
+The `includeIf`/worktree and `useHttpPath` findings in Background are therefore
+kept as live results rather than curiosities. They do not bear on this plan's
+implementation, since nothing in it places a credential in a guest. They become
+load-bearing immediately for the documented per-fork escape hatch, and for any
+future attempt to give worktrees distinct credentials on any forge — including the
+pre-existing GitHub behavior this investigation uncovered, in which every worktree
+silently inherits the main clone's token.
 
 ### The issue-number entry point
 
@@ -910,12 +989,17 @@ tool. The default's interaction with reset is recorded under risks.
 <details>
 <summary>Implementation Risks</summary>
 
-- **Two credential mechanisms coexisting invites confusion**: Directory-scoped
-  for GitHub, URL-keyed for drupal.org, in the same store.
-    - **Mitigation**: Document the split and the reason at the point of
-      definition. Record convergence — and the pre-existing GitHub
-      worktree-inherits-main-clone-token behavior this investigation uncovered —
-      as an explicit follow-up rather than leaving two mechanisms unexplained.
+- **Contributors will reasonably ask why they cannot just push**: The guest holds
+  no credential by design, but a fine-grained per-fork token demonstrably works,
+  and a contributor who discovers that will assume the plan overlooked it. Left
+  unexplained, this invites someone to "fix" it by wiring a token into the guest
+  and quietly deleting the plan's central security property.
+    - **Mitigation**: Document the reasoning where the contributor meets the
+      friction, not only in this plan: the token works, it is bounded to one fork,
+      and it costs a manual web-UI trip per issue because no API can create one.
+      Describe the manual escape hatch honestly, including what it gives up, so
+      choosing it is deliberate rather than a workaround. Do not ship sand
+      machinery for it until someone reports the iteration pain.
 - **A published change is public and permanent**: Unlike a token, which can be
   revoked, a commit pushed to a shared issue fork is immediately visible to the
   Drupal community and cannot be quietly withdrawn. The failure mode of this
@@ -949,11 +1033,13 @@ tool. The default's interaction with reset is recorded under risks.
    configuration.
 3. Two issue worktrees of the same module run simultaneously in one VM, each
    serving its own site, without name, port, or database collision.
-4. A push from an issue worktree authenticates with a token scoped to that issue
-   fork alone; a push from that worktree to a *different* fork or to the
-   canonical project fails to authenticate.
-5. Credential resolution for a given fork URL is identical from the main clone
-   and from any worktree, at any path.
+4. No push from anywhere inside the guest authenticates to drupal.org at all: a
+   push to the issue's own fork, to a different fork, and to the canonical
+   project each fail for want of any credential, through `git`, through `glab`,
+   and through the `drupalorg` CLI alike.
+5. Publication behaves identically whether the change set originates in the main
+   clone or in a worktree at any path, including a harness-created nested one —
+   the worktree's location never affects where the work lands.
 6. Existing GitHub behavior is unchanged: a VM created with a `GH_TOKEN` and a
    GitHub clone URL authenticates exactly as it does today, with no migration and
    no change to stored secrets.
@@ -963,11 +1049,12 @@ tool. The default's interaction with reset is recorded under risks.
    documented, harness-neutral commands; nothing depends on a Claude-Code-specific
    file or convention.
 9. Naming an issue number against a drupal.org checkout produces, in one step, a
-   worktree on the issue branch, a bootstrapped ddev project, and push access
-   scoped to that issue's fork.
-10. The host requires no PHP runtime and no Drupal tooling, and makes exactly one
-    authenticated GitLab call per mint; fork resolution and verification use no
-    credential at all.
+   worktree on the issue branch and a bootstrapped, running ddev project — and
+   places no credential anywhere in the guest, because none is needed.
+10. The host requires no PHP runtime, no Drupal tooling, and no git — no
+    repository, no checkout, no working tree. Fork resolution and verification
+    use no credential at all, and the only authenticated calls it ever makes are
+    the publish itself: the commit and the merge request.
 11. Running the bootstrap twice on the same checkout changes nothing and reports
     success — idempotency is asserted by test, since two of the three trigger
     surfaces can fire repeatedly.
@@ -1021,13 +1108,16 @@ These steps inspect the real system and must be executed after implementation.
 Several require a live VM; the drupal.org probes require a real account and a
 real issue fork.
 
-1. **Probe the drupal.org unknowns first.** Using a real drupal.org account with
-   push access to a real issue fork, query the GitLab API for the caller's access
-   level on that fork project, and attempt a token-creation call against it.
-   Record whether the access level permits minting and whether the endpoint is
-   permitted. Both came back negative in the probe already run — this step exists
-   so a future change in drupal.org's posture is noticed deliberately rather than
-   assumed.
+1. **Re-probe the drupal.org access ceiling.** Using a real drupal.org account,
+   query the GitLab API for the caller's access level on an issue fork **of a
+   module that account maintains**, and attempt a token-creation call against it.
+   Both came back negative and are not expected to change: the access level is
+   Developer (30) even for the parent project's own maintainer on a fork they
+   created themselves, and `POST .../access_tokens` is blocked at the edge for
+   everyone. Use the maintained-module variant specifically — the weaker probe,
+   against a module the account merely contributes to, cannot distinguish "this
+   account is not privileged enough" from "no account can be". This step exists so
+   a change in drupal.org's posture is noticed deliberately rather than assumed.
 2. **Verify the guest holds no drupal.org credential and needs none.** In a
    provisioned VM, complete a full development loop against a real issue: clone,
    bootstrap, edit, run tests, read the merge request and pipeline status. Then
@@ -1057,9 +1147,11 @@ real issue fork.
    rather than an error page.
 8. **Verify the one-step issue entry point.** Against that checkout, name a real
    issue number and confirm all three outcomes in one action: a worktree exists on
-   the issue branch, it is a running ddev project reachable over HTTP, and a push
-   to that issue's fork authenticates. This is the plan's headline claim and must
-   be demonstrated, not argued.
+   the issue branch, it is a running ddev project reachable over HTTP, and the
+   guest still holds no drupal.org credential of any kind. This is the plan's
+   headline claim and must be demonstrated, not argued. (An earlier revision of
+   this step required a push to *authenticate*, contradicting step 12; the guest
+   cannot push under this design, and must not be able to.)
 9. **Verify worktree bootstrap and non-clobbering.** Record the main clone's ddev
    configuration, add a worktree at a nested path, and confirm: a new independent
    ddev project exists at the worktree; its name differs from the parent's; the
@@ -1119,16 +1211,17 @@ real issue fork.
     plus at least one issue worktree. Confirm both module clones survive or are
     named as lost, per step 14's standard, and that the outcome is never silently
     partial.
-22. **Settle the fine-grained token question manually, before building either
-    credential design.** On a real account, open the token UI at
-    git.drupalcode.org and confirm whether a fine-grained token can be created at
-    all. If it can, attempt a boundary of the single issue-fork project, and
-    separately a boundary of the `issue` group, each with `Code: Push`. Record
-    which boundaries the UI permits for a non-member. Then verify the resulting
-    token by pushing to an issue fork and by attempting a push to a canonical
-    `project/<module>` repository — the second must fail. This is the check that
-    decides between the two credential designs, and it must not be inferred from
-    documentation.
+22. **Run the fine-grained token's negative control, before documenting the
+    escape hatch.** Most of this check is already answered and must not be
+    re-litigated: the UI does expose fine-grained tokens, `Code: Push` exists, a
+    single issue-fork project is a selectable boundary, the `issue` group is
+    **not**, and a fork-bounded token pushes to its fork successfully. What has
+    **not** been run is the negative control that carries the whole blast-radius
+    claim: take a token bounded to one issue fork and attempt a push to a
+    canonical `project/<module>` the developer maintains. It **must** fail. Until
+    it does, the escape hatch stays undocumented — a boundary that has only been
+    observed permitting things has not been shown to forbid anything. This does
+    not block the rest of the plan, which builds no token path.
 23. **Re-run the endpoint map.** Re-probe drupal.org's allowlist and confirm the
     content endpoints this design depends on still route to GitLab and that the
     credential endpoints are still blocked. A change here is a platform change,
@@ -1145,10 +1238,21 @@ real issue fork.
 Yes — this plan requires documentation updates, both human- and agent-facing.
 
 - **A new user-facing guide for the Drupal.org workflow** under `docs/using-sand/`,
-  covering the end-to-end path from `sand create` to a pushed issue-fork branch,
-  the worktree model for parallel issues, and the token model. This is the
-  document that carries the work order's "SIMPLE for a Drupal developer" goal and
-  should be written for someone who knows Drupal and not sandbar.
+  covering the end-to-end path from `sand create` to a published merge request, the
+  worktree model for parallel issues, and the publication model — including that
+  the VM holds no drupal.org credential and that publishing is a confirmed step on
+  the workstation. This is the document that carries the work order's "SIMPLE for a
+  Drupal developer" goal and should be written for someone who knows Drupal and not
+  sandbar.
+- **An honest answer to "why can't I just push?"**, placed where the contributor
+  meets the friction rather than buried in a security page. A fine-grained token
+  bounded to one issue fork demonstrably works, so a contributor who finds that out
+  will assume it was overlooked. Say that it works, that it is bounded to a single
+  fork, and that it costs a manual web-UI token per issue because GitLab exposes no
+  API to create one. Describe the manual escape hatch and what accepting it gives
+  up — a credential inside an agent-controlled VM, which drupal.org's edge will not
+  contain if it leaks. Do not write this up until the negative control in the
+  validation steps has passed.
 - **`docs/using-sand/secrets.md`** — state plainly that drupal.org work needs no
   guest secret at all, and why: the credential lives on the workstation and the
   VM never authenticates to drupal.org. This is a notable exception to the page's
@@ -1171,9 +1275,9 @@ Yes — this plan requires documentation updates, both human- and agent-facing.
   The existing documentation already warns that a reset re-clones before secrets
   land; this workflow adds cases that warning does not currently cover.
 - **`AGENTS.md`** — yes, this needs updating: it is the repository's own
-  agent-facing documentation and must describe the new credential mechanism, the
-  the reason no drupal.org credential belongs in a guest, and the worktree/ddev clobbering hazard
-  so future work does not reintroduce it.
+  agent-facing documentation and must describe the publication mechanism, the
+  reason no drupal.org credential belongs in a guest, and the worktree/ddev
+  clobbering hazard, so future work does not reintroduce any of them.
 - **Follow-up record** — the pre-existing behavior that GitHub worktrees inherit
   the main clone's token, uncovered during this investigation and deliberately
   left unchanged for compatibility, should be filed rather than lost.
@@ -1182,7 +1286,7 @@ Yes — this plan requires documentation updates, both human- and agent-facing.
 
 ### Development Skills
 
-Go, for the host-side credential and minting work. Ansible, for the provisioning
+Go, for the host-side credential handling and the publication client. Ansible, for the provisioning
 role and the hook installation. Shell, for the bootstrap and the git hook. Working
 knowledge of git's credential subsystem and configuration-matching rules — this
 plan turns on details that are easy to get subtly wrong. Familiarity with ddev's
@@ -1247,20 +1351,40 @@ ddev or token state, but that is not required here and is deliberately left out.
 ## Notes
 
 The work order's framing — "gitlab api tokens are issue, and not project scoped"
-— turned out to be true in effect but not in mechanism. GitLab personal access
-tokens cannot be project-restricted at all; what makes per-issue scoping possible
-is that each issue fork is a separate *project*, so a project access token is
-naturally issue-scoped. That distinction is why the plan reaches for project
-access tokens and a host-held personal token rather than trying to narrow a
-personal token, and it is worth carrying into the documentation because it is a
-genuinely counterintuitive corner of GitLab.
+— turned out to be right about the shape and wrong about the mechanism, and the
+mechanism is what decided the design. Each issue fork is a separate *project*, so
+per-issue scoping is natural in principle. Two of the three ways to exploit that
+are closed: a *classic* personal access token cannot be restricted to a project
+at all, and a *project access token* requires Maintainer, which no one holds on an
+issue fork. The third — a **fine-grained** access token bounded to one fork —
+genuinely works, and was verified pushing. It fails on economics rather than
+capability: GitLab exposes no API that can create one, and the boundary cannot be
+widened to the `issue` group, so every issue costs a manual trip through the web
+UI. That is why the plan publishes from the host instead of narrowing a token,
+and it is worth carrying into the documentation, because "the secure option
+exists but cannot be automated" is a far less obvious conclusion than "the secure
+option does not exist."
 
-The single most valuable finding of this investigation is that credentials must
-be keyed by remote URL rather than by directory. It was not part of the original
-framing, it invalidates the obvious design, and it is invisible until someone
-tests `includeIf` inside a linked worktree. It also means the worktree question
-and the token question — which read as two separate problems in the work order —
-have one shared answer.
+The corollary is worth stating for anyone who revisits this: the deciding
+constraint is drupal.org's *token-creation* surface, not GitLab's token model. If
+the Drupal Association ever exposed fine-grained token creation by API, or if a
+group-level boundary became selectable by non-members, the in-guest push loop
+would become cheap and this decision should be reopened.
+
+The most valuable finding changed as the investigation went on, and it is worth
+recording both. The first was that credentials must be keyed by remote URL rather
+than by directory — invisible until someone tests `includeIf` inside a linked
+worktree, and fatal to the obvious design. It is no longer load-bearing here,
+because the chosen design puts no credential in the guest at all, but it is kept
+in Background because it is expensively established and would resurface intact
+the moment anyone tries to give worktrees distinct credentials for any forge.
+
+The finding that actually decided this plan is narrower and blunter: **on
+drupal.org, every credential that is safe enough to hand an agent is one a human
+must create by hand, one issue at a time.** Once that is true, the cheapest secure
+design is not a better token but no token — which is why publication moved to the
+host, and why the two halves of the work order turned out to have separate
+answers rather than the single shared one the earlier revisions expected.
 
 Finally, the design deliberately spends its effort on making knowledge
 unnecessary rather than on conveying knowledge. Documentation and discovery
@@ -1274,26 +1398,78 @@ automatically portable to any tool.
 Carried deliberately rather than papered over. Downstream task generation should
 treat these as known, not as oversights.
 
-- **Two fine-grained-token facts are unverified**, and the choice between the two
-  credential designs depends on them: whether git.drupalcode.org's token UI
-  exposes fine-grained tokens at all, and whether the boundary picker allows
-  selecting the `issue` group as a non-member. Minutes of manual checking; do not
-  build either design until they are settled.
-- **The plan does not choose between host-side publication and an
-  `issue`-group-bounded token.** This is deliberate, not an omission. Both bound
-  the catastrophic case; they differ in whether the guest can push at all, and one
-  depends on unverified platform behavior. The decision belongs to the developer's
-  risk posture once the facts above are in.
-- **The Drupal Association has not been consulted.** The design publishes
-  agent-authored commits through a permitted API as a human-confirmed action,
-  which reads as within policy, but the DA's automation and AI policies were
-  written without this shape in mind. Their view should be sought before this is
-  promoted widely, and it may impose disclosure requirements on merge requests.
+- **The fine-grained token's negative control has not been run.** A token bounded
+  to a single issue fork has been verified *permitting* a push to that fork; it has
+  not been verified *refusing* a push to a canonical `project/<module>`. This
+  blocks nothing in this plan, which places no token in a guest, but the manual
+  escape hatch must not be documented as safe until it passes. A boundary observed
+  only permitting things has not been shown to forbid anything.
+- **The in-guest iteration loop is a known, accepted cost.** Responding to a
+  failing pipeline means a host-side confirmed publish per attempt rather than a
+  `git push`. This is a deliberate trade, not an oversight, and it is the most
+  likely source of contributor complaint. If it bites in practice, the reopening
+  condition is recorded in the fine-grained token section.
+- **The Drupal Association has not been consulted, on three separate questions.**
+  Whether host-side publishing via the commits API is acceptable under the
+  automation policy given a human confirms each publish — the plan's reading is
+  that it is "an individual action a user could already perform", but that is an
+  inference and not a ruling. Whether they would allowlist
+  `POST /projects/:id/access_tokens` — worth asking only if the escape hatch ever
+  becomes a supported path, since it would make in-guest tokens automatable and
+  reopen the design decision. And whether AI-assisted merge requests must be
+  disclosed — governance issue 3565917 proposes it but it is not ratified. None
+  block building; all should be settled before this is promoted widely.
 - **Whether Drupal's extension discovery skips dot-directories is assumed, not
   verified.** If it does not, nested worktrees pollute the parent site's extension
   scan. The plan requires explicit exclusion rather than relying on this.
 
 ### Change Log
+
+- **2026-08-27 (refinement 5 — the deferred decision, closed)**: Refinement 4's
+  two unverified facts were checked on a real account, and they split. The token
+  UI **does** expose fine-grained tokens, `Code: Push` **is** present, a single
+  issue-fork project **is** a selectable boundary, and a token so bounded was
+  verified pushing to its fork. But the `issue` **group is not selectable** — the
+  access probe shows `group_access: null` on a fork, so the developer's Developer
+  role there is a direct project membership and they are not a member of that
+  group, while GitLab offers only boundaries the user belongs to. Refinement 4's
+  enabling consequence — one token, created once, reaching every fork — therefore
+  does not exist. What the platform actually offers is one hand-built token per
+  issue fork: a *tighter* blast radius than the group option, but precisely the
+  friction the work order opened by naming, and unautomatable because no API can
+  create one.
+
+  Separately, the access-level finding was strengthened from sampled to
+  structural. A probe on `issue/dubbot-3619492` — a brand-new fork of a module the
+  developer fully maintains, created by them moments earlier — still returns
+  `access_level: 30`. If the parent project's own maintainer is merely a Developer
+  on a fork they just created, no drupal.org user can hold Maintainer on an issue
+  fork. Project access tokens are closed permanently, not merely closed to one
+  account, and no earlier design reopens.
+
+  On those facts the deferral was closed: **the plan builds host-side publication
+  only.** The per-fork token is recorded as a manual escape hatch with its cost
+  stated, and no sand machinery is built for it — building both would have spent
+  the URL-keyed store and host-scoped `useHttpPath` work to reinstate a friction
+  the work order asked to remove, against the scope-control hook. The plan also
+  stays a single plan: the earlier proposal to split the credential half out was
+  premised on two mutually-exclusive designs blocking decomposition, and with one
+  design chosen it decomposes end to end.
+
+  Corrected three claims the new facts falsified: the Executive Summary and Notes
+  both still asserted that drupal.org offers no narrower credential (it offers
+  one, but only by hand), and "Consequences for the guest credential machinery"
+  claimed the per-fork machinery was unnecessary under *either* design — which was
+  reasoning from the group boundary that turned out not to exist. Had the token
+  design been chosen it would have needed exactly that machinery.
+
+  Also swept up stale artefacts left by refinement 3's redesign, which task
+  generation would have tripped over: success criteria 4, 5, 9 and 10 still
+  described the deleted per-fork-token design, promising push access and "one
+  authenticated call per mint" under a design with no tokens and no mint; and
+  validation step 8 required a push to *authenticate* while step 12 required every
+  push to *fail* — a direct contradiction. Recorded the one genuinely open token
+  fact, the negative control, which has not been run.
 
 - **2026-08-27 (refinement 4 — a corrected assumption)**: Background research
   contradicted a claim this plan had asserted flatly and built on: that GitLab
