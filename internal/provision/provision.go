@@ -959,25 +959,18 @@ type ResetOptions struct {
 // pass omits project_clone_url (CloneURL cleared) so the project role's clone
 // step does not clobber the restored tree.
 //
-// Once stage-out has begun, no later error removes the staging dir — the error
-// is wrapped with its path so the user can recover their data manually.
+// Once the VM has been deleted, no later error removes the staging dir — the
+// error is wrapped with its path so the user can recover their data manually. A
+// failure BEFORE that point drops the staged copy, because the original is
+// still sitting in the untouched guest; StageGuard owns that whole rule (see
+// staging.go), and both this reset and the Proxmox provider's share it.
 func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts ResetOptions, out io.Writer) error {
-	// stageDir is only set once staging actually runs; an empty value means there
-	// is nothing on the host to preserve or clean up.
-	var stageDir string
+	// stage is only created once staging actually runs; a nil guard means there
+	// is nothing on the host to preserve or clean up, and every method on it is
+	// nil-safe for exactly that case.
+	var stage *StageGuard
 	var home string
 	var project ProjectPlan
-
-	// wrap adds the recovery path to any error raised once host data exists, so
-	// the one statement of that contract lives here rather than at each return.
-	// It reads stageDir at CALL time, so it is correct before staging has run
-	// (nothing to recover, nothing to add) as well as after.
-	wrap := func(err error) error {
-		if err == nil || stageDir == "" {
-			return err
-		}
-		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-	}
 
 	// 1. Stage out the selected state while the source VM is still alive.
 	if opts.PreserveClaude || opts.PreserveProject {
@@ -992,18 +985,17 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
 			return fmt.Errorf("resolve home for %q: %w", cfg.Name, err)
 		}
-		if stageDir, err = newStageDir(); err != nil {
+		if stage, err = NewStageGuard(); err != nil {
 			return err
 		}
-		// From here on, errors must keep stageDir and surface its path (wrap).
 		if opts.PreserveClaude {
-			if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-				return wrap(err)
+			if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{".claude", ".claude.json"}, stage.Path("claude.tgz")); err != nil {
+				return stage.Fail(err)
 			}
 		}
 		if opts.PreserveProject {
-			if project, err = PlanProject(ctx, p.Lima, cfg.Name, home, cfg.CloneURL, filepath.Join(stageDir, "project.tgz")); err != nil {
-				return wrap(err)
+			if project, err = PlanProject(ctx, p.Lima, cfg.Name, home, cfg.CloneURL, stage.Path("project.tgz")); err != nil {
+				return stage.Fail(err)
 			}
 			if !project.Staged && project.OrgRel != "" {
 				step(out, "Note: %q has no ~/%s to preserve; the project will be cloned fresh instead.", cfg.Name, project.OrgRel)
@@ -1011,9 +1003,13 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		}
 	}
 
-	// 2. Delete the existing VM.
+	// 2. Delete the existing VM. From here on the staged archives are the only
+	// copy of what was in the guest, so every later failure keeps them — flipped
+	// BEFORE the call, since a delete that reports an error may still have taken
+	// the instance with it.
+	stage.DestroyingGuest()
 	if err := p.Lima.Delete(cfg.Name, true); err != nil {
-		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
+		return stage.Fail(fmt.Errorf("delete %q: %w", cfg.Name, err))
 	}
 
 	// 3. Recreate sized from the base image. A reset re-clones ONE VM; it never
@@ -1023,24 +1019,24 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// still needs a timer to share its signature with createVM, so give it one whose
 	// readings are simply discarded here.
 	if err := p.prepareBaseAndClone(ctx, cfg, CreateOptions{}, out, newPhaseTimer(out)); err != nil {
-		return wrap(err)
+		return stage.Fail(err)
 	}
 	pbDir, err := p.stagedPlaybookDir(ctx)
 	if err != nil {
-		return wrap(err)
+		return stage.Fail(err)
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
-		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
+		return stage.Fail(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
 	}
 	step(out, "Starting %q…", cfg.Name)
 	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-		return wrap(fmt.Errorf("start %q: %w", cfg.Name, err))
+		return stage.Fail(fmt.Errorf("start %q: %w", cfg.Name, err))
 	}
 
 	// 4. Restore Claude BEFORE finalize so the playbook layers settings on top.
 	if opts.PreserveClaude {
-		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-			return wrap(fmt.Errorf("restore Claude into %q: %w", cfg.Name, err))
+		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{".claude", ".claude.json"}, stage.Path("claude.tgz")); err != nil {
+			return stage.Fail(fmt.Errorf("restore Claude into %q: %w", cfg.Name, err))
 		}
 	}
 
@@ -1054,16 +1050,16 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
 	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out); err != nil {
-		return wrap(err)
+		return stage.Fail(err)
 	}
 
 	// 6. Restore the project tree AFTER finalize, then re-approve its .env.
 	if project.Staged {
-		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{project.OrgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
-			return wrap(fmt.Errorf("restore project into %q: %w", cfg.Name, err))
+		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{project.OrgRel}, stage.Path("project.tgz")); err != nil {
+			return stage.Fail(fmt.Errorf("restore project into %q: %w", cfg.Name, err))
 		}
 		if err := AllowDirenv(ctx, p.Lima, cfg.Name, cfg.User, home+"/"+project.OrgRel, out); err != nil {
-			return wrap(fmt.Errorf("direnv allow in %q: %w", cfg.Name, err))
+			return stage.Fail(fmt.Errorf("direnv allow in %q: %w", cfg.Name, err))
 		}
 	}
 
@@ -1105,17 +1101,15 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		}
 		step(out, "Restarting %q to apply a pending reboot…", cfg.Name)
 		if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
-			return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
+			return stage.Fail(fmt.Errorf("stop %q: %w", cfg.Name, err))
 		}
 		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-			return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
+			return stage.Fail(fmt.Errorf("restart %q: %w", cfg.Name, err))
 		}
 	}
 
 	// 8. Full success: drop the host staging dir.
-	if stageDir != "" {
-		removeStageDir(stageDir)
-	}
+	stage.Done()
 	return nil
 }
 
