@@ -98,8 +98,20 @@ var collectMaxTotalBytes int64 = 20 << 20
 // BuildCollectCommand substitutes its tokens in. It is intentionally small,
 // mirroring sweep.go's sweepScriptTemplate:
 //
-//  1. `git rev-list --reverse "<base>..HEAD"` lists the commits not yet on
-//     the base ref, oldest first — the order a replay must send them in.
+//  1. `git rev-list --reverse --no-merges "<base>..HEAD"` lists the commits
+//     not yet on the base ref, oldest first — the order a replay must send
+//     them in.
+//
+//     --no-merges is load-bearing rather than tidy. A merge commit carries no
+//     file changes of its own, so `diff-tree` emits nothing for it and it
+//     would arrive here as a commit with zero file actions — which the
+//     publisher refuses, failing the WHOLE change set after the human has
+//     already confirmed it. Skipping merges is also the only coherent reading
+//     for a content-API replay: the API lands one commit per call from a list
+//     of file actions and cannot express a second parent, so a merge is not
+//     something publication could reproduce even if it were carried. The
+//     changes a merge brought in travel as the commits themselves.
+//
 //  2. For each commit, one line per author-name/author-email/message field,
 //     each base64-encoded (see the package doc comment for why). Each field
 //     is captured into a shell variable BEFORE it is base64-encoded,
@@ -124,16 +136,29 @@ var collectMaxTotalBytes int64 = 20 << 20
 //     ever removed). Chaining the sentinel with `&&` rather than `;` means
 //     a failing `git log` (impossible in ordinary use, but see point 5 on
 //     `set -e`) is not masked by the sentinel command's own success.
+//
 //  3. `git diff-tree --no-commit-id --name-status -M -r --root` lists that
 //     commit's changed files with their status (`A`, `M`, `D`, or an
 //     `R<nn>`-style rename carrying both paths) — `--root` so an initial
 //     commit (rare here, since these are commits ahead of an existing base)
 //     still gets a diff instead of diff-tree's default empty output for a
-//     parentless commit.
+//     parentless commit, and `-c core.quotePath=false` so a path with any
+//     non-ASCII byte in it (git's default quotes those as
+//     `"caf\303\251.txt"`, double quotes and backslash escapes included)
+//     arrives as its real bytes. Without it such a path is unreadable by
+//     `git cat-file`/`git show` AND rejected by ValidateRepoPath's
+//     backslash rule, so a single accented filename anywhere in the range
+//     would fail the whole collection.
+//
 //  4. For every non-delete entry, the file's resulting content at that
 //     commit (`git show "$c:$path"`), unless `git cat-file -s` reports it
 //     over collectMaxFileBytes, in which case an `oversize=1` marker is
-//     emitted instead of content.
+//     emitted instead of content. The size probe is `|| size=""`-guarded so
+//     its failure reaches the `[ -n "$size" ]` test below rather than being
+//     swallowed by `set -e` as an unexplained abort of the whole run — the
+//     guard is otherwise unreachable, since a failed assignment would have
+//     killed the script before it.
+//
 //  5. `set -e` plus (bash's) `set -o pipefail` turn a failed git read
 //     anywhere in the script into an immediate, loud abort — inherited into
 //     every nested subshell the `| while read` pipelines spawn — rather
@@ -151,7 +176,7 @@ var collectMaxTotalBytes int64 = 20 << 20
 // sweep.go's) never needs escaping.
 const collectScriptTemplate = `set -ef -o pipefail
 b64() { base64 -w0; }
-git rev-list --reverse "__BASE__..HEAD" | while IFS= read -r c; do
+git rev-list --reverse --no-merges "__BASE__..HEAD" | while IFS= read -r c; do
   [ -z "$c" ] && continue
   name=$(git log -1 --format=%an "$c")
   email=$(git log -1 --format=%ae "$c")
@@ -161,7 +186,7 @@ git rev-list --reverse "__BASE__..HEAD" | while IFS= read -r c; do
   printf 'name=%s\n' "$(printf '%s' "$name" | b64)"
   printf 'email=%s\n' "$(printf '%s' "$email" | b64)"
   printf 'msg=%s\n' "$(printf '%s' "$msg" | b64)"
-  git diff-tree --no-commit-id --name-status -M -r --root "$c" | while IFS=$'\t' read -r status p1 p2; do
+  git -c core.quotePath=false diff-tree --no-commit-id --name-status -M -r --root "$c" | while IFS=$'\t' read -r status p1 p2; do
     [ -z "$status" ] && continue
     path="$p1"
     prev=""
@@ -176,7 +201,7 @@ git rev-list --reverse "__BASE__..HEAD" | while IFS= read -r c; do
     case "$status" in
       D) : ;;
       *)
-        size=$(git cat-file -s "$c:$path" 2>/dev/null)
+        size=$(git cat-file -s "$c:$path" 2>/dev/null) || size=""
         if [ -n "$size" ] && [ "$size" -gt __MAXFILE__ ]; then
           printf 'oversize=1\n'
         else

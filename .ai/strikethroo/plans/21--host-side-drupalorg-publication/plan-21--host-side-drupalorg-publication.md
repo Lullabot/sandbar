@@ -1362,10 +1362,10 @@ No cycles: every edge runs from a lower task ID to a higher one.
 **Parallel Tasks:**
 - ✔️ Task 005: Authenticated publish — commit replay, merge request, partial failure and resumption (depends on: 001, 002, 003, 004)
 
-### Phase 4: Surfaces
+### ✅ Phase 4: Surfaces
 **Parallel Tasks:**
-- Task 007: `sand publish` CLI surface (depends on: 004, 005, 006)
-- Task 008: TUI Landing pane publish action (depends on: 004, 005, 006)
+- ✔️ Task 007: `sand publish` CLI surface (depends on: 004, 005, 006)
+- ✔️ Task 008: TUI Landing pane publish action (depends on: 004, 005, 006)
 
 ### Phase 5: Documentation
 **Parallel Tasks:**
