@@ -88,7 +88,7 @@ require the VM to be running.
 | `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
 | `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |
 | `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |
-| `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR or the branch's page in a browser. See [Landing](files-and-shells.md#landing). |
+| `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR, the branch's page in a browser, or — for a checkout on a `git.drupalcode.org` remote — publish its local commits to drupal.org. See [Landing](files-and-shells.md#landing) and [Publishing to drupal.org](drupalorg-publishing.md). |
 | `L` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
 
 `d` is always delete, on every screen — the most destructive key never

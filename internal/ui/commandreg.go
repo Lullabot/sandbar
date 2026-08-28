@@ -364,7 +364,7 @@ var vmCommands = []vmCommand{
 	{
 		id:         "land",
 		binding:    key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "land")),
-		about:      "Open the Landing pane: this VM's git checkouts, their push/PR state, and a one-key action to open or create a pull request.",
+		about:      "Open the Landing pane: this VM's git checkouts, their push/PR state, and a one-key action to open or create a pull request, or to publish to drupal.org.",
 		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v boardVM) tea.Cmd {
 			return m.openLandingPane(v)

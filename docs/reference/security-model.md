@@ -105,6 +105,61 @@ that branch reaches your host only when you choose to bring it there
 yourself — a `gh pr checkout` or `git pull` you run and review — never as a
 side effect of Landing itself.
 
+## Publishing to drupal.org: agent decides what, host decides where
+
+[Publishing to drupal.org](../using-sand/drupalorg-publishing.md) — replaying
+a guest checkout's commits onto a drupal.org issue fork — splits authority
+along one line: **the guest decides WHAT changes** (the commits, their
+messages, and their file contents) and **the host decides WHERE they go**
+(which fork, which branch, whether a merge request follows). The guest never
+sees a drupal.org credential, a project, a branch name, or a URL; it only
+ever produces an inert payload of commits and file actions that is
+structurally incapable of naming a destination. That split is enforced by the
+payload type itself, not by convention — see `internal/drupalorg`'s package
+doc comment — so no amount of prompt injection or agent compromise can make
+a guest's output smuggle in where it lands.
+
+**No drupal.org credential ever enters a VM.** The guest clones and reads
+drupal.org anonymously — anonymous requests already cover the entire
+development loop, including CI results and merge-request feedback — and only
+the host, using a personal access token that never leaves your workstation,
+performs the one call that writes. This is a stricter version of the
+least-privilege reasoning below, not a variant of it: a drupal.org account
+PAT is not scoped to one repository the way a GitHub fine-grained token can
+be — it is account-wide, and a working Drupal contributor's account may hold
+push access to modules running on tens of thousands of sites. The only safe
+credential to place in an agent-controlled VM for that kind of account is
+none at all. See
+[Files and State](files-and-state.md#host-paths) for where the token
+actually lives and why its path is a convention rather than a config value.
+
+**The limits, stated honestly.** This design does not make publication safe
+in the abstract — it moves the one dangerous credential to the one place an
+agent cannot directly reach, and stops there:
+
+- **The host still holds a powerful, account-wide credential**, and it uses
+  that credential to publish content an agent authored. The human-in-the-loop
+  confirmation (see the publishing guide) is what stands between an agent's
+  output and a public, permanent write — not any property of the credential
+  itself. A compromised or careless human confirmation is still a compromise.
+- **drupal.org's edge allowlist is not a containment boundary.** drupal.org
+  runs a per-path, per-method allowlist in front of its GitLab API that
+  blocks a few credential-minting endpoints (`POST /access_tokens`,
+  `POST /deploy_tokens`, `POST /deploy_keys`) while routing every
+  content-write endpoint this design uses straight through. It is tempting to
+  read that as "drupal.org contains what an agent can do", but two things
+  defeat that reading: `POST /api/graphql` is **not** blocked and returns 200
+  unauthenticated — protecting GraphQL writes the same way "would require
+  inspecting the request body, which is not a capability of our load balancer,
+  as far as I know", per the infrastructure discussion in
+  [#3379836](https://www.drupal.org/project/infrastructure/issues/3379836) —
+  and `git push` over HTTPS reaches GitLab directly, bypassing the REST
+  allowlist entirely. So the allowlist is a control on one specific REST
+  path, not a barrier that would stop a leaked credential. **If a credential
+  ever enters a guest, the allowlist will not save you** — the guarantee has
+  to come from the credential's own boundary, or from its absence, exactly as
+  above.
+
 ## A least-privilege token: reasonable agent access
 
 `sand` can hand Claude Code a GitHub token at create time so it can clone,
