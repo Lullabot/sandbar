@@ -2,13 +2,18 @@ package ui
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/drupalorg"
 	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
@@ -62,11 +67,70 @@ func (f *fakeGhActions) OpenInBrowser(_ context.Context, target string) error {
 	return f.openErr
 }
 
+// --- fakeDrupalOrgActions: the drupalOrgActions seam's test double ---------
+
+// fakeDrupalOrgActions records every call it receives and returns canned
+// results, so a test can exercise the Landing pane's publish flow without
+// reading a real token file or contacting git.drupalcode.org — mirroring
+// fakeGhActions above, one layer down.
+type fakeDrupalOrgActions struct {
+	tokenAvailable bool
+
+	resolveForkCalls []string
+	fork             *drupalorg.ProjectInfo
+	forkErr          error
+
+	publishCalls []struct {
+		dest drupalorg.Destination
+		cs   drupalorg.ChangeSet
+	}
+	publishResult drupalorg.Result
+	publishErr    error
+}
+
+func (f *fakeDrupalOrgActions) TokenAvailable() bool { return f.tokenAvailable }
+
+func (f *fakeDrupalOrgActions) ResolveFork(_ context.Context, forkPath string) (*drupalorg.ProjectInfo, error) {
+	f.resolveForkCalls = append(f.resolveForkCalls, forkPath)
+	return f.fork, f.forkErr
+}
+
+func (f *fakeDrupalOrgActions) Publish(_ context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error) {
+	f.publishCalls = append(f.publishCalls, struct {
+		dest drupalorg.Destination
+		cs   drupalorg.ChangeSet
+	}{dest, cs})
+	return f.publishResult, f.publishErr
+}
+
+// landingPublishFixture builds a real drupalorg.ChangeSet/Destination pair
+// (one commit, one file) and RenderConfirmation's real text for it — used by
+// both the cancel-path and the confirmation-view tests below, so the text
+// asserted against is exactly what production code would render, not a
+// hand-typed stand-in for it.
+func landingPublishFixture(t *testing.T) (drupalorg.ChangeSet, drupalorg.Destination, string) {
+	t.Helper()
+	cs := drupalorg.ChangeSet{Commits: []drupalorg.Commit{{
+		Message:     "Fix the thing",
+		AuthorName:  "Dev Eloper",
+		AuthorEmail: "dev@example.com",
+		Actions: []drupalorg.FileAction{{
+			Kind: drupalorg.ActionCreate, Path: "foo.txt",
+			Content: "hello\n", Encoding: drupalorg.EncodingText,
+		}},
+	}}}
+	dest := drupalorg.Destination{
+		ForkPath: "issue/module-1234", Branch: "module-1234",
+		ParentID: 42, ParentPath: "project/module", ParentBranch: "1.0.x",
+	}
+	return cs, dest, drupalorg.RenderConfirmation(cs, dest)
+}
+
 // --- classifyLandRow: the pure row-state -> action mapping, every table case
 
 func TestClassifyLandRowPushedNoPRNotYetResolved(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowPushedNoPR {
 		t.Fatalf("Kind = %v, want landRowPushedNoPR", row.Kind)
 	}
@@ -80,7 +144,7 @@ func TestClassifyLandRowPushedNoPRNotYetResolved(t *testing.T) {
 
 func TestClassifyLandRowPushedNoPRResolved(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
-	row := classifyLandRow(c, nil, prCheckDone)
+	row := classifyLandRow(c, nil, prCheckDone, false)
 	if row.Kind != landRowPushedNoPR {
 		t.Fatalf("Kind = %v, want landRowPushedNoPR", row.Kind)
 	}
@@ -95,7 +159,7 @@ func TestClassifyLandRowPushedNoPRResolved(t *testing.T) {
 func TestClassifyLandRowPushedHasPR(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
 	pr := &landgh.PR{Number: 42, URL: "https://github.com/acme/repo/pull/42", State: "OPEN", Draft: true}
-	row := classifyLandRow(c, pr, prCheckDone)
+	row := classifyLandRow(c, pr, prCheckDone, false)
 	if row.Kind != landRowPushedHasPR {
 		t.Fatalf("Kind = %v, want landRowPushedHasPR", row.Kind)
 	}
@@ -109,7 +173,7 @@ func TestClassifyLandRowPushedHasPR(t *testing.T) {
 
 func TestClassifyLandRowUnpushed(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "acme/repo", Forge: "github.com"}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
 	}
@@ -130,7 +194,7 @@ func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
 	// send the user to a PR that does not reflect the local state.
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}
 	pr := &landgh.PR{Number: 1, URL: "https://github.com/acme/repo/pull/1"}
-	row := classifyLandRow(c, pr, prCheckDone)
+	row := classifyLandRow(c, pr, prCheckDone, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk (dirty overrides an existing PR)", row.Kind)
 	}
@@ -146,7 +210,7 @@ func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
 // exactly where it matters most.
 func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 2}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly — there is no remote at all", row.Kind)
 	}
@@ -162,7 +226,7 @@ func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
 
 	// A CLEAN local-only checkout has nothing at stake, so it stays terse.
 	clean := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateNever}
-	if got := classifyLandRow(clean, nil, prCheckPending); got.Label != "local only" {
+	if got := classifyLandRow(clean, nil, prCheckPending, false); got.Label != "local only" {
 		t.Fatalf("Label = %q, want a bare %q for a clean local-only checkout", got.Label, "local only")
 	}
 }
@@ -195,7 +259,7 @@ func TestCommitAndPushExprIsLiteral(t *testing.T) {
 
 func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
 	}
@@ -215,7 +279,7 @@ func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
 // nothing at all when it was clean.
 func TestClassifyLandRowNeverPushed(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk — it exists nowhere but this VM", row.Kind)
 	}
@@ -232,7 +296,7 @@ func TestClassifyLandRowNeverPushed(t *testing.T) {
 	// the regression this pins.
 	dirty := c
 	dirty.Dirty = 2
-	got := classifyLandRow(dirty, nil, prCheckPending)
+	got := classifyLandRow(dirty, nil, prCheckPending, false)
 	if got.Action != row.Action {
 		t.Fatalf("a dirty never-pushed branch got action %v but a clean one got %v — they must agree", got.Action, row.Action)
 	}
@@ -248,7 +312,7 @@ func TestClassifyLandRowNeverPushed(t *testing.T) {
 // else. A checkout with a remote always reaches an arm that can act.
 func TestClassifyLandRowLocalOnlyIsOnlyForNoRemote(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", Branch: "feature", PushState: checkouts.PushStateNever}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly", row.Kind)
 	}
@@ -264,14 +328,14 @@ func TestClassifyLandRowLocalOnlyIsOnlyForNoRemote(t *testing.T) {
 	// alone is enough to keep it out of "local only".
 	withForge := c
 	withForge.Forge = "git.example.com"
-	if got := classifyLandRow(withForge, nil, prCheckPending); got.Kind == landRowLocalOnly {
+	if got := classifyLandRow(withForge, nil, prCheckPending, false); got.Kind == landRowLocalOnly {
 		t.Fatalf("a checkout with a remote was classified local-only: %+v", got)
 	}
 }
 
 func TestClassifyLandRowNoRemoteAtAll(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: ""}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly (no remote configured at all)", row.Kind)
 	}
@@ -280,32 +344,115 @@ func TestClassifyLandRowNoRemoteAtAll(t *testing.T) {
 	}
 }
 
+// TestClassifyLandRowGitLabForgeNoOneKeyAction pins that a GitLab checkout's
+// classification is UNCHANGED by the drupal.org arm this test file's other
+// forge tests exercise: it is as important that gitlab.com (a non-GitHub,
+// non-drupal.org forge) keeps exactly its old behaviour as it is that
+// drupal.org gets its new one — including when a workstation PAT happens to
+// be on file, which must have no effect on a forge the publish action does
+// not target at all.
 func TestClassifyLandRowGitLabForgeNoOneKeyAction(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "group/repo", Forge: "gitlab.com", Branch: "feature"}
-	// Even if somehow "resolved" with a PR-shaped result (never actually
-	// produced for a non-GitHub forge — handleLandingAvailable only fires
-	// PRState for github.com checkouts), gh scope is GitHub-only: no one-key
-	// action for GitLab/drupal.org.
-	row := classifyLandRow(c, &landgh.PR{Number: 1}, prCheckDone)
-	if row.Kind != landRowOtherForge {
-		t.Fatalf("Kind = %v, want landRowOtherForge", row.Kind)
-	}
-	if row.Action != landActionNone {
-		t.Fatalf("Action = %v, want landActionNone — no one-key MR action for GitLab (deferred)", row.Action)
-	}
-	if !strings.Contains(row.Label, "gitlab.com") {
-		t.Fatalf("Label = %q, want it to name the forge", row.Label)
+	for _, tokenAvailable := range []bool{false, true} {
+		// Even if somehow "resolved" with a PR-shaped result (never actually
+		// produced for a non-GitHub forge — handleLandingAvailable only fires
+		// PRState for github.com checkouts), gh scope is GitHub-only: no
+		// one-key action for GitLab.
+		row := classifyLandRow(c, &landgh.PR{Number: 1}, prCheckDone, tokenAvailable)
+		if row.Kind != landRowOtherForge {
+			t.Fatalf("tokenAvailable=%v: Kind = %v, want landRowOtherForge", tokenAvailable, row.Kind)
+		}
+		if row.Action != landActionNone {
+			t.Fatalf("tokenAvailable=%v: Action = %v, want landActionNone — no one-key MR action for GitLab (deferred)", tokenAvailable, row.Action)
+		}
+		if !strings.Contains(row.Label, "gitlab.com") {
+			t.Fatalf("tokenAvailable=%v: Label = %q, want it to name the forge", tokenAvailable, row.Label)
+		}
 	}
 }
 
-func TestClassifyLandRowDrupalOrgForgeNoOneKeyAction(t *testing.T) {
+// TestClassifyLandRowDrupalOrgForgeOffersPublishWithToken pins the arm this
+// task fills: a git.drupalcode.org checkout with a workstation PAT on file
+// gets its own row kind and a publish action — the dead end this checkout
+// used to fall into (landRowOtherForge/landActionNone) is gone for this
+// forge specifically.
+func TestClassifyLandRowDrupalOrgForgeOffersPublishWithToken(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"}
-	row := classifyLandRow(c, nil, prCheckPending)
-	if row.Kind != landRowOtherForge {
-		t.Fatalf("Kind = %v, want landRowOtherForge", row.Kind)
+	row := classifyLandRow(c, nil, prCheckPending, true)
+	if row.Kind != landRowDrupalOrgPublish {
+		t.Fatalf("Kind = %v, want landRowDrupalOrgPublish", row.Kind)
+	}
+	if row.Action != landActionPublish {
+		t.Fatalf("Action = %v, want landActionPublish", row.Action)
+	}
+	if !strings.Contains(row.Label, "drupal.org") {
+		t.Fatalf("Label = %q, want it to state what publication would do", row.Label)
+	}
+}
+
+// TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish pins the arm's
+// PRIORITY, which is the whole reason the feature is reachable at all.
+//
+// The canonical drupal.org contribution starts by cloning a canonical
+// project the contributor has NO push access to and committing locally, so
+// the checkout is unpushed (or dirty, or both). With the drupal.org arm
+// sitting below at-risk — as it first did — every such row was classified
+// landRowAtRisk and offered "commit and push", an action that cannot succeed
+// because this design deliberately puts no drupal.org credential in the
+// guest. Publish was then reachable only once there was nothing left to
+// publish.
+//
+// Both states must therefore reach the publish arm, and a dirty tree must
+// still SAY it is dirty, because publication carries committed commits only.
+func TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		checkout  checkouts.Checkout
+		wantDirty bool
+	}{
+		{
+			name:     "unpushed commits",
+			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
+		},
+		{
+			name:     "never pushed",
+			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateNever, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
+		},
+		{
+			name:      "dirty working tree",
+			checkout:  checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, Dirty: 2, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
+			wantDirty: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := classifyLandRow(tc.checkout, nil, prCheckPending, true)
+			if row.Kind != landRowDrupalOrgPublish {
+				t.Fatalf("Kind = %v, want landRowDrupalOrgPublish — a drupal.org checkout with local work is exactly what publication exists for, not an at-risk row offered a push that cannot succeed", row.Kind)
+			}
+			if row.Action != landActionPublish {
+				t.Fatalf("Action = %v, want landActionPublish", row.Action)
+			}
+			if tc.wantDirty && !strings.Contains(row.Label, "uncommitted") {
+				t.Fatalf("Label = %q, want it to name the uncommitted work that publication will NOT carry", row.Label)
+			}
+		})
+	}
+}
+
+// TestClassifyLandRowDrupalOrgForgeNoTokenDisablesPublish pins AC5: an absent
+// PAT disables the action with a VISIBLE REASON, rather than offering it and
+// failing on it later.
+func TestClassifyLandRowDrupalOrgForgeNoTokenDisablesPublish(t *testing.T) {
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStatePushed, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"}
+	row := classifyLandRow(c, nil, prCheckPending, false)
+	if row.Kind != landRowDrupalOrgNoToken {
+		t.Fatalf("Kind = %v, want landRowDrupalOrgNoToken", row.Kind)
 	}
 	if row.Action != landActionNone {
-		t.Fatalf("Action = %v, want landActionNone", row.Action)
+		t.Fatalf("Action = %v, want landActionNone — no PAT means no action to offer", row.Action)
+	}
+	if !strings.Contains(row.Label, "PAT") {
+		t.Fatalf("Label = %q, want it to say WHY publish is unavailable", row.Label)
 	}
 }
 
@@ -377,7 +524,7 @@ func TestBuildLandRowsIndentsWorktreesUnderParent(t *testing.T) {
 		{Path: "/home/user/repo", Kind: checkouts.KindRepo, PushState: checkouts.PushStateNever},
 		{Path: "/home/user/repo-wt", Kind: checkouts.KindWorktree, Parent: "/home/user/repo", PushState: checkouts.PushStateNever},
 	})
-	rows := buildLandRows(groups, map[string]resolvedPR{}, prCheckPending)
+	rows := buildLandRows(groups, map[string]resolvedPR{}, prCheckPending, false)
 	if len(rows) != 2 {
 		t.Fatalf("len(rows) = %d, want 2", len(rows))
 	}
@@ -393,7 +540,7 @@ func TestBuildLandRowsUsesResolvedPRPerPath(t *testing.T) {
 	c := checkouts.Checkout{Path: "/home/user/repo", Kind: checkouts.KindRepo, PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com", Branch: "feature"}
 	groups := groupCheckouts([]checkouts.Checkout{c})
 	pr := &landgh.PR{Number: 9, URL: "https://github.com/acme/repo/pull/9"}
-	rows := buildLandRows(groups, map[string]resolvedPR{"/home/user/repo": {pr: pr, state: prCheckDone}}, prCheckPending)
+	rows := buildLandRows(groups, map[string]resolvedPR{"/home/user/repo": {pr: pr, state: prCheckDone}}, prCheckPending, false)
 	if rows[0].Kind != landRowPushedHasPR {
 		t.Fatalf("rows[0].Kind = %v, want landRowPushedHasPR", rows[0].Kind)
 	}
@@ -822,7 +969,10 @@ func TestGhModeLabelAllModes(t *testing.T) {
 }
 
 func TestStyleForLandRowEveryKind(t *testing.T) {
-	kinds := []landRowKind{landRowLocalOnly, landRowAtRisk, landRowPushedNoPR, landRowPushedHasPR, landRowOtherForge, landRowNothingToLand}
+	kinds := []landRowKind{
+		landRowLocalOnly, landRowAtRisk, landRowPushedNoPR, landRowPushedHasPR,
+		landRowOtherForge, landRowNothingToLand, landRowDrupalOrgPublish, landRowDrupalOrgNoToken,
+	}
 	for _, k := range kinds {
 		if got := styleForLandRow(k).Render("x"); ansi.Strip(got) != "x" {
 			t.Fatalf("styleForLandRow(%v).Render(\"x\") stripped = %q, want \"x\"", k, ansi.Strip(got))
@@ -839,7 +989,7 @@ func TestClassifyLandRowNothingToLand(t *testing.T) {
 		Path: "/home/u/repo", Branch: "main", DefaultBranch: "main",
 		PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com",
 	}
-	row := classifyLandRow(c, nil, prCheckPending)
+	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowNothingToLand {
 		t.Fatalf("Kind = %v, want landRowNothingToLand", row.Kind)
 	}
@@ -855,7 +1005,7 @@ func TestClassifyLandRowNothingToLand(t *testing.T) {
 
 	// A feature branch in the same repo is unaffected.
 	c.Branch = "feature"
-	if got := classifyLandRow(c, nil, prCheckDone); got.Kind != landRowPushedNoPR || got.Action != landActionOpenDraftPR {
+	if got := classifyLandRow(c, nil, prCheckDone, false); got.Kind != landRowPushedNoPR || got.Action != landActionOpenDraftPR {
 		t.Fatalf("feature branch classified as %v/%v, want landRowPushedNoPR/landActionOpenDraftPR", got.Kind, got.Action)
 	}
 }
@@ -928,7 +1078,7 @@ func TestLandingActLabelNamesTheRealAction(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := landingPane{rows: []landRow{classifyLandRow(tc.c, nil, prCheckDone)}}
+			p := landingPane{rows: []landRow{classifyLandRow(tc.c, nil, prCheckDone, false)}}
 			if got := p.landingActBinding().Help().Desc; got != tc.want {
 				t.Fatalf("act label = %q, want %q", got, tc.want)
 			}
@@ -937,7 +1087,7 @@ func TestLandingActLabelNamesTheRealAction(t *testing.T) {
 
 	// An existing PR is the browser case.
 	withPR := checkouts.Checkout{Path: "/a", Branch: "f", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}
-	p := landingPane{rows: []landRow{classifyLandRow(withPR, &landgh.PR{Number: 7}, prCheckDone)}}
+	p := landingPane{rows: []landRow{classifyLandRow(withPR, &landgh.PR{Number: 7}, prCheckDone, false)}}
 	if got := p.landingActBinding().Help().Desc; got != "open in browser" {
 		t.Fatalf("act label = %q, want %q", got, "open in browser")
 	}
@@ -948,7 +1098,7 @@ func TestLandingActLabelNamesTheRealAction(t *testing.T) {
 // action, so the binding is disabled and drops out of the help bar.
 func TestLandingActKeyHiddenWhenTheRowHasNoAction(t *testing.T) {
 	clone := checkouts.Checkout{Path: "/a", Branch: "main", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}
-	p := landingPane{rows: []landRow{classifyLandRow(clone, nil, prCheckDone)}}
+	p := landingPane{rows: []landRow{classifyLandRow(clone, nil, prCheckDone, false)}}
 	if p.landingActBinding().Enabled() {
 		t.Fatal("the act key must be disabled on a row with no action")
 	}
@@ -1102,7 +1252,7 @@ func TestPRCheckStatesReadHonestly(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyLandRow(c, nil, tc.check).Label
+			got := classifyLandRow(c, nil, tc.check, false).Label
 			if got != tc.want {
 				t.Fatalf("Label = %q, want %q", got, tc.want)
 			}
@@ -1191,5 +1341,280 @@ func TestRescanChecksNewlySurfacedCheckouts(t *testing.T) {
 	}
 	if !sawBranch {
 		t.Fatalf("no lookup fired for the newly surfaced checkout: %+v", fake.prStateCalls)
+	}
+}
+
+// --- drupal.org publish flow: confirmation, cancel, and the full round trip
+
+// TestLandingPublishCancelPublishesNothing pins the AC3/AC7 requirement that
+// cancelling the confirmation publishes nothing: pressing 'n' at
+// publishConfirm must clear the flow WITHOUT ever calling
+// drupalOrgActions.Publish.
+func TestLandingPublishCancelPublishesNothing(t *testing.T) {
+	m := newTestModel(t)
+	cs, dest, text := landingPublishFixture(t)
+	fake := &fakeDrupalOrgActions{tokenAvailable: true}
+	m.drupalOrgActions = fake
+	m.landing.publish = &landingPublish{
+		checkout: checkouts.Checkout{Path: "/home/u/repo"},
+		stage:    publishConfirm,
+		dest:     dest,
+		cs:       cs,
+		text:     text,
+	}
+
+	next, cmd := m.updateLanding(runeKey('n'))
+	m = next.(model)
+	if cmd != nil {
+		t.Fatal("cancel must not return a command")
+	}
+	if m.landing.publish != nil {
+		t.Fatal("cancel must clear the pending publish flow")
+	}
+	if len(fake.publishCalls) != 0 {
+		t.Fatalf("Publish was called %d time(s) after cancel, want 0", len(fake.publishCalls))
+	}
+
+	// esc is the same cancel, per the pane's confirm/cancel idiom (m.keys.Cancel).
+	m.landing.publish = &landingPublish{stage: publishConfirm, dest: dest, cs: cs, text: text}
+	next, _ = m.updateLanding(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = next.(model)
+	if m.landing.publish != nil {
+		t.Fatal("esc must also clear the pending publish flow")
+	}
+	if len(fake.publishCalls) != 0 {
+		t.Fatalf("Publish was called %d time(s) after esc-cancel, want 0", len(fake.publishCalls))
+	}
+}
+
+// TestLandingPublishConfirmationViewShowsDestinationAndFiles pins AC3/AC7:
+// the confirmation view renders task 4's confirmation text — the destination
+// and the file list — not a summary.
+func TestLandingPublishConfirmationViewShowsDestinationAndFiles(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 100, 40)
+	cs, dest, text := landingPublishFixture(t)
+	m.landing.publish = &landingPublish{
+		checkout: checkouts.Checkout{Path: "/home/u/repo"},
+		stage:    publishConfirm,
+		dest:     dest,
+		cs:       cs,
+		text:     text,
+	}
+
+	rendered := ansi.Strip(m.landingView())
+	if !strings.Contains(rendered, dest.ForkPath) {
+		t.Fatalf("rendered view = %q, want it to contain the destination %q", rendered, dest.ForkPath)
+	}
+	if !strings.Contains(rendered, "foo.txt") {
+		t.Fatalf("rendered view = %q, want it to contain the changed file's path", rendered)
+	}
+	if !strings.Contains(rendered, "hello") {
+		t.Fatalf("rendered view = %q, want it to contain the file's resulting content", rendered)
+	}
+	if !strings.Contains(rendered, "[y] yes") || !strings.Contains(rendered, "[n] cancel") {
+		t.Fatalf("rendered view = %q, want the pane's confirm/cancel idiom", rendered)
+	}
+}
+
+// collectFixtureRaw builds one guest change-set collection stream — the wire
+// format drupalorg.ParseCollect decodes (internal/drupalorg/collect.go) — for
+// a single commit with a single created file, for a fake ShellOut to return.
+// The delimiter literals mirror collect.go's own unexported
+// collectFileDelim/collectCommitDelim constants; this is an integration test
+// of the UI's wiring, not of ParseCollect itself (covered by drupalorg's own
+// tests), so canning the wire text directly is the point.
+func collectFixtureRaw() string {
+	enc := base64.StdEncoding.EncodeToString
+	var b strings.Builder
+	b.WriteString("name=" + enc([]byte("Dev Eloper")) + "\n")
+	b.WriteString("email=" + enc([]byte("dev@example.com")) + "\n")
+	b.WriteString("msg=" + enc([]byte("Fix the thing")) + "\n")
+	b.WriteString("kind=A\n")
+	b.WriteString("path=" + enc([]byte("foo.txt")) + "\n")
+	b.WriteString("content=" + enc([]byte("hello\n")) + "\n")
+	b.WriteString("---sand-collect-file---\n")
+	b.WriteString("---sand-collect-commit---\n")
+	return b.String()
+}
+
+// TestLandingPublishFlowEndToEnd drives the full publish flow through real
+// key presses: issue number -> guest collection -> anonymous fork resolution
+// -> confirmation -> 'y' -> the job registry, asserting the dispatched job's
+// output carries the per-commit result and the merge request drupalOrgActions
+// reports, exactly like every other landing job.
+func TestLandingPublishFlowEndToEnd(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{
+				Path: "/home/u/mod", Kind: checkouts.KindRepo, Branch: "1234-fix", DefaultBranch: "1.0.x",
+				OrgRepo: "project/mod", Forge: "git.drupalcode.org", PushState: checkouts.PushStatePushed,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	fakeDO := &fakeDrupalOrgActions{
+		tokenAvailable: true,
+		fork: &drupalorg.ProjectInfo{ID: 99, DefaultBranch: "1.0.x", ForkedFromProject: &drupalorg.ForkedFromProject{
+			ID: 42, PathWithNamespace: "project/mod", DefaultBranch: "1.0.x",
+		}},
+		publishResult: drupalorg.Result{
+			Commits: []drupalorg.CommitResult{
+				{Index: 0, Subject: "Fix the thing", Status: drupalorg.CommitLanded, SHA: "abc123"},
+			},
+			MergeRequest:       &drupalorg.MergeRequest{IID: 7, WebURL: "https://git.drupalcode.org/mr/7"},
+			MergeRequestOpened: true,
+		},
+	}
+	m.drupalOrgActions = fakeDO
+
+	// The publish flow runs two guest scripts through Provider.RunArgv,
+	// captured via a real exec.CommandContext (runGuestScript) — never
+	// Provider.ShellOut (see task 6's acceptance criteria, cited on
+	// provider.RunCaptured's doc comment). RunArgvFunc below returns a real,
+	// harmless argv ("cat" of a canned fixture file) for each of the two
+	// scripts, routed by comparing expr against the known literal
+	// shared remote-info script — exactly what a real exec.CommandContext call
+	// would run, just against fixture text instead of a real guest.
+	remoteInfoFile := filepath.Join(t.TempDir(), "remoteinfo")
+	if err := os.WriteFile(remoteInfoFile, []byte("https://git.drupalcode.org/project/mod.git\norigin/1.0.x\n"), 0o600); err != nil {
+		t.Fatalf("write remote-info fixture: %v", err)
+	}
+	collectFile := filepath.Join(t.TempDir(), "collect")
+	if err := os.WriteFile(collectFile, []byte(collectFixtureRaw()), 0o600); err != nil {
+		t.Fatalf("write collect fixture: %v", err)
+	}
+	m.members[0].prov = &providerfake.Provider{RunArgvFunc: func(_ vm.VM, _, expr string) []string {
+		if expr == drupalorg.BuildRemoteInfoCommand() {
+			return []string{"cat", remoteInfoFile}
+		}
+		return []string{"cat", collectFile}
+	}}
+
+	m.openLandingPane(v)
+
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("starting the publish flow should return the focus/blink command")
+	}
+	if m.landing.publish == nil || m.landing.publish.stage != publishAskIssue {
+		t.Fatalf("publish state = %+v, want stage publishAskIssue", m.landing.publish)
+	}
+
+	for _, r := range "1234" {
+		next, _ = m.updateLanding(runeKey(r))
+		m = next.(model)
+	}
+	next, cmd = m.updateLanding(ctrlKey('s'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("submitting the issue number should fire the collect command")
+	}
+	if m.landing.publish == nil || m.landing.publish.stage != publishResolving {
+		t.Fatalf("publish state = %+v, want stage publishResolving", m.landing.publish)
+	}
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+	m = l.m
+
+	if len(fakeDO.resolveForkCalls) != 1 || fakeDO.resolveForkCalls[0] != "issue/mod-1234" {
+		t.Fatalf("resolveForkCalls = %+v, want exactly one for issue/mod-1234", fakeDO.resolveForkCalls)
+	}
+	if !strings.Contains(m.landing.publish.text, "issue/mod-1234") {
+		t.Fatalf("confirmation text = %q, want it to name the destination", m.landing.publish.text)
+	}
+
+	next, cmd = m.updateLanding(runeKey('y'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("confirming should dispatch the publish job")
+	}
+	if m.view != viewProgress {
+		t.Fatalf("view = %v, want viewProgress", m.view)
+	}
+
+	jk := landKey(v.scope, v.Name)
+	l2 := newTeaLoop(t, m)
+	l2.exec(cmd)
+	l2.pump("the publish job to finish", func(m model) bool {
+		s, ok := m.jobs.snapshot(jk)
+		return ok && !s.Running()
+	})
+	final, _ := l2.m.jobs.snapshot(jk)
+	if final.Failed() {
+		t.Fatalf("job failed: %v", final.Err)
+	}
+	if !strings.Contains(final.Output, "abc123") {
+		t.Fatalf("job output = %q, want it to name the landed commit's SHA", final.Output)
+	}
+	if !strings.Contains(final.Output, "mr/7") {
+		t.Fatalf("job output = %q, want it to name the merge request", final.Output)
+	}
+	if len(fakeDO.publishCalls) != 1 {
+		t.Fatalf("Publish calls = %d, want 1", len(fakeDO.publishCalls))
+	}
+}
+
+// TestLandingPublishEpochSurvivesPaneReopen pins the fix for a real bug a
+// code-review pass caught: landingPane (and everything on it) is replaced
+// WHOLESALE by openLandingPane every time the pane opens, including
+// reopening the SAME VM. A staleness counter stored ON landingPane would
+// therefore reset to zero on every reopen — so a flow abandoned before its
+// async result landed, followed by opening a SECOND flow (which would also
+// start at epoch 0/1), could see the first flow's late result pass an
+// epoch check that no longer meant anything. model.landingPublishEpoch lives
+// OUTSIDE landingPane specifically so a reopen cannot rewind it, and this
+// test proves a stale result computed under the FIRST flow's epoch is
+// dropped rather than corrupting the second, unrelated flow's state.
+func TestLandingPublishEpochSurvivesPaneReopen(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.drupalOrgActions = &fakeDrupalOrgActions{tokenAvailable: true}
+
+	// Flow #1: start it, capture its epoch, then abandon it (esc) without an
+	// answer ever landing.
+	cmd := m.startLandingPublish(checkouts.Checkout{Path: "/a", OrgRepo: "project/a", Forge: "git.drupalcode.org"})
+	if cmd == nil {
+		t.Fatal("startLandingPublish should return the focus/blink command")
+	}
+	firstEpoch := m.landingPublishEpoch
+	m.landing.publish = nil // abandoned: esc during publishResolving does exactly this
+
+	// Reopening the pane for the SAME VM replaces landingPane wholesale.
+	m.openLandingPane(v)
+
+	// Flow #2: a different checkout entirely.
+	cmd = m.startLandingPublish(checkouts.Checkout{Path: "/b", OrgRepo: "project/b", Forge: "git.drupalcode.org"})
+	if cmd == nil {
+		t.Fatal("startLandingPublish should return the focus/blink command")
+	}
+	secondEpoch := m.landingPublishEpoch
+	if secondEpoch == firstEpoch {
+		t.Fatalf("second flow's epoch (%d) collided with the first's (%d) — the reopen reset the counter", secondEpoch, firstEpoch)
+	}
+	m.landing.publish.module = "b"
+	m.landing.publish.issue = 2
+
+	// Flow #1's collection lands late, carrying its OWN epoch. It must be
+	// dropped — the module must NOT flip to "a".
+	m.handleLandingCollect(landingCollectMsg{epoch: firstEpoch, cs: drupalorg.ChangeSet{Commits: []drupalorg.Commit{{Message: "from flow 1"}}}})
+	if m.landing.publish == nil {
+		t.Fatal("the stale result must not have cleared the active flow")
+	}
+	if m.landing.publish.module != "b" || len(m.landing.publish.cs.Commits) != 0 {
+		t.Fatalf("stale flow-#1 result was applied to flow #2: %+v", m.landing.publish)
+	}
+
+	// Flow #2's own result, carrying the CURRENT epoch, must apply normally.
+	m.handleLandingCollect(landingCollectMsg{epoch: secondEpoch, cs: drupalorg.ChangeSet{Commits: []drupalorg.Commit{{Message: "from flow 2"}}}})
+	if len(m.landing.publish.cs.Commits) != 1 || m.landing.publish.cs.Commits[0].Message != "from flow 2" {
+		t.Fatalf("the current flow's own result was not applied: %+v", m.landing.publish)
 	}
 }

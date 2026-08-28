@@ -253,6 +253,25 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 		})
 	}
 
+	// notAttempted records every pending commit that was never sent, so a
+	// report distinguishes "refused" from "never tried" — and so Result
+	// keeps its documented shape (one entry per change-set commit) on EVERY
+	// path that got as far as classifying the already-present prefix. It is
+	// defined here, before the last anonymous checks, precisely because
+	// those can still refuse the publish: without it a refusal after the
+	// prefix was classified returned a Result holding only the
+	// already-present commits, and a report printing "1 of 1" for a change
+	// set of three.
+	notAttempted := func(from int) {
+		for j := from; j < len(pending); j++ {
+			res.Commits = append(res.Commits, CommitResult{
+				Index:   present + j,
+				Subject: subjectOf(pending[j].Message),
+				Status:  CommitNotAttempted,
+			})
+		}
+	}
+
 	// Looked up before the replay rather than after it, so that a publish
 	// which could not then propose its work — no merge request open and no
 	// parent branch to target — is refused while nothing has been written.
@@ -261,14 +280,17 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 	// that to an unrevocable write is the whole point.
 	existingMR, err := p.client.OpenMergeRequest(ctx, dest.ParentPath, fork.ID, dest.Branch)
 	if err != nil {
+		notAttempted(0)
 		return res, fmt.Errorf("drupalorg: looking for an open merge request from %q on %q: %w", dest.Branch, dest.ParentPath, err)
 	}
 	if existingMR == nil && dest.ParentBranch == "" {
+		notAttempted(0)
 		return res, fmt.Errorf("drupalorg: no merge request is open from %q and the canonical parent %q reports no branch to target; refusing to publish commits that could not then be proposed", dest.Branch, dest.ParentPath)
 	}
 
 	lastCommits, err := p.lastCommitIDs(ctx, dest, pending, branchExists)
 	if err != nil {
+		notAttempted(0)
 		return res, err
 	}
 
@@ -284,18 +306,6 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 			token = loaded
 		}
 		return token, nil
-	}
-
-	// notAttempted records the tail of a replay that was never sent, so a
-	// failure report distinguishes "refused" from "never tried".
-	notAttempted := func(from int) {
-		for j := from; j < len(pending); j++ {
-			res.Commits = append(res.Commits, CommitResult{
-				Index:   present + j,
-				Subject: subjectOf(pending[j].Message),
-				Status:  CommitNotAttempted,
-			})
-		}
 	}
 
 	for i, commit := range pending {

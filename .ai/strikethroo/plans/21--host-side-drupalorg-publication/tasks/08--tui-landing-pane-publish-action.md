@@ -2,7 +2,7 @@
 id: 8
 group: "surfaces"
 dependencies: [4, 5, 6]
-status: "pending"
+status: "completed"
 created: 2026-08-28
 model: "sonnet"
 effort: "high"
@@ -62,10 +62,25 @@ Use your internal Todo tool to track these and keep on track.
   the single place that decides what a checkout's row says and does". Keep it
   pure: no I/O, no network, no credential read inside it. Availability of the
   PAT must be passed in as state, the way `prCheck` already is.
-- The arm's priority order matters. The new arm belongs where
-  `!isGitHubForge(c.Forge)` sits today — after the local-only, at-risk, and
-  nothing-to-land arms — so a dirty or unpushed drupal.org checkout still shows
-  the at-risk rescue first. Do not move it up.
+- The arm's priority order matters. **This requirement was wrong as first
+  written and was corrected during execution** — it is left here with its
+  correction rather than silently rewritten, because the defect is instructive.
+
+  It originally said the new arm belongs where `!isGitHubForge(c.Forge)` sits
+  today, after the local-only, at-risk and nothing-to-land arms, "so a dirty or
+  unpushed drupal.org checkout still shows the at-risk rescue first. Do not
+  move it up." That reasoning was carried over from GitHub and does not hold
+  here: a sand guest holds **no drupal.org credential by design**, so the
+  commit-and-push the at-risk arm offers can never succeed against
+  git.drupalcode.org — and the unpushed-commits state that arm claims is
+  precisely the state publication exists to serve (clone a canonical project
+  you cannot push to, commit locally, publish from the host). Below at-risk,
+  the publish action was reachable only once there was nothing left to publish.
+
+  The drupal.org arm therefore sits **ahead** of the at-risk arm — the one
+  place the pane's usual priority is deliberately inverted — while a dirty
+  working tree is still named in the label, because publication carries
+  committed commits only. See TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish.
 
 ## Input Dependencies
 

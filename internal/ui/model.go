@@ -226,12 +226,37 @@ type model struct {
 	// copy carries it for free exactly like every other seam here.
 	ghActions ghActions
 
+	// drupalOrgActions is the Landing pane's seam (landing.go) over
+	// internal/drupalorg's PAT check and network calls: TokenAvailable,
+	// ResolveFork, Publish. Defaulted to newDrupalOrgActions() in New(); tests
+	// fake it so no test reads a real PAT file or contacts
+	// git.drupalcode.org. A plain interface value, for the same reason
+	// ghActions is.
+	drupalOrgActions drupalOrgActions
+
 	// landing is the Landing pane's own state (landing.go): the focused VM
 	// identity it was opened for, its grouped/flattened rows, the resolved
 	// per-checkout PR results, and which gh mode it is in. Plain value state —
 	// nothing here outlives one Update call the way a job's log does — so,
 	// unlike jobs/heartbeats/checkouts/sweeps above, this is not a pointer.
 	landing landingPane
+
+	// landingPublishEpoch is the drupal.org publish flow's staleness guard
+	// (landing.go's landingRemoteInfoMsg/landingCollectMsg/landingForkMsg):
+	// bumped once every time startLandingPublish opens a new flow, and
+	// carried by every async result message the flow's three sequential
+	// steps produce, so a result from a flow the user has since cancelled or
+	// superseded is recognized as stale and dropped — the same discipline
+	// heartbeat.go's connection epoch and sweepshell.go's sweep epoch apply.
+	//
+	// Deliberately a field on model, NOT on landing (landingPane): the pane
+	// is replaced WHOLESALE by openLandingPane every time it opens —
+	// including reopening the same VM — so a counter living inside it would
+	// reset to zero right when a flow it just abandoned might still have a
+	// result in flight, letting that stale result collide with a
+	// same-numbered NEW flow's epoch. Living on model instead, it only ever
+	// increases for the life of the process.
+	landingPublishEpoch uint64
 
 	// lastInput is when the user last touched a key. Together with the active view
 	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
@@ -539,21 +564,22 @@ func New(fleet provider.Fleet) tea.Model {
 	}
 
 	m := model{
-		members:      members,
-		active:       active,
-		reg:          reg,
-		sec:          sec,
-		profileStore: profileStore,
-		jobs:         newJobRegistry(),
-		heartbeats:   newHeartbeatsResolver(fleetShellResolver(members)),
-		checkouts:    checkoutReg,
-		sweeps:       newSweepsResolver(fleetShellResolver(members)),
-		ghActions:    landgh.New(),
-		keys:         newKeyMap(),
-		help:         help.New(),
-		view:         viewBoard,
-		viewport:     viewport.New(),
-		spinner:      sp,
+		members:          members,
+		active:           active,
+		reg:              reg,
+		sec:              sec,
+		profileStore:     profileStore,
+		jobs:             newJobRegistry(),
+		heartbeats:       newHeartbeatsResolver(fleetShellResolver(members)),
+		checkouts:        checkoutReg,
+		sweeps:           newSweepsResolver(fleetShellResolver(members)),
+		ghActions:        landgh.New(),
+		drupalOrgActions: newDrupalOrgActions(),
+		keys:             newKeyMap(),
+		help:             help.New(),
+		view:             viewBoard,
+		viewport:         viewport.New(),
+		spinner:          sp,
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
@@ -972,6 +998,22 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a model-state fold — nothing further to dispatch.
 		m.handleLandingPRState(msg)
 		return m, nil
+
+	case landingRemoteInfoMsg:
+		// The drupal.org publish flow's guest remote/upstream resolution
+		// landed (landing.go). May itself fire the change-set collection.
+		return m, m.handleLandingRemoteInfo(msg)
+
+	case landingCollectMsg:
+		// The drupal.org publish flow's guest change-set collection landed
+		// (landing.go). May itself fire the anonymous fork resolution.
+		return m, m.handleLandingCollect(msg)
+
+	case landingForkMsg:
+		// The drupal.org publish flow's anonymous fork resolution landed
+		// (landing.go). Folding it in advances the flow to its confirmation —
+		// nothing further to dispatch.
+		return m, m.handleLandingFork(msg)
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after

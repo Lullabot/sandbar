@@ -20,8 +20,13 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os/exec"
+	"strings"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -188,4 +193,42 @@ type HostResources struct {
 	// DiskFreeBytes — the denominator a "less than 5% disk free" warning needs
 	// alongside the free reading that already existed for the header.
 	DiskTotalBytes int64
+}
+
+// RunCaptured runs one read-only guest command through p.RunArgv and returns
+// its stdout, folding any stderr into the error. It exists because the two
+// host-side surfaces that read a guest non-interactively — `sand publish` and
+// the Landing pane's drupal.org publish flow — each grew their own identical
+// copy of this, and the pair had already drifted apart before either shipped.
+//
+// It is deliberately NOT ShellOut and NOT tea.ExecProcess. ShellOut's
+// signature carries no working directory (it is ShellOut(ctx, name, argv...)),
+// which a per-checkout read needs; tea.ExecProcess hands the command the
+// caller's real TTY, which is right for a `git commit` that opens an editor
+// and wrong here, where the whole point is to capture stdout and parse it.
+//
+// It lives here rather than beside the scripts it runs because
+// internal/drupalorg is deliberately exec-free: that package builds command
+// strings and parses their output, and never executes anything. Keeping the
+// process plumbing on this side of the seam is what lets the security-relevant
+// package stay pure stdlib and testable with no VM.
+func RunCaptured(ctx context.Context, p Provider, v vm.VM, workdir, expr string) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("no provider for this VM")
+	}
+	argv := p.RunArgv(v, workdir, expr)
+	if len(argv) == 0 {
+		return nil, errors.New("no guest command available for this provider")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }

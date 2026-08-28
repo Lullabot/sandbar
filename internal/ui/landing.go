@@ -10,17 +10,26 @@ package ui
 // mirroring vmCommands' enabledFor idiom (commandreg.go): "Open draft PR" for
 // a pushed branch with no PR (gh, or the compare-URL browser fallback when
 // host gh is absent/unauthed), "Open in browser" for a branch that already
-// has one, and no action at all for an at-risk (unpushed/dirty), local-only,
-// or non-GitHub-forge row.
+// has one, "Publish to drupal.org" for a branch pushed to a
+// git.drupalcode.org remote with a workstation PAT on file (see
+// startLandingPublish), and no action at all for an at-risk
+// (unpushed/dirty), local-only, nothing-to-land, drupal.org-with-no-PAT, or
+// other-non-GitHub-forge row.
 //
-// Every action — including "Open draft PR" — runs through the SAME job
-// registry every other sand action does (jobs.go/progress.go): it streams
-// into the viewport and is retained as a reopenable ledger entry ('L' reopens
-// it — see commandreg.go; the retention mechanism itself is job-registry
-// native and needs no change here). No guest execution happens on ANY of
-// these actions — every one of them is a workstation-local gh call or an OS
-// browser-open; the guest is touched only by the read-only sweep that
-// populated the registry this pane reads.
+// Every action — including "Open draft PR" and "Publish to drupal.org" —
+// runs through the SAME job registry every other sand action does
+// (jobs.go/progress.go): it streams into the viewport and is retained as a
+// reopenable ledger entry ('L' reopens it — see commandreg.go; the retention
+// mechanism itself is job-registry native and needs no change here). Most of
+// these actions touch no guest at all — a workstation-local gh call or an OS
+// browser-open — with two exceptions, both narrowly scoped: the
+// commit-and-push action runs entirely inside the VM (it is the only one that
+// does), and the drupal.org publish flow READS the guest twice — its origin
+// remote/upstream branch, then its already-committed change set (via
+// internal/drupalorg's guest collector) — before ever contacting drupal.org.
+// Neither guest read writes anything or authenticates from the guest. The
+// sweep itself remains the only thing that touches a guest merely to
+// populate the registry this pane reads.
 //
 // Wiring the 'l' key to open this pane (with the shell/u/g running-VM gating
 // idiom) is commandreg.go's land verb's job; this file exposes
@@ -32,16 +41,19 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/drupalorg"
 	"github.com/lullabot/sandbar/internal/landgh"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -75,6 +87,16 @@ const (
 	// warning: it renders in the pane's ordinary dim chrome and offers no
 	// action. See checkouts.Checkout.NothingToLand.
 	landRowNothingToLand
+	// landRowDrupalOrgPublish is a checkout pushed to a git.drupalcode.org
+	// remote with a workstation drupal.org PAT on file: the row offers to
+	// publish its unlanded commits to drupal.org (landActionPublish). See
+	// startLandingPublish.
+	landRowDrupalOrgPublish
+	// landRowDrupalOrgNoToken is the same checkout with NO PAT on file: state
+	// is shown, no action is offered, and the label says why — the AC5
+	// requirement that an absent PAT disable the action with a visible reason
+	// rather than offer it and fail later.
+	landRowDrupalOrgNoToken
 )
 
 // landAction is the action-key half of the table: the ONE action a row's
@@ -87,10 +109,18 @@ const (
 	landActionOpenInBrowser
 	// landActionCommitAndPush is the at-risk row's action: commit whatever is
 	// uncommitted (opening the user's editor, in the guest, on their real
-	// terminal) and push the branch. It is the ONE landing action that is not
-	// a host-side gh call — it runs entirely inside the VM, because that is
-	// where the code is and where it must stay.
+	// terminal) and push the branch. It is the ONE landing action that
+	// SUSPENDS THE TTY — unlike every other action here (publish included),
+	// it runs entirely inside the VM, on the user's own terminal, because
+	// `git commit` needs one.
 	landActionCommitAndPush
+	// landActionPublish starts the drupal.org publish flow (startLandingPublish):
+	// an issue-number prompt, then resolving the checkout's change set (a
+	// read-only guest collection) and its drupal.org fork (an anonymous
+	// network read) into a rendered confirmation the user must explicitly
+	// accept before anything is published. Nothing is written to the guest or
+	// to drupal.org until that confirmation is accepted.
+	landActionPublish
 )
 
 // landRow is one rendered/actionable line of the pane: a single checkout
@@ -155,28 +185,59 @@ func isGitHubForge(forge string) bool {
 	return strings.EqualFold(forge, "github.com")
 }
 
+// isDrupalOrgForge reports whether forge is git.drupalcode.org, the one
+// non-GitHub forge the Landing pane offers a one-key action for: publish,
+// gated on a workstation PAT (see classifyLandRow's arm 4).
+func isDrupalOrgForge(forge string) bool {
+	return strings.EqualFold(forge, "git.drupalcode.org")
+}
+
 // classifyLandRow is the PURE row-state -> action mapping (plan Component
 // 4's table), the single place that decides what a checkout's row says and
 // does. pr/resolved carry the AUTHORITATIVE PRState result once it has
 // landed (see handleLandingPRState); until then resolved is false and a
 // pushed GitHub checkout is shown provisionally as "pushed - no PR", per the
-// plan's "treat the sweep's push-state as a hint" note.
+// plan's "treat the sweep's push-state as a hint" note. tokenAvailable is the
+// only other I/O-derived fact this function consumes, and — exactly like
+// check — it arrives as already-resolved STATE: whether a workstation
+// drupal.org PAT exists (landingPane.tokenAvailable, checked once when the
+// pane opens; see openLandingPane), never resolved here. Nothing in this
+// function reads a file, opens a network connection, or touches a guest.
 //
 // Priority order matters and is deliberate:
+//
 //  1. No remote at all: nothing any action here could target. This is the
 //     ONLY meaning of "local only" — it used to also swallow a branch that
 //     simply had not been pushed yet, which hid the single case the pane is
 //     most useful for behind a label saying there was nothing to do.
-//  2. At-risk — uncommitted changes, unpushed commits, or a branch with no
+//
+//  2. A git.drupalcode.org forge: offers to publish the checkout's unlanded
+//     commits to drupal.org (landActionPublish, see startLandingPublish) when
+//     a workstation PAT is on file, or states that publish is disabled and
+//     why when it is not — an absent PAT must disable the action with a
+//     visible reason, never offer it and fail later.
+//
+//     This one arm deliberately outranks at-risk, inverting the order every
+//     other forge follows, and the arm's own comment explains why: a guest
+//     holds no drupal.org credential by design, so the commit-and-push that
+//     at-risk offers cannot succeed there, and the unpushed-commits state it
+//     claims is the very state publication exists to serve. Below at-risk,
+//     this arm was reachable only when there was nothing left to publish.
+//
+//  3. At-risk — uncommitted changes, unpushed commits, or a branch with no
 //     remote-tracking ref at all — wins over every PR arm below, REGARDLESS
 //     of whether an earlier, already-pushed commit on the same branch has a
 //     PR: local state the forge does not yet reflect must be resolved before
 //     anything points the user at a PR that misrepresents it.
-//  3. On the default branch with nothing of its own: no PR to open.
-//  4. A non-GitHub forge: state shown, no one-key action (deferred: glab).
-//  5. Pushed on GitHub: "no PR" (offer Open draft PR) or "PR #N" (offer Open
+//
+//  4. On the default branch with nothing of its own: no PR to open.
+//
+//  5. Any OTHER non-GitHub forge: state shown, no one-key action (deferred:
+//     glab).
+//
+//  6. Pushed on GitHub: "no PR" (offer Open draft PR) or "PR #N" (offer Open
 //     in browser), depending on the authoritative check.
-func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck) landRow {
+func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAvailable bool) landRow {
 	row := landRow{Checkout: c, PR: pr, PRResolved: check == prCheckDone}
 
 	switch {
@@ -189,6 +250,37 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck) landRow
 		// only" alone would understate it precisely where it matters most.
 		row.Label = "local only"
 		if c.Dirty > 0 || c.PushState == checkouts.PushStateUnpushed {
+			row.Label += " · " + atRiskLabel(c)
+		}
+	case isDrupalOrgForge(c.Forge):
+		// This arm sits AHEAD of the at-risk arm, which is the one place the
+		// pane's usual priority order is deliberately inverted, so the reason
+		// belongs here rather than in a commit message.
+		//
+		// A sand guest holds NO drupal.org credential — that is the whole
+		// point of host-side publication, not an oversight — so the "commit
+		// and push" the at-risk arm would otherwise offer CANNOT succeed
+		// against git.drupalcode.org. Worse, the local-commits state that arm
+		// claims is exactly the state publication exists to serve: clone a
+		// canonical project you have no push access to, commit locally, and
+		// publish from the workstation. With the at-risk arm ahead of this
+		// one, the publish action was reachable only once there was nothing
+		// left to publish, and the row a contributor actually has offered
+		// them an action guaranteed to fail.
+		//
+		// Uncommitted work is still named, because publication carries
+		// COMMITTED commits only — a dirty tree means some work stays behind,
+		// and the row must not imply otherwise.
+		if !tokenAvailable {
+			row.Kind = landRowDrupalOrgNoToken
+			row.Action = landActionNone
+			row.Label = "on git.drupalcode.org · no drupal.org PAT on file, publish disabled"
+		} else {
+			row.Kind = landRowDrupalOrgPublish
+			row.Action = landActionPublish
+			row.Label = "publish to drupal.org"
+		}
+		if c.Dirty > 0 {
 			row.Label += " · " + atRiskLabel(c)
 		}
 	case c.PushState == checkouts.PushStateUnpushed ||
@@ -331,8 +423,9 @@ func groupCheckouts(cs []checkouts.Checkout) []landGroup {
 // checkout's row state against resolved (keyed by Checkout.Path).
 // dflt is the state a checkout with no recorded outcome takes — prCheckPending
 // while the pane still expects lookups to fire, prCheckSkipped once host gh is
-// known to be unusable and none ever will.
-func buildLandRows(groups []landGroup, resolved map[string]resolvedPR, dflt prCheck) []landRow {
+// known to be unusable and none ever will. tokenAvailable is passed straight
+// through to classifyLandRow — see its doc comment.
+func buildLandRows(groups []landGroup, resolved map[string]resolvedPR, dflt prCheck, tokenAvailable bool) []landRow {
 	at := func(path string) resolvedPR {
 		if rp, ok := resolved[path]; ok {
 			return rp
@@ -343,11 +436,11 @@ func buildLandRows(groups []landGroup, resolved map[string]resolvedPR, dflt prCh
 	for _, g := range groups {
 		if g.HasRepo {
 			rp := at(g.Repo.Path)
-			rows = append(rows, classifyLandRow(g.Repo, rp.pr, rp.state))
+			rows = append(rows, classifyLandRow(g.Repo, rp.pr, rp.state, tokenAvailable))
 		}
 		for _, wt := range g.Worktrees {
 			rp := at(wt.Path)
-			r := classifyLandRow(wt, rp.pr, rp.state)
+			r := classifyLandRow(wt, rp.pr, rp.state, tokenAvailable)
 			r.Indent = true
 			rows = append(rows, r)
 		}
@@ -391,6 +484,24 @@ type landingPane struct {
 	// scanning is true while an on-demand rescan (the `r` key) is in flight,
 	// so the header can say so and a second press cannot race the first.
 	scanning bool
+
+	// tokenAvailable is whether a workstation drupal.org PAT was on file the
+	// last time it was checked (openLandingPane, and again on every rescan —
+	// see handleLandRefresh). It is a LOCAL FILE READ (drupalorg.LoadToken),
+	// not a network call, so — unlike the host-gh probe above — it is checked
+	// synchronously rather than through its own lazy-probe message; this is
+	// the STATE classifyLandRow's tokenAvailable parameter is built from, and
+	// classifyLandRow itself never reads the file.
+	tokenAvailable bool
+
+	// publish is the in-flight drupal.org publish flow for one row, nil
+	// except while it is active (startLandingPublish). Its staleness guard
+	// (model.landingPublishEpoch) is deliberately NOT a field here: this
+	// struct is replaced wholesale by openLandingPane every time the pane
+	// opens (including reopening the SAME VM), so a counter stored here
+	// would reset to zero on every reopen — exactly the collision
+	// model.landingPublishEpoch's doc comment describes avoiding.
+	publish *landingPublish
 }
 
 // landingAvailableMsg carries the result of the lazy host-gh-availability
@@ -414,6 +525,43 @@ type landingPRStateMsg struct {
 	err   error
 }
 
+// landingRemoteInfoMsg carries the drupal.org publish flow's guest
+// remote/upstream resolution result (resolveRemoteInfoCmd) — the checkout's
+// origin remote URL (for module derivation) and its local upstream
+// tracking ref (the change-set collection's base ref). Scoped by epoch
+// ONLY — see the doc comment on model.landingPublishEpoch for why that
+// alone is a sufficient staleness guard, unlike landingPRStateMsg's
+// (scope, vm, path) scoping: several PRState lookups can be in flight at
+// once, keyed apart by path, but this flow's three async steps
+// (remote/upstream -> collect -> fork) run one at a time, so at most ONE is
+// ever in flight, and epoch alone already distinguishes it from every other
+// flow that has ever existed in this process.
+type landingRemoteInfoMsg struct {
+	epoch     uint64
+	remoteURL string
+	upstream  string
+	err       error
+}
+
+// landingCollectMsg carries the drupal.org publish flow's guest change-set
+// collection result (collectCmd). Scoped by epoch only — see
+// landingRemoteInfoMsg's doc comment.
+type landingCollectMsg struct {
+	epoch uint64
+	cs    drupalorg.ChangeSet
+	err   error
+}
+
+// landingForkMsg carries the drupal.org publish flow's anonymous fork
+// resolution result (resolveForkCmd). Scoped by epoch only — see
+// landingRemoteInfoMsg's doc comment.
+type landingForkMsg struct {
+	epoch    uint64
+	forkPath string
+	fork     *drupalorg.ProjectInfo
+	err      error
+}
+
 // openLandingPane opens the Landing pane for v: a snapshot of the checkout
 // registry's cached rows for v, grouped (worktrees under their parent repo),
 // followed by the lazy authoritative gh check. PR-state resolution for each
@@ -435,11 +583,15 @@ func (m *model) openLandingPane(v boardVM) tea.Cmd {
 		sweptAt:  vc.SweptAt,
 		groups:   groups,
 		resolved: map[string]resolvedPR{},
+		// A local file read (drupalorg.LoadToken, via TokenAvailable), never a
+		// network call — cheap enough to check synchronously here rather than
+		// through its own lazy-probe message, unlike the host-gh check below.
+		tokenAvailable: m.drupalOrgActions.TokenAvailable(),
 	}
 	// Pending: the availability probe is about to fire, and will fire lookups
 	// if gh turns out to be usable. handleLandingAvailable downgrades these to
 	// prCheckSkipped if it is not.
-	m.landing.rows = buildLandRows(groups, m.landing.resolved, prCheckPending)
+	m.landing.rows = buildLandRows(groups, m.landing.resolved, prCheckPending, m.landing.tokenAvailable)
 	m.view = viewLanding
 	return checkLandingAvailableCmd(m.ghActions, v.scope, v.Name)
 }
@@ -468,7 +620,7 @@ func (m *model) handleLandingAvailable(msg landingAvailableMsg) tea.Cmd {
 		// state is unknown, rather than sitting on "(checking…)" forever with
 		// no lookup in flight. "Open draft PR" still works, falling back to
 		// the compare URL (landDraftPRRun).
-		m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, prCheckSkipped)
+		m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, prCheckSkipped, m.landing.tokenAvailable)
 		return nil
 	}
 
@@ -545,7 +697,7 @@ func (m *model) handleLandingPRState(msg landingPRStateMsg) {
 	} else {
 		m.landing.resolved[msg.path] = resolvedPR{pr: msg.pr, state: prCheckDone}
 	}
-	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck())
+	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck(), m.landing.tokenAvailable)
 }
 
 // landDraftPRRun builds the streamFunc for "Open draft PR": CreateDraftPR
@@ -598,7 +750,8 @@ func landOpenBrowserRun(gh ghActions, orgRepo string, pr *landgh.PR) streamFunc 
 // cursor exposes (classifyLandRow's Action), as a JOB (jobs.go/progress.go) —
 // exactly like every other sand action — so its output streams into the
 // viewport and is retained as a reopenable ledger entry. A row with no
-// action (at-risk, local-only, other-forge) does nothing.
+// action (at-risk, local-only, other-forge, drupal.org-with-no-PAT) does
+// nothing.
 func (m *model) runLandingAction() tea.Cmd {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return nil
@@ -620,6 +773,12 @@ func (m *model) runLandingAction() tea.Cmd {
 		// to the guest so `git commit` can open an editor. It therefore
 		// returns directly rather than joining the job registry below.
 		return landCommitPushCmd(m.provFor(m.landing.scope), m.landing.scope, m.landing.vm, c.Path)
+	case landActionPublish:
+		// Not a job yet either: this opens the publish flow's issue-number
+		// prompt (startLandingPublish). The flow only reaches the job
+		// registry below once the user has confirmed what it resolved — see
+		// confirmLandingPublish.
+		return m.startLandingPublish(c)
 	default:
 		return nil
 	}
@@ -675,6 +834,8 @@ func actionVerb(row landRow) string {
 		return "open draft PR"
 	case landActionOpenInBrowser:
 		return "open in browser"
+	case landActionPublish:
+		return "publish to drupal.org"
 	default:
 		return ""
 	}
@@ -700,7 +861,15 @@ func (p landingPane) landingActBinding() key.Binding {
 // cursor, the act key runs the row's action (if any), and Back returns to
 // the board without disturbing anything in flight (a dispatched action
 // keeps running in the job registry exactly like a file transfer would).
+//
+// A pending drupal.org publish flow (m.landing.publish != nil) is checked
+// FIRST and takes over every key, exactly the way m.confirm takes over the
+// board and progress screens (updateConfirm) — the row list underneath is
+// frozen until the flow is cancelled or completes.
 func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.landing.publish != nil {
+		return m.updateLandingPublish(msg)
+	}
 	switch msg.Code {
 	case tea.KeyUp:
 		if m.landing.cursor > 0 {
@@ -794,13 +963,14 @@ func (p landingPane) ghModeLabel() string {
 }
 
 // styleForLandRow picks a row's colour by its Kind: amber for the actionable
-// "pushed, no PR" row (the same warn vocabulary the tile badge uses), green
-// for an existing PR, red/at-risk styling for unpushed/dirty, and the plain
-// dim status colour for everything else (local-only, other-forge, and
-// nothing-to-land — all states, not warnings).
+// "pushed, no PR" and "publish to drupal.org" rows (the same warn vocabulary
+// the tile badge uses), green for an existing PR, red/at-risk styling for
+// unpushed/dirty, and the plain dim status colour for everything else
+// (local-only, other-forge, drupal.org-with-no-PAT, and nothing-to-land —
+// all states, not warnings).
 func styleForLandRow(k landRowKind) lipgloss.Style {
 	switch k {
-	case landRowPushedNoPR:
+	case landRowPushedNoPR, landRowDrupalOrgPublish:
 		return warnStyle
 	case landRowPushedHasPR:
 		return okStyle
@@ -814,7 +984,16 @@ func styleForLandRow(k landRowKind) lipgloss.Style {
 // landingView renders the pane: a title naming the VM, the gh-mode line, and
 // one line per row (a worktree indented under its parent repo), the cursor
 // marked, styled by state, and the footer.
+//
+// A pending drupal.org publish flow takes over the WHOLE pane rather than
+// overlaying one line on top of the row list (contrast m.confirm's overlay,
+// confirmView): the confirmation it must show — every commit, its files, and
+// its destination — is fundamentally multi-line, and clipping it to fit
+// beside the row list would defeat the reason it exists.
 func (m model) landingView() string {
+	if m.landing.publish != nil {
+		return m.landingPublishView()
+	}
 	cw := m.layout.ContentWidth
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Landing: " + m.landing.vmName))
@@ -847,6 +1026,504 @@ func (m model) landingView() string {
 	}
 
 	b.WriteString("\n" + m.footerView(m.landingHelp()))
+	return appStyle.Render(b.String())
+}
+
+// --- drupal.org publish: an issue-number prompt, a resolve step, and task 4's
+// confirmation — all delegated to internal/drupalorg, never re-derived here. -
+
+// drupalOrgActions is the seam over internal/drupalorg's PAT check and
+// network calls that the Landing pane's publish flow acts through, mirroring
+// ghActions one layer down: a test fakes every drupal.org round trip rather
+// than reading a real token file or contacting git.drupalcode.org.
+// newDrupalOrgActions (below) is model.New's default (m.drupalOrgActions).
+type drupalOrgActions interface {
+	// TokenAvailable reports whether a workstation drupal.org PAT is on file
+	// (drupalorg.LoadToken, recognizing drupalorg.ErrNoToken) — without ever
+	// handing the token itself back to this package. See landingPane.tokenAvailable.
+	TokenAvailable() bool
+	// ResolveFork looks up the drupal.org issue fork at forkPath, anonymously.
+	ResolveFork(ctx context.Context, forkPath string) (*drupalorg.ProjectInfo, error)
+	// Publish replays cs onto dest and opens or reuses its merge request.
+	Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error)
+}
+
+// drupalOrgClient is the production drupalOrgActions, built once in New()
+// exactly the way landgh.New() backs ghActions.
+type drupalOrgClient struct {
+	client *drupalorg.Client
+	pub    *drupalorg.Publisher
+}
+
+// newDrupalOrgActions builds the production drupalOrgActions.
+func newDrupalOrgActions() drupalOrgActions {
+	// Config{} carries no BaseURL override, so this parses the package's own
+	// fixed default (drupalorg's defaultBaseURL) and cannot fail.
+	c, _ := drupalorg.New(drupalorg.Config{})
+	return &drupalOrgClient{client: c, pub: drupalorg.NewPublisher(c)}
+}
+
+func (d *drupalOrgClient) TokenAvailable() bool {
+	_, err := drupalorg.LoadToken()
+	return err == nil
+}
+
+func (d *drupalOrgClient) ResolveFork(ctx context.Context, forkPath string) (*drupalorg.ProjectInfo, error) {
+	return d.client.Project(ctx, forkPath)
+}
+
+func (d *drupalOrgClient) Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error) {
+	return d.pub.Publish(ctx, dest, cs)
+}
+
+// landingPublishStage sequences the drupal.org publish flow: entering the
+// issue number, then resolving — in order — the checkout's origin remote and
+// upstream branch (guest), its change set (guest), and its drupal.org fork
+// (anonymous network read) into a Destination and a rendered confirmation,
+// and finally awaiting the user's explicit yes/no on that confirmation.
+// Nothing is published until the LAST stage's 'y' — see
+// confirmLandingPublish. All three resolve steps share ONE publishResolving
+// stage; only their own async messages (landingRemoteInfoMsg,
+// landingCollectMsg, landingForkMsg) distinguish where the flow actually is.
+type landingPublishStage int
+
+const (
+	publishAskIssue landingPublishStage = iota
+	publishResolving
+	publishConfirm
+)
+
+// landingPublish is the Landing pane's in-flight publish flow for one row —
+// nil except while it is active (landingPane.publish). It never itself
+// resolves a fork, collects a change set, guards a destination, or calls
+// drupal.org: every one of those is delegated to internal/drupalorg (through
+// drupalOrgActions) and internal/provider (for the read-only guest
+// collection); this struct only sequences their results.
+type landingPublish struct {
+	checkout   checkouts.Checkout
+	stage      landingPublishStage
+	issueInput textinput.Model
+	// err is set on a resolve failure and shown back on the issue-number
+	// prompt, which is also where the flow returns to on failure — the user
+	// can retry, or press esc to give up, without losing the checkout it was
+	// about.
+	err string
+
+	// cancel aborts the resolve step currently in flight. Every step runs
+	// under its own bounded context (stepContext), so a guest that never
+	// answers fails in finite time instead of pinning the flow on
+	// "resolving…" forever, and esc at that stage kills the guest command
+	// (exec.CommandContext) rather than abandoning it to run on — the flow's
+	// two guest reads are subprocesses, and dropping the pointer to a
+	// subprocess does not stop it.
+	//
+	// It is only ever set and called from the Bubble Tea update loop (never
+	// from the tea.Cmd goroutines, which just consume the context), so no
+	// synchronisation is needed here.
+	cancel context.CancelFunc
+
+	module string
+	issue  int
+	dest   drupalorg.Destination
+	cs     drupalorg.ChangeSet
+	// text is drupalorg.RenderConfirmation's output verbatim — the plan
+	// requires that neither surface build the confirmation twice in two
+	// idioms, so the CONTENT comes from internal/drupalorg and only this
+	// view's framing (the title, the footer) is the pane's own.
+	text string
+}
+
+// The publish flow's two guest reads — the checkout's remote URL and
+// upstream ref, then its change set — go through internal/drupalorg's
+// BuildRemoteInfoCommand/ParseRemoteInfo and BuildCollectCommand/ParseCollect,
+// executed by provider.RunCaptured. All three used to be private copies here,
+// duplicating cmd/sand/publish.go's, and the two copies had already drifted in
+// their error text; the plan requires resolution logic to live once so the two
+// surfaces cannot derive a destination differently. drupalorg builds and parses
+// but never execs, which is what keeps that package free of process plumbing.
+
+// landingPublishStepTimeout bounds each of the publish flow's three resolve
+// steps. Generous — a change-set collection reads every touched blob out of
+// a guest over ssh — but finite: without it a wedged guest or a hung API
+// call leaves the pane on "resolving…" with no result ever arriving.
+const landingPublishStepTimeout = 5 * time.Minute
+
+// stepContext starts the next resolve step's bounded context, cancelling any
+// previous one. Called only from the update loop — see landingPublish.cancel.
+func (p *landingPublish) stepContext() context.Context {
+	p.stopStep()
+	ctx, cancel := context.WithTimeout(context.Background(), landingPublishStepTimeout)
+	p.cancel = cancel
+	return ctx
+}
+
+// stopStep cancels the resolve step in flight, if any, killing the guest
+// command it is blocked on. Idempotent, so every path that leaves a resolve
+// stage — a failure, a success, or the user's esc — can call it.
+func (p *landingPublish) stopStep() {
+	if p.cancel != nil {
+		p.cancel()
+		p.cancel = nil
+	}
+}
+
+// startLandingPublish opens the drupal.org publish flow's issue-number
+// prompt for c. Nothing is resolved or published until the flow reaches
+// publishConfirm and the user presses 'y' — see updateLandingPublish.
+func (m *model) startLandingPublish(c checkouts.Checkout) tea.Cmd {
+	m.landingPublishEpoch++
+	ti := textinput.New()
+	ti.Placeholder = "drupal.org issue number"
+	ti.CharLimit = 10
+	focus := ti.Focus()
+	m.landing.publish = &landingPublish{checkout: c, stage: publishAskIssue, issueInput: ti}
+	return tea.Batch(focus, textinput.Blink)
+}
+
+// updateLandingPublish routes keys while the drupal.org publish flow is
+// active, taking over from updateLanding exactly the way updateConfirm takes
+// over the board and progress screens: checked FIRST, and every stage but
+// the last (publishConfirm) can only advance or cancel — nothing is
+// published before the user has seen and accepted the rendered confirmation.
+func (m model) updateLandingPublish(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	p := m.landing.publish
+	switch p.stage {
+	case publishAskIssue:
+		// esc (not m.keys.Back, which also binds backspace) cancels: backspace
+		// must keep editing the field, exactly like updateDest's destination
+		// prompt (transfer.go) faces the same conflict for the same reason.
+		if msg.Code == tea.KeyEsc {
+			p.stopStep()
+			m.landing.publish = nil
+			return m, nil
+		}
+		if key.Matches(msg, m.keys.Submit) {
+			return m.submitLandingIssue()
+		}
+		var cmd tea.Cmd
+		p.issueInput, cmd = p.issueInput.Update(msg)
+		return m, cmd
+	case publishResolving:
+		if msg.Code == tea.KeyEsc {
+			// Cancels the resolve in flight — which kills the guest command
+			// it is blocked on rather than leaving it running — and if its
+			// result still lands, the nil-flow check in
+			// handleLandingRemoteInfo/handleLandingCollect/handleLandingFork
+			// drops it.
+			p.stopStep()
+			m.landing.publish = nil
+		}
+		return m, nil
+	case publishConfirm:
+		switch {
+		case key.Matches(msg, m.keys.Confirm): // 'y'
+			return m.confirmLandingPublish()
+		case key.Matches(msg, m.keys.Cancel): // 'n' / esc
+			p.stopStep()
+			m.landing.publish = nil
+			return m, nil
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// submitLandingIssue validates the entered issue number and, if it checks
+// out, advances the flow to resolving: resolving the checkout's origin
+// remote and upstream branch from the guest (resolveRemoteInfoCmd), which in
+// turn drives the change-set collection and the module derivation. No
+// destination, guard, or payload logic lives here — only sequencing.
+func (m model) submitLandingIssue() (tea.Model, tea.Cmd) {
+	p := m.landing.publish
+	n, err := strconv.Atoi(strings.TrimSpace(p.issueInput.Value()))
+	if err != nil || n <= 0 {
+		p.err = "enter a positive drupal.org issue number"
+		return m, nil
+	}
+	p.issue = n
+	p.err = ""
+	p.stage = publishResolving
+	return m, resolveRemoteInfoCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, m.landingPublishEpoch)
+}
+
+// resolveRemoteInfoCmd runs originAndUpstreamExpr in the guest and reports
+// the result as a landingRemoteInfoMsg.
+func resolveRemoteInfoCmd(ctx context.Context, prov provider.Provider, v vm.VM, path string, epoch uint64) tea.Cmd {
+	return func() tea.Msg {
+		out, err := provider.RunCaptured(ctx, prov, v, path, drupalorg.BuildRemoteInfoCommand())
+		if err != nil {
+			return landingRemoteInfoMsg{epoch: epoch, err: fmt.Errorf("resolve remote and upstream branch: %w", err)}
+		}
+		remoteURL, upstream, err := drupalorg.ParseRemoteInfo(out)
+		if err != nil {
+			return landingRemoteInfoMsg{epoch: epoch, err: err}
+		}
+		return landingRemoteInfoMsg{epoch: epoch, remoteURL: remoteURL, upstream: upstream}
+	}
+}
+
+// handleLandingRemoteInfo folds the guest remote/upstream resolution into
+// the flow: on success it derives the module (drupalorg.ModuleFromRemoteURL)
+// and fires the change-set collection (collectCmd) against the resolved
+// upstream ref; on failure it returns to the issue prompt with the reason
+// shown, so the user can fix it (or rescan and retry) without starting over.
+func (m *model) handleLandingRemoteInfo(msg landingRemoteInfoMsg) tea.Cmd {
+	p := m.landing.publish
+	if p == nil || msg.epoch != m.landingPublishEpoch {
+		return nil // stale: cancelled, or superseded by a later flow
+	}
+	// This step's result is in hand, so its bounded context has done its job
+	// and is released here — every path below either ends the flow's resolve
+	// phase or starts the next step's own context.
+	p.stopStep()
+	if msg.err != nil {
+		p.err = msg.err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	module, err := drupalorg.ModuleFromRemoteURL(msg.remoteURL)
+	if err != nil {
+		p.err = err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	p.module = module
+	return collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, msg.upstream, m.landingPublishEpoch)
+}
+
+// collectCmd builds and runs the guest change-set collection
+// (drupalorg.BuildCollectCommand/ParseCollect) for path against baseRef, and
+// reports the parsed ChangeSet (or the failure) as a landingCollectMsg.
+func collectCmd(ctx context.Context, prov provider.Provider, v vm.VM, path, baseRef string, epoch uint64) tea.Cmd {
+	return func() tea.Msg {
+		script, err := drupalorg.BuildCollectCommand(baseRef)
+		if err != nil {
+			return landingCollectMsg{epoch: epoch, err: err}
+		}
+		out, err := provider.RunCaptured(ctx, prov, v, path, script)
+		if err != nil {
+			return landingCollectMsg{epoch: epoch, err: fmt.Errorf("collect change set: %w", err)}
+		}
+		cs, err := drupalorg.ParseCollect(string(out))
+		if err != nil {
+			return landingCollectMsg{epoch: epoch, err: err}
+		}
+		return landingCollectMsg{epoch: epoch, cs: cs}
+	}
+}
+
+// handleLandingCollect folds a guest collection result into the flow: on
+// success it derives the fork path (drupalorg.ForkPath) and fires the
+// anonymous fork resolution (resolveForkCmd); on failure — including "no
+// commits to publish" — it returns the flow to the issue prompt with the
+// reason shown, so the user can fix it and retry without starting over.
+func (m *model) handleLandingCollect(msg landingCollectMsg) tea.Cmd {
+	p := m.landing.publish
+	if p == nil || msg.epoch != m.landingPublishEpoch {
+		return nil // stale: cancelled, or superseded by a later flow
+	}
+	p.stopStep()
+	if msg.err != nil {
+		p.err = msg.err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	if len(msg.cs.Commits) == 0 {
+		p.err = "nothing to publish: no commits ahead of this checkout's upstream branch"
+		p.stage = publishAskIssue
+		return nil
+	}
+	p.cs = msg.cs
+	forkPath, err := drupalorg.ForkPath(p.module, p.issue)
+	if err != nil {
+		p.err = err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, forkPath, m.landingPublishEpoch)
+}
+
+// resolveForkCmd looks up the drupal.org issue fork at forkPath (anonymous)
+// and reports the result as a landingForkMsg.
+func resolveForkCmd(ctx context.Context, actions drupalOrgActions, forkPath string, epoch uint64) tea.Cmd {
+	return func() tea.Msg {
+		fork, err := actions.ResolveFork(ctx, forkPath)
+		return landingForkMsg{epoch: epoch, forkPath: forkPath, fork: fork, err: err}
+	}
+}
+
+// handleLandingFork folds the fork resolution into the flow: on success it
+// builds the Destination (drupalorg.NewDestination — never allowing a
+// destination outside the issue/ namespace from the TUI, unlike the CLI's
+// power-user override) and renders the confirmation
+// (drupalorg.RenderConfirmation), advancing to publishConfirm. On failure it
+// returns to the issue prompt with the reason shown.
+func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
+	p := m.landing.publish
+	if p == nil || msg.epoch != m.landingPublishEpoch {
+		return nil
+	}
+	p.stopStep()
+	if msg.err != nil {
+		p.err = msg.err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	dest, err := drupalorg.NewDestination(p.module, p.issue, msg.forkPath, msg.fork, false)
+	if err != nil {
+		p.err = err.Error()
+		p.stage = publishAskIssue
+		return nil
+	}
+	p.dest = dest
+	p.text = drupalorg.RenderConfirmation(p.cs, dest)
+	p.stage = publishConfirm
+	return nil
+}
+
+// confirmLandingPublish dispatches the resolved publish as a job, exactly
+// like every other landing action (runLandingAction) — the only difference is
+// that its Destination/ChangeSet were resolved ahead of time, by this flow,
+// rather than read straight off the row. Reached ONLY from the 'y' key on
+// publishConfirm: cancelling (or never reaching this stage) publishes
+// nothing.
+func (m model) confirmLandingPublish() (tea.Model, tea.Cmd) {
+	p := m.landing.publish
+	c, dest, cs := p.checkout, p.dest, p.cs
+	p.stopStep()
+	m.landing.publish = nil
+
+	jk := landKey(m.landing.scope, m.landing.vmName)
+	title := "Publish to drupal.org: " + c.OrgRepo + " -> " + dest.ForkPath
+	cmd, started := m.beginStream(jk, title, landPublishRun(m.drupalOrgActions, dest, cs))
+	if started {
+		m.focusJob(jk)
+	}
+	return m, cmd
+}
+
+// landPublishRun is the publish flow's streamFunc: it calls
+// drupalOrgActions.Publish (internal/drupalorg's Publisher, doing every
+// authenticated write) and writes its Result out in full, whether or not it
+// also returns an error — a partial run (some commits landed, one failed,
+// the rest never attempted) must never render as a plain success or a plain
+// failure, only as its own precise report. See writePublishResult.
+func landPublishRun(actions drupalOrgActions, dest drupalorg.Destination, cs drupalorg.ChangeSet) streamFunc {
+	return func(ctx context.Context, out io.Writer) error {
+		fmt.Fprintf(out, "publishing %d commit(s) to %s (branch %q)…\n", len(cs.Commits), dest.ForkPath, dest.Branch)
+		res, err := actions.Publish(ctx, dest, cs)
+		writePublishResult(out, res)
+		return err
+	}
+}
+
+// writePublishResult writes one line per commit result — landed (with its
+// SHA), already present, failed, or never attempted — plus any warnings and
+// the merge request outcome. This is what makes a partial failure legible
+// rather than a bare "error": every commit's fate is named, in order.
+func writePublishResult(out io.Writer, res drupalorg.Result) {
+	for _, c := range res.Commits {
+		switch c.Status {
+		case drupalorg.CommitLanded:
+			fmt.Fprintf(out, "  [%d/%d] landed as %s: %s\n", c.Index+1, len(res.Commits), c.SHA, c.Subject)
+		case drupalorg.CommitAlreadyPresent:
+			fmt.Fprintf(out, "  [%d/%d] already present (%s): %s\n", c.Index+1, len(res.Commits), c.SHA, c.Subject)
+		case drupalorg.CommitFailed:
+			fmt.Fprintf(out, "  [%d/%d] FAILED: %s: %v\n", c.Index+1, len(res.Commits), c.Subject, c.Err)
+		case drupalorg.CommitNotAttempted:
+			fmt.Fprintf(out, "  [%d/%d] not attempted: %s\n", c.Index+1, len(res.Commits), c.Subject)
+		}
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintf(out, "warning: %s\n", w)
+	}
+	if res.MergeRequest != nil {
+		verb := "already open"
+		if res.MergeRequestOpened {
+			verb = "opened"
+		}
+		fmt.Fprintf(out, "merge request %s: %s\n", verb, res.MergeRequest.WebURL)
+	}
+}
+
+// landingPublishHelp returns the footer bindings for the publish flow's
+// current stage — the SAME app-wide Submit/Back and Confirm/Cancel bindings
+// every other prompt and confirmation in sand uses (transfer.go's
+// destination prompt, m.confirm's overlay), so the publish flow's idiom is
+// never a bespoke one.
+func (m model) landingPublishHelp() []key.Binding {
+	switch m.landing.publish.stage {
+	case publishAskIssue:
+		return []key.Binding{m.keys.Submit, m.keys.Back}
+	case publishConfirm:
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	default:
+		return nil
+	}
+}
+
+// clipPublishText fits the confirmation text to the pane: every line is
+// truncated to the content width, and the block as a whole to the rows left
+// over once the title, the y/n prompt, and the footer have taken theirs,
+// with a marked count of what did not fit.
+//
+// It exists because RenderConfirmation renders a file's content IN FULL (up
+// to 2000 lines per action, of unbounded width) and this view has no
+// viewport to scroll it in: unclipped, a confirmation of any real size
+// pushes its own "[y] yes [n] cancel" line and the footer off the bottom of
+// the screen, so the human is asked to approve a permanent public write by a
+// screen that no longer shows the question. Marking the elision — and
+// pointing at the CLI, which prints the whole thing — is the honest version
+// of "shows everything" the pane can actually deliver.
+func (m model) clipPublishText(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	// Rows this view spends on anything but the text: the title, the blank
+	// line under it, the blank line and the prompt below the text, and the
+	// blank line and the footer below that.
+	const chrome = 6
+	avail := max(m.layout.ContentHeight-chrome, 1)
+	elided := 0
+	if len(lines) > avail {
+		// The marker itself costs one of the available rows.
+		elided = len(lines) - (avail - 1)
+		lines = lines[:avail-1]
+	}
+	for i, l := range lines {
+		lines[i] = m.clipLine(l)
+	}
+	if elided > 0 {
+		lines = append(lines, statusStyle.Render(fmt.Sprintf("… %d more line(s) not shown — run `sand publish` to review the full confirmation", elided)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// landingPublishView renders the drupal.org publish flow: the issue-number
+// prompt, a "resolving…" placeholder while the guest and drupal.org round
+// trips are in flight, or task 4's confirmation text — clipped only by what
+// the terminal can actually show, and never summarised (see
+// clipPublishText) — with the pane's confirm/cancel idiom.
+func (m model) landingPublishView() string {
+	p := m.landing.publish
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Publish to drupal.org: " + p.checkout.Path))
+	b.WriteString("\n\n")
+
+	switch p.stage {
+	case publishAskIssue:
+		b.WriteString(statusStyle.Render("Which drupal.org issue does this checkout's work belong to?"))
+		b.WriteString("\n\n")
+		b.WriteString(p.issueInput.View())
+		b.WriteString("\n")
+		if p.err != "" {
+			b.WriteString("\n" + errStyle.Render(p.err) + "\n")
+		}
+	case publishResolving:
+		b.WriteString(statusStyle.Render("resolving the change set and the drupal.org fork…"))
+	case publishConfirm:
+		b.WriteString(m.clipPublishText(p.text))
+		b.WriteString("\n" + errStyle.Render("Publish the above?  [y] yes   [n] cancel"))
+	}
+	b.WriteString("\n\n" + m.footerView(m.landingPublishHelp()))
 	return appStyle.Render(b.String())
 }
 
@@ -974,7 +1651,12 @@ func (m *model) handleLandRefresh(msg landRefreshMsg) tea.Cmd {
 	_ = m.checkouts.Set(msg.scope, msg.vm, msg.vc)
 	m.landing.sweptAt = msg.vc.SweptAt
 	m.landing.groups = groupCheckouts(msg.vc.Checkouts)
-	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck())
+	// Re-checked on every rescan (unlike ghAvailability, which stays lazy and
+	// once-only) — a token file is cheap to stat, and a user who just dropped
+	// one in mid-session should not have to close and reopen the pane to see
+	// publish become available.
+	m.landing.tokenAvailable = m.drupalOrgActions.TokenAvailable()
+	m.landing.rows = buildLandRows(m.landing.groups, m.landing.resolved, m.landing.defaultPRCheck(), m.landing.tokenAvailable)
 	if m.landing.cursor >= len(m.landing.rows) {
 		m.landing.cursor = len(m.landing.rows) - 1
 	}
