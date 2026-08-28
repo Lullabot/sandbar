@@ -1353,10 +1353,10 @@ No cycles: every edge runs from a lower task ID to a higher one.
 - ✔️ Task 002: Host-side drupal.org PAT loader at a conventional path
 - ✔️ Task 003: Anonymous GitLab client and fork resolution by convention
 
-### Phase 2: The split of authority, and getting the work out of the guest
+### ✅ Phase 2: The split of authority, and getting the work out of the guest
 **Parallel Tasks:**
-- Task 004: Destination guard and the shared confirmation summary (depends on: 001, 003)
-- Task 006: Collect the change set from the guest checkout (depends on: 001)
+- ✔️ Task 004: Destination guard and the shared confirmation summary (depends on: 001, 003)
+- ✔️ Task 006: Collect the change set from the guest checkout (depends on: 001)
 
 ### Phase 3: Publication
 **Parallel Tasks:**

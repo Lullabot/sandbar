@@ -2,7 +2,7 @@
 id: 4
 group: "drupalorg-core"
 dependencies: [1, 3]
-status: "pending"
+status: "completed"
 created: 2026-08-28
 model: "sonnet"
 effort: "high"
