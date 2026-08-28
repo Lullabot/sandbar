@@ -1304,3 +1304,97 @@ treat these as known, not as oversights.
   by necessity under replay. The guest-to-host transfer of the payload was added to
   the unresolved gaps, since the existing sweep plumbing was built for short framed
   text rather than whole file contents.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+- Plus this plan's own **per-task completion gate** (Self Validation): every
+  task runs `/code-review --fix`, then `/simplify`, then re-runs its tests
+  before it may be marked complete.
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1["001: Payload type + path validation"]
+    T2["002: Host PAT loader"]
+    T3["003: Anonymous client + fork resolution"]
+    T4["004: Destination guard + confirmation"]
+    T5["005: Commit replay, MR, resumption"]
+    T6["006: Guest change-set collection"]
+    T7["007: sand publish CLI"]
+    T8["008: TUI Landing pane action"]
+    T9["009: Documentation"]
+
+    T1 --> T4
+    T3 --> T4
+    T1 --> T6
+    T1 --> T5
+    T2 --> T5
+    T3 --> T5
+    T4 --> T5
+    T4 --> T7
+    T5 --> T7
+    T6 --> T7
+    T4 --> T8
+    T5 --> T8
+    T6 --> T8
+    T5 --> T9
+    T7 --> T9
+    T8 --> T9
+```
+
+No cycles: every edge runs from a lower task ID to a higher one.
+
+### Phase 1: Foundations — types, credential, and anonymous reads
+**Parallel Tasks:**
+- Task 001: Publication payload type and repository-path validation
+- Task 002: Host-side drupal.org PAT loader at a conventional path
+- Task 003: Anonymous GitLab client and fork resolution by convention
+
+### Phase 2: The split of authority, and getting the work out of the guest
+**Parallel Tasks:**
+- Task 004: Destination guard and the shared confirmation summary (depends on: 001, 003)
+- Task 006: Collect the change set from the guest checkout (depends on: 001)
+
+### Phase 3: Publication
+**Parallel Tasks:**
+- Task 005: Authenticated publish — commit replay, merge request, partial failure and resumption (depends on: 001, 002, 003, 004)
+
+### Phase 4: Surfaces
+**Parallel Tasks:**
+- Task 007: `sand publish` CLI surface (depends on: 004, 005, 006)
+- Task 008: TUI Landing pane publish action (depends on: 004, 005, 006)
+
+### Phase 5: Documentation
+**Parallel Tasks:**
+- Task 009: Security model, publishing guide, and the agent-facing record (depends on: 005, 007, 008)
+
+### Post-phase Actions
+
+Each phase ends with `POST_PHASE.md`: lint/format checks, a conventional
+commit for the phase, and the blueprint's task/phase status updated in place.
+
+### Deliberately not tasked
+
+Two items from the plan are **not** decomposed into tasks, and their absence is
+a decision rather than an oversight:
+
+- **The fine-grained token escape-hatch documentation.** The plan gates it on a
+  negative control that has not been run — a token bounded to one issue fork
+  must be shown to *fail* pushing to a canonical `project/<module>` — and says
+  the documentation "must not ship until it does". That control needs a real
+  drupal.org account and a hand-built token. Task 009 records the withheld
+  section and its precondition instead of writing it.
+- **The plan's Post-Implementation Validation steps 1–21.** These inspect the
+  real system: they need a real drupal.org account with push access to an issue
+  fork, an account-level PAT on the workstation, and a provisioned VM, and they
+  create **public, permanent** merge requests on drupal.org. They are executed
+  by a human against real infrastructure under `POST_EXECUTION.md`, not by a
+  task subagent. Step 22 — `go test ./... -race` and the coverage floor — is
+  runnable and is part of the post-execution gate.
+
+### Execution Summary
+- Total Phases: 5
+- Total Tasks: 9
