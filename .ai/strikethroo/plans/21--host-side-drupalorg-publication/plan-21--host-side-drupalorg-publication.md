@@ -1347,11 +1347,11 @@ graph TD
 
 No cycles: every edge runs from a lower task ID to a higher one.
 
-### Phase 1: Foundations — types, credential, and anonymous reads
+### ✅ Phase 1: Foundations — types, credential, and anonymous reads
 **Parallel Tasks:**
-- Task 001: Publication payload type and repository-path validation
-- Task 002: Host-side drupal.org PAT loader at a conventional path
-- Task 003: Anonymous GitLab client and fork resolution by convention
+- ✔️ Task 001: Publication payload type and repository-path validation
+- ✔️ Task 002: Host-side drupal.org PAT loader at a conventional path
+- ✔️ Task 003: Anonymous GitLab client and fork resolution by convention
 
 ### Phase 2: The split of authority, and getting the work out of the guest
 **Parallel Tasks:**
