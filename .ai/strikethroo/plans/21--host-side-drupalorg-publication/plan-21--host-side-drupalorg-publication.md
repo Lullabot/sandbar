@@ -302,8 +302,9 @@ was too generous, and this plan does not lean on it. Two findings undercut it:
 `POST /api/graphql` is **not** blocked and returns 200 unauthenticated, and git
 push over HTTPS (`git-receive-pack`) reaches GitLab directly, bypassing the REST
 allowlist entirely. Drupal Association staff have explained why in their own
-infrastructure issue — protecting GraphQL writes the same way "would require
-inspecting the request body, which is not a capability of our load balancer."
+infrastructure issue, [#3379836](https://www.drupal.org/project/infrastructure/issues/3379836)
+— protecting GraphQL writes the same way "would require inspecting the request
+body, which is not a capability of our load balancer, as far as I know."
 
 The allowlist is therefore best understood as a control on one specific REST path,
 not as containment. Nothing here may treat it as a barrier that would stop a leaked

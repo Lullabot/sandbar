@@ -149,13 +149,16 @@ agent cannot directly reach, and stops there:
   content-write endpoint this design uses straight through. It is tempting to
   read that as "drupal.org contains what an agent can do", but two things
   defeat that reading: `POST /api/graphql` is **not** blocked and returns 200
-  unauthenticated, and `git push` over HTTPS reaches GitLab directly,
-  bypassing the REST allowlist entirely (Drupal Association staff confirm
-  their load balancer cannot inspect request bodies to block it). So the
-  allowlist is a control on one specific REST path, not a barrier that would
-  stop a leaked credential. **If a credential ever enters a guest, the
-  allowlist will not save you** — the guarantee has to come from the
-  credential's own boundary, or from its absence, exactly as above.
+  unauthenticated — protecting GraphQL writes the same way "would require
+  inspecting the request body, which is not a capability of our load balancer,
+  as far as I know", per the infrastructure discussion in
+  [#3379836](https://www.drupal.org/project/infrastructure/issues/3379836) —
+  and `git push` over HTTPS reaches GitLab directly, bypassing the REST
+  allowlist entirely. So the allowlist is a control on one specific REST
+  path, not a barrier that would stop a leaked credential. **If a credential
+  ever enters a guest, the allowlist will not save you** — the guarantee has
+  to come from the credential's own boundary, or from its absence, exactly as
+  above.
 
 ## A least-privilege token: reasonable agent access
 
