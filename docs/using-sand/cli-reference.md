@@ -479,6 +479,13 @@ exactly as far as it got; re-running `sand publish` is how you recover, and
 explains why that — rather than repairing the fork by hand — is the
 supported path.
 
+Publication only ever appends to the fork's branch; `sand publish` has no
+force push and cannot rewrite or remove a commit it already published. That
+also means rewriting your local history after a publish is not supported —
+an amended commit whose message and author are unchanged is reported
+`already-present` and its amendment is never sent. See
+[There is no force push](drupalorg-publishing.md#there-is-no-force-push-the-fork-branch-only-ever-grows).
+
 ## `sand version` / `sand --version`
 
 Prints the build identity and exits. Both spellings do the same thing, and

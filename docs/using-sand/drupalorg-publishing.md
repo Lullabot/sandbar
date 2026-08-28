@@ -100,7 +100,7 @@ For a checkout `PATH`, publication:
    on the fork where it has one, followed by the merge request's URL and any
    warnings.
 
-## Three things you'll otherwise learn the hard way
+## Four things you'll otherwise learn the hard way
 
 ### Replay, not squash — your local history is what lands
 
@@ -130,6 +130,49 @@ already on the branch, recognizes the commits that already landed, and
 sends only the remainder — whether the failure was transient (a network
 blip, a rate limit) or you fixed something in the guest first. You do not
 need to, and should not try to, repair the fork by hand.
+
+### There is no force push — the fork branch only ever grows
+
+`sand publish` never pushes a ref. Every commit goes through drupal.org's
+content API, which can only **append** a commit to a branch: there is no
+non-fast-forward update, no rewind, and no branch deletion anywhere in this
+mechanism. Nothing `sand` can do will rewrite or remove something already
+published.
+
+That is deliberate — one human `y` authorizes the writes in front of it, and
+a force push would let a single approval destroy public history that an
+earlier approval created. But it does mean **rewriting local history after
+you have published is not a supported operation**, and it goes wrong in two
+different ways depending on what you rewrote:
+
+- **Amend a commit's content while leaving its message and author alone**,
+  and resumption recognizes it as already landed. Your amendment is *not*
+  published. It's reported as a skipped commit, so it is visible in the
+  output — but the fork's copy now quietly differs from yours, and nothing
+  will reconcile them for you.
+- **Change a commit message, or reorder, drop, or insert a commit**, and the
+  match against what's on the branch breaks. The replay then re-sends commits
+  the fork already has. It cannot rewrite them, so you get some mixture of
+  duplicate commits appended on top and outright failures partway: a create
+  for a path that now exists is rejected, and an update whose recorded parent
+  has moved comes back as *"the fork moved underneath this publish;
+  re-derive the change set and retry"*.
+
+So: **tidy your history in the guest before the first publish, not after**
+(see [Replay, not squash](#replay-not-squash-your-local-history-is-what-lands)).
+Once commits are public on the fork, treat that history as fixed and add to
+it rather than rewriting it.
+
+If you genuinely need published history changed — a secret committed by
+mistake, a series too tangled to live with — that is out-of-band work this
+tool deliberately does not do for you. Do it from your workstation with your
+own git and credentials (`git push --force` to the issue fork), or close the
+merge request and delete the branch through drupal.org's web UI. The branch
+is derived from the issue rather than from your local state, so a later
+`sand publish` targets the same `<module>-<nid>` branch on
+`issue/<module>-<nid>` either way. A fresh publish onto a branch you deleted
+recreates it from the fork's default branch and replays your change set from
+scratch, which is the one clean way back to a history you chose.
 
 ### Commits published this way are not GPG-signed
 
