@@ -1398,3 +1398,114 @@ a decision rather than an oversight:
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 9
+
+## Execution Summary
+
+**Status**: ⚠️ Implementation complete; post-implementation validation **not** complete
+**Completed Date**: 2026-08-28
+
+### Results
+
+All 9 tasks across 5 phases are implemented, reviewed under the per-task gate,
+and committed to `worktree-plan-21-host-side-drupalorg-publication`:
+
+- `internal/drupalorg` — the payload type (no destination field, enforced by a
+  reflection test), repository-path validation that refuses rather than
+  normalises, the host PAT loader at its conventional path with a mode refusal,
+  the anonymous `net/http` client with drupal.org edge-refusal detection, fork
+  resolution by convention, the destination guard and shared confirmation
+  renderer, the guest change-set collector, and the authenticated commit replay
+  with its merge request, partial-failure reporting, and resumption.
+- `cmd/sand/publish.go` and the Landing pane's drupal.org row — both surfaces
+  over that one package, neither holding publication logic of its own.
+- Documentation across the security model, a new publishing guide,
+  files-and-state, secrets, the CLI reference, the TUI guide, and `AGENTS.md`.
+
+**Runnable gates, all passing and re-run at the end:** `go build ./...`,
+`go vet ./...`, `gofmt`, `go test ./... -race`, `mkdocs build --strict` (the
+check CI runs), and the coverage gate at **90.3%** against a committed floor of
+87% — Self Validation step 22.
+
+### Noteworthy Events
+
+**A defect in this plan's own task spec, found and corrected during execution.**
+Task 8 was written instructing that the drupal.org row keep `classifyLandRow`'s
+existing arm priority ("do not move it up"). That reasoning was carried over
+from GitHub and is wrong here: a guest holds no drupal.org credential *by
+design*, so the commit-and-push the at-risk arm offers can never succeed
+against git.drupalcode.org — and the unpushed-local-commits state that arm
+claims is precisely the state publication exists to serve. As specified, the
+publish action was reachable only when there was nothing left to publish. The
+arm now outranks at-risk, covered by
+`TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish` and confirmed by
+mutation test; the task file records its own correction rather than being
+silently rewritten.
+
+**Defects found by the per-task gates that would have shipped otherwise:**
+
+- The confirmation view rendered unbounded, pushing the `[y] yes [n] cancel`
+  line off-screen — asking a human to approve a permanent public write with the
+  question no longer visible. The confirmation is the design's only control, so
+  this defeated it entirely.
+- Guest-supplied text could forge a `Destination:` line in that confirmation via
+  ANSI escapes. Now stripped and escaped.
+- Authenticated calls followed redirects. Go strips only `Authorization` and
+  `Cookie` across hosts, and `PRIVATE-TOKEN` is on neither list, so a redirect
+  would have handed the account PAT to whoever answered. Redirects now refused.
+- `last_commit_id` was per-call rather than per-file. Mutation-tested: the naive
+  form fails on commit 2 of 3 **with commit 1 already public and unrevocable**.
+- `Result` reported "1/1" for a three-commit change set on anonymous-phase
+  failures — a partial public write reported as a clean one.
+- The PAT loader stat'd the path, not the descriptor (TOCTOU).
+- The collector fabricated empty files from failing `git` reads, mangled commit
+  messages with deliberate trailing blank lines, broke on non-ASCII filenames,
+  and silently dropped the last commit of a truncated stream.
+- Merge commits failed an entire publish *after* the human had confirmed it.
+- Both surfaces had grown private copies of the guest remote-info script, its
+  parser, and the exec wrapper — already drifted in their error text before
+  shipping, against success criterion 14. Consolidated into `internal/drupalorg`
+  (script, parser) and `internal/provider` (runner), keeping `drupalorg`
+  exec-free.
+- A documentation pass reintroduced the fine-grained-vs-project-access-token
+  conflation this plan was corrected for twice. Fixed in both the guide and
+  `AGENTS.md`: GitLab exposes **no** creation API for a fine-grained token at
+  all, which is a GitLab property; the *project access* token is the mechanism
+  that has an endpoint, and it fails separately on Maintainer and on
+  drupal.org's edge block.
+
+**Process note.** The `/code-review` and `/simplify` skills spawn review
+sub-agents that repeatedly ignored "report findings only" and edited files
+themselves, once leaving a stray file behind. Every phase was therefore verified
+by re-reading files from disk and re-running the proving commands directly,
+never on a sub-agent's report.
+
+### Necessary follow-ups
+
+**This plan is deliberately NOT archived.** Its Self Validation steps 1–21
+inspect the real system, and none of them has been run:
+
+- They require a real drupal.org account with push access to an issue fork, an
+  account-level PAT on the workstation, and a provisioned VM with a hand-made
+  drupal.org checkout.
+- They create **public, permanent** merge requests and commits on drupal.org.
+- Step 2 (`probe-drupalorg-api.sh`) sends real `POST` requests to
+  git.drupalcode.org — commits, branches, files, merge requests. It was **not**
+  run: the payloads are shaped to be rejected, but `glab` is present on this
+  machine and may be authenticated, and a misfire creates public artefacts. It
+  needs a human's explicit go-ahead.
+
+Archiving would assert a verification that has not happened. The plan stays in
+`plans/` until a human with the required account runs steps 1–21.
+
+Also outstanding, both recorded in the shipped documentation rather than only
+here:
+
+- **The fine-grained-token escape-hatch write-up is withheld**, gated on the
+  negative control the plan requires and nobody has run: a token bounded to one
+  issue fork must be shown to **fail** a push to a canonical `project/<module>`.
+- **GitHub worktrees inherit the main clone's token** (git resolves
+  `includeIf "gitdir:…"` against `$GIT_DIR`, which for a linked worktree is
+  `<main-clone>/.git/worktrees/<name>`). Pre-existing, deliberately unchanged
+  here, filed so it is not lost.
+- **The Drupal Association has not been consulted** on any of the plan's three
+  open questions.
