@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -146,49 +145,6 @@ func (c *Client) Project(ctx context.Context, path string) (*ProjectInfo, error)
 		return nil, err
 	}
 	return &p, nil
-}
-
-// branch is the subset of a GitLab branch resource this package reads.
-type branch struct {
-	Name string `json:"name"`
-}
-
-// branchesPerPage is the page size Branches requests — GitLab's maximum — and
-// also the signal Branches uses to detect the last page: a page short of this
-// count means there is nothing more to fetch.
-const branchesPerPage = 100
-
-// branchesMaxPages bounds how many pages Branches will follow, so a
-// misbehaving server that never returns a short page (e.g. always echoing
-// back branchesPerPage items) cannot make this loop forever. 1000 pages is
-// 100,000 branches — far beyond any real drupal.org project.
-const branchesMaxPages = 1000
-
-// Branches lists ALL of path's branch names, using no credential. GitLab
-// paginates this endpoint (default page size 20, maximum 100), so a project
-// with more branches than fit on one page — which includes any project of
-// real size, e.g. project/drupal itself — would silently come back
-// truncated if only a single page were ever requested; Branches instead
-// follows pages until one comes back short of branchesPerPage.
-func (c *Client) Branches(ctx context.Context, path string) ([]string, error) {
-	var names []string
-	for page := 1; page <= branchesMaxPages; page++ {
-		var pageBranches []branch
-		query := url.Values{
-			"per_page": {strconv.Itoa(branchesPerPage)},
-			"page":     {strconv.Itoa(page)},
-		}
-		if err := c.do(ctx, http.MethodGet, encodedProjectPath(path)+"/repository/branches", query, &pageBranches); err != nil {
-			return nil, err
-		}
-		for _, b := range pageBranches {
-			names = append(names, b.Name)
-		}
-		if len(pageBranches) < branchesPerPage {
-			return names, nil
-		}
-	}
-	return nil, fmt.Errorf("drupalorg: %s: more than %d pages of branches, refusing to fetch further", path, branchesMaxPages)
 }
 
 // BranchExists reports whether branch exists on the project at path, using

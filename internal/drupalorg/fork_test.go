@@ -2,10 +2,7 @@ package drupalorg
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -157,64 +154,6 @@ func TestClient_Project_ForkedFromProject(t *testing.T) {
 		p.ForkedFromProject.PathWithNamespace != "project/drupal" ||
 		p.ForkedFromProject.DefaultBranch != "11.x" {
 		t.Errorf("ForkedFromProject = %+v, unexpected fields", p.ForkedFromProject)
-	}
-}
-
-// TestClient_Branches_Paginates asserts that Branches follows GitLab's
-// pagination rather than silently truncating at one page: a project with
-// more branches than fit on a single page (branchesPerPage=100) must still
-// return every branch, not just the first page's worth.
-func TestClient_Branches_Paginates(t *testing.T) {
-	// 150 branches spread across two pages: a full first page (100) proves
-	// the loop follows to page 2, and a short second page (50) proves it
-	// then stops rather than requesting a third, empty page.
-	const total = 150
-
-	var gotPages []string
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPages = append(gotPages, r.URL.Query().Get("page"))
-		page, err := strconv.Atoi(r.URL.Query().Get("page"))
-		if err != nil {
-			t.Fatalf("request missing a valid page param: %v", err)
-		}
-		perPage, err := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if err != nil {
-			t.Fatalf("request missing a valid per_page param: %v", err)
-		}
-
-		start := (page - 1) * perPage
-		end := start + perPage
-		if end > total {
-			end = total
-		}
-
-		// GitLab branch objects, not bare strings.
-		var objs []map[string]string
-		for i := start; i < end; i++ {
-			objs = append(objs, map[string]string{"name": fmt.Sprintf("branch-%d", i)})
-		}
-		body, err := json.Marshal(objs)
-		if err != nil {
-			t.Fatalf("marshalling fixture page: %v", err)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
-	})
-
-	got, err := c.Branches(context.Background(), "project/drupal")
-	if err != nil {
-		t.Fatalf("Branches: %v", err)
-	}
-
-	if len(got) != total {
-		t.Fatalf("Branches returned %d names, want %d (pagination stopped early or over-fetched)", len(got), total)
-	}
-	if got[0] != "branch-0" || got[total-1] != fmt.Sprintf("branch-%d", total-1) {
-		t.Errorf("Branches = [%q ... %q], want ordered branch-0..branch-%d", got[0], got[len(got)-1], total-1)
-	}
-	if len(gotPages) != 2 || gotPages[0] != "1" || gotPages[1] != "2" {
-		t.Errorf("requested pages = %v, want exactly [\"1\" \"2\"]", gotPages)
 	}
 }
 
