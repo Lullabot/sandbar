@@ -103,32 +103,68 @@ func IsNotFound(err error) bool {
 // response with out non-nil, decodes the JSON body into out. No request ever
 // carries a PRIVATE-TOKEN header or any other credential.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, out any) error {
-	// Parsed from the concatenated string (not built by assigning to
-	// full.Path directly) so that path, which already contains percent-
-	// escapes from encodedProjectPath, is not double-encoded: url.URL.Path
-	// stores the DECODED path, so assigning an already-escaped string to it
-	// would have its own "%" characters re-escaped to "%25" when the
-	// request is finally rendered to the wire.
-	full, err := url.Parse(strings.TrimSuffix(c.base.String(), "/") + path)
+	full, err := c.endpoint(method, path, query)
 	if err != nil {
-		return fmt.Errorf("drupalorg: building %s %s url: %w", method, path, err)
-	}
-	if len(query) > 0 {
-		full.RawQuery = query.Encode()
+		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, full, nil)
 	if err != nil {
 		return fmt.Errorf("drupalorg: building %s %s request: %w", method, path, err)
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.http.Do(req)
+	return send(c.http, req, method, path, out)
+}
+
+// send executes req and classifies the response. It is the single place a
+// request is actually put on the wire, shared by the anonymous do() above
+// and by the authenticated requests in publish.go so that transport errors
+// and response classification read identically whether or not a credential
+// was attached. httpClient is a parameter rather than c.http because the
+// authenticated path deliberately uses a transport that refuses redirects
+// (see NewPublisher). method and path name the request in errors; they are
+// passed rather than read back off req because path is the API path, not
+// the escaped URL path.
+func send(httpClient *http.Client, req *http.Request, method, path string, out any) error {
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("drupalorg: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
+	return interpretResponse(method, path, resp, out)
+}
+
+// endpoint renders the absolute URL for path (already percent-escaped where
+// needed — see encodedProjectPath) and query. method is used only to name
+// the failing request in an error.
+//
+// The URL is parsed from the concatenated string (not built by assigning to
+// full.Path directly) so that path, which already contains percent-escapes
+// from encodedProjectPath, is not double-encoded: url.URL.Path stores the
+// DECODED path, so assigning an already-escaped string to it would have its
+// own "%" characters re-escaped to "%25" when the request is finally
+// rendered to the wire.
+func (c *Client) endpoint(method, path string, query url.Values) (string, error) {
+	full, err := url.Parse(strings.TrimSuffix(c.base.String(), "/") + path)
+	if err != nil {
+		return "", fmt.Errorf("drupalorg: building %s %s url: %w", method, path, err)
+	}
+	if len(query) > 0 {
+		full.RawQuery = query.Encode()
+	}
+	return full.String(), nil
+}
+
+// interpretResponse reads resp and classifies it: a drupal.org edge refusal,
+// a GitLab *APIError, or a 2xx whose JSON body is decoded into out when out
+// is non-nil. Reached through send() from both the anonymous do() and the
+// authenticated requests in publish.go, so a blocked endpoint, a GitLab
+// error body, and a decode failure are recognised identically whether or not
+// a credential was attached. It never reads the request's headers and so can
+// never surface a credential in an error.
+func interpretResponse(method, path string, resp *http.Response, out any) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("drupalorg: reading %s %s response: %w", method, path, err)
