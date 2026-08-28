@@ -1358,9 +1358,9 @@ No cycles: every edge runs from a lower task ID to a higher one.
 - ✔️ Task 004: Destination guard and the shared confirmation summary (depends on: 001, 003)
 - ✔️ Task 006: Collect the change set from the guest checkout (depends on: 001)
 
-### Phase 3: Publication
+### ✅ Phase 3: Publication
 **Parallel Tasks:**
-- Task 005: Authenticated publish — commit replay, merge request, partial failure and resumption (depends on: 001, 002, 003, 004)
+- ✔️ Task 005: Authenticated publish — commit replay, merge request, partial failure and resumption (depends on: 001, 002, 003, 004)
 
 ### Phase 4: Surfaces
 **Parallel Tasks:**
