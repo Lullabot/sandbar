@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.2](https://github.com/Lullabot/sandbar/compare/v0.9.1...v0.9.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 96af6d2 ([#143](https://github.com/Lullabot/sandbar/issues/143)) ([0c3241a](https://github.com/Lullabot/sandbar/commit/0c3241ad2a0d59c261fbfb2b3a4965e30fd9941b))
+* **deps:** update module charm.land/bubbles/v2 to v2.2.1 ([#146](https://github.com/Lullabot/sandbar/issues/146)) ([8c2fa6c](https://github.com/Lullabot/sandbar/commit/8c2fa6c38affa910637af7a8c3413931164672d9))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260823001701-96af6d2cb5f6 ([#144](https://github.com/Lullabot/sandbar/issues/144)) ([e33c17f](https://github.com/Lullabot/sandbar/commit/e33c17f9901250a1b3b70d661799e4f0c29a4c14))
+
 ## [0.9.1](https://github.com/Lullabot/sandbar/compare/v0.9.0...v0.9.1) (2026-08-25)
 
 
