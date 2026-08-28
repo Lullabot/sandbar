@@ -75,6 +75,7 @@ nav:
     - Web Servers and Ports: using-sand/web-servers.md
     - Connection Profiles: using-sand/connection-profiles.md
     - Proxmox VE: using-sand/proxmox.md
+    - Publishing to drupal.org: using-sand/drupalorg-publishing.md
   - Reference:
     - Files and State: reference/files-and-state.md
     - Troubleshooting: reference/troubleshooting.md
