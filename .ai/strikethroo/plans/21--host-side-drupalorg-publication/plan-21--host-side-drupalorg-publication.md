@@ -97,6 +97,22 @@ must stand alone, and because plan 20 is no longer the authority on any of them.
 | Does this plan depend on plan 20 in any way? | **No.** Publication takes a change set from any drupal.org checkout in a guest; it does not care whether that checkout is a bootstrapped ddev project. End-to-end validation uses a hand-made checkout in a VM, since the automatic bootstrap does not exist yet. | Derived |
 | Was the per-task completion gate carried over? | **Yes**, unchanged. It applies to every task generated from this plan. | Carried from refinement 2 |
 
+### Refinement session 7 — surfaces, config home, and commit shape, 2026-08-28
+
+| Question | Answer | Source |
+| --- | --- | --- |
+| The plan says a developer publishes "with one host-side command" but never names the surface, and `land` already has two. Which does publication get? | **Both**, mirroring `land`: a `cmd/sand/publish.go` CLI entry point and a TUI action, over a shared `internal/drupalorg` package. | User |
+| Is the TUI half a new pane? | **No — it fills an arm the Landing pane already has.** `classifyLandRow` (`internal/ui/landing.go`) already carries a "non-GitHub forge: state shown, no one-key action (deferred: glab)" arm, and `checkouts.Checkout` already records `Forge`. A `git.drupalcode.org` checkout flows into that dead arm today. The row model, job registry, and confirmation idiom all carry over. | Auto-resolved from codebase |
+| Where is the host PAT's path recorded? `TokenFile` is a *Proxmox-profile* field and `profiles.yaml` is a per-location store, so the plan's stated pattern had no home for a workstation-global credential. | **A fixed conventional path**, `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token`, with `token.go`'s mode refusal. No config key, no schema, no form field — nothing to mis-record and nothing to migrate. A new global config file was rejected as scope creep under PRE_PLAN. | User |
+| Does one publish produce one commit or several? | **Several — each local commit is replayed** as its own `POST /repository/commits`, preserving the guest's history and messages on the fork. The plan had listed this as an unresolved gap to be decided deliberately. | User |
+| What does replay cost? | **Partial failure becomes a first-class outcome.** N sequential calls means commit 2 of 3 can fail with commit 1 already public and unrevocable. Accepted deliberately; the design must report exactly what landed and be resumable rather than pretend it can roll back. | Derived from the decision |
+| Does the merge-request call work as the plan described it? | **No — the plan was wrong.** It said the MR opens "against the issue branch". Verified on `project/dubbot`: every drupal.org MR is cross-project, `source_project_id` 241450 -> `target_project_id` 106348, `target_branch` `2.x`. The call needs `target_project_id` pointed at the canonical project. | Defect in prior revision, corrected by probe |
+| Does that break the `issue/`-namespace guard? | **No, but the guard needed scoping.** It governs where *commits* land, which stays inside `issue/`. An MR necessarily names the canonical project as its target — that is metadata about where a proposal is directed, not a write to that project's code. The target is derived from the fork's own `forked_from_project`, read anonymously, so no guest data reaches it. | Derived; corroborated by probe |
+| Is creating the branch the normal case? | **No — the branch almost always already exists.** drupal.org creates the issue branch with the fork: `issue/drupal-3181657` already carries `3181657-fix-views-timezone` and `3181657-test-only`. `start_branch` against an existing branch errors, so the normal path omits it. | Probe |
+| Can the payload express the change sets it must carry? | **No — defect in the prior revision.** "Paths and their resulting contents" cannot express a deletion, which has no content, nor a rename, though the content API has `delete` and `move` actions. Corrected to an ordered list of commits, each carrying file actions with an explicit kind and encoding. | Defect in prior revision |
+| Does the host call GitLab over HTTP or shell out to `glab`? | **`net/http`**, on the typed-client pattern `internal/pve` already establishes. Success criterion 4 says the host needs no Drupal tooling and no git; a mandatory `glab` install would sit badly with that, and would need an availability probe of the kind `landgh` carries only because `gh` may be absent. `glab` stays a dependency of the probe script alone. | Auto-resolved from codebase |
+| Where does commit authorship come from under replay? | **Per-commit, from the guest's local history** — by necessity, since replaying a commit without its author would rewrite it. This is not a destination and does not weaken the split of authority; the committer of record is the PAT owner regardless. Stated rather than left implicit. | Derived from the replay decision |
+
 ## Executive Summary
 
 A Drupal developer working in an agent-controlled VM needs a way to publish work
@@ -122,12 +138,15 @@ So the guest is given **no credential at all**, and publication moves to the
 workstation. The guest clones anonymously, reads merge requests, pipelines, branch
 lists, trees, commits, and raw files anonymously — all verified — and commits only
 to its own local git. Publication happens on the host through GitLab's content API
-rather than the git protocol: one `POST /repository/commits` creates the branch
-and lands the whole change set with correct authorship, and a second call opens
-the merge request. The host therefore needs no git repository, no checkout and no
-git objects, which preserves the no-code-on-host boundary `internal/landgh` exists
-to protect — nothing transits but inert data the host forwards over HTTPS without
-ever writing it to a working tree or executing it.
+rather than the git protocol: each local commit is replayed as its own
+`POST /repository/commits` onto the issue branch — which drupal.org has usually
+created already, alongside the fork — and a merge request is opened if one does not
+yet exist. That merge request is cross-project by drupal.org's construction: it runs
+from the fork to the canonical project, whose identity the host reads anonymously
+from the fork's own `forked_from_project`. The host therefore needs no git
+repository, no checkout and no git objects, which preserves the no-code-on-host
+boundary `internal/landgh` exists to protect — nothing transits but inert data the
+host forwards over HTTPS without ever writing it to a working tree or executing it.
 
 The security property is a **split of authority rather than the strength of a
 secret**: the agent decides content, the host decides destination. The target
@@ -151,6 +170,8 @@ push, which publishes first and shows a diff afterwards.
 | Resolving an issue fork appears to need drupal.org tooling, which lives only in the guest | Fork URLs are derived by convention and confirmed anonymously, from the host, with no credential and no Drupal tooling | Resolves the apparent contradiction between "the host holds the credential" and "the `drupalorg` CLI is in the guest" |
 | A contributor who discovers that a fine-grained per-fork token works will assume it was overlooked | Documentation says it works, says what it costs, and says what accepting it gives up | Left unexplained, this invites someone to wire a token into a guest and quietly delete the design's central property |
 | sandbar has no host-side credential outside the guest-facing secrets store | The account PAT follows `internal/profiles/token.go` — a recorded path, one loader, a hard refusal of over-permissive modes | `internal/secrets` exists to deliver secrets *into* guests, which is exactly what this credential must never do |
+| Publishing means a `git push`, which discards nothing and reports nothing until it is done | Each local commit is replayed onto the issue branch through the content API, and what landed is reported precisely when part of a replay fails | History is worth preserving on a shared issue fork, and a public, unrevocable partial result must be named rather than hidden behind a generic error |
+| Non-GitHub checkouts appear in the Landing pane with no action available | A `git.drupalcode.org` row offers publication, filling the arm `classifyLandRow` already reserves for a non-GitHub forge | The pane already detects the forge and already shows the row; only the action is missing |
 | A task could be marked complete without a review or simplification pass | No task completes until `/code-review --fix` and then `/simplify` have run and their tests re-run | Correctness and quality gates belong at task boundaries, not as one sweep at the end |
 
 ### Background
@@ -324,11 +345,40 @@ widen its own reach by asking.
 documentation).** A single `POST /projects/:id/repository/commits` accepts a target
 `branch`, a `start_branch` or `start_sha` to create it from, an `actions` array of
 create/update/delete/move/chmod operations carrying file contents as text or
-base64, and explicit `author_name`/`author_email`. So one call creates the branch
-and lands a complete, correctly-attributed change set. Requests above 20 MB are
-rate limited and above 300 MB rejected — irrelevant for module patches. This is
-what allows the host to publish without a git repository, a checkout, or any git
-objects.
+base64, and explicit `author_name`/`author_email`. So one call lands one complete,
+correctly-attributed commit. Requests above 20 MB are rate limited and above 300 MB
+rejected — irrelevant for module patches. This is what allows the host to publish
+without a git repository, a checkout, or any git objects.
+
+**The shape of a real drupal.org publication was verified rather than assumed
+(probed anonymously, 2026-08-28).** Three findings, each of which corrected
+something the earlier revision had stated or implied.
+
+*The issue branch usually exists already.* drupal.org creates it when it creates
+the fork: `issue/drupal-3181657` already carries `3181657-fix-views-timezone` and
+`3181657-test-only`. An earlier revision described publication as "one call creates
+the branch and lands the change set", which is the uncommon case. `start_branch`
+against a branch that already exists is an error, so the normal path omits it and
+appends; `start_branch` is used only when the branch is genuinely absent, and the
+branch it starts from is the fork's own `default_branch` (`9.2.x` on that fork —
+GitLab records there the branch the fork was taken from).
+
+*Merge requests are cross-project, and the earlier revision described them wrongly.*
+It said the second call "opens the merge request against the issue branch". It does
+not. On `project/dubbot` the three most recent merge requests all run fork ->
+parent: `source_project_id` 241450 -> `target_project_id` 106348, `target_branch`
+`2.x`, and the same for 241411 and 241406. Listing merge requests on an issue fork
+itself returns `[]`, because an issue fork holds none — they live on the canonical
+project. The call is therefore `POST /projects/<fork>/merge_requests` carrying
+`target_project_id` for the parent and the parent's development branch as
+`target_branch`.
+
+*The parent is derivable anonymously, so no guest data reaches the merge-request
+target.* `GET /projects/issue%2Fdrupal-3181657` returns
+`forked_from_project: {path_with_namespace: "project/drupal", id: 59858}` with no
+credential presented. The canonical project the merge request is directed at is
+therefore host-derived like every other part of the destination — read from the fork
+the host itself resolved, never named by the guest.
 
 **A host-side credential pattern already exists (confirmed in the codebase).**
 `internal/profiles/token.go` establishes it: `profiles.yaml` is secret-free and
@@ -395,20 +445,21 @@ graph TD
     subgraph GUEST["Guest VM (agent-controlled) — HOLDS NO CREDENTIAL"]
         CLONE["Anonymous clone + anonymous reads<br/>MRs, pipelines, CI, files"]
         WORK["Agent commits to LOCAL git only"]
-        COLL["Collect changed paths + contents<br/>no destination, ever"]
+        COLL["Collect the commits not yet on the fork<br/>message, author, file actions per commit<br/>no destination, ever"]
         CLONE --> WORK --> COLL
     end
 
     subgraph HOST["Host (trusted) — holds the credential"]
-        RESOLVE["Resolve fork by convention<br/>module + issue number<br/>anonymous, no credential"]
-        SHOW["Show what will be published,<br/>and WHERE. Human confirms."]
-        PAT["Account PAT<br/>via profiles token pattern<br/>never enters a VM"]
-        API["POST /repository/commits<br/>+ POST /merge_requests<br/>no git, no checkout"]
-        RESOLVE --> SHOW --> API
+        SURF["sand publish (CLI)<br/>or Landing pane row (TUI)"]
+        RESOLVE["Resolve fork by convention<br/>module + issue number<br/>then read forked_from_project<br/>anonymous, no credential"]
+        SHOW["Show every commit, its files,<br/>and WHERE. Human confirms."]
+        PAT["Account PAT<br/>~/.config/sandbar/drupalorg.token<br/>mode 0600 or refused<br/>never enters a VM"]
+        API["net/http, per commit:<br/>POST /repository/commits<br/>then POST /merge_requests<br/>if none exists yet"]
+        SURF --> RESOLVE --> SHOW --> API
         PAT --> API
     end
 
-    DEV --> RESOLVE
+    DEV --> SURF
     COLL -->|"content only, inert data"| SHOW
     API -->|"HTTPS"| GL["git.drupalcode.org"]
 
@@ -419,6 +470,7 @@ graph TD
     style PAT fill:#4a2020,color:#fff
     style DEST fill:#1f4a2f,color:#fff
     style SHOW fill:#1f3a5f,color:#fff
+    style SURF fill:#1f3a5f,color:#fff
     style WORK fill:#1f3a5f,color:#fff
 ```
 
@@ -428,20 +480,31 @@ graph TD
 that cannot leak into a guest by accident.
 
 The credential is an account-level drupal.org personal access token with API
-scope, held on the workstation. It follows the pattern `internal/profiles/token.go`
-already establishes rather than introducing a new store: configuration records only
-the *path* to the credential file, never the value; one loader is the single read
-site; and a file readable by group or other is refused outright rather than warned
-about.
+scope, held on the workstation at a **fixed conventional path**:
+`${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token`. One loader is the single
+read site, and a file readable by group or other is refused outright rather than
+warned about — `internal/profiles/token.go`'s refusal, reused verbatim in intent.
+
+The path is a convention rather than a configured value, and that is a deliberate
+narrowing of what the plan first said. `token.go`'s `TokenFile` is a field on a
+**Proxmox connection profile**, and `profiles.yaml` is a per-location store; a
+workstation-global credential that has nothing to do with where VMs run has no
+coherent home there. The alternative — a new global config file — would introduce a
+persisted schema, its versioning, and a TUI editing surface for a single string,
+which is the scope creep PRE_PLAN exists to stop. A convention has nothing to
+mis-record and nothing to migrate. An absent file is not an error condition to
+diagnose at publish time: it means publication is unavailable, and both surfaces say
+so up front.
 
 Placement in `internal/secrets` must be refused explicitly, and the reason
 documented at the point of the decision rather than only in this plan: that package
 exists to deliver secrets *into* guests. Putting this credential there would make
 the one thing the entire design forbids into a one-line change that looks correct.
 
-The credential is only ever read at the moment of an authenticated call, and only
-two calls are ever authenticated: the commit and the merge request. Fork
-resolution, existence checks, and branch listing use no credential at all.
+The credential is only ever read at the moment of an authenticated call, and the
+only authenticated calls are the commit replay — one per local commit — and the
+merge request, when one is needed. Fork resolution, branch-existence checks, branch
+listing, and reading the fork's `forked_from_project` all use no credential at all.
 
 ### Fork resolution by convention
 
@@ -471,12 +534,28 @@ is implemented first, resolution is built here and plan 20 consumes it.
 **Objective**: Carry the change set as inert data, structurally incapable of
 naming where it goes.
 
-The payload is a list of repository-relative paths and their resulting contents,
-plus a commit message and the developer's authorship. It carries **no destination
-field of any kind** — no project, no branch, no remote, no URL. This is the central
-structural claim of the design and must be enforced by the type, not by convention:
-if the payload cannot express a destination, no amount of prompt injection or agent
-compromise can supply one.
+The payload is an **ordered list of commits**. Each carries its message, its
+author name and email, and an ordered list of file actions; each action carries an
+explicit **kind** — create, update, delete, move — a repository-relative path, and,
+for the kinds that have one, the resulting content with its encoding (text, or
+base64 for anything that is not valid UTF-8).
+
+The action kind is not decoration. An earlier revision specified the payload as
+"paths and their resulting contents", which cannot express a deletion — a deleted
+file has no content — and cannot express a rename, though the content API offers
+both. A change set that removes a file would have been silently unpublishable.
+
+The payload carries **no destination field of any kind** — no project, no branch, no
+remote, no URL. This is the central structural claim of the design and must be
+enforced by the type, not by convention: if the payload cannot express a
+destination, no amount of prompt injection or agent compromise can supply one.
+
+Authorship is the one guest-supplied field that reaches drupal.org verbatim, and it
+is stated here rather than left implicit. Replaying a commit without its author
+would rewrite it, so the author travels with the commit. This does not weaken the
+split of authority — an author name is not a destination, and it cannot redirect a
+write — and the committer of record is the PAT owner in every case, so a forged
+author line misattributes text without concealing who published it.
 
 Paths must be validated on the host before use: repository-relative only, no
 absolute paths, no `..` traversal, no path that normalises outside the tree.
@@ -497,13 +576,24 @@ The destination is assembled entirely from host-side arguments: the target
 checkout the developer names, the issue number they give, and the branch derived
 from them. Nothing the guest produced participates.
 
-Two controls sit on top of that. The publisher **refuses any destination outside
-the `issue/` namespace unless the developer overrides deliberately**, so writing to
-a canonical `project/<module>` — the case that motivated the entire design — cannot
-happen as a default or a bug, only as an explicit act. And publication requires
-explicit human confirmation showing what will change and where, in a readable form
-rather than a summary count. Declining publishes nothing. No code path may publish
-as a side effect of any other command.
+Two controls sit on top of that. The publisher **refuses any commit destination
+outside the `issue/` namespace unless the developer overrides deliberately**, so
+writing to a canonical `project/<module>` — the case that motivated the entire
+design — cannot happen as a default or a bug, only as an explicit act. And
+publication requires explicit human confirmation showing what will change and where,
+in a readable form rather than a summary count. Declining publishes nothing. No code
+path may publish as a side effect of any other command.
+
+The guard governs **where commits land**, and that scoping is deliberate rather than
+incidental. A merge request necessarily names the canonical project as its
+`target_project_id`, because on drupal.org every merge request runs fork -> parent;
+a guard that refused to name a canonical project at all would forbid the one thing
+publication exists to do. The distinction that matters is that a merge request is a
+*proposal* directed at a project, not a write to its code: it lands no commit, moves
+no branch, and is reviewable and closable by that project's maintainers. And its
+target is not a wider grant to be abused, because it is derived — read from the
+fork's own `forked_from_project` by the host, anonymously — rather than supplied. A
+payload cannot influence it any more than it can influence the fork.
 
 Publication being a **human-initiated act** is also what keeps the workflow clear
 of drupal.org's automation-and-bots provision: it is "an individual action a user
@@ -514,29 +604,84 @@ could already perform with a regular authenticated session", not a bot.
 **Objective**: Land a complete, correctly-attributed change set and open a merge
 request, using no git.
 
-One `POST /projects/:id/repository/commits` creates the branch from a
-`start_branch` and applies every file action in a single commit carrying
-`author_name` and `author_email`. A second call opens the merge request against the
-issue branch. Both endpoints are verified routed on drupal.org.
+**One call is one commit, and each local commit is replayed as its own call.** A
+publish preserves the guest's history and messages on the fork rather than squashing
+them, which is the decision refinement 7 took after the plan had carried it as an
+open gap. So a publish is *N* sequential `POST /projects/<fork>/repository/commits`
+calls, each carrying that commit's message, its `author_name` and `author_email`,
+and its file actions.
 
-Three behaviors of the content API differ observably from a git push and must be
-decided rather than discovered:
+**The branch usually exists, so `start_branch` is usually omitted.** drupal.org
+creates the issue branch alongside the fork, and sending `start_branch` against an
+existing branch is an error. The first call therefore appends when the branch is
+present and creates only when it is genuinely absent, starting in that case from the
+fork's own `default_branch`, which GitLab sets to the branch the fork was taken
+from. Which of the two happened is resolved anonymously before any authenticated
+call is made.
 
-- **One call is one commit.** A multi-commit branch needs several sequential calls.
-  Decide deliberately whether a change set publishes as one commit or several, and
-  say which in the documentation rather than surprising contributors.
+**The merge request is cross-project.** `POST /projects/<fork>/merge_requests`
+carries `target_project_id` for the canonical parent and that parent's development
+branch as `target_branch` — verified against three real merge requests on
+`project/dubbot`. The parent's identity comes from the fork's `forked_from_project`,
+read anonymously. The call is **skipped when a merge request already exists** for
+that source branch, which is the common case on an issue that has been worked
+before; publishing more commits to an open merge request must not attempt to open a
+second one.
+
+**Partial failure is a first-class outcome, not an error path.** *N* sequential
+calls means call 2 of 3 can fail with call 1 already public and unrevocable. There
+is no rollback and the design must not pretend otherwise. What it must do instead is
+report precisely which commits landed and which did not, name the first failure, and
+be **resumable**: re-running a publish re-derives what is already on the branch and
+replays only the remainder. A publish that stops halfway leaves the branch in a
+state the next publish can complete, rather than one a developer has to repair by
+hand.
+
+Three further behaviors of the content API differ observably from a git push:
+
 - **Commits created this way are not GPG-signed** by the developer.
 - **`last_commit_id` is the only concurrency guard** if the fork moved underneath.
   Send it on update actions, and treat a conflict as a normal outcome to re-derive
-  from rather than an error.
+  from rather than an error. Under replay it also guards the chain: each call's
+  expected parent is the commit the previous call created.
+- **Oversized payloads must be detected before sending** and explained, since the API
+  rate-limits above 20 MB and rejects above 300 MB. The check is per call, so a large
+  change set may be publishable as a replay where it would not be as one commit.
 
-Oversized payloads must be detected before sending and explained, since the API
-rate-limits above 20 MB and rejects above 300 MB.
+The client is `net/http`, on the typed-client pattern `internal/pve` already
+establishes — not a shell-out to `glab`. Success criterion 4 says the host needs no
+Drupal tooling and no git, and a mandatory `glab` install would sit badly beside it;
+it would also need an availability probe of the kind `landgh` carries only because
+`gh` may be absent. `glab` remains a dependency of `probe-drupalorg-api.sh` alone,
+which is a developer tool rather than part of the product.
 
 Failure reporting is a named requirement rather than an afterthought. Because
 drupal.org's allowlist can change, a blocked endpoint returns an HTML body where
 JSON was expected, and that must be recognised and reported as *drupal.org refused
 this request* — not as a generic API error or a misleading 404.
+
+### The two surfaces
+
+**Objective**: Offer publication both headlessly and where the developer already
+looks, without building the confirmation twice in two idioms.
+
+Publication is exposed the way `land` already is: a CLI entry point at
+`cmd/sand/publish.go` and a TUI action, both over one shared `internal/drupalorg`
+package that owns fork resolution, the payload type, the client, and the guard. The
+surfaces differ only in how they render the confirmation and stream progress;
+neither holds publication logic of its own.
+
+The TUI half is smaller than it sounds, because the Landing pane already reserves a
+place for it. `classifyLandRow` in `internal/ui/landing.go` carries an arm for *"a
+non-GitHub forge: state shown, no one-key action (deferred: glab)"*, and
+`checkouts.Checkout` already records the remote's `Forge`. A `git.drupalcode.org`
+checkout flows into that dead arm today. Filling it reuses the pane's row model, its
+one-action-per-row idiom, and the job registry every other sand action streams
+through — so the work is an action and a confirmation view, not a new pane.
+
+The CLI half carries the same guard and the same confirmation, printed rather than
+rendered, and is what makes the publication path testable end to end without driving
+a TUI.
 
 ### The fine-grained token option, and why this plan does not build it
 
@@ -669,15 +814,17 @@ publication target.
       DA's AI policy requires for AI-assisted merge requests, and raise the design
       with the DA before promoting it widely.
 - **The content API is not the git protocol, and differs in observable ways**: One
-  call produces one commit, so a multi-commit branch needs several sequential
-  calls; commits created this way are not GPG-signed by the developer; and
-  `last_commit_id` is the only concurrency guard if the fork moved underneath.
-  Requests above 20 MB are rate limited.
-    - **Mitigation**: Decide deliberately whether a change set publishes as one
-      commit or several, and say so in the documentation rather than surprising
-      contributors. Send `last_commit_id` on update actions and treat a conflict as
-      a normal outcome to re-derive from, not an error. Detect an oversized payload
-      before sending and explain it.
+  call produces one commit, so replaying a multi-commit change set means several
+  sequential calls; commits created this way are not GPG-signed by the developer;
+  and `last_commit_id` is the only concurrency guard if the fork moved underneath.
+  Requests above 20 MB are rate limited. The branch usually already exists, so
+  `start_branch` is usually wrong to send.
+    - **Mitigation**: Replay is the decided shape and belongs in the documentation
+      rather than surprising contributors. Resolve anonymously whether the branch
+      exists before any authenticated call, and send `start_branch` only when it does
+      not. Send `last_commit_id` on update actions, chain it across a replay, and
+      treat a conflict as a normal outcome to re-derive from rather than an error.
+      Detect an oversized payload per call before sending and explain it.
 - **The endpoint allowlist is drupal.org's to change**: The content endpoints this
   design depends on are permitted today because drupal.org allows them, not because
   they are guaranteed. The same edge that blocks the token endpoints could block
@@ -700,6 +847,18 @@ publication target.
       show what will change and where in a form a human can actually read, not a
       summary count. Publishing must never be the default or automatic outcome of
       any command.
+- **A replay can fail partway, leaving a branch half-published**: Replaying each
+  local commit as its own call means commit 2 of 3 can fail with commit 1 already
+  public. Nothing can withdraw it, and the state is one a developer did not ask for
+  and may not notice. This is a cost the replay decision accepted knowingly rather
+  than a defect to design away.
+    - **Mitigation**: Treat partial success as a reportable outcome rather than an
+      error: name exactly which commits landed, which did not, and why the first
+      failure happened. Make publication **resumable** — a re-run re-derives what is
+      already on the branch and replays only the remainder — so the recovery path is
+      running the same command again rather than repairing the fork by hand. Cover
+      it with a test that fails an interior call and asserts both the report and the
+      resumption.
 - **End-to-end validation writes to real drupal.org**: Unlike the environment work
   in plan 20, this plan cannot be validated entirely inside a local VM. Its tests
   create real merge requests on a public forge.
@@ -723,25 +882,31 @@ publication target.
 1. No drupal.org credential is present anywhere in a guest VM, in any form — not
    in the environment, the credential store, a `.env`, a git config, or a shell
    history.
-2. The account-level drupal.org PAT exists only on the workstation, is referenced
-   in configuration by path rather than by value, and is refused outright if its
-   file is readable by group or other.
-3. A developer publishes a change set from a guest checkout with one host-side
-   command: the branch is created on the correct issue fork, contains exactly the
-   intended file changes with correct authorship, and a merge request is opened
-   against the right target.
+2. The account-level drupal.org PAT exists only on the workstation, is read from
+   the conventional path `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token`
+   rather than from any configured value, and is refused outright if its file is
+   readable by group or other. Its absence disables publication with a clear message
+   rather than failing mid-publish.
+3. A developer publishes from a guest checkout on either surface — the `sand publish`
+   CLI entry point or the Landing pane row — and each local commit not yet on the
+   fork appears on the correct issue fork's branch, in order, with its own message
+   and its original authorship, carrying exactly the intended file changes. An
+   existing branch is appended to rather than recreated, and a merge request is
+   opened against the canonical parent project only if one does not already exist.
 4. The host requires no PHP runtime, no Drupal tooling, and no git — no repository,
    no checkout, no working tree, no git objects. Fork resolution and verification
-   use no credential; the only authenticated calls are the commit and the merge
-   request.
+   use no credential; the only authenticated calls are the per-commit replay calls
+   and the merge request, when one is needed.
 5. Nothing the guest produces — file paths, contents, branch names, commit message
    — can alter which project or branch the host writes to. The payload type cannot
    express a destination at all.
 6. Publication cannot complete without explicit human confirmation that shows what
    will change and where; declining publishes nothing, and no code path publishes
    as a side effect of another command.
-7. A destination outside the `issue/` namespace is refused without a deliberate
-   override.
+7. A *commit* destination outside the `issue/` namespace is refused without a
+   deliberate override. The merge request's `target_project_id` names the canonical
+   parent, as drupal.org requires, and is derived from the fork's own
+   `forked_from_project` rather than from anything the guest produced.
 8. Publication behaves identically whether the change set originates in a main
    clone or in a worktree at any path, including a harness-created nested one — the
    worktree's location never affects where the work lands.
@@ -753,7 +918,18 @@ publication target.
 11. Existing GitHub behavior is unchanged: `internal/provision/gitcred.go` is
     untouched, a VM created with a `GH_TOKEN` authenticates exactly as it does
     today, and no stored secret changes.
-12. Every task in the blueprint passes the per-task completion gate —
+12. A payload can express every change a real commit contains — creates, updates,
+    deletes, and renames, with binary content carried as base64 — and a change set
+    that removes a file publishes correctly rather than silently omitting it.
+13. A replay that fails partway reports exactly which commits landed and which did
+    not, and re-running the publish completes the remainder rather than duplicating
+    what is already on the branch.
+14. Publication works identically from both surfaces, with all resolution, payload,
+    guard, and client logic living once in `internal/drupalorg` rather than being
+    implemented twice.
+15. The workstation needs no `glab` and no `gh` for publication: the client is
+    `net/http`, and `glab` is required only by `probe-drupalorg-api.sh`.
+16. Every task in the blueprint passes the per-task completion gate —
     `/code-review --fix`, then `/simplify`, then tests re-run — before being marked
     complete.
 
@@ -817,11 +993,14 @@ steps is created by hand — an ordinary `git clone` of a drupal.org module and 
 5. **Verify the PAT never reaches a guest.** After a publish, search a provisioned
    VM exhaustively — environment, credential store, per-directory `.env` files, git
    config, shell history — and confirm the account PAT is absent in every form.
-6. **Verify publication end to end.** From a real issue worktree with real changes,
-   publish. Confirm a branch is created on the correct issue fork, that it contains
-   exactly the intended file changes with correct authorship, and that a merge
-   request is opened against the right target. Verify from a clean anonymous clone,
-   not from the machine that published.
+6. **Verify publication end to end, on both surfaces.** From a real issue worktree
+   holding **several** local commits, publish — once through `sand publish`, and once
+   through the Landing pane row. Confirm each commit appears on the correct issue
+   fork's branch in order, with its own message and original authorship, carrying
+   exactly the intended file changes; that the pre-existing branch was appended to
+   rather than recreated; and that a merge request exists against the canonical
+   parent project with the right target branch, created only if one was absent.
+   Verify from a clean anonymous clone, not from the machine that published.
 7. **Verify publication requires human confirmation.** Confirm the publish path
    cannot complete without an explicit confirmation, that declining publishes
    nothing at all, and that no code path publishes as a side effect of any other
@@ -863,7 +1042,22 @@ steps is created by hand — an ordinary `git clone` of a drupal.org module and 
     and explained before sending, and that a `last_commit_id` conflict — produced by
     moving the fork underneath a prepared publish — is reported as a re-derivable
     conflict rather than a failure.
-17. **Run the fine-grained token's negative control, before documenting the escape
+17. **Verify the replay's failure and resumption behavior.** Cause an interior call
+    of a multi-commit replay to fail — a revoked token mid-run, or a `last_commit_id`
+    conflict induced by moving the branch underneath. Confirm the report names
+    exactly which commits landed and which did not, and that it does not present a
+    partial success as a clean failure. Then re-run the same publish and confirm it
+    replays only the remainder, leaving no duplicated commits on the branch.
+18. **Verify the payload carries every kind of change.** Publish a change set that
+    creates a file, modifies a file, **deletes** a file, renames a file, and adds a
+    binary file. Confirm all five land correctly on the fork — the deletion in
+    particular, which the prior payload design could not express at all.
+19. **Verify the merge-request target is derived, not supplied.** Confirm the
+    canonical parent is read from the fork's `forked_from_project` anonymously, that
+    a hostile payload cannot alter `target_project_id` or `target_branch`, and that
+    publishing again onto a branch whose merge request is already open does not
+    attempt to create a second one.
+20. **Run the fine-grained token's negative control, before documenting the escape
     hatch.** Most of this check is already answered and must not be re-litigated:
     the UI does expose fine-grained tokens, `Code: Push` exists, a single issue-fork
     project is a selectable boundary, the `issue` group is **not**, and a
@@ -872,7 +1066,10 @@ steps is created by hand — an ordinary `git clone` of a drupal.org module and 
     bounded to one issue fork and attempt a push to a canonical `project/<module>`
     the developer maintains. It **must** fail. Until it does, the escape hatch stays
     undocumented.
-18. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
+21. **Verify the host needs no forge CLI.** With neither `glab` nor `gh` on `PATH`,
+    confirm a publish completes on both surfaces. The client is `net/http`; only
+    `probe-drupalorg-api.sh` may require `glab`.
+22. **Run the existing suite.** `go test ./... -race` must pass, and coverage must
     not fall below the committed floor enforced in CI.
 
 ## Documentation
@@ -887,12 +1084,14 @@ Yes — this plan requires documentation updates, both human- and agent-facing.
   credential and publishes agent-authored content with it, and drupal.org's edge
   allowlist is not a containment boundary.
 - **A user-facing guide to publishing** under `docs/using-sand/`, covering how a
-  change set gets from a guest checkout to a merge request, what the confirmation
-  shows, what one publish produces (one commit or several — whichever the
-  implementation chooses), and the fact that commits published this way are not
-  GPG-signed. Written for someone who knows Drupal and not sandbar. When plan 20
-  lands, this becomes part of the end-to-end drupal.org guide rather than a separate
-  page.
+  change set gets from a guest checkout to a merge request on both surfaces, what the
+  confirmation shows, and three things a contributor will otherwise discover the hard
+  way: that a publish **replays each local commit** rather than squashing, so local
+  history is what appears on the fork; that a replay which fails partway leaves the
+  earlier commits public and is recovered by re-running the publish, not by repairing
+  the fork; and that commits published this way are not GPG-signed. Written for
+  someone who knows Drupal and not sandbar. When plan 20 lands, this becomes part of
+  the end-to-end drupal.org guide rather than a separate page.
 - **An honest answer to "why can't I just push?"**, placed where the contributor
   meets the friction rather than buried in a security page. A fine-grained token
   bounded to one issue fork demonstrably works, so a contributor who finds that out
@@ -905,9 +1104,10 @@ Yes — this plan requires documentation updates, both human- and agent-facing.
   guest secret at all, and why: the credential lives on the workstation and the VM
   never authenticates to drupal.org. This is a notable exception to the page's whole
   premise and should not be left implicit.
-- **`docs/reference/files-and-state.md`** — document the host-side account PAT file,
-  its required mode, and that it is deliberately not part of the guest secrets
-  store.
+- **`docs/reference/files-and-state.md`** — document the host-side account PAT file
+  at `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token`, its required mode, that
+  its path is a convention rather than a configured value and why, and that it is
+  deliberately not part of the guest secrets store.
 - **`AGENTS.md`** — describe the publication mechanism and the reason no drupal.org
   credential belongs in a guest, so future agent-driven work does not reintroduce
   one.
@@ -948,19 +1148,32 @@ established by probe and needs re-checking rather than discovering.
 
 ## Integration Strategy
 
-Publication is a sibling of `internal/landgh` and should be built as one: a
-host-side adapter that runs only on the workstation, takes a small structured
-input, and shells out or calls out with an argument vector rather than a shell
-string. `landgh`'s injection-safety invariant applies with more force here, since
-the payload is agent-authored by construction. The difference is that `landgh`
-calls `gh` for metadata about a branch already pushed by the guest, whereas this
-adapter carries the content itself — so the destination must come from host-side
-arguments alone, and never from anything the guest produced.
+Publication is a sibling of `internal/landgh` and is shaped like it, down to
+having the same two surfaces: `internal/drupalorg` holds fork resolution, the
+payload type, the guard, and the client; `cmd/sand/publish.go` is the headless
+entry point, as `cmd/sand/land.go` is; and the TUI action fills the arm
+`internal/ui/landing.go`'s `classifyLandRow` already reserves for a non-GitHub
+forge. No publication logic lives in either surface.
 
-The host-side account PAT follows the credential pattern
-`internal/profiles/token.go` already establishes — a path recorded in
-configuration, one loader, and a hard refusal of over-permissive file modes —
-rather than introducing a new store or extending the guest-facing secrets store.
+The one place it departs from `landgh` is transport. `landgh` shells out to the
+user's own `gh`; this adapter speaks `net/http` directly, on the typed-client
+pattern `internal/pve` already establishes, so the workstation needs no `glab` and
+no forge CLI at all. `landgh`'s injection-safety invariant still applies with more
+force here, since the payload is agent-authored by construction: guest data is never
+interpolated into a URL or a command, and the payload type cannot express a
+destination. The deeper difference is that `landgh` calls `gh` for metadata about a
+branch the guest already pushed, whereas this adapter carries the content itself —
+so the destination must come from host-side arguments and host-side anonymous
+lookups alone, and never from anything the guest produced.
+
+The host-side account PAT follows the *spirit* of `internal/profiles/token.go` — one
+loader, and a hard refusal of over-permissive file modes — but not its configuration
+shape. `token.go`'s `TokenFile` is a field on a Proxmox connection profile and
+`profiles.yaml` is a per-location store, so a workstation-global credential is
+recorded there nowhere sensible. It lives at a fixed conventional path instead:
+`${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token`. `profiles.yaml` is
+unchanged, no new config schema is introduced, and the guest-facing secrets store is
+not extended.
 
 `internal/provision/gitcred.go` is **untouched**. Its `recognizedForgeTokens` table
 keeps its single GitHub entry, and no `useHttpPath` configuration is written into
@@ -1035,10 +1248,19 @@ treat these as known, not as oversights.
   AI-assisted merge requests must be disclosed — governance issue 3565917 proposes it
   but it is not ratified. None block building; all should be settled before this is
   promoted widely.
-- **Whether a change set publishes as one commit or several is not yet decided.**
-  The content API makes one call one commit. The choice is a product decision with a
-  documentation consequence, and it should be made during task generation rather than
-  fallen into.
+- **A replay can leave a branch half-published, and nothing can undo it.** Decided
+  in refinement 7: a publish replays each local commit as its own call, so an
+  interior failure leaves the earlier commits public and unrevocable. The mitigation
+  is precise reporting plus resumability, not rollback, and the accepted residue is
+  that a contributor can end up with a fork in a state they did not ask for. This is
+  a consequence of a decision taken knowingly, not an oversight.
+- **The guest-to-host transfer of the change set is named but not specified.** The
+  plan says publication uses sandbar's existing guest-execution and transfer paths.
+  That is directionally right — but the sweep those paths were built for reads short,
+  delimiter-framed text, whereas a payload carries whole file contents, possibly
+  binary and possibly large. Framing, encoding, and the size check are a task-level
+  design problem that should be treated as its own unit of work rather than assumed
+  to fall out of the existing plumbing.
 
 ### Change Log
 
@@ -1056,3 +1278,29 @@ treat these as known, not as oversights.
   control that gates it. Fork resolution by convention is also built here, with plan
   20 consuming it. All findings are carried unchanged from plan 20's five refinement
   sessions; nothing was re-decided during the extraction.
+- **2026-08-28 (refinement 7 — surfaces, config home, commit shape, and three
+  corrections)**: Resolved the three things the plan left a downstream reader unable
+  to act on. Publication gets **both** surfaces — `cmd/sand/publish.go` and a TUI
+  action — over a shared `internal/drupalorg`; the TUI half turned out to be filling
+  an arm `classifyLandRow` already reserves for a non-GitHub forge rather than
+  building a new pane. The host PAT moves to a **fixed conventional path**
+  (`~/.config/sandbar/drupalorg.token`), because `token.go`'s `TokenFile` is a
+  Proxmox-*profile* field and `profiles.yaml` had no coherent home for a
+  workstation-global credential; a new global config file was rejected as scope
+  creep. A publish **replays each local commit** rather than squashing, closing the
+  gap the plan had carried as undecided — and the accepted cost, partial failure with
+  no rollback, is now a named risk, a success criterion, and a validation step
+  requiring precise reporting and resumability. Three defects were corrected against
+  live probes: the merge-request call is **cross-project** (verified on
+  `project/dubbot`: 241450 -> 106348, target `2.x`), not "against the issue branch",
+  so the `issue/` guard is now scoped to commit destinations while the merge-request
+  target is derived from `forked_from_project` anonymously; the issue branch **almost
+  always already exists** (`issue/drupal-3181657` carries `3181657-*` branches), so
+  `start_branch` is the exception rather than the rule; and the payload could not
+  express a **deletion or a rename**, and is now an ordered list of commits whose
+  file actions carry an explicit kind and encoding. Transport was settled as
+  `net/http` on the `internal/pve` pattern, leaving `glab` a dependency of the probe
+  script alone. Commit authorship was made explicit as per-commit and guest-supplied
+  by necessity under replay. The guest-to-host transfer of the payload was added to
+  the unresolved gaps, since the existing sweep plumbing was built for short framed
+  text rather than whole file contents.
