@@ -176,6 +176,16 @@ that state calls for:
   If such a checkout holds uncommitted or unpushed work, the row still says
   so (`local only · 2 uncommitted`) — there is nothing sand can do about it,
   but you should know it is there before deleting the VM.
+- **On `git.drupalcode.org`** — the checkout's remote is a drupal.org
+  project rather than GitHub. Instead of a PR flow, the row reads
+  `publish to drupal.org` when a workstation drupal.org PAT is on file:
+  acting on it prompts for the drupal.org issue number this work belongs
+  to, then resolves the destination and asks you to confirm before
+  publishing anything. Without a PAT on file the row instead reads
+  `on git.drupalcode.org · no drupal.org PAT on file, publish disabled`
+  and offers no action. See
+  [Publishing to drupal.org](drupalorg-publishing.md), and
+  [Setup](drupalorg-publishing.md#setup) for the token file.
 
 The commit-and-push action is the only Landing action that runs inside the
 VM, and it stays there: the commit and the push both happen in the guest,

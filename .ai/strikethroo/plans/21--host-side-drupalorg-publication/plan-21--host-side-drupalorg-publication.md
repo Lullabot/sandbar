@@ -1367,9 +1367,9 @@ No cycles: every edge runs from a lower task ID to a higher one.
 - ✔️ Task 007: `sand publish` CLI surface (depends on: 004, 005, 006)
 - ✔️ Task 008: TUI Landing pane publish action (depends on: 004, 005, 006)
 
-### Phase 5: Documentation
+### ✅ Phase 5: Documentation
 **Parallel Tasks:**
-- Task 009: Security model, publishing guide, and the agent-facing record (depends on: 005, 007, 008)
+- ✔️ Task 009: Security model, publishing guide, and the agent-facing record (depends on: 005, 007, 008)
 
 ### Post-phase Actions
 

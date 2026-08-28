@@ -102,6 +102,24 @@ still delivered to the guest as a plain environment variable, but it does
 named, non-empty scope. See below for where the create-time clone token
 lands by default.
 
+**Known limitation: a linked worktree inherits its main clone's token.**
+`includeIf "gitdir:…"` is matched against git's `$GIT_DIR`, and for a linked
+worktree (`git worktree add`) that is
+`<main-clone>/.git/worktrees/<name>` — not the worktree's own working
+directory. So a scope's `includeIf "gitdir:~/<scope>/"` stanza never
+actually matches from inside a worktree of that scope; what authenticates
+there instead is whatever `includeIf` matched the *main clone's* path. In
+practice this means every worktree of a repo silently uses the main clone's
+`GH_TOKEN`, and there is currently no way to give one worktree its own,
+narrower token. This is a pre-existing property of how this wiring resolves
+paths, not something specific to any one feature — it surfaced while
+investigating
+[publishing to drupal.org](drupalorg-publishing.md#why-publication-is-host-side),
+whose manual per-issue-fork escape hatch would need a genuinely
+per-worktree credential, which `includeIf "gitdir:…"` cannot express. It is
+left unchanged here and recorded instead, since fixing it is a larger
+change to this GitHub-token wiring than any one feature has needed so far.
+
 ### Creating a fine-grained token
 
 Use a GitHub **fine-grained personal access token**, scoped to the
@@ -155,3 +173,21 @@ stored secrets are written into the guest — so resetting a VM that cloned a
 **private** repo still needs the clone token re-supplied on the reset form,
 unless you enable the reset form's project-directory preserve toggle, which
 skips the re-clone entirely. See [Resetting a VM](tui.md#resetting-a-vm).
+
+## drupal.org: a notable exception
+
+[Publishing a checkout's commits to drupal.org](drupalorg-publishing.md) is
+the one write-capable integration `sand` offers that needs **no secret in
+this store at all**, and no `.env` entry in the guest either. Everything
+above this section exists to get a `KEY=VALUE` pair from your host into a
+VM; drupal.org publication deliberately does the opposite — the credential
+never leaves your workstation in the first place. A guest checkout clones
+and reads drupal.org anonymously, over an unauthenticated HTTPS remote; only
+the host, holding a personal access token from a file it reads directly (not
+through this store), performs the one call that actually writes. See
+[Files and State](../reference/files-and-state.md#host-paths) for where that
+token file lives, and
+[Security Model](../reference/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
+for why: a drupal.org account PAT is account-wide rather than scoped to one
+repository, so the only credential safe to place in an agent-controlled VM
+for that kind of account is none.

@@ -512,6 +512,56 @@ every bullet, not the constraint itself.
   underneath the full-screen TUI, so it must stay a pure filesystem read. An
   explicit `GH_TOKEN`/`GITHUB_TOKEN` in sand's environment bypasses the
   plugin path entirely.
+- **No drupal.org credential ever belongs in a guest, full stop
+  (`internal/drupalorg`).** Publishing a checkout's commits to drupal.org
+  (`sand publish`, and the Landing pane's `publish to drupal.org` row) does
+  NOT reuse the GitHub two-token pattern above by giving the guest its own
+  drupal.org push token — it is host-side by design: the guest only ever
+  clones and reads drupal.org anonymously, and produces an inert
+  `drupalorg.ChangeSet` (commits, messages, file actions) that is
+  structurally incapable of naming a destination — see the package doc
+  comment on `internal/drupalorg/payload.go`. Only the host, reading a
+  personal access token from
+  `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token` (`LoadToken` in
+  `internal/drupalorg/token.go`, the single read site; never
+  `internal/secrets`, which exists to deliver secrets INTO a guest), ever
+  attaches that credential — and only for the one call
+  (`Publisher.Publish` in `internal/drupalorg/publish.go`) that writes. The
+  reason is a blast-radius one, not a taste preference: a drupal.org
+  account PAT is account-wide, not scoped to one repository the way a
+  GitHub fine-grained token is, and a working Drupal contributor's account
+  can hold push access to modules on tens of thousands of sites. Do not
+  "simplify" this by wiring a drupal.org token into guest provisioning or
+  the secrets store — that is the one thing this design forbids. A manual,
+  narrower fine-grained token bounded to a single issue fork does exist as
+  something a developer can set up by hand through drupal.org's web UI, but
+  `sand` deliberately automates none of it. Keep the reason straight,
+  because two different mechanisms get conflated here and the distinction
+  decides the design: GitLab exposes **no API whatsoever** that can create a
+  *fine-grained* token (`POST /user/personal_access_tokens` takes only the
+  `k8s_proxy` and `self_rotate` scopes and no boundary parameter), so there
+  is nothing to call and nothing drupal.org could unblock to change that. A
+  *project access* token is the mechanism that does have an endpoint — and
+  that one requires Maintainer, which drupal.org grants nobody on an issue
+  fork, and is separately blocked at drupal.org's edge. Neither is
+  automatable, for unrelated reasons, and this page's how-to for it is
+  **withheld**: writing it up as safe is gated on a negative control nobody
+  has run (a token bounded to one issue fork must be shown to FAIL a push to
+  a canonical `project/<module>`, which needs a real drupal.org account). See
+  `docs/using-sand/drupalorg-publishing.md#why-publication-is-host-side` for
+  that gate and the reasoning in full. Publication also replays each guest
+  commit as its own API call rather than pushing a ref — see
+  `internal/drupalorg/publish.go`'s file doc comment for why a failed
+  replay leaves earlier commits public with no rollback, and why a re-run
+  is the only recovery.
+  A second, unrelated follow-up surfaced while investigating the withheld
+  escape hatch above: a linked git worktree silently inherits its main
+  clone's `GH_TOKEN`, because git matches `includeIf "gitdir:…"` against
+  `$GIT_DIR` — which for a worktree is
+  `<main-clone>/.git/worktrees/<name>`, not the worktree's own path — so no
+  per-worktree token is expressible through the mechanism
+  `internal/provision/gitcred.go` uses. Left unchanged by this work; see
+  "Known limitation" in `docs/using-sand/secrets.md`.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 

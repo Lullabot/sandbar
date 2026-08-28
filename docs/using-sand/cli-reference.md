@@ -1,6 +1,6 @@
 # CLI Reference
 
-There are five entry points:
+There are seven entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
@@ -11,6 +11,8 @@ There are five entry points:
 
 - [`sand land NAME`](#sand-land-name) — list a VM's git checkouts, or open a
   draft PR / browser for one of them.
+- [`sand publish NAME PATH ISSUE`](#sand-publish-name-path-issue) — publish
+  a checkout's local commits to a drupal.org issue fork.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
 
@@ -417,6 +419,65 @@ yet.
 `sand land` never pushes, commits, or otherwise touches the checkout's
 working state — it only reads what the guest already has and, for `--pr`,
 calls `gh` on the workstation.
+
+## `sand publish NAME PATH ISSUE`
+
+Publish `PATH`'s local commits (inside the VM named `NAME`) to the
+drupal.org issue fork for issue `ISSUE`, using the workstation's own
+drupal.org token — never a credential inside the VM. This is the same
+publication logic (`internal/drupalorg`) the TUI's Landing pane offers as
+its `publish to drupal.org` row; see
+[Publishing to drupal.org](drupalorg-publishing.md) for what it does, what
+the confirmation shows, and what to know before you rely on it.
+
+```
+Usage: sand publish NAME PATH ISSUE [--yes] [--allow-outside-issue-namespace] [--profile <name>]
+
+Publish PATH's local commits (inside the VM named NAME) to the drupal.org
+issue fork for issue ISSUE, using the workstation's own drupal.org token —
+never a credential inside the VM. Prints the destination and every commit
+and file that will change, then asks for confirmation before writing
+anything; declining publishes nothing.
+
+The named VM must already exist and be running (see 'sand' to list
+instances, or 'sand create' to make one). If NAME is managed under more than
+one connection profile, --profile picks which one to act on.
+```
+
+`sand publish` refuses immediately, before touching the VM or drupal.org at
+all, if no workstation drupal.org PAT is on file — see
+[Setup](drupalorg-publishing.md#setup) for where that file goes. Given a
+running VM and a PAT, it collects `PATH`'s change set, resolves the
+destination, prints the full confirmation (every commit, author, and file
+change — never a summary), and then requires an explicit human act before
+publishing anything:
+
+- **`--yes`** confirms non-interactively. It is the only sanctioned
+  non-interactive route, and it is never read from an environment variable
+  — pass it only after you've reviewed the printed confirmation yourself.
+  Without it, a non-terminal `stdin` (a script or pipe) refuses outright
+  rather than publishing silently; on a real terminal you're prompted
+  `[y/N]` instead.
+- **`--allow-outside-issue-namespace`** is the only way to let the commit
+  destination fall outside the `issue/<module>-<issue>` fork namespace —
+  and so the only way to publish straight to a canonical drupal.org project
+  rather than an issue fork. This is not the normal path; see
+  [Publishing to drupal.org](drupalorg-publishing.md#what-actually-gets-published-and-how)
+  for why that guard exists.
+- **`--profile`** picks which connection profile `NAME` is resolved on, the
+  same as every other command that names a VM.
+
+If `PATH` has no local commits ahead of its upstream branch, `sand publish`
+says so and exits cleanly without prompting for anything.
+
+The printed report lists every change-set commit in order — its status
+(`landed`, `already-present`, `failed`, or `not-attempted`) and its SHA on
+the fork where it has one — followed by the merge request's URL (opened, or
+already open) and any warnings. A replay that fails partway is reported
+exactly as far as it got; re-running `sand publish` is how you recover, and
+[A failure partway](drupalorg-publishing.md#a-failure-partway-leaves-earlier-commits-public-and-there-is-no-rollback)
+explains why that — rather than repairing the fork by hand — is the
+supported path.
 
 ## `sand version` / `sand --version`
 
