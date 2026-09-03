@@ -39,4 +39,4 @@ devtools_glab_deb_arch_map:
   aarch64: arm64
 
 # Drupal.org CLI (drupalorg) — pinned PHAR release
-devtools_drupalorg_cli_version: "0.10.3"
+devtools_drupalorg_cli_version: "0.11.0"
