@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
@@ -72,7 +73,7 @@ func TestSeedAptCache_PushesWhenCachePresent(t *testing.T) {
 	if len(f.calls) != 2 {
 		t.Fatalf("seedAptCache made %d limactl calls, want 2 (push, then sudo move): %v", len(f.calls), f.calls)
 	}
-	wantPush := []string{"copy", "-v", "--backend=scp", "-r", archivesDir, "sandbar-base:/tmp/"}
+	wantPush := []string{"copy", "-v", "--backend=scp", "-r", archivesDir, "sandbar-base:" + aptCacheStagingParent}
 	if got := f.calls[0]; !reflect.DeepEqual(got, wantPush) {
 		t.Fatalf("seedAptCache push argv = %v, want %v", got, wantPush)
 	}
@@ -86,7 +87,10 @@ func TestSeedAptCache_PushesWhenCachePresent(t *testing.T) {
 // Copy failure (host unreachable, permissions, whatever) must not fail the
 // base build. Caching is an optimisation, not a correctness requirement. It
 // also proves the push failing short-circuits the move — there is nothing
-// staged to move once the push itself failed.
+// worth moving once the push itself failed — but does NOT skip the staging
+// cleanup: scp fails file by file, so a failed push still leaves behind
+// whatever it managed to transfer, and that half-written cache is guest disk
+// the playbook is about to need.
 func TestSeedAptCache_CopyFailureIsSwallowed(t *testing.T) {
 	host := t.TempDir()
 	archivesDir := filepath.Join(host, aptArchivesDirName)
@@ -104,8 +108,35 @@ func TestSeedAptCache_CopyFailureIsSwallowed(t *testing.T) {
 	if err := p.seedAptCache(context.Background(), "sandbar-base", io.Discard); err != nil {
 		t.Fatalf("seedAptCache must swallow a Copy failure, got error: %v", err)
 	}
-	if len(f.calls) != 1 {
-		t.Fatalf("seedAptCache made %d limactl calls after the push failed, want 1 (no move attempted): %v", len(f.calls), f.calls)
+	if len(f.calls) != 2 {
+		t.Fatalf("seedAptCache made %d limactl calls after the push failed, want 2 (the push, then the staging cleanup): %v", len(f.calls), f.calls)
+	}
+	cleanup := strings.Join(f.calls[1], " ")
+	if !strings.Contains(cleanup, "rm") || !strings.Contains(cleanup, aptCacheStagingDir) {
+		t.Errorf("the failed push left its partial staging dir behind; want an `rm -rf %s`, got: %v", aptCacheStagingDir, f.calls[1])
+	}
+	if strings.Contains(cleanup, "/var/cache/apt/archives") {
+		t.Errorf("the move into the real cache dir was attempted even though the push failed: %v", f.calls[1])
+	}
+}
+
+// TestAptCacheStagingDirIsOnDiskNotTmpfs pins the staging location OFF /tmp.
+//
+// Debian 13 has systemd mount /tmp as a tmpfs at half of RAM, so staging a
+// several-hundred-megabyte cache there spends the guest's memory on it and, on
+// the 2GiB base the e2e suite builds, runs out outright: ~900MB of .deb files
+// into a 1GiB tmpfs. That broke every lima-e2e run for a week, and the failure
+// it surfaced named a NodeSource gpg key rather than the cache — the seed
+// itself was swallowed as best-effort, so the only symptom was the playbook
+// dying later on a full /tmp. A future edit that moves this back to /tmp for
+// tidiness would reintroduce exactly that, so it is asserted rather than left
+// to the comment on aptCacheStagingDir.
+func TestAptCacheStagingDirIsOnDiskNotTmpfs(t *testing.T) {
+	if strings.HasPrefix(aptCacheStagingDir, "/tmp/") {
+		t.Errorf("aptCacheStagingDir = %q, but /tmp is a RAM-backed tmpfs on the base image — a cache seed belongs on the instance disk", aptCacheStagingDir)
+	}
+	if want := aptCacheStagingParent + aptArchivesDirName; aptCacheStagingDir != want {
+		t.Errorf("aptCacheStagingDir = %q, want %q — the staging dir must stay derived from the directory the Copy pushes into, or the push and the sudo move drift apart", aptCacheStagingDir, want)
 	}
 }
 
