@@ -879,6 +879,67 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#native-terminal-tabs-with-tmux-cc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native terminal tabs with tmux -CC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Native terminal tabs with tmux -CC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-terminals-speak-control-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which terminals speak control mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-tab-per-vm-with-the-board-still-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tab per VM, with the board still live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-tab-per-window-inside-one-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tab per window inside one VM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-you-cant-have-both-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why you can't have both at once
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1425,6 +1486,67 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#native-terminal-tabs-with-tmux-cc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native terminal tabs with tmux -CC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Native terminal tabs with tmux -CC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#which-terminals-speak-control-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which terminals speak control mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-tab-per-vm-with-the-board-still-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tab per VM, with the board still live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-tab-per-window-inside-one-vm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A tab per window inside one VM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-you-cant-have-both-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why you can't have both at once
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1627,6 +1749,87 @@ returns on detach.</p>
 of a board nobody is looking at rather than making the provisioner wait for a
 screen to draw on. On detach the tile shows where that build has actually got
 to — not a replay of every step it took while you were away.</p>
+<h3 id="native-terminal-tabs-with-tmux-cc">Native terminal tabs with <code>tmux -CC</code></h3>
+<p>Some terminals can render a tmux session's windows as <strong>native tabs</strong> rather
+than letting tmux draw them itself. You run tmux in <em>control mode</em>
+(<code>tmux -CC</code>), tmux speaks a line protocol instead of painting a screen, and
+the terminal turns each tmux window into a real tab. sand has two ways to use
+that, and they are not interchangeable — one gives you a tab per <strong>VM</strong>, the
+other a tab per <strong>window inside one VM</strong>.</p>
+<h4 id="which-terminals-speak-control-mode">Which terminals speak control mode</h4>
+<p>Nothing in sand looks at which terminal you are running. <code>--cc</code> starts an
+ordinary <code>tmux -CC</code> client and the two recipes below are plain tmux commands,
+so what you get is whatever your terminal does with the protocol. <strong>This list
+is not exhaustive</strong> and support moves; at the time of writing:</p>
+<table>
+<thead>
+<tr>
+<th>Terminal</th>
+<th>Control mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>iTerm2</strong></td>
+<td>The reference implementation — control mode was written for it. The rest of this page describes iTerm2's behaviour.</td>
+</tr>
+<tr>
+<td><strong>WezTerm</strong></td>
+<td>Implemented, but a subset: WezTerm's own UI takes the keystrokes, so the tmux prefix does not reach tmux. Use WezTerm's new-tab rather than <code>C-a c</code>.</td>
+</tr>
+<tr>
+<td><strong>Ghostty</strong></td>
+<td>Not yet. Protocol parsing landed in 1.3.0 but is not wired to the UI, so you do not get tabs today.</td>
+</tr>
+<tr>
+<td><strong>Alacritty, Windows Terminal, Terminal.app</strong></td>
+<td>No. Each has an open feature request.</td>
+</tr>
+</tbody>
+</table>
+<p>A terminal that does not speak control mode prints the protocol into your
+window as scrolling text rather than failing cleanly — sand cannot tell the
+difference, so if that is what you see, drop <code>--cc</code> and attach normally.</p>
+<h4 id="a-tab-per-vm-with-the-board-still-live">A tab per VM, with the board still live</h4>
+<p>Start sand inside a control-mode tmux session:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>tmux<span class="w"> </span>-CC<span class="w"> </span>new-session<span class="w"> </span>-s<span class="w"> </span>sandbar<span class="w"> </span>sand
+</code></pre></div>
+<p><code>$TMUX</code> is now set, so <code>S</code> takes the new-window path described above instead
+of suspending — and because your terminal is rendering that tmux, the new
+window arrives as a <strong>native tab</strong>. The board keeps running in its own tab beside
+it, progress bars and all, and each <code>S</code> on a different VM opens another tab.</p>
+<p>This is the setup to use if you spend the day in the board.</p>
+<h4 id="a-tab-per-window-inside-one-vm">A tab per window inside one VM</h4>
+<p><code>sand shell --cc NAME</code> attaches to the <strong>guest's</strong> tmux in control mode, so
+the windows <code>C-a c</code> makes inside the VM become native tabs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
+</code></pre></div>
+<p>Run this from a plain terminal window, not from the board.</p>
+<h4 id="why-you-cant-have-both-at-once">Why you can't have both at once</h4>
+<p>The two recipes stack a host tmux and a guest tmux, and only the outer one
+can reach the terminal. Control mode announces itself with a DCS escape sequence,
+and tmux strips DCS from its panes' output rather than forwarding it to its
+client — so a guest <code>tmux -CC</code> running inside a host tmux window never
+reaches the terminal at all. Turning on <code>allow-passthrough</code> does not change
+this; that option forwards a specific <code>tmux;</code>-prefixed wrapper, not the
+handshake tmux emits on its own.</p>
+<p>Rather than print raw protocol into your pane, <code>sand shell --cc</code> refuses
+when <code>$TMUX</code> is set:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">handshake before your terminal can see it; detach (C-a d) and run this from a</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">plain terminal window</span>
+</code></pre></div>
+<p>So pick the layer that matters more to you. If you mostly want several VMs
+open at once, take the first recipe. If you mostly want several windows
+inside one VM, take the second.</p>
+<div class="admonition tip">
+<p class="admonition-title">The board will mention this once</p>
+<p>The first time you press <code>S</code> outside a host tmux session, and only if
+tmux is installed on this machine, the board logs a one-line reminder of
+both commands to its Messages strip. It appears once per run of <code>sand</code>,
+not once per shell — quit and relaunch to see it again.</p>
+</div>
 <h2 id="uploading-and-downloading-files-data-not-code">Uploading and downloading files: data, not code</h2>
 <p><code>u</code> (upload) and <code>g</code> (download) on a focused tile open a file-transfer pane.
 Download is bound to <code>g</code>, not <code>d</code> — <code>d</code> is always delete; see the

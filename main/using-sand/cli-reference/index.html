@@ -2096,7 +2096,7 @@ above.)</p>
 <h2 id="sand-shell-name"><code>sand shell NAME</code></h2>
 <p>Attach a shell to <code>NAME</code>'s persistent tmux session in the guest. This is the
 same attach path the TUI's <code>S</code> key uses, so the two entrypoints never drift.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Usage: sand shell NAME [--profile &lt;name&gt;]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Usage: sand shell NAME [--profile &lt;name&gt;] [--cc]
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Attach a shell to NAME's persistent tmux session in the guest.
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
@@ -2112,13 +2112,27 @@ same attach path the TUI's <code>S</code> key uses, so the two entrypoints never
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>own current one, so two terminals can look at two different windows of the
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>same VM.
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>The named VM must already exist and be running (see 'sand' to list instances,
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>or 'sand create' to make one). If NAME is managed under more than one
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>connection profile, --profile picks which one to attach to.
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>--cc attaches in tmux control mode instead. In a terminal that speaks the
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>protocol, each guest window becomes a native tab, so C-a c opens a real tab
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>rather than a window drawn inside this one. iTerm2 is the reference
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>implementation; WezTerm implements a subset; the list is not exhaustive and
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>sand does not detect your terminal, it just starts a tmux -CC client.
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>Run it from a plain terminal window: a host tmux pane strips the control-mode
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>handshake, so --cc refuses when $TMUX is set.
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>The named VM must already exist and be running (see 'sand' to list instances,
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>or 'sand create' to make one). If NAME is managed under more than one
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>connection profile, --profile picks which one to attach to.
 </code></pre></div>
-<p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> may appear
-before or after <code>NAME</code>. <code>sand shell</code> refuses a VM that does not exist or is
-not running.</p>
+<p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> and <code>--cc</code>
+may each appear before or after <code>NAME</code>. <code>sand shell</code> refuses a VM that does
+not exist or is not running.</p>
+<p><code>--cc</code> attaches in tmux control mode, so a terminal that speaks the protocol
+renders the guest's tmux windows as native tabs. It refuses when <code>$TMUX</code> is
+set, because a host tmux pane strips the handshake control mode needs — see
+<a href="../files-and-shells/#native-terminal-tabs-with-tmux-cc">Native terminal tabs with <code>tmux -CC</code></a>
+for both ways to get native tabs and why you can only have one of them at a
+time.</p>
 <h3 id="cross-profile-resolution-for-sand-shell">Cross-profile resolution for <code>sand shell</code></h3>
 <p>Because the same VM name can exist under more than one
 <a href="../connection-profiles/">Connection Profile</a>, <code>sand shell NAME</code> resolves
