@@ -107,8 +107,15 @@ const (
 	AttachFullScreen AttachMode = iota
 	// AttachControl starts a control-mode client (`tmux -CC`). tmux then speaks
 	// a line protocol on stdout instead of drawing, and a terminal that
-	// understands it — iTerm2 is the one that does — renders each tmux window
-	// as a NATIVE tab. This is what `sand shell --cc` asks for.
+	// understands it renders each tmux window as a NATIVE tab. This is what
+	// `sand shell --cc` asks for.
+	//
+	// Nothing here detects the terminal, and nothing should: this is stock
+	// tmux, so which emulators cooperate is their business and changes without
+	// us. iTerm2 is the reference implementation, WezTerm has a partial one,
+	// and a terminal that does not speak it prints the protocol as text. The
+	// docs name a few; the list is deliberately not exhaustive and not
+	// encoded in the program.
 	//
 	// It only works when the control-mode output reaches the terminal emulator
 	// DIRECTLY. In particular it does NOT work through a host tmux pane:

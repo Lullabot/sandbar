@@ -298,8 +298,10 @@ own current one, so two terminals can look at two different windows of the
 same VM.
 
 --cc attaches in tmux control mode instead. In a terminal that speaks the
-protocol — iTerm2 is the one that does — each guest window becomes a native
-tab, so C-a c opens a real tab rather than a window drawn inside this one.
+protocol, each guest window becomes a native tab, so C-a c opens a real tab
+rather than a window drawn inside this one. iTerm2 is the reference
+implementation; WezTerm implements a subset; the list is not exhaustive and
+sand does not detect your terminal, it just starts a tmux -CC client.
 Run it from a plain terminal window: a host tmux pane strips the control-mode
 handshake, so --cc refuses when $TMUX is set.
 
@@ -312,9 +314,9 @@ connection profile, --profile picks which one to attach to.
 may each appear before or after `NAME`. `sand shell` refuses a VM that does
 not exist or is not running.
 
-`--cc` attaches in tmux control mode, so iTerm2 renders the guest's tmux
-windows as native tabs. It refuses when `$TMUX` is set, because a host tmux
-pane strips the handshake control mode needs — see
+`--cc` attaches in tmux control mode, so a terminal that speaks the protocol
+renders the guest's tmux windows as native tabs. It refuses when `$TMUX` is
+set, because a host tmux pane strips the handshake control mode needs — see
 [Native terminal tabs with `tmux -CC`](files-and-shells.md#native-terminal-tabs-with-tmux-cc)
 for both ways to get native tabs and why you can only have one of them at a
 time.

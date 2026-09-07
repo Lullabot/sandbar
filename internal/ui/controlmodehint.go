@@ -10,8 +10,9 @@ import "os/exec"
 // there are two ways out of it that nothing in the UI otherwise mentions:
 //
 //   - Start sand inside `tmux -CC new-session`. $TMUX is then set, so `S` takes
-//     the fast path — and because iTerm2 renders a control-mode client's windows
-//     as native tabs, each shell lands in a real tab beside a still-live board.
+//     the fast path — and in a terminal that renders a control-mode client's
+//     windows as native tabs (iTerm2 being the reference one), each shell lands
+//     in a real tab beside a still-live board.
 //   - Run `sand shell --cc NAME` from a separate window, which attaches to the
 //     GUEST's tmux in control mode, so the guest's own windows become native tabs.
 //
@@ -53,6 +54,6 @@ func (m *model) controlModeHint(name string) {
 		return
 	}
 	m.ccHintShown = true
-	m.logMsg("tip (iTerm2): `sand shell --cc " + name + "` opens native tabs; " +
+	m.logMsg("tip (iTerm2 or another control-mode terminal): `sand shell --cc " + name + "` opens native tabs; " +
 		"or start sand inside `tmux -CC new-session` so S never suspends this board")
 }

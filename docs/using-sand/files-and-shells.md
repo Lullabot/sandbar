@@ -71,16 +71,30 @@ to — not a replay of every step it took while you were away.
 
 ### Native terminal tabs with `tmux -CC`
 
-iTerm2 can render a tmux session's windows as **native tabs** rather than
-letting tmux draw them itself. You run tmux in *control mode* (`tmux -CC`),
-tmux speaks a line protocol instead of painting a screen, and iTerm2 turns
-each tmux window into a real tab. sand has two ways to use that, and they
-are not interchangeable — one gives you a tab per **VM**, the other a tab
-per **window inside one VM**.
+Some terminals can render a tmux session's windows as **native tabs** rather
+than letting tmux draw them itself. You run tmux in *control mode*
+(`tmux -CC`), tmux speaks a line protocol instead of painting a screen, and
+the terminal turns each tmux window into a real tab. sand has two ways to use
+that, and they are not interchangeable — one gives you a tab per **VM**, the
+other a tab per **window inside one VM**.
 
-Control mode is iTerm2's feature; other terminals generally don't implement
-it, and will print the protocol as text instead. Everything below assumes
-iTerm2.
+#### Which terminals speak control mode
+
+Nothing in sand looks at which terminal you are running. `--cc` starts an
+ordinary `tmux -CC` client and the two recipes below are plain tmux commands,
+so what you get is whatever your terminal does with the protocol. **This list
+is not exhaustive** and support moves; at the time of writing:
+
+| Terminal | Control mode |
+| --- | --- |
+| **iTerm2** | The reference implementation — control mode was written for it. The rest of this page describes iTerm2's behaviour. |
+| **WezTerm** | Implemented, but a subset: WezTerm's own UI takes the keystrokes, so the tmux prefix does not reach tmux. Use WezTerm's new-tab rather than `C-a c`. |
+| **Ghostty** | Not yet. Protocol parsing landed in 1.3.0 but is not wired to the UI, so you do not get tabs today. |
+| **Alacritty, Windows Terminal, Terminal.app** | No. Each has an open feature request. |
+
+A terminal that does not speak control mode prints the protocol into your
+window as scrolling text rather than failing cleanly — sand cannot tell the
+difference, so if that is what you see, drop `--cc` and attach normally.
 
 #### A tab per VM, with the board still live
 
@@ -91,8 +105,8 @@ $ tmux -CC new-session -s sandbar sand
 ```
 
 `$TMUX` is now set, so `S` takes the new-window path described above instead
-of suspending — and because iTerm2 is rendering that tmux, the new window
-arrives as a **native tab**. The board keeps running in its own tab beside
+of suspending — and because your terminal is rendering that tmux, the new
+window arrives as a **native tab**. The board keeps running in its own tab beside
 it, progress bars and all, and each `S` on a different VM opens another tab.
 
 This is the setup to use if you spend the day in the board.
@@ -111,7 +125,7 @@ Run this from a plain terminal window, not from the board.
 #### Why you can't have both at once
 
 The two recipes stack a host tmux and a guest tmux, and only the outer one
-can reach iTerm2. Control mode announces itself with a DCS escape sequence,
+can reach the terminal. Control mode announces itself with a DCS escape sequence,
 and tmux strips DCS from its panes' output rather than forwarding it to its
 client — so a guest `tmux -CC` running inside a host tmux window never
 reaches the terminal at all. Turning on `allow-passthrough` does not change

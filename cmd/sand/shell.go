@@ -69,7 +69,7 @@ type registryOwnership interface {
 func runShell(args []string) error {
 	fs := flag.NewFlagSet("shell", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
-	ccFlag := fs.Bool("cc", false, "Attach in tmux control mode, so a terminal that speaks it (iTerm2) shows each guest window as a native tab")
+	ccFlag := fs.Bool("cc", false, "Attach in tmux control mode, so a terminal that speaks it (iTerm2, WezTerm, ...) shows each guest window as a native tab")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME [--profile <name>] [--cc]
 
@@ -88,8 +88,10 @@ own current one, so two terminals can look at two different windows of the
 same VM.
 
 --cc attaches in tmux control mode instead. In a terminal that speaks the
-protocol — iTerm2 is the one that does — each guest window becomes a native
-tab, so C-a c opens a real tab rather than a window drawn inside this one.
+protocol, each guest window becomes a native tab, so C-a c opens a real tab
+rather than a window drawn inside this one. iTerm2 is the reference
+implementation; WezTerm implements a subset; the list is not exhaustive and
+sand does not detect your terminal, it just starts a tmux -CC client.
 Run it from a plain terminal window: a host tmux pane strips the control-mode
 handshake, so --cc refuses when $TMUX is set.
 
