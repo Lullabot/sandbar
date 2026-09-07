@@ -21,15 +21,16 @@ import (
 )
 
 // collector is the narrow surface runPublish needs to gather a change set
-// off a targeted guest checkout: the module it belongs to (derived from the
-// checkout's own origin remote — see drupalorg.ModuleFromRemoteURL) and the
-// commits not yet on the fork, parsed into task 1's payload type. Narrow and
-// consumer-declared, mirroring land.go's ghActions/vmRunningChecker, so
-// doPublish's decision logic (decline, non-TTY refusal, reporting) is
-// testable with a fake that returns canned values — no VM, no guest, no
-// network. providerCollector (below) is the only production implementation.
+// off a targeted guest checkout: what the checkout's own origin remote
+// identifies (drupalorg.TargetFromRemoteURL — always the module, plus the
+// issue when that remote is an issue fork) and the commits not yet on the
+// fork, parsed into task 1's payload type. Narrow and consumer-declared,
+// mirroring land.go's ghActions/vmRunningChecker, so doPublish's decision
+// logic (decline, non-TTY refusal, reporting) is testable with a fake that
+// returns canned values — no VM, no guest, no network. providerCollector
+// (below) is the only production implementation.
 type collector interface {
-	Collect(ctx context.Context, v vm.VM, path string) (module string, cs drupalorg.ChangeSet, err error)
+	Collect(ctx context.Context, v vm.VM, path string) (target drupalorg.RemoteTarget, cs drupalorg.ChangeSet, err error)
 }
 
 // destPublisher is the narrow internal/drupalorg surface runPublish needs on
@@ -57,10 +58,17 @@ type destPublisher interface {
 	Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error)
 }
 
-// runPublish implements the `sand publish NAME PATH ISSUE` subcommand: the
+// runPublish implements the `sand publish NAME PATH [ISSUE]` subcommand: the
 // headless entry point that resolves a destination, collects the change set
 // from a guest checkout, shows the confirmation, requires an explicit human
 // yes, publishes, and prints the result.
+//
+// ISSUE is optional because a checkout cloned from its issue fork already
+// names the issue in its own origin remote ("issue/<module>-<nid>"), which
+// doPublish reads back through drupalorg.TargetFromRemoteURL. Given
+// explicitly it wins, which is the escape hatch for the checkout whose remote
+// is the canonical project — or the one whose fork is not the issue the work
+// belongs to.
 //
 // Mirrors runLand's shape closely: flag parsing and reordering, the store/
 // registry/provider resolution dance, requireRunningVM for the same clear
@@ -74,13 +82,19 @@ func runPublish(args []string) error {
 	yesFlag := fs.Bool("yes", false, "Confirm publication non-interactively — the non-interactive form of the human confirmation this command otherwise asks for on a terminal. Pass it only after you have reviewed the printed confirmation yourself; it is never read from an environment variable.")
 	allowOutsideNSFlag := fs.Bool("allow-outside-issue-namespace", false, "Allow the commit destination to fall outside the issue/<module>-<issue> fork namespace — the only way past the destination guard, and the only way to publish straight to a canonical drupal.org project")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand publish NAME PATH ISSUE [--yes] [--allow-outside-issue-namespace] [--profile <name>]
+		fmt.Fprintf(fs.Output(), `Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile <name>]
 
 Publish PATH's local commits (inside the VM named NAME) to the drupal.org
 issue fork for issue ISSUE, using the workstation's own drupal.org token —
 never a credential inside the VM. Prints the destination and every commit
 and file that will change, then asks for confirmation before writing
 anything; declining publishes nothing.
+
+ISSUE may be omitted when PATH was cloned from its issue fork: such a
+checkout's origin remote is "issue/<module>-<ISSUE>", which already names
+the issue, so it is read from there. Give ISSUE explicitly to override that,
+or when the checkout's remote is the canonical "project/<module>" repository
+and so names no issue at all.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
@@ -93,15 +107,23 @@ one connection profile, --profile picks which one to act on.
 		}
 		return err // flag package already printed usage
 	}
-	if fs.NArg() != 3 {
+	if fs.NArg() < 2 || fs.NArg() > 3 {
 		fs.Usage()
-		return errors.New("sand publish: need a VM NAME, a checkout PATH, and an ISSUE number")
+		return errors.New("sand publish: need a VM NAME and a checkout PATH, and optionally an ISSUE number")
 	}
 	name := fs.Arg(0)
 	path := fs.Arg(1)
-	issue, convErr := strconv.Atoi(fs.Arg(2))
-	if convErr != nil || issue <= 0 {
-		return fmt.Errorf("sand publish: invalid ISSUE %q: must be a positive integer", fs.Arg(2))
+	// 0 means "not given": doPublish reads the issue out of the checkout's
+	// own remote in that case, and refuses only if that cannot answer either.
+	// A supplied ISSUE is still validated here, at the argv boundary, so a
+	// typo is refused before a VM is resolved or a guest is touched.
+	issue := 0
+	if fs.NArg() == 3 {
+		n, convErr := strconv.Atoi(fs.Arg(2))
+		if convErr != nil || n <= 0 {
+			return fmt.Errorf("sand publish: invalid ISSUE %q: must be a positive integer", fs.Arg(2))
+		}
+		issue = n
 	}
 
 	// Publication cannot complete without explicit human confirmation, and
@@ -215,8 +237,16 @@ func reorderPublishFlags(args []string) []string {
 // interesting decision is pulled down into this function instead, driven
 // entirely by fakes in publish_test.go — mirroring land.go's
 // landPR/landWeb/listCheckouts split.
+// issue is the number given on the command line, or 0 when it was omitted;
+// in that case it is read from the checkout's own origin remote, which names
+// the issue whenever the checkout was cloned from that issue's fork. An
+// explicit ISSUE always wins over the derived one — the remote is a good
+// default, not an override of what the operator actually asked for — and the
+// derived value is announced when it is used, because a destination nobody
+// typed must still be a destination they can see before the confirmation
+// asks them to accept it.
 func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool, coll collector, dp destPublisher, v vm.VM, path string, issue int, yes, allowOutsideNS bool) error {
-	module, cs, err := coll.Collect(ctx, v, path)
+	target, cs, err := coll.Collect(ctx, v, path)
 	if err != nil {
 		return err
 	}
@@ -225,7 +255,15 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 		return nil
 	}
 
-	dest, err := dp.ResolveDestination(ctx, module, issue, allowOutsideNS)
+	if issue <= 0 {
+		if target.Issue <= 0 {
+			return fmt.Errorf("sand publish: checkout %q's remote names the canonical project rather than an issue fork, so it cannot say which issue this work belongs to — pass the ISSUE number explicitly", path)
+		}
+		issue = target.Issue
+		fmt.Fprintf(stdout, "sand publish: issue %d, read from this checkout's remote\n", issue)
+	}
+
+	dest, err := dp.ResolveDestination(ctx, target.Module, issue, allowOutsideNS)
 	if err != nil {
 		return err
 	}
@@ -389,6 +427,8 @@ func (l *liveDestPublisher) Publish(ctx context.Context, dest drupalorg.Destinat
 // The two guest reads this command performs — the checkout's remote URL and
 // upstream ref, then its change set — come from internal/drupalorg's
 // BuildRemoteInfoCommand/ParseRemoteInfo and BuildCollectCommand/ParseCollect,
+// and what the remote URL then MEANS is decided by that package's
+// TargetFromRemoteURL, shared with the TUI for the same reason,
 // executed by provider.RunCaptured. They lived as private copies here and in
 // internal/ui/landing.go until the two had already drifted in their error
 // text; the plan requires resolution logic to live once, so the two surfaces
@@ -398,39 +438,41 @@ type providerCollector struct {
 	p provider.Provider
 }
 
-// Collect resolves path's module (from its origin remote) and upstream ref,
-// then runs and parses drupalorg.BuildCollectCommand/ParseCollect against
-// that ref — the guest-side collector and host-side parser task 6 already
-// built. No logic beyond wiring those two calls to path's actual origin and
-// upstream lives here.
-func (c providerCollector) Collect(ctx context.Context, v vm.VM, path string) (string, drupalorg.ChangeSet, error) {
+// Collect resolves what path's origin remote identifies (its module, and its
+// issue when that remote is an issue fork) along with the upstream ref, then
+// runs and parses drupalorg.BuildCollectCommand/ParseCollect against that ref
+// — the guest-side collector and host-side parser task 6 already built. No
+// logic beyond wiring those two calls to path's actual origin and upstream
+// lives here; deciding whether the derived issue is the one actually used is
+// doPublish's, not this collector's.
+func (c providerCollector) Collect(ctx context.Context, v vm.VM, path string) (drupalorg.RemoteTarget, drupalorg.ChangeSet, error) {
 	out, err := provider.RunCaptured(ctx, c.p, v, path, drupalorg.BuildRemoteInfoCommand())
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, fmt.Errorf("sand publish: resolving %q's remote and upstream branch: %w", path, err)
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: resolving %q's remote and upstream branch: %w", path, err)
 	}
 	remoteURL, upstream, err := drupalorg.ParseRemoteInfo(out)
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, err
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, err
 	}
 
-	module, err := drupalorg.ModuleFromRemoteURL(remoteURL)
+	target, err := drupalorg.TargetFromRemoteURL(remoteURL)
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, fmt.Errorf("sand publish: checkout %q: %w", path, err)
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: checkout %q: %w", path, err)
 	}
 
 	script, err := drupalorg.BuildCollectCommand(upstream)
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
 	}
 	collected, err := provider.RunCaptured(ctx, c.p, v, path, script)
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, fmt.Errorf("sand publish: collecting changes from %q: %w", path, err)
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: collecting changes from %q: %w", path, err)
 	}
 	cs, err := drupalorg.ParseCollect(string(collected))
 	if err != nil {
-		return "", drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
 	}
-	return module, cs, nil
+	return target, cs, nil
 }
 
 // run executes expr against path inside v via Provider.RunArgv, capturing

@@ -11,7 +11,7 @@ There are seven entry points:
 
 - [`sand land NAME`](#sand-land-name) — list a VM's git checkouts, or open a
   draft PR / browser for one of them.
-- [`sand publish NAME PATH ISSUE`](#sand-publish-name-path-issue) — publish
+- [`sand publish NAME PATH [ISSUE]`](#sand-publish-name-path-issue) — publish
   a checkout's local commits to a drupal.org issue fork.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
   the build identity.
@@ -435,7 +435,7 @@ yet.
 working state — it only reads what the guest already has and, for `--pr`,
 calls `gh` on the workstation.
 
-## `sand publish NAME PATH ISSUE`
+## `sand publish NAME PATH [ISSUE]`
 
 Publish `PATH`'s local commits (inside the VM named `NAME`) to the
 drupal.org issue fork for issue `ISSUE`, using the workstation's own
@@ -446,7 +446,7 @@ its `publish to drupal.org` row; see
 the confirmation shows, and what to know before you rely on it.
 
 ```
-Usage: sand publish NAME PATH ISSUE [--yes] [--allow-outside-issue-namespace] [--profile <name>]
+Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile <name>]
 
 Publish PATH's local commits (inside the VM named NAME) to the drupal.org
 issue fork for issue ISSUE, using the workstation's own drupal.org token —
@@ -454,10 +454,31 @@ never a credential inside the VM. Prints the destination and every commit
 and file that will change, then asks for confirmation before writing
 anything; declining publishes nothing.
 
+ISSUE may be omitted when PATH was cloned from its issue fork: such a
+checkout's origin remote is "issue/<module>-<ISSUE>", which already names
+the issue, so it is read from there. Give ISSUE explicitly to override that,
+or when the checkout's remote is the canonical "project/<module>" repository
+and so names no issue at all.
+
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
 one connection profile, --profile picks which one to act on.
 ```
+
+`ISSUE` is optional. If you cloned the issue fork — the normal way to work
+an issue — the checkout's own `origin` already spells the issue out
+(`git@git.drupalcode.org:issue/<module>-<ISSUE>.git`), and `sand publish`
+reads it from there, printing the number it derived before the confirmation
+so you can see what it settled on:
+
+```
+$ sand publish web /home/u/dubbot
+sand publish: issue 3619578, read from this checkout's remote
+```
+
+Pass `ISSUE` yourself to override that, or when the checkout was cloned from
+the canonical `project/<module>` repository — that remote names no issue, so
+there is nothing to derive and `sand publish` says so rather than guessing.
 
 `sand publish` refuses immediately, before touching the VM or drupal.org at
 all, if no workstation drupal.org PAT is on file — see

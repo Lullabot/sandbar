@@ -1672,6 +1672,26 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.profileInputs[i], cmds[i] = m.profileInputs[i].Update(msg)
 		}
 		return m, tea.Batch(cmds...)
+	case viewLanding:
+		// The Landing pane owns a stateful sub-component only while the
+		// drupal.org publish flow is parked on its issue-number prompt, so
+		// that is the only case forwarded — the row list underneath is
+		// rendered from model state on every frame, exactly like the board's
+		// tiles, and has nothing to deliver to.
+		//
+		// This is not merely about cursor blink. Pasted text arrives as
+		// tea.PasteMsg, NOT as a KeyPressMsg (Bubble Tea v2 enables bracketed
+		// paste by default and reports the paste as one message), and
+		// bubbles' textinput handles that message itself — but only if it is
+		// ever handed one. Until the Landing pane joined this switch, every
+		// paste into the issue field was silently dropped on the floor here,
+		// while the same paste worked in every other text field in sand
+		// purely because those views were already listed above.
+		if p := m.landing.publish; p != nil && p.stage == publishAskIssue {
+			p.issueInput, cmd = p.issueInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	default:
 		return m, nil
 	}

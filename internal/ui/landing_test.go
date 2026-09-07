@@ -1439,10 +1439,15 @@ func collectFixtureRaw() string {
 }
 
 // TestLandingPublishFlowEndToEnd drives the full publish flow through real
-// key presses: issue number -> guest collection -> anonymous fork resolution
-// -> confirmation -> 'y' -> the job registry, asserting the dispatched job's
-// output carries the per-commit result and the merge request drupalOrgActions
-// reports, exactly like every other landing job.
+// key presses: the guest remote read -> the issue prompt (reached because
+// THIS checkout's remote is the canonical project, which names no issue) ->
+// guest collection -> anonymous fork resolution -> confirmation -> 'y' -> the
+// job registry, asserting the dispatched job's output carries the per-commit
+// result and the merge request drupalOrgActions reports, exactly like every
+// other landing job.
+//
+// TestLandingPublishDerivesIssueFromForkRemote below is its counterpart for
+// the case that skips the prompt entirely.
 func TestLandingPublishFlowEndToEnd(t *testing.T) {
 	m, v := landingTestVM(t, "web")
 	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
@@ -1499,10 +1504,27 @@ func TestLandingPublishFlowEndToEnd(t *testing.T) {
 	next, cmd := m.updateLanding(runeKey('o'))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("starting the publish flow should return the focus/blink command")
+		t.Fatal("starting the publish flow should fire the guest remote read")
 	}
-	if m.landing.publish == nil || m.landing.publish.stage != publishAskIssue {
-		t.Fatalf("publish state = %+v, want stage publishAskIssue", m.landing.publish)
+	if m.landing.publish == nil || m.landing.publish.stage != publishResolving {
+		t.Fatalf("publish state = %+v, want stage publishResolving", m.landing.publish)
+	}
+
+	// The remote read runs FIRST now. This fixture's remote is
+	// "project/mod.git" — the canonical project, which names no issue — so
+	// the flow must stop at the prompt and ask, having already worked out
+	// the module for itself.
+	l0 := newTeaLoop(t, m)
+	l0.exec(cmd)
+	l0.pump("the publish flow to reach the issue prompt", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishAskIssue
+	})
+	m = l0.m
+	if got := m.landing.publish.module; got != "mod" {
+		t.Fatalf("module = %q, want %q derived from the checkout's remote", got, "mod")
+	}
+	if got := m.landing.publish.issue; got != 0 {
+		t.Fatalf("issue = %d, want 0: a canonical remote names no issue", got)
 	}
 
 	for _, r := range "1234" {
@@ -1513,6 +1535,11 @@ func TestLandingPublishFlowEndToEnd(t *testing.T) {
 	m = next.(model)
 	if cmd == nil {
 		t.Fatal("submitting the issue number should fire the collect command")
+	}
+	// The upstream ref resolved by the first step is reused rather than the
+	// guest being read a second time for a fact already in hand.
+	if got := m.landing.publish.upstream; got != "origin/1.0.x" {
+		t.Fatalf("upstream = %q, want the ref the first step already resolved", got)
 	}
 	if m.landing.publish == nil || m.landing.publish.stage != publishResolving {
 		t.Fatalf("publish state = %+v, want stage publishResolving", m.landing.publish)
@@ -1616,5 +1643,162 @@ func TestLandingPublishEpochSurvivesPaneReopen(t *testing.T) {
 	m.handleLandingCollect(landingCollectMsg{epoch: secondEpoch, cs: drupalorg.ChangeSet{Commits: []drupalorg.Commit{{Message: "from flow 2"}}}})
 	if len(m.landing.publish.cs.Commits) != 1 || m.landing.publish.cs.Commits[0].Message != "from flow 2" {
 		t.Fatalf("the current flow's own result was not applied: %+v", m.landing.publish)
+	}
+}
+
+// TestLandingPublishDerivesIssueFromForkRemote covers the case a developer
+// working a drupal.org issue is actually in: the checkout was cloned from
+// that issue's fork, so its remote is "issue/<module>-<nid>" and already
+// names the issue. The flow must read it from there and go straight to the
+// confirmation — never stopping to ask for a number the checkout itself has
+// been carrying all along.
+//
+// Refusing that remote is also what used to make this flow fail outright,
+// with "cannot derive module from remote path \"issue/…\"" — an error that
+// named nothing the developer could act on, about the one remote that was
+// already correct.
+func TestLandingPublishDerivesIssueFromForkRemote(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{
+				Path: "/home/u/mod", Kind: checkouts.KindRepo, Branch: "1234-fix", DefaultBranch: "1.0.x",
+				OrgRepo: "issue/mod-1234", Forge: "git.drupalcode.org", PushState: checkouts.PushStatePushed,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	fakeDO := &fakeDrupalOrgActions{
+		tokenAvailable: true,
+		fork: &drupalorg.ProjectInfo{ID: 99, DefaultBranch: "1.0.x", ForkedFromProject: &drupalorg.ForkedFromProject{
+			ID: 42, PathWithNamespace: "project/mod", DefaultBranch: "1.0.x",
+		}},
+	}
+	m.drupalOrgActions = fakeDO
+
+	remoteInfoFile := filepath.Join(t.TempDir(), "remoteinfo")
+	if err := os.WriteFile(remoteInfoFile, []byte("git@git.drupalcode.org:issue/mod-1234.git\norigin/1234-fix\n"), 0o600); err != nil {
+		t.Fatalf("write remote-info fixture: %v", err)
+	}
+	collectFile := filepath.Join(t.TempDir(), "collect")
+	if err := os.WriteFile(collectFile, []byte(collectFixtureRaw()), 0o600); err != nil {
+		t.Fatalf("write collect fixture: %v", err)
+	}
+	m.members[0].prov = &providerfake.Provider{RunArgvFunc: func(_ vm.VM, _, expr string) []string {
+		if expr == drupalorg.BuildRemoteInfoCommand() {
+			return []string{"cat", remoteInfoFile}
+		}
+		return []string{"cat", collectFile}
+	}}
+
+	m.openLandingPane(v)
+
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("starting the publish flow should fire the guest remote read")
+	}
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+	m = l.m
+
+	// Not one keystroke was spent on the issue number, and the destination
+	// is nonetheless the right one.
+	if got := m.landing.publish.issue; got != 1234 {
+		t.Fatalf("issue = %d, want 1234 read from the checkout's fork remote", got)
+	}
+	if got := m.landing.publish.module; got != "mod" {
+		t.Fatalf("module = %q, want %q", got, "mod")
+	}
+	if len(fakeDO.resolveForkCalls) != 1 || fakeDO.resolveForkCalls[0] != "issue/mod-1234" {
+		t.Fatalf("resolveForkCalls = %+v, want exactly one for issue/mod-1234", fakeDO.resolveForkCalls)
+	}
+	if !strings.Contains(m.landing.publish.text, "issue/mod-1234") {
+		t.Fatalf("confirmation text = %q, want it to name the destination", m.landing.publish.text)
+	}
+}
+
+// TestLandingPublishIssuePromptAcceptsPaste pins the routing fix for a real
+// bug: pasted text arrives as tea.PasteMsg, not as a KeyPressMsg, so it
+// reaches a text input only through model.forward — and the Landing pane was
+// not in forward's switch at all. Every paste into the issue field was
+// dropped on the floor, in the one field where the value being typed is a
+// seven-digit number nobody wants to retype.
+//
+// It goes through model.Update rather than calling forward directly, because
+// the missing case was in the ROUTING, and a test that skipped the routing
+// would have passed against the bug.
+func TestLandingPublishIssuePromptAcceptsPaste(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.drupalOrgActions = &fakeDrupalOrgActions{tokenAvailable: true}
+	m.openLandingPane(v)
+	m.view = viewLanding
+	m.landing.publish = &landingPublish{stage: publishAskIssue, issueInput: newIssueInput(), upstream: "origin/1.0.x", module: "mod"}
+
+	next, _ := m.Update(tea.PasteMsg{Content: "3619578"})
+	m = next.(model)
+
+	if got := m.landing.publish.issueInput.Value(); got != "3619578" {
+		t.Fatalf("issue field = %q after a paste, want %q", got, "3619578")
+	}
+}
+
+// TestParseIssueRef covers what someone can reasonably put in the prompt once
+// pasting into it works — and, just as importantly, what must be refused
+// rather than scavenged for digits: the cost of reading a number out of the
+// wrong string here is a public write to the wrong issue's fork.
+func TestParseIssueRef(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int
+		ok   bool
+	}{
+		{raw: "3619578", want: 3619578, ok: true},
+		{raw: "  3619578\n", want: 3619578, ok: true},
+		{raw: "#3619578", want: 3619578, ok: true},
+		{raw: "https://www.drupal.org/project/dubbot/issues/3619578", want: 3619578, ok: true},
+		{raw: "https://www.drupal.org/project/dubbot/issues/3619578/", want: 3619578, ok: true},
+		{raw: "http://www.drupal.org/node/3619578", want: 3619578, ok: true},
+		{raw: ""},
+		{raw: "abc"},
+		{raw: "0"},
+		{raw: "-5"},
+		{raw: "12 34"},
+		{raw: "issue 3619578"},
+		{raw: "3619578 and more"},
+	}
+	for _, tc := range cases {
+		got, ok := parseIssueRef(tc.raw)
+		if ok != tc.ok {
+			t.Errorf("parseIssueRef(%q) ok = %v, want %v", tc.raw, ok, tc.ok)
+			continue
+		}
+		if ok && got != tc.want {
+			t.Errorf("parseIssueRef(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestLandingPublishIssueInputHasWidth pins the fix for the "> d" prompt.
+// bubbles' textinput sizes its placeholder buffer to Width()+1 runes, so an
+// input left at the zero width renders "drupal.org issue number" as its first
+// character alone — which reads as a stray keystroke sitting in an empty
+// field, not as a placeholder.
+func TestLandingPublishIssueInputHasWidth(t *testing.T) {
+	ti := newIssueInput()
+	if ti.Width() < len(ti.Placeholder) {
+		t.Fatalf("issue input width = %d, want at least the placeholder's %d so it is not clipped to its first character", ti.Width(), len(ti.Placeholder))
+	}
+	// Stripped of styling: the first placeholder rune is drawn as the
+	// virtual cursor and so carries its own SGR run, which is exactly why
+	// the truncation this pins was invisible in the raw string.
+	if got := ansi.Strip(ti.View()); !strings.Contains(got, ti.Placeholder) {
+		t.Errorf("issue input view = %q, want the whole placeholder %q", got, ti.Placeholder)
 	}
 }

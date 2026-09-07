@@ -15,15 +15,15 @@ import (
 // doPublish's decision logic can be exercised without a real VM or guest —
 // mirrors land_test.go's fakeGh pattern.
 type fakeCollector struct {
-	module string
+	target drupalorg.RemoteTarget
 	cs     drupalorg.ChangeSet
 	err    error
 	calls  int
 }
 
-func (f *fakeCollector) Collect(context.Context, vm.VM, string) (string, drupalorg.ChangeSet, error) {
+func (f *fakeCollector) Collect(context.Context, vm.VM, string) (drupalorg.RemoteTarget, drupalorg.ChangeSet, error) {
 	f.calls++
-	return f.module, f.cs, f.err
+	return f.target, f.cs, f.err
 }
 
 // fakeDestPublisher is a destPublisher double that records every call and
@@ -38,10 +38,17 @@ type fakeDestPublisher struct {
 
 	resolveCalls int
 	publishCalls int
+
+	// gotModule/gotIssue record what the last ResolveDestination call was
+	// actually asked to resolve — the only way to observe whether doPublish
+	// used the ISSUE it was given or the one read off the checkout's remote.
+	gotModule string
+	gotIssue  int
 }
 
-func (f *fakeDestPublisher) ResolveDestination(context.Context, string, int, bool) (drupalorg.Destination, error) {
+func (f *fakeDestPublisher) ResolveDestination(_ context.Context, module string, issue int, _ bool) (drupalorg.Destination, error) {
 	f.resolveCalls++
+	f.gotModule, f.gotIssue = module, issue
 	return f.dest, f.resolveErr
 }
 
@@ -80,7 +87,7 @@ func sampleDestination() drupalorg.Destination {
 // --- doPublish: decline, non-TTY refusal, --yes, and the partial-failure report ---
 
 func TestDoPublishDeclinePathPublishesNothing(t *testing.T) {
-	coll := &fakeCollector{module: "foo", cs: sampleChangeSet()}
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet()}
 	dp := &fakeDestPublisher{dest: sampleDestination()}
 
 	var stdout strings.Builder
@@ -103,7 +110,7 @@ func TestDoPublishDeclinePathPublishesNothing(t *testing.T) {
 }
 
 func TestDoPublishNonTTYRefusesWithoutYes(t *testing.T) {
-	coll := &fakeCollector{module: "foo", cs: sampleChangeSet()}
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet()}
 	dp := &fakeDestPublisher{dest: sampleDestination()}
 
 	var stdout strings.Builder
@@ -122,7 +129,7 @@ func TestDoPublishNonTTYRefusesWithoutYes(t *testing.T) {
 }
 
 func TestDoPublishYesFlagSkipsPromptAndPublishes(t *testing.T) {
-	coll := &fakeCollector{module: "foo", cs: sampleChangeSet()}
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet()}
 	dp := &fakeDestPublisher{
 		dest: sampleDestination(),
 		result: drupalorg.Result{
@@ -156,7 +163,7 @@ func TestDoPublishReportsPartialFailureFromResult(t *testing.T) {
 			{Index: 2, Subject: "third commit", Status: drupalorg.CommitNotAttempted},
 		},
 	}
-	coll := &fakeCollector{module: "foo", cs: sampleChangeSet()}
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet()}
 	dp := &fakeDestPublisher{
 		dest:       sampleDestination(),
 		result:     res,
@@ -183,7 +190,7 @@ func TestDoPublishReportsPartialFailureFromResult(t *testing.T) {
 }
 
 func TestDoPublishNothingToPublishSkipsConfirmationAndDestination(t *testing.T) {
-	coll := &fakeCollector{module: "foo", cs: drupalorg.ChangeSet{}}
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: drupalorg.ChangeSet{}}
 	dp := &fakeDestPublisher{dest: sampleDestination()}
 
 	var stdout strings.Builder
@@ -275,13 +282,19 @@ func TestReorderPublishFlags(t *testing.T) {
 // --- runPublish: argument validation and the absent-PAT message (neither touches a VM or the network) ---
 
 func TestRunPublishArgValidation(t *testing.T) {
+	// Argument validation must be decided before any token, store, or
+	// provider is touched; pinning XDG_CONFIG_HOME at an empty dir keeps
+	// that true of the test too, rather than letting it read whatever the
+	// developer running it happens to have on disk.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	cases := []struct {
 		name    string
 		args    []string
 		wantErr string
 	}{
 		{name: "no args", args: []string{}, wantErr: "need a VM NAME"},
-		{name: "missing issue", args: []string{"vm", "/path"}, wantErr: "need a VM NAME"},
+		{name: "only a name", args: []string{"vm"}, wantErr: "need a VM NAME"},
 		{name: "too many args", args: []string{"vm", "/path", "123", "extra"}, wantErr: "need a VM NAME"},
 		{name: "non-numeric issue", args: []string{"vm", "/path", "abc"}, wantErr: "invalid ISSUE"},
 		{name: "zero issue", args: []string{"vm", "/path", "0"}, wantErr: "invalid ISSUE"},
@@ -294,6 +307,25 @@ func TestRunPublishArgValidation(t *testing.T) {
 				t.Errorf("runPublish(%v) error = %v, want it to contain %q", tc.args, err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// Two arguments is now a complete invocation — the issue is read from the
+// checkout's own remote — so it must get PAST argument validation rather than
+// being rejected for arity. The absent-PAT refusal is simply the next gate it
+// reaches in a test environment with no token, and reaching it is the proof.
+func TestRunPublishAcceptsOmittedIssue(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	err := runPublish([]string{"somevm", "/some/path"})
+	if err == nil {
+		t.Fatal("runPublish: want an error (no token), not a success")
+	}
+	if strings.Contains(err.Error(), "need a VM NAME") {
+		t.Errorf("runPublish error = %v, want ISSUE to be optional rather than an arity failure", err)
+	}
+	if !strings.Contains(err.Error(), "publication is unavailable") {
+		t.Errorf("runPublish error = %v, want it to have reached the token check", err)
 	}
 }
 
@@ -313,5 +345,64 @@ func TestRunPublishAbsentPATMessage(t *testing.T) {
 	}
 	if !errors.Is(err, drupalorg.ErrNoToken) {
 		t.Errorf("runPublish error = %v, want it to wrap drupalorg.ErrNoToken", err)
+	}
+}
+
+// --- doPublish: where the issue number comes from -------------------------
+
+// A checkout cloned from its issue fork names the issue in its own remote, so
+// omitting ISSUE must resolve the destination for exactly that issue rather
+// than refusing — this is the whole point of making the argument optional.
+func TestDoPublishDerivesIssueFromForkRemote(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "dubbot", Issue: 3619578}, cs: sampleChangeSet()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	err := doPublish(context.Background(), &stdout, strings.NewReader("n\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 0, false, false)
+	if err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if dp.gotModule != "dubbot" || dp.gotIssue != 3619578 {
+		t.Errorf("ResolveDestination got (%q, %d), want (%q, %d)", dp.gotModule, dp.gotIssue, "dubbot", 3619578)
+	}
+	// A destination nobody typed must be announced, not assumed silently.
+	if !strings.Contains(stdout.String(), "3619578") {
+		t.Errorf("doPublish stdout = %q, want the derived issue number reported", stdout.String())
+	}
+}
+
+// An explicitly given ISSUE is what the operator asked for, so it wins over
+// the one the remote happens to name.
+func TestDoPublishExplicitIssueOverridesForkRemote(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "dubbot", Issue: 3619578}, cs: sampleChangeSet()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	err := doPublish(context.Background(), &stdout, strings.NewReader("n\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 999, false, false)
+	if err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if dp.gotIssue != 999 {
+		t.Errorf("ResolveDestination got issue %d, want the explicit 999", dp.gotIssue)
+	}
+}
+
+// A canonical "project/<module>" remote names no issue, so omitting ISSUE has
+// to fail with something that says so and says what to do — never publish to
+// a guessed destination.
+func TestDoPublishWithoutIssueOnCanonicalRemoteRefuses(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	err := doPublish(context.Background(), &stdout, strings.NewReader("y\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 0, false, false)
+	if err == nil {
+		t.Fatal("doPublish: want an error when neither the argument nor the remote names an issue")
+	}
+	if !strings.Contains(err.Error(), "ISSUE") {
+		t.Errorf("doPublish error = %q, want it to name the ISSUE argument as the fix", err.Error())
+	}
+	if dp.resolveCalls != 0 || dp.publishCalls != 0 {
+		t.Errorf("resolve/publish called (%d, %d), want (0, 0) with no issue to resolve", dp.resolveCalls, dp.publishCalls)
 	}
 }

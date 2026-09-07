@@ -45,32 +45,58 @@ func TestForkPath(t *testing.T) {
 	}
 }
 
-func TestModuleFromRemoteURL(t *testing.T) {
+func TestTargetFromRemoteURL(t *testing.T) {
 	cases := []struct {
 		name    string
 		raw     string
-		want    string
+		want    RemoteTarget
 		wantErr bool
 	}{
 		{
 			name: "https",
 			raw:  "https://git.drupalcode.org/project/drupal.git",
-			want: "drupal",
+			want: RemoteTarget{Module: "drupal"},
 		},
 		{
 			name: "https no dot git suffix",
 			raw:  "https://git.drupalcode.org/project/webform",
-			want: "webform",
+			want: RemoteTarget{Module: "webform"},
 		},
 		{
 			name: "scp-like ssh",
 			raw:  "git@git.drupalcode.org:project/views_bulk_operations.git",
-			want: "views_bulk_operations",
+			want: RemoteTarget{Module: "views_bulk_operations"},
 		},
 		{
 			name: "ssh url form",
 			raw:  "ssh://git@git.drupalcode.org/project/commerce.git",
-			want: "commerce",
+			want: RemoteTarget{Module: "commerce"},
+		},
+		// An issue fork's remote is the case a developer actually has
+		// checked out while working an issue, and it carries the issue
+		// number with it — refusing it was what made publication fail on the
+		// one remote that was already pointed at the right place.
+		{
+			name: "issue fork https carries its issue",
+			raw:  "https://git.drupalcode.org/issue/dubbot-3619578.git",
+			want: RemoteTarget{Module: "dubbot", Issue: 3619578},
+		},
+		{
+			name: "issue fork scp-like ssh",
+			raw:  "git@git.drupalcode.org:issue/webform-3181657.git",
+			want: RemoteTarget{Module: "webform", Issue: 3181657},
+		},
+		{
+			name: "issue fork ssh url form no dot git suffix",
+			raw:  "ssh://git@git.drupalcode.org/issue/commerce-42",
+			want: RemoteTarget{Module: "commerce", Issue: 42},
+		},
+		{
+			// The "-" separator is not in a module name, so a module ending
+			// in digits still splits unambiguously.
+			name: "issue fork module ending in a digit",
+			raw:  "https://git.drupalcode.org/issue/foo2-123.git",
+			want: RemoteTarget{Module: "foo2", Issue: 123},
 		},
 		{
 			name:    "wrong host rejected",
@@ -78,8 +104,30 @@ func TestModuleFromRemoteURL(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "not a project path rejected",
-			raw:     "https://git.drupalcode.org/issue/drupal-3181657.git",
+			// Neither shape: a module name cannot contain "-", so this is
+			// not an issue fork path, and it is not a project path either.
+			name:    "hyphenated fork path rejected",
+			raw:     "https://git.drupalcode.org/issue/foo-bar-123.git",
+			wantErr: true,
+		},
+		{
+			name:    "fork path with no issue number rejected",
+			raw:     "https://git.drupalcode.org/issue/drupal.git",
+			wantErr: true,
+		},
+		{
+			name:    "issue number wider than an int rejected",
+			raw:     "https://git.drupalcode.org/issue/drupal-99999999999999999999999.git",
+			wantErr: true,
+		},
+		{
+			name:    "issue number zero rejected",
+			raw:     "https://git.drupalcode.org/issue/drupal-0.git",
+			wantErr: true,
+		},
+		{
+			name:    "some other namespace rejected",
+			raw:     "https://git.drupalcode.org/sandbox/someone-123.git",
 			wantErr: true,
 		},
 		{
@@ -96,20 +144,50 @@ func TestModuleFromRemoteURL(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ModuleFromRemoteURL(tc.raw)
+			got, err := TargetFromRemoteURL(tc.raw)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("ModuleFromRemoteURL(%q) = %q, nil; want error", tc.raw, got)
+					t.Fatalf("TargetFromRemoteURL(%q) = %+v, nil; want error", tc.raw, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ModuleFromRemoteURL(%q) unexpected error: %v", tc.raw, err)
+				t.Fatalf("TargetFromRemoteURL(%q) unexpected error: %v", tc.raw, err)
 			}
 			if got != tc.want {
-				t.Errorf("ModuleFromRemoteURL(%q) = %q, want %q", tc.raw, got, tc.want)
+				t.Errorf("TargetFromRemoteURL(%q) = %+v, want %+v", tc.raw, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTargetFromRemoteURLRoundTripsForkPath pins the two directions together:
+// whatever ForkPath formats, TargetFromRemoteURL must read back unchanged.
+// The two share moduleNamePattern precisely so they cannot drift, and this is
+// what would catch it if one of them ever grew a rule the other did not.
+func TestTargetFromRemoteURLRoundTripsForkPath(t *testing.T) {
+	cases := []struct {
+		module string
+		issue  int
+	}{
+		{"dubbot", 3619578},
+		{"webform", 1},
+		{"views_bulk_operations", 3181657},
+		{"foo2", 123},
+	}
+	for _, tc := range cases {
+		path, err := ForkPath(tc.module, tc.issue)
+		if err != nil {
+			t.Fatalf("ForkPath(%q, %d): %v", tc.module, tc.issue, err)
+		}
+		got, err := TargetFromRemoteURL("https://git.drupalcode.org/" + path + ".git")
+		if err != nil {
+			t.Fatalf("TargetFromRemoteURL for %q: %v", path, err)
+		}
+		want := RemoteTarget{Module: tc.module, Issue: tc.issue}
+		if got != want {
+			t.Errorf("round trip of %q = %+v, want %+v", path, got, want)
+		}
 	}
 }
 

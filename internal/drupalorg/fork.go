@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -41,13 +42,60 @@ func ForkPath(module string, issue int) (string, error) {
 // every contrib module's canonical repository.
 var moduleFromPathRe = regexp.MustCompile(`^project/(` + moduleNamePattern + `)$`)
 
-// ModuleFromRemoteURL derives a module (project) machine name from a git
-// remote URL, accepting both forms of a module's canonical
-// "git.drupalcode.org/project/<module>.git" repository:
+// forkFromPathRe matches the "issue/<module>-<nid>" path drupal.org gives
+// every issue fork. It is the inbound counterpart of ForkPath's outbound
+// formatting, built from the same moduleNamePattern so the two directions
+// cannot drift out of sync — the same reason moduleFromPathRe is.
+//
+// The module group cannot swallow the "-<nid>" separator: "-" is not in
+// moduleNamePattern, so the split stays unambiguous even for a module name
+// that itself ends in digits ("issue/foo2-123" is module "foo2", issue 123).
+// A module name containing "-" is not a drupal.org module name at all, so a
+// path like "issue/foo-bar-123" correctly fails to match rather than being
+// guessed at.
+var forkFromPathRe = regexp.MustCompile(`^issue/(` + moduleNamePattern + `)-([0-9]+)$`)
+
+// RemoteTarget is what a drupal.org git remote URL identifies: always a
+// module, and — when the remote names an issue fork rather than the
+// canonical project — the issue that fork belongs to.
+//
+// The Issue field is why this type exists rather than a bare module string.
+// A developer working an issue clones the issue fork, so their checkout's
+// remote is "issue/<module>-<nid>", which already NAMES the issue being
+// worked on. Making them retype a number their own remote spells out is both
+// busywork and a chance to publish onto the wrong fork, so both surfaces read
+// it from here and only prompt when the remote genuinely cannot answer.
+type RemoteTarget struct {
+	// Module is the project machine name, e.g. "dubbot" — the same value on
+	// a canonical remote and on an issue fork's, since a fork's path embeds
+	// the module it forks.
+	Module string
+	// Issue is the drupal.org issue node ID the remote's fork belongs to, or
+	// 0 when the remote names the canonical project and so says nothing
+	// about any issue. Callers MUST read 0 as "the remote cannot answer;
+	// ask" and never as an issue number — ForkPath rejects a non-positive
+	// issue outright, which is the backstop if one ever slips through.
+	Issue int
+}
+
+// TargetFromRemoteURL derives a RemoteTarget from a git remote URL,
+// accepting both of the drupal.org repositories a developer can be working
+// from:
+//
+//   - the canonical project, ".../project/<module>.git", yielding Issue 0
+//   - an issue fork, ".../issue/<module>-<nid>.git", yielding both fields
+//
+// in all three spellings git remotes come in:
 //
 //   - HTTPS: "https://git.drupalcode.org/project/<module>.git"
-//   - SSH (scp-like): "git@git.drupalcode.org:project/<module>.git"
+//   - SSH (scp-like): "git@git.drupalcode.org:issue/<module>-<nid>.git"
 //   - SSH (URL form): "ssh://git@git.drupalcode.org/project/<module>.git"
+//
+// Accepting the fork form is not a mere convenience: refusing it made the
+// common case — a checkout cloned from the very fork publication targets —
+// fail with "cannot derive module from remote path", which named nothing the
+// developer could act on and pointed at the one remote that was already
+// correct.
 //
 // raw MUST be the origin remote of the checkout being targeted by the
 // operation at hand — the checkout the developer is actually publishing
@@ -57,8 +105,43 @@ var moduleFromPathRe = regexp.MustCompile(`^project/(` + moduleNamePattern + `)$
 // component checked out alongside the distribution itself) it identifies
 // only the first module ever cloned into that VM. Deriving the module from
 // CloneURL would silently resolve to the wrong fork whenever a later
-// checkout in the same VM is the one actually being published.
-func ModuleFromRemoteURL(raw string) (string, error) {
+// checkout in the same VM is the one actually being published — and, now
+// that the issue is read from the remote too, would carry a stale issue
+// number along with it.
+func TargetFromRemoteURL(raw string) (RemoteTarget, error) {
+	path, err := repoPathFromRemoteURL(raw)
+	if err != nil {
+		return RemoteTarget{}, err
+	}
+
+	if m := moduleFromPathRe.FindStringSubmatch(path); m != nil {
+		return RemoteTarget{Module: m[1]}, nil
+	}
+	if m := forkFromPathRe.FindStringSubmatch(path); m != nil {
+		// strconv cannot fail on `[0-9]+`, but it CAN overflow: a nid wider
+		// than an int is not a drupal.org node ID, and must be refused here
+		// rather than wrapped into a negative issue number that ForkPath
+		// would then reject with a far less obvious message.
+		nid, convErr := strconv.Atoi(m[2])
+		if convErr != nil || nid <= 0 {
+			return RemoteTarget{}, fmt.Errorf("drupalorg: remote path %q has an unusable issue number %q", path, m[2])
+		}
+		return RemoteTarget{Module: m[1], Issue: nid}, nil
+	}
+
+	return RemoteTarget{}, fmt.Errorf(
+		"drupalorg: remote path %q is neither a canonical project (%q) nor an issue fork (%q)",
+		path, "project/<module>", "issue/<module>-<issue>",
+	)
+}
+
+// repoPathFromRemoteURL normalises a git remote URL of any spelling down to
+// the repository path it addresses ("project/drupal", "issue/dubbot-3619578"),
+// having first confirmed the host is git.drupalcode.org. It is split out from
+// TargetFromRemoteURL so that URL shape and repository shape are decided
+// separately: everything here is about git and SSH, everything in the caller
+// is about drupal.org's naming conventions.
+func repoPathFromRemoteURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("drupalorg: empty remote URL")
@@ -92,12 +175,7 @@ func ModuleFromRemoteURL(raw string) (string, error) {
 		return "", fmt.Errorf("drupalorg: remote host %q is not git.drupalcode.org", host)
 	}
 
-	path = strings.Trim(strings.TrimSuffix(path, ".git"), "/")
-	m := moduleFromPathRe.FindStringSubmatch(path)
-	if m == nil {
-		return "", fmt.Errorf("drupalorg: cannot derive module from remote path %q", path)
-	}
-	return m[1], nil
+	return strings.Trim(strings.TrimSuffix(path, ".git"), "/"), nil
 }
 
 // encodedProjectPath returns the "/projects/<escaped path>" segment for
