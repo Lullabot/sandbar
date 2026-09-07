@@ -100,13 +100,28 @@ it is not where prose belongs.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
-  not directly on `Provider`.
+  not directly on `Provider`. Both backends' resets share `staging.go`'s
+  `PlanProject` (what the GUEST actually holds decides what is preserved, not
+  what the config implies) and `StageGuard`, which owns the one rule about the
+  host staging directory: the archives are a COPY until the guest is destroyed,
+  so a failure BEFORE the delete drops them (the original is still in the
+  untouched VM) and every failure after it keeps them and names the path.
 - `registry` — managed-VM index, now `(connection scope, name)`-keyed
   (schema v3, auto-migrated on read). Each entry's connection `Scope` is
   derived from which profile's provider created it (`LocalScope` for local
   Lima, a remote identity like `user@host:port` for remote), so the same VM
   name can exist independently under two different profiles and a remote
-  profile's VMs never mix with the local list.
+  profile's VMs never mix with the local list. Every write goes through
+  `mutate`: take the file's `statelock`, RE-READ, apply, write. A whole-file
+  rewrite from a stale in-memory map is how a long-open TUI used to erase the
+  entry a concurrent `sand create` had just added, so `save` is called from
+  nowhere else — and `Reconcile` prunes only entries the caller already knew
+  about, since a VM another process created after this one's instance listing
+  is not evidence of a VM that went away.
+- `statelock` — the advisory file lock (`<path>.lock`, `syscall.Flock`) behind
+  `registry` and `secrets`' read-modify-write. Never fails hard: an unlockable
+  path or a holder past the wait budget proceeds unserialized, the same posture
+  `provision`'s base lock takes.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
@@ -114,14 +129,37 @@ it is not where prose belongs.
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
 
-Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
-(`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
-keep them from drifting — the create/TUI paths construct their provider(s) via
-`provider.BuildFleet` over the `profiles` store's enabled profiles (a headless
-command binds only the one profile it targets; the TUI binds every enabled
-one), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
-construct their guest-attach command exclusively via `provider.AttachArgv()`,
-the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
+Entrypoint: `cmd/sand/main.go`. **Every headless subcommand is a TUI verb under
+the same name, and the pair shares one implementation**: `sand create` is the
+form behind `n`, `sand reset` is `R` (`cmd/sand/reset.go`), `sand shell` is `S`,
+`sand land` is `l`, `sand paste-image` is `v`. A verb that exists in only one of
+the two entrypoints is one users have to discover twice, and the drift is not
+hypothetical — `sand reset` exists because the TUI could preserve a Claude login
+or a project tree across a rebuild and the CLI's `sand create --recreate` could
+not, so the docs' own answer to a CLI user was "open the TUI".
+
+Keep them from drifting by SHARING, not by copying: the create/reset gates and
+bookkeeping are `internal/manage` (`RecreateBase`, `RecordSuccess`,
+`Reconcile`), the host-secrets follow-up after any build is
+`cmd/sand/secrets.go`'s `settleSecrets` mirroring the TUI's `provisionDoneMsg`
+handler, and both shell entrypoints construct their guest-attach command
+exclusively via `provider.AttachArgv()` — the one place in sand that knows tmux
+exists (for local Lima) or SSH (for remote). The create/TUI paths construct
+their provider(s) via `provider.BuildFleet` over the `profiles` store's enabled
+profiles (a headless command binds only the one profile it targets; the TUI
+binds every enabled one), while a command acting on an EXISTING VM (`sand
+reset`/`shell`/`land`/`paste-image`) resolves the owning profile from the VM
+itself via `resolveVMProfile` (marker, then registry, then a live listing)
+rather than from a default.
+
+**A reset never changes which VM it is resetting.** Its name, base image and
+clone URL come from the target's own record, not from the form/flags: the TUI
+renders the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`),
+`sand reset` has no `--clone-url` at all, and `sand create --recreate
+--clone-url` is refused. An editable URL made one form mean two things — the
+preserve toggle is labelled from the org the VM HAS while the clone used the
+edited URL — so "keep my project" could discard the tree it named. A different
+repo is a different VM; `n` / `sand create` makes one.
 
 ## Build, run, format
 

@@ -592,18 +592,27 @@ func TestSave_RenameFailure_LeavesNoPartialFile(t *testing.T) {
 		t.Fatalf("target path must still be a directory, not a file (got mode %v)", fi.Mode())
 	}
 
-	// No leftover temp file (or anything else) beside the original
-	// directory entry: the failed save must have cleaned up after itself.
+	// No leftover temp file beside the original directory entry: the failed save
+	// must have cleaned up after itself. The store's advisory lock file
+	// (secrets.json.lock — see internal/statelock) is expected and permanent:
+	// every write takes it, including this failed one, and it holds no data.
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("readdir: %v", err)
 	}
-	if len(ents) != 1 || ents[0].Name() != "secrets.json" || !ents[0].IsDir() {
-		names := make([]string, len(ents))
-		for i, e := range ents {
+	var kept []os.DirEntry
+	for _, e := range ents {
+		if e.Name() == "secrets.json.lock" {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) != 1 || kept[0].Name() != "secrets.json" || !kept[0].IsDir() {
+		names := make([]string, len(kept))
+		for i, e := range kept {
 			names[i] = e.Name()
 		}
-		t.Fatalf("expected only the original secrets.json directory left in %s, got %v", dir, names)
+		t.Fatalf("expected only the original secrets.json directory (plus its lock) left in %s, got %v", dir, names)
 	}
 }
 

@@ -877,23 +877,61 @@ func parseMarkerStream(data []byte) (map[string][]byte, error) {
 // to $HOME (its Lima default is the relative ".lima"), so the _sand directory is
 // created and its absolute path resolved in one round trip before the copy.
 //
-// The staged copy is refreshed each build (the prior one is removed first) and
-// deliberately NOT cleaned up afterward: the base overlay's mount points at it and
-// a clone's finalize re-mounts it, so it must outlive the build that created it —
-// the remote analogue of the local checkout the mount points at for local Lima.
-func (h *SSHHost) StagePlaybook(ctx context.Context, localDir string) (string, error) {
+// The staged copy is deliberately NOT cleaned up afterward: the base overlay's
+// mount points at it and a clone's finalize re-mounts it, so it must outlive the
+// build that created it — the remote analogue of the local checkout the mount
+// points at for local Lima.
+//
+// stamp (the playbook's content hash) is recorded beside the copy and re-read on
+// the next call; when it still matches, the rm/scp is skipped and only the path
+// is resolved. That guard is load-bearing rather than a speed-up: staging now
+// runs on every clone, because a clone's playbook mount is repointed at the
+// result (see Client.Configure), and without it every create would rm -rf and
+// re-copy a directory that a CONCURRENT build's guest may be part-way through
+// rsyncing out of, handing that guest a truncated playbook.
+func (h *SSHHost) StagePlaybook(ctx context.Context, localDir, stamp string) (string, error) {
 	sandDir := strings.TrimSuffix(h.cfg.RemoteLimaHome, "/") + "/_sand"
-	// One round trip: create _sand, drop any prior staged playbook (scp into an
-	// existing dir would nest the source under it), and echo _sand's ABSOLUTE path.
 	q := shellQuote(sandDir)
+
+	// One round trip: create _sand, echo its ABSOLUTE path (RemoteLimaHome may be
+	// relative to $HOME), and echo the stamp of whatever is staged there now.
 	out, errb, err := h.runRemote(ctx, nil, "sh", "-c",
-		fmt.Sprintf("mkdir -p %s && rm -rf %s/playbook && cd %s && pwd", q, q, q))
+		// `|| true` is scoped to the cat with braces, NOT left to trail the whole
+		// chain: `a && b && c || true` exits 0 when a FAILS, so an unwritable
+		// LimaHome would come back as a silent success with no output at all, and
+		// the empty pwd below would resolve dst to "/playbook" — the remote root.
+		fmt.Sprintf("mkdir -p %s && cd %s && pwd && { cat playbook.stamp 2>/dev/null || true; }", q, q))
 	if err != nil {
 		return "", fmt.Errorf("prepare remote playbook dir: %w: %s", err, strings.TrimSpace(string(errb)))
 	}
-	dst := strings.TrimSpace(string(out)) + "/playbook"
+	// The probe prints the absolute path on line 1 and the staged copy's stamp, if
+	// any, on line 2 — so a missing stamp yields "", which never equals a
+	// non-empty one and correctly forces the re-stage below.
+	pathLine, stampLine, _ := strings.Cut(string(out), "\n")
+	base := strings.TrimSpace(pathLine)
+	if base == "" {
+		return "", fmt.Errorf("prepare remote playbook dir: %s reported no path", sandDir)
+	}
+	dst := base + "/playbook"
+	if stamp != "" && strings.TrimSpace(stampLine) == stamp {
+		return dst, nil
+	}
+
+	// Drop the prior staged playbook AND its stamp before copying: scp into an
+	// existing directory would nest the source under it, and clearing the stamp
+	// first means an interrupted copy cannot leave one vouching for a partial tree.
+	if _, errb, err := h.runRemote(ctx, nil, "sh", "-c",
+		fmt.Sprintf("rm -rf %s/playbook %s/playbook.stamp", q, q)); err != nil {
+		return "", fmt.Errorf("clear the staged playbook: %w: %s", err, strings.TrimSpace(string(errb)))
+	}
 	if err := h.scp(ctx, nil, true, localDir, h.target()+":"+dst); err != nil {
 		return "", fmt.Errorf("stage playbook to remote host: %w", err)
+	}
+	if stamp != "" {
+		// Best-effort: a stamp that cannot be written costs the NEXT run a re-copy,
+		// never this one its playbook — the tree it would vouch for is already there.
+		_, _, _ = h.runRemote(ctx, nil, "sh", "-c",
+			fmt.Sprintf("printf %%s %s > %s/playbook.stamp", shellQuote(stamp), q))
 	}
 	return dst, nil
 }

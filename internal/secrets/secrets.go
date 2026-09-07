@@ -43,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/statelock"
 )
 
 // schemaVersion is the on-disk format this build writes and understands. A file
@@ -233,25 +234,44 @@ func Load() (*Store, error) {
 // every case the returned store is non-nil and usable.
 func LoadFrom(path string) (*Store, error) {
 	s := &Store{path: path, vms: map[registry.Scope]map[string]map[string]map[string]string{}}
+	vms, err := readStore(path)
+	if err != nil {
+		return s, err
+	}
+	s.vms = vms
+	return s, nil
+}
+
+// scopedVMs is the store's in-memory shape: connection scope -> VM name ->
+// directory scope -> KEY -> VALUE. Named so the read/mutate plumbing below can
+// talk about it without restating four map levels each time.
+type scopedVMs = map[registry.Scope]map[string]map[string]map[string]string
+
+// readStore reads and migrates the on-disk store at path without writing
+// anything back. It is the shared body of LoadFrom and of the re-read every
+// mutate performs under the store lock, so the two can never disagree about how
+// a file is parsed.
+func readStore(path string) (scopedVMs, error) {
+	out := scopedVMs{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return s, nil
+			return out, nil
 		}
-		return s, err
+		return out, err
 	}
 	if len(data) == 0 {
-		return s, nil
+		return out, nil
 	}
 
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		_ = os.Rename(path, path+".corrupt")
-		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return out, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
 
 	if probe.Version > schemaVersion {
-		return s, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, probe.Version, schemaVersion)
+		return out, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, probe.Version, schemaVersion)
 	}
 
 	if probe.Version <= 1 {
@@ -261,7 +281,7 @@ func LoadFrom(path string) (*Store, error) {
 		var v1 v1File
 		if err := json.Unmarshal(data, &v1); err != nil {
 			_ = os.Rename(path, path+".corrupt")
-			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 		}
 		byName := make(map[string]map[string]map[string]string, len(v1.VMs))
 		for name, pairs := range v1.VMs {
@@ -272,9 +292,9 @@ func LoadFrom(path string) (*Store, error) {
 			byName[name] = map[string]map[string]string{"": cp}
 		}
 		if len(byName) > 0 {
-			s.vms[registry.LocalScope] = byName
+			out[registry.LocalScope] = byName
 		}
-		return s, nil
+		return out, nil
 	}
 
 	if probe.Version == 2 {
@@ -286,12 +306,12 @@ func LoadFrom(path string) (*Store, error) {
 		var parsed fileSchemaV2
 		if err := json.Unmarshal(data, &parsed); err != nil {
 			_ = os.Rename(path, path+".corrupt")
-			return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 		}
 		if len(parsed.VMs) > 0 {
-			s.vms[registry.LocalScope] = parsed.VMs
+			out[registry.LocalScope] = parsed.VMs
 		}
-		return s, nil
+		return out, nil
 	}
 
 	// probe.Version == 3 (the only remaining case, since >3, <=1, and ==2 are
@@ -299,12 +319,12 @@ func LoadFrom(path string) (*Store, error) {
 	var parsed fileSchema
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		_ = os.Rename(path, path+".corrupt")
-		return s, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return out, fmt.Errorf("secrets store at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
 	if parsed.Scopes != nil {
-		s.vms = fromScopeGroups(parsed.Scopes)
+		out = fromScopeGroups(parsed.Scopes)
 	}
-	return s, nil
+	return out, nil
 }
 
 // Get returns a defensive copy of the global-scope (directory scope "")
@@ -389,26 +409,27 @@ func (s *Store) SetAll(vm string, connScope registry.Scope, scopes map[string]ma
 		cp[scope] = inner
 	}
 
-	byName := s.vms[connScope]
-	if len(cp) == 0 {
+	return s.mutate(func(vms scopedVMs) {
+		byName := vms[connScope]
+		if len(cp) == 0 {
+			if byName == nil {
+				return
+			}
+			if _, ok := byName[vm]; !ok {
+				return
+			}
+			delete(byName, vm)
+			if len(byName) == 0 {
+				delete(vms, connScope)
+			}
+			return
+		}
 		if byName == nil {
-			return s.save()
+			byName = map[string]map[string]map[string]string{}
+			vms[connScope] = byName
 		}
-		if _, ok := byName[vm]; !ok {
-			return s.save()
-		}
-		delete(byName, vm)
-		if len(byName) == 0 {
-			delete(s.vms, connScope)
-		}
-		return s.save()
-	}
-	if byName == nil {
-		byName = map[string]map[string]map[string]string{}
-		s.vms[connScope] = byName
-	}
-	byName[vm] = cp
-	return s.save()
+		byName[vm] = cp
+	})
 }
 
 // Remove drops vm's entry (all directory scopes) under connScope and persists
@@ -416,13 +437,49 @@ func (s *Store) SetAll(vm string, connScope registry.Scope, scopes map[string]ma
 // The connScope entry itself is pruned once it holds no more VMs, so an empty
 // connection scope never lingers on disk.
 func (s *Store) Remove(vm string, connScope registry.Scope) error {
-	byName := s.vms[connScope]
-	if byName != nil {
+	return s.mutate(func(vms scopedVMs) {
+		byName := vms[connScope]
+		if byName == nil {
+			return
+		}
 		delete(byName, vm)
 		if len(byName) == 0 {
-			delete(s.vms, connScope)
+			delete(vms, connScope)
 		}
+	})
+}
+
+// mutate is the ONE way this store's on-disk state changes: it takes the
+// store's advisory lock (internal/statelock), RE-READS the file, applies apply
+// to what it finds there, and writes the result back.
+//
+// The re-read matters for the same reason it does in internal/registry: save
+// rewrites the WHOLE file from an in-memory map, so a long-running TUI holding
+// the store it read at startup would otherwise erase the secrets a `sand
+// create`/`sand reset` in another terminal had just written for a different VM.
+// Two writers editing the SAME VM's pairs concurrently still resolve
+// last-writer-wins for that VM — this store's API replaces a VM's scopes
+// wholesale, so there is no finer merge to make — but they no longer take each
+// other's unrelated VMs with them.
+//
+// With an empty path (an in-memory store, used in tests) there is nothing to
+// lock or re-read and apply runs straight against the existing map.
+func (s *Store) mutate(apply func(vms scopedVMs)) error {
+	if s.path == "" {
+		apply(s.vms)
+		return nil
 	}
+
+	release := statelock.Acquire(s.path)
+	defer release()
+
+	// A re-read that fails (a corrupt file, which readStore has just
+	// quarantined) leaves this process's own entries as the best available
+	// state — the same posture LoadFrom takes.
+	if vms, err := readStore(s.path); err == nil {
+		s.vms = vms
+	}
+	apply(s.vms)
 	return s.save()
 }
 

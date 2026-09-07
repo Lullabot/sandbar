@@ -73,10 +73,18 @@ type HostFiles interface {
 	// the remote host, so the implementation copies the fileset to a stable path
 	// under the remote LimaHome and returns THAT path — otherwise `limactl start`
 	// would mount a directory that does not exist on the remote host. The staged
-	// copy is left in place (refreshed each build): the base overlay's mount points
-	// at it, and a clone's finalize still bind-mounts it, so it must outlive the
-	// build that created it, exactly as the local checkout/extracted dir does.
-	StagePlaybook(ctx context.Context, localDir string) (mountPath string, err error)
+	// copy is left in place (refreshed when its content changes): the base
+	// overlay's mount points at it, and a clone's finalize still bind-mounts it,
+	// so it must outlive the build that created it, exactly as the local
+	// checkout/extracted dir does.
+	//
+	// stamp identifies localDir's CONTENT (the caller passes the playbook content
+	// hash). A remote implementation records it beside the staged copy and skips
+	// the copy entirely when it already matches, which is not merely an
+	// optimisation: staging is called on every clone, and re-copying over a
+	// directory that a CONCURRENT build's guest is rsyncing out of could hand that
+	// guest a half-written file. An empty stamp forces the copy.
+	StagePlaybook(ctx context.Context, localDir, stamp string) (mountPath string, err error)
 	// OpenLock opens or creates the advisory lock file at path (which the caller
 	// has already ensured a parent directory for) with perm, returning a LockFile
 	// the base-image serializer flocks. See internal/provision/baselock.go.
@@ -140,8 +148,9 @@ func (localFiles) LimaHome() string {
 }
 
 // StagePlaybook is a no-op for local Lima: limactl runs on this machine, so it
-// bind-mounts localDir directly — nothing to copy anywhere.
-func (localFiles) StagePlaybook(_ context.Context, localDir string) (string, error) {
+// bind-mounts localDir directly — nothing to copy anywhere, and so nothing for
+// the content stamp to guard either.
+func (localFiles) StagePlaybook(_ context.Context, localDir, _ string) (string, error) {
 	return localDir, nil
 }
 

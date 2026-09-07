@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/lullabot/sandbar/internal/statelock"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -216,29 +217,65 @@ func Load() (*Registry, error) {
 // not both unmarshalable into one struct.
 func LoadFrom(path string) (*Registry, error) {
 	r := &Registry{path: path, vms: map[scopedKey]entry{}}
-	data, err := os.ReadFile(path)
+	vms, needsSave, err := readIndex(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return r, nil
+		if errors.Is(err, errNewerSchema) {
+			// A pathless registry: it can never save, so a file written by a newer
+			// sand than this one is left exactly as it is rather than downgraded.
+			return NewEmpty(), err
 		}
 		return r, err
 	}
+	r.vms = vms
+	if needsSave {
+		// Best-effort persist of the migration. The in-memory registry is already
+		// correctly migrated, so this write is only about durability — and it must
+		// NOT be fatal to a load. A read-only or full data dir would otherwise make
+		// EVERY `sand`/`sand create` invocation surface a migration error, where
+		// the old (pure-read) LoadFrom loaded the same file silently; the next
+		// successful mutating save persists the version bump instead.
+		_ = r.mutate(nil)
+	}
+	return r, nil
+}
+
+// errNewerSchema marks the one unreadable file this package refuses to touch at
+// all: one stamped with a schema version this build does not understand. Every
+// other read failure still yields a usable (empty) registry that may later be
+// written; this one must not be, so LoadFrom hands back a pathless registry.
+var errNewerSchema = errors.New("upgrade sand")
+
+// readIndex reads and migrates the on-disk index at path WITHOUT writing
+// anything back, returning the entries, whether the file needs rewriting in the
+// current schema, and any read error. It is the shared body of LoadFrom and of
+// the re-read every mutate performs under the lock — the two must agree on how
+// a file is parsed, and a re-read that could itself save would recurse into the
+// lock it already holds.
+func readIndex(path string) (map[scopedKey]entry, bool, error) {
+	out := map[scopedKey]entry{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return out, false, nil
+		}
+		return out, false, err
+	}
 	if len(data) == 0 {
-		return r, nil
+		return out, false, nil
 	}
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		_ = os.Rename(path, path+".corrupt")
-		return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return out, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 	}
 	version := probe.Version
 	if version == 0 {
 		version = 1 // unversioned file predates the version field
 	}
 	if version > currentVersion {
-		return NewEmpty(), fmt.Errorf(
-			"managed index %s has schema version %d, but this sand only understands %d; upgrade sand",
-			path, version, currentVersion)
+		return out, false, fmt.Errorf(
+			"managed index %s has schema version %d, but this sand only understands %d; %w",
+			path, version, currentVersion, errNewerSchema)
 	}
 
 	needsSave := false
@@ -247,7 +284,7 @@ func LoadFrom(path string) (*Registry, error) {
 		var legacy legacyFileSchema
 		if err := json.Unmarshal(data, &legacy); err != nil {
 			_ = os.Rename(path, path+".corrupt")
-			return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 		}
 		vms := legacy.VMs
 		if vms == nil {
@@ -278,7 +315,7 @@ func LoadFrom(path string) (*Registry, error) {
 			if scope.Provider == "" {
 				scope = LocalScope
 			}
-			r.vms[scopedKey{scope: scope, name: name}] = e
+			out[scopedKey{scope: scope, name: name}] = e
 		}
 		needsSave = true
 	} else {
@@ -286,29 +323,20 @@ func LoadFrom(path string) (*Registry, error) {
 		var parsed fileSchema
 		if err := json.Unmarshal(data, &parsed); err != nil {
 			_ = os.Rename(path, path+".corrupt")
-			return r, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
 		}
 		for _, de := range parsed.VMs {
 			scope := Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}
 			if scope.Provider == "" {
 				scope = LocalScope
 			}
-			r.vms[scopedKey{scope: scope, name: de.Name}] = entry{
+			out[scopedKey{scope: scope, name: de.Name}] = entry{
 				Base: de.Base, Config: de.Config, Provider: de.Provider, RemoteTarget: de.RemoteTarget,
 			}
 		}
 	}
 
-	if needsSave {
-		// Best-effort persist. The in-memory registry is already correctly
-		// migrated, so this write is only about durability — and it must NOT be
-		// fatal to a load. A read-only or full data dir would otherwise make
-		// EVERY `sand`/`sand create` invocation surface a migration error, where
-		// the old (pure-read) LoadFrom loaded the same file silently; the next
-		// successful mutating save() persists the version bump instead.
-		_ = r.save()
-	}
-	return r, nil
+	return out, needsSave, nil
 }
 
 // renameLegacyBase rewrites every entry in vms whose base is from to to, in
@@ -420,10 +448,12 @@ func (r *Registry) Add(cfg vm.CreateConfig) error {
 // connection profile and a "web" on another must coexist).
 func (r *Registry) AddScoped(cfg vm.CreateConfig, scope Scope) error {
 	cfg.CloneToken = ""
-	r.vms[scopedKey{scope: scope, name: cfg.Name}] = entry{
-		Base: cfg.BaseName, Config: cfg, Provider: scope.Provider, RemoteTarget: scope.RemoteTarget,
-	}
-	return r.save()
+	return r.mutate(func(vms map[scopedKey]entry) bool {
+		vms[scopedKey{scope: scope, name: cfg.Name}] = entry{
+			Base: cfg.BaseName, Config: cfg, Provider: scope.Provider, RemoteTarget: scope.RemoteTarget,
+		}
+		return true
+	})
 }
 
 // Remove drops name from the index under the local Lima provider and persists
@@ -440,8 +470,10 @@ func (r *Registry) Remove(name string) error {
 // change. It never touches a same-named entry recorded under a different
 // scope — the whole point of the (scope, name) keying this task introduces.
 func (r *Registry) RemoveScoped(scope Scope, name string) error {
-	delete(r.vms, scopedKey{scope: scope, name: name})
-	return r.save()
+	return r.mutate(func(vms map[scopedKey]entry) bool {
+		delete(vms, scopedKey{scope: scope, name: name})
+		return true
+	})
 }
 
 // Reconcile drops managed entries whose VM no longer exists; present is the set
@@ -469,20 +501,36 @@ func (r *Registry) Reconcile(present map[string]bool) ([]string, error) {
 // for, another provider's entries, since two providers (or a same-named VM
 // under two scopes) can legitimately reuse the same VM name.
 func (r *Registry) ReconcileScoped(scope Scope, present map[string]bool) ([]string, error) {
-	var dropped []string
+	// The drop set is decided from what THIS registry already knew, not from
+	// whatever the re-read under the lock turns up (see mutate). present is a
+	// listing taken before this call; an entry another process added since then
+	// is not in it and is not evidence of a VM that has gone away — pruning it
+	// would delete a VM's index entry moments after a concurrent `sand create`
+	// recorded it, which is precisely the lost update the lock exists to stop.
+	known := make(map[string]bool)
 	for key := range r.vms {
-		if key.scope != scope {
-			continue
-		}
-		if !present[key.name] {
-			delete(r.vms, key)
-			dropped = append(dropped, key.name)
+		if key.scope == scope && !present[key.name] {
+			known[key.name] = true
 		}
 	}
-	if len(dropped) == 0 {
+	if len(known) == 0 {
 		return nil, nil
 	}
-	return dropped, r.save()
+
+	var dropped []string
+	err := r.mutate(func(vms map[scopedKey]entry) bool {
+		for key := range vms {
+			if key.scope == scope && known[key.name] {
+				delete(vms, key)
+				dropped = append(dropped, key.name)
+			}
+		}
+		return len(dropped) > 0
+	})
+	if len(dropped) == 0 {
+		return nil, err
+	}
+	return dropped, err
 }
 
 // BaseInScope returns the base image recorded for name, and whether name is
@@ -498,6 +546,50 @@ func (r *Registry) BaseInScope(name string, scope Scope) (base string, managed b
 	return e.Base, true
 }
 
+// mutate is the ONE way this registry's on-disk state changes: it takes the
+// index's advisory lock, RE-READS the file, applies apply to the entries it
+// finds there, and writes the result back. apply reports whether it changed
+// anything, so a no-op mutation costs no write.
+//
+// The re-read is the point. Every save writes the WHOLE file from an in-memory
+// map, so without it a long-running TUI — holding the index it read at startup —
+// silently erased any entry a `sand create` in another terminal had added in the
+// meantime: a real VM that was no longer sand-managed, no longer resettable, and
+// invisible in the board's managed-only roster. Atomic rename made each write
+// land intact; it never said which writer won. (The authoritative provenance
+// marker on the instance survives all of this, which is why the damage was
+// recoverable at all — see AdoptOnce — but the index is what the TUI reads on
+// every frame.)
+//
+// A caller's own in-memory map is refreshed to the merged state as a
+// side effect, so the process that just wrote is never behind the file it wrote.
+//
+// With an empty path (an in-memory registry, used in tests) there is nothing to
+// lock or re-read and apply runs straight against the existing map. A nil apply
+// means "just persist what is in memory" — the migration write LoadFrom does.
+func (r *Registry) mutate(apply func(vms map[scopedKey]entry) bool) error {
+	if r.path == "" {
+		if apply != nil {
+			apply(r.vms)
+		}
+		return nil
+	}
+
+	release := statelock.Acquire(r.path)
+	defer release()
+
+	// A re-read that fails (a corrupt file, which readIndex has just quarantined)
+	// leaves this process's own entries as the best available state — the same
+	// posture LoadFrom takes, and the next write re-creates the file from them.
+	if vms, _, err := readIndex(r.path); err == nil {
+		r.vms = vms
+	}
+	if apply != nil && !apply(r.vms) {
+		return nil
+	}
+	return r.save()
+}
+
 // save writes the index atomically (unique temp file + rename). With an empty
 // path it is a no-op, so an in-memory registry never touches disk. The temp file
 // is unique per write so two TUI processes sharing a data dir don't race on a
@@ -505,6 +597,10 @@ func (r *Registry) BaseInScope(name string, scope Scope) (base string, managed b
 // saves of the same logical state produce byte-identical output — otherwise Go
 // map iteration order would make the file's array order (and therefore its
 // diff) flap on every unrelated save.
+//
+// It is deliberately unexported AND only called from mutate, which holds the
+// index lock: a whole-file rewrite outside that lock is the lost update this
+// package spent a release quietly performing.
 func (r *Registry) save() error {
 	if r.path == "" {
 		return nil

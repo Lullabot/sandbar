@@ -129,8 +129,8 @@ to a coin flip.
 **Fix:** the template build now strips the machine identity before
 templatizing, and the old template is recognized as stale automatically — the
 next `sand create` rebuilds it. Existing VMs keep their cloned identity,
-though, so either recreate them from the rebuilt base, or fix each one in
-place:
+though, so either rebuild them from the rebuilt base (`sand reset NAME`, or `R`
+on the tile), or fix each one in place:
 
 ```bash
 sudo truncate -s 0 /etc/machine-id && sudo reboot

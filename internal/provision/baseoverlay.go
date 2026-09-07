@@ -52,8 +52,11 @@ import (
 
 // playbookMountPoint is where a base image mounts the host playbook directory.
 // RenderBaseOverlay writes it and the in-guest script rsyncs out of it; the two are
-// pinned together by TestBaseOverlayReaderUnderstandsTheOverlayWeWrite.
-const playbookMountPoint = "/mnt/playbook"
+// pinned together by TestBaseOverlayReaderUnderstandsTheOverlayWeWrite. It is an
+// alias for the lima package's constant rather than a second spelling of the
+// string, because lima.Configure repoints this exact mount on every clone and
+// two independent literals would be one rename away from silently disagreeing.
+const playbookMountPoint = lima.PlaybookMountPoint
 
 // baseOverlay is the part of an instance's lima.yaml that decides whether the
 // instance can be converged in place: which playbook it mounts, and the bootstrap

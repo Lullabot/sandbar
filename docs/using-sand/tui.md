@@ -144,12 +144,19 @@ new VM is created on without leaving the TUI. See
 ## Resetting a VM
 
 Pressing `R` on a managed tile opens the create form again, titled *Reset
-VM*, pre-filled with that VM's recorded settings. `Name` is locked; every
-other field — CPUs, memory, disk, hostname, git identity, clone URL — is
-editable, so a reset doubles as the way to resize a VM or change its
-identity. Confirm with `ctrl+s` to delete the VM and re-clone it from the
-base image with the edited settings; the new settings are then recorded, so
-the *next* reset defaults to them.
+VM*, pre-filled with that VM's recorded settings. Confirm with `ctrl+s` to
+delete the VM and re-clone it from the base image; the settings you changed
+are then recorded, so the *next* reset defaults to them.
+
+Two fields are shown but **locked**: `Name` and `GitHub repo URL`. A reset
+gives you *this* VM again — same name, same project — so CPUs, memory, disk,
+hostname and git identity are editable (a reset doubles as the way to resize a
+VM), while the two things that say *which* VM it is are not. To work on a
+different repo, press `n` and make another VM. The GitHub token field stays
+editable, because re-cloning a private repo still needs one.
+
+The headless equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name),
+with the same gate, the same defaults and the same two preserve options.
 
 Two **preserve toggles** follow the fields (space/enter flips the focused
 one). Both default off:

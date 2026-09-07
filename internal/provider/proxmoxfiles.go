@@ -65,7 +65,7 @@ func (f proxmoxFiles) DiskAllocBytes(string) int64 { return -1 }
 // the opposite reason — it bind-mounts that very directory — whereas here there
 // is nothing to mount at all: the playbook reaches the guest over SSH during
 // provisioning. Copying it anywhere would produce a path no one ever reads.
-func (f proxmoxFiles) StagePlaybook(_ context.Context, localDir string) (string, error) {
+func (f proxmoxFiles) StagePlaybook(_ context.Context, localDir, _ string) (string, error) {
 	return localDir, nil
 }
 

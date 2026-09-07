@@ -31,6 +31,22 @@ func walkResetFocusNext(m *model, n int) []int {
 	return seen
 }
 
+// resetCycleSteps is how many focus moves it takes to leave fHostname, visit
+// every EDITABLE input up to fCloneToken, walk the toggles, and land back on
+// fHostname. Derived from fieldLocked rather than from the field indices,
+// because reset mode steps over its locked fields (the Name and the repo URL)
+// and a hard-coded span silently stops testing a full cycle the moment that set
+// changes.
+func resetCycleSteps(m model, toggles int) int {
+	editable := 0
+	for i := fHostname; i <= fCloneToken; i++ {
+		if !m.fieldLocked(i) {
+			editable++
+		}
+	}
+	return editable - 1 + toggles + 1 // to the last input, through the toggles, then wrap
+}
+
 func walkResetFocusPrev(m *model, n int) []int {
 	seen := make([]int, 0, n)
 	for i := 0; i < n; i++ {
@@ -70,7 +86,7 @@ func TestResetFocusNextToggleHidden(t *testing.T) {
 	// Full cycle from fHostname must never observe toggleFocus == 1.
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
-	steps := (fCloneToken - fHostname) + 2 // inputs to fCloneToken, then two more Nexts to wrap
+	steps := resetCycleSteps(m, 1) // one toggle: the project one is hidden
 	seen := walkResetFocusNext(&m, steps)
 	for _, v := range seen {
 		if v == 1 {
@@ -104,7 +120,7 @@ func TestResetFocusPrevToggleHidden(t *testing.T) {
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
-	steps := (fCloneToken - fHostname) + 2
+	steps := resetCycleSteps(m, 1)
 	seen := walkResetFocusPrev(&m, steps)
 	for _, v := range seen {
 		if v == 1 {

@@ -324,16 +324,29 @@ func probeProvenanceOwners(enabled []profiles.Profile, name string) []profiles.P
 // is "no such VM"; more than one requires --profile to disambiguate, and
 // lists the candidates by name.
 func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, profileFlag string) (provider.Provider, error) {
+	target, err := resolveVMProfile(store, reg, name, profileFlag)
+	if err != nil {
+		return nil, err
+	}
+	prov, _, err := providerForProfile(target)
+	return prov, err
+}
+
+// resolveVMProfile is resolveShellProvider's decision proper: WHICH connection
+// profile an existing VM name lives on. It is split out because a caller that
+// acts on the VM's registry entry — `sand reset`, which reads its recorded
+// config and records the rebuilt one — needs that profile's registry.Scope as
+// well as its provider, and the two must be derived from the SAME answer.
+func resolveVMProfile(store *profiles.Store, reg registryOwnership, name, profileFlag string) (profiles.Profile, error) {
 	if profileFlag != "" {
 		p, ok := store.GetByName(profileFlag)
 		if !ok {
-			return nil, fmt.Errorf("unknown connection profile %q", profileFlag)
+			return profiles.Profile{}, fmt.Errorf("unknown connection profile %q", profileFlag)
 		}
 		if !p.Enabled {
-			return nil, fmt.Errorf("profile %q is disabled", p.Name)
+			return profiles.Profile{}, fmt.Errorf("profile %q is disabled", p.Name)
 		}
-		prov, _, err := providerForProfile(p)
-		return prov, err
+		return p, nil
 	}
 
 	enabled := make([]profiles.Profile, 0, len(store.List()))
@@ -346,7 +359,7 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 	var target profiles.Profile
 	switch {
 	case len(enabled) == 0:
-		return nil, fmt.Errorf("no enabled connection profile found (not even %q)", profiles.LocalProfileID)
+		return profiles.Profile{}, fmt.Errorf("no enabled connection profile found (not even %q)", profiles.LocalProfileID)
 	case len(enabled) == 1:
 		// Only one profile is enabled: use it directly, exactly as `sand shell`
 		// always has, regardless of whether NAME is a sand-managed VM — there is
@@ -376,7 +389,7 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 		}
 		switch len(owners) {
 		case 0:
-			return nil, fmt.Errorf("no such VM %q (run 'sand' to list instances, or pass --profile if it is on a specific connection profile)", name)
+			return profiles.Profile{}, fmt.Errorf("no such VM %q (run 'sand' to list instances, or pass --profile if it is on a specific connection profile)", name)
 		case 1:
 			target = owners[0]
 		default:
@@ -384,10 +397,9 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 			for i, o := range owners {
 				names[i] = o.Name
 			}
-			return nil, fmt.Errorf("%q exists under more than one connection profile (%s) — pass --profile to pick one", name, strings.Join(names, ", "))
+			return profiles.Profile{}, fmt.Errorf("%q exists under more than one connection profile (%s) — pass --profile to pick one", name, strings.Join(names, ", "))
 		}
 	}
 
-	prov, _, err := providerForProfile(target)
-	return prov, err
+	return target, nil
 }

@@ -31,6 +31,16 @@ import (
 // aptCacheHostDirFn seam exists for exactly this; use it, and keep XDG_CACHE_HOME
 // set too for any other os.UserCacheDir() caller that may appear.
 //
+// TMPDIR is isolated for the same reason, and it is the third instance of the
+// same lesson. Reset stages its archives into os.MkdirTemp("") (newStageDir),
+// and once stage-out has begun NO later error removes that directory — the path
+// is surfaced in the error instead, so a user can recover data that would
+// otherwise be gone. That contract is right in production and litters in a test:
+// every run of the stage-out-failure case left a real /tmp/sand-reset-* behind on
+// the developer's machine. os.MkdirTemp("") honours TMPDIR, so pointing it at a
+// directory this function removes keeps the production behaviour intact and the
+// host clean.
+//
 // The limae2e tests are excluded (build tag): they boot real VMs and need the real
 // Lima home, which is the entire point of them.
 func TestMain(m *testing.M) {
@@ -51,8 +61,16 @@ func TestMain(m *testing.M) {
 	aptCacheHostDirFn = func() (string, error) {
 		return filepath.Join(cacheDir, "sand", "apt-cache"), nil
 	}
+	tmpDir, err := os.MkdirTemp("", "sand-provision-test-tmp-*")
+	if err != nil {
+		panic("isolate TMPDIR: " + err.Error())
+	}
+	if err := os.Setenv("TMPDIR", tmpDir); err != nil {
+		panic("isolate TMPDIR: " + err.Error())
+	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	_ = os.RemoveAll(cacheDir)
+	_ = os.RemoveAll(tmpDir)
 	os.Exit(code)
 }
