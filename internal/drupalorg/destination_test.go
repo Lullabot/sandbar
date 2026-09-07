@@ -34,6 +34,9 @@ func TestNewDestination(t *testing.T) {
 		ParentID:     59858,
 		ParentPath:   "project/drupal",
 		ParentBranch: "11.x",
+		// Defaulted to the branch: host-derived and stable, and the value a
+		// destination keeps whenever no issue title is available.
+		MergeRequestTitle: "drupal-3181657",
 	}
 	if dest != want {
 		t.Fatalf("NewDestination() = %+v, want %+v", dest, want)
@@ -214,6 +217,9 @@ func TestNewDestination_AdversarialPayloadCannotInfluenceDestination(t *testing.
 		ParentID:     59858,
 		ParentPath:   "project/drupal",
 		ParentBranch: "11.x",
+		// Defaulted to the branch: host-derived and stable, and the value a
+		// destination keeps whenever no issue title is available.
+		MergeRequestTitle: "drupal-3181657",
 	}
 	if hostileDest != want {
 		t.Errorf("NewDestination() = %+v, want %+v", hostileDest, want)

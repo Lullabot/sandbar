@@ -399,6 +399,11 @@ func newLiveDestPublisher() (*liveDestPublisher, error) {
 // issue, fetches it anonymously, and hands both to drupalorg.NewDestination
 // — task 4's guard — which is the only place a Destination is ever built.
 // allowOutsideIssueNS passes straight through to it.
+//
+// It then looks up the issue's own drupal.org title to name the merge
+// request with. That read is anonymous, separately bounded, and allowed to
+// come back empty — see drupalorg.LookupIssueTitle — so a publish is never
+// failed or delayed for want of a better title than the branch name.
 func (l *liveDestPublisher) ResolveDestination(ctx context.Context, module string, issue int, allowOutsideIssueNS bool) (drupalorg.Destination, error) {
 	forkPath, err := drupalorg.ForkPath(module, issue)
 	if err != nil {
@@ -415,7 +420,7 @@ func (l *liveDestPublisher) ResolveDestination(ctx context.Context, module strin
 	if err != nil {
 		return drupalorg.Destination{}, fmt.Errorf("sand publish: %w", err)
 	}
-	return dest, nil
+	return dest.WithMergeRequestTitle(drupalorg.LookupIssueTitle(ctx, l.client, module, issue)), nil
 }
 
 // Publish delegates to the wrapped *drupalorg.Publisher — see its doc

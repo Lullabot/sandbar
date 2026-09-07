@@ -45,6 +45,19 @@ type Destination struct {
 	// merge request's target_branch, read from
 	// forked_from_project.default_branch.
 	ParentBranch string
+	// MergeRequestTitle is what a merge request opened for this destination
+	// is titled.
+	//
+	// It lives on Destination, beside the fields naming where the commits
+	// land, for the same reason those do: it must never be derived from the
+	// payload. A title taken from guest text would put an agent's prose — of
+	// a compromised or prompt-injected agent, per the package doc comment —
+	// at the top of a permanent, public proposal, and would change between a
+	// first publish and a resumed one. NewDestination therefore defaults it
+	// to Branch, which is host-derived and stable; WithMergeRequestTitle
+	// replaces it with the issue's OWN drupal.org title, which is
+	// host-fetched and equally out of the guest's reach.
+	MergeRequestTitle string
 }
 
 // NewDestination builds a Destination from host-side inputs only: module and
@@ -135,5 +148,30 @@ func NewDestination(module string, issue int, forkPath string, fork *ProjectInfo
 		ParentID:     parent.ID,
 		ParentPath:   parent.PathWithNamespace,
 		ParentBranch: parent.DefaultBranch,
+		// The branch name is the title publication has always used: terse,
+		// but host-derived and stable across a resumed run. It stands unless
+		// a caller has a better one — see WithMergeRequestTitle.
+		MergeRequestTitle: branch,
 	}, nil
+}
+
+// WithMergeRequestTitle returns a copy of d titled with the issue's own
+// drupal.org title (drupalorg.LookupIssueTitle's output, already formatted
+// as "Issue #<nid>: <title>" and sanitized). An empty title leaves d's
+// existing title alone, so a failed or refused lookup silently keeps the
+// branch-name default rather than blanking it.
+//
+// It is a separate step from NewDestination, rather than another parameter
+// on it, because the two answer to different rules: NewDestination is pure
+// and total — it validates a destination and cannot fail for want of a
+// network — while a title comes from a fetch that is allowed to fail and
+// whose failure must not propagate. Keeping them apart is what lets every
+// caller that does not care about titles go on constructing a correct,
+// publishable Destination with no lookup at all.
+func (d Destination) WithMergeRequestTitle(title string) Destination {
+	if title == "" {
+		return d
+	}
+	d.MergeRequestTitle = title
+	return d
 }

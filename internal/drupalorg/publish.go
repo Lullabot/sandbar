@@ -739,16 +739,26 @@ type mergeRequestRequest struct {
 // names a canonical project; see Destination.ParentID for why that is a
 // proposal rather than a write to it.
 //
-// The title is the source branch, which is host-derived, stable across
-// re-runs, and drupal.org's own convention for an issue branch. Deriving it
-// from the payload would make a merge request's title depend on guest text
-// and would change between a first publish and a resumed one.
+// The title comes from the Destination, which is host-derived and stable
+// across re-runs — normally the issue's own drupal.org title, falling back
+// to the source branch (see Destination.MergeRequestTitle). Deriving it from
+// the payload would make a merge request's title depend on guest text and
+// would change between a first publish and a resumed one.
+//
+// The fallback is applied here as well as in NewDestination, so that a
+// Destination built as a struct literal — every test that does so, and any
+// future caller — still opens a titled merge request rather than an untitled
+// one GitLab would reject.
 func (p *Publisher) postMergeRequest(ctx context.Context, dest Destination, token string) (*MergeRequest, error) {
+	title := dest.MergeRequestTitle
+	if title == "" {
+		title = dest.Branch
+	}
 	body := mergeRequestRequest{
 		SourceBranch:    dest.Branch,
 		TargetBranch:    dest.ParentBranch,
 		TargetProjectID: dest.ParentID,
-		Title:           dest.Branch,
+		Title:           title,
 	}
 	var mr MergeRequest
 	if err := p.post(ctx, encodedProjectPath(dest.ForkPath)+"/merge_requests", token, body, &mr); err != nil {

@@ -20,6 +20,11 @@ type Config struct {
 	// BaseURL overrides the API root; empty uses defaultBaseURL. Tests point
 	// this at an httptest.Server so no test ever contacts git.drupalcode.org.
 	BaseURL string
+	// IssueBaseURL overrides drupal.org's node API root; empty uses
+	// defaultIssueBaseURL. It is a separate knob from BaseURL because it is
+	// a separate HOST — see defaultIssueBaseURL — and tests point it at an
+	// httptest.Server so no test ever contacts www.drupal.org either.
+	IssueBaseURL string
 	// HTTPClient overrides the transport; nil uses http.DefaultClient.
 	HTTPClient *http.Client
 }
@@ -32,6 +37,10 @@ type Config struct {
 type Client struct {
 	http *http.Client
 	base *url.URL
+	// issueBase is drupal.org's node API root, kept as a string rather than
+	// a *url.URL because nothing appends a query or escapes a segment
+	// against it: Issue builds one fixed "/node/<digits>.json" path.
+	issueBase string
 }
 
 // New builds a Client from cfg.
@@ -50,7 +59,7 @@ func New(cfg Config) (*Client, error) {
 		httpClient = http.DefaultClient
 	}
 
-	return &Client{http: httpClient, base: base}, nil
+	return &Client{http: httpClient, base: base, issueBase: cfg.IssueBaseURL}, nil
 }
 
 // ErrDrupalOrgRefused reports that drupal.org's edge blocked a request
