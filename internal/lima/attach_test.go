@@ -365,3 +365,80 @@ func TestRunArgvDropsAnUnsafeColorterm(t *testing.T) {
 		t.Fatalf("expression = %q, want the caller's literal command alone", expr)
 	}
 }
+
+// TestAttachArgvControlModeFlagsBothNewSessionsOnly pins where `-CC` may and may
+// not appear. Both branches must get it — a user who is the FIRST client to a VM
+// (the `main` branch) and one who is the second (the grouped branch) both asked
+// for control mode and must both get it, and a mode that applied to only one
+// would depend on invisible guest state.
+//
+// The `has-session` probe must NOT get it: the guest shell branches on that
+// command's EXIT STATUS, and a control-mode client there would answer a yes/no
+// question with a protocol stream.
+func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
+	argv := AttachArgvMode("web", "/home/u.guest", "", AttachControl)
+	expr, grouped, mainBranch := splitGuestExpr(t, argv)
+
+	for _, tc := range []struct{ name, branch string }{
+		{"grouped", grouped},
+		{"main", mainBranch},
+	} {
+		// `-CC` sits directly after `tmux` and ahead of every command, not
+		// glued to new-session: clipboardCmds' `start-server \; set -s …`
+		// runs in between, and tmux takes client flags only before commands.
+		cc := strings.Index(tc.branch, "tmux -CC ")
+		if cc < 0 || !strings.Contains(tc.branch[cc:], "new-session") {
+			t.Errorf("the %s branch does not start a control-mode client; a --cc attach must be control mode whether or not `main` already exists:\n\t%s", tc.name, tc.branch)
+		}
+	}
+
+	if strings.Contains(expr, "-CC has-session") {
+		t.Errorf("the has-session PROBE was put into control mode. The guest shell branches on its exit status, so it must stay an ordinary command:\n\t%s", expr)
+	}
+	if !strings.Contains(expr, "tmux has-session") {
+		t.Errorf("the has-session probe is no longer a bare `tmux has-session`, so the branch guard has changed shape:\n\t%s", expr)
+	}
+}
+
+// TestAttachArgvDefaultModeIsUnchanged is the regression guard on the mode-less
+// entrypoints: AttachArgv and GuestAttachArgv are what every caller but `sand
+// shell --cc` uses, and adding control mode must not have leaked a `-CC` into
+// any of them.
+func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"AttachArgv", AttachArgv("web", "/home/u.guest", "truecolor")},
+		{"AttachArgvMode(AttachFullScreen)", AttachArgvMode("web", "/home/u.guest", "truecolor", AttachFullScreen)},
+		{"GuestAttachArgv", GuestAttachArgv("truecolor")},
+		{"GuestAttachArgvMode(AttachFullScreen)", GuestAttachArgvMode("truecolor", AttachFullScreen)},
+	} {
+		if got := strings.Join(tc.argv, " "); strings.Contains(got, "-CC") {
+			t.Errorf("%s emitted a control-mode client. Only an explicit AttachControl may:\n\t%s", tc.name, got)
+		}
+	}
+
+	// The default-mode expression must still be byte-identical to the mode-less
+	// one, so the refactor that introduced AttachMode cannot have moved a token.
+	if a, b := AttachArgv("web", "/h", "truecolor"), AttachArgvMode("web", "/h", "truecolor", AttachFullScreen); !slices.Equal(a, b) {
+		t.Errorf("AttachArgv and AttachArgvMode(AttachFullScreen) disagree:\n\t%q\n\t%q", a, b)
+	}
+}
+
+// TestAttachArgvControlModeKeepsDestroyUnattachedOffMain is
+// TestAttachArgvDestroyUnattachedOnGroupedSessionOnly's control-mode twin. That
+// test guards the single most destructive thing this package can get wrong
+// (destroy-unattached on `main` silently destroys the user's long-running work
+// on detach), and a second way of building the expression is exactly how such a
+// guarantee gets lost — so it is re-asserted here rather than assumed to carry.
+func TestAttachArgvControlModeKeepsDestroyUnattachedOffMain(t *testing.T) {
+	_, grouped, mainBranch := splitGuestExpr(t, AttachArgvMode("web", "/h", "", AttachControl))
+
+	if !strings.Contains(grouped, `set-option -t "$s" destroy-unattached on`) {
+		t.Errorf("the grouped session does not set destroy-unattached on ITSELF, so every second --cc attach leaks an orphan session:\n\t%s", grouped)
+	}
+	if strings.Contains(mainBranch, "destroy-unattached") {
+		t.Fatalf("destroy-unattached reached the `main` branch under control mode. This DESTROYS the user's long-running work the moment they detach:\n\t%s", mainBranch)
+	}
+}

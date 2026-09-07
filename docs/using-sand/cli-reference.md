@@ -281,7 +281,7 @@ Attach a shell to `NAME`'s persistent tmux session in the guest. This is the
 same attach path the TUI's `S` key uses, so the two entrypoints never drift.
 
 ```
-Usage: sand shell NAME [--profile <name>]
+Usage: sand shell NAME [--profile <name>] [--cc]
 
 Attach a shell to NAME's persistent tmux session in the guest.
 
@@ -297,14 +297,29 @@ A second terminal running this command shares the same windows but keeps its
 own current one, so two terminals can look at two different windows of the
 same VM.
 
+--cc attaches in tmux control mode instead. In a terminal that speaks the
+protocol, each guest window becomes a native tab, so C-a c opens a real tab
+rather than a window drawn inside this one. iTerm2 is the reference
+implementation; WezTerm implements a subset; the list is not exhaustive and
+sand does not detect your terminal, it just starts a tmux -CC client.
+Run it from a plain terminal window: a host tmux pane strips the control-mode
+handshake, so --cc refuses when $TMUX is set.
+
 The named VM must already exist and be running (see 'sand' to list instances,
 or 'sand create' to make one). If NAME is managed under more than one
 connection profile, --profile picks which one to attach to.
 ```
 
-`NAME` is required (exactly one positional argument); `--profile` may appear
-before or after `NAME`. `sand shell` refuses a VM that does not exist or is
-not running.
+`NAME` is required (exactly one positional argument); `--profile` and `--cc`
+may each appear before or after `NAME`. `sand shell` refuses a VM that does
+not exist or is not running.
+
+`--cc` attaches in tmux control mode, so a terminal that speaks the protocol
+renders the guest's tmux windows as native tabs. It refuses when `$TMUX` is
+set, because a host tmux pane strips the handshake control mode needs — see
+[Native terminal tabs with `tmux -CC`](files-and-shells.md#native-terminal-tabs-with-tmux-cc)
+for both ways to get native tabs and why you can only have one of them at a
+time.
 
 ### Cross-profile resolution for `sand shell`
 

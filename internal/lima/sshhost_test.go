@@ -606,8 +606,8 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	// The guest expression survives BYTE-FOR-BYTE (only shell-quoted for the remote
 	// shell), and destroy-unattached still never touches `main`.
 	last := got[len(got)-1]
-	if !strings.Contains(last, guestAttachExpr("")) {
-		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr(""))
+	if !strings.Contains(last, guestAttachExpr("", "")) {
+		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr("", ""))
 	}
 
 	// The remote argv's tail (after the `ssh -t <mux flags> target` prefix) must

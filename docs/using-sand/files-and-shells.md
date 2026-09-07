@@ -69,6 +69,90 @@ of a board nobody is looking at rather than making the provisioner wait for a
 screen to draw on. On detach the tile shows where that build has actually got
 to — not a replay of every step it took while you were away.
 
+### Native terminal tabs with `tmux -CC`
+
+Some terminals can render a tmux session's windows as **native tabs** rather
+than letting tmux draw them itself. You run tmux in *control mode*
+(`tmux -CC`), tmux speaks a line protocol instead of painting a screen, and
+the terminal turns each tmux window into a real tab. sand has two ways to use
+that, and they are not interchangeable — one gives you a tab per **VM**, the
+other a tab per **window inside one VM**.
+
+#### Which terminals speak control mode
+
+Nothing in sand looks at which terminal you are running. `--cc` starts an
+ordinary `tmux -CC` client and the two recipes below are plain tmux commands,
+so what you get is whatever your terminal does with the protocol. **This list
+is not exhaustive** and support moves; at the time of writing:
+
+| Terminal | Control mode |
+| --- | --- |
+| **iTerm2** | The reference implementation — control mode was written for it. The rest of this page describes iTerm2's behaviour. |
+| **WezTerm** | Implemented, but a subset: WezTerm's own UI takes the keystrokes, so the tmux prefix does not reach tmux. Use WezTerm's new-tab rather than `C-a c`. |
+| **Ghostty** | Not yet. Protocol parsing landed in 1.3.0 but is not wired to the UI, so you do not get tabs today. |
+| **Alacritty, Windows Terminal, Terminal.app** | No. Each has an open feature request. |
+
+A terminal that does not speak control mode prints the protocol into your
+window as scrolling text rather than failing cleanly — sand cannot tell the
+difference, so if that is what you see, drop `--cc` and attach normally.
+
+#### A tab per VM, with the board still live
+
+Start sand inside a control-mode tmux session:
+
+```console
+$ tmux -CC new-session -s sandbar sand
+```
+
+`$TMUX` is now set, so `S` takes the new-window path described above instead
+of suspending — and because your terminal is rendering that tmux, the new
+window arrives as a **native tab**. The board keeps running in its own tab beside
+it, progress bars and all, and each `S` on a different VM opens another tab.
+
+This is the setup to use if you spend the day in the board.
+
+#### A tab per window inside one VM
+
+`sand shell --cc NAME` attaches to the **guest's** tmux in control mode, so
+the windows `C-a c` makes inside the VM become native tabs:
+
+```console
+$ sand shell --cc web
+```
+
+Run this from a plain terminal window, not from the board.
+
+#### Why you can't have both at once
+
+The two recipes stack a host tmux and a guest tmux, and only the outer one
+can reach the terminal. Control mode announces itself with a DCS escape sequence,
+and tmux strips DCS from its panes' output rather than forwarding it to its
+client — so a guest `tmux -CC` running inside a host tmux window never
+reaches the terminal at all. Turning on `allow-passthrough` does not change
+this; that option forwards a specific `tmux;`-prefixed wrapper, not the
+handshake tmux emits on its own.
+
+Rather than print raw protocol into your pane, `sand shell --cc` refuses
+when `$TMUX` is set:
+
+```console
+$ sand shell --cc web
+sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode
+handshake before your terminal can see it; detach (C-a d) and run this from a
+plain terminal window
+```
+
+So pick the layer that matters more to you. If you mostly want several VMs
+open at once, take the first recipe. If you mostly want several windows
+inside one VM, take the second.
+
+!!! tip "The board will mention this once"
+
+    The first time you press `S` outside a host tmux session, and only if
+    tmux is installed on this machine, the board logs a one-line reminder of
+    both commands to its Messages strip. It appears once per run of `sand`,
+    not once per shell — quit and relaunch to see it again.
+
 ## Uploading and downloading files: data, not code
 
 `u` (upload) and `g` (download) on a focused tile open a file-transfer pane.

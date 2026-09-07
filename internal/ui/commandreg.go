@@ -261,6 +261,9 @@ var vmCommands = []vmCommand{
 				m.logMsg("opened " + v.Name + " in a new tmux window")
 			} else {
 				m.logMsg("attaching to " + v.Name + " — C-a d detaches; the TUI resumes when you detach or exit")
+				// Only this branch suspends, so only this branch has a cost worth
+				// suggesting a way out of. See controlmodehint.go.
+				m.controlModeHint(v.Name)
 			}
 			return shellCmd(m.provFor(v.scope), v.scope, v.VM)
 		},

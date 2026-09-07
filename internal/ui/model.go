@@ -294,6 +294,11 @@ type model struct {
 	searching   bool
 	searchQuery string
 
+	// ccHintShown records that this RUN has already logged the tmux control-mode
+	// tip (controlmodehint.go), so a user who shells into six VMs reads it once
+	// rather than six times. Session-only on purpose — see that file's header.
+	ccHintShown bool
+
 	// acting is true while a quick lifecycle action (start/stop/restart/delete) is
 	// in flight. It drives the spinner beside the status line so these blocking
 	// limactl calls show live feedback, and is cleared by the matching
