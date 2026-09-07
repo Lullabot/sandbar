@@ -2,7 +2,7 @@ module github.com/lullabot/sandbar
 
 go 1.25.0
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	charm.land/bubbles/v2 v2.2.1
