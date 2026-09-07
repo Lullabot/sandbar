@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1124,8 +1125,17 @@ type landingPublish struct {
 
 	module string
 	issue  int
-	dest   drupalorg.Destination
-	cs     drupalorg.ChangeSet
+	// upstream is the checkout's upstream tracking ref, resolved by the
+	// flow's FIRST step and held here because the issue prompt now sits
+	// AFTER that step rather than before it: when the remote turns out to be
+	// a canonical project, the prompt is shown and its submission must
+	// continue straight to the change-set collection instead of re-reading
+	// the guest for a fact already in hand. Empty means "not resolved yet"
+	// — which is also how the retry path recognises that a failed first step
+	// has to be run again rather than resumed (see submitLandingIssue).
+	upstream string
+	dest     drupalorg.Destination
+	cs       drupalorg.ChangeSet
 	// text is drupalorg.RenderConfirmation's output verbatim — the plan
 	// requires that neither surface build the confirmation twice in two
 	// idioms, so the CONTENT comes from internal/drupalorg and only this
@@ -1167,17 +1177,95 @@ func (p *landingPublish) stopStep() {
 	}
 }
 
-// startLandingPublish opens the drupal.org publish flow's issue-number
-// prompt for c. Nothing is resolved or published until the flow reaches
-// publishConfirm and the user presses 'y' — see updateLandingPublish.
+// startLandingPublish opens the drupal.org publish flow for c by resolving
+// the checkout's own origin remote FIRST, before asking the user anything.
+// A developer working an issue clones that issue's fork, so their remote is
+// "issue/<module>-<nid>" and already names the issue being published to;
+// drupalorg.TargetFromRemoteURL reads it back out, and the issue prompt is
+// shown only for the case the remote genuinely cannot answer — a checkout
+// cloned from the canonical "project/<module>" repository. See
+// handleLandingRemoteInfo, which is where that branch is taken.
+//
+// Nothing is resolved beyond that read, and nothing is published, until the
+// flow reaches publishConfirm and the user presses 'y' — see
+// updateLandingPublish. Deriving the issue removes a question, never a
+// confirmation: the destination it derives is still rendered in full and
+// still has to be accepted.
 func (m *model) startLandingPublish(c checkouts.Checkout) tea.Cmd {
 	m.landingPublishEpoch++
+	p := &landingPublish{checkout: c, stage: publishResolving, issueInput: newIssueInput()}
+	m.landing.publish = p
+	return resolveRemoteInfoCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, c.Path, m.landingPublishEpoch)
+}
+
+// newIssueInput builds the issue-number prompt's text input.
+//
+// SetWidth is not cosmetic here and must not be dropped: bubbles' textinput
+// sizes its placeholder buffer to Width()+1 runes, so an input left at the
+// zero width renders a 23-character placeholder as its first character alone
+// — the prompt read "> d", the first letter of "drupal.org issue number",
+// which looks for all the world like a stray keystroke sitting in the field.
+// Every other text input in sand (form.go, profilesview.go) sets a width for
+// this reason; this one is no different.
+func newIssueInput() textinput.Model {
 	ti := textinput.New()
 	ti.Placeholder = "drupal.org issue number"
-	ti.CharLimit = 10
-	focus := ti.Focus()
-	m.landing.publish = &landingPublish{checkout: c, stage: publishAskIssue, issueInput: ti}
-	return tea.Batch(focus, textinput.Blink)
+	// Room for a pasted issue URL, not just the seven digits of a node ID —
+	// parseIssueRef accepts one, and a CharLimit that truncated it would
+	// silently turn the paste into a wrong number rather than a rejected one.
+	ti.CharLimit = 128
+	ti.SetWidth(44)
+	ti.Focus()
+	return ti
+}
+
+// issueRefRe matches what someone can reasonably put in the issue prompt: a
+// bare node ID, a "#"-prefixed one, or a drupal.org issue URL — whose node
+// ID is always its last path segment
+// ("https://www.drupal.org/project/<module>/issues/<nid>"). Pasting the URL
+// straight from the browser is the natural gesture once paste works at all,
+// and re-typing seven digits out of a URL already on the clipboard is
+// exactly the busywork this flow is trying to remove.
+//
+// It is anchored at BOTH ends deliberately. A pattern that merely found
+// digits somewhere in the input would happily read an issue number out of a
+// string that is not an issue reference at all, and the cost of guessing
+// wrong here is a public write to the wrong issue's fork.
+var issueRefRe = regexp.MustCompile(`^(?:#|https?://\S+/)?([0-9]+)/?$`)
+
+// parseIssueRef reads a drupal.org issue node ID out of what the user
+// entered. It VALIDATES rather than sanitises, in the same spirit as
+// drupalorg.ForkPath: anything that is not one of the accepted shapes is
+// refused outright rather than scavenged for digits.
+func parseIssueRef(raw string) (int, bool) {
+	m := issueRefRe.FindStringSubmatch(strings.TrimSpace(raw))
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// backToIssuePrompt returns the flow to the issue-number prompt with reason
+// shown, from wherever it failed. Every resolve step's failure path goes
+// through here so they cannot drift apart in what they leave behind.
+//
+// The already-known issue is written back into the field rather than the
+// field being left blank: when the issue was DERIVED from the remote the
+// user never typed it, so a blank prompt after (say) "no issue fork at
+// issue/foo-123" would ask them to supply a number without showing them the
+// one that just failed. Seeding it also makes the prompt the flow's override
+// for a derived issue — the only way to aim at a different one from the TUI.
+func (p *landingPublish) backToIssuePrompt(reason string) tea.Cmd {
+	p.err = reason
+	p.stage = publishAskIssue
+	if p.issue > 0 {
+		p.issueInput.SetValue(strconv.Itoa(p.issue))
+	}
+	return tea.Batch(p.issueInput.Focus(), textinput.Blink)
 }
 
 // updateLandingPublish routes keys while the drupal.org publish flow is
@@ -1235,15 +1323,23 @@ func (m model) updateLandingPublish(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // destination, guard, or payload logic lives here — only sequencing.
 func (m model) submitLandingIssue() (tea.Model, tea.Cmd) {
 	p := m.landing.publish
-	n, err := strconv.Atoi(strings.TrimSpace(p.issueInput.Value()))
-	if err != nil || n <= 0 {
-		p.err = "enter a positive drupal.org issue number"
+	n, ok := parseIssueRef(p.issueInput.Value())
+	if !ok {
+		p.err = "enter a drupal.org issue number, or paste its issue URL"
 		return m, nil
 	}
 	p.issue = n
 	p.err = ""
 	p.stage = publishResolving
-	return m, resolveRemoteInfoCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, m.landingPublishEpoch)
+	if p.upstream == "" {
+		// The first step never completed (it failed, and the prompt is where
+		// the flow parks a failure), so there is no remote or upstream in
+		// hand to resume from: run it again. The re-run's own result decides
+		// the module, and leaves the issue just entered alone unless the
+		// remote turns out to name a fork of its own.
+		return m, resolveRemoteInfoCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, m.landingPublishEpoch)
+	}
+	return m, collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, p.upstream, m.landingPublishEpoch)
 }
 
 // resolveRemoteInfoCmd runs originAndUpstreamExpr in the guest and reports
@@ -1263,10 +1359,22 @@ func resolveRemoteInfoCmd(ctx context.Context, prov provider.Provider, v vm.VM, 
 }
 
 // handleLandingRemoteInfo folds the guest remote/upstream resolution into
-// the flow: on success it derives the module (drupalorg.ModuleFromRemoteURL)
-// and fires the change-set collection (collectCmd) against the resolved
-// upstream ref; on failure it returns to the issue prompt with the reason
-// shown, so the user can fix it (or rescan and retry) without starting over.
+// the flow. This is the step that decides whether the user is asked anything
+// at all: drupalorg.TargetFromRemoteURL reads the module out of the remote
+// and, when that remote is an issue fork, the issue number with it. With an
+// issue in hand the flow goes straight on to the change-set collection
+// (collectCmd) against the resolved upstream ref; without one — a checkout
+// cloned from the canonical "project/<module>" repository, which names no
+// issue — it stops at the prompt and asks.
+//
+// A number the user typed already (the retry path, where the prompt was
+// reached by an earlier failure) is kept unless the remote names a fork of
+// its own, in which case the fork's issue wins: it is the repository the
+// commits would actually be replayed onto, so it is the more authoritative
+// of the two.
+//
+// On failure it returns to the issue prompt with the reason shown, so the
+// user can fix it (or rescan and retry) without starting over.
 func (m *model) handleLandingRemoteInfo(msg landingRemoteInfoMsg) tea.Cmd {
 	p := m.landing.publish
 	if p == nil || msg.epoch != m.landingPublishEpoch {
@@ -1277,18 +1385,23 @@ func (m *model) handleLandingRemoteInfo(msg landingRemoteInfoMsg) tea.Cmd {
 	// phase or starts the next step's own context.
 	p.stopStep()
 	if msg.err != nil {
-		p.err = msg.err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(msg.err.Error())
 	}
-	module, err := drupalorg.ModuleFromRemoteURL(msg.remoteURL)
+	target, err := drupalorg.TargetFromRemoteURL(msg.remoteURL)
 	if err != nil {
-		p.err = err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(err.Error())
 	}
-	p.module = module
-	return collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, msg.upstream, m.landingPublishEpoch)
+	p.module = target.Module
+	p.upstream = msg.upstream
+	if target.Issue > 0 {
+		p.issue = target.Issue
+	}
+	if p.issue <= 0 {
+		p.err = ""
+		p.stage = publishAskIssue
+		return tea.Batch(p.issueInput.Focus(), textinput.Blink)
+	}
+	return collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, p.upstream, m.landingPublishEpoch)
 }
 
 // collectCmd builds and runs the guest change-set collection
@@ -1324,21 +1437,15 @@ func (m *model) handleLandingCollect(msg landingCollectMsg) tea.Cmd {
 	}
 	p.stopStep()
 	if msg.err != nil {
-		p.err = msg.err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(msg.err.Error())
 	}
 	if len(msg.cs.Commits) == 0 {
-		p.err = "nothing to publish: no commits ahead of this checkout's upstream branch"
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt("nothing to publish: no commits ahead of this checkout's upstream branch")
 	}
 	p.cs = msg.cs
 	forkPath, err := drupalorg.ForkPath(p.module, p.issue)
 	if err != nil {
-		p.err = err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(err.Error())
 	}
 	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, forkPath, m.landingPublishEpoch)
 }
@@ -1365,15 +1472,11 @@ func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
 	}
 	p.stopStep()
 	if msg.err != nil {
-		p.err = msg.err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(msg.err.Error())
 	}
 	dest, err := drupalorg.NewDestination(p.module, p.issue, msg.forkPath, msg.fork, false)
 	if err != nil {
-		p.err = err.Error()
-		p.stage = publishAskIssue
-		return nil
+		return p.backToIssuePrompt(err.Error())
 	}
 	p.dest = dest
 	p.text = drupalorg.RenderConfirmation(p.cs, dest)
@@ -1455,6 +1558,14 @@ func (m model) landingPublishHelp() []key.Binding {
 	switch m.landing.publish.stage {
 	case publishAskIssue:
 		return []key.Binding{m.keys.Submit, m.keys.Back}
+	case publishResolving:
+		// The resolve stage is where the flow now OPENS — the checkout's
+		// remote is read before the user is asked anything — so it is the
+		// first screen shown rather than one passed through after a
+		// submission. A footer with nothing in it would leave that screen
+		// looking like it had no way out, and esc is the way out (it also
+		// kills the guest command in flight; see updateLandingPublish).
+		return []key.Binding{m.keys.Back}
 	case publishConfirm:
 		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
 	default:
@@ -1511,6 +1622,13 @@ func (m model) landingPublishView() string {
 	switch p.stage {
 	case publishAskIssue:
 		b.WriteString(statusStyle.Render("Which drupal.org issue does this checkout's work belong to?"))
+		b.WriteString("\n")
+		// Said only here, on the prompt, because this is the one place the
+		// question is being asked at all: a checkout cloned from its issue
+		// fork never reaches this stage (handleLandingRemoteInfo reads the
+		// number out of the remote), so a developer who lands here is being
+		// asked precisely because their remote could not answer.
+		b.WriteString(hintStyle.Render("this checkout's remote names no issue, so it cannot be derived — a number or an issue URL both work"))
 		b.WriteString("\n\n")
 		b.WriteString(p.issueInput.View())
 		b.WriteString("\n")

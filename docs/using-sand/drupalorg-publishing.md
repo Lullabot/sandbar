@@ -21,7 +21,7 @@ You reach this two ways:
   this action (`enter`/`o`) once a workstation PAT is on file. If no PAT is
   on file, the row instead says `on git.drupalcode.org · no drupal.org PAT
   on file, publish disabled` — see [setup](#setup) below.
-- **`sand publish NAME PATH ISSUE`** from the command line, for scripting or
+- **`sand publish NAME PATH [ISSUE]`** from the command line, for scripting or
   for a bigger confirmation than the TUI's pane can show at once (see
   [`sand publish`](cli-reference.md#sand-publish-name-path-issue) in the CLI
   reference).
@@ -63,7 +63,9 @@ you a narrower one.
 For a checkout `PATH`, publication:
 
 1. Reads the checkout's origin remote and upstream branch to work out which
-   module it belongs to and how many local commits are ahead.
+   module it belongs to, **which issue it belongs to** (see
+   [Where the issue number comes from](#where-the-issue-number-comes-from)),
+   and how many local commits are ahead.
 2. Collects those commits — in order, oldest first — as an inert list of
    commit messages, authors, and file actions (create/update/delete/move,
    with resulting content). **Merge commits are skipped**: a merge carries
@@ -71,7 +73,7 @@ For a checkout `PATH`, publication:
    to express a second parent — the changes a merge brought in still travel,
    as the ordinary commits that made them.
 3. Resolves where those commits go: the drupal.org **issue fork** for the
-   issue number you give it (`issue/<module>-<nid>`), read anonymously, with
+   issue number (`issue/<module>-<nid>`), read anonymously, with
    its canonical parent project (e.g. `project/<module>`) derived from that
    fork's own `forked_from_project` — never guessed, and never something the
    guest's output can influence. By default, a commit destination outside
@@ -99,6 +101,35 @@ For a checkout `PATH`, publication:
    (`landed`, `already-present`, `failed`, or `not-attempted`) and its SHA
    on the fork where it has one, followed by the merge request's URL and any
    warnings.
+
+## Where the issue number comes from
+
+The normal way to work a drupal.org issue is to clone its **issue fork**, so
+the checkout's own `origin` is already `issue/<module>-<nid>` —
+which names both the module and the issue. Publication reads the number
+straight out of that remote, and neither surface asks you for it:
+
+- **The Landing pane** resolves the remote first and goes directly to the
+  confirmation. The issue prompt appears only if the remote cannot answer.
+- **`sand publish NAME PATH`** takes no `ISSUE` argument in this case, and
+  prints the number it derived (`issue 3619578, read from this checkout's
+  remote`) above the confirmation.
+
+You are asked only when the checkout was cloned from the canonical
+`project/<module>` repository instead. That remote names no issue, so there
+is nothing to derive:
+
+- **The Landing pane** shows its issue prompt. A bare number, a `#`-prefixed
+  one, and a pasted drupal.org issue URL are all accepted.
+- **`sand publish`** needs the `ISSUE` argument, and says so rather than
+  guessing.
+
+Deriving the issue removes a **question**, never a **confirmation**. The
+destination it works out is still rendered in full, and still has to be
+accepted, before anything is written — see step 4 above. If the derived
+destination is not the one you want, decline: on the CLI, re-run with an
+explicit `ISSUE`; in the Landing pane, the prompt is seeded with the derived
+number whenever the flow returns to it, so you can edit it there.
 
 ## Four things you'll otherwise learn the hard way
 
