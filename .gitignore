@@ -14,3 +14,10 @@ site/
 # Local env for the opt-in e2e suites (host names, pool, token file paths).
 # `sand` itself reads no env vars — these belong to the tests alone.
 .env
+
+# Claude Code's per-task git worktrees, checked out inside the repo.
+/.claude/worktrees/
+
+# Local env for the opt-in Proxmox e2e suite, beside the `.env` above: host,
+# node, pool, storage and the PATH to a token file — never the token itself.
+/e2e.env
