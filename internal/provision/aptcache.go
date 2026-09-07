@@ -71,12 +71,12 @@ func defaultAptCacheHostDir() (string, error) {
 	return filepath.Join(base, "sand", "apt-cache"), nil
 }
 
-// aptCacheStagingDir is where a seed push actually lands in the guest: Copy
-// places its source directory INSIDE the destination it is given (see the
-// package doc), so pushing archivesDir (whose basename is aptArchivesDirName)
-// to the guest's "/tmp/" lands at "/tmp/" + aptArchivesDirName — this constant
-// spells that out explicitly so the Copy call and the sudo move command below
-// cannot drift apart.
+// aptCacheStagingParent is the guest directory a seed push is copied INTO, and
+// aptCacheStagingDir is where that push therefore lands: Copy places its source
+// directory INSIDE the destination it is given (see the package doc), so
+// pushing archivesDir (whose basename is aptArchivesDirName) to the parent
+// lands at parent + aptArchivesDirName. One is derived from the other so the
+// Copy call and the sudo move command below cannot drift apart.
 //
 // It has to be a WORLD-WRITABLE guest scratch location in the first place
 // because `limactl copy` shells in as the unprivileged guest user, never
@@ -85,7 +85,23 @@ func defaultAptCacheHostDir() (string, error) {
 // against a real Lima instance, not assumed. Landing here first and moving
 // into the real cache dir with a separate `sudo` shell step is what actually
 // works.
-const aptCacheStagingDir = "/tmp/" + aptArchivesDirName
+//
+// It is /var/tmp and NOT /tmp because Debian 13 — the base image, see
+// RenderBaseOverlay — has systemd mount /tmp as a tmpfs sized at half of RAM.
+// A seed is hundreds of megabytes of .deb files, so staging it in /tmp spends
+// the guest's MEMORY on it and, on a small VM, does not fit at all: the e2e
+// suite builds its base at 2GiB, which makes /tmp 1GiB, and the cache reached
+// ~900MB. What that looks like from the outside is worth recording, because
+// nothing in it names apt or this file: every scp write fails with a bare
+// `Failure`, the seed is swallowed as best-effort exactly as designed, and the
+// base playbook then dies several steps later on `Failed to replace
+// '/tmp/nodesource.gpg.key'`. /var/tmp is world-writable in the same way
+// (1777) and lives on the instance disk, which is vm.BaseDiskFloor (20GiB), so
+// a seed is bounded by disk rather than by RAM.
+const (
+	aptCacheStagingParent = "/var/tmp/"
+	aptCacheStagingDir    = aptCacheStagingParent + aptArchivesDirName
+)
 
 // seedAptCache pushes a previously harvested apt-archives cache from the host
 // into the RUNNING base instance's /var/cache/apt/archives, so the base
@@ -111,8 +127,17 @@ func (p *Provisioner) seedAptCache(ctx context.Context, name string, out io.Writ
 	if err != nil || len(entries) == 0 {
 		return nil // no cache yet (first build, or a prior harvest never ran) — nothing to seed
 	}
-	if err := p.Lima.Copy(ctx, out, true, archivesDir, lima.GuestPath(name, "/tmp/")); err != nil {
+	if err := p.Lima.Copy(ctx, out, true, archivesDir, lima.GuestPath(name, aptCacheStagingParent)); err != nil {
 		fmt.Fprintf(out, "Note: could not seed the apt archive cache (%v); this build will re-download previously cached packages.\n", err)
+		// A failed push is rarely a push that wrote NOTHING: scp transfers file
+		// by file, so whatever landed before the failure is still sitting in the
+		// staging dir. Leaving it there hands the playbook a guest with less
+		// free space than it started with — which is how a swallowed seed
+		// failure turned into a base build that died on an unrelated write. The
+		// cleanup is best-effort like the rest of this function: the build is
+		// already going to re-download, and a failure to tidy up is not worth a
+		// second Note the reader cannot act on.
+		_ = p.Lima.Shell(ctx, name, nil, io.Discard, "sudo", "rm", "-rf", aptCacheStagingDir)
 		return nil
 	}
 	// Move what was just staged into the real cache dir as root, then remove
