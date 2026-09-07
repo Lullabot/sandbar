@@ -69,6 +69,76 @@ of a board nobody is looking at rather than making the provisioner wait for a
 screen to draw on. On detach the tile shows where that build has actually got
 to — not a replay of every step it took while you were away.
 
+### Native terminal tabs with `tmux -CC`
+
+iTerm2 can render a tmux session's windows as **native tabs** rather than
+letting tmux draw them itself. You run tmux in *control mode* (`tmux -CC`),
+tmux speaks a line protocol instead of painting a screen, and iTerm2 turns
+each tmux window into a real tab. sand has two ways to use that, and they
+are not interchangeable — one gives you a tab per **VM**, the other a tab
+per **window inside one VM**.
+
+Control mode is iTerm2's feature; other terminals generally don't implement
+it, and will print the protocol as text instead. Everything below assumes
+iTerm2.
+
+#### A tab per VM, with the board still live
+
+Start sand inside a control-mode tmux session:
+
+```console
+$ tmux -CC new-session -s sandbar sand
+```
+
+`$TMUX` is now set, so `S` takes the new-window path described above instead
+of suspending — and because iTerm2 is rendering that tmux, the new window
+arrives as a **native tab**. The board keeps running in its own tab beside
+it, progress bars and all, and each `S` on a different VM opens another tab.
+
+This is the setup to use if you spend the day in the board.
+
+#### A tab per window inside one VM
+
+`sand shell --cc NAME` attaches to the **guest's** tmux in control mode, so
+the windows `C-a c` makes inside the VM become native tabs:
+
+```console
+$ sand shell --cc web
+```
+
+Run this from a plain terminal window, not from the board.
+
+#### Why you can't have both at once
+
+The two recipes stack a host tmux and a guest tmux, and only the outer one
+can reach iTerm2. Control mode announces itself with a DCS escape sequence,
+and tmux strips DCS from its panes' output rather than forwarding it to its
+client — so a guest `tmux -CC` running inside a host tmux window never
+reaches the terminal at all. Turning on `allow-passthrough` does not change
+this; that option forwards a specific `tmux;`-prefixed wrapper, not the
+handshake tmux emits on its own.
+
+Rather than print raw protocol into your pane, `sand shell --cc` refuses
+when `$TMUX` is set:
+
+```console
+$ sand shell --cc web
+sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode
+handshake before your terminal can see it; detach (C-a d) and run this from a
+plain terminal window
+```
+
+So pick the layer that matters more to you. If you mostly want several VMs
+open at once, take the first recipe. If you mostly want several windows
+inside one VM, take the second.
+
+!!! tip "The board will mention this once"
+
+    The first time you press `S` outside a host tmux session, and only if
+    tmux is installed on this machine, the board logs a one-line reminder of
+    both commands to its Messages strip. It appears once per run of `sand`,
+    not once per shell — quit and relaunch to see it again.
+
 ## Uploading and downloading files: data, not code
 
 `u` (upload) and `g` (download) on a focused tile open a file-transfer pane.

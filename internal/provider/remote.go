@@ -43,6 +43,11 @@ func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
 	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"))
 }
 
+// AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
+func (p *remoteLimaProvider) AttachArgvControl(v vm.VM) []string {
+	return p.host.AttachArgvMode(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+}
+
 // RunArgv is AttachArgv's one-command sibling, ssh-wrapped the same way. See
 // Provider.RunArgv.
 func (p *remoteLimaProvider) RunArgv(v vm.VM, workdir, expr string) []string {

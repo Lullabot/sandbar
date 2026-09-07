@@ -134,6 +134,11 @@ func (p *limaProvider) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }
 
+// AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
+func (p *limaProvider) AttachArgvControl(v vm.VM) []string {
+	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+}
+
 // RunArgv runs one interactive command in a guest directory. See Provider.RunArgv.
 func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 	return lima.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))

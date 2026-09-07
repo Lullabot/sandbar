@@ -87,8 +87,55 @@ import "regexp"
 //
 // **clipboardCmds is prepended to BOTH new-session commands** — see its own comment
 // for what it does and why it is here rather than only in the shipped ~/.tmux.conf.
-func guestAttachExpr(colortermEnv string) string {
-	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux ` + clipboardCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux ` + clipboardCmds + `new-session` + colortermEnv + ` -s main; fi`
+func guestAttachExpr(colortermEnv, ccFlag string) string {
+	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + clipboardCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + clipboardCmds + `new-session` + colortermEnv + ` -s main; fi`
+}
+
+// AttachMode selects which kind of tmux CLIENT the attach expression starts.
+// It changes ONE token — whether `-CC` precedes `new-session` — and nothing
+// else: the session names, the grouped-session branch and the
+// destroy-unattached target are identical in both modes, deliberately, so the
+// most destructive line in this package (see guestAttachExpr) cannot acquire a
+// second, subtly different copy.
+type AttachMode int
+
+const (
+	// AttachFullScreen starts an ordinary tmux client, which draws the session
+	// itself with its own status bar. Every caller wants this unless the user
+	// asked otherwise; it is the zero value so a mode nobody thought about is
+	// the behaviour sand has always had.
+	AttachFullScreen AttachMode = iota
+	// AttachControl starts a control-mode client (`tmux -CC`). tmux then speaks
+	// a line protocol on stdout instead of drawing, and a terminal that
+	// understands it — iTerm2 is the one that does — renders each tmux window
+	// as a NATIVE tab. This is what `sand shell --cc` asks for.
+	//
+	// It only works when the control-mode output reaches the terminal emulator
+	// DIRECTLY. In particular it does NOT work through a host tmux pane:
+	// control mode announces itself with a DCS sequence (ESC P 1000 p), and
+	// tmux's own terminal emulator strips DCS from pane output rather than
+	// forwarding it to its client. Measured on tmux 3.5a, with
+	// `allow-passthrough` both off and on: text either side of the sequence
+	// reaches the client and the sequence itself never does. So an emulator
+	// sitting outside a host tmux never sees the handshake and the user gets
+	// the raw control protocol printed as gibberish. cmd/sand's shell
+	// subcommand warns when $TMUX is set for exactly this reason.
+	AttachControl
+)
+
+// flag is the fragment spliced in directly after `tmux`, with its leading
+// space, so it stays a separate argv word and still precedes clipboardCmds —
+// -CC is a client flag and tmux only accepts it ahead of the commands.
+//
+// Only the two attaching invocations take it. The `has-session` probe in front
+// of them must NOT: its exit status is what the guest's shell branches on, and
+// a control-mode client there would both hijack the probe and print protocol at
+// a caller that is only asking a yes/no question.
+func (m AttachMode) flag() string {
+	if m == AttachControl {
+		return " -CC"
+	}
+	return ""
 }
 
 // clipboardCmds is the `start-server \; set -s … \; ` prefix that turns on tmux's
@@ -181,11 +228,17 @@ func AttachArgv(name, guestHome, colorterm string) []string {
 	// "limactl" is the same binary NewExecRunner shells out to; the interactive
 	// attach deliberately bypasses Runner (which captures output) because a tmux
 	// client needs the real terminal, not a pipe.
+	return AttachArgvMode(name, guestHome, colorterm, AttachFullScreen)
+}
+
+// AttachArgvMode is AttachArgv with the tmux client mode chosen explicitly; see
+// GuestAttachArgvMode for why the mode-less name is kept as the full-screen case.
+func AttachArgvMode(name, guestHome, colorterm string, mode AttachMode) []string {
 	argv := []string{"limactl", "shell"}
 	if guestHome != "" {
 		argv = append(argv, "--workdir", guestHome)
 	}
-	return append(append(argv, name), GuestAttachArgv(colorterm)...)
+	return append(append(argv, name), GuestAttachArgvMode(colorterm, mode)...)
 }
 
 // GuestAttachArgv returns the IN-GUEST half of the attach command — `bash -c
@@ -206,7 +259,16 @@ func AttachArgv(name, guestHome, colorterm string) []string {
 // shell in the guest user's own $HOME already, so an ssh-transport provider has
 // nothing to correct.
 func GuestAttachArgv(colorterm string) []string {
-	return []string{"bash", "-c", guestAttachExpr(colortermFlag(colorterm))}
+	return GuestAttachArgvMode(colorterm, AttachFullScreen)
+}
+
+// GuestAttachArgvMode is GuestAttachArgv with the tmux client mode chosen
+// explicitly. GuestAttachArgv is the AttachFullScreen case and stays the name
+// every existing caller uses, because defaulting to it is safe: forgetting the
+// mode yields the attach sand has always done, not a silently different session
+// layout.
+func GuestAttachArgvMode(colorterm string, mode AttachMode) []string {
+	return []string{"bash", "-c", guestAttachExpr(colortermFlag(colorterm), mode.flag())}
 }
 
 // colortermValue is the full set of shell-safe COLORTERM strings. Every real

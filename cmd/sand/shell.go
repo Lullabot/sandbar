@@ -37,6 +37,7 @@ const limaRunning = "Running"
 type vmGetter interface {
 	Get(name string) (vm.VM, error)
 	AttachArgv(v vm.VM) []string
+	AttachArgvControl(v vm.VM) []string
 }
 
 // registryOwnership is the narrow registry surface resolveShellProvider needs
@@ -68,8 +69,9 @@ type registryOwnership interface {
 func runShell(args []string) error {
 	fs := flag.NewFlagSet("shell", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
+	ccFlag := fs.Bool("cc", false, "Attach in tmux control mode, so a terminal that speaks it (iTerm2) shows each guest window as a native tab")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME [--profile <name>]
+		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME [--profile <name>] [--cc]
 
 Attach a shell to NAME's persistent tmux session in the guest.
 
@@ -84,6 +86,12 @@ start of the line.
 A second terminal running this command shares the same windows but keeps its
 own current one, so two terminals can look at two different windows of the
 same VM.
+
+--cc attaches in tmux control mode instead. In a terminal that speaks the
+protocol — iTerm2 is the one that does — each guest window becomes a native
+tab, so C-a c opens a real tab rather than a window drawn inside this one.
+Run it from a plain terminal window: a host tmux pane strips the control-mode
+handshake, so --cc refuses when $TMUX is set.
 
 The named VM must already exist and be running (see 'sand' to list instances,
 or 'sand create' to make one). If NAME is managed under more than one
@@ -122,7 +130,7 @@ connection profile, --profile picks which one to attach to.
 		return err
 	}
 
-	argv, err := shellAttachArgv(p, name)
+	argv, err := shellAttachArgv(p, name, *ccFlag)
 	if err != nil {
 		return err
 	}
@@ -168,7 +176,18 @@ connection profile, --profile picks which one to attach to.
 // out from runShell so it can be tested with a stub vmLister; the exec
 // hand-off above needs a real TTY and a real VM and is deliberately left
 // untested here.
-func shellAttachArgv(l vmGetter, name string) ([]string, error) {
+func shellAttachArgv(l vmGetter, name string, controlMode bool) ([]string, error) {
+	// Refuse control mode inside a host tmux rather than "supporting" it into a
+	// mess. tmux enters control mode by emitting a DCS handshake (ESC P 1000 p),
+	// and a host tmux pane strips DCS from its output instead of forwarding it to
+	// its client -- measured on tmux 3.5a, with allow-passthrough both off and on.
+	// The emulator outside therefore never switches modes and the raw control
+	// protocol lands in the pane as scrolling gibberish. There is no configuration
+	// that fixes it, so an error naming the fix beats a warning above the noise.
+	if controlMode && os.Getenv("TMUX") != "" {
+		return nil, errors.New("sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode handshake before your terminal can see it; detach (C-a d) and run this from a plain terminal window")
+	}
+
 	found, err := l.Get(name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
@@ -180,6 +199,9 @@ func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 		return nil, fmt.Errorf("sand shell: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 
+	if controlMode {
+		return l.AttachArgvControl(found), nil
+	}
 	return l.AttachArgv(found), nil
 }
 
@@ -188,8 +210,8 @@ func shellAttachArgv(l vmGetter, name string) ([]string, error) {
 // --profile work` parses the same as `sand shell --profile work NAME` under
 // flag.FlagSet, which otherwise stops parsing flags at the first non-flag
 // token. Only the flags this subcommand defines (-h/--help, --profile) are
-// recognised; anything else is left as positional so an unrecognised flag
-// still reaches fs.Parse and produces its normal error.
+// recognised (-h/--help, --profile, --cc); anything else is left as positional
+// so an unrecognised flag still reaches fs.Parse and produces its normal error.
 func reorderShellFlags(args []string) []string {
 	var flagArgs, positional []string
 	for i := 0; i < len(args); i++ {
@@ -197,12 +219,18 @@ func reorderShellFlags(args []string) []string {
 		switch {
 		case a == "-h" || a == "--help" || a == "-help":
 			flagArgs = append(flagArgs, a)
+		case a == "--cc" || a == "-cc":
+			// A bool flag: unlike --profile it consumes no following value, so
+			// `sand shell NAME --cc` must not swallow whatever comes next.
+			flagArgs = append(flagArgs, a)
 		case a == "--profile" || a == "-profile":
 			flagArgs = append(flagArgs, a)
 			if i+1 < len(args) {
 				i++
 				flagArgs = append(flagArgs, args[i])
 			}
+		case strings.HasPrefix(a, "--cc=") || strings.HasPrefix(a, "-cc="):
+			flagArgs = append(flagArgs, a)
 		case strings.HasPrefix(a, "--profile=") || strings.HasPrefix(a, "-profile="):
 			flagArgs = append(flagArgs, a)
 		default:

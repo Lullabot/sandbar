@@ -48,11 +48,12 @@ type Provider struct {
 	ShellOutFunc       func(ctx context.Context, name string, argv ...string) ([]byte, error)
 	CopyFunc           func(ctx context.Context, out io.Writer, recursive bool, src, dst string) error
 
-	AttachArgvFunc func(v vm.VM) []string
-	RunArgvFunc    func(v vm.VM, workdir, expr string) []string
-	GuestHomeFunc  func(v vm.VM) string
-	GuestUserFunc  func(v vm.VM) string
-	GuestPathFunc  func(name, path string) string
+	AttachArgvFunc        func(v vm.VM) []string
+	AttachArgvControlFunc func(v vm.VM) []string
+	RunArgvFunc           func(v vm.VM, workdir, expr string) []string
+	GuestHomeFunc         func(v vm.VM) string
+	GuestUserFunc         func(v vm.VM) string
+	GuestPathFunc         func(name, path string) string
 
 	PreflightFunc     func() error
 	HostResourcesFunc func() provider.HostResources
@@ -188,6 +189,13 @@ func (f *Provider) RunArgv(v vm.VM, workdir, expr string) []string {
 func (f *Provider) AttachArgv(v vm.VM) []string {
 	if f.AttachArgvFunc != nil {
 		return f.AttachArgvFunc(v)
+	}
+	return nil
+}
+
+func (f *Provider) AttachArgvControl(v vm.VM) []string {
+	if f.AttachArgvControlFunc != nil {
+		return f.AttachArgvControlFunc(v)
 	}
 	return nil
 }

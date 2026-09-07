@@ -1110,10 +1110,20 @@ func splitGuestEndpoint(s string) (instance, path string, isGuest bool) {
 // still precedes the instance name, because AttachArgv put it there and quoting
 // preserves order. The caller execs the result against its real TTY.
 func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
+	return h.AttachArgvMode(name, guestHome, colorterm, AttachFullScreen)
+}
+
+// AttachArgvMode is AttachArgv with the tmux client mode chosen explicitly.
+//
+// Note what control mode means over ssh: the DCS handshake rides the ssh
+// connection to the LOCAL terminal, which is fine — ssh is a transparent byte
+// pipe, unlike a tmux pane (see AttachControl). So `sand shell --cc` works
+// against a remote-profile VM exactly as it does against a local one.
+func (h *SSHHost) AttachArgvMode(name, guestHome, colorterm string, mode AttachMode) []string {
 	// The `ssh -t <target> <shell-quoted local argv>` construction IS sshCommand
 	// with tty=true; reuse it rather than re-spelling the quoting loop the file's
 	// header calls load-bearing.
-	return h.sshCommand(true, AttachArgv(name, guestHome, colorterm)...)
+	return h.sshCommand(true, AttachArgvMode(name, guestHome, colorterm, mode)...)
 }
 
 // --- base-image lock over ssh ---------------------------------------------------
