@@ -560,7 +560,12 @@ type landingForkMsg struct {
 	epoch    uint64
 	forkPath string
 	fork     *drupalorg.ProjectInfo
-	err      error
+	// mrTitle is the merge-request title the issue warrants, or "" when
+	// drupal.org could not vouch for one. Empty is not a failure — it means
+	// the destination keeps its branch-name default; see
+	// drupalorg.LookupIssueTitle.
+	mrTitle string
+	err     error
 }
 
 // openLandingPane opens the Landing pane for v: a snapshot of the checkout
@@ -1045,6 +1050,11 @@ type drupalOrgActions interface {
 	TokenAvailable() bool
 	// ResolveFork looks up the drupal.org issue fork at forkPath, anonymously.
 	ResolveFork(ctx context.Context, forkPath string) (*drupalorg.ProjectInfo, error)
+	// IssueTitle returns the merge-request title issue nid warrants for
+	// module, or "" when drupal.org cannot vouch for one. It returns no
+	// error by design — see drupalorg.LookupIssueTitle: a title is a
+	// convenience, and no failure of it may fail a publish.
+	IssueTitle(ctx context.Context, module string, nid int) string
 	// Publish replays cs onto dest and opens or reuses its merge request.
 	Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error)
 }
@@ -1071,6 +1081,10 @@ func (d *drupalOrgClient) TokenAvailable() bool {
 
 func (d *drupalOrgClient) ResolveFork(ctx context.Context, forkPath string) (*drupalorg.ProjectInfo, error) {
 	return d.client.Project(ctx, forkPath)
+}
+
+func (d *drupalOrgClient) IssueTitle(ctx context.Context, module string, nid int) string {
+	return drupalorg.LookupIssueTitle(ctx, d.client, module, nid)
 }
 
 func (d *drupalOrgClient) Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error) {
@@ -1447,15 +1461,30 @@ func (m *model) handleLandingCollect(msg landingCollectMsg) tea.Cmd {
 	if err != nil {
 		return p.backToIssuePrompt(err.Error())
 	}
-	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, forkPath, m.landingPublishEpoch)
+	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, p.module, p.issue, forkPath, m.landingPublishEpoch)
 }
 
-// resolveForkCmd looks up the drupal.org issue fork at forkPath (anonymous)
-// and reports the result as a landingForkMsg.
-func resolveForkCmd(ctx context.Context, actions drupalOrgActions, forkPath string, epoch uint64) tea.Cmd {
+// resolveForkCmd looks up the drupal.org issue fork at forkPath and, in the
+// same step, the issue's own title to name the merge request with — both
+// anonymous reads against drupal.org, so they belong to one stage of the
+// flow rather than two.
+//
+// The title lookup runs only once the fork has resolved, and its result is
+// carried even when empty: an empty title is not a failure but "no better
+// title than the branch name is available" (see drupalorg.LookupIssueTitle),
+// which handleLandingFork applies as exactly that.
+func resolveForkCmd(ctx context.Context, actions drupalOrgActions, module string, issue int, forkPath string, epoch uint64) tea.Cmd {
 	return func() tea.Msg {
 		fork, err := actions.ResolveFork(ctx, forkPath)
-		return landingForkMsg{epoch: epoch, forkPath: forkPath, fork: fork, err: err}
+		if err != nil {
+			return landingForkMsg{epoch: epoch, forkPath: forkPath, err: err}
+		}
+		return landingForkMsg{
+			epoch:    epoch,
+			forkPath: forkPath,
+			fork:     fork,
+			mrTitle:  actions.IssueTitle(ctx, module, issue),
+		}
 	}
 }
 
@@ -1478,6 +1507,7 @@ func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
 	if err != nil {
 		return p.backToIssuePrompt(err.Error())
 	}
+	dest = dest.WithMergeRequestTitle(msg.mrTitle)
 	p.dest = dest
 	p.text = drupalorg.RenderConfirmation(p.cs, dest)
 	p.stage = publishConfirm

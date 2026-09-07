@@ -335,3 +335,28 @@ func TestRenderConfirmation_TabsInContentSurvive(t *testing.T) {
 		t.Errorf("RenderConfirmation() escaped a tab in file content; indented source must stay readable; got:\n%q", out)
 	}
 }
+
+// The merge request title is what the world sees first on a permanent,
+// public proposal, so the human approving it must be shown the exact string
+// that will be sent — including when a failed lookup has left it as the bare
+// branch name.
+func TestRenderConfirmationShowsTheMergeRequestTitle(t *testing.T) {
+	dest := Destination{
+		ForkPath:          "issue/dubbot-3619578",
+		Branch:            "dubbot-3619578",
+		ParentID:          42,
+		ParentPath:        "project/dubbot",
+		ParentBranch:      "2.0.x",
+		MergeRequestTitle: "Issue #3619578: Fix very slow Overview page loads",
+	}
+	out := RenderConfirmation(ChangeSet{}, dest)
+	if !strings.Contains(out, "Merge request title: Issue #3619578: Fix very slow Overview page loads") {
+		t.Errorf("confirmation = %q, want it to name the merge request title", out)
+	}
+
+	dest.MergeRequestTitle = ""
+	out = RenderConfirmation(ChangeSet{}, dest)
+	if !strings.Contains(out, "Merge request title: dubbot-3619578") {
+		t.Errorf("confirmation = %q, want the branch-name fallback shown", out)
+	}
+}

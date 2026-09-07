@@ -1331,3 +1331,81 @@ func TestAlreadyLandedCount(t *testing.T) {
 		})
 	}
 }
+
+// --- the merge request's title -------------------------------------------
+
+// TestPublish_MergeRequestCarriesTheIssueTitle pins what this whole title
+// path exists for: a merge request opened for an issue fork must be titled
+// after the ISSUE, not after the branch. Titled "dubbot-3619578", a proposal
+// tells a reviewer scanning a project's merge request list nothing at all —
+// and it is the one string everyone downstream sees first.
+func TestPublish_MergeRequestCarriesTheIssueTitle(t *testing.T) {
+	writeTokenFile(t, testToken+"\n", 0o600)
+
+	fx := seededFixture()
+	dest := fx.destination(t).WithMergeRequestTitle("Issue #3181657: Fix very slow Overview page loads")
+	p := fx.publisher(t)
+
+	if _, err := p.Publish(context.Background(), dest, threeCommitChangeSet()); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	bodies := fx.snapshotMRBodies()
+	if len(bodies) != 1 {
+		t.Fatalf("merge request bodies = %d, want 1", len(bodies))
+	}
+	want := "Issue #3181657: Fix very slow Overview page loads"
+	if got := bodies[0]["title"]; got != want {
+		t.Errorf("merge request title = %v, want %q", got, want)
+	}
+}
+
+// Without a title lookup — a drupal.org outage, an issue belonging to
+// another project, any of LookupIssueTitle's silent failures — publication
+// must still open a correctly titled merge request, falling back to the
+// branch name it always used. A publish is never failed for want of a nicer
+// title, and GitLab rejects an empty one.
+func TestPublish_MergeRequestFallsBackToTheBranchTitle(t *testing.T) {
+	writeTokenFile(t, testToken+"\n", 0o600)
+
+	fx := seededFixture()
+	dest := fx.destination(t).WithMergeRequestTitle("") // the lookup came back empty
+	p := fx.publisher(t)
+
+	if _, err := p.Publish(context.Background(), dest, threeCommitChangeSet()); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	bodies := fx.snapshotMRBodies()
+	if len(bodies) != 1 {
+		t.Fatalf("merge request bodies = %d, want 1", len(bodies))
+	}
+	if got := bodies[0]["title"]; got != dest.Branch {
+		t.Errorf("merge request title = %v, want the branch name %q", got, dest.Branch)
+	}
+}
+
+// A Destination built as a struct literal carries no title at all. It must
+// still open a titled merge request rather than one GitLab rejects for an
+// empty title — the fallback lives in postMergeRequest as well as in
+// NewDestination for exactly this case.
+func TestPublish_MergeRequestTitleDefaultsForABareDestination(t *testing.T) {
+	writeTokenFile(t, testToken+"\n", 0o600)
+
+	fx := seededFixture()
+	dest := fx.destination(t)
+	dest.MergeRequestTitle = ""
+	p := fx.publisher(t)
+
+	if _, err := p.Publish(context.Background(), dest, threeCommitChangeSet()); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	bodies := fx.snapshotMRBodies()
+	if len(bodies) != 1 {
+		t.Fatalf("merge request bodies = %d, want 1", len(bodies))
+	}
+	if got := bodies[0]["title"]; got != dest.Branch {
+		t.Errorf("merge request title = %v, want the branch name %q", got, dest.Branch)
+	}
+}

@@ -80,6 +80,17 @@ type fakeDrupalOrgActions struct {
 	fork             *drupalorg.ProjectInfo
 	forkErr          error
 
+	// issueTitle is what the fake's IssueTitle returns; issueTitleCalls
+	// records the (module, nid) pairs it was asked for. The zero value —
+	// an empty title — is the "drupal.org could not vouch for one" case,
+	// which is what most of these tests want and what the real lookup
+	// returns on any failure.
+	issueTitle      string
+	issueTitleCalls []struct {
+		module string
+		nid    int
+	}
+
 	publishCalls []struct {
 		dest drupalorg.Destination
 		cs   drupalorg.ChangeSet
@@ -93,6 +104,14 @@ func (f *fakeDrupalOrgActions) TokenAvailable() bool { return f.tokenAvailable }
 func (f *fakeDrupalOrgActions) ResolveFork(_ context.Context, forkPath string) (*drupalorg.ProjectInfo, error) {
 	f.resolveForkCalls = append(f.resolveForkCalls, forkPath)
 	return f.fork, f.forkErr
+}
+
+func (f *fakeDrupalOrgActions) IssueTitle(_ context.Context, module string, nid int) string {
+	f.issueTitleCalls = append(f.issueTitleCalls, struct {
+		module string
+		nid    int
+	}{module, nid})
+	return f.issueTitle
 }
 
 func (f *fakeDrupalOrgActions) Publish(_ context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error) {
@@ -1722,6 +1741,133 @@ func TestLandingPublishDerivesIssueFromForkRemote(t *testing.T) {
 	if !strings.Contains(m.landing.publish.text, "issue/mod-1234") {
 		t.Fatalf("confirmation text = %q, want it to name the destination", m.landing.publish.text)
 	}
+}
+
+// TestLandingPublishTitlesTheMergeRequestAfterTheIssue pins the title path
+// end to end through the pane: the issue's own drupal.org title is looked up
+// for the module being published, lands on the Destination, is shown in the
+// confirmation the human accepts, and is what the publish job is dispatched
+// with. A merge request titled "mod-1234" tells a reviewer nothing.
+func TestLandingPublishTitlesTheMergeRequestAfterTheIssue(t *testing.T) {
+	m, v, fakeDO := landingPublishForkFixture(t)
+	fakeDO.issueTitle = "Issue #1234: Fix very slow Overview page loads"
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+	m = l.m
+
+	// Looked up for the module actually being published, at the issue
+	// actually being published to — not for whatever the VM was created from.
+	if len(fakeDO.issueTitleCalls) != 1 {
+		t.Fatalf("IssueTitle calls = %+v, want exactly one", fakeDO.issueTitleCalls)
+	}
+	if got := fakeDO.issueTitleCalls[0]; got.module != "mod" || got.nid != 1234 {
+		t.Errorf("IssueTitle called for (%q, %d), want (%q, %d)", got.module, got.nid, "mod", 1234)
+	}
+	if got := m.landing.publish.dest.MergeRequestTitle; got != fakeDO.issueTitle {
+		t.Errorf("destination title = %q, want %q", got, fakeDO.issueTitle)
+	}
+	if !strings.Contains(m.landing.publish.text, fakeDO.issueTitle) {
+		t.Errorf("confirmation text = %q, want it to show the merge request title", m.landing.publish.text)
+	}
+
+	next, cmd = m.updateLanding(runeKey('y'))
+	m = next.(model)
+	l2 := newTeaLoop(t, m)
+	l2.exec(cmd)
+	jk := landKey(v.scope, v.Name)
+	l2.pump("the publish job to finish", func(m model) bool {
+		s, ok := m.jobs.snapshot(jk)
+		return ok && !s.Running()
+	})
+	if len(fakeDO.publishCalls) != 1 {
+		t.Fatalf("Publish calls = %d, want 1", len(fakeDO.publishCalls))
+	}
+	if got := fakeDO.publishCalls[0].dest.MergeRequestTitle; got != fakeDO.issueTitle {
+		t.Errorf("published destination title = %q, want %q", got, fakeDO.issueTitle)
+	}
+}
+
+// A title lookup that comes back empty — drupal.org down, an issue filed
+// against another project, any of LookupIssueTitle's silent failures — must
+// leave the branch-name default in place and publish anyway. The title is a
+// convenience; nothing about it may block a publish.
+func TestLandingPublishFallsBackToBranchTitle(t *testing.T) {
+	m, v, fakeDO := landingPublishForkFixture(t)
+	fakeDO.issueTitle = "" // the lookup could not vouch for one
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+	m = l.m
+
+	if got := m.landing.publish.dest.MergeRequestTitle; got != "mod-1234" {
+		t.Errorf("destination title = %q, want the branch-name fallback %q", got, "mod-1234")
+	}
+	if !strings.Contains(m.landing.publish.text, "Merge request title: mod-1234") {
+		t.Errorf("confirmation text = %q, want the fallback title shown", m.landing.publish.text)
+	}
+}
+
+// landingPublishForkFixture builds the model, VM, and drupal.org double the
+// title tests share: one pushed checkout whose remote is its ISSUE FORK, so
+// the flow derives issue 1234 for module "mod" and runs to confirmation
+// without a keystroke spent on the number.
+func landingPublishForkFixture(t *testing.T) (model, boardVM, *fakeDrupalOrgActions) {
+	t.Helper()
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{
+				Path: "/home/u/mod", Kind: checkouts.KindRepo, Branch: "1234-fix", DefaultBranch: "1.0.x",
+				OrgRepo: "issue/mod-1234", Forge: "git.drupalcode.org", PushState: checkouts.PushStatePushed,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	fakeDO := &fakeDrupalOrgActions{
+		tokenAvailable: true,
+		fork: &drupalorg.ProjectInfo{ID: 99, DefaultBranch: "1.0.x", ForkedFromProject: &drupalorg.ForkedFromProject{
+			ID: 42, PathWithNamespace: "project/mod", DefaultBranch: "1.0.x",
+		}},
+		publishResult: drupalorg.Result{
+			Commits:            []drupalorg.CommitResult{{Index: 0, Subject: "Fix the thing", Status: drupalorg.CommitLanded, SHA: "abc123"}},
+			MergeRequest:       &drupalorg.MergeRequest{IID: 7, WebURL: "https://git.drupalcode.org/mr/7"},
+			MergeRequestOpened: true,
+		},
+	}
+	m.drupalOrgActions = fakeDO
+
+	remoteInfoFile := filepath.Join(t.TempDir(), "remoteinfo")
+	if err := os.WriteFile(remoteInfoFile, []byte("git@git.drupalcode.org:issue/mod-1234.git\norigin/1234-fix\n"), 0o600); err != nil {
+		t.Fatalf("write remote-info fixture: %v", err)
+	}
+	collectFile := filepath.Join(t.TempDir(), "collect")
+	if err := os.WriteFile(collectFile, []byte(collectFixtureRaw()), 0o600); err != nil {
+		t.Fatalf("write collect fixture: %v", err)
+	}
+	m.members[0].prov = &providerfake.Provider{RunArgvFunc: func(_ vm.VM, _, expr string) []string {
+		if expr == drupalorg.BuildRemoteInfoCommand() {
+			return []string{"cat", remoteInfoFile}
+		}
+		return []string{"cat", collectFile}
+	}}
+	return m, v, fakeDO
 }
 
 // TestLandingPublishIssuePromptAcceptsPaste pins the routing fix for a real

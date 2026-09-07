@@ -111,7 +111,13 @@ side effect of Landing itself.
 a guest checkout's commits onto a drupal.org issue fork — splits authority
 along one line: **the guest decides WHAT changes** (the commits, their
 messages, and their file contents) and **the host decides WHERE they go**
-(which fork, which branch, whether a merge request follows). The guest never
+(which fork, which branch, how the merge request is titled, whether one
+follows at all). The merge request's title is on the host's side of that line
+deliberately: it is read from the issue's own drupal.org page, never from the
+commits, so a compromised agent's prose cannot become the headline of a
+permanent public proposal — see
+[How the merge request is titled](../using-sand/drupalorg-publishing.md#how-the-merge-request-is-titled).
+The guest never
 sees a drupal.org credential, a project, a branch name, or a URL; it only
 ever produces an inert payload of commits and file actions that is
 structurally incapable of naming a destination. That split is enforced by the

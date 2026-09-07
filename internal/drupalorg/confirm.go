@@ -59,6 +59,17 @@ func RenderConfirmation(cs ChangeSet, dest Destination) string {
 	// more than one that merely happens not to be today.
 	fmt.Fprintf(&b, "Destination: %s (branch %q)\n", sanitizeLine(dest.ForkPath), sanitizeLine(dest.Branch))
 	fmt.Fprintf(&b, "Merge request target: %s (branch %q)\n", sanitizeLine(dest.ParentPath), sanitizeLine(dest.ParentBranch))
+	// Shown because it is now something other than a restatement of the
+	// branch: it is normally the issue's own title, fetched from drupal.org,
+	// and it is what the world sees at the top of the proposal. A human
+	// approving a public write should be able to read the headline it will
+	// carry — including when a failed lookup has left it as the bare branch
+	// name — rather than discover it afterwards.
+	mrTitle := dest.MergeRequestTitle
+	if mrTitle == "" {
+		mrTitle = dest.Branch
+	}
+	fmt.Fprintf(&b, "Merge request title: %s\n", sanitizeLine(mrTitle))
 	fmt.Fprintf(&b, "\n%d commit(s) will be published:\n", len(cs.Commits))
 
 	for i, c := range cs.Commits {

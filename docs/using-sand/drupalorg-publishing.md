@@ -83,7 +83,9 @@ For a checkout `PATH`, publication:
    path, and its own guard rail exists for exactly the reason this whole
    design does.
 4. Shows you a **confirmation**: the destination and branch, the merge
-   request's target, and then every commit in order — its message, its
+   request's target and **title** (see
+   [How the merge request is titled](#how-the-merge-request-is-titled)), and
+   then every commit in order — its message, its
    author, and every file it touches, with the resulting content shown in
    full (large files are elided with a marked count, never silently
    summarized). Nothing before this point has written anything, on the
@@ -130,6 +132,40 @@ accepted, before anything is written — see step 4 above. If the derived
 destination is not the one you want, decline: on the CLI, re-run with an
 explicit `ISSUE`; in the Landing pane, the prompt is seeded with the derived
 number whenever the flow returns to it, so you can edit it there.
+
+## How the merge request is titled
+
+A merge request is titled after its **issue**, using drupal.org's own
+convention:
+
+```
+Issue #3619578: Fix very slow Overview page loads
+```
+
+The title is read from the issue node on drupal.org — an anonymous,
+credential-free lookup of a public page, on the same host you filed the issue
+on. It is never taken from the commits: a title derived from the payload
+would put a guest agent's prose at the top of a permanent, public proposal,
+and would change between a first publish and a resumed one. That is the same
+rule the destination itself follows.
+
+If drupal.org can't vouch for a title, the merge request falls back to the
+branch name (`dubbot-3619578`) — the title publication used before. That
+happens when:
+
+- the lookup fails or times out (drupal.org is down, slow, or its edge
+  refuses the request), or
+- the node isn't an issue at all, or
+- **the issue belongs to a different project than the one you're publishing
+  to.** An issue number that resolves to some other project's issue is not
+  this publication's issue whatever its number, and a confidently wrong title
+  is worse than a terse one.
+
+None of these fail the publish. The lookup is bounded separately from the
+rest of the flow and is allowed to come back empty; a title is a convenience,
+and nothing about it blocks a publish. Whichever title you end up with is
+printed in the confirmation before you accept it, so you always see the
+headline your proposal will carry.
 
 ## Four things you'll otherwise learn the hard way
 
