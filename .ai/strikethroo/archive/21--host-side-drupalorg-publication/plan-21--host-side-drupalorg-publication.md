@@ -964,6 +964,12 @@ two command names.
 
 ### Post-Implementation Validation
 
+> **Archive note (2026-09-08).** Steps 1–21 below were reclassified as
+> **optional** when this plan was archived. Step 22 was run and passes.
+> What was and was not actually exercised is recorded under *Verified in
+> real use* and *Optional verifications* in the Execution Summary. The
+> text below is the plan as originally written.
+
 These steps inspect the real system and must be executed after implementation.
 Several require a real drupal.org account, a real issue fork, and a host PAT.
 Because plan 20 has not been implemented, the guest-side checkout used by these
@@ -1402,8 +1408,12 @@ a decision rather than an oversight:
 
 ## Execution Summary
 
-**Status**: ⚠️ Implementation complete; post-implementation validation **not** complete
+**Status**: ✅ Complete and archived. Implemented, reviewed under the per-task
+gate, and exercised end to end by a human against a real drupal.org issue fork.
+The remaining post-implementation steps were reclassified as **optional** at
+archive time — see *Optional verifications* below.
 **Completed Date**: 2026-08-28
+**Archived Date**: 2026-09-08
 
 ### Results
 
@@ -1421,6 +1431,11 @@ and committed to `worktree-plan-21-host-side-drupalorg-publication`:
   over that one package, neither holding publication logic of its own.
 - Documentation across the security model, a new publishing guide,
   files-and-state, secrets, the CLI reference, the TUI guide, and `AGENTS.md`.
+- Three follow-ups from real-world use, after the nine tasks: the issue
+  number is read from the checkout’s own fork remote instead of typed by
+  hand, merge requests are titled from the issue’s `api-d7` node instead
+  of the branch, and the checkout is reconciled against the fork after a
+  publish. See *Verified in real use* below.
 
 **Runnable gates, all passing and re-run at the end:** `go build ./...`,
 `go vet ./...`, `gofmt`, `go test ./... -race`, `mkdocs build --strict` (the
@@ -1480,23 +1495,92 @@ themselves, once leaving a stray file behind. Every phase was therefore verified
 by re-reading files from disk and re-running the proving commands directly,
 never on a sub-agent's report.
 
-### Necessary follow-ups
+### Verified in real use
 
-**This plan is deliberately NOT archived.** Its Self Validation steps 1–21
-inspect the real system, and none of them has been run:
+Publication was exercised end to end by a human against a real drupal.org issue
+fork — module `dubbot`, issue 3619578 — through the Landing pane, on a checkout
+whose remote was `issue/dubbot-3619578`. Real commits were replayed onto the
+fork branch and a real merge request was opened against the canonical parent.
+That covers the substance of **step 6 for one surface**, **step 3** (fork
+resolution with no credential) along the way, and **step 7** insofar as the
+confirmation was presented and required.
 
-- They require a real drupal.org account with push access to an issue fork, an
-  account-level PAT on the workstation, and a provisioned VM with a hand-made
-  drupal.org checkout.
-- They create **public, permanent** merge requests and commits on drupal.org.
-- Step 2 (`probe-drupalorg-api.sh`) sends real `POST` requests to
-  git.drupalcode.org — commits, branches, files, merge requests. It was **not**
-  run: the payloads are shaped to be rejected, but `glab` is present on this
-  machine and may be authenticated, and a misfire creates public artefacts. It
-  needs a human's explicit go-ahead.
+Three defects surfaced only because a human ran it, each fixed before archiving:
 
-Archiving would assert a verification that has not happened. The plan stays in
-`plans/` until a human with the required account runs steps 1–21.
+- The fork remote’s own path was not used to derive the issue number, so the
+  number had to be typed by hand — and `TargetFromRemoteURL` then rejected the
+  very path it had been given (`cannot derive module from remote path
+  "issue/dubbot-3619578"`).
+- The issue-number field dropped pastes: `tea.PasteMsg` is not a `KeyPressMsg`,
+  and the Landing pane forwarded only key presses.
+- The merge request was titled `dubbot-3619578`, the branch name, which a human
+  had to correct by hand on a public merge request. Titles now come from the
+  issue’s own `api-d7` node.
+
+A fourth followed from addressing those: publication *replays* commits, so the
+checkout and the fork diverge by construction the moment a publish succeeds.
+The checkout is now reconciled against the fork afterwards.
+
+### Optional verifications
+
+The remaining post-implementation steps are **optional**, by an explicit
+decision taken at archive time — not because they were run. **Nothing in this
+section has been executed.** It is recorded so the gap stays legible to whoever
+reads this next.
+
+Several are covered by the automated suite at the unit level. For those, the
+untested risk is that this design’s *model of drupal.org* is wrong, not that
+the logic is:
+
+| Step | Automated coverage |
+| --- | --- |
+| 4 — PAT file-mode refusal | `TestLoadTokenModeMatrix`, `TestLoadTokenNeverLeaksTokenInErrors` |
+| 9, 10 — destination cannot be influenced | `TestNoDestinationField`, `TestNewDestination_AdversarialPayloadCannotInfluenceDestination`, `TestValidateRepoPath_HostilePaths`, `TestCommitGuard_OutsideIssueNamespace` |
+| 15 — blocked endpoint reported honestly | `TestClient_BlockedEndpoint`, `TestPublish_EdgeRefusalDuringPublication` |
+| 16 — oversize and `last_commit_id` conflict | `TestPublish_CommitSizeIsCheckedBeforeSending`, `TestParseCollect_TotalSizeCapEnforced` |
+| 17 — partial failure and resumption | `TestPublish_InteriorFailureIsReportedThenResumed` |
+| 19 — merge-request target derived, not duplicated | `TestClient_OpenMergeRequest_QueriesParentNotFork`, `TestPublish_OpenMergeRequestIsNotDuplicated` |
+
+**Step 18 is the thinnest.** `TestValidateFileAction_KindConstraints` and
+`TestRenderConfirmation_DeleteAndMove` check the type level only; no delete,
+rename, or binary file has ever landed on a real fork. Deletion is the case the
+prior payload design could not express at all, so it carries the least
+evidence of any shipped behaviour here.
+
+These have no test substitute and would need a real VM or a real account:
+
+- **5** — the account PAT is absent from a provisioned VM in every form:
+  environment, credential store, per-directory `.env` files, git config, shell
+  history.
+- **8** — no git repository, checkout, or working tree is created on the host.
+- **11** — with two modules cloned in one VM, a publish lands on the worked
+  module’s fork, not the first module’s and not the VM’s create-time clone URL.
+- **12** — a publish from a main clone and from a nested worktree land
+  identically.
+- **13** — a guest genuinely *cannot* push, by trying. This is the check that
+  would make the blast-radius claim structural rather than merely intended, and
+  it is the most load-bearing item left unrun.
+- **14** — the guest’s anonymous read loop still works. Pair to 13: the loop
+  working *and* 13 failing are both required, either alone proves nothing.
+- **21** — a publish completes with neither `glab` nor `gh` on `PATH`.
+- **1**, **2** — the access-ceiling re-probe and `probe-drupalorg-api.sh`.
+  These write publicly: the probe sends real `POST` requests to
+  git.drupalcode.org, and although its payloads are shaped to be rejected,
+  `glab` may be authenticated on the machine that runs it and a misfire creates
+  public artefacts. Needs a human’s explicit go-ahead.
+- **20** — the fine-grained token negative control. This one still gates
+  something: the escape-hatch write-up stays undocumented until a token bounded
+  to one issue fork is shown to **fail** a push to a canonical
+  `project/<module>`.
+
+Also unrun from **step 6**: the `sand publish` CLI surface against a real fork,
+and verification from a clean anonymous clone taken on a machine other than the
+one that published.
+
+One step is stale rather than outstanding. **Step 3** asks that a fork’s
+branches be *listed*, and the `Branches` lister it refers to was removed as
+dead code before this plan was archived — `BranchExists` is the only branch
+question publication actually asks.
 
 Also outstanding, both recorded in the shipped documentation rather than only
 here:
