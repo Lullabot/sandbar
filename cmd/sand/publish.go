@@ -31,6 +31,15 @@ import (
 // (below) is the only production implementation.
 type collector interface {
 	Collect(ctx context.Context, v vm.VM, path string) (target drupalorg.RemoteTarget, cs drupalorg.ChangeSet, err error)
+	// Fetch refreshes the checkout's view of the fork branch just published
+	// to and reports how the two compare. It writes nothing in the guest —
+	// no branch moves, no file changes — which is what makes it safe to run
+	// after every publish without asking.
+	Fetch(ctx context.Context, v vm.VM, path, branch string) (drupalorg.SyncStatus, error)
+	// Adopt resets the checkout's branch onto the fork's published commits.
+	// This is the one guest WRITE publication performs, and doPublish offers
+	// it only on an explicit yes to a SyncStatus that reported CanAdopt.
+	Adopt(ctx context.Context, v vm.VM, path, branch string) error
 }
 
 // destPublisher is the narrow internal/drupalorg surface runPublish needs on
@@ -268,6 +277,13 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 		return err
 	}
 
+	// ONE buffered reader for every prompt this command asks, built here and
+	// passed down. Two would silently break the second question: bufio reads
+	// ahead, so a reader created for the publish prompt takes the adopt
+	// prompt's answer into its buffer with it, and a second reader over the
+	// same stdin then sees EOF and reads a "no" nobody typed.
+	in := bufio.NewReader(stdin)
+
 	// The confirmation is the one control standing between an agent's
 	// output and a public, permanent write — see drupalorg.RenderConfirmation
 	// and the package doc comment on internal/drupalorg/confirm.go. It is
@@ -276,7 +292,7 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 	// safe to omit from what the human is asked to approve.
 	fmt.Fprint(stdout, drupalorg.RenderConfirmation(cs, dest))
 
-	confirmed, err := confirmPublish(stdout, stdin, tty, yes)
+	confirmed, err := confirmPublish(stdout, in, tty, yes)
 	if err != nil {
 		return err
 	}
@@ -297,7 +313,65 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 	if pubErr != nil {
 		return fmt.Errorf("sand publish: %w", pubErr)
 	}
+
+	syncCheckout(ctx, stdout, in, tty, coll, v, path, dest.Branch)
 	return nil
+}
+
+// syncCheckout closes the loop a replay opens. Publication creates NEW
+// commits on the fork rather than pushing the local ones, so the moment it
+// succeeds the checkout's remote-tracking ref is stale and its history has
+// no commit in common with what is now public. It fetches so the developer
+// can see and diff what actually landed, and — when the two hold identical
+// content and nothing is uncommitted — offers to adopt the published
+// commits.
+//
+// EVERY failure here is reported and swallowed. The publish has already
+// succeeded and is unrevocable by the time this runs; turning a fetch
+// timeout into a non-zero exit would report a successful publish as a failed
+// command, which is worse than a stale ref. For the same reason it is called
+// for its effects and returns nothing.
+//
+// The offer is never taken by --yes. That flag confirms the PUBLISH — the
+// thing the printed confirmation described — and a `git reset --hard` in a
+// working tree is not that. Without a terminal to ask, this reports the
+// divergence and the command to run, and changes nothing.
+func syncCheckout(ctx context.Context, stdout io.Writer, stdin *bufio.Reader, tty bool, coll collector, v vm.VM, path, branch string) {
+	status, err := coll.Fetch(ctx, v, path, branch)
+	if err != nil {
+		fmt.Fprintf(stdout, "warning: could not refresh %q against the fork: %v\n", path, err)
+		return
+	}
+
+	fmt.Fprintf(stdout, "\n%s\n", status.Summary())
+	if !status.Diverged() {
+		return
+	}
+	fmt.Fprintf(stdout, "  published: %s\n  local:     %s\n", status.Fork, status.Local)
+
+	if !status.CanAdopt() {
+		// Named explicitly rather than left as silence: the reason the offer
+		// is absent is the actionable part, and it differs (real local
+		// changes vs. uncommitted work) in ways that need different fixes.
+		fmt.Fprintln(stdout, "not offering to adopt the published commits — see the message above.")
+		return
+	}
+	if !tty {
+		fmt.Fprintf(stdout, "to adopt the published commits in the guest: git fetch && git reset --hard %s\n", status.Fork)
+		return
+	}
+
+	fmt.Fprint(stdout, "Reset this checkout onto the published commits? [y/N] ")
+	line, _ := stdin.ReadString('\n')
+	if answer := strings.ToLower(strings.TrimSpace(line)); answer != "y" && answer != "yes" {
+		fmt.Fprintln(stdout, "left as is — the checkout keeps its own commits.")
+		return
+	}
+	if err := coll.Adopt(ctx, v, path, branch); err != nil {
+		fmt.Fprintf(stdout, "warning: could not adopt the published commits: %v\n", err)
+		return
+	}
+	fmt.Fprintf(stdout, "adopted: %s is now at %s\n", path, status.Fork)
 }
 
 // confirmPublish decides whether to proceed, and is the ONLY piece of
@@ -311,7 +385,7 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 // environment variable — the flag is the whole contract. Without it, a
 // non-TTY stdin refuses outright rather than publishing silently: a pipe is
 // not a human, and this command must never default to publishing.
-func confirmPublish(stdout io.Writer, stdin io.Reader, tty, yes bool) (bool, error) {
+func confirmPublish(stdout io.Writer, stdin *bufio.Reader, tty, yes bool) (bool, error) {
 	if yes {
 		return true, nil
 	}
@@ -319,8 +393,7 @@ func confirmPublish(stdout io.Writer, stdin io.Reader, tty, yes bool) (bool, err
 		return false, errors.New("sand publish: refusing to publish: stdin is not a terminal, so there is no human to confirm this; re-run with --yes after reviewing the confirmation above, or run this from an interactive terminal")
 	}
 	fmt.Fprint(stdout, "Publish the above to drupal.org? [y/N] ")
-	reader := bufio.NewReader(stdin)
-	line, _ := reader.ReadString('\n')
+	line, _ := stdin.ReadString('\n')
 	line = strings.ToLower(strings.TrimSpace(line))
 	return line == "y" || line == "yes", nil
 }
@@ -478,6 +551,36 @@ func (c providerCollector) Collect(ctx context.Context, v vm.VM, path string) (d
 		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
 	}
 	return target, cs, nil
+}
+
+// Fetch refreshes path's view of the fork branch and parses the comparison.
+// Like Collect it only wires drupalorg's builder and parser to the provider's
+// exec path; the comparison itself is decided in drupalorg, once, so both
+// surfaces read the same state the same way.
+func (c providerCollector) Fetch(ctx context.Context, v vm.VM, path, branch string) (drupalorg.SyncStatus, error) {
+	script, err := drupalorg.BuildFetchCommand(branch)
+	if err != nil {
+		return drupalorg.SyncStatus{}, err
+	}
+	out, err := provider.RunCaptured(ctx, c.p, v, path, script)
+	if err != nil {
+		return drupalorg.SyncStatus{}, fmt.Errorf("fetching %q in %q: %w", branch, path, err)
+	}
+	return drupalorg.ParseSyncStatus(out)
+}
+
+// Adopt resets path's branch onto the fork's published commits. The script it
+// runs re-checks in the guest that the tree is clean and the content still
+// matches before it touches anything — see BuildResetCommand.
+func (c providerCollector) Adopt(ctx context.Context, v vm.VM, path, branch string) error {
+	script, err := drupalorg.BuildResetCommand(branch)
+	if err != nil {
+		return err
+	}
+	if _, err := provider.RunCaptured(ctx, c.p, v, path, script); err != nil {
+		return fmt.Errorf("adopting %q in %q: %w", branch, path, err)
+	}
+	return nil
 }
 
 // run executes expr against path inside v via Provider.RunArgv, capturing

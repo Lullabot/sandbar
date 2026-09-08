@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +20,35 @@ type fakeCollector struct {
 	cs     drupalorg.ChangeSet
 	err    error
 	calls  int
+
+	// syncStatus/syncErr drive Fetch; adoptErr drives Adopt. The zero
+	// SyncStatus is "not diverged", which is what the tests that predate the
+	// post-publish sync want: nothing to report, nothing offered.
+	syncStatus  drupalorg.SyncStatus
+	syncErr     error
+	adoptErr    error
+	fetchCalls  int
+	adoptCalls  int
+	adoptBranch string
+}
+
+func (f *fakeCollector) Fetch(_ context.Context, _ vm.VM, _, _ string) (drupalorg.SyncStatus, error) {
+	f.fetchCalls++
+	return f.syncStatus, f.syncErr
+}
+
+func (f *fakeCollector) Adopt(_ context.Context, _ vm.VM, _, branch string) error {
+	f.adoptCalls++
+	f.adoptBranch = branch
+	return f.adoptErr
+}
+
+// divergedSync is the state a successful replay always leaves behind: two
+// histories with the same content and no commit in common, and a clean tree.
+func divergedSync() drupalorg.SyncStatus {
+	return drupalorg.SyncStatus{
+		Dirty: 0, Local: "aaaaaaa", Fork: "bbbbbbb", Ahead: 3, Behind: 3, SameContent: true,
+	}
 }
 
 func (f *fakeCollector) Collect(context.Context, vm.VM, string) (drupalorg.RemoteTarget, drupalorg.ChangeSet, error) {
@@ -211,7 +241,7 @@ func TestDoPublishNothingToPublishSkipsConfirmationAndDestination(t *testing.T) 
 func TestConfirmPublish(t *testing.T) {
 	t.Run("yes flag bypasses the prompt entirely", func(t *testing.T) {
 		var out strings.Builder
-		ok, err := confirmPublish(&out, strings.NewReader(""), false, true)
+		ok, err := confirmPublish(&out, bufio.NewReader(strings.NewReader("")), false, true)
 		if err != nil || !ok {
 			t.Fatalf("confirmPublish(yes=true) = (%v, %v), want (true, nil)", ok, err)
 		}
@@ -223,7 +253,7 @@ func TestConfirmPublish(t *testing.T) {
 	t.Run("tty accepts y/yes case-insensitively", func(t *testing.T) {
 		for _, in := range []string{"y\n", "Y\n", "yes\n", "YES\n"} {
 			var out strings.Builder
-			ok, err := confirmPublish(&out, strings.NewReader(in), true, false)
+			ok, err := confirmPublish(&out, bufio.NewReader(strings.NewReader(in)), true, false)
 			if err != nil || !ok {
 				t.Errorf("confirmPublish(%q) = (%v, %v), want (true, nil)", in, ok, err)
 			}
@@ -231,14 +261,14 @@ func TestConfirmPublish(t *testing.T) {
 	})
 
 	t.Run("tty rejects anything else", func(t *testing.T) {
-		ok, err := confirmPublish(&strings.Builder{}, strings.NewReader("no\n"), true, false)
+		ok, err := confirmPublish(&strings.Builder{}, bufio.NewReader(strings.NewReader("no\n")), true, false)
 		if err != nil || ok {
 			t.Errorf("confirmPublish(no) = (%v, %v), want (false, nil)", ok, err)
 		}
 	})
 
 	t.Run("non-tty without yes refuses", func(t *testing.T) {
-		_, err := confirmPublish(&strings.Builder{}, strings.NewReader(""), false, false)
+		_, err := confirmPublish(&strings.Builder{}, bufio.NewReader(strings.NewReader("")), false, false)
 		if err == nil {
 			t.Error("confirmPublish: want an error on a non-tty without yes")
 		}
@@ -404,5 +434,146 @@ func TestDoPublishWithoutIssueOnCanonicalRemoteRefuses(t *testing.T) {
 	}
 	if dp.resolveCalls != 0 || dp.publishCalls != 0 {
 		t.Errorf("resolve/publish called (%d, %d), want (0, 0) with no issue to resolve", dp.resolveCalls, dp.publishCalls)
+	}
+}
+
+// --- doPublish: reconciling the checkout after a replay -------------------
+
+// A replay leaves the checkout holding commits that are now public under
+// different SHAs. doPublish must fetch so that divergence is visible, and —
+// the tree being clean and the content identical — offer to adopt what
+// landed.
+func TestDoPublishOffersToAdoptPublishedCommits(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: divergedSync()}
+	dp := &fakeDestPublisher{dest: sampleDestination(), result: drupalorg.Result{}}
+
+	var stdout strings.Builder
+	// "y" confirms the publish; the second "y" accepts the adopt offer.
+	err := doPublish(context.Background(), &stdout, strings.NewReader("y\ny\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false)
+	if err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.fetchCalls != 1 {
+		t.Errorf("Fetch calls = %d, want 1", coll.fetchCalls)
+	}
+	if coll.adoptCalls != 1 {
+		t.Fatalf("Adopt calls = %d, want 1", coll.adoptCalls)
+	}
+	if coll.adoptBranch != sampleDestination().Branch {
+		t.Errorf("adopted branch = %q, want %q", coll.adoptBranch, sampleDestination().Branch)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "different commits") {
+		t.Errorf("stdout = %q, want the divergence explained", out)
+	}
+}
+
+// Declining the offer must leave the checkout exactly as it was. The publish
+// is done either way; the reset is a separate act with its own answer.
+func TestDoPublishDeclinedAdoptLeavesCheckoutAlone(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: divergedSync()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("y\nn\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false); err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.adoptCalls != 0 {
+		t.Errorf("Adopt calls = %d, want 0 after declining", coll.adoptCalls)
+	}
+	if !strings.Contains(stdout.String(), "left as is") {
+		t.Errorf("stdout = %q, want the decline acknowledged", stdout.String())
+	}
+}
+
+// A dirty tree means publication left uncommitted work behind, and a reset
+// would destroy it. The offer must not be made at all — and the reason must
+// be said, since "no prompt appeared" is not actionable on its own.
+func TestDoPublishDoesNotOfferAdoptOnADirtyTree(t *testing.T) {
+	status := divergedSync()
+	status.Dirty = 2
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: status}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("y\ny\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false); err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.adoptCalls != 0 {
+		t.Fatalf("Adopt calls = %d, want 0 with uncommitted work in the tree", coll.adoptCalls)
+	}
+	if !strings.Contains(stdout.String(), "uncommitted") {
+		t.Errorf("stdout = %q, want the uncommitted work named as the reason", stdout.String())
+	}
+}
+
+// Content that genuinely differs is not a SHA-divergence artifact, and a
+// reset would discard real local work. No offer.
+func TestDoPublishDoesNotOfferAdoptWhenContentDiffers(t *testing.T) {
+	status := divergedSync()
+	status.SameContent = false
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: status}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("y\ny\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false); err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.adoptCalls != 0 {
+		t.Errorf("Adopt calls = %d, want 0 when the content differs", coll.adoptCalls)
+	}
+}
+
+// --yes confirms the PUBLISH. A hard reset of a working tree is a different
+// act, and a pipe is not a human who can answer for it: without a terminal
+// the divergence is reported and nothing is touched.
+func TestDoPublishNonTTYReportsButNeverAdopts(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: divergedSync()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader(""), false, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, true, false); err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.adoptCalls != 0 {
+		t.Fatalf("Adopt calls = %d, want 0 without a terminal", coll.adoptCalls)
+	}
+	if !strings.Contains(stdout.String(), "git reset --hard") {
+		t.Errorf("stdout = %q, want the command to run reported instead", stdout.String())
+	}
+}
+
+// The publish has already succeeded and cannot be rolled back by the time
+// the sync runs, so a fetch failure is a warning — never a non-zero exit
+// that would report a successful publish as a failed command.
+func TestDoPublishFetchFailureIsOnlyAWarning(t *testing.T) {
+	coll := &fakeCollector{
+		target:  drupalorg.RemoteTarget{Module: "foo"},
+		cs:      sampleChangeSet(),
+		syncErr: errors.New("network unreachable"),
+	}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("y\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false); err != nil {
+		t.Fatalf("doPublish: a fetch failure must not fail the command, got %v", err)
+	}
+	if !strings.Contains(stdout.String(), "warning") {
+		t.Errorf("stdout = %q, want the fetch failure reported as a warning", stdout.String())
+	}
+}
+
+// Nothing is offered, and no reset is attempted, when the publish never got
+// as far as writing anything.
+func TestDoPublishDeclineSkipsTheSyncEntirely(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: sampleChangeSet(), syncStatus: divergedSync()}
+	dp := &fakeDestPublisher{dest: sampleDestination()}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("n\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 12345, false, false); err != nil {
+		t.Fatalf("doPublish: unexpected error: %v", err)
+	}
+	if coll.fetchCalls != 0 || coll.adoptCalls != 0 {
+		t.Errorf("fetch/adopt calls = (%d, %d), want (0, 0) when the publish was declined", coll.fetchCalls, coll.adoptCalls)
 	}
 }

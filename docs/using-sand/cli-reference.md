@@ -503,6 +503,15 @@ publishing anything:
 - **`--profile`** picks which connection profile `NAME` is resolved on, the
   same as every other command that names a VM.
 
+After a successful publish, `sand publish` fetches the fork branch in the
+guest and reports how your checkout compares — the replay creates new commits
+with new SHAs, so the two diverge by construction. When their content is
+identical and your tree is clean, it offers to reset the checkout onto the
+published commits. That offer is a **separate** question from `--yes`, which
+confirms only the publish; without a terminal the command to run is printed
+instead. See
+[Your checkout after a publish](drupalorg-publishing.md#your-checkout-after-a-publish).
+
 If `PATH` has no local commits ahead of its upstream branch, `sand publish`
 says so and exits cleanly without prompting for anything.
 
