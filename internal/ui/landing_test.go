@@ -1948,3 +1948,101 @@ func TestLandingPublishIssueInputHasWidth(t *testing.T) {
 		t.Errorf("issue input view = %q, want the whole placeholder %q", got, ti.Placeholder)
 	}
 }
+
+// --- post-publish reconciliation ------------------------------------------
+
+// A dispatched publish records what its completion will need to reconcile
+// the checkout, because the flow that knows those facts is cleared the
+// moment the job starts. Without this the job finishes with nothing left to
+// say which VM, checkout, or branch it was about.
+func TestLandingPublishRecordsItsSyncTarget(t *testing.T) {
+	m, v, _ := landingPublishForkFixture(t)
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+	m = l.m
+
+	next, _ = m.updateLanding(runeKey('y'))
+	m = next.(model)
+
+	jk := landKey(v.scope, v.Name)
+	target, ok := m.publishSync[jk]
+	if !ok {
+		t.Fatalf("publishSync = %+v, want an entry for the dispatched job", m.publishSync)
+	}
+	if target.path != "/home/u/mod" {
+		t.Errorf("sync target path = %q, want %q", target.path, "/home/u/mod")
+	}
+	// The FORK's branch, not the guest's local branch name ("1234-fix"):
+	// the fetch has to name the ref publication actually wrote.
+	if target.branch != "mod-1234" {
+		t.Errorf("sync target branch = %q, want the fork branch %q", target.branch, "mod-1234")
+	}
+}
+
+// A replay leaves the checkout holding the same content under different
+// commits. That is the state adopting is FOR, so it must raise the ordinary
+// confirmation overlay rather than acting on its own.
+func TestLandingSyncOffersToAdoptOnAcleanDivergence(t *testing.T) {
+	m := newTestModel(t)
+	target := publishSyncTarget{path: "/home/u/mod", branch: "mod-1234", vm: vm.VM{Name: "web"}}
+
+	cmd := m.handleLandingSync(landingSyncMsg{
+		target: target,
+		status: drupalorg.SyncStatus{Local: "aaa", Fork: "bbb", Ahead: 3, Behind: 3, SameContent: true},
+	})
+	if cmd != nil {
+		t.Errorf("handleLandingSync returned a command; the offer is an overlay, not an action")
+	}
+	if m.confirm == nil {
+		t.Fatal("no confirmation raised for an adoptable divergence")
+	}
+	if !strings.Contains(m.confirm.prompt, "/home/u/mod") {
+		t.Errorf("confirm prompt = %q, want it to name the checkout", m.confirm.prompt)
+	}
+}
+
+// Every state that is not safe to adopt must raise nothing at all: an
+// overlay offering to destroy uncommitted work, or to discard real local
+// changes, is worse than no offer.
+func TestLandingSyncStaysSilentWhenAdoptingIsUnsafe(t *testing.T) {
+	cases := map[string]drupalorg.SyncStatus{
+		"uncommitted work": {Local: "aaa", Fork: "bbb", SameContent: true, Dirty: 2},
+		"content differs":  {Local: "aaa", Fork: "bbb", SameContent: false},
+		"already in sync":  {Local: "aaa", Fork: "aaa", SameContent: true},
+		"no fork commit":   {Local: "aaa", SameContent: true},
+	}
+	for name, status := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.handleLandingSync(landingSyncMsg{
+				target: publishSyncTarget{path: "/home/u/mod", branch: "mod-1234"},
+				status: status,
+			})
+			if m.confirm != nil {
+				t.Errorf("raised a confirmation for %s: %q", name, m.confirm.prompt)
+			}
+		})
+	}
+}
+
+// The publish this follows has already succeeded and cannot be rolled back,
+// so a fetch failure is logged and dropped — never turned into a dialog that
+// implies something went wrong with the publish itself.
+func TestLandingSyncFailureIsOnlyLogged(t *testing.T) {
+	m := newTestModel(t)
+	m.handleLandingSync(landingSyncMsg{
+		target: publishSyncTarget{path: "/home/u/mod", branch: "mod-1234"},
+		err:    errors.New("network unreachable"),
+	})
+	if m.confirm != nil {
+		t.Errorf("raised a confirmation after a failed fetch: %q", m.confirm.prompt)
+	}
+}

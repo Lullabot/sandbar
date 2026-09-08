@@ -336,6 +336,14 @@ type model struct {
 	// below.
 	confirm *confirmState
 
+	// publishSync holds, per dispatched drupal.org publish job, what its
+	// COMPLETION needs in order to reconcile the guest checkout with the
+	// commits the publish created on the fork (see publishSyncTarget). The
+	// publish flow itself is gone by then — confirmLandingPublish clears it
+	// when it dispatches — so the facts have to outlive it here. Entries are
+	// consumed exactly once, on provisionDoneMsg, whatever the outcome.
+	publishSync map[jobKey]publishSyncTarget
+
 	// Create form.
 	inputs   []textinput.Model
 	focusIdx int
@@ -1440,6 +1448,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		// Taken before any of the early returns below, so a cancelled or
+		// failed publish drops its entry rather than leaving it to be
+		// mistaken for a later job's on the same key.
+		syncTarget, wantsSync := m.publishSync[msg.job]
+		if wantsSync {
+			delete(m.publishSync, msg.job)
+		}
 		if m.view == viewProgress && m.progressJob == msg.job {
 			m.setOutput()
 		}
@@ -1518,10 +1533,29 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			applyCmd = applySecretsCmd(m.provFor(msg.job.scope), msg.job.scope, cfg.Name, user, scopes)
 		}
 		refresh := m.refreshMemberCmd(msg.job.scope) // refresh the build's own member
-		if applyCmd != nil {
-			return m, tea.Batch(refresh, applyCmd)
+		// A successful publish leaves the checkout holding commits that are
+		// now public under DIFFERENT SHAs — the content API replays rather
+		// than pushes. Fetch so the checkout can at least see what landed;
+		// handleLandingSync decides whether to offer adopting it.
+		var syncCmd tea.Cmd
+		if wantsSync && msg.err == nil {
+			syncCmd = landingSyncCmd(m.provFor(syncTarget.scope), syncTarget)
+		}
+		if applyCmd != nil || syncCmd != nil {
+			return m, tea.Batch(refresh, applyCmd, syncCmd)
 		}
 		return m, refresh
+
+	case landingSyncMsg:
+		return m, m.handleLandingSync(msg)
+
+	case landingAdoptedMsg:
+		if msg.err != nil {
+			m.logWarn("could not adopt the published commits in " + msg.path + ": " + msg.err.Error())
+			return m, nil
+		}
+		m.logMsg("adopted the published commits in " + msg.path)
+		return m, nil
 
 	case toolsetLoadedMsg:
 		// The read was kicked (openForm/cycleFormProfile, form.go) for the scope

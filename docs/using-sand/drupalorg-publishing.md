@@ -99,7 +99,9 @@ For a checkout `PATH`, publication:
    [Replay, not squash](#replay-not-squash-your-local-history-is-what-lands)
    — and then opens a merge request against the canonical parent, or reuses
    one that's already open for that branch.
-7. Reports what happened: one line per commit, in order, naming its status
+7. Reconciles your checkout with what just landed — see
+   [Your checkout after a publish](#your-checkout-after-a-publish).
+8. Reports what happened: one line per commit, in order, naming its status
    (`landed`, `already-present`, `failed`, or `not-attempted`) and its SHA
    on the fork where it has one, followed by the merge request's URL and any
    warnings.
@@ -166,6 +168,78 @@ rest of the flow and is allowed to come back empty; a title is a convenience,
 and nothing about it blocks a publish. Whichever title you end up with is
 printed in the confirmation before you accept it, so you always see the
 headline your proposal will carry.
+
+## Your checkout after a publish
+
+Because publication **replays** commits rather than pushing them, every
+commit that lands is a brand-new commit object: a new SHA, a new committer of
+record (the owner of the PAT), a new timestamp. Your checkout still holds the
+originals. So the moment a publish succeeds, your local branch and the fork
+hold **the same content under completely different commits, with nothing in
+common**.
+
+That is expected, and resuming a publish already copes with it — commits are
+matched by message and author, never by SHA, which is what makes resumption
+work at all. But your checkout doesn't know, and left alone it goes wrong in
+the usual way: `git log origin/<branch>` shows a stale picture, and a later
+`git pull` merges the two histories into a pile of duplicated commits.
+
+So after every successful publish, `sand` **fetches** the fork branch in the
+guest and tells you where you stand:
+
+```
+this checkout and the fork hold the same content under different commits
+(3 local, 3 published) — publication replays commits rather than pushing
+them, so the SHAs differ
+  published: 891e13e…
+  local:     9c2d5f2…
+```
+
+The fetch is a read. It moves no branch and touches no file, so it happens
+without asking. Its value is that `git diff HEAD FETCH_HEAD` and `git log
+origin/<branch>` now tell you the truth about what is public.
+
+### Adopting the published commits
+
+When — and only when — all three of these hold:
+
+- your history and the fork's differ, **and**
+- their **content is identical**, **and**
+- your working tree is **clean**,
+
+`sand` offers to reset your branch onto the published commits:
+
+```
+Reset this checkout onto the published commits? [y/N]
+```
+
+In the TUI this arrives as the usual `[y] yes  [n] cancel` confirmation.
+Saying yes runs `git reset --hard` onto the fetched commits, leaving your
+checkout exactly matching what is public. Nothing is lost: the content is
+identical by construction, and the only things discarded are the local commit
+objects whose changes are already public under other SHAs.
+
+Say no and nothing happens. This is a **separate decision from the publish**,
+with its own answer — `--yes` confirms the publish and never the reset, and
+without a terminal `sand publish` prints the command instead of running it.
+
+The offer is withheld, with the reason printed, when:
+
+- **your tree is dirty.** Publication carries committed commits only, so the
+  uncommitted remainder was deliberately left behind — a reset would destroy
+  it. Commit or stash it, then publish again.
+- **the content genuinely differs.** That is not a SHA-divergence artifact;
+  you have real local changes the fork doesn't, and a reset would discard
+  them.
+
+The reset re-checks both conditions **inside the guest**, immediately before
+it acts. A VM runs agent code that can write files at any moment, so a guard
+evaluated on the host when the question was asked is a guard against the
+past; if anything changed while you were deciding, the reset refuses instead.
+
+Note that this only ever moves you **onto** the fork. The fork branch can
+only grow (see [There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows)),
+so there is no version of this that rewrites drupal.org to match you.
 
 ## Four things you'll otherwise learn the hard way
 

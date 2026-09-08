@@ -1514,6 +1514,113 @@ func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
 	return nil
 }
 
+// publishSyncTarget is what a dispatched publish job leaves behind so that
+// its COMPLETION can close the loop the replay opened.
+//
+// Publication creates new commits on the fork rather than pushing the local
+// ones, so the moment the job succeeds the guest checkout's remote-tracking
+// ref is stale and its history has no commit in common with what is now
+// public (see internal/drupalorg/sync.go). Everything needed to fix that —
+// which VM, which checkout, which branch — is known when the job is
+// dispatched and gone from the flow by the time it finishes, since
+// confirmLandingPublish clears m.landing.publish on its way out. So it is
+// recorded here, keyed by the job, and consumed once on provisionDoneMsg.
+type publishSyncTarget struct {
+	scope  registry.Scope
+	vm     vm.VM
+	path   string
+	branch string
+}
+
+// landingSyncMsg carries the post-publish comparison back to the update loop.
+type landingSyncMsg struct {
+	target publishSyncTarget
+	status drupalorg.SyncStatus
+	err    error
+}
+
+// landingAdoptedMsg reports the result of adopting the published commits.
+type landingAdoptedMsg struct {
+	path string
+	err  error
+}
+
+// landingSyncCmd fetches the fork branch in the guest and reports the
+// comparison. It runs AFTER the publish job rather than inside it, which is
+// what keeps the two independent: a fetch that fails, times out, or finds
+// something surprising cannot retroactively mark a successful, unrevocable
+// publish as failed.
+//
+// It writes nothing in the guest — see drupalorg.BuildFetchCommand — so it
+// needs no confirmation of its own and is run after every successful publish.
+func landingSyncCmd(prov provider.Provider, t publishSyncTarget) tea.Cmd {
+	return func() tea.Msg {
+		script, err := drupalorg.BuildFetchCommand(t.branch)
+		if err != nil {
+			return landingSyncMsg{target: t, err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), landingPublishStepTimeout)
+		defer cancel()
+		out, err := provider.RunCaptured(ctx, prov, t.vm, t.path, script)
+		if err != nil {
+			return landingSyncMsg{target: t, err: err}
+		}
+		status, err := drupalorg.ParseSyncStatus(out)
+		return landingSyncMsg{target: t, status: status, err: err}
+	}
+}
+
+// landingAdoptCmd resets the checkout onto the fork's published commits. It
+// is reached ONLY from the confirmation overlay handleLandingSync raises, and
+// the script it runs re-checks in the guest that the tree is still clean and
+// the content still matches before it moves anything — see
+// drupalorg.BuildResetCommand for why that second check is not redundant.
+func landingAdoptCmd(prov provider.Provider, t publishSyncTarget) tea.Cmd {
+	return func() tea.Msg {
+		script, err := drupalorg.BuildResetCommand(t.branch)
+		if err != nil {
+			return landingAdoptedMsg{path: t.path, err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), landingPublishStepTimeout)
+		defer cancel()
+		_, err = provider.RunCaptured(ctx, prov, t.vm, t.path, script)
+		return landingAdoptedMsg{path: t.path, err: err}
+	}
+}
+
+// handleLandingSync reports where the checkout stands after a publish and,
+// when adopting the published commits is safe, raises the app's ordinary
+// confirmation overlay for it.
+//
+// The overlay is the right shape for this and a new bespoke prompt would be
+// the wrong one: this is a destructive, VM-scoped action needing one yes,
+// which is exactly what m.confirm is for everywhere else in sand. It is also
+// answerable from the progress screen the finished publish leaves the user
+// on (updateProgress hands off to updateConfirm first), so the offer lands
+// where they already are.
+//
+// A failure is logged, never raised: the publish it followed has already
+// succeeded, and a stale ref is not worth a scary dialog.
+func (m *model) handleLandingSync(msg landingSyncMsg) tea.Cmd {
+	if msg.err != nil {
+		m.logWarn("published, but could not refresh " + msg.target.path + " against the fork: " + msg.err.Error())
+		return nil
+	}
+	m.logMsg("published: " + msg.status.Summary())
+	if !msg.status.CanAdopt() {
+		return nil
+	}
+	t := msg.target
+	m.confirm = &confirmState{
+		prompt:  "Reset " + t.path + " onto the published commits?",
+		run:     landingAdoptCmd(m.provFor(t.scope), t),
+		working: "adopting the published commits in " + t.path + "…",
+		scope:   t.scope,
+		vmName:  t.vm.Name,
+	}
+	return nil
+}
+
 // confirmLandingPublish dispatches the resolved publish as a job, exactly
 // like every other landing action (runLandingAction) — the only difference is
 // that its Destination/ChangeSet were resolved ahead of time, by this flow,
@@ -1531,6 +1638,17 @@ func (m model) confirmLandingPublish() (tea.Model, tea.Cmd) {
 	cmd, started := m.beginStream(jk, title, landPublishRun(m.drupalOrgActions, dest, cs))
 	if started {
 		m.focusJob(jk)
+		// Recorded only for a job that actually started: a refused dispatch
+		// publishes nothing, so there is nothing for its completion to sync.
+		if m.publishSync == nil {
+			m.publishSync = make(map[jobKey]publishSyncTarget)
+		}
+		m.publishSync[jk] = publishSyncTarget{
+			scope:  m.landing.scope,
+			vm:     m.landing.vm,
+			path:   c.Path,
+			branch: dest.Branch,
+		}
 	}
 	return m, cmd
 }
