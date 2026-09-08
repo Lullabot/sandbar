@@ -1138,6 +1138,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../drupalorg-publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publishing to drupal.org
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1921,6 +1949,16 @@ that state calls for:</p>
   If such a checkout holds uncommitted or unpushed work, the row still says
   so (<code>local only · 2 uncommitted</code>) — there is nothing sand can do about it,
   but you should know it is there before deleting the VM.</li>
+<li><strong>On <code>git.drupalcode.org</code></strong> — the checkout's remote is a drupal.org
+  project rather than GitHub. Instead of a PR flow, the row reads
+  <code>publish to drupal.org</code> when a workstation drupal.org PAT is on file:
+  acting on it prompts for the drupal.org issue number this work belongs
+  to, then resolves the destination and asks you to confirm before
+  publishing anything. Without a PAT on file the row instead reads
+  <code>on git.drupalcode.org · no drupal.org PAT on file, publish disabled</code>
+  and offers no action. See
+  <a href="../drupalorg-publishing/">Publishing to drupal.org</a>, and
+  <a href="../drupalorg-publishing/#setup">Setup</a> for the token file.</li>
 </ul>
 <p>The commit-and-push action is the only Landing action that runs inside the
 VM, and it stays there: the commit and the push both happen in the guest,

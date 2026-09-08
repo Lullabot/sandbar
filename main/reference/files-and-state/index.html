@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://lullabot.github.io/sandbar/main/reference/files-and-state/">
       
       
-        <link rel="prev" href="../../using-sand/proxmox/">
+        <link rel="prev" href="../../using-sand/drupalorg-publishing/">
       
       
         <link rel="next" href="../troubleshooting/">
@@ -886,6 +886,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/drupalorg-publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publishing to drupal.org
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1416,9 +1444,14 @@ out; every other page links here instead of restating them.</p>
 <td>The <code>user@realm!tokenid=value</code> credential a Proxmox profile's <code>token_file</code> points at. <strong>Not</strong> managed by <code>sand</code> and never written by it — you create it (see <a href="../../using-sand/proxmox/">Proxmox VE</a>). Must be mode <code>0600</code>; <code>sand</code> refuses to read a looser one.</td>
 <td>Only if you're prepared to re-issue the token — it's the sole secret that grants access to the pool.</td>
 </tr>
+<tr>
+<td><code>${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token</code></td>
+<td>Your drupal.org account <strong>personal access token</strong>, read only on the host for <a href="../../using-sand/drupalorg-publishing/">publishing a guest checkout's commits to drupal.org</a>. <strong>Not</strong> managed by <code>sand</code> and never written by it — you create it, with the token as its only content. Must be mode <code>0600</code>; <code>sand</code> refuses to read a looser one, and refuses to publish at all if the file is absent. The path is a fixed <strong>convention, not a configured value</strong>: there is deliberately no <code>profiles.yaml</code> key and no form field for it, because the credential is workstation-global rather than per-location. It is deliberately <strong>not</strong> in the <a href="../../using-sand/secrets/">secrets store</a> either — that store exists to deliver secrets <em>into</em> a guest, and no drupal.org credential ever enters a VM (see <a href="../security-model/#publishing-to-drupalorg-agent-decides-what-host-decides-where">Security Model</a>).</td>
+<td>Only if you're prepared to re-issue the token. Deleting it disables publishing until you recreate it; nothing else is affected.</td>
+</tr>
 </tbody>
 </table>
-<p>Sources: <code>internal/profiles/store.go</code> (<code>profiles.yaml</code> default path, schema, and CRUD), <code>internal/registry/registry.go:53</code> and <code>internal/registry/registry.go:62</code> (<code>managed-vms.json</code> default path), <code>internal/registry/registry.go:172</code> (the config saved into that index is the create config, stripped of the clone token), <code>internal/registry/registry.go:107</code>-<code>internal/registry/registry.go:129</code> (the v3 <code>(scope, name)</code>-keyed array shape), <code>internal/secrets/secrets.go:124</code> and <code>internal/secrets/secrets.go:133</code> (<code>secrets.json</code> default path), <code>internal/secrets/secrets.go:342</code>-<code>internal/secrets/secrets.go:350</code> (directory forced to <code>0700</code>) and <code>internal/secrets/secrets.go:357</code>-<code>internal/secrets/secrets.go:359</code> (file created at <code>0600</code>), <code>internal/provision/baseversion.go:62</code>-<code>internal/provision/baseversion.go:68</code> (<code>LIMA_HOME</code> fallback to <code>~/.lima</code>).</p>
+<p>Sources: <code>internal/profiles/store.go</code> (<code>profiles.yaml</code> default path, schema, and CRUD), <code>internal/registry/registry.go:53</code> and <code>internal/registry/registry.go:62</code> (<code>managed-vms.json</code> default path), <code>internal/registry/registry.go:172</code> (the config saved into that index is the create config, stripped of the clone token), <code>internal/registry/registry.go:107</code>-<code>internal/registry/registry.go:129</code> (the v3 <code>(scope, name)</code>-keyed array shape), <code>internal/secrets/secrets.go:124</code> and <code>internal/secrets/secrets.go:133</code> (<code>secrets.json</code> default path), <code>internal/secrets/secrets.go:342</code>-<code>internal/secrets/secrets.go:350</code> (directory forced to <code>0700</code>) and <code>internal/secrets/secrets.go:357</code>-<code>internal/secrets/secrets.go:359</code> (file created at <code>0600</code>), <code>internal/provision/baseversion.go:62</code>-<code>internal/provision/baseversion.go:68</code> (<code>LIMA_HOME</code> fallback to <code>~/.lima</code>), <code>internal/drupalorg/token.go</code> (<code>TokenPath</code>'s <code>XDG_CONFIG_HOME</code> fallback and doc comment, and <code>LoadToken</code>'s mode check).</p>
 <h3 id="two-different-scope-dimensions">Two different "scope" dimensions</h3>
 <p>Two unrelated things are both called a "scope" in this file store, and it's
 easy to conflate them:</p>

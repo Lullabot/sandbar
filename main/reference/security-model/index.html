@@ -699,6 +699,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#publishing-to-drupalorg-agent-decides-what-host-decides-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing to drupal.org: agent decides what, host decides where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -997,6 +1008,34 @@
     
   
     Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/drupalorg-publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publishing to drupal.org
   
 
     
@@ -1347,6 +1386,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#publishing-to-drupalorg-agent-decides-what-host-decides-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing to drupal.org: agent decides what, host decides where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-least-privilege-token-reasonable-agent-access" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1516,6 +1566,64 @@ what happens <em>after</em> a push, not what the guest's token can do. Code from
 that branch reaches your host only when you choose to bring it there
 yourself — a <code>gh pr checkout</code> or <code>git pull</code> you run and review — never as a
 side effect of Landing itself.</p>
+<h2 id="publishing-to-drupalorg-agent-decides-what-host-decides-where">Publishing to drupal.org: agent decides what, host decides where</h2>
+<p><a href="../../using-sand/drupalorg-publishing/">Publishing to drupal.org</a> — replaying
+a guest checkout's commits onto a drupal.org issue fork — splits authority
+along one line: <strong>the guest decides WHAT changes</strong> (the commits, their
+messages, and their file contents) and <strong>the host decides WHERE they go</strong>
+(which fork, which branch, how the merge request is titled, whether one
+follows at all). The merge request's title is on the host's side of that line
+deliberately: it is read from the issue's own drupal.org page, never from the
+commits, so a compromised agent's prose cannot become the headline of a
+permanent public proposal — see
+<a href="../../using-sand/drupalorg-publishing/#how-the-merge-request-is-titled">How the merge request is titled</a>.
+The guest never
+sees a drupal.org credential, a project, a branch name, or a URL; it only
+ever produces an inert payload of commits and file actions that is
+structurally incapable of naming a destination. That split is enforced by the
+payload type itself, not by convention — see <code>internal/drupalorg</code>'s package
+doc comment — so no amount of prompt injection or agent compromise can make
+a guest's output smuggle in where it lands.</p>
+<p><strong>No drupal.org credential ever enters a VM.</strong> The guest clones and reads
+drupal.org anonymously — anonymous requests already cover the entire
+development loop, including CI results and merge-request feedback — and only
+the host, using a personal access token that never leaves your workstation,
+performs the one call that writes. This is a stricter version of the
+least-privilege reasoning below, not a variant of it: a drupal.org account
+PAT is not scoped to one repository the way a GitHub fine-grained token can
+be — it is account-wide, and a working Drupal contributor's account may hold
+push access to modules running on tens of thousands of sites. The only safe
+credential to place in an agent-controlled VM for that kind of account is
+none at all. See
+<a href="../files-and-state/#host-paths">Files and State</a> for where the token
+actually lives and why its path is a convention rather than a config value.</p>
+<p><strong>The limits, stated honestly.</strong> This design does not make publication safe
+in the abstract — it moves the one dangerous credential to the one place an
+agent cannot directly reach, and stops there:</p>
+<ul>
+<li><strong>The host still holds a powerful, account-wide credential</strong>, and it uses
+  that credential to publish content an agent authored. The human-in-the-loop
+  confirmation (see the publishing guide) is what stands between an agent's
+  output and a public, permanent write — not any property of the credential
+  itself. A compromised or careless human confirmation is still a compromise.</li>
+<li><strong>drupal.org's edge allowlist is not a containment boundary.</strong> drupal.org
+  runs a per-path, per-method allowlist in front of its GitLab API that
+  blocks a few credential-minting endpoints (<code>POST /access_tokens</code>,
+  <code>POST /deploy_tokens</code>, <code>POST /deploy_keys</code>) while routing every
+  content-write endpoint this design uses straight through. It is tempting to
+  read that as "drupal.org contains what an agent can do", but two things
+  defeat that reading: <code>POST /api/graphql</code> is <strong>not</strong> blocked and returns 200
+  unauthenticated — protecting GraphQL writes the same way "would require
+  inspecting the request body, which is not a capability of our load balancer,
+  as far as I know", per the infrastructure discussion in
+  <a href="https://www.drupal.org/project/infrastructure/issues/3379836">#3379836</a> —
+  and <code>git push</code> over HTTPS reaches GitLab directly, bypassing the REST
+  allowlist entirely. So the allowlist is a control on one specific REST
+  path, not a barrier that would stop a leaked credential. <strong>If a credential
+  ever enters a guest, the allowlist will not save you</strong> — the guarantee has
+  to come from the credential's own boundary, or from its absence, exactly as
+  above.</li>
+</ul>
 <h2 id="a-least-privilege-token-reasonable-agent-access">A least-privilege token: reasonable agent access</h2>
 <p><code>sand</code> can hand Claude Code a GitHub token at create time so it can clone,
 pull, push, and open pull requests from inside the VM (see

@@ -1006,6 +1006,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-publish-name-path-issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand publish NAME PATH [ISSUE]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-version-sand-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1152,6 +1163,34 @@
     
   
     Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../drupalorg-publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publishing to drupal.org
   
 
     
@@ -1696,6 +1735,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-publish-name-path-issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand publish NAME PATH [ISSUE]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-version-sand-version" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1727,7 +1777,7 @@
 
 
 <h1 id="cli-reference">CLI Reference</h1>
-<p>There are five entry points:</p>
+<p>There are seven entry points:</p>
 <ul>
 <li><a href="#sand"><code>sand</code></a> — no arguments — launches the interactive TUI.</li>
 <li><a href="#sand-create"><code>sand create</code></a> — headless, non-interactive VM provisioning.</li>
@@ -1741,6 +1791,8 @@
 <p><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
   draft PR / browser for one of them.</p>
 </li>
+<li><a href="#sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></a> — publish
+  a checkout's local commits to a drupal.org issue fork.</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
   the build identity.</li>
 </ul>
@@ -2228,6 +2280,90 @@ yet.</p>
 <p><code>sand land</code> never pushes, commits, or otherwise touches the checkout's
 working state — it only reads what the guest already has and, for <code>--pr</code>,
 calls <code>gh</code> on the workstation.</p>
+<h2 id="sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></h2>
+<p>Publish <code>PATH</code>'s local commits (inside the VM named <code>NAME</code>) to the
+drupal.org issue fork for issue <code>ISSUE</code>, using the workstation's own
+drupal.org token — never a credential inside the VM. This is the same
+publication logic (<code>internal/drupalorg</code>) the TUI's Landing pane offers as
+its <code>publish to drupal.org</code> row; see
+<a href="../drupalorg-publishing/">Publishing to drupal.org</a> for what it does, what
+the confirmation shows, and what to know before you rely on it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile &lt;name&gt;]
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Publish PATH's local commits (inside the VM named NAME) to the drupal.org
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>issue fork for issue ISSUE, using the workstation's own drupal.org token —
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>never a credential inside the VM. Prints the destination and every commit
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>and file that will change, then asks for confirmation before writing
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>anything; declining publishes nothing.
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>ISSUE may be omitted when PATH was cloned from its issue fork: such a
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>checkout's origin remote is "issue/&lt;module&gt;-&lt;ISSUE&gt;", which already names
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>the issue, so it is read from there. Give ISSUE explicitly to override that,
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>or when the checkout's remote is the canonical "project/&lt;module&gt;" repository
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>and so names no issue at all.
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>one connection profile, --profile picks which one to act on.
+</code></pre></div>
+<p><code>ISSUE</code> is optional. If you cloned the issue fork — the normal way to work
+an issue — the checkout's own <code>origin</code> already spells the issue out
+(<code>git@git.drupalcode.org:issue/&lt;module&gt;-&lt;ISSUE&gt;.git</code>), and <code>sand publish</code>
+reads it from there, printing the number it derived before the confirmation
+so you can see what it settled on:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>$ sand publish web /home/u/dubbot
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sand publish: issue 3619578, read from this checkout's remote
+</code></pre></div>
+<p>Pass <code>ISSUE</code> yourself to override that, or when the checkout was cloned from
+the canonical <code>project/&lt;module&gt;</code> repository — that remote names no issue, so
+there is nothing to derive and <code>sand publish</code> says so rather than guessing.</p>
+<p><code>sand publish</code> refuses immediately, before touching the VM or drupal.org at
+all, if no workstation drupal.org PAT is on file — see
+<a href="../drupalorg-publishing/#setup">Setup</a> for where that file goes. Given a
+running VM and a PAT, it collects <code>PATH</code>'s change set, resolves the
+destination, prints the full confirmation (every commit, author, and file
+change — never a summary), and then requires an explicit human act before
+publishing anything:</p>
+<ul>
+<li><strong><code>--yes</code></strong> confirms non-interactively. It is the only sanctioned
+  non-interactive route, and it is never read from an environment variable
+  — pass it only after you've reviewed the printed confirmation yourself.
+  Without it, a non-terminal <code>stdin</code> (a script or pipe) refuses outright
+  rather than publishing silently; on a real terminal you're prompted
+  <code>[y/N]</code> instead.</li>
+<li><strong><code>--allow-outside-issue-namespace</code></strong> is the only way to let the commit
+  destination fall outside the <code>issue/&lt;module&gt;-&lt;issue&gt;</code> fork namespace —
+  and so the only way to publish straight to a canonical drupal.org project
+  rather than an issue fork. This is not the normal path; see
+  <a href="../drupalorg-publishing/#what-actually-gets-published-and-how">Publishing to drupal.org</a>
+  for why that guard exists.</li>
+<li><strong><code>--profile</code></strong> picks which connection profile <code>NAME</code> is resolved on, the
+  same as every other command that names a VM.</li>
+</ul>
+<p>After a successful publish, <code>sand publish</code> fetches the fork branch in the
+guest and reports how your checkout compares — the replay creates new commits
+with new SHAs, so the two diverge by construction. When their content is
+identical and your tree is clean, it offers to reset the checkout onto the
+published commits. That offer is a <strong>separate</strong> question from <code>--yes</code>, which
+confirms only the publish; without a terminal the command to run is printed
+instead. See
+<a href="../drupalorg-publishing/#your-checkout-after-a-publish">Your checkout after a publish</a>.</p>
+<p>If <code>PATH</code> has no local commits ahead of its upstream branch, <code>sand publish</code>
+says so and exits cleanly without prompting for anything.</p>
+<p>The printed report lists every change-set commit in order — its status
+(<code>landed</code>, <code>already-present</code>, <code>failed</code>, or <code>not-attempted</code>) and its SHA on
+the fork where it has one — followed by the merge request's URL (opened, or
+already open) and any warnings. A replay that fails partway is reported
+exactly as far as it got; re-running <code>sand publish</code> is how you recover, and
+<a href="../drupalorg-publishing/#a-failure-partway-leaves-earlier-commits-public-and-there-is-no-rollback">A failure partway</a>
+explains why that — rather than repairing the fork by hand — is the
+supported path.</p>
+<p>Publication only ever appends to the fork's branch; <code>sand publish</code> has no
+force push and cannot rewrite or remove a commit it already published. That
+also means rewriting your local history after a publish is not supported —
+an amended commit whose message and author are unchanged is reported
+<code>already-present</code> and its amendment is never sent. See
+<a href="../drupalorg-publishing/#there-is-no-force-push-the-fork-branch-only-ever-grows">There is no force push</a>.</p>
 <h2 id="sand-version-sand-version"><code>sand version</code> / <code>sand --version</code></h2>
 <p>Prints the build identity and exits. Both spellings do the same thing, and
 <code>--version</code> is checked before anything else in <code>sand</code>'s argument dispatch, so
@@ -2236,8 +2372,8 @@ it works even without <code>limactl</code> installed.</p>
 (<code>-ldflags "-X main.version=..."</code>). A binary built from source instead prints
 the git revision Go's toolchain embeds automatically, with a <code>-dirty</code> suffix
 if the working tree had uncommitted changes at build time — for example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>$ sand --version
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>07bae1a-dirty
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>$ sand --version
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>07bae1a-dirty
 </code></pre></div>
 
 
