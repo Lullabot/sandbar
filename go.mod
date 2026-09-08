@@ -1,6 +1,6 @@
 module github.com/lullabot/sandbar
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.27.1
 
@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/exp/golden v0.0.0-20260906004030-3986e9119cf9
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260823001701-96af6d2cb5f6
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
