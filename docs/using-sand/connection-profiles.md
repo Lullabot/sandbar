@@ -1,16 +1,25 @@
-# Connection Profiles
+# Where VMs Run
 
-By default `sand` manages VMs with a local [Lima](https://lima-vm.io) — it runs
-`limactl` on the machine you launched `sand` from. It can also drive `limactl`
-on one or more **remote** hosts over SSH, so VMs live on a bigger box (a
-workstation, a home server) while you work from a laptop.
+A `sand` VM doesn't have to run on the machine in front of you. It can run:
 
-Every location `sand` knows about — local or remote — is a **Connection
-Profile**. Profiles are the only configuration surface for this: there is no
-environment variable to set and no per-invocation flag needed to pick a
-backend (older `sand` builds used `SAND_PROVIDER` / `SAND_REMOTE_*`
-environment variables for this; those are **removed** — see
-[Environment variables removed](#environment-variables-removed) below).
+- **On this machine** — the default. `sand` runs [Lima](https://lima-vm.io)
+  locally, and nothing needs configuring.
+- **On another machine, over SSH** — `sand` runs the same Lima commands on a
+  host you can SSH into, so VMs live on a bigger box (a workstation, a home
+  server) while you work from a laptop.
+- **On a [Proxmox VE](https://www.proxmox.com/) host** — `sand` drives VMs
+  through the Proxmox REST API with a pool-scoped token. No Lima involved.
+  See [Proxmox VE Setup](proxmox.md) for the one-time host setup.
+
+Whichever you pick, the commands, the board, and the keybindings are the
+same. Only the machine underneath changes.
+
+Every location `sand` knows about is a **Connection Profile**. Profiles are
+the only configuration surface for this: there is no environment variable to
+set and no per-invocation flag needed to pick a backend (older `sand` builds
+used `SAND_PROVIDER` / `SAND_REMOTE_*` environment variables for this; those
+are **removed** — see [Environment variables
+removed](#environment-variables-removed) below).
 
 ## What a profile is
 
@@ -128,8 +137,8 @@ step:
   rebuild anything — its VMs, jobs, and last-used pointer all follow the
   rename by ID.
 
-Editing a profile's connection fields (host/user/port/key/Lima home), or
-disabling/deleting it, is only offered while that profile is **idle** — no
+Editing a profile's connection fields (its host, credentials, and the rest),
+or disabling/deleting it, is only offered while that profile is **idle** — no
 build or other job currently running against it — the same guard that
 protects a single VM from a destructive action mid-build, generalized to the
 whole profile.
@@ -150,10 +159,10 @@ order.
 
 Unlike the old environment-variable selection, which chose exactly one
 backend per process, **every enabled profile is live simultaneously** in the
-TUI: the board shows tiles from your local Lima and every enabled remote
-host side by side, each tile labeled with the profile it runs on (see
-[The TUI](tui.md)). A disabled or errored profile shows a banner instead of
-tiles, naming the profile and the reason.
+TUI: the board shows tiles from this machine, every enabled remote host, and
+every Proxmox host side by side, each tile labeled with the profile it runs
+on (see [The TUI](tui.md)). A disabled or errored profile shows a banner
+instead of tiles, naming the profile and the reason.
 
 Because VMs are tracked per-profile, the **same VM name can exist under two
 different profiles** without conflict — `claude` on your `local` profile and
@@ -161,7 +170,10 @@ different profiles** without conflict — `claude` on your `local` profile and
 a display name. `sand shell claude` is ambiguous in that case and asks you to
 disambiguate with `--profile`.
 
-## Requirements on a remote host
+## Requirements on a remote SSH host
+
+These apply to a `remote-ssh` profile. A Proxmox profile has its own,
+different setup — see [Proxmox VE Setup](proxmox.md).
 
 - **Lima** (`limactl` on `PATH`) — the remote host runs the exact same
   `limactl` the local provider does; `sand` only changes *where* it runs.
@@ -170,30 +182,34 @@ disambiguate with `--profile`.
 - **Passwordless SSH** to the target (key-based auth). `sand` runs `limactl`
   non-interactively over SSH, so the connection must not prompt.
 
-## How a remote profile behaves
+## What changes when the VM isn't on your machine
 
-With a `remote-ssh` profile enabled, `sand create --profile`, the TUI, `sand
-shell`, and file copy behave the same as locally — the base image is built on
-that host once, each VM is a `limactl clone` of it, and finalize runs there
-too:
+Not much. With any profile enabled, `sand create --profile`, the TUI, `sand
+shell`, and file copy work the way they do locally — the base image is built
+on that host once, each VM is a clone of it, and finalize runs there too.
+Three things are worth knowing:
 
 - **Interactive shells** (`sand shell NAME` and `S` on a tile) wrap the guest
   tmux attach with `ssh -t` automatically; detaching still leaves the session
   running, exactly as with a local VM (see [Files and Shells](files-and-shells.md)).
-- **File transfer** to and from a guest is staged through the remote host
-  transparently — the remote `limactl copy` cannot see your local filesystem, so
-  `sand` copies via the remote host and preserves where files land in the guest.
-- **Web servers** running in a remote VM's guest are *not* reachable from
-  your machine: their ports forward to the remote host's loopback, not
-  yours. See [Web Servers and Ports](web-servers.md) for the cloudflared
-  and SSH-forwarding options.
-- **Isolation**: VMs created on a profile are tagged with that profile's
-  connection in the [managed-VM index](../reference/files-and-state.md), so
-  they never mix with VMs from another profile — a local `limactl list` and a
-  remote profile's list never show each other's instances.
+- **File transfer** works in both directions, but the route differs. On a
+  `remote-ssh` profile the remote `limactl copy` can't see your local
+  filesystem, so `sand` stages the file through the remote host and preserves
+  where it lands in the guest. On a `proxmox` profile `sand` copies straight
+  to the guest with `scp`.
+- **Reaching a web server** in the guest differs the same way. On a
+  `remote-ssh` profile, Lima forwards the guest's ports to the *remote host's*
+  loopback, not yours, so they aren't reachable from your machine without a
+  tunnel. On a `proxmox` profile the guest has its own address on your
+  network, so you connect to it directly. See [Web Servers and
+  Ports](web-servers.md).
 
-The managed-VM index records only a profile's `user@host:port`, never a
-private key or password.
+**Isolation.** VMs created on a profile are tagged with that profile's
+connection in the [managed-VM index](../reference/files-and-state.md), so
+they never mix with VMs from another profile — a local `limactl list` and a
+remote profile's list never show each other's instances. The index records
+only a profile's `user@host:port` (or `host:node/pool`), never a private key,
+password, or API token.
 
 ## Environment variables removed
 
@@ -209,10 +225,9 @@ mapping (`SAND_REMOTE_HOST` → `host`, `SAND_REMOTE_USER` → `user`,
 `SAND_REMOTE_PORT` → `port`, `SAND_REMOTE_IDENTITY` → `identity_path`,
 `SAND_REMOTE_LIMA_HOME` → `lima_home`).
 
-## Other backends
+## More backends later
 
-The local and remote-Lima backends are two implementations of `sand`'s internal
-`Provider` seam. A third, **[Proxmox VE](proxmox.md)**, drives VMs through the
-Proxmox REST API with a least-privilege, pool-scoped API token — see that page
-for setup. The same seam is what would let further non-Lima backends
-(DigitalOcean, Linode) be added later; those are not available yet.
+The three profile types are three implementations of one internal seam in
+`sand`, which is what lets them share every command and screen. Further
+backends (DigitalOcean, Linode) can be added the same way; none are available
+yet.

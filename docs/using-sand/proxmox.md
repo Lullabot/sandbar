@@ -1,10 +1,10 @@
-# Proxmox VE
+# Proxmox VE Setup
 
 `sand` can run VMs on a [Proxmox VE](https://www.proxmox.com/) host through its
-REST API, alongside the local and remote-Lima backends. A Proxmox profile is
-selected the same way any other is — it's just another
-[Connection Profile](connection-profiles.md) — but it needs some one-time setup
-on the Proxmox side, and that setup is what this page is about.
+REST API. Once it's set up, a Proxmox host is just another place VMs can run —
+same board, same commands, same keybindings as a VM on your own machine (see
+[Where VMs Run](connection-profiles.md)). What it needs first is some one-time
+setup on the Proxmox side, and that setup is what this page is about.
 
 The design goal is a **least-privilege, pool-scoped** token: `sand` gets exactly
 the permissions it needs to run its create/clone/delete workflow, confined to a

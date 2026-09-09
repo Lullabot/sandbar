@@ -4,9 +4,11 @@
 
 `S` on a tile in the [Board](tui.md), and `sand shell NAME` from the command
 line, both attach you to the same thing: the VM's **persistent tmux
-session** inside the guest, prefixed with `C-a`. They share the same attach
-path (`internal/lima.AttachArgv`), so they are two doors onto one session,
-not two different mechanisms.
+session** inside the guest, prefixed with `C-a`. They share one attach path,
+so they are two doors onto one session, not two different mechanisms — and
+that holds wherever the VM runs. A VM on another machine or on Proxmox is
+reached over SSH instead, which `sand` sets up for you; nothing about the
+session changes.
 
 Because the session is persistent, detaching — with `C-a d`, or by just
 closing your terminal — does **not** kill what's running in it. Attach
@@ -214,9 +216,9 @@ your clipboard instead, the command reports "no image on clipboard" and
 nothing is staged. Inside the guest, the shims that serve the image to
 Claude Code have no text-serving path at all — image-only by construction.
 
-The image is read on the machine running `sand` (your workstation), not the
-remote host (if you're targeting a remote Lima VM). Only the image bytes
-themselves are sent across the network.
+The image is read on the machine running `sand` (your workstation), never on
+the machine the VM runs on. Only the image bytes themselves are sent across
+the network.
 
 ### Known limitation
 

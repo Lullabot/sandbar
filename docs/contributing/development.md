@@ -6,8 +6,10 @@ How to build, test, and iterate on `sand` locally.
 
 `sand` has two halves that share one repo:
 
-- **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that drives [Lima](https://lima-vm.io)
-  to create, clone, reset, and manage VMs, plus a host-side secrets store.
+- **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that creates, clones, resets,
+  and manages VMs — on this machine or another one with
+  [Lima](https://lima-vm.io), or on a Proxmox host through its API — plus a
+  host-side secrets store.
 - **An Ansible provisioner** (`site.yml`, `roles/…`, `group_vars/`) that
   configures a VM once it boots. The Go side embeds and runs it — see
   [The Embedded Playbook](ansible-playbook.md) for how that actually works.
@@ -17,7 +19,9 @@ Inside `internal/`:
 | Package | What it does |
 |---|---|
 | `lima` | Typed wrapper over the `limactl` CLI. All subprocess execution goes through a `Runner` interface so code is testable without a real binary. |
-| `provision` | Orchestrates create/reset (base build, `limactl clone`, finalize) and the Ansible run; `staging.go` moves data across a reset. |
+| `provider` | The seam behind "where a VM runs": one implementation each for local Lima, Lima on a remote host over SSH, and Proxmox. Everything above this layer is written once. |
+| `profiles` | The `profiles.yaml` store — the named connections a provider is built from. |
+| `provision` | Orchestrates create/reset (base build, clone, finalize) and the Ansible run; `staging.go` moves data across a reset. |
 | `ui` | The Bubble Tea model, views, and commands (board/form/secrets/progress/…). |
 | `secrets`, `registry`, `manage`, `browse`, `vm` | Host-side secrets store, managed-VM index, shared registry bookkeeping, file browser, domain types. |
 
@@ -59,13 +63,20 @@ this repository — including for the docs, below. A contributor who assumes
 go test ./...                                  # unit + integration, no VM needed
 go test ./internal/ui -run TestTUI -update     # regenerate TUI golden snapshots
 go test -tags limae2e ./...                    # real-VM end-to-end (needs limactl + KVM)
+go test -tags proxmoxe2e ./internal/provider   # real-VM end-to-end on Proxmox
 ```
 
 `go test ./...` covers unit tests and the `teatest`-based TUI golden
 snapshots and never boots a real VM. Real-VM end-to-end tests are gated
-behind the `limae2e` build tag, so plain `go test ./...` skips them; run them
-locally on a host with Lima (or dispatch the `test.yml` workflow, whose
-`lima-e2e` job runs them under QEMU+KVM).
+behind a build tag, so plain `go test ./...` skips them:
+
+- `limae2e` — run these on a host with Lima, or dispatch the `test.yml`
+  workflow, whose `lima-e2e` job runs them under QEMU+KVM.
+- `proxmoxe2e` — run these against a Proxmox host with a test pool set up.
+  They also need `PROXMOX_E2E=1` and the other `PROXMOX_E2E_*` variables, and
+  skip without them. See [Proxmox VE
+  Setup](../using-sand/proxmox.md#a-separate-pool-for-automated-tests) for
+  the pool and the full variable list.
 
 ## Docs
 
