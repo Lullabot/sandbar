@@ -9,9 +9,9 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@self-review/core": "1.42.0",
-    "@self-review/react": "1.42.0",
-    "@self-review/types": "1.42.0",
+    "@self-review/core": "1.43.4",
+    "@self-review/react": "1.43.4",
+    "@self-review/types": "1.43.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
