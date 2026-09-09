@@ -1,9 +1,12 @@
 # sandbar
 
 `sand` is a single Go binary that provisions disposable Claude Code
-development VMs on [Lima](https://lima-vm.io). Spin up an isolated, fully
-provisioned VM in seconds, point Claude Code at a repository, and throw the
-VM away when you're done.
+development VMs. Spin up an isolated, fully provisioned VM in seconds, point
+Claude Code at a repository, and throw the VM away when you're done.
+
+VMs can run **on your own machine**, **on another machine over SSH**, or **on
+a [Proxmox VE](https://www.proxmox.com/) host**. You pick per VM, and the
+board shows every location at once.
 
 **For full documentation, visit
 [https://lullabot.github.io/sandbar/latest/](https://lullabot.github.io/sandbar/latest/)**
@@ -15,7 +18,9 @@ brew install lullabot/sandbar/sand
 ```
 
 That's it — no Ansible, no Go toolchain, and no clone of this repository
-required. Homebrew pulls in [Lima](https://lima-vm.io) as a dependency.
+required. Homebrew also pulls in [Lima](https://lima-vm.io), which `sand`
+uses to run VMs on your own machine and on remote machines over SSH. A
+Proxmox host needs no Lima at all, just a scoped API token.
 
 ## Quick start
 
@@ -38,15 +43,24 @@ for the full walkthrough, or the
 [CLI Reference](https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/)
 for every command and flag.
 
-By default `sand` manages VMs on a local Lima. It can also manage a **fleet**
-of VMs spread across your local machine and one or more remote hosts over
-SSH, all at once — each host you add is a named **Connection Profile**,
-managed entirely from the TUI's `p` screen or hand-edited in a secret-free,
-shareable `profiles.yaml`. See
-[Connection Profiles](https://lullabot.github.io/sandbar/latest/using-sand/connection-profiles/)
-for the model. (Earlier, unreleased builds selected a single remote target
-via `SAND_PROVIDER` / `SAND_REMOTE_*` environment variables; that surface has
-been removed in favor of profiles.)
+## Where VMs run
+
+Out of the box, `sand` runs VMs on the machine you launched it from. Add a
+**Connection Profile** and it runs them somewhere else instead — or as well:
+
+- **Local** — Lima on your own machine. Always present, nothing to configure.
+- **Remote SSH** — Lima on another machine you can SSH into, so VMs live on a
+  workstation or home server while you work from a laptop.
+- **Proxmox VE** — VMs on a Proxmox host through its REST API, using a
+  least-privilege token scoped to one resource pool.
+
+Every enabled profile is live at the same time: one board, tiles from all of
+them side by side. Profiles are managed from the TUI's `p` screen or by
+hand-editing a secret-free, shareable `profiles.yaml`. See
+[Where VMs Run](https://lullabot.github.io/sandbar/latest/using-sand/connection-profiles/)
+for the model and
+[Proxmox VE Setup](https://lullabot.github.io/sandbar/latest/using-sand/proxmox/)
+for the one-time host setup.
 
 ## Development
 
@@ -61,6 +75,7 @@ docs.
 go test ./...                       # fast unit + integration suite (no VM needed)
 go test ./... -race                 # the same, with the race detector (what CI runs)
 go test -tags limae2e ./...         # real-VM e2e — needs a host with Lima + KVM
+go test -tags proxmoxe2e ./...      # real-VM e2e on Proxmox — needs a configured PVE host
 ```
 
 **Coverage.** CI's `unit` job measures coverage over `./internal/...` (the
