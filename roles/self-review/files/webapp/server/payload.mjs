@@ -78,3 +78,34 @@ export async function buildDiffPayload({ repoPath, diffArgs, config }) {
     stats,
   };
 }
+
+/**
+ * The set of repo-relative paths a client is allowed to ask about, taken from
+ * a payload buildDiffPayload has already produced.
+ *
+ * This exists because /api/expand takes a file path straight off the query
+ * string and hands it to git. Without a check, that is an arbitrary,
+ * unauthenticated argument reaching a subprocess: the value is attacker-chosen
+ * whenever the reviewer has any other page open, since a cross-origin GET to
+ * 127.0.0.1 needs no preflight and the attacker never has to read the reply to
+ * have caused the call. @self-review/core passes git arguments as argv rather
+ * than through a shell (upstream's own fix for exactly this class of bug), so
+ * the metacharacter half is closed there — but "the dependency happens to be
+ * safe today" is not the property this server should rely on, and it says
+ * nothing about which FILES may be read. Answering only for paths the reviewer
+ * was already shown is a property this server can hold on its own.
+ *
+ * Both sides of a rename are included: the panel identifies a file by newPath
+ * for everything except a deletion, where oldPath is all there is.
+ *
+ * @param {{files: import('@self-review/core').DiffFile[]}} payload
+ * @returns {Set<string>}
+ */
+export function reviewablePaths(payload) {
+  const paths = new Set();
+  for (const file of payload.files) {
+    if (file.newPath) paths.add(file.newPath);
+    if (file.oldPath) paths.add(file.oldPath);
+  }
+  return paths;
+}

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { getRepoRootAsync, loadConfig, checkWritability } from '@self-review/core';
 
-import { buildDiffPayload } from './payload.mjs';
+import { buildDiffPayload, reviewablePaths } from './payload.mjs';
 import { expandFileContext } from './expand.mjs';
 import { resolveOutputPath, writeReview } from './review.mjs';
 
@@ -149,6 +149,12 @@ async function handleRequest(req, res, ctx) {
 
   if (req.method === 'GET' && url.pathname === '/api/diff') {
     const payload = await buildDiffPayload({ repoPath: repoRoot, diffArgs, config });
+    // Remember what this answer showed, so /api/expand can refuse to talk about
+    // anything else. Recorded here rather than resolved once at startup because
+    // the payload is what the reviewer is actually looking at: a re-fetch after
+    // the working tree moved must widen (or narrow) the allowlist with it, or
+    // the expand bar starts failing on files that are plainly on screen.
+    ctx.expandable = reviewablePaths(payload);
     return sendJson(res, 200, payload);
   }
 
@@ -158,6 +164,13 @@ async function handleRequest(req, res, ctx) {
     const filePath = url.searchParams.get('path');
     if (!filePath) {
       return sendError(res, 400, new Error('missing ?path='));
+    }
+    // Only files the reviewer has already been shown. See reviewablePaths for
+    // why this endpoint in particular cannot take the path on trust. The empty
+    // set before the first /api/diff is the correct answer, not a gap: a client
+    // that has not loaded the diff has no file to legitimately expand.
+    if (!ctx.expandable.has(filePath)) {
+      return sendError(res, 404, new Error(`not a file in this review: ${filePath}`));
     }
     const expanded = await expandFileContext({
       repoPath: repoRoot,
@@ -229,7 +242,8 @@ async function main() {
   const config = loadConfig();
   const distDir = path.join(WEBAPP_ROOT, 'dist');
 
-  const ctx = { repoRoot, diffArgs, config, distDir };
+  // expandable starts empty and is filled by the first /api/diff (handleRequest).
+  const ctx = { repoRoot, diffArgs, config, distDir, expandable: new Set() };
   const server = http.createServer((req, res) => {
     // Identify every response as this server's. The workstation-side readiness
     // probe accepts any HTTP answer by design (the question is "is it up", not

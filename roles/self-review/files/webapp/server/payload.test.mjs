@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { buildDiffPayload } from './payload.mjs';
+import { buildDiffPayload, reviewablePaths } from './payload.mjs';
 
 /** Minimal AppConfig shape sufficient for createIgnoreFilter/computePayloadStats. */
 function fakeConfig(overrides = {}) {
@@ -142,4 +142,33 @@ test('buildDiffPayload honours a configured outputFile when excluding the review
 
   const named = payload.files.map(f => f.newPath || f.oldPath);
   assert.ok(!named.includes('my-review.xml'), `configured outputFile must not be reviewable: ${named.join(', ')}`);
+});
+
+test('reviewablePaths covers what the panel can ask to expand, and nothing else', async () => {
+  const dir = makeScratchRepo();
+
+  const payload = await buildDiffPayload({
+    repoPath: dir,
+    diffArgs: undefined,
+    config: fakeConfig(),
+  });
+
+  const allowed = reviewablePaths(payload);
+
+  // Everything the reviewer was shown is expandable, under the same identity
+  // the panel sends back (newPath, falling back to oldPath for a deletion).
+  for (const file of payload.files) {
+    const asPanelSendsIt = file.newPath || file.oldPath;
+    assert.ok(
+      allowed.has(asPanelSendsIt),
+      `a file in the payload must be expandable: ${asPanelSendsIt}`
+    );
+  }
+
+  // And nothing else is, which is the property that keeps an unauthenticated
+  // cross-origin GET from choosing the argument /api/expand hands to git.
+  assert.ok(!allowed.has('/etc/passwd'), 'an absolute path outside the repo must not be expandable');
+  assert.ok(!allowed.has('../outside.txt'), 'a traversal must not be expandable');
+  assert.ok(!allowed.has('$(touch /tmp/pwned)'), 'a shell metacharacter payload must not be expandable');
+  assert.ok(!allowed.has(''), 'the empty path must not be expandable');
 });
