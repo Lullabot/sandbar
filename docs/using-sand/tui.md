@@ -13,14 +13,13 @@ The header shows a live readout of the **host(s)** you're connected to, not
 the VMs: one band per active [Connection Profile](connection-profiles.md),
 each with CPU and memory currently in use (fed by a guest heartbeat), free
 disk on the volume that holds that profile's VMs, and the build's version.
-With only the permanent Local profile enabled — sand's out-of-the-box
-default — there's a single band and the header looks exactly like it always
-has. Enable a remote profile and a second band appears for it; a profile
-that's **disabled** or **errored** (unreachable, misconfigured) shows a
-banner instead, naming the profile and the reason its tiles are absent. The
-header does not count base images or unmanaged VMs — the board only ever
-shows sand-managed clones, and the header doesn't either. Manage a base
-image with `limactl` directly.
+Out of the box that's one band, for the permanent Local profile. Add a
+remote or Proxmox profile and a second band appears for it; a profile that's
+**disabled** or **errored** (unreachable, misconfigured) shows a banner
+instead, naming the profile and the reason its tiles are absent. The header
+does not count base images or unmanaged VMs — the board only ever shows
+sand-managed clones, and the header doesn't either. Manage a base image with
+`limactl` (or the Proxmox UI) directly.
 
 ## The tile board
 
@@ -65,7 +64,7 @@ These act on the board itself, regardless of which tile is focused.
 | `n` | Create a new VM |
 | `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
 | `/` | Search / filter tiles by name |
-| `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. An unmanaged Lima instance or a base image is never touched, even if it's running, so an instance you use for unrelated work is safe. |
+| `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sand` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
 | `?` | Show the keys screen |
 | `q` | Quit |
 

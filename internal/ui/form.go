@@ -71,9 +71,9 @@ var fieldLabels = []string{
 // create a fine-grained token and the recommended (deliberately limited)
 // permissions.
 var fieldInfo = []string{
-	"Required. Lima instance name — also the VM you'll `limactl shell` into. Must differ from the base image.",
+	"Required. The VM's name — also the name you'll pass to `sand shell`. Must differ from the base image.",
 	"VM hostname inside the guest. Blank → same as the instance name.",
-	"Primary VM user. Blank → your host username (Lima creates a matching user).",
+	"Primary VM user. Blank → your host username (a matching user is created in the guest).",
 	"Required. git user.name written into the VM's git config.",
 	"Required. git user.email written into the VM's git config.",
 	"vCPUs for the VM. Blank → half your host's cores (minimum 2).",

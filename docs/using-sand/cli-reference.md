@@ -47,10 +47,10 @@ not a prompt.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--name` | string | `claude` | Lima instance name. |
+| `--name` | string | `claude` | VM name. |
 | `--base-name` | string | `sandbar-base` | Base image instance name; clones are made from this shared, long-lived image. |
 | `--hostname` | string | same as `--name` | VM hostname. Empty means `EffectiveHostname()` falls back to `--name`. |
-| `--user` | string | the **host username** (`id -un`, then `$USER`, then `claude`) | Primary VM user. Lima creates a guest user matching the host username, so this mirrors that — it is never sent empty, since an empty `user_name` would override the Ansible user role's own default and break in-guest user creation. |
+| `--user` | string | the **host username** (`id -un`, then `$USER`, then `claude`) | Primary VM user. A guest user matching the host username is created for you, so this mirrors that — it is never sent empty, since an empty `user_name` would override the Ansible user role's own default and break in-guest user creation. |
 | `--git-name` | string | host `git config user.name` | git `user.name` written into the VM. See [git identity](#-git-name-git-email-fall-back-to-host-git-config) below. |
 | `--git-email` | string | host `git config user.email` | git `user.email` written into the VM. See [git identity](#-git-name-git-email-fall-back-to-host-git-config) below. |
 | `--cpus` | string (parsed as int) | `2` | vCPUs. Must be a positive integer. |
@@ -171,7 +171,8 @@ These sound similar and do different things to different objects:
 The base image is always built at a fixed **20GiB floor**
 (`vm.BaseDiskFloor`), regardless of `--disk` — `--disk` sizes the *clone*, not
 the base. Each clone is then grown from that floor up to `--disk` once, before
-its first start (`limactl edit --set '.disk=...'`).
+its first start (on a Lima profile, `limactl edit --set '.disk=...'`; on
+Proxmox, a disk resize through the API).
 
 Because the underlying qcow2 disk can grow but not shrink live, a `--disk`
 smaller than the 20GiB floor is not something you can actually get: asking for
@@ -250,7 +251,7 @@ Flags:
   -memory string
     	RAM, e.g. 8GiB (default "8GiB")
   -name string
-    	Lima instance name (default "claude")
+    	VM name (default "claude")
   -profile string
     	Connection profile to create on (default: the last-used profile, else "local")
   -rebuild

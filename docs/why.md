@@ -34,15 +34,17 @@ We hope Sandbar is the answer!
 
 **2. Agentic tools replace IDEs in most cases.**
 
-Each VM is a full guest, not a container sharing your kernel. Its only
-mount is the read-only provisioning playbook. Lima's stock host-home
-share is forced off. The agent inside cannot see or touch your host
-filesystem, and `limactl delete` provably removes everything the VM
-ever produced, because there was never a channel for it to leave
-anything behind. Files move in and out only when you upload or download
-them on purpose. The [Security Model](reference/security-model.md)
-spells out the full set of guarantees and their two deliberate
-exceptions.
+Each VM is a full guest, not a container sharing your kernel. Nothing
+of yours is mounted into it: the most it ever gets is the provisioning
+playbook, read-only, and the host-home share Lima would otherwise set
+up is forced off. The agent inside cannot see or touch your host
+filesystem, and deleting the VM provably removes everything it ever
+produced, because there was never a channel for it to leave anything
+behind. Files move in and out only when you upload or download them on
+purpose. This holds whether the VM runs on your own machine or on a
+server — and on a server, the agent isn't running on your hardware at
+all. The [Security Model](reference/security-model.md) spells out the
+full set of guarantees and their two deliberate exceptions.
 
 That property is what lets sandbar run the agent with permissions
 skipped by default and treat it as safe rather than reckless. The
@@ -112,6 +114,11 @@ to make it easier (and faster!) to use.
   hostname, git identity, and an optional repo clone, so new
   environments come up in seconds. See
   [How Provisioning Works](getting-started/how-it-works.md).
+- **Your laptop isn't the only place to run one.** The same board and
+  the same commands create a VM on this machine, on another machine
+  over SSH, or on a [Proxmox](using-sand/proxmox.md) host — so heavy
+  agent work can live on a server while you drive it from a laptop.
+  See [Where VMs Run](using-sand/connection-profiles.md).
 - **A board and a CLI.** Run `sand` for a
   [terminal board](using-sand/tui.md) where every action fires from the
   focused tile, or script `sand create` and `sand shell` headlessly for
@@ -142,8 +149,9 @@ mid-July 2026, is close on the surface: a single Go binary you install
 with Homebrew that gives a coding agent a local full VM with its own
 kernel, already agent-agnostic across Claude, Codex, and others.
 [agent-vm](https://github.com/sylvinus/agent-vm) is built on Lima, the
-same backend sandbar uses today, is multi-agent, and even shares the
-base-template-then-clone provisioning model.
+same thing sandbar uses to run a VM on your own machine, is
+multi-agent, and even shares the base-template-then-clone provisioning
+model.
 
 Both make the opposite call on the decision above. clawk live-mounts
 your repo over virtio-fs, and its own README notes that an agent can
@@ -227,11 +235,23 @@ it, and the tools that restrict the environment do it in the cloud or
 as an SDK that likely doesn't work with your build tools. Sandbar is
 the point where local, full-VM, sealed, and disposable meet.
 
+The local/cloud split in that table is also less of a split for
+sandbar than for the rest. A sandbar VM runs on your laptop by default,
+but the same board and the same commands put it on a workstation, a
+home server, or a [Proxmox](using-sand/proxmox.md) host instead — a
+machine you own, not someone else's cloud. You get somewhere bigger to
+run agents without giving up the boundary or handing your code to a
+third party.
+
 ## Where it's going
 
-Lima and Claude Code are the first supported backend and agent, not the
-definition of the tool. The provisioning model is built to add more of
-both: other agents behind the same disposable-VM workflow, and other
-backends behind the same commands, with Proxmox and similar targets
-planned so a Sandbar VM can land on a Mac Mini or a server, and not
-only a laptop.
+A Sandbar VM already runs wherever you want it: on your laptop, on a
+Mac Mini or workstation over SSH, or on a
+[Proxmox](using-sand/proxmox.md) server. All three are the same
+commands and the same board — see
+[Where VMs Run](using-sand/connection-profiles.md).
+
+That took three backends behind one seam, and the seam is what the rest
+of the roadmap builds on: more places to run a VM, and more agents
+behind the same disposable-VM workflow. Claude Code and Codex are the
+agents supported today, not the definition of the tool.

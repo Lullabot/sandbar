@@ -18,17 +18,24 @@ tenant or a determined attacker.
 - **Passwordless sudo** is enabled for the configured user (default:
   `claude`). It is not intended to host multiple users or untrusted
   workloads alongside the intended one.
-- **The only guest mount is the playbook, and it is read-only.** There is no
-  writable host mount — not even Lima's stock host-home share — so the VM
-  cannot modify anything on your machine, and `limactl delete <name>`
-  provably removes everything the VM produced. Move files in or out
-  deliberately with the TUI's Upload/Download actions instead.
-- **Guest listen ports are forwarded to loopback only.** Lima forwards a
-  guest's listening TCP ports to `127.0.0.1` on the host that runs the VM —
-  never a LAN interface — so a server inside the VM is not exposed to the
-  network. Publishing one further (a cloudflared tunnel, an SSH forward) is
-  always an explicit action; see
-  [Web Servers and Ports](../using-sand/web-servers.md).
+- **Nothing on your machine is writable from the guest.** On a Lima VM the
+  only mount is the provisioning playbook, and it is read-only — not even
+  the stock host-home share Lima would otherwise set up. On Proxmox there is
+  no mount at all; the playbook is streamed in over SSH. Either way the VM
+  cannot modify anything on your machine, and deleting the VM provably
+  removes everything it produced. Move files in or out deliberately with the
+  TUI's Upload/Download actions instead.
+- **On a Lima VM (local or remote), guest listen ports are forwarded to
+  loopback only.** Lima forwards a guest's listening TCP ports to
+  `127.0.0.1` on the host that runs the VM — never a LAN interface — so a
+  server inside the VM is not exposed to the network. Publishing one further
+  (a cloudflared tunnel, an SSH forward) is always an explicit action.
+- **A Proxmox VM is different: it has a real network address.** Its ports
+  are not forwarded, so anything listening in the guest is reachable by
+  anything that can route to the bridge network. Run Proxmox VMs on a
+  network you trust — the same one you must already trust for `sand` to
+  reach the guests at all. See
+  [Web Servers and Ports](../using-sand/web-servers.md) for both cases.
 - **Samba is forced off** for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.
 - **`sand` does not provision a Claude Code credential.** You log in inside
