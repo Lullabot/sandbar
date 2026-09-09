@@ -167,3 +167,97 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+// seedWebappArtifacts creates the two .gitignore'd directories a contributor
+// ends up with after running `npm ci` / `npm run build` in the review web
+// app. They exist only in a working-tree checkout, never in the embedded FS —
+// which is exactly why no existing test noticed whether they were excluded.
+func seedWebappArtifacts(t *testing.T, root string) []string {
+	t.Helper()
+	files := []string{
+		"roles/self-review/files/webapp/node_modules/.package-lock.json",
+		"roles/self-review/files/webapp/node_modules/react/index.js",
+		"roles/self-review/files/webapp/node_modules/@self-review/core/dist/index.js",
+		"roles/self-review/files/webapp/dist/index.html",
+		"roles/self-review/files/webapp/dist/assets/main-abc123.js",
+	}
+	for _, f := range files {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", f, err)
+		}
+		if err := os.WriteFile(p, []byte("build artifact\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+	return files
+}
+
+// TestPlaybookFilesetsAgreeOnWebappArtifacts pins the THREE hand-maintained
+// lists that must agree about roles/self-review/files/webapp/{node_modules,dist}:
+// playbook_embed.go's go:embed directives, provision.go's playbookSyncCmd rsync
+// filter, and baseversion.go's playbookFileset/playbookExcludedDirs.
+//
+// The existing sync tests could not catch a regression in any of them, because
+// fakeCheckout sources its tree from the EMBEDDED FS, which by construction can
+// never contain node_modules — so the exclusion the filter exists for was never
+// exercised. This test seeds the artifacts explicitly, the way a real repo-mode
+// checkout has them, and asserts both consumers ignore them:
+//
+//   - rsync must not copy them, or 358 MB of node_modules lands in /root/playbook
+//     on every create and in every base image built from it;
+//   - the content hash must not see them, or the base-image version stamp shifts
+//     on any npm activity and a perfectly good shared base is declared stale and
+//     rebuilt over files that never reach a guest at all.
+func TestPlaybookFilesetsAgreeOnWebappArtifacts(t *testing.T) {
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("rsync not installed")
+	}
+	src := fakeCheckout(t)
+
+	// The stamp a clean checkout produces — the value that must not move.
+	clean, err := playbookContentHash(os.DirFS(src))
+	if err != nil {
+		t.Fatalf("hash clean checkout: %v", err)
+	}
+
+	artifacts := seedWebappArtifacts(t, src)
+
+	dirty, err := playbookContentHash(os.DirFS(src))
+	if err != nil {
+		t.Fatalf("hash checkout with build artifacts: %v", err)
+	}
+	if dirty != clean {
+		t.Errorf("the playbook content hash changed when local npm build artifacts appeared\n"+
+			"clean: %s\ndirty: %s\n"+
+			"a contributor who has run `npm ci` would rebuild the shared base image for nothing "+
+			"(see playbookExcludedDirs)", clean, dirty)
+	}
+
+	dst := t.TempDir()
+	cmd := rsyncFromGuestScript(t)
+	cmd = strings.ReplaceAll(cmd, "/mnt/playbook/", src+"/")
+	cmd = strings.ReplaceAll(cmd, "/root/playbook/", dst+"/")
+	if out, err := exec.Command("bash", "-euo", "pipefail", "-c", cmd).CombinedOutput(); err != nil {
+		t.Fatalf("guest rsync failed: %v\n%s", err, out)
+	}
+	for _, f := range artifacts {
+		if _, err := os.Lstat(filepath.Join(dst, filepath.FromSlash(f))); !os.IsNotExist(err) {
+			t.Errorf("rsync copied a local build artifact into the guest playbook: %s\n"+
+				"the --include list in playbookSyncCmd must enumerate the webapp's source files, "+
+				"never the directory wholesale", f)
+		}
+	}
+
+	// The webapp's real sources must still arrive — an over-broad exclusion
+	// that dropped the server would pass every assertion above.
+	for _, f := range []string{
+		"roles/self-review/files/webapp/package.json",
+		"roles/self-review/files/webapp/server/index.mjs",
+		"roles/self-review/files/webapp/src/main.tsx",
+	} {
+		if _, err := os.Lstat(filepath.Join(dst, filepath.FromSlash(f))); err != nil {
+			t.Errorf("rsync did not copy a webapp source file the guest needs: %s (%v)", f, err)
+		}
+	}
+}

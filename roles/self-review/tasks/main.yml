@@ -1,0 +1,141 @@
+---
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+- name: Create the self-review install directory
+  ansible.builtin.file:
+    path: "{{ selfreview_install_dir }}"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+# The web app's source is copied file-by-file and directory-by-directory
+# rather than with a single recursive copy of files/webapp/, so that
+# node_modules and dist — a developer's local `npm ci`/`npm run build`
+# artifacts, both .gitignore'd but very much present on disk once that has
+# run — are never referenced by any task and therefore can never be copied
+# into a base image, no matter what ends up sitting next to them in that
+# directory. This mirrors playbook_embed.go's go:embed directive, which
+# enumerates the very same files for the very same reason (see its comment
+# for the measured bloat this defends against).
+- name: Copy the self-review web app's top-level files
+  ansible.builtin.copy:
+    src: "webapp/{{ item }}"
+    dest: "{{ selfreview_install_dir }}/{{ item }}"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+  loop:
+    - package.json
+    - package-lock.json
+    - index.html
+    - tsconfig.json
+    - vite.config.ts
+
+- name: Copy the self-review web app's server and client source
+  ansible.builtin.copy:
+    src: "webapp/{{ item }}/"
+    dest: "{{ selfreview_install_dir }}/{{ item }}/"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+    directory_mode: "0755"
+  loop:
+    - server
+    - src
+
+# npm ci + the vite build together take real time (a full dependency install
+# plus a bundle that pulls in mermaid/cytoscape/katex chunks), so they are
+# gated on whether their INPUTS actually changed since the last run rather
+# than always re-running — the same "changed=0 on a re-run" bar every other
+# role in this playbook is held to. A digest over every deployed build input
+# is compared against a stamp file written after a successful build.
+#
+# "Every input" is the correction: gating on package-lock.json alone was
+# wrong in the direction that ships broken software. A source-only change is
+# exactly what a bug fix to the browser client looks like, and it left the
+# stamp matching, the build skipped, and the old bundle still being served.
+- name: Checksum every deployed input the build depends on
+  ansible.builtin.shell:
+    # A checksum of the LOCKFILE ALONE was not enough, and shipped a stale
+    # bundle every time. dist/ is built from src/ + index.html + the vite and
+    # tsconfig settings, so a release that fixes the browser client without
+    # touching a dependency left selfreview_build_needed false: the copy tasks
+    # above installed the new source, `npm run build` was skipped, and every
+    # `sand land --review` on that converged base kept serving the bundle built
+    # from the OLD source until someone happened to run `sand create --rebuild`.
+    #
+    # `find | sort | sha256sum` over the deployed tree covers the same inputs
+    # vite reads. Sorted so the digest is order-independent, and -type f so
+    # directory mtimes cannot perturb it.
+    cmd: >-
+      find package-lock.json index.html vite.config.ts tsconfig.json src -type f
+      | LC_ALL=C sort
+      | xargs -r sha256sum
+      | sha256sum
+    chdir: "{{ selfreview_install_dir }}"
+  register: selfreview_inputs
+  changed_when: false
+
+- name: Stat the existing build stamp
+  ansible.builtin.stat:
+    path: "{{ selfreview_install_dir }}/.build-stamp"
+  register: selfreview_stamp_file
+
+- name: Read the existing build stamp
+  ansible.builtin.slurp:
+    src: "{{ selfreview_install_dir }}/.build-stamp"
+  register: selfreview_stamp_raw
+  when: selfreview_stamp_file.stat.exists
+
+- name: Determine whether npm ci / the build needs to (re-)run
+  ansible.builtin.set_fact:
+    selfreview_build_needed: >-
+      {{ not selfreview_stamp_file.stat.exists
+         or (selfreview_stamp_raw.content | b64decode | trim) != (selfreview_inputs.stdout | trim) }}
+
+- name: Install web app dependencies with npm ci
+  ansible.builtin.command:
+    cmd: npm ci --no-audit --no-fund
+    chdir: "{{ selfreview_install_dir }}"
+  become: true
+  become_user: "{{ user_name }}"
+  when: selfreview_build_needed
+  changed_when: true
+
+- name: Build the web app bundle
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ selfreview_install_dir }}"
+  become: true
+  become_user: "{{ user_name }}"
+  when: selfreview_build_needed
+  changed_when: true
+
+# Only devDependencies (vite, typescript, @vitejs/plugin-react, the React
+# type stubs) are pruned. @self-review/core, react and react-dom are regular
+# dependencies, so they — and everything the server needs at runtime — remain.
+- name: Prune build-only dependencies
+  ansible.builtin.command:
+    cmd: npm prune --omit=dev
+    chdir: "{{ selfreview_install_dir }}"
+  become: true
+  become_user: "{{ user_name }}"
+  when: selfreview_build_needed
+  changed_when: true
+
+- name: Record the build stamp
+  ansible.builtin.copy:
+    content: "{{ selfreview_inputs.stdout | trim }}"
+    dest: "{{ selfreview_install_dir }}/.build-stamp"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+  when: selfreview_build_needed

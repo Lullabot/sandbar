@@ -3,6 +3,7 @@ package providerfake
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -67,6 +68,9 @@ func TestZeroValueNeverPanics(t *testing.T) {
 	if got := f.AttachArgv(vm.VM{}); got != nil {
 		t.Errorf("AttachArgv() = %v, want nil", got)
 	}
+	if got := f.ForwardArgv(vm.VM{}, 8080, 3000); got != nil {
+		t.Errorf("ForwardArgv() = %v, want nil", got)
+	}
 	if got := f.GuestHome(vm.VM{}); got != "" {
 		t.Errorf("GuestHome() = %q, want \"\"", got)
 	}
@@ -91,7 +95,10 @@ func TestOverridesRunInsteadOfTheDefault(t *testing.T) {
 		ListFunc:       func() ([]vm.VM, error) { return []vm.VM{{Name: "web"}}, nil },
 		StartFunc:      func(name string) error { gotName = name; return wantErr },
 		AttachArgvFunc: func(v vm.VM) []string { return []string{"ssh", "-t", v.Name} },
-		GuestPathFunc:  func(name, path string) string { return "custom:" + name + path },
+		ForwardArgvFunc: func(v vm.VM, hostPort, guestPort int) []string {
+			return []string{"ssh", "-N", "-L", fmt.Sprintf("%d:127.0.0.1:%d", hostPort, guestPort), v.Name}
+		},
+		GuestPathFunc: func(name, path string) string { return "custom:" + name + path },
 	}
 
 	vms, err := f.List()
@@ -103,6 +110,9 @@ func TestOverridesRunInsteadOfTheDefault(t *testing.T) {
 	}
 	if got := f.AttachArgv(vm.VM{Name: "claude"}); len(got) != 3 || got[2] != "claude" {
 		t.Fatalf("AttachArgv() override = %v, want it to reflect the passed vm.VM", got)
+	}
+	if got := f.ForwardArgv(vm.VM{Name: "claude"}, 8080, 3000); len(got) != 5 || got[3] != "8080:127.0.0.1:3000" || got[4] != "claude" {
+		t.Fatalf("ForwardArgv() override = %v, want it to reflect the passed hostPort/guestPort/vm.VM", got)
 	}
 	if got := f.GuestPath("claude", "/home"); got != "custom:claude/home" {
 		t.Fatalf("GuestPath() override = %q, want %q", got, "custom:claude/home")
