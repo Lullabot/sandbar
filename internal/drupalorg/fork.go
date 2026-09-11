@@ -88,8 +88,11 @@ type RemoteTarget struct {
 // in all three spellings git remotes come in:
 //
 //   - HTTPS: "https://git.drupalcode.org/project/<module>.git"
-//   - SSH (scp-like): "git@git.drupalcode.org:issue/<module>-<nid>.git"
-//   - SSH (URL form): "ssh://git@git.drupalcode.org/project/<module>.git"
+//   - SSH (scp-like): "git@git.drupal.org:issue/<module>-<nid>.git"
+//   - SSH (URL form): "ssh://git@git.drupal.org/project/<module>.git"
+//
+// The two SSH spellings name a DIFFERENT host from the HTTPS one, and that
+// is not a typo — see [IsGitHost].
 //
 // Accepting the fork form is not a mere convenience: refusing it made the
 // common case — a checkout cloned from the very fork publication targets —
@@ -135,9 +138,51 @@ func TargetFromRemoteURL(raw string) (RemoteTarget, error) {
 	)
 }
 
+// gitHosts are the hostnames drupal.org serves the same GitLab repositories
+// on. There are two, and which one a remote names is decided purely by its
+// protocol:
+//
+//   - git.drupalcode.org serves HTTPS — anonymous clones, authenticated
+//     pushes over a PAT, and the REST API this package calls (see
+//     client.go's defaultBaseURL). It does not answer on port 22 at all.
+//
+//   - git.drupal.org serves SSH, and is the ONLY host that does. Every SSH
+//     remote for a drupal.org repository therefore names git.drupal.org,
+//     including the one drupal.org's own issue-fork "Show commands" panel
+//     hands a contributor to paste:
+//
+//     git remote add <module>-<nid> git@git.drupal.org:issue/<module>-<nid>.git
+//
+// Recognizing only the HTTPS host — as this did until a contributor followed
+// those pasted instructions — does not fail loudly. It makes the checkout
+// unrecognizable as a drupal.org one at all, and the Landing pane's arm
+// order (see internal/ui/landing.go's classifyLandRow) then drops the row
+// through to "commit and push", the one action a guest holding no drupal.org
+// credential is guaranteed to fail at. The remote was valid, the checkout
+// was publishable, and the pane offered a push denied by publickey.
+var gitHosts = []string{"git.drupalcode.org", "git.drupal.org"}
+
+// IsGitHost reports whether host is one of the hostnames drupal.org serves
+// git repositories on (see [gitHosts]). It is exported because the Landing
+// pane classifies a checkout by its remote's host alone, before any URL is
+// parsed, and that decision must be the same one made here — the pane
+// offering publication for a host this package would go on to reject is
+// exactly the "offer it and fail later" split the pane exists to avoid.
+//
+// host is a bare hostname, as [net/url.URL.Hostname] and
+// internal/checkouts' Forge field both give it — never a URL.
+func IsGitHost(host string) bool {
+	for _, h := range gitHosts {
+		if strings.EqualFold(host, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // repoPathFromRemoteURL normalises a git remote URL of any spelling down to
 // the repository path it addresses ("project/drupal", "issue/dubbot-3619578"),
-// having first confirmed the host is git.drupalcode.org. It is split out from
+// having first confirmed the host is one drupal.org serves git on. It is split out from
 // TargetFromRemoteURL so that URL shape and repository shape are decided
 // separately: everything here is about git and SSH, everything in the caller
 // is about drupal.org's naming conventions.
@@ -171,8 +216,8 @@ func repoPathFromRemoteURL(raw string) (string, error) {
 	host := u.Hostname()
 	path := strings.TrimPrefix(u.Path, "/")
 
-	if !strings.EqualFold(host, "git.drupalcode.org") {
-		return "", fmt.Errorf("drupalorg: remote host %q is not git.drupalcode.org", host)
+	if !IsGitHost(host) {
+		return "", fmt.Errorf("drupalorg: remote host %q is not a drupal.org git host (%s)", host, strings.Join(gitHosts, " or "))
 	}
 
 	return strings.Trim(strings.TrimSuffix(path, ".git"), "/"), nil

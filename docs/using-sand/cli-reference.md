@@ -467,7 +467,8 @@ one connection profile, --profile picks which one to act on.
 
 `ISSUE` is optional. If you cloned the issue fork — the normal way to work
 an issue — the checkout's own `origin` already spells the issue out
-(`git@git.drupalcode.org:issue/<module>-<ISSUE>.git`), and `sand publish`
+(`git@git.drupal.org:issue/<module>-<ISSUE>.git`, or the HTTPS spelling
+`https://git.drupalcode.org/issue/<module>-<ISSUE>.git`), and `sand publish`
 reads it from there, printing the number it derived before the confirmation
 so you can see what it settled on:
 

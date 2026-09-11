@@ -458,6 +458,50 @@ func TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish(t *testing.T) {
 	}
 }
 
+// TestClassifyLandRowDrupalOrgSSHHostIsRecognized pins the OTHER half of "is
+// this drupal.org" — the host — which the test above takes for granted.
+//
+// drupal.org serves the same repositories on two hosts, split by protocol:
+// git.drupalcode.org over HTTPS and git.drupal.org over SSH (see
+// drupalorg.IsGitHost). A contributor who adds a remote the way drupal.org's
+// own issue-fork "Show commands" panel tells them to gets the SSH one:
+//
+//	git remote add dubbot-3622063 git@git.drupal.org:issue/dubbot-3622063.git
+//
+// While this arm compared one host, such a checkout was not merely
+// unpublishable — it was unrecognizable. It fell past this arm into at-risk
+// and was offered exactly the commit-and-push the test above exists to
+// prevent, which then died in the guest with "Permission denied
+// (publickey)": the remote required a key, and no drupal.org credential is
+// ever put in a guest. Both the enabled and the PAT-less arms are pinned,
+// because a host this pane does not know silently skips both.
+func TestClassifyLandRowDrupalOrgSSHHostIsRecognized(t *testing.T) {
+	c := checkouts.Checkout{
+		Path:      "/home/user/drupal.org/dubbot",
+		PushState: checkouts.PushStateUnpushed,
+		Ahead:     2,
+		OrgRepo:   "issue/dubbot-3622063",
+		Forge:     "git.drupal.org",
+		Branch:    "3622063-allow-sites-to",
+	}
+
+	row := classifyLandRow(c, nil, prCheckPending, true)
+	if row.Kind != landRowDrupalOrgPublish {
+		t.Fatalf("Kind = %v, want landRowDrupalOrgPublish — git.drupal.org is drupal.org's SSH host, and a row that does not recognize it is offered a guest push that cannot authenticate", row.Kind)
+	}
+	if row.Action != landActionPublish {
+		t.Fatalf("Action = %v, want landActionPublish", row.Action)
+	}
+
+	row = classifyLandRow(c, nil, prCheckPending, false)
+	if row.Kind != landRowDrupalOrgNoToken {
+		t.Fatalf("Kind = %v, want landRowDrupalOrgNoToken — without a PAT the row must say why publish is disabled, not fall through to a push", row.Kind)
+	}
+	if row.Action != landActionNone {
+		t.Fatalf("Action = %v, want landActionNone", row.Action)
+	}
+}
+
 // TestClassifyLandRowDrupalOrgForgeNoTokenDisablesPublish pins AC5: an absent
 // PAT disables the action with a VISIBLE REASON, rather than offering it and
 // failing on it later.
