@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.0](https://github.com/Lullabot/sandbar/compare/v0.9.1...v0.10.0) (2026-09-11)
+
+
+### Features
+
+* **drupalorg:** destination guard, confirmation, and guest collection ([4da44de](https://github.com/Lullabot/sandbar/commit/4da44dea34c20ab6c97eb3bd39b97d0677173061))
+* **drupalorg:** payload type, host PAT loader, and anonymous GitLab client ([a82c372](https://github.com/Lullabot/sandbar/commit/a82c372ea3be38e2c10a292b40dd805507c50ffe))
+* **drupalorg:** reconcile the checkout after a publish ([94b11fb](https://github.com/Lullabot/sandbar/commit/94b11fb8a9adf29d61e613fdfe55f359383fb475))
+* **drupalorg:** replay commits to an issue fork and open its merge request ([ceee697](https://github.com/Lullabot/sandbar/commit/ceee6976b7984383a2632c9d86046976d9b59513))
+* **drupalorg:** title merge requests after their issue ([d0938c5](https://github.com/Lullabot/sandbar/commit/d0938c5c79f0e8c896f2646ea9a43e55f39d42fc))
+* **sand,ui:** publish to drupal.org from the CLI and the Landing pane ([1177e09](https://github.com/Lullabot/sandbar/commit/1177e091797a79443d45884420e57a6f23a69154))
+* **sand,ui:** tmux control-mode attach via `sand shell --cc` ([#158](https://github.com/Lullabot/sandbar/issues/158)) ([16ccca8](https://github.com/Lullabot/sandbar/commit/16ccca8a2378e637fcf58c6304dc2aa191519627))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 6f6ad8b ([#156](https://github.com/Lullabot/sandbar/issues/156)) ([b46267c](https://github.com/Lullabot/sandbar/commit/b46267cc14abeee109ec6785872bd7fc38703de0))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 96af6d2 ([#143](https://github.com/Lullabot/sandbar/issues/143)) ([0c3241a](https://github.com/Lullabot/sandbar/commit/0c3241ad2a0d59c261fbfb2b3a4965e30fd9941b))
+* **deps:** update module charm.land/bubbles/v2 to v2.2.1 ([#146](https://github.com/Lullabot/sandbar/issues/146)) ([8c2fa6c](https://github.com/Lullabot/sandbar/commit/8c2fa6c38affa910637af7a8c3413931164672d9))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260823001701-96af6d2cb5f6 ([#144](https://github.com/Lullabot/sandbar/issues/144)) ([e33c17f](https://github.com/Lullabot/sandbar/commit/e33c17f9901250a1b3b70d661799e4f0c29a4c14))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260902165432-6f6ad8b37b0a ([#157](https://github.com/Lullabot/sandbar/issues/157)) ([474698d](https://github.com/Lullabot/sandbar/commit/474698d4e524ca6190ea8022e777370749d2d5cc))
+* **deps:** update module golang.org/x/sys to v0.48.0 ([#161](https://github.com/Lullabot/sandbar/issues/161)) ([8a4f2be](https://github.com/Lullabot/sandbar/commit/8a4f2befe0e6a9e99596555a751d2daba9c69efa))
+* **drupalorg:** read the issue from the checkout's own fork remote ([038b75b](https://github.com/Lullabot/sandbar/commit/038b75bc464dcd19abf289dfdd6cebdc83d6b3c0))
+* **provision:** stage the apt cache seed on disk, not in /tmp ([#160](https://github.com/Lullabot/sandbar/issues/160)) ([e881fc2](https://github.com/Lullabot/sandbar/commit/e881fc29fcff7fe41733787404f116ccc8b3df6f))
+
 ## [0.9.1](https://github.com/Lullabot/sandbar/compare/v0.9.0...v0.9.1) (2026-08-25)
 
 
