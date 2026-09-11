@@ -48,6 +48,20 @@ const (
 	// sweepMaxDepth bounds how far `find` descends from the guest's $HOME.
 	// Six levels reaches the common "~/src/org/repo" and "~/work/client/app"
 	// shapes without wandering into arbitrarily deep unrelated trees.
+	//
+	// It bounds the discovery of REPOSITORIES only. A repository's linked
+	// worktrees are enumerated from the repository itself, by `git worktree
+	// list` (see sweepScriptTemplate), so they are found at any depth and
+	// even outside $HOME entirely.
+	//
+	// That split is the whole point, and it is what this constant got wrong
+	// while `find` was asked to discover worktrees too. A worktree under the
+	// now-common ".claude/worktrees/<name>" convention sits THREE levels
+	// below its repository, so whether it was swept came down to how deep
+	// the repository happened to be cloned: "~/org/repo" left it at exactly
+	// six and it appeared, while "~/host/org/repo" put it at seven and it
+	// silently did not — same layout, same tool, opposite answer, and no
+	// diagnostic anywhere. Raising the number would only move that cliff.
 	sweepMaxDepth = 6
 
 	// sweepMaxCheckouts caps how many discovered `.git` entries are processed
@@ -55,6 +69,15 @@ const (
 	// keeping one sweep pass (each entry timeout-wrapped) bounded in wall
 	// time. A guest that legitimately has more sees the rest on account of
 	// the Truncated flag, never a silent drop.
+	//
+	// It is applied TWICE, once either side of the worktree expansion, and
+	// both applications are load-bearing. The second bounds the per-checkout
+	// git reads, as it always did. The first bounds the expansion ITSELF:
+	// that step runs one `git worktree list` per discovered repository, so
+	// capping only afterwards would let a home with hundreds of repos spend
+	// hundreds of subprocesses deciding what to cap — the exact stall this
+	// cap exists to prevent, merely moved one stage earlier. Either one
+	// firing sets the same flag, emitted once.
 	sweepMaxCheckouts = 50
 
 	// sweepPerRepoTimeout is the `timeout` (seconds) wrapped around every
@@ -81,11 +104,27 @@ const (
 // constants are substituted in by BuildSweepCommand. It is intentionally
 // small:
 //
-//  1. A bounded `find` from $HOME for `.git` entries — matching BOTH
-//     directories (ordinary checkouts) and files (worktree pointers) —
-//     pruning common noise directories so the walk doesn't wander into
-//     dependency trees, and capped at sweepMaxCheckouts total.
-//  2. For each entry, a `g` helper (`timeout N git --no-optional-locks -C
+//  1. A bounded `find` from $HOME for `.git` DIRECTORIES — ordinary
+//     checkouts — pruning common noise directories so the walk doesn't
+//     wander into dependency trees, and capped at sweepMaxCheckouts.
+//
+//  2. For each repository found, `git worktree list --porcelain`, whose
+//     "worktree <path>" lines are turned back into `<path>/.git` entries.
+//     This is what discovers LINKED worktrees, and it is why `find` no
+//     longer looks for the `.git` FILES that mark them: git is asked where
+//     a repository's worktrees are instead of the filesystem being searched
+//     for them, so depth, pruning, and even $HOME stop being able to hide
+//     one. See sweepMaxDepth for the bug that motivated the split.
+//
+//     The list always names the main worktree first — the very repository
+//     being asked — so the repo is emitted by its own expansion rather than
+//     separately, and nothing is listed twice. An entry whose `.git` no
+//     longer exists is dropped (git keeps reporting a deleted worktree as
+//     `prunable` until someone prunes it), and a repository whose expansion
+//     comes back empty falls back to the found path, so a git too old or
+//     too slow for `worktree list` costs its worktrees, never the repo.
+//
+//  3. For each entry, a `g` helper (`timeout N git --no-optional-locks -C
 //     "$dir"`) reads: the checked-out branch, the branch's configured remote
 //     (falling back to the first configured remote — never assuming
 //     "origin"), that remote's URL, whether a remote-tracking ref exists for
@@ -94,7 +133,8 @@ const (
 //     and its `gitdir: ` pointer passed through raw — Go, not the shell,
 //     resolves the parent repo path from it (see parentFromGitdirPointer),
 //     which is what makes that logic unit-testable against synthetic text.
-//  3. Every field is emitted as a `key=value` line, one record per checkout,
+//
+//  4. Every field is emitted as a `key=value` line, one record per checkout,
 //     terminated by sweepRecordDelim.
 //
 // __TOKENS__ are substituted by BuildSweepCommand via strings.Replacer, not
@@ -102,11 +142,37 @@ const (
 // escaping.
 const sweepScriptTemplate = `set -f
 g() { timeout __TIMEOUT__ git --no-optional-locks -C "$dir" "$@" 2>/dev/null; }
-found=$(find "$HOME" -maxdepth __DEPTH__ \( -name node_modules -o -name .cache -o -name .cargo -o -name .npm \) -prune -o -name .git -print 2>/dev/null)
+found=$(find "$HOME" -maxdepth __DEPTH__ \( -name node_modules -o -name .cache -o -name .cargo -o -name .npm \) -prune -o -type d -name .git -print 2>/dev/null)
+trunc=
 count=$(printf '%s\n' "$found" | grep -c .)
 if [ "$count" -gt __CAP__ ]; then
-  echo "__TRUNC__"
+  trunc=1
   found=$(printf '%s\n' "$found" | head -n __CAP__)
+fi
+found=$(printf '%s\n' "$found" | while IFS= read -r gitpath; do
+  [ -z "$gitpath" ] && continue
+  dir=$(dirname "$gitpath")
+  wts=$(g worktree list --porcelain | while IFS= read -r line; do
+    case "$line" in
+    "worktree "*)
+      wt=${line#worktree }
+      [ -e "$wt/.git" ] && printf '%s\n' "$wt/.git"
+      ;;
+    esac
+  done)
+  if [ -n "$wts" ]; then
+    printf '%s\n' "$wts"
+  else
+    printf '%s\n' "$gitpath"
+  fi
+done)
+count=$(printf '%s\n' "$found" | grep -c .)
+if [ "$count" -gt __CAP__ ]; then
+  trunc=1
+  found=$(printf '%s\n' "$found" | head -n __CAP__)
+fi
+if [ -n "$trunc" ]; then
+  echo "__TRUNC__"
 fi
 printf '%s\n' "$found" | while IFS= read -r gitpath; do
   [ -z "$gitpath" ] && continue
