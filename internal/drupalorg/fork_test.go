@@ -99,8 +99,36 @@ func TestTargetFromRemoteURL(t *testing.T) {
 			want: RemoteTarget{Module: "foo2", Issue: 123},
 		},
 		{
+			// drupal.org's SSH host. An SSH remote can name no other one —
+			// git.drupalcode.org does not serve port 22 — so this is the
+			// spelling every contributor who pastes from an issue's "Show
+			// commands" panel ends up with, and rejecting it made their
+			// checkout unrecognizable as drupal.org's at all.
+			name: "issue fork scp-like ssh on the ssh host",
+			raw:  "git@git.drupal.org:issue/dubbot-3622063.git",
+			want: RemoteTarget{Module: "dubbot", Issue: 3622063},
+		},
+		{
+			name: "canonical project scp-like ssh on the ssh host",
+			raw:  "git@git.drupal.org:project/dubbot.git",
+			want: RemoteTarget{Module: "dubbot"},
+		},
+		{
+			name: "issue fork ssh url form on the ssh host",
+			raw:  "ssh://git@git.drupal.org/issue/dubbot-3622063.git",
+			want: RemoteTarget{Module: "dubbot", Issue: 3622063},
+		},
+		{
 			name:    "wrong host rejected",
 			raw:     "https://github.com/project/drupal.git",
+			wantErr: true,
+		},
+		{
+			// The bare domain is drupal.org's WEBSITE, not a git host: it
+			// serves no repositories, so a remote naming it is a mistake to
+			// report rather than a near-miss to accept.
+			name:    "drupal.org itself rejected",
+			raw:     "https://drupal.org/project/drupal.git",
 			wantErr: true,
 		},
 		{

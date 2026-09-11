@@ -10,11 +10,10 @@ package ui
 // mirroring vmCommands' enabledFor idiom (commandreg.go): "Open draft PR" for
 // a pushed branch with no PR (gh, or the compare-URL browser fallback when
 // host gh is absent/unauthed), "Open in browser" for a branch that already
-// has one, "Publish to drupal.org" for a branch pushed to a
-// git.drupalcode.org remote with a workstation PAT on file (see
-// startLandingPublish), and no action at all for an at-risk
-// (unpushed/dirty), local-only, nothing-to-land, drupal.org-with-no-PAT, or
-// other-non-GitHub-forge row.
+// has one, "Publish to drupal.org" for a branch pushed to a drupal.org remote
+// with a workstation PAT on file (see startLandingPublish), and no action at
+// all for an at-risk (unpushed/dirty), local-only, nothing-to-land,
+// drupal.org-with-no-PAT, or other-non-GitHub-forge row.
 //
 // Every action — including "Open draft PR" and "Publish to drupal.org" —
 // runs through the SAME job registry every other sand action does
@@ -88,9 +87,9 @@ const (
 	// warning: it renders in the pane's ordinary dim chrome and offers no
 	// action. See checkouts.Checkout.NothingToLand.
 	landRowNothingToLand
-	// landRowDrupalOrgPublish is a checkout pushed to a git.drupalcode.org
-	// remote with a workstation drupal.org PAT on file: the row offers to
-	// publish its unlanded commits to drupal.org (landActionPublish). See
+	// landRowDrupalOrgPublish is a checkout pushed to a drupal.org remote with
+	// a workstation drupal.org PAT on file: the row offers to publish its
+	// unlanded commits to drupal.org (landActionPublish). See
 	// startLandingPublish.
 	landRowDrupalOrgPublish
 	// landRowDrupalOrgNoToken is the same checkout with NO PAT on file: state
@@ -186,11 +185,20 @@ func isGitHubForge(forge string) bool {
 	return strings.EqualFold(forge, "github.com")
 }
 
-// isDrupalOrgForge reports whether forge is git.drupalcode.org, the one
-// non-GitHub forge the Landing pane offers a one-key action for: publish,
-// gated on a workstation PAT (see classifyLandRow's arm 4).
+// isDrupalOrgForge reports whether forge is drupal.org's, the one non-GitHub
+// forge the Landing pane offers a one-key action for: publish, gated on a
+// workstation PAT (see classifyLandRow's arm 4).
+//
+// The answer is drupalorg.IsGitHost's rather than a comparison of its own,
+// because drupal.org serves git on TWO hosts — git.drupalcode.org over
+// HTTPS, git.drupal.org over SSH — and this pane must recognize exactly the
+// set internal/drupalorg will go on to accept. A row classified as
+// publishable here and rejected there would offer an action that fails after
+// the user commits to it; a row NOT classified here falls through to arm 3's
+// commit-and-push, which a guest holding no drupal.org credential cannot
+// complete. Both failures were reachable while this compared one host.
 func isDrupalOrgForge(forge string) bool {
-	return strings.EqualFold(forge, "git.drupalcode.org")
+	return drupalorg.IsGitHost(forge)
 }
 
 // classifyLandRow is the PURE row-state -> action mapping (plan Component
@@ -212,11 +220,12 @@ func isDrupalOrgForge(forge string) bool {
 //     simply had not been pushed yet, which hid the single case the pane is
 //     most useful for behind a label saying there was nothing to do.
 //
-//  2. A git.drupalcode.org forge: offers to publish the checkout's unlanded
-//     commits to drupal.org (landActionPublish, see startLandingPublish) when
-//     a workstation PAT is on file, or states that publish is disabled and
-//     why when it is not — an absent PAT must disable the action with a
-//     visible reason, never offer it and fail later.
+//  2. A drupal.org forge — EITHER of its git hosts, see isDrupalOrgForge:
+//     offers to publish the checkout's unlanded commits to drupal.org
+//     (landActionPublish, see startLandingPublish) when a workstation PAT is
+//     on file, or states that publish is disabled and why when it is not —
+//     an absent PAT must disable the action with a visible reason, never
+//     offer it and fail later.
 //
 //     This one arm deliberately outranks at-risk, inverting the order every
 //     other forge follows, and the arm's own comment explains why: a guest
@@ -261,13 +270,13 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAv
 		// A sand guest holds NO drupal.org credential — that is the whole
 		// point of host-side publication, not an oversight — so the "commit
 		// and push" the at-risk arm would otherwise offer CANNOT succeed
-		// against git.drupalcode.org. Worse, the local-commits state that arm
-		// claims is exactly the state publication exists to serve: clone a
-		// canonical project you have no push access to, commit locally, and
-		// publish from the workstation. With the at-risk arm ahead of this
-		// one, the publish action was reachable only once there was nothing
-		// left to publish, and the row a contributor actually has offered
-		// them an action guaranteed to fail.
+		// against drupal.org. Worse, the local-commits state that arm claims
+		// is exactly the state publication exists to serve: clone a canonical
+		// project you have no push access to, commit locally, and publish
+		// from the workstation. With the at-risk arm ahead of this one, the
+		// publish action was reachable only once there was nothing left to
+		// publish, and the row a contributor actually has offered them an
+		// action guaranteed to fail.
 		//
 		// Uncommitted work is still named, because publication carries
 		// COMMITTED commits only — a dirty tree means some work stays behind,
@@ -275,7 +284,7 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAv
 		if !tokenAvailable {
 			row.Kind = landRowDrupalOrgNoToken
 			row.Action = landActionNone
-			row.Label = "on git.drupalcode.org · no drupal.org PAT on file, publish disabled"
+			row.Label = "on drupal.org · no PAT on file, publish disabled"
 		} else {
 			row.Kind = landRowDrupalOrgPublish
 			row.Action = landActionPublish
