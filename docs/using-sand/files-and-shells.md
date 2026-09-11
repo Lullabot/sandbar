@@ -237,6 +237,14 @@ how code — as opposed to the data `u`/`g` move above — leaves the VM: not by
 copying files, but by pushing a branch and opening a PR against it, exactly
 as you would from your own machine.
 
+The sweep finds repositories up to six directories below the guest's home
+(skipping `node_modules`, `.cache`, `.cargo` and `.npm`), and then asks git
+itself for each repository's linked worktrees — so a worktree is listed
+however deep it sits, including outside the home directory entirely. A
+repository cloned deeper than six levels below the home directory is not
+found at all, and so has no row — `sand land NAME PATH` cannot reach one
+either, since it selects from the same sweep.
+
 Each checkout lands in one of a few states, and the pane offers the action
 that state calls for:
 

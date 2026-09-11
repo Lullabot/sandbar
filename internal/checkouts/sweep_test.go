@@ -461,10 +461,11 @@ func TestBuildSweepCommand_Golden(t *testing.T) {
 	mustContain := []string{
 		`find "$HOME"`, // bounded from the guest's own home
 		"-maxdepth " + strconv.Itoa(sweepMaxDepth), // depth cap
-		"-name .git",                    // matches both dirs (repos) and files (worktree pointers) via -print
-		"node_modules",                  // noise pruning
-		".cache",                        // noise pruning
-		strconv.Itoa(sweepMaxCheckouts), // total count cap (~50)
+		"-type d -name .git",                       // REPOSITORIES only; worktrees come from git, not find
+		"worktree list --porcelain",                // …which is how linked worktrees are discovered, at any depth
+		"node_modules",                             // noise pruning
+		".cache",                                   // noise pruning
+		strconv.Itoa(sweepMaxCheckouts),            // total count cap (~50)
 		"head -n " + strconv.Itoa(sweepMaxCheckouts),
 		"timeout " + strconv.Itoa(sweepPerRepoTimeout), // per-checkout timeout wrap
 		"--no-optional-locks",                          // read-only git reads
