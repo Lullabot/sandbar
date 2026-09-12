@@ -30,16 +30,32 @@
 # Consequence to know about: `systemctl is-active docker` reads "inactive" on a
 # freshly booted VM until something opens the socket. `docker info` works — it
 # opens the socket, which is the trigger.
+#
+# Both tasks below need a live systemd: `state: started` obviously needs a
+# running daemon to start, but even the bare `enabled:` flips are out — this
+# repo's own chroot precedent (.github/workflows/base-image.yml) established
+# that plain `systemctl enable/disable` refuses inside a chroot with no
+# running init ("no such file or directory" talking to the manager); the
+# workaround there is `systemctl --root=<mount> enable <unit>` run from
+# OUTSIDE the chroot, which writes the wants/ symlink directly. Ansible has no
+# equivalent "--root" mode, so under a chroot image build (sand_image_build:
+# true) this role does neither: it records the requirement here instead, and
+# task 03's build script applies it afterwards from outside the chroot:
+#   systemctl --root=<mount> enable docker.socket
+#   systemctl --root=<mount> disable docker.service
+# See docs/contributing/image-build-audit.md.
 - name: Enable the Docker socket (activates the daemon on first use)
   ansible.builtin.systemd_service:
     name: docker.socket
     state: started
     enabled: true
+  when: not sand_image_build
 
 - name: Keep the Docker service off the boot path
   ansible.builtin.systemd_service:
     name: docker.service
     enabled: false
+  when: not sand_image_build
 
 - name: Add claude user to docker group
   ansible.builtin.user:
