@@ -20,7 +20,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // Host is the full host-access seam: the machine limactl runs on, exposing both
@@ -181,23 +180,9 @@ func (localFiles) OpenLock(path string, perm fs.FileMode) (LockFile, error) {
 	return &localLock{f: f}, nil
 }
 
-// localLock flocks a real *os.File. syscall.Flock is intentionally unguarded by a
-// build tag: sand runs only where Lima does (Linux and macOS, per .goreleaser),
-// and Flock exists on both — the same reasoning baselock.go's doc comment gives
-// for not shipping a non-unix fallback.
+// localLock locks a real *os.File. The TryLock/Unlock pair is per-OS: flock(2)
+// on unix, LockFileEx on Windows. Both are advisory-per-process and released on
+// close, which is the contract OpenLock's callers rely on.
 type localLock struct{ f *os.File }
-
-func (l *localLock) TryLock() (bool, error) {
-	err := syscall.Flock(int(l.f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if err == nil {
-		return true, nil
-	}
-	if err == syscall.EWOULDBLOCK {
-		return false, nil // held by someone else — wait and retry
-	}
-	return false, err
-}
-
-func (l *localLock) Unlock() error { return syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN) }
 
 func (l *localLock) Close() error { return l.f.Close() }

@@ -1,0 +1,334 @@
+name: windows-native-spike
+
+# Throwaway spike for issue #99, option B: can `sand` run natively on Windows,
+# driving limactl.exe over QEMU/WHPX, with no WSL2 in the picture?
+#
+# Four INDEPENDENT jobs, deliberately parallel -- each answers a different
+# question and none needs the others to finish. A serial pipeline would make
+# the slowest (a full VM boot) gate the fastest (does sand.exe even run).
+#
+#   native-build  Does the tree build, vet and TEST on native Windows? No
+#                 hypervisor involved. Measures the real porting distance now
+#                 that the flock split lets it compile at all.
+#   whpx-accel    Is WHPX usable on a hosted runner? Cheap and decisive, and a
+#                 prerequisite for lima-whpx -- so worth isolating, because
+#                 "Lima failed" and "the accelerator was never available" are
+#                 very different answers.
+#   lima-whpx     Does limactl.exe actually boot a guest over QEMU/WHPX? The
+#                 option B question proper.
+#   wsl2-lima     The option A control: Lima under WSL2 with KVM, which the
+#                 earlier probe showed should work. If option B fails and this
+#                 passes, the difference is WHPX, not our setup.
+#
+# Every check is non-fatal and prints a RESULT: marker. A red job here means
+# "we learned something", not "the branch is broken" -- nothing gates merges.
+
+on:
+  workflow_dispatch:
+  # Fires on every push to the spike branch, so iterating on the Go side
+  # re-runs the investigation without depending on the PR's paths filter.
+  push:
+    branches: [worktree-windows-ci-probe]
+
+permissions:
+  contents: read
+
+env:
+  LIMA_VERSION: "2.2.0"
+
+jobs:
+  # ---------------------------------------------------------------- job 1 ---
+  # Pure toolchain question: no VM, no hypervisor, fastest signal.
+  native-build:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Building ON Windows, not cross-compiling: catches anything cgo- or
+      # toolchain-specific that a GOOS=windows build from Linux would miss.
+      - name: Build sand.exe natively
+        run: |
+          go build -o sand.exe ./cmd/sand
+          if ($LASTEXITCODE -ne 0) { "RESULT: build=FAILED"; exit 1 }
+          if (Test-Path sand.exe) { "RESULT: build=OK" } else { "RESULT: build=MISSING"; exit 1 }
+
+      # --version is handled before limactl is ever looked up (see main.go), so
+      # it is the one command guaranteed not to need a hypervisor or a VM.
+      - name: Smoke-run sand.exe
+        continue-on-error: true
+        run: |
+          .\sand.exe --version
+          "RESULT: version-exit=$LASTEXITCODE"
+          .\sand.exe create -h
+          "RESULT: create-help-exit=$LASTEXITCODE"
+          .\sand.exe bogus-subcommand
+          "RESULT: unknown-subcommand-exit=$LASTEXITCODE (expect 2)"
+
+      - name: Vet on Windows
+        continue-on-error: true
+        run: |
+          go vet ./... 2>&1 | Tee-Object -FilePath vet.txt
+          "RESULT: vet-exit=$LASTEXITCODE"
+
+      # The real measure of porting distance. Most of this suite is expected to
+      # fail on Windows (host probes read /proc/meminfo, fixtures assume POSIX
+      # paths); the useful output is WHICH packages fail, not that some do.
+      - name: Full test suite on Windows
+        continue-on-error: true
+        run: |
+          go test ./... 2>&1 | Tee-Object -FilePath test.txt
+          "RESULT: test-exit=$LASTEXITCODE"
+
+      - name: Summarize test results
+        if: always()
+        continue-on-error: true
+        run: |
+          if (Test-Path test.txt) {
+            $fail = (Select-String -Path test.txt -Pattern '^FAIL' -ErrorAction SilentlyContinue)
+            $ok   = (Select-String -Path test.txt -Pattern '^ok' -ErrorAction SilentlyContinue)
+            "RESULT: packages-ok=$($ok.Count) packages-failed=$($fail.Count)"
+            "--- failing packages ---"
+            $fail | ForEach-Object { $_.Line }
+          } else {
+            "RESULT: test-output=MISSING"
+          }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: native-build-logs
+          path: |
+            vet.txt
+            test.txt
+            sand.exe
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------- job 2 ---
+  # Is the accelerator itself available? Isolated from Lima on purpose.
+  whpx-accel:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install QEMU
+        run: |
+          choco install qemu -y --no-progress
+          "RESULT: choco-exit=$LASTEXITCODE"
+
+      - name: Report QEMU version
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu"
+          qemu-system-x86_64.exe --version
+          "RESULT: qemu-version-exit=$LASTEXITCODE"
+
+      # Same logic as the KVM probe: an accelerator that cannot initialize makes
+      # qemu exit within a second or so, while a working one leaves it sitting
+      # at the "no bootable disk" prompt until we kill it. Surviving the wait IS
+      # the pass condition. TCG runs as a control so a qemu-side problem cannot
+      # be mistaken for a WHPX-side one.
+      - name: WHPX accelerator smoke test
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu"
+          foreach ($accel in @('whpx','tcg')) {
+            $qargs = @('-accel', $accel, '-display', 'none', '-m', '128', '-no-reboot')
+            $p = Start-Process -FilePath "qemu-system-x86_64.exe" -ArgumentList $qargs -PassThru `
+                   -RedirectStandardError "err-$accel.txt" -RedirectStandardOutput "out-$accel.txt"
+            if ($p.WaitForExit(20000)) {
+              "RESULT: $accel=EXITED-EARLY code=$($p.ExitCode)"
+            } else {
+              $p.Kill()
+              "RESULT: $accel=SURVIVED-TIMEOUT (accelerator initialized)"
+            }
+            Get-Content "err-$accel.txt" -ErrorAction SilentlyContinue | Select-Object -First 10
+          }
+
+  # ---------------------------------------------------------------- job 3 ---
+  # Option B proper: limactl.exe driving a real guest with no WSL2 anywhere.
+  lima-whpx:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install QEMU
+        continue-on-error: true
+        run: choco install qemu -y --no-progress
+
+      - name: Install limactl.exe
+        continue-on-error: true
+        run: |
+          $url = "https://github.com/lima-vm/lima/releases/download/v$env:LIMA_VERSION/lima-$env:LIMA_VERSION-Windows-AMD64.zip"
+          Invoke-WebRequest -Uri $url -OutFile lima.zip
+          Expand-Archive -Path lima.zip -DestinationPath "$env:USERPROFILE\lima" -Force
+          Get-ChildItem -Recurse "$env:USERPROFILE\lima\bin" | Select-Object Name
+          "RESULT: lima-install-exit=$LASTEXITCODE"
+
+      - name: Report Lima info
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          limactl.exe --version
+          limactl.exe info | Select-Object -First 20
+          "RESULT: limactl-info-exit=$LASTEXITCODE"
+
+      # The actual boot. Lima v2.2.0 made qemu the default driver on Windows, so
+      # this is the documented-but-barely-exercised path. --tty=false keeps it
+      # non-interactive; the log dump on failure is where the real diagnosis is.
+      - name: Boot a Lima guest over QEMU/WHPX
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          limactl.exe start --tty=false --name=spike template:default
+          "RESULT: lima-start-exit=$LASTEXITCODE"
+          limactl.exe list
+          limactl.exe shell spike uname -a
+          "RESULT: lima-shell-exit=$LASTEXITCODE"
+
+      - name: Dump Lima logs
+        if: always()
+        continue-on-error: true
+        run: |
+          $d = "$env:USERPROFILE\.lima\spike"
+          if (Test-Path $d) {
+            Get-ChildItem $d
+            foreach ($f in @('ha.stderr.log','serial.log','qemu.stderr.log')) {
+              if (Test-Path "$d\$f") { "--- $f ---"; Get-Content "$d\$f" -Tail 60 }
+            }
+          } else { "RESULT: lima-dir=MISSING" }
+
+  # ---------------------------------------------------------------- job 4 ---
+  # Option A control. The earlier probe proved /dev/kvm is there; this proves a
+  # guest actually boots on it, which is what `sand` would need.
+  wsl2-lima:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Request nested virtualization from WSL
+        run: Set-Content -Path "$env:USERPROFILE\.wslconfig" -Value "[wsl2]`nnestedVirtualization=true`n"
+
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          set-as-default: "true"
+
+      - name: Boot a Lima guest under WSL2 + KVM
+        shell: wsl-bash {0}
+        continue-on-error: true
+        run: |
+          set +e
+          echo "SPIKE-START"
+
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq qemu-system-x86 qemu-utils openssh-client curl ca-certificates \
+            || echo "RESULT: apt=FAILED"
+
+          curl -fsSL -o /tmp/lima.tar.gz \
+            "https://github.com/lima-vm/lima/releases/download/v${{ env.LIMA_VERSION }}/lima-${{ env.LIMA_VERSION }}-Linux-x86_64.tar.gz" \
+            || echo "RESULT: lima-download=FAILED"
+          tar -C /usr/local -xzf /tmp/lima.tar.gz || echo "RESULT: lima-extract=FAILED"
+          # limactl refuses to run as root, so probe the file rather than run it.
+          [ -x /usr/local/bin/limactl ] && echo "RESULT: limactl=INSTALLED" \
+            || echo "RESULT: limactl=MISSING"
+
+          # Lima refuses to run as root, so the boot happens as an ordinary user
+          # -- which also mirrors how a real WSL2 user would run sand.
+          useradd -m -s /bin/bash limauser 2>/dev/null
+          usermod -aG kvm limauser
+          echo "RESULT: kvm-group=$(id -nG limauser)"
+          su - limauser -c 'limactl start --tty=false --name=spike template:default'
+          echo "RESULT: lima-start-exit=$?"
+          su - limauser -c 'limactl list'
+          su - limauser -c 'limactl shell spike uname -a'
+          echo "RESULT: lima-shell-exit=$?"
+
+          echo "--- ha.stderr.log ---"
+          tail -60 /home/limauser/.lima/spike/ha.stderr.log 2>/dev/null || echo "(none)"
+
+          echo "SPIKE-END"
+
+  # ---------------------------------------------------------------- job 5 ---
+  # The one thing that could still sink option B. internal/lima/client.go holds
+  # a standing invariant that work VMs carry NO writable host mount, and the
+  # only mount sand actually needs is a READ-ONLY bind of the staged playbook
+  # at /mnt/playbook. The default template's automatic home mount failed over
+  # sshfs in the first run -- but that is Lima's own convenience mount, not
+  # ours. This asks the narrow question that matters: can Lima on Windows bind
+  # a host directory into the guest read-only, and can the guest read it?
+  lima-whpx-mount:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install QEMU
+        continue-on-error: true
+        run: choco install qemu -y --no-progress
+
+      - name: Install limactl.exe
+        continue-on-error: true
+        run: |
+          $url = "https://github.com/lima-vm/lima/releases/download/v${{ env.LIMA_VERSION }}/lima-${{ env.LIMA_VERSION }}-Windows-AMD64.zip"
+          Invoke-WebRequest -Uri $url -OutFile lima.zip
+          Expand-Archive -Path lima.zip -DestinationPath "$env:USERPROFILE\lima" -Force
+
+      - name: Stage a host directory to mount
+        run: |
+          $d = "$env:USERPROFILE\mnttest"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Set-Content -Path "$d\sentinel.txt" -Value "mounted-ok-from-windows-host"
+          "RESULT: staged=$d"
+
+      # Forward slashes on purpose: they dodge YAML/PowerShell backslash
+      # escaping entirely, and Lima normalizes them on Windows.
+      - name: Boot with an explicit read-only mount
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          $loc = ("$env:USERPROFILE/mnttest") -replace '\\','/'
+          # Built by concatenation from single-quoted parts: embedded double
+          # quotes never pass through pwsh's native-argument escaping, and the
+          # whole expression reaches limactl as one argv entry.
+          $expr = '.mounts=[{"location":"' + $loc + '","mountPoint":"/mnt/spike","writable":false}]'
+          "using --set $expr"
+          limactl.exe start --tty=false --name=mnt template:default --set $expr
+          "RESULT: mount-start-exit=$LASTEXITCODE"
+
+      - name: Read the mount from inside the guest
+        continue-on-error: true
+        run: |
+          $env:PATH += ";C:\Program Files\qemu;$env:USERPROFILE\lima\bin"
+          limactl.exe shell mnt ls -la /mnt/spike
+          "RESULT: mount-ls-exit=$LASTEXITCODE"
+          limactl.exe shell mnt cat /mnt/spike/sentinel.txt
+          "RESULT: mount-cat-exit=$LASTEXITCODE"
+          limactl.exe shell mnt sh -c "mount | grep -i spike || echo NO-MOUNT-LINE"
+
+      - name: Dump Lima logs
+        if: always()
+        continue-on-error: true
+        run: |
+          $d = "$env:USERPROFILE\.lima\mnt"
+          if (Test-Path $d) {
+            foreach ($f in @('ha.stderr.log','serial.log')) {
+              if (Test-Path "$d\$f") { "--- $f ---"; Get-Content "$d\$f" -Tail 40 }
+            }
+          } else { "RESULT: lima-dir=MISSING" }

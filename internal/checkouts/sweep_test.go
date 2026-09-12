@@ -401,6 +401,15 @@ func TestParseRemoteURL(t *testing.T) {
 		{"https with token", "https://oauth2:GLPAT-xxxx@gitlab.com/org/repo.git", "gitlab.com", "org/repo"},
 		{"http with user:pass", "http://user:pw@ghe.internal/o/r.git", "ghe.internal", "o/r"},
 		{"empty", "", "", ""},
+		// A local-path remote has no forge. The POSIX spelling already yields
+		// ("", "") because it contains no colon; the Windows spelling must
+		// agree rather than reading the drive letter as an scp-like host.
+		{"local posix path", "/tmp/fixture/remote", "", ""},
+		{"local windows path", `C:\Users\dev\src\remote`, "", ""},
+		{"local windows path forward slashes", "C:/Users/dev/src/remote", "", ""},
+		// Guard the guard: a real one-character hostname is still not a drive
+		// letter, because a drive letter is followed by a path separator.
+		{"scp-like short host", "git@h:org/repo.git", "h", "org/repo"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

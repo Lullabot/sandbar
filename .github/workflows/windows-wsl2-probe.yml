@@ -1,0 +1,164 @@
+name: windows-wsl2-probe
+
+# Throwaway capability probe for issue #99 (Windows support via WSL2).
+#
+# It answers ONE question that no amount of documentation reading settles:
+# does /dev/kvm exist inside a WSL2 distro on a GitHub-hosted Windows runner?
+#
+# Why it is in doubt. The runner is already a guest (Azure host -> runner VM).
+# WSL2's utility VM is the first level of nesting, and GitHub's Windows images
+# have supported that since the move to Dadsv5 in January 2024 — that is why
+# WSL2 works there at all. A Lima guest under QEMU+KVM inside the distro would
+# be a SECOND level of nesting, and Azure documents support for one. If this
+# probe finds /dev/kvm, `sand`'s whole remote-Lima path can be exercised on a
+# free Windows runner exactly like `remote-lima-e2e` does on ubuntu-24.04. If
+# it does not, hosted Windows CI is limited to Windows-side plumbing (sshd,
+# firewall, keepalive, path handling) and the VM boot itself needs real
+# hardware or a self-hosted runner.
+#
+# ANSWER (measured 2026-08-27, run 33110986636, windows-2025):
+#   virt-extensions=PRESENT, dev-kvm=PRESENT, kvm-ok=YES ("KVM acceleration
+#   can be used"), and `qemu-system-x86_64 -accel kvm` ran until `timeout`
+#   killed it rather than failing to initialize. WSL 2.7.12.0, kernel
+#   6.18.33.2-2, Windows 10.0.26100.33296.
+#
+#   So the second level of nesting IS available: a Lima guest can run under
+#   QEMU+KVM inside WSL2 on a free hosted Windows runner. GitHub still calls
+#   nested virt unsupported and experimental, so treat this as "works today,
+#   could regress" and keep any Windows job non-blocking.
+#
+# This is a one-off measurement, not a gate. Delete it once the answer is
+# recorded on issue #99.
+
+# workflow_dispatch alone cannot run this before it lands: Actions only
+# registers dispatchable workflows that already exist on the default branch,
+# so `gh workflow run --ref <branch>` 404s until merge. The paths filter fires
+# the probe on the PR that introduces it -- which is where the evidence
+# belongs -- while leaving every other PR untouched.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/windows-wsl2-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      # Written before WSL starts: .wslconfig is read at utility-VM boot, so
+      # setting it afterwards would need a `wsl --shutdown` to take effect.
+      # nestedVirtualization defaults to true on Windows 11 but the runner
+      # image is Windows Server 2025, so state it explicitly rather than
+      # assume the default carries over.
+      - name: Request nested virtualization from WSL
+        shell: pwsh
+        run: |
+          $cfg = "[wsl2]`nnestedVirtualization=true`n"
+          Set-Content -Path "$env:USERPROFILE\.wslconfig" -Value $cfg
+          Get-Content "$env:USERPROFILE\.wslconfig"
+
+      # Option B (native sand.exe driving limactl.exe) needs QEMU's WHPX
+      # accelerator, which needs the HypervisorPlatform feature. Report
+      # whether the image has it; enabling it would need a reboot.
+      - name: Report host hypervisor features
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-WindowsOptionalFeature -Online |
+            Where-Object FeatureName -match 'Hyper-V|HypervisorPlatform|Microsoft-Windows-Subsystem-Linux|VirtualMachinePlatform' |
+            Select-Object FeatureName, State | Format-Table -AutoSize
+          (Get-ComputerInfo -Property 'HyperV*') | Format-List
+
+      - name: Install WSL2 + Ubuntu
+        uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7.0.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          set-as-default: "true"
+
+      - name: Report WSL version
+        shell: pwsh
+        continue-on-error: true
+        run: wsl --version
+
+      # The measurement, in ONE in-distro step so ordering is guaranteed.
+      #
+      # Uses the `wsl-bash` shell that setup-wsl registers. An earlier revision
+      # passed a multi-line PowerShell here-string to `wsl.exe ... bash -euxc`
+      # and it silently executed nothing at all -- zero output, exit 0 -- which
+      # `continue-on-error` then dressed up as a green check. Hence the
+      # PROBE-START/PROBE-END sentinels: if both are absent from the log the
+      # shell plumbing broke and the run says nothing about KVM, which is very
+      # different from KVM being absent.
+      #
+      # No `set -e`: every check is guarded, and an "ABSENT" is a result to be
+      # reported, not a failure to abort on.
+      - name: Probe for KVM inside the distro
+        shell: wsl-bash {0}
+        continue-on-error: true
+        run: |
+          # setup-wsl's wsl-bash shell runs with `set -e`, which aborted the
+          # first good run: `timeout` returns 124 when it fires, so the qemu
+          # accelerator test killed the script before the sshd check and
+          # PROBE-END could report. Every check below is individually guarded,
+          # and an "ABSENT" is a result worth printing rather than a reason to
+          # stop, so opt out.
+          set +e
+
+          echo "PROBE-START"
+          uname -a
+
+          if grep -o -m1 -E 'vmx|svm' /proc/cpuinfo; then
+            echo "RESULT: virt-extensions=PRESENT"
+          else
+            echo "RESULT: virt-extensions=ABSENT"
+          fi
+
+          if [ -e /dev/kvm ]; then
+            ls -l /dev/kvm
+            echo "RESULT: dev-kvm=PRESENT"
+          else
+            echo "RESULT: dev-kvm=ABSENT"
+          fi
+
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq || echo "RESULT: apt-update=FAILED"
+          apt-get install -y -qq cpu-checker qemu-system-x86 openssh-server \
+            || echo "RESULT: apt-install=FAILED"
+
+          if command -v kvm-ok >/dev/null; then
+            kvm-ok && echo "RESULT: kvm-ok=YES" || echo "RESULT: kvm-ok=NO"
+          else
+            echo "RESULT: kvm-ok=NOT-INSTALLED"
+          fi
+
+          # The real accelerator init, not just a device-node check: qemu exits
+          # non-zero at once with "failed to initialize kvm" when KVM is
+          # unusable, and otherwise gets as far as complaining about having no
+          # bootable disk. That distinction is the actual answer.
+          # Exit 124 means `timeout` fired, i.e. qemu initialized KVM and sat
+          # there -- the good outcome. A fast non-zero exit with "failed to
+          # initialize kvm" on stderr is the bad one.
+          if command -v qemu-system-x86_64 >/dev/null; then
+            timeout 20 qemu-system-x86_64 -accel kvm -display none -m 128 -no-reboot
+            echo "RESULT: qemu-kvm-exit=$?"
+          else
+            echo "RESULT: qemu-kvm-exit=NOT-INSTALLED"
+          fi
+
+          # Independent of KVM: Phase 1 of issue #99 needs an sshd inside the
+          # distro that a Linux `sand` client can reach. Testable here either
+          # way, so measure it while we have the distro up.
+          mkdir -p /run/sshd && /usr/sbin/sshd
+          sleep 2
+          if ss -ltn | grep -q ':22'; then
+            echo "RESULT: sshd=LISTENING"
+          else
+            echo "RESULT: sshd=NOT-LISTENING"
+          fi
+
+          echo "PROBE-END"
