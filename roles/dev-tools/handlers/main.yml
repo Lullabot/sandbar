@@ -4,12 +4,19 @@
     cmd: update-ca-certificates
   changed_when: true
 
+# Only notified by the Docker registry proxy tasks
+# (devtools_docker_registry_proxy_enabled), which is not set for a base image
+# build — but guarded on the same terms as roles/base's sshd reload handler in
+# case a future caller ever combines the two: no live systemd to
+# daemon-reload or restart Docker on inside a chroot image build.
 - name: Reload systemd
   ansible.builtin.systemd_service:
     daemon_reload: true
   notify: Restart Docker
+  when: not sand_image_build
 
 - name: Restart Docker
   ansible.builtin.systemd_service:
     name: docker
     state: restarted
+  when: not sand_image_build
