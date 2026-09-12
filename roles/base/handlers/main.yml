@@ -1,5 +1,14 @@
 ---
+# Notified by the two sshd_config.d drop-ins in tasks/main.yml. Under a
+# chroot image build (sand_image_build: true) there is no running sshd to
+# reload — the handler would still FIRE (a notifying task reports changed on
+# the image's very first build) but `service ssh reload` needs a live
+# systemd/D-Bus to signal the daemon, which does not exist here. Skipping is
+# correct, not a gap: the drop-ins are already on disk by the time this would
+# run, and every real sshd start after that (the guest's actual first boot)
+# reads them fresh — nothing was ever waiting on this reload.
 - name: Reload sshd
   ansible.builtin.service:
     name: ssh
     state: reloaded
+  when: not sand_image_build
