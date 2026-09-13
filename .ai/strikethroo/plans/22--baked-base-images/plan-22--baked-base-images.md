@@ -304,8 +304,10 @@ graph TD
     T01[01: Chroot audit + sand_image_build flag] --> T03[03: Image build script]
     T02[02: Baseline measurement]
     T03 --> T04[04: Image hygiene assertions]
+    T03 --> T15[15: Reduce image size]
     T03 --> T05[05: Workflow matrix + publish]
     T04 --> T05
+    T15 --> T05
     T05 --> T06[06: Dual-consumption verification]
     T05 --> T07[07: Manifest + acquisition]
     T07 --> T08[08: Lima wiring]
@@ -337,12 +339,21 @@ No circular dependencies: every edge runs from a lower task ID to a higher one.
 
 _Task 02 is ordering-critical: it measures a code path this plan deletes, so the number cannot be recovered after Phase 6. It has no dependencies precisely so it can run first._
 
-### Phase 2: The Build
+### ✅ Phase 2: The Build
 **Parallel Tasks:**
-- Task 03: Image build script — chroot base-phase build, generalization, compression, size gate (depends on: 01)
+- ✔️ Task 03: Image build script — chroot base-phase build, generalization, compression, size gate (depends on: 01) — **completed**
 
-### Phase 3: The Gate
-**Parallel Tasks:**
+Final artifact: **1,230,045,184 bytes**, SHA-256 `67d8a5e1aff2137304162a584ffd0ee78e695c3ba36bd677526734e10f8a8109`. Playbook result was identical on every post-fix run: `ok=78 changed=58 failed=0 skipped=27`.
+
+**Root cause of the size instability** (recorded because it is non-obvious and will recur if the zero-fill is ever removed): ext4 does not zero a block's contents on delete — only the allocation bitmap changes. `qemu-img convert -c` cannot see ext4's free-block bitmap, so residual bytes from deleted files (apt lists and caches, logs, resize slack) were compressed as real entropy. Different runs left different garbage behind, which is why byte-identical inputs produced a 108 MiB spread. The fix zero-fills free space with `dd if=/dev/zero` and deletes the filler while still mounted — the manual equivalent of `zerofree`, needing no extra package and no TRIM plumbing through `qemu-nbd`.
+
+**Note for Task 04:** `/var/lib/dbus/machine-id` does **not exist** in this image — no `dbus` package is installed, so the upstream image never ships it. The generalization correctly did nothing (it only re-links when the path exists and is a regular file). Task 04's assertion must treat *absent* as a pass, not require a symlink.
+
+One additional playbook change beyond Task 01's: `roles/user/tasks/main.yml` now creates `/var/lib/systemd/linger/` before touching the per-user linger file. On a never-booted genericcloud image that directory does not exist (logind creates it lazily), so the offline-equivalent task failed with `ENOENT`. This was the only playbook task that failed under chroot across all four runs, and it was fixed by extending the `sand_image_build` guard rather than working around it in the script.
+
+### Phase 3: The Gate and the Size Work
+**Sequential Tasks** (both perform image builds and contend for `qemu-nbd` devices and disk — they must NOT run concurrently):
+- Task 15: Reduce the published image size with safe trims and zstd compression (depends on: 03)
 - Task 04: Assert the built image is safe to distribute (depends on: 03)
 
 ### Phase 4: Publication
@@ -383,4 +394,29 @@ _Task 06 is a gate whose failure redirects Phase 6; it runs in parallel with 07 
 
 ### Execution Summary
 - Total Phases: 9
-- Total Tasks: 14
+- Total Tasks: 15
+
+### ✅ Phase 2: The Build — Results
+
+Task 03 is complete and the approach is **validated**. The headline findings:
+
+- **The chroot build works.** The full base-phase playbook — five APT repositories, the 30-package transaction, and all three `curl | sh` vendor installers — ran to completion inside a `chroot` over a mounted image root, with no init and no D-Bus. This was the single largest technical unknown in the plan.
+- **Task 01's `/run` constraint was respected in practice**, verified by the orchestrator from the live mount table: only `dev`, `proc` and `sys` were bind-mounted.
+- **Size was initially unstable and is now reproducible.** Runs 1 and 2 produced 1890.3 MiB and 1998.8 MiB — a 108.4 MiB swing, with run 2 failing the script's own 1900 MiB gate and landing within 49 MiB of GitHub's hard ceiling. The cause was uncompressed garbage left in free space before `qemu-img convert -c`. After the fix, runs 3 and 4 produced 1173.06 MiB and 1172.68 MiB — a **384 KiB delta (0.03%)**.
+- **The 2 GiB per-asset limit is not a blocker.** Final size is **1,229,651,968 bytes (1172.68 MiB)** — 57.3% of the ceiling, with ~875 MiB of headroom.
+- Teardown is idempotent: after a *failed* run 2, exactly one temp directory and no stale nbd connections or orphaned mounts remained.
+
+**Measured image composition** (3.0 GB uncompressed → 1172.68 MiB compressed, 2.6x), from mounting the built image:
+
+| Component | Uncompressed |
+| --- | --- |
+| Codex (251M binary + 67M helper) | 318M |
+| JDK | 286M |
+| Go (lib 113M + src 140M + test/api 29M) | 282M |
+| Docker stack | ~300M |
+| GCC + headers | 230M |
+| Claude (single binary, single version) | 214M |
+| node | 121M |
+| glab / uv / gh / ddev / cloudflared | 216M |
+
+Trimmable text content totals ~200M uncompressed but only ~40 MiB compressed; **zstd is the larger lever at an expected 120-230 MiB**. This drove the addition of Task 15. User decisions recorded: the **JDK and cloudflared are retained**; `/usr/include`, GCC and Go's `src` tree are retained for functional reasons (native module builds, and Go compiling its stdlib from source since 1.20).
