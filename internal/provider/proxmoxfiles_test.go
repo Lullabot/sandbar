@@ -74,7 +74,7 @@ func TestProxmoxFilesLimaHomeIsStateRoot(t *testing.T) {
 // the provisioner at a path that does not exist.
 func TestProxmoxFilesStagePlaybookIsIdentity(t *testing.T) {
 	local := t.TempDir()
-	got, err := newProxmoxFiles(t.TempDir()).StagePlaybook(context.Background(), local)
+	got, err := newProxmoxFiles(t.TempDir()).StagePlaybook(context.Background(), local, "stamp")
 	if err != nil {
 		t.Fatalf("StagePlaybook: %v", err)
 	}

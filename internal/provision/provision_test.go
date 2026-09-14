@@ -155,7 +155,7 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 		{"list", "claude", "--format", "{{.Status}}"},       // exists-guard: target absent
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // Status(base) -> Stopped
 		{"clone", "sandbar-base", "claude"},                 // Clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true)) | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/playbook"`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // Start
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize provision
 		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check
@@ -1402,7 +1402,7 @@ func TestReset_NoPreserve(t *testing.T) {
 		{"delete", "claude", "-f"},                          // destroy
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // ensureBaseStopped
 		{"clone", "sandbar-base", "claude"},                 // re-clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true)) | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/playbook"`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // start clone
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize
 		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check

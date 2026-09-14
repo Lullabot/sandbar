@@ -127,7 +127,11 @@ func RenderBaseOverlay(cfg vm.CreateConfig, playbookDir string) ([]byte, error) 
 	fmt.Fprintf(&b, "disk: %s\n", quoteYAML(vm.BaseDiskFloor))
 	b.WriteString(overlayContainerd)
 	b.WriteString("mounts:\n")
-	fmt.Fprintf(&b, "- location: %s\n  mountPoint: /mnt/playbook\n  writable: false\n", quoteYAML(playbookDir))
+	// The mount point comes from the constant, not a literal: this line is the
+	// PRODUCER of the value lima.Client.Configure's jq selector has to match when
+	// it repoints a clone's mount, and two literals would be one rename away from
+	// silently disagreeing.
+	fmt.Fprintf(&b, "- location: %s\n  mountPoint: %s\n  writable: false\n", quoteYAML(playbookDir), playbookMountPoint)
 	b.WriteString(overlayProvision)
 	return []byte(b.String()), nil
 }
