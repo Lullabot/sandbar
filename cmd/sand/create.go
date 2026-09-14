@@ -83,7 +83,7 @@ Flags:
 	}
 
 	cpusFlag := fs.String("cpus", fmt.Sprint(cfg.CPUs), "vCPUs")
-	fs.StringVar(&cfg.Name, "name", cfg.Name, "Lima instance name")
+	fs.StringVar(&cfg.Name, "name", cfg.Name, "VM name")
 	fs.StringVar(&cfg.BaseName, "base-name", cfg.BaseName, "Base image instance name")
 	fs.StringVar(&cfg.Hostname, "hostname", cfg.Hostname, "VM hostname (default: same as --name)")
 	fs.StringVar(&cfg.User, "user", cfg.User, "Primary VM user")

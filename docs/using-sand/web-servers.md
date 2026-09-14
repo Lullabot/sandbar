@@ -2,9 +2,13 @@
 
 How to reach a web server running inside a `sand` VM — a ddev project,
 `npm run dev`, `python3 -m http.server`, anything listening on a TCP port.
-The answer depends on where the VM lives: on the machine you're sitting at
-(the **Local** profile), or on a remote host (a `remote-ssh`
-[Connection Profile](connection-profiles.md)).
+The answer depends on where the VM lives:
+
+| The VM runs on | How you reach it |
+| --- | --- |
+| This machine (the **Local** profile) | `http://localhost:PORT` — [automatically](#local-vms-ports-appear-on-localhost) |
+| A **Proxmox** host | The guest's own address on your network — [directly](#proxmox-vms-the-guest-has-its-own-address) |
+| Another machine over SSH (`remote-ssh`) | A [tunnel you start](#remote-ssh-vms-tunnel-out-with-cloudflared) |
 
 ## Local VMs: ports appear on localhost
 
@@ -64,13 +68,40 @@ after which the project URL is `https://myproj.ddev.site:8443`.
     see [Shells and Files](files-and-shells.md)) and add it to your OS or
     browser trust store.
 
-## Remote VMs: tunnel out with cloudflared
+## Proxmox VMs: the guest has its own address
 
-On a remote profile the same Lima forwarding happens — but to `127.0.0.1`
-**on the remote host**. That's a machine you can SSH into, not the one your
-browser runs on, so a guest web server is reachable from nowhere except the
-remote host itself. `sand` adds no port forwarding of its own over the
-profile's SSH connection, and the
+A VM on a Proxmox host isn't behind port forwarding at all. It's attached to
+a Linux bridge and gets its own address on that network — the same address
+`sand` uses to SSH into it — so a server listening in the guest is reachable
+at `http://<guest-ip>:PORT` from anything that can route to it, including
+your browser. Privileged ports are not a problem either: nothing is
+forwarded, so a guest server on port 80 or 443 is just there.
+
+To find the address, open a shell (`S` on the tile) and run:
+
+```console
+claude@myvm$ hostname -I
+```
+
+Two consequences of a real network address:
+
+- **It is not loopback-only.** Unlike a local VM, a Proxmox guest's ports
+  are reachable by anything else on that network, not just by you. That's
+  why the [security model](../reference/security-model.md) expects a Proxmox
+  host to sit on an isolated LAN or VLAN, and why you shouldn't run a
+  `sand` VM on a network you don't control.
+- **`*.ddev.site` won't resolve to it.** Those names resolve to
+  `127.0.0.1` in public DNS, which is wrong for a guest on its own address.
+  Add a hosts entry pointing the project name at the guest IP, or use
+  `ddev share` as described below.
+
+## Remote SSH VMs: tunnel out with cloudflared
+
+On a `remote-ssh` profile the same Lima forwarding happens — but to
+`127.0.0.1` **on the remote host**. That's a machine you can SSH into, not
+the one your browser runs on, so a guest web server is reachable from nowhere
+except the remote host itself. `sand` adds no port forwarding of its own over
+the profile's SSH connection, and the
 [security model](../reference/security-model.md) assumes remote hosts sit
 on an isolated network behind whatever firewalling you already have.
 

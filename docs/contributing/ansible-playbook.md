@@ -35,19 +35,28 @@ you run `go run ./cmd/sand` from inside this checkout, your uncommitted
 edits to `roles/` or `site.yml` take effect on the very next provision.**
 There is no rebuild-and-reinstall step to remember.
 
-## The mount, and what runs where
+## How it reaches the guest, and what runs where
 
-The resolved directory is mounted into the guest as its **only** mount, and
-that mount is **read-only**. Ansible itself is installed *inside the
-guest*, not on the host, and the playbook runs there with
-`--connection=local` — the host never executes `ansible-playbook` at all.
+Ansible itself is installed *inside the guest*, not on the host, and the
+playbook runs there with `--connection=local` — the host never executes
+`ansible-playbook` at all. How the fileset gets into the guest depends on
+the backend:
 
-Inside the guest, the in-guest provisioning script (`inGuestScript` in
+- **On Lima** (local or remote), the resolved directory is mounted into the
+  guest as its **only** mount, and that mount is **read-only**.
+- **On Proxmox**, there is no mount at all — there's no shared filesystem to
+  make one from. `sand` packages the fileset into a gzipped tar
+  (`buildPlaybookTar`) and streams it to the guest over the SSH connection's
+  stdin, where it's unpacked. Same fileset, no mount.
+
+On Lima, the in-guest provisioning script (`inGuestScript` in
 `internal/provision/provision.go`) rsyncs the mounted playbook fileset into
 a guest-local working copy before each run, filtered to exactly the members
 `playbook_embed.go` declares (`site.yml`, `ansible.cfg`, `inventory`,
 `roles/***`, `group_vars/***`) — never the whole mount, which in
-working-tree mode would otherwise be an entire git checkout. Per-phase
+working-tree mode would otherwise be an entire git checkout. The Proxmox tar
+is built from that same list, so both paths carry the same files and neither
+can leak a checkout's `.git` or Go sources into a guest. Per-phase
 extra-vars are streamed into the guest over stdin into `/dev/shm` (tmpfs)
 and removed on exit; they are never placed on argv or written to the
 persistent disk, so a clone token never appears in a process listing.
@@ -61,7 +70,7 @@ values:
 | Phase | What runs | When |
 |---|---|---|
 | `base` | Heavy setup: `base`, (conditionally) `samba`, `dev-tools`, `claude-code` | Building the shared base image once, before any clone exists |
-| `finalize` | Light, per-VM identity: `base`, `user`, `project` | Against each `limactl clone` of the base image |
+| `finalize` | Light, per-VM identity: `base`, `user`, `project` | Against each clone of the base image |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
 This split is what lets `sand` build one expensive base image and clone it
@@ -74,7 +83,7 @@ work (hostname, git identity, optional project clone) against each clone.
 and `project`. `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
 `internal/provision/vars.go` sets `samba_enabled: false` on every `sand`
-run (Lima VMs use a bind mount or `limactl copy` instead of a Samba share),
+run (files move with `limactl copy` or `scp` instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
 does not execute on the `sand` path.
 

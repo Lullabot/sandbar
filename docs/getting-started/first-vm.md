@@ -36,6 +36,15 @@ create after that clones the base image instead of reinstalling everything,
 so it's fast. See [How Provisioning Works](how-it-works.md) for why it's
 built this way.
 
+## Putting the VM somewhere else
+
+Both paths above create the VM on the machine you ran `sand` from. To put it
+on another machine or on a Proxmox host, add that machine as a profile once
+(press `p` in the board, then `n`), then pick it from the create form's
+profile selector — or pass `sand create --profile NAME` headlessly. Nothing
+else about the VM changes. See [Where VMs
+Run](../using-sand/connection-profiles.md).
+
 ## Logging into Claude Code
 
 `sand` installs the Claude Code CLI but does **not** provision a credential

@@ -1,7 +1,7 @@
 site_name: sandbar
 site_url: https://lullabot.github.io/sandbar/
 repo_url: https://github.com/lullabot/sandbar
-site_description: Disposable Claude Code development VMs on Lima.
+site_description: Disposable Claude Code development VMs, on your own machine or on a server.
 docs_dir: docs
 site_dir: site
 
@@ -70,11 +70,11 @@ nav:
   - Using sand:
     - The Board (TUI): using-sand/tui.md
     - CLI Reference: using-sand/cli-reference.md
+    - Where VMs Run: using-sand/connection-profiles.md
+    - Proxmox VE Setup: using-sand/proxmox.md
     - Secrets: using-sand/secrets.md
     - Shells and Files: using-sand/files-and-shells.md
     - Web Servers and Ports: using-sand/web-servers.md
-    - Connection Profiles: using-sand/connection-profiles.md
-    - Proxmox VE: using-sand/proxmox.md
     - Publishing to drupal.org: using-sand/drupalorg-publishing.md
   - Reference:
     - Files and State: reference/files-and-state.md
