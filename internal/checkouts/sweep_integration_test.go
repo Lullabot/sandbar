@@ -307,3 +307,171 @@ func TestSweepAgainstRealGitWorktree(t *testing.T) {
 		t.Errorf("Branch = %q, want %q", got.Branch, "side")
 	}
 }
+
+// TestSweepAgainstRealGitWorktreeBeyondDepth is the regression test for the
+// bug that motivated enumerating worktrees with git instead of find.
+//
+// It builds the layout that broke: a repository at "~/host/org/repo" — the
+// ordinary shape of a Go or GitHub checkout — holding a linked worktree under
+// the ".claude/worktrees/<name>" convention. The worktree's `.git` then sits
+// at depth SEVEN below $HOME, one past sweepMaxDepth, so a find-based sweep
+// silently omitted it while the identical layout one directory shallower
+// ("~/org/repo") was swept fine. The Landing pane's symptom was a branch with
+// unpushed commits that simply had no row.
+//
+// The assertion is deliberately about a depth the find cannot reach: raising
+// sweepMaxDepth would make this pass again for exactly one more level, which
+// is why the fix stopped asking find about worktrees at all.
+func TestSweepAgainstRealGitWorktreeBeyondDepth(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	// host/org/repo/.git is itself at depth 4 — comfortably inside the find.
+	work := filepath.Join(home, "host", "org", "repo")
+	// …but its worktree's .git lands at depth 7, outside it.
+	wt := filepath.Join(work, ".claude", "worktrees", "deep")
+
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, home, home, "init", "-q", "-b", "main", work)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, home, "add", "-A")
+	runGit(t, work, home, "commit", "-qm", "one")
+	runGit(t, work, home, "worktree", "add", "-q", "-b", "side", wt)
+
+	vc := runSweep(t, home)
+
+	got := findCheckout(t, vc, wt)
+	if got.Kind != KindWorktree {
+		t.Errorf("Kind = %v, want KindWorktree", got.Kind)
+	}
+	if got.Parent != work {
+		t.Errorf("Parent = %q, want %q", got.Parent, work)
+	}
+	if got.Branch != "side" {
+		t.Errorf("Branch = %q, want %q", got.Branch, "side")
+	}
+
+	// The repository itself must still be swept — the expansion REPLACES the
+	// found path with the worktree list, so losing the main worktree in that
+	// substitution is the obvious way to fix this bug and break everything
+	// else.
+	if repo := findCheckout(t, vc, work); repo.Kind != KindRepo {
+		t.Errorf("Kind = %v for %s, want KindRepo", repo.Kind, work)
+	}
+}
+
+// TestSweepAgainstRealGitWorktreeOutsideHome pins the other half of "git
+// decides, not the filesystem": a worktree git knows about is swept even when
+// it lives nowhere find would ever look. `git worktree add ../elsewhere` is
+// ordinary usage, and before the expansion such a worktree was invisible no
+// matter how the depth cap was tuned.
+func TestSweepAgainstRealGitWorktreeOutsideHome(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	outside := t.TempDir() // a sibling of $HOME, not under it
+	work := filepath.Join(home, "work")
+	wt := filepath.Join(outside, "elsewhere")
+
+	runGit(t, home, home, "init", "-q", "-b", "main", work)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, home, "add", "-A")
+	runGit(t, work, home, "commit", "-qm", "one")
+	runGit(t, work, home, "worktree", "add", "-q", "-b", "side", wt)
+
+	got := findCheckout(t, runSweep(t, home), wt)
+	if got.Kind != KindWorktree {
+		t.Errorf("Kind = %v, want KindWorktree for a worktree outside $HOME", got.Kind)
+	}
+	if got.Parent != work {
+		t.Errorf("Parent = %q, want %q", got.Parent, work)
+	}
+}
+
+// TestSweepAgainstRealGitWorktreeWithSpace pins that the expansion survives a
+// worktree path with a space in it.
+//
+// The expansion reads `git worktree list --porcelain` line by line and strips
+// the literal "worktree " prefix, so everything after that prefix is the path
+// — no word splitting, and no assumption that git leaves the path unquoted.
+// A directory with a space is the everyday version of that worry, and the one
+// a contributor will actually hit.
+func TestSweepAgainstRealGitWorktreeWithSpace(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	wt := filepath.Join(home, "my worktree")
+
+	runGit(t, home, home, "init", "-q", "-b", "main", work)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, home, "add", "-A")
+	runGit(t, work, home, "commit", "-qm", "one")
+	runGit(t, work, home, "worktree", "add", "-q", "-b", "side", wt)
+
+	got := findCheckout(t, runSweep(t, home), wt)
+	if got.Kind != KindWorktree {
+		t.Errorf("Kind = %v, want KindWorktree", got.Kind)
+	}
+	if got.Branch != "side" {
+		t.Errorf("Branch = %q, want %q", got.Branch, "side")
+	}
+}
+
+// TestSweepAgainstRealGitWorktreeListedOnce guards the two ways the expansion
+// can corrupt the list it produces.
+//
+// A worktree shallow enough for find to have discovered on its own is now
+// ALSO named by its repository's `git worktree list`, so emitting both would
+// give the pane duplicate rows — the same checkout twice, each with its own
+// cursor position and actions. And a worktree whose directory has been
+// deleted stays in git's list, reported as prunable, until someone runs `git
+// worktree prune`; emitting it would invent a row for a path that is not
+// there, whose every git read fails into an empty record.
+func TestSweepAgainstRealGitWorktreeListedOnce(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	kept := filepath.Join(home, "kept")
+	deleted := filepath.Join(home, "deleted")
+
+	runGit(t, home, home, "init", "-q", "-b", "main", work)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, home, "add", "-A")
+	runGit(t, work, home, "commit", "-qm", "one")
+	runGit(t, work, home, "worktree", "add", "-q", "-b", "kept", kept)
+	runGit(t, work, home, "worktree", "add", "-q", "-b", "gone", deleted)
+
+	// Remove the directory without telling git: the entry survives in
+	// `worktree list` output as prunable.
+	if err := os.RemoveAll(deleted); err != nil {
+		t.Fatal(err)
+	}
+
+	vc := runSweep(t, home)
+
+	seen := map[string]int{}
+	for _, c := range vc.Checkouts {
+		seen[c.Path]++
+	}
+	for _, p := range []string{work, kept} {
+		if seen[p] != 1 {
+			t.Errorf("%s appears %d times in the sweep, want exactly 1: %+v", p, seen[p], vc.Checkouts)
+		}
+	}
+	if seen[deleted] != 0 {
+		t.Errorf("%s appears %d times, want 0 — a deleted worktree git still calls prunable must not become a row",
+			deleted, seen[deleted])
+	}
+}
