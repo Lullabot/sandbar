@@ -281,3 +281,49 @@ func TestToolsetKey_PartialSelections(t *testing.T) {
 		})
 	}
 }
+
+// TestLoginName covers the Windows-sourced arms of HostUser. A Windows account
+// name is not necessarily a legal Linux login, and the guest's useradd gets
+// whatever this returns -- so the interesting cases are the ones that must NOT
+// be passed through untouched.
+func TestLoginName(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"already a login", "andrew", "andrew"},
+		{"uppercase folds", "Andrew", "andrew"},
+		{"display name with a space", "Andrew Berry", "andrew-berry"},
+		{"dotted account", "andrew.berry", "andrew-berry"},
+		{"keeps digits underscore hyphen", "dev_2-x", "dev_2-x"},
+		{"drops characters useradd rejects", "andrew@corp!", "andrewcorp"},
+		{"refuses a leading hyphen", "-rf", "rf"},
+		{"trailing separator trimmed", "andrew ", "andrew"},
+		// Nothing usable survives, so HostUser must fall through to its next
+		// source rather than pass an empty user_name to Ansible.
+		{"empty", "", ""},
+		{"only punctuation", "!!!", ""},
+		{"only spaces", "   ", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := loginName(c.raw); got != c.want {
+				t.Errorf("loginName(%q) = %q, want %q", c.raw, got, c.want)
+			}
+		})
+	}
+}
+
+// TestLoginNameLength pins the 32-character useradd limit and that truncation
+// cannot leave a trailing hyphen.
+func TestLoginNameLength(t *testing.T) {
+	got := loginName(strings.Repeat("a", 40))
+	if len(got) != 32 {
+		t.Errorf("len = %d, want 32", len(got))
+	}
+	got = loginName(strings.Repeat("a", 32) + " berry")
+	if strings.HasSuffix(got, "-") {
+		t.Errorf("loginName = %q, must not end in a hyphen after truncation", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"sort"
 	"strconv"
 	"strings"
@@ -299,7 +300,53 @@ func HostUser() string {
 	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
 		return u
 	}
+	// Windows reaches here every time: there is no `id` on PATH and the
+	// environment carries USERNAME, not USER. Without this arm every VM
+	// created from a Windows host silently became "claude", which also moves
+	// the guest home and the ~/<host>/<org>/<repo> checkout path.
+	//
+	// Unlike a POSIX login, a Windows account name is not necessarily a legal
+	// Linux one -- "Andrew Berry" is an ordinary Windows username -- so these
+	// two sources are sanitized where `id -un` and $USER are trusted as-is.
+	if u := loginName(os.Getenv("USERNAME")); u != "" {
+		return u
+	}
+	if cur, err := user.Current(); err == nil {
+		// user.Current reports DOMAIN\user (or MACHINE\user) on Windows; only
+		// the account name is meaningful as a guest login.
+		name := cur.Username
+		if i := strings.LastIndexAny(name, `\/`); i >= 0 {
+			name = name[i+1:]
+		}
+		if u := loginName(name); u != "" {
+			return u
+		}
+	}
 	return "claude"
+}
+
+// loginName reduces a host account name to something useradd(8) will accept in
+// the guest, returning "" when nothing usable survives so the caller falls
+// through to the next source. It lowercases, keeps only the portable login
+// character set, and refuses a leading hyphen (which useradd reads as a flag).
+func loginName(raw string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(raw)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		case r == ' ' || r == '.':
+			// A space or dot is the common shape of a Windows display-style
+			// account name ("Andrew Berry", "andrew.berry"); a hyphen keeps it
+			// readable rather than running the words together.
+			b.WriteRune('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if len(name) > 32 {
+		name = strings.TrimRight(name[:32], "-")
+	}
+	return name
 }
 
 // HostGitConfig reads a single value from the host git config, best-effort: any
