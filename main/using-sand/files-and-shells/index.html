@@ -1958,13 +1958,16 @@ that state calls for:</p>
   If such a checkout holds uncommitted or unpushed work, the row still says
   so (<code>local only · 2 uncommitted</code>) — there is nothing sand can do about it,
   but you should know it is there before deleting the VM.</li>
-<li><strong>On <code>git.drupalcode.org</code></strong> — the checkout's remote is a drupal.org
-  project rather than GitHub. Instead of a PR flow, the row reads
+<li><strong>On drupal.org</strong> — the checkout's remote is a drupal.org project rather
+  than GitHub. Either of drupal.org's two git hosts counts:
+  <code>git.drupalcode.org</code> (HTTPS) or <code>git.drupal.org</code> (SSH, the host the
+  "Show commands" panel on an issue fork hands you). Instead of a PR flow,
+  the row reads
   <code>publish to drupal.org</code> when a workstation drupal.org PAT is on file:
   acting on it prompts for the drupal.org issue number this work belongs
   to, then resolves the destination and asks you to confirm before
   publishing anything. Without a PAT on file the row instead reads
-  <code>on git.drupalcode.org · no drupal.org PAT on file, publish disabled</code>
+  <code>on drupal.org · no PAT on file, publish disabled</code>
   and offers no action. See
   <a href="../drupalorg-publishing/">Publishing to drupal.org</a>, and
   <a href="../drupalorg-publishing/#setup">Setup</a> for the token file.</li>

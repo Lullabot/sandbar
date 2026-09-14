@@ -1647,10 +1647,11 @@ drupal.org personal access token (PAT) that never leaves your machine.</p>
 <p>You reach this two ways:</p>
 <ul>
 <li><strong>The Landing pane's <code>publish to drupal.org</code> row.</strong> Focus a running VM,
-  press <code>l</code>, and any checkout pushed to a <code>git.drupalcode.org</code> remote offers
-  this action (<code>enter</code>/<code>o</code>) once a workstation PAT is on file. If no PAT is
-  on file, the row instead says <code>on git.drupalcode.org · no drupal.org PAT
-  on file, publish disabled</code> — see <a href="#setup">setup</a> below.</li>
+  press <code>l</code>, and any checkout on a drupal.org remote — <code>git.drupalcode.org</code>
+  over HTTPS or <code>git.drupal.org</code> over SSH — offers this action (<code>enter</code>/<code>o</code>)
+  once a workstation PAT is on file. If no PAT is on file, the row instead
+  says <code>on drupal.org · no PAT on file, publish disabled</code> — see
+  <a href="#setup">setup</a> below.</li>
 <li><strong><code>sand publish NAME PATH [ISSUE]</code></strong> from the command line, for scripting or
   for a bigger confirmation than the TUI's pane can show at once (see
   <a href="../cli-reference/#sand-publish-name-path-issue"><code>sand publish</code></a> in the CLI
