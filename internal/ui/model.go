@@ -233,6 +233,19 @@ type model struct {
 	// git.drupalcode.org. A plain interface value, for the same reason
 	// ghActions is.
 	drupalOrgActions drupalOrgActions
+	// reviewRun is the Landing pane's seam (landing.go) over internal/landreview's
+	// orchestration (task 5's Session.Run) that the review key runs. Defaulted to
+	// defaultReviewRun in New(); tests fake it so no test picks a real workstation
+	// port, probes a real HTTP server, or spawns a real ssh/limactl forwarder
+	// child. A plain func value, mirroring ghActions immediately above.
+	reviewRun reviewRunFunc
+
+	// review is the in-flight Landing-pane review session's identity and
+	// teardown state, or the zero value when none is running. It lives here,
+	// beside reviewRun, rather than on landing below, because a review session
+	// outlives the landingPane value that started it — see activeReview's doc
+	// in landing.go for the orphaned guest processes that placement prevents.
+	review activeReview
 
 	// landing is the Landing pane's own state (landing.go): the focused VM
 	// identity it was opened for, its grouped/flattened rows, the resolved
@@ -379,6 +392,7 @@ type model struct {
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
+	resetWithReview      bool
 	preserveClaude       bool
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
@@ -398,6 +412,7 @@ type model struct {
 	toolDDEV    bool
 	toolGo      bool
 	toolJava    bool
+	toolReview  bool
 	toolRebuild bool
 
 	// Progress / streaming. Everything that used to be a single job's state on the
@@ -588,6 +603,7 @@ func New(fleet provider.Fleet) tea.Model {
 		sweeps:           newSweepsResolver(fleetShellResolver(members)),
 		ghActions:        landgh.New(),
 		drupalOrgActions: newDrupalOrgActions(),
+		reviewRun:        defaultReviewRun,
 		keys:             newKeyMap(),
 		help:             help.New(),
 		view:             viewBoard,
@@ -1027,6 +1043,20 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (landing.go). Folding it in advances the flow to its confirmation —
 		// nothing further to dispatch.
 		return m, m.handleLandingFork(msg)
+
+	case landReviewURLMsg:
+		// The review UI's URL, reported while the session is still running
+		// (landing.go's runLandingReview). Purely a model-state fold plus a
+		// session-log entry — nothing further to dispatch.
+		m.handleLandReviewURL(msg)
+		return m, nil
+
+	case landReviewDoneMsg:
+		// A Landing-pane review session finished, failed, or was cancelled
+		// (landing.go's runLandingReview). Purely a model-state fold plus a
+		// session-log entry — nothing further to dispatch.
+		m.handleLandReviewDone(msg)
+		return m, nil
 
 	case refreshTickMsg:
 		// This member's loop iteration is done; tickRefresh (called centrally after
@@ -1577,12 +1607,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolDDEV = cfg.WithDDEV
 			m.toolGo = cfg.WithGo
 			m.toolJava = cfg.WithJava
-			// Codex must be refreshed too, or the probed base's codex state is
-			// silently dropped: the checkbox stays at openForm's default (false)
-			// while the base was built WITH codex, and submitting reconverges the
-			// shared base without it (the silent de-select form.go's reset path
-			// guards against, reintroduced here for the create/probe path).
+			// Codex and review must be refreshed too, or the probed base's
+			// state is silently dropped: the checkbox stays at openForm's
+			// default (false) while the base was built WITH the tool, and
+			// submitting reconverges the shared base without it (the silent
+			// de-select form.go's reset path guards against, reintroduced
+			// here for the create/probe path).
 			m.toolCodex = cfg.WithCodex
+			m.toolReview = cfg.WithReview
 		}
 		return m, nil
 

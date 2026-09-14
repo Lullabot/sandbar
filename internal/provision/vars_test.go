@@ -86,6 +86,7 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 		"toolset_go":     true,
 		"toolset_java":   true,
 		"toolset_codex":  false,
+		"toolset_review": false,
 	} {
 		v, ok := m[key]
 		if !ok {
@@ -155,7 +156,7 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
 	m := parseVars(t, data)
-	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex"} {
+	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex", "toolset_review"} {
 		if _, ok := m[k]; ok {
 			t.Errorf("finalize phase unexpectedly emitted %q", k)
 		}
@@ -180,6 +181,43 @@ func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 	}
 	if v, ok := m["toolset_claude"].(bool); !ok || !v {
 		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
+	}
+}
+
+// TestBuildExtraVars_ReviewCanBeSelected mirrors
+// TestBuildExtraVars_CodexCanBeSelected for the self-review web UI's
+// toolset_review extra-var: it defaults off like codex, so this proves
+// toolset_review=true is emitted (and the other tools unaffected) when a user
+// opts in via --with-review, gating the self-review role on in site.yml.
+func TestBuildExtraVars_ReviewCanBeSelected(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithReview = true
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+
+	if v, ok := m["toolset_review"].(bool); !ok || !v {
+		t.Errorf("toolset_review = %v, want true", m["toolset_review"])
+	}
+	if v, ok := m["toolset_claude"].(bool); !ok || !v {
+		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
+	}
+}
+
+// TestBuildExtraVars_ReviewOmittedOnFinalize: like the other tool-set
+// booleans, toolset_review is only meaningful in the base phase.
+func TestBuildExtraVars_ReviewOmittedOnFinalize(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithReview = true
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+	if _, ok := m["toolset_review"]; ok {
+		t.Errorf("finalize phase unexpectedly emitted toolset_review")
 	}
 }
 

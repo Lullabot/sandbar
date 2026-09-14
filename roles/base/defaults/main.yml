@@ -91,11 +91,17 @@ base_packages:
 # unconfigured run does not install it. Like claude, it gates the whole codex
 # role from site.yml and installs no apt packages, so it also has nothing to
 # fold into toolset_packages below.
+#
+# toolset_review is the second opt-in selection, for the same reason as
+# codex: a heavy `npm ci` + vite build (~270MB of node_modules before
+# pruning) that most bases should not pay for. It gates the whole
+# self-review role from site.yml and installs no apt packages either.
 toolset_claude: true
 toolset_codex: false
 toolset_ddev: true
 toolset_go: true
 toolset_java: true
+toolset_review: false
 
 # golang and default-jdk-headless are ~500-700MB installed between them, so
 # they are opt-out rather than unconditional entries in base_packages above.

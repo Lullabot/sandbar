@@ -21,3 +21,8 @@ site/
 # Local env for the opt-in Proxmox e2e suite, beside the `.env` above: host,
 # node, pool, storage and the PATH to a token file — never the token itself.
 /e2e.env
+
+# The self-review web app's installed dependencies. `roles/` is go:embed'd
+# into the sand binary (playbook_embed.go), so a stray tree here would ship
+# inside a locally built binary; the role installs its own copy in the guest.
+roles/self-review/files/webapp/node_modules/

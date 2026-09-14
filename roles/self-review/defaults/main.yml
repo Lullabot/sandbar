@@ -1,0 +1,13 @@
+---
+# The self-review web UI is part of the configurable base tool-set (sand
+# create --with-review). Like codex it is opt-IN: toolset_review defaults to
+# false, so an unconfigured run does not build it. That default lives with
+# the other toolset_* selections in roles/base/defaults/main.yml (see the
+# codex role's identical comment for why it lives there and not here).
+#
+# selfreview_install_dir is the ONE fixed, predictable guest path the built
+# web app lands in. It is not tunable: task 5 (`sand land --review`) hard-codes
+# this path to launch `node server/index.mjs` without any file discovery, so
+# changing it here without also changing that caller would silently break the
+# review command.
+selfreview_install_dir: /opt/sandbar/self-review

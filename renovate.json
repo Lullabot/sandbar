@@ -77,6 +77,11 @@
       "matchDatasources": ["node-version"],
       "allowedVersions": "/^\\d*[02468]\\./",
       "automerge": false
+    },
+    {
+      "description": "self-review's three packages are released in lockstep; a mixed set breaks the embedding contract, so bump them together",
+      "matchPackageNames": ["@self-review/**"],
+      "groupName": "self-review"
     }
   ]
 }

@@ -68,6 +68,31 @@ var playbookFileset = map[string]bool{
 	"group_vars":  true,
 }
 
+// playbookExcludedDirs are directories that sit INSIDE playbookFileset's
+// entries but deliberately never reach a guest: the review web app's local
+// build artifacts. playbookFileset can only express whole top-level entries
+// ("roles"), so without this the hash walks all of roles/ — and these two
+// directories with it.
+//
+// They are .gitignore'd, so they exist only on a contributor's own disk, and
+// only after `npm ci` or `npm run build` — which running the web app's tests
+// requires. But a repo-mode `sand create` hashes the working TREE, so leaving
+// them in had two costs on exactly those machines: reading and sha256'ing
+// ~100k node_modules files (hundreds of MB, minutes of wall clock) on every
+// create, and — worse — producing a stamp that no longer matched the one
+// recorded for the existing base image, marking a perfectly good shared base
+// stale and rebuilding it from scratch over files that playbook_embed.go's
+// go:embed list and provision.go's playbookSyncCmd rsync filter both already
+// exclude from ever reaching a guest. Nothing that actually lands in the VM
+// changed, so neither should the version stamp.
+//
+// This is the THIRD list that has to agree about the webapp's build
+// artifacts; TestPlaybookFilesetsAgreeOnWebappArtifacts pins all three.
+var playbookExcludedDirs = map[string]bool{
+	"roles/self-review/files/webapp/node_modules": true,
+	"roles/self-review/files/webapp/dist":         true,
+}
+
 // playbookContentHash hashes exactly the fileset that reaches the guest,
 // filtering fsys down to playbookFileset first so extraneous entries (e.g. a
 // working-tree checkout's .git, go sources, or agent tooling) never perturb
@@ -82,6 +107,9 @@ func playbookContentHash(fsys fs.FS) (string, error) {
 		}
 		if p == "." {
 			return nil
+		}
+		if d.IsDir() && playbookExcludedDirs[p] {
+			return fs.SkipDir
 		}
 		top := p
 		if i := strings.IndexByte(p, '/'); i >= 0 {
