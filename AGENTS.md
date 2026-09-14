@@ -129,22 +129,37 @@ it is not where prose belongs.
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
 
-Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
-(`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
-keep them from drifting — the create/TUI paths construct their provider(s) via
-`provider.BuildFleet` over the `profiles` store's enabled profiles (a headless
-command binds only the one profile it targets; the TUI binds every enabled
-one), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
-construct their guest-attach command exclusively via `provider.AttachArgv()`,
-the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
+Entrypoint: `cmd/sand/main.go`. **Every headless subcommand is a TUI verb under
+the same name, and the pair shares one implementation**: `sand create` is the
+form behind `n`, `sand reset` is `R` (`cmd/sand/reset.go`), `sand shell` is `S`,
+`sand land` is `l`, `sand paste-image` is `v`. A verb that exists in only one of
+the two entrypoints is one users have to discover twice, and the drift is not
+hypothetical — `sand reset` exists because the TUI could preserve a Claude login
+or a project tree across a rebuild and the CLI's `sand create --recreate` could
+not, so the docs' own answer to a CLI user was "open the TUI".
+
+Keep them from drifting by SHARING, not by copying: the create/reset gates and
+bookkeeping are `internal/manage` (`RecreateBase`, `RecordSuccess`,
+`Reconcile`), the host-secrets follow-up after any build is
+`cmd/sand/secrets.go`'s `settleSecrets` mirroring the TUI's `provisionDoneMsg`
+handler, and both shell entrypoints construct their guest-attach command
+exclusively via `provider.AttachArgv()` — the one place in sand that knows tmux
+exists (for local Lima) or SSH (for remote). The create/TUI paths construct
+their provider(s) via `provider.BuildFleet` over the `profiles` store's enabled
+profiles (a headless command binds only the one profile it targets; the TUI
+binds every enabled one), while a command acting on an EXISTING VM (`sand
+reset`/`shell`/`land`/`paste-image`) resolves the owning profile from the VM
+itself via `resolveVMProfile` (marker, then registry, then a live listing)
+rather than from a default.
 
 **A reset never changes which VM it is resetting.** Its name, base image and
-clone URL come from the target's own record, not from the form: the TUI renders
-the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`). An
-editable URL made one form mean two things — the preserve toggle is labelled
-from the org the VM HAS while the clone used the edited URL — so "keep my
-project" could discard the tree it named. A different repo is a different VM;
-`n` / `sand create` makes one.
+clone URL come from the target's own record, not from the form/flags: the TUI
+renders the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`),
+`sand reset` has no `--clone-url` at all, and `sand create --recreate
+--clone-url` is refused. An editable URL made one form mean two things — the
+preserve toggle is labelled from the org the VM HAS while the clone used the
+edited URL — so "keep my project" could discard the tree it named. A different
+repo is a different VM; `n` / `sand create` makes one.
 
 ## Build, run, format
 
