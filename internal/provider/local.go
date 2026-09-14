@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"io"
-	"os"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -131,17 +130,17 @@ func (p *limaProvider) Copy(ctx context.Context, out io.Writer, recursive bool, 
 // so the caller passes only the vm.VM and never constructs the Lima-shaped
 // command. Reproduces exactly what the `S` verb and `sand shell` do today.
 func (p *limaProvider) AttachArgv(v vm.VM) []string {
-	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
+	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), lima.HostColorterm())
 }
 
 // AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
 func (p *limaProvider) AttachArgvControl(v vm.VM) []string {
-	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), lima.HostColorterm(), lima.AttachControl)
 }
 
 // RunArgv runs one interactive command in a guest directory. See Provider.RunArgv.
 func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
-	return lima.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
+	return lima.RunArgv(v.Name, workdir, expr, lima.HostColorterm())
 }
 
 // HostUser returns this machine's user — for local Lima the limactl host IS this

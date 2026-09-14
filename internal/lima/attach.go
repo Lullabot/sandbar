@@ -1,6 +1,33 @@
 package lima
 
-import "regexp"
+import (
+	"os"
+	"regexp"
+	"runtime"
+)
+
+// HostColorterm reports the COLORTERM value the guest should be told about. It
+// is the host's own COLORTERM everywhere except Windows, where NO terminal sets
+// the variable -- not Windows Terminal, not conhost, not cmd -- even though
+// Windows Terminal has rendered 24-bit color since build 14931.
+//
+// Without a default there, colortermFlag below drops the (empty) value and
+// every Windows user gets a 256-color guest while sand's own board renders in
+// truecolor on the same screen, because Bubble Tea detects Windows color
+// support from the NT build number rather than from $COLORTERM. Two different
+// color depths in one window reads as a sandbar bug, not a missing env var.
+//
+// An explicitly set COLORTERM still wins, so this only supplies the default
+// Windows never provides.
+func HostColorterm() string {
+	if v := os.Getenv("COLORTERM"); v != "" {
+		return v
+	}
+	if runtime.GOOS == "windows" {
+		return "truecolor"
+	}
+	return ""
+}
 
 // This file is the ONLY place in sand that knows tmux exists. Both entrypoints
 // into a guest shell — the TUI's `S` verb and `sand shell` — build their command

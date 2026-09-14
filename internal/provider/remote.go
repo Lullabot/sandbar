@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"os"
-
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -40,18 +38,18 @@ var _ Provenancer = (*remoteLimaProvider)(nil)
 // identical (host.AttachArgv reuses lima.AttachArgv). This is what gives `sand
 // shell` and the TUI `S` verb the remote form with no drift.
 func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
-	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"))
+	return p.host.AttachArgv(v.Name, lima.GuestHomeVia(p.host, v.Dir), lima.HostColorterm())
 }
 
 // AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
 func (p *remoteLimaProvider) AttachArgvControl(v vm.VM) []string {
-	return p.host.AttachArgvMode(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+	return p.host.AttachArgvMode(v.Name, lima.GuestHomeVia(p.host, v.Dir), lima.HostColorterm(), lima.AttachControl)
 }
 
 // RunArgv is AttachArgv's one-command sibling, ssh-wrapped the same way. See
 // Provider.RunArgv.
 func (p *remoteLimaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
-	return p.host.RunArgv(v.Name, workdir, expr, os.Getenv("COLORTERM"))
+	return p.host.RunArgv(v.Name, workdir, expr, lima.HostColorterm())
 }
 
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH

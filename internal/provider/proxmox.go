@@ -1369,7 +1369,7 @@ func (p *proxmoxProvider) attachArgvMode(v vm.VM, mode lima.AttachMode) []string
 	if err != nil {
 		return failArgv(fmt.Sprintf("sand: cannot attach to %q: %v", v.Name, err))
 	}
-	return p.sshHost(ip).SSHArgv(true, lima.GuestAttachArgvMode(os.Getenv("COLORTERM"), mode)...)
+	return p.sshHost(ip).SSHArgv(true, lima.GuestAttachArgvMode(lima.HostColorterm(), mode)...)
 }
 
 // RunArgv returns the full argv that runs ONE interactive guest command (expr)
@@ -1402,7 +1402,7 @@ func (p *proxmoxProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 [ -n "$2" ] && export COLORTERM="$2"
 shift 2
 ` + expr
-	return p.sshHost(ip).SSHArgv(true, "bash", "-c", script, "sand-run", workdir, os.Getenv("COLORTERM"))
+	return p.sshHost(ip).SSHArgv(true, "bash", "-c", script, "sand-run", workdir, lima.HostColorterm())
 }
 
 // failArgv is a real, runnable command that prints msg and exits non-zero — the
