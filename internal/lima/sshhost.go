@@ -34,6 +34,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,10 +163,18 @@ func NewSSHHost(cfg SSHConfig) *SSHHost {
 	// never make constructing an SSHHost — or any command it later runs — fail.
 	// It just means every command pays a fresh ssh handshake, exactly as before
 	// this feature existed.
-	if cacheDir, err := os.UserCacheDir(); err == nil {
-		dir := filepath.Join(cacheDir, "sandbar", "ssh")
-		if err := os.MkdirAll(dir, 0o700); err == nil {
-			h.controlDir = dir
+	//
+	// Skipped entirely on Windows: the bundled Win32-OpenSSH does not implement
+	// connection multiplexing at all, so these flags buy nothing there and only
+	// risk a per-command warning. Leaving controlDir empty takes muxFlags'
+	// existing opt-out path rather than adding a second one, and avoids
+	// creating a socket directory nothing will ever put a socket in.
+	if runtime.GOOS != "windows" {
+		if cacheDir, err := os.UserCacheDir(); err == nil {
+			dir := filepath.Join(cacheDir, "sandbar", "ssh")
+			if err := os.MkdirAll(dir, 0o700); err == nil {
+				h.controlDir = dir
+			}
 		}
 	}
 	h.debugLogPath = resolveDebugLog(cfg)
