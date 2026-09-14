@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -753,6 +753,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -817,62 +873,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1493,8 +1493,10 @@
 <h2 id="repository-layout">Repository layout</h2>
 <p><code>sand</code> has two halves that share one repo:</p>
 <ul>
-<li><strong>A Go TUI/CLI</strong> (<code>cmd/sand</code>, <code>internal/…</code>) that drives <a href="https://lima-vm.io">Lima</a>
-  to create, clone, reset, and manage VMs, plus a host-side secrets store.</li>
+<li><strong>A Go TUI/CLI</strong> (<code>cmd/sand</code>, <code>internal/…</code>) that creates, clones, resets,
+  and manages VMs — on this machine or another one with
+  <a href="https://lima-vm.io">Lima</a>, or on a Proxmox host through its API — plus a
+  host-side secrets store.</li>
 <li><strong>An Ansible provisioner</strong> (<code>site.yml</code>, <code>roles/…</code>, <code>group_vars/</code>) that
   configures a VM once it boots. The Go side embeds and runs it — see
   <a href="../ansible-playbook/">The Embedded Playbook</a> for how that actually works.</li>
@@ -1513,8 +1515,16 @@
 <td>Typed wrapper over the <code>limactl</code> CLI. All subprocess execution goes through a <code>Runner</code> interface so code is testable without a real binary.</td>
 </tr>
 <tr>
+<td><code>provider</code></td>
+<td>The seam behind "where a VM runs": one implementation each for local Lima, Lima on a remote host over SSH, and Proxmox. Everything above this layer is written once.</td>
+</tr>
+<tr>
+<td><code>profiles</code></td>
+<td>The <code>profiles.yaml</code> store — the named connections a provider is built from.</td>
+</tr>
+<tr>
 <td><code>provision</code></td>
-<td>Orchestrates create/reset (base build, <code>limactl clone</code>, finalize) and the Ansible run; <code>staging.go</code> moves data across a reset.</td>
+<td>Orchestrates create/reset (base build, clone, finalize) and the Ansible run; <code>staging.go</code> moves data across a reset.</td>
 </tr>
 <tr>
 <td><code>ui</code></td>
@@ -1555,12 +1565,20 @@ this repository — including for the docs, below. A contributor who assumes
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>go test ./...                                  # unit + integration, no VM needed
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>go test ./internal/ui -run TestTUI -update     # regenerate TUI golden snapshots
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>go test -tags limae2e ./...                    # real-VM end-to-end (needs limactl + KVM)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>go test -tags proxmoxe2e ./internal/provider   # real-VM end-to-end on Proxmox
 </code></pre></div>
 <p><code>go test ./...</code> covers unit tests and the <code>teatest</code>-based TUI golden
 snapshots and never boots a real VM. Real-VM end-to-end tests are gated
-behind the <code>limae2e</code> build tag, so plain <code>go test ./...</code> skips them; run them
-locally on a host with Lima (or dispatch the <code>test.yml</code> workflow, whose
-<code>lima-e2e</code> job runs them under QEMU+KVM).</p>
+behind a build tag, so plain <code>go test ./...</code> skips them:</p>
+<ul>
+<li><code>limae2e</code> — run these on a host with Lima, or dispatch the <code>test.yml</code>
+  workflow, whose <code>lima-e2e</code> job runs them under QEMU+KVM.</li>
+<li><code>proxmoxe2e</code> — run these against a Proxmox host with a test pool set up.
+  They also need <code>PROXMOX_E2E=1</code> and the other <code>PROXMOX_E2E_*</code> variables, and
+  skip without them. See <a href="../../using-sand/proxmox/#a-separate-pool-for-automated-tests">Proxmox VE
+  Setup</a> for
+  the pool and the full variable list.</li>
+</ul>
 <h2 id="docs">Docs</h2>
 <p>The documentation site (the one you are reading) is built with MkDocs
 Material, invoked entirely through <a href="https://docs.astral.sh/uv/"><code>uv</code></a>'s

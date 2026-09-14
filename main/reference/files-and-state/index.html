@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -753,6 +753,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -817,62 +873,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1416,13 +1416,13 @@ out; every other page links here instead of restating them.</p>
 <tbody>
 <tr>
 <td><code>${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml</code></td>
-<td>The <a href="../../using-sand/connection-profiles/">Connection Profiles</a> config: every location <code>sand</code> can run VMs on (the permanent Local profile, plus any <code>remote-ssh</code> profiles you've added), each profile's host/user/port/key-path/Lima-home, and which profile was last used. <strong>Secret-free</strong> — no password or key material, only a path to a key file — and hand-editable YAML.</td>
+<td>The <a href="../../using-sand/connection-profiles/">Connection Profiles</a> config: every location <code>sand</code> can run VMs on (the permanent Local profile, plus any <code>remote-ssh</code> or <code>proxmox</code> profiles you've added), each profile's connection settings, and which profile was last used. <strong>Secret-free</strong> — no password or key material, only a path to a key file — and hand-editable YAML.</td>
 <td>Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — <code>sand</code> reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again.</td>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json</code></td>
 <td>The secret-free index of every <code>sand</code>-managed VM: which VMs <code>sand</code> created, the base image each was cloned from, and each VM's create configuration (the settings that pre-fill the form when you <code>Reset</code>). Since schema version 3, each entry is keyed by <strong>(connection scope, name)</strong> rather than by bare name, so the same VM name can exist under two different connection profiles without colliding.</td>
-<td>Yes, but you lose the pre-filled reset config and <code>sand</code>'s record of which VMs it manages — a VM's actual disk is untouched, and Lima will still list it, but <code>sand</code> will no longer treat it as managed.</td>
+<td>Yes, but you lose the pre-filled reset config and <code>sand</code>'s record of which VMs it manages — a VM's actual disk is untouched, and the machine it runs on will still list it, but <code>sand</code> will no longer treat it as managed.</td>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json</code></td>

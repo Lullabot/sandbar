@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -753,6 +753,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -817,62 +873,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1233,10 +1233,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-mount-and-what-runs-where" class="md-nav__link">
+  <a href="#how-it-reaches-the-guest-and-what-runs-where" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The mount, and what runs where
+        How it reaches the guest, and what runs where
       
     </span>
   </a>
@@ -1380,10 +1380,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-mount-and-what-runs-where" class="md-nav__link">
+  <a href="#how-it-reaches-the-guest-and-what-runs-where" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The mount, and what runs where
+        How it reaches the guest, and what runs where
       
     </span>
   </a>
@@ -1485,17 +1485,27 @@ picks the directory to mount into the VM in two tiers:</p>
 you run <code>go run ./cmd/sand</code> from inside this checkout, your uncommitted
 edits to <code>roles/</code> or <code>site.yml</code> take effect on the very next provision.</strong>
 There is no rebuild-and-reinstall step to remember.</p>
-<h2 id="the-mount-and-what-runs-where">The mount, and what runs where</h2>
-<p>The resolved directory is mounted into the guest as its <strong>only</strong> mount, and
-that mount is <strong>read-only</strong>. Ansible itself is installed <em>inside the
-guest</em>, not on the host, and the playbook runs there with
-<code>--connection=local</code> — the host never executes <code>ansible-playbook</code> at all.</p>
-<p>Inside the guest, the in-guest provisioning script (<code>inGuestScript</code> in
+<h2 id="how-it-reaches-the-guest-and-what-runs-where">How it reaches the guest, and what runs where</h2>
+<p>Ansible itself is installed <em>inside the guest</em>, not on the host, and the
+playbook runs there with <code>--connection=local</code> — the host never executes
+<code>ansible-playbook</code> at all. How the fileset gets into the guest depends on
+the backend:</p>
+<ul>
+<li><strong>On Lima</strong> (local or remote), the resolved directory is mounted into the
+  guest as its <strong>only</strong> mount, and that mount is <strong>read-only</strong>.</li>
+<li><strong>On Proxmox</strong>, there is no mount at all — there's no shared filesystem to
+  make one from. <code>sand</code> packages the fileset into a gzipped tar
+  (<code>buildPlaybookTar</code>) and streams it to the guest over the SSH connection's
+  stdin, where it's unpacked. Same fileset, no mount.</li>
+</ul>
+<p>On Lima, the in-guest provisioning script (<code>inGuestScript</code> in
 <code>internal/provision/provision.go</code>) rsyncs the mounted playbook fileset into
 a guest-local working copy before each run, filtered to exactly the members
 <code>playbook_embed.go</code> declares (<code>site.yml</code>, <code>ansible.cfg</code>, <code>inventory</code>,
 <code>roles/***</code>, <code>group_vars/***</code>) — never the whole mount, which in
-working-tree mode would otherwise be an entire git checkout. Per-phase
+working-tree mode would otherwise be an entire git checkout. The Proxmox tar
+is built from that same list, so both paths carry the same files and neither
+can leak a checkout's <code>.git</code> or Go sources into a guest. Per-phase
 extra-vars are streamed into the guest over stdin into <code>/dev/shm</code> (tmpfs)
 and removed on exit; they are never placed on argv or written to the
 persistent disk, so a clone token never appears in a process listing.</p>
@@ -1520,7 +1530,7 @@ values:</p>
 <tr>
 <td><code>finalize</code></td>
 <td>Light, per-VM identity: <code>base</code>, <code>user</code>, <code>project</code></td>
-<td>Against each <code>limactl clone</code> of the base image</td>
+<td>Against each clone of the base image</td>
 </tr>
 <tr>
 <td><code>full</code></td>
@@ -1537,7 +1547,7 @@ work (hostname, git identity, optional project clone) against each clone.</p>
 and <code>project</code>. <code>site.yml</code> runs them in that order, gated by
 <code>provision_phase</code> as above. <code>samba</code> is worth calling out specifically:
 <code>internal/provision/vars.go</code> sets <code>samba_enabled: false</code> on every <code>sand</code>
-run (Lima VMs use a bind mount or <code>limactl copy</code> instead of a Samba share),
+run (files move with <code>limactl copy</code> or <code>scp</code> instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
 does not execute on the <code>sand</code> path.</p>
 <h2 id="ci-coverage">CI coverage</h2>

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -758,6 +758,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../secrets/" class="md-nav__link">
         
   
@@ -1069,62 +1125,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1704,9 +1704,11 @@
 <h2 id="shells">Shells</h2>
 <p><code>S</code> on a tile in the <a href="../tui/">Board</a>, and <code>sand shell NAME</code> from the command
 line, both attach you to the same thing: the VM's <strong>persistent tmux
-session</strong> inside the guest, prefixed with <code>C-a</code>. They share the same attach
-path (<code>internal/lima.AttachArgv</code>), so they are two doors onto one session,
-not two different mechanisms.</p>
+session</strong> inside the guest, prefixed with <code>C-a</code>. They share one attach path,
+so they are two doors onto one session, not two different mechanisms — and
+that holds wherever the VM runs. A VM on another machine or on Proxmox is
+reached over SSH instead, which <code>sand</code> sets up for you; nothing about the
+session changes.</p>
 <p>Because the session is persistent, detaching — with <code>C-a d</code>, or by just
 closing your terminal — does <strong>not</strong> kill what's running in it. Attach
 again later with either <code>S</code> or <code>sand shell NAME</code> and it's all still there.</p>
@@ -1909,9 +1911,9 @@ an image type is advertised before fetching any bytes. If you have text on
 your clipboard instead, the command reports "no image on clipboard" and
 nothing is staged. Inside the guest, the shims that serve the image to
 Claude Code have no text-serving path at all — image-only by construction.</p>
-<p>The image is read on the machine running <code>sand</code> (your workstation), not the
-remote host (if you're targeting a remote Lima VM). Only the image bytes
-themselves are sent across the network.</p>
+<p>The image is read on the machine running <code>sand</code> (your workstation), never on
+the machine the VM runs on. Only the image bytes themselves are sent across
+the network.</p>
 <h3 id="known-limitation">Known limitation</h3>
 <p>A Linux <em>host</em> clipboard holding only a non-PNG image (e.g., JPEG without a
 PNG variant) is treated as "no image" in v1. macOS always coerces images to

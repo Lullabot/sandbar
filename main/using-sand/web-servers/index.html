@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -16,7 +16,7 @@
         <link rel="prev" href="../files-and-shells/">
       
       
-        <link rel="next" href="../connection-profiles/">
+        <link rel="next" href="../drupalorg-publishing/">
       
       
         
@@ -758,6 +758,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../secrets/" class="md-nav__link">
         
   
@@ -902,15 +958,26 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#remote-vms-tunnel-out-with-cloudflared" class="md-nav__link">
+  <a href="#proxmox-vms-the-guest-has-its-own-address" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Remote VMs: tunnel out with cloudflared
+        Proxmox VMs: the guest has its own address
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Remote VMs: tunnel out with cloudflared">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-ssh-vms-tunnel-out-with-cloudflared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote SSH VMs: tunnel out with cloudflared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote SSH VMs: tunnel out with cloudflared">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -944,62 +1011,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -1376,15 +1387,26 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#remote-vms-tunnel-out-with-cloudflared" class="md-nav__link">
+  <a href="#proxmox-vms-the-guest-has-its-own-address" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Remote VMs: tunnel out with cloudflared
+        Proxmox VMs: the guest has its own address
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Remote VMs: tunnel out with cloudflared">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-ssh-vms-tunnel-out-with-cloudflared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote SSH VMs: tunnel out with cloudflared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remote SSH VMs: tunnel out with cloudflared">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1437,9 +1459,29 @@
 <h1 id="web-servers-and-ports">Web Servers and Ports</h1>
 <p>How to reach a web server running inside a <code>sand</code> VM — a ddev project,
 <code>npm run dev</code>, <code>python3 -m http.server</code>, anything listening on a TCP port.
-The answer depends on where the VM lives: on the machine you're sitting at
-(the <strong>Local</strong> profile), or on a remote host (a <code>remote-ssh</code>
-<a href="../connection-profiles/">Connection Profile</a>).</p>
+The answer depends on where the VM lives:</p>
+<table>
+<thead>
+<tr>
+<th>The VM runs on</th>
+<th>How you reach it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>This machine (the <strong>Local</strong> profile)</td>
+<td><code>http://localhost:PORT</code> — <a href="#local-vms-ports-appear-on-localhost">automatically</a></td>
+</tr>
+<tr>
+<td>A <strong>Proxmox</strong> host</td>
+<td>The guest's own address on your network — <a href="#proxmox-vms-the-guest-has-its-own-address">directly</a></td>
+</tr>
+<tr>
+<td>Another machine over SSH (<code>remote-ssh</code>)</td>
+<td>A <a href="#remote-ssh-vms-tunnel-out-with-cloudflared">tunnel you start</a></td>
+</tr>
+</tbody>
+</table>
 <h2 id="local-vms-ports-appear-on-localhost">Local VMs: ports appear on localhost</h2>
 <p>Lima automatically forwards every TCP port that starts listening inside the
 guest to <code>127.0.0.1</code> on your machine, same port number. <code>sand</code> doesn't add
@@ -1485,18 +1527,40 @@ holding <code>rootCA.pem</code>; copy it out (the <code>g</code> verb, or the do
 see <a href="../files-and-shells/">Shells and Files</a>) and add it to your OS or
 browser trust store.</p>
 </div>
-<h2 id="remote-vms-tunnel-out-with-cloudflared">Remote VMs: tunnel out with cloudflared</h2>
-<p>On a remote profile the same Lima forwarding happens — but to <code>127.0.0.1</code>
-<strong>on the remote host</strong>. That's a machine you can SSH into, not the one your
-browser runs on, so a guest web server is reachable from nowhere except the
-remote host itself. <code>sand</code> adds no port forwarding of its own over the
-profile's SSH connection, and the
+<h2 id="proxmox-vms-the-guest-has-its-own-address">Proxmox VMs: the guest has its own address</h2>
+<p>A VM on a Proxmox host isn't behind port forwarding at all. It's attached to
+a Linux bridge and gets its own address on that network — the same address
+<code>sand</code> uses to SSH into it — so a server listening in the guest is reachable
+at <code>http://&lt;guest-ip&gt;:PORT</code> from anything that can route to it, including
+your browser. Privileged ports are not a problem either: nothing is
+forwarded, so a guest server on port 80 or 443 is just there.</p>
+<p>To find the address, open a shell (<code>S</code> on the tile) and run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">claude@myvm$ </span>hostname<span class="w"> </span>-I
+</code></pre></div>
+<p>Two consequences of a real network address:</p>
+<ul>
+<li><strong>It is not loopback-only.</strong> Unlike a local VM, a Proxmox guest's ports
+  are reachable by anything else on that network, not just by you. That's
+  why the <a href="../../reference/security-model/">security model</a> expects a Proxmox
+  host to sit on an isolated LAN or VLAN, and why you shouldn't run a
+  <code>sand</code> VM on a network you don't control.</li>
+<li><strong><code>*.ddev.site</code> won't resolve to it.</strong> Those names resolve to
+  <code>127.0.0.1</code> in public DNS, which is wrong for a guest on its own address.
+  Add a hosts entry pointing the project name at the guest IP, or use
+  <code>ddev share</code> as described below.</li>
+</ul>
+<h2 id="remote-ssh-vms-tunnel-out-with-cloudflared">Remote SSH VMs: tunnel out with cloudflared</h2>
+<p>On a <code>remote-ssh</code> profile the same Lima forwarding happens — but to
+<code>127.0.0.1</code> <strong>on the remote host</strong>. That's a machine you can SSH into, not
+the one your browser runs on, so a guest web server is reachable from nowhere
+except the remote host itself. <code>sand</code> adds no port forwarding of its own over
+the profile's SSH connection, and the
 <a href="../../reference/security-model/">security model</a> assumes remote hosts sit
 on an isolated network behind whatever firewalling you already have.</p>
 <p>The supported way in is outward: run
 <a href="https://github.com/cloudflare/cloudflared">cloudflared</a> — preinstalled in
 every VM — <strong>inside the guest</strong>, and let it hand you a URL:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">claude@myvm$ </span>cloudflared<span class="w"> </span>tunnel<span class="w"> </span>--url<span class="w"> </span>http://localhost:3000
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">claude@myvm$ </span>cloudflared<span class="w"> </span>tunnel<span class="w"> </span>--url<span class="w"> </span>http://localhost:3000
 </code></pre></div>
 <p>This starts a <a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/">Quick Tunnel</a>
 — no Cloudflare account, no configuration — and prints a random
@@ -1507,13 +1571,13 @@ for as long as the process runs.</p>
 by the request's <code>Host</code> header, which a bare tunnel to a port doesn't
 preserve. Let <a href="https://docs.ddev.com/en/stable/users/topics/sharing/"><code>ddev share</code></a>
 do it, pointed at cloudflared:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>share<span class="w"> </span>--provider<span class="o">=</span>cloudflared
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>share<span class="w"> </span>--provider<span class="o">=</span>cloudflared
 </code></pre></div>
 <p>This runs the same cloudflared already in the VM (no account, no
 authtoken), wires up the <code>Host</code> header and TLS to the router for you, and
 prints the public <code>trycloudflare.com</code> URL. Make it the default so plain
 <code>ddev share</code> uses it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>config<span class="w"> </span>global<span class="w"> </span>--share-default-provider<span class="o">=</span>cloudflared
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">claude@myvm$ </span>ddev<span class="w"> </span>config<span class="w"> </span>global<span class="w"> </span>--share-default-provider<span class="o">=</span>cloudflared
 </code></pre></div>
 <p>(ddev's out-of-the-box default provider is ngrok, which needs an ngrok.com
 account and <code>ngrok config add-authtoken</code> first; cloudflared avoids both.)</p>
@@ -1532,7 +1596,7 @@ easiest way to show in-progress work to someone who isn't at your desk.</p>
 <p>For a private path to a remote VM — no public URL — plain OpenSSH
 forwarding works today, using the connection details already in your
 <a href="../connection-profiles/#profilesyaml">profile</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>ssh<span class="w"> </span>-N<span class="w"> </span>-L<span class="w"> </span><span class="m">8443</span>:127.0.0.1:8443<span class="w"> </span>-p<span class="w"> </span>&lt;port&gt;<span class="w"> </span>-i<span class="w"> </span>&lt;identity_path&gt;<span class="w"> </span>&lt;user&gt;@&lt;host&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>ssh<span class="w"> </span>-N<span class="w"> </span>-L<span class="w"> </span><span class="m">8443</span>:127.0.0.1:8443<span class="w"> </span>-p<span class="w"> </span>&lt;port&gt;<span class="w"> </span>-i<span class="w"> </span>&lt;identity_path&gt;<span class="w"> </span>&lt;user&gt;@&lt;host&gt;
 </code></pre></div>
 <p>While that runs, <code>localhost:8443</code> on your machine reaches the remote host's
 loopback port 8443 — that is, a guest port Lima forwarded there. For the

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -626,6 +626,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#putting-the-vm-somewhere-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting the VM somewhere else
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#logging-into-claude-code" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -860,6 +871,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -924,62 +991,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1369,6 +1380,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#putting-the-vm-somewhere-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Putting the VM somewhere else
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#logging-into-claude-code" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1432,6 +1454,13 @@ which can take a while. Every VM you
 create after that clones the base image instead of reinstalling everything,
 so it's fast. See <a href="../how-it-works/">How Provisioning Works</a> for why it's
 built this way.</p>
+<h2 id="putting-the-vm-somewhere-else">Putting the VM somewhere else</h2>
+<p>Both paths above create the VM on the machine you ran <code>sand</code> from. To put it
+on another machine or on a Proxmox host, add that machine as a profile once
+(press <code>p</code> in the board, then <code>n</code>), then pick it from the create form's
+profile selector — or pass <code>sand create --profile NAME</code> headlessly. Nothing
+else about the VM changes. See <a href="../../using-sand/connection-profiles/">Where VMs
+Run</a>.</p>
 <h2 id="logging-into-claude-code">Logging into Claude Code</h2>
 <p><code>sand</code> installs the Claude Code CLI but does <strong>not</strong> provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (<code>S</code>

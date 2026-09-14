@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -664,6 +664,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#how-each-backend-does-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How each backend does it
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -849,6 +860,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -913,62 +980,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1368,6 +1379,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#how-each-backend-does-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How each backend does it
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1390,29 +1412,33 @@
 
 <h1 id="how-provisioning-works">How Provisioning Works</h1>
 <p><code>sand</code> splits provisioning into two passes so the expensive work happens
-once, not on every VM.</p>
+once, not on every VM. This is the same everywhere a VM can run — on your
+own machine, on a remote host, or on Proxmox.</p>
 <pre class="mermaid"><code>graph TD
-    A[sand create] --&gt; B{sandbar-base exists?}
-    B -- no --&gt; C[Build base image: heavy install]
-    C --&gt; D[Stop base image]
+    A[sand create] --&gt; B{Base image exists?}
+    B -- no --&gt; C[Build the base image: heavy install]
+    C --&gt; D[Stop the base image]
     B -- yes --&gt; D
-    D --&gt; E[limactl clone → grow disk]
+    D --&gt; E[Clone the base → grow disk]
     E --&gt; F[Finalize: hostname, git identity, apt upgrade, optional repo clone]
     F --&gt; G[Restart → ready]</code></pre>
 <h2 id="the-base-image">The base image</h2>
-<p>The first time you create a VM, <code>sand</code> runs a heavy install
-into a stopped Lima instance named <code>sandbar-base</code>. This installs the dev
-tools, Claude Code, and everything else that every VM needs. See
-<a href="../available-tools/">Available Tools</a> for the full toolchain.</p>
+<p>The first time you create a VM, <code>sand</code> runs a heavy install into a stopped
+VM named <code>sandbar-base</code>. This installs the dev tools, Claude Code, and
+everything else that every VM needs. See <a href="../available-tools/">Available
+Tools</a> for the full toolchain.</p>
 <p>Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — <code>sand</code> rebuilds it automatically if the
 underlying provisioning logic has changed since it was built, or you can
 force a rebuild yourself with <code>sand create --rebuild</code> (or by deleting
 <code>sandbar-base</code> and creating a new VM).</p>
+<p>Each place you run VMs gets its own base image, built the first time you
+create a VM there. A base image on your laptop and one on a server are
+separate, and neither is copied to the other.</p>
 <h2 id="cloning">Cloning</h2>
-<p>Every VM after the first is a <code>limactl clone</code> of the stopped base image,
-grown to the disk size you asked for. Cloning a stopped VM is far cheaper
-than reinstalling the whole stack, which is what makes each new VM fast.</p>
+<p>Every VM after the first is a copy of the stopped base image, grown to the
+disk size you asked for. Copying a stopped VM is far cheaper than
+reinstalling the whole stack, which is what makes each new VM fast.</p>
 <h2 id="finalize">Finalize</h2>
 <p>A clone isn't ready to use yet — it's still an anonymous copy of the base
 image. A light finalize pass sets the VM's hostname, writes your git
@@ -1424,6 +1450,42 @@ ready to use.</p>
 creation fast without compromising isolation: identity is applied per-VM at
 finalize time, so the shared base image never contains anyone's secrets or
 git configuration.</p>
+<h2 id="how-each-backend-does-it">How each backend does it</h2>
+<p>The shape above is identical everywhere; only the mechanics differ.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>On your machine or a remote host</th>
+<th>On Proxmox</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs VMs with</td>
+<td><a href="https://lima-vm.io">Lima</a>, via <code>limactl</code></td>
+<td>The Proxmox REST API</td>
+</tr>
+<tr>
+<td>The base image is</td>
+<td>a stopped Lima instance</td>
+<td>a PVE template, built from a cloud image</td>
+</tr>
+<tr>
+<td>A new VM is</td>
+<td><code>limactl clone</code> of it</td>
+<td>a PVE clone of that template</td>
+</tr>
+<tr>
+<td><code>sand</code> reaches the guest over</td>
+<td><code>limactl shell</code>, or SSH for a remote host</td>
+<td>SSH, to the address the guest agent reports</td>
+</tr>
+</tbody>
+</table>
+<p>For a remote host, <code>sand</code> runs the same <code>limactl</code> commands it would run
+locally — it only changes <em>where</em> they run. See <a href="../../using-sand/connection-profiles/">Where VMs
+Run</a>.</p>
 
 
 

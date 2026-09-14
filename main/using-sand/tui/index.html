@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -927,6 +927,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../secrets/" class="md-nav__link">
         
   
@@ -991,62 +1047,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1555,14 +1555,13 @@ tile under the focus ring.</p>
 the VMs: one band per active <a href="../connection-profiles/">Connection Profile</a>,
 each with CPU and memory currently in use (fed by a guest heartbeat), free
 disk on the volume that holds that profile's VMs, and the build's version.
-With only the permanent Local profile enabled — sand's out-of-the-box
-default — there's a single band and the header looks exactly like it always
-has. Enable a remote profile and a second band appears for it; a profile
-that's <strong>disabled</strong> or <strong>errored</strong> (unreachable, misconfigured) shows a
-banner instead, naming the profile and the reason its tiles are absent. The
-header does not count base images or unmanaged VMs — the board only ever
-shows sand-managed clones, and the header doesn't either. Manage a base
-image with <code>limactl</code> directly.</p>
+Out of the box that's one band, for the permanent Local profile. Add a
+remote or Proxmox profile and a second band appears for it; a profile that's
+<strong>disabled</strong> or <strong>errored</strong> (unreachable, misconfigured) shows a banner
+instead, naming the profile and the reason its tiles are absent. The header
+does not count base images or unmanaged VMs — the board only ever shows
+sand-managed clones, and the header doesn't either. Manage a base image with
+<code>limactl</code> (or the Proxmox UI) directly.</p>
 <h2 id="the-tile-board">The tile board</h2>
 <p>Tiles are sorted alphabetically by name and stay there — a VM changing
 status never reorders the board. An empty slot on the board is a "ghost
@@ -1619,7 +1618,7 @@ failed while you weren't looking.</p>
 </tr>
 <tr>
 <td><code>X</code></td>
-<td>Stop all — every <strong>sand-managed</strong> VM that's currently running, after a confirmation naming them. An unmanaged Lima instance or a base image is never touched, even if it's running, so an instance you use for unrelated work is safe.</td>
+<td>Stop all — every <strong>sand-managed</strong> VM that's currently running, after a confirmation naming them. A VM <code>sand</code> didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe.</td>
 </tr>
 <tr>
 <td><code>?</code></td>

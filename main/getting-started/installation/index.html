@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -849,6 +849,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/secrets/" class="md-nav__link">
         
   
@@ -913,62 +969,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1390,15 +1390,25 @@
 
 <h1 id="installation">Installation</h1>
 <h2 id="prerequisites">Prerequisites</h2>
+<p><code>sand</code> itself runs on macOS or Linux. What else you need depends on where
+you want the VMs to run.</p>
+<p><strong>To run VMs on this machine</strong> (the default), you need
+<a href="https://lima-vm.io">Lima</a> and a working hypervisor. macOS has a hypervisor
+built in; on Linux, Lima needs QEMU/KVM — see the <a href="https://lima-vm.io/docs/installation/">Lima installation
+docs</a> if <code>limactl</code> doesn't already
+work on your machine. You don't need to install Lima separately: Homebrew
+pulls it in as a dependency of the <code>sand</code> formula below.</p>
+<p><strong>To run VMs somewhere else</strong>, this machine needs nothing but <code>sand</code>:</p>
 <ul>
-<li>A machine that can run <a href="https://lima-vm.io">Lima</a>: macOS or Linux, with a
-  working hypervisor (macOS has one built in; on Linux, Lima needs
-  QEMU/KVM — see the <a href="https://lima-vm.io/docs/installation/">Lima installation
-  docs</a> if <code>limactl</code> doesn't already
-  work on your machine).</li>
-<li>Lima itself. You don't need to install it separately — Homebrew pulls it
-  in as a dependency of the <code>sand</code> formula, below.</li>
+<li>On <strong>another machine over SSH</strong>, Lima and the hypervisor live on that
+  machine instead, and you need passwordless SSH to it.</li>
+<li>On a <strong>Proxmox VE host</strong>, no Lima is involved at all — <code>sand</code> talks to the
+  Proxmox API over HTTPS. The host needs a one-time
+  <a href="../../using-sand/proxmox/">token and pool setup</a>.</li>
 </ul>
+<p>Either way, add the machine as a <a href="../../using-sand/connection-profiles/">Connection
+Profile</a> once and <code>sand</code> uses it from
+then on.</p>
 <h2 id="install-sand">Install <code>sand</code></h2>
 <p><code>sand</code> ships as a prebuilt Homebrew <strong>formula</strong> (not a cask — deliberately,
 so the same install works on both macOS and Linux) from the
@@ -1412,8 +1422,11 @@ tap:</p>
 </code></pre></div>
 <h2 id="upgrading-and-removing">Upgrading and removing</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>sand
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>sand<span class="w">   </span><span class="c1"># does not delete your VMs; use `limactl delete &lt;name&gt;`</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>sand<span class="w">   </span><span class="c1"># does not delete your VMs</span>
 </code></pre></div>
+<p>Uninstalling leaves every VM where it is. Delete the ones you don't want
+first — press <code>d</code> on a tile in the board, or, for a local VM, run
+<code>limactl delete &lt;name&gt;</code>.</p>
 
 
 

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -16,7 +16,7 @@
         <link rel="prev" href="../connection-profiles/">
       
       
-        <link rel="next" href="../drupalorg-publishing/">
+        <link rel="next" href="../secrets/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Proxmox VE - sandbar</title>
+        <title>Proxmox VE Setup - sandbar</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#proxmox-ve" class="md-skip">
+        <a href="#proxmox-ve-setup" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Proxmox VE
+              Proxmox VE Setup
             
           </span>
         </div>
@@ -758,90 +758,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../secrets/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Secrets
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../files-and-shells/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Shells and Files
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../web-servers/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../connection-profiles/" class="md-nav__link">
         
   
@@ -849,7 +765,7 @@
   <span class="md-ellipsis">
     
   
-    Connection Profiles
+    Where VMs Run
   
 
     
@@ -886,7 +802,7 @@
   <span class="md-ellipsis">
     
   
-    Proxmox VE
+    Proxmox VE Setup
   
 
     
@@ -904,7 +820,7 @@
   <span class="md-ellipsis">
     
   
-    Proxmox VE
+    Proxmox VE Setup
   
 
     
@@ -1049,6 +965,90 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../files-and-shells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shells and Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web-servers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web Servers and Ports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1532,12 +1532,12 @@
   
 
 
-<h1 id="proxmox-ve">Proxmox VE</h1>
+<h1 id="proxmox-ve-setup">Proxmox VE Setup</h1>
 <p><code>sand</code> can run VMs on a <a href="https://www.proxmox.com/">Proxmox VE</a> host through its
-REST API, alongside the local and remote-Lima backends. A Proxmox profile is
-selected the same way any other is — it's just another
-<a href="../connection-profiles/">Connection Profile</a> — but it needs some one-time setup
-on the Proxmox side, and that setup is what this page is about.</p>
+REST API. Once it's set up, a Proxmox host is just another place VMs can run —
+same board, same commands, same keybindings as a VM on your own machine (see
+<a href="../connection-profiles/">Where VMs Run</a>). What it needs first is some one-time
+setup on the Proxmox side, and that setup is what this page is about.</p>
 <p>The design goal is a <strong>least-privilege, pool-scoped</strong> token: <code>sand</code> gets exactly
 the permissions it needs to run its create/clone/delete workflow, confined to a
 dedicated <a href="https://pve.proxmox.com/wiki/User_Management#pveum_pools">resource pool</a>,

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs on Lima.">
+        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
       
       
       
@@ -753,6 +753,62 @@
   
   
     <li class="md-nav__item">
+      <a href="../using-sand/connection-profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Where VMs Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using-sand/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../using-sand/secrets/" class="md-nav__link">
         
   
@@ -817,62 +873,6 @@
     
   
     Web Servers and Ports
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../using-sand/connection-profiles/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Connection Profiles
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../using-sand/proxmox/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Proxmox VE
   
 
     
@@ -1444,15 +1444,17 @@ devops expert.</p>
 <h2 id="our-core-philosophies">Our Core Philosophies</h2>
 <p><strong>1. sandbar VM has no writable path back to your machine.</strong></p>
 <p><strong>2. Agentic tools replace IDEs in most cases.</strong></p>
-<p>Each VM is a full guest, not a container sharing your kernel. Its only
-mount is the read-only provisioning playbook. Lima's stock host-home
-share is forced off. The agent inside cannot see or touch your host
-filesystem, and <code>limactl delete</code> provably removes everything the VM
-ever produced, because there was never a channel for it to leave
-anything behind. Files move in and out only when you upload or download
-them on purpose. The <a href="../reference/security-model/">Security Model</a>
-spells out the full set of guarantees and their two deliberate
-exceptions.</p>
+<p>Each VM is a full guest, not a container sharing your kernel. Nothing
+of yours is mounted into it: the most it ever gets is the provisioning
+playbook, read-only, and the host-home share Lima would otherwise set
+up is forced off. The agent inside cannot see or touch your host
+filesystem, and deleting the VM provably removes everything it ever
+produced, because there was never a channel for it to leave anything
+behind. Files move in and out only when you upload or download them on
+purpose. This holds whether the VM runs on your own machine or on a
+server — and on a server, the agent isn't running on your hardware at
+all. The <a href="../reference/security-model/">Security Model</a> spells out the
+full set of guarantees and their two deliberate exceptions.</p>
 <p>That property is what lets sandbar run the agent with permissions
 skipped by default and treat it as safe rather than reckless. The
 recovery model for a misbehaving agent isn't a hardened host. It's <code>R</code>
@@ -1513,6 +1515,11 @@ to make it easier (and faster!) to use.</p>
   hostname, git identity, and an optional repo clone, so new
   environments come up in seconds. See
   <a href="../getting-started/how-it-works/">How Provisioning Works</a>.</li>
+<li><strong>Your laptop isn't the only place to run one.</strong> The same board and
+  the same commands create a VM on this machine, on another machine
+  over SSH, or on a <a href="../using-sand/proxmox/">Proxmox</a> host — so heavy
+  agent work can live on a server while you drive it from a laptop.
+  See <a href="../using-sand/connection-profiles/">Where VMs Run</a>.</li>
 <li><strong>A board and a CLI.</strong> Run <code>sand</code> for a
   <a href="../using-sand/tui/">terminal board</a> where every action fires from the
   focused tile, or script <code>sand create</code> and <code>sand shell</code> headlessly for
@@ -1541,8 +1548,9 @@ mid-July 2026, is close on the surface: a single Go binary you install
 with Homebrew that gives a coding agent a local full VM with its own
 kernel, already agent-agnostic across Claude, Codex, and others.
 <a href="https://github.com/sylvinus/agent-vm">agent-vm</a> is built on Lima, the
-same backend sandbar uses today, is multi-agent, and even shares the
-base-template-then-clone provisioning model.</p>
+same thing sandbar uses to run a VM on your own machine, is
+multi-agent, and even shares the base-template-then-clone provisioning
+model.</p>
 <p>Both make the opposite call on the decision above. clawk live-mounts
 your repo over virtio-fs, and its own README notes that an agent can
 therefore commit bad code that could run on your host. agent-vm mounts
@@ -1672,13 +1680,23 @@ fully functional quadrant.</p>
 it, and the tools that restrict the environment do it in the cloud or
 as an SDK that likely doesn't work with your build tools. Sandbar is
 the point where local, full-VM, sealed, and disposable meet.</p>
+<p>The local/cloud split in that table is also less of a split for
+sandbar than for the rest. A sandbar VM runs on your laptop by default,
+but the same board and the same commands put it on a workstation, a
+home server, or a <a href="../using-sand/proxmox/">Proxmox</a> host instead — a
+machine you own, not someone else's cloud. You get somewhere bigger to
+run agents without giving up the boundary or handing your code to a
+third party.</p>
 <h2 id="where-its-going">Where it's going</h2>
-<p>Lima and Claude Code are the first supported backend and agent, not the
-definition of the tool. The provisioning model is built to add more of
-both: other agents behind the same disposable-VM workflow, and other
-backends behind the same commands, with Proxmox and similar targets
-planned so a Sandbar VM can land on a Mac Mini or a server, and not
-only a laptop.</p>
+<p>A Sandbar VM already runs wherever you want it: on your laptop, on a
+Mac Mini or workstation over SSH, or on a
+<a href="../using-sand/proxmox/">Proxmox</a> server. All three are the same
+commands and the same board — see
+<a href="../using-sand/connection-profiles/">Where VMs Run</a>.</p>
+<p>That took three backends behind one seam, and the seam is what the rest
+of the roadmap builds on: more places to run a VM, and more agents
+behind the same disposable-VM workflow. Claude Code and Codex are the
+agents supported today, not the definition of the tool.</p>
 
 
 
