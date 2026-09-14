@@ -138,6 +138,14 @@ one), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
 construct their guest-attach command exclusively via `provider.AttachArgv()`,
 the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
 
+**A reset never changes which VM it is resetting.** Its name, base image and
+clone URL come from the target's own record, not from the form: the TUI renders
+the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`). An
+editable URL made one form mean two things — the preserve toggle is labelled
+from the org the VM HAS while the clone used the edited URL — so "keep my
+project" could discard the tree it named. A different repo is a different VM;
+`n` / `sand create` makes one.
+
 ## Build, run, format
 
 ```
