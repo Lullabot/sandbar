@@ -1,0 +1,79 @@
+name: windows-build
+
+# Publishes a downloadable sand.exe for manual testing on a real Windows box,
+# so getting a fresh binary after a fix is "open the run, click the artifact"
+# rather than a hand-built file passed around out of band.
+#
+# It is a BUILD, not a gate: nothing here blocks a merge. The Windows test
+# suite still has known failures (HOME vs USERPROFILE, POSIX tooling in
+# fixtures) that are being fixed separately, so `go test` runs here only to
+# record the state -- continue-on-error keeps a red suite from hiding the
+# artifact, which is the whole point of the workflow.
+#
+# Cross-compiled from ubuntu rather than built on windows-2025: it is faster
+# and cheaper, and the binary is identical. The windows-2025 job below exists
+# only to run the tests on the real platform.
+#
+# Delete this once releases carry a Windows archive; until then it is the only
+# way to get a build onto a test machine.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-native-support]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Cross-compile sand.exe
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          version="0.10.0-win-$(git rev-parse --short HEAD)"
+          go build -ldflags "-s -w -X main.version=${version}" -o sand.exe ./cmd/sand
+          echo "version=${version}" >> "$GITHUB_STEP_SUMMARY"
+          sha256sum sand.exe | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cross-vet
+        run: GOOS=windows GOARCH=amd64 go vet ./...
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sand-windows-amd64
+          path: sand.exe
+          if-no-files-found: error
+
+  test:
+    name: Test suite on Windows
+    runs-on: windows-2025
+    continue-on-error: true
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Records the pass/fail split so progress on the remaining test-harness
+      # failures is visible run to run. Not a gate -- see the header.
+      - name: Go test
+        run: |
+          go test ./... 2>&1 | Tee-Object -Variable out
+          $ok = ($out | Select-String -Pattern '^ok ').Count
+          $fail = ($out | Select-String -Pattern '^(FAIL|--- FAIL)').Count
+          "packages-ok=$ok packages-failed=$fail" | Tee-Object -Append $env:GITHUB_STEP_SUMMARY
