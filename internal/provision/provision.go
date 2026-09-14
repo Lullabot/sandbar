@@ -180,6 +180,34 @@ func (p *Provisioner) playbookDir() (string, error) {
 	return p.PlaybookDir, nil
 }
 
+// stagedPlaybookDir locates the playbook and makes it available ON THE HOST
+// WHERE LIMACTL RUNS, returning the path to mount at /mnt/playbook — for the
+// base overlay (buildBase) and, pinned onto each clone, for the finalize pass
+// (see lima.Client.Configure for why a clone must not keep the base's).
+//
+// The staging step is not optional for either caller: `limactl start`
+// bind-mounts the location on its OWN host, which for remote Lima is the remote
+// machine, so a local path would mount an absent directory. StagePlaybook is a
+// no-op for local Lima and a refresh of the stable remote copy for remote Lima,
+// stamped with the playbook's content hash so a remote that already holds this
+// exact playbook is left untouched. A hash that cannot be computed is passed as
+// "", which simply forces the copy — the behaviour this had before the stamp.
+func (p *Provisioner) stagedPlaybookDir(ctx context.Context) (string, error) {
+	dir, err := p.playbookDir()
+	if err != nil {
+		return "", fmt.Errorf("locate playbook: %w", err)
+	}
+	stamp, err := playbookContentHash(os.DirFS(dir))
+	if err != nil {
+		stamp = ""
+	}
+	mountDir, err := p.hostFiles().StagePlaybook(ctx, dir, stamp)
+	if err != nil {
+		return "", fmt.Errorf("stage playbook: %w", err)
+	}
+	return mountDir, nil
+}
+
 // step writes a phase banner to the streamed output so the user sees which
 // lifecycle stage is running even before limactl/ansible prints anything — the
 // slow base build and boots are otherwise long stretches of silence.
@@ -231,9 +259,9 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// for remote Lima that is the remote machine, not this laptop, so a local
 	// playbook path would mount an empty/absent directory. StagePlaybook is a
 	// no-op for local Lima and a copy to the remote host for remote Lima.
-	mountDir, err := hf.StagePlaybook(ctx, dir)
+	mountDir, err := p.stagedPlaybookDir(ctx)
 	if err != nil {
-		return fmt.Errorf("stage playbook: %w", err)
+		return err
 	}
 	overlay, err := RenderBaseOverlay(cfg, mountDir)
 	if err != nil {
@@ -403,8 +431,14 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	if err := timer.time("clone start", func() error {
 		// Size the clone before its first start: the base is built at a small
 		// disk floor, so this grows the disk (and applies cpus/memory) for this
-		// VM.
-		if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+		// VM. The playbook dir goes with it so finalize rsyncs from THIS run's
+		// playbook rather than whatever host directory the base was built with —
+		// see lima.Client.Configure.
+		pbDir, err := p.stagedPlaybookDir(ctx)
+		if err != nil {
+			return err
+		}
+		if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
 			return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
 		}
 		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
@@ -993,7 +1027,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if err := p.prepareBaseAndClone(ctx, cfg, CreateOptions{}, out, newPhaseTimer(out)); err != nil {
 		return wrap(err)
 	}
-	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+	pbDir, err := p.stagedPlaybookDir(ctx)
+	if err != nil {
+		return wrap(err)
+	}
+	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
 		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
 	}
 	step(out, "Starting %q…", cfg.Name)
