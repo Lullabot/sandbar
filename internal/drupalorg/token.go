@@ -93,12 +93,8 @@ func LoadToken() (string, error) {
 	}
 	defer f.Close()
 
-	fi, err := f.Stat()
-	if err != nil {
-		return "", fmt.Errorf(errTokenFile, err)
-	}
-	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
-		return "", fmt.Errorf("drupal.org token file %s has mode %04o; it must not be readable by group or other (chmod 600)", path, mode)
+	if err := checkTokenPerms(f, path); err != nil {
+		return "", err
 	}
 
 	b, err := io.ReadAll(f)
