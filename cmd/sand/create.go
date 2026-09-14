@@ -118,7 +118,7 @@ Flags:
 	// false): an unconfigured `sand create` must not start installing a tool no
 	// existing base has.
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
-	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
+	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
@@ -132,6 +132,22 @@ Flags:
 			return nil // usage was already printed; -h/--help is not a failure
 		}
 		return err // flag package already printed usage
+	}
+
+	// Which flags the user ACTUALLY passed. It decides two things: the refusal
+	// just below, and (further down) that an omitted flag means "whatever this
+	// VM already was" rather than this flag set's default.
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	// A recreate is a reset, and a reset never changes which project the VM has.
+	// The two settings mean opposite things — "rebuild this VM" and "make it a
+	// different VM" — and the combination silently threw the existing checkout
+	// away for the new URL's sake. Say so instead, before anything touches a
+	// backend. (The TUI's reset form locks the same field — internal/ui's
+	// fieldLocked.)
+	if err := refuseRecreateWithCloneURL(*recreate, explicit, cfg.Name); err != nil {
+		return err
 	}
 
 	n, err := vm.ParseCPUs(*cpusFlag)
@@ -200,9 +216,8 @@ Flags:
 	//
 	// The adoption itself is deferred until after the --recreate block below,
 	// because it is keyed by cfg.BaseName and that block may still change which
-	// base this VM belongs to.
-	explicit := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	// base this VM belongs to. (`explicit` — the set fs.Visit reported — is built
+	// right after Parse, above.)
 
 	// Default the VM user to the provider's host user (the remote host for remote
 	// Lima, this machine for local), falling back to the local user if the host
@@ -324,6 +339,14 @@ Flags:
 		return err
 	}
 
+	// Seed --clone-token as the VM's GH_TOKEN secret and write its stored
+	// secrets into the guest — the same follow-up the TUI performs on a
+	// successful build. Without it a headless create's token was usable for
+	// exactly one clone and then unrecorded (nothing to rotate later from the
+	// secrets editor), and a --recreate came back with none of the secrets the
+	// VM had before. See settleSecrets.
+	settleSecrets(ctx, p, scope, cfg, os.Stdout)
+
 	// Record the profile as last-used only on a successful create — by ID, so
 	// a later rename of the profile does not lose the pointer (see
 	// Store.SetLastUsed). Best-effort: a failure to persist it must not turn a
@@ -332,6 +355,26 @@ Flags:
 		fmt.Fprintln(os.Stdout, "warning: could not record last-used profile:", err)
 	}
 	return nil
+}
+
+// refuseRecreateWithCloneURL rejects `sand create --recreate --clone-url ...`.
+//
+// --recreate rebuilds the VM it names; --clone-url says which project a VM is
+// for. Together they asked for a rebuild that is a different VM, and what
+// happened was the quiet worst case: the old org directory was left behind (or,
+// with --preserve-project's TUI equivalent, discarded to protect a tree that had
+// never been staged) and the new repo cloned beside it. The error names both
+// ways out rather than picking one.
+//
+// It runs on the parsed flags alone, before any provider or registry work, so a
+// contradictory command line costs nothing and fails the same way on a machine
+// with no limactl at all.
+func refuseRecreateWithCloneURL(recreate bool, explicit map[string]bool, name string) error {
+	if !recreate || !explicit["clone-url"] {
+		return nil
+	}
+	return fmt.Errorf("sand create: --recreate cannot change --clone-url — a rebuild keeps the VM's project. "+
+		"Run 'sand reset %s' to rebuild it as it is, or 'sand create --name <new-name> --clone-url ...' for the other repo", name)
 }
 
 // adoptRecordedConfig copies rec's settings into cfg for every field whose flag
