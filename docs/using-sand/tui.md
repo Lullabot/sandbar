@@ -154,6 +154,9 @@ VM), while the two things that say *which* VM it is are not. To work on a
 different repo, press `n` and make another VM. The GitHub token field stays
 editable, because re-cloning a private repo still needs one.
 
+The headless equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name),
+with the same gate, the same defaults and the same two preserve options.
+
 Two **preserve toggles** follow the fields (space/enter flips the focused
 one). Both default off:
 
