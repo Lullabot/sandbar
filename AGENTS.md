@@ -100,7 +100,12 @@ it is not where prose belongs.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
-  not directly on `Provider`.
+  not directly on `Provider`. Both backends' resets share `staging.go`'s
+  `PlanProject` (what the GUEST actually holds decides what is preserved, not
+  what the config implies) and `StageGuard`, which owns the one rule about the
+  host staging directory: the archives are a COPY until the guest is destroyed,
+  so a failure BEFORE the delete drops them (the original is still in the
+  untouched VM) and every failure after it keeps them and names the path.
 - `registry` — managed-VM index, now `(connection scope, name)`-keyed
   (schema v3, auto-migrated on read). Each entry's connection `Scope` is
   derived from which profile's provider created it (`LocalScope` for local
