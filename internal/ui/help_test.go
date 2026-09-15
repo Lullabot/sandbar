@@ -53,9 +53,9 @@ func TestHelpScreenDescribesEveryVerb(t *testing.T) {
 	// the closing note is legitimately below the fold at most sizes.
 	flat := strings.Join(strings.Fields(ansi.Strip(strings.Join(m.helpLines(), " "))), " ")
 	for _, tail := range []string{
-		"The key does nothing when it is not offered.",                // the closing note
-		"form opens pre-filled so you can change the settings first.", // R, the longest verb
-		"X still stops every managed VM.",                             // the / entry
+		"The key does nothing when it is not offered.", // the closing note
+		"a different repo is a new VM (n).",            // R, the longest verb
+		"X still stops every managed VM.",              // the / entry
 	} {
 		if !strings.Contains(flat, tail) {
 			t.Errorf("a sentence was cut before its end — %q is missing", tail)
