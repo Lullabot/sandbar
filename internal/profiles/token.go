@@ -18,14 +18,12 @@ func LoadToken(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(expanded); err != nil {
+	fi, err := os.Stat(expanded)
+	if err != nil {
 		return "", fmt.Errorf("proxmox token file: %w", err)
 	}
-	// The "is anyone else able to read this?" test is per-OS: unix mode bits
-	// on unix, a DACL walk on Windows, where Go synthesizes 0666 for every
-	// file and a mode check would either pass everything or fail everything.
-	if err := checkTokenPerms(expanded); err != nil {
-		return "", err
+	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
+		return "", fmt.Errorf("proxmox token file %s has mode %04o; it must not be readable by group or other (chmod 600)", expanded, mode)
 	}
 	b, err := os.ReadFile(expanded)
 	if err != nil {
