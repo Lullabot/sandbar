@@ -14,14 +14,12 @@ import (
 // error as "give up on serializing, build unserialized", so an implementation
 // that reported contention as an error would not fail loudly -- it would
 // quietly let two concurrent `sand create` runs prepare the same base image at
-// once. That is exactly the translation the Windows implementation has to get
-// right, mapping ERROR_LOCK_VIOLATION to (false, nil) rather than letting it
-// surface as an error.
+// once. flock(2) reports contention as EWOULDBLOCK, and translating that to
+// (false, nil) rather than letting it surface as an error is the whole job.
 //
-// This test is deliberately NOT per-OS. It drives the exported seam rather
-// than the syscall, so it runs unchanged over flock(2) on unix and LockFileEx
-// on Windows, and is the only thing that checks the two agree. Both implement
-// the lock per open handle, so two OpenLock calls contend within a single
+// It drives the exported seam rather than the syscall, so it pins the contract
+// callers depend on rather than the implementation underneath. flock holds the
+// lock per open file description, so two OpenLock calls contend within a single
 // process and no subprocess is needed.
 func TestLocalLockContention(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "base.lock")
@@ -56,7 +54,8 @@ func TestLocalLockContention(t *testing.T) {
 	}
 
 	// Close, not Unlock: release-on-close is the property OpenLock's callers
-	// rely on, and the one most easily lost in a per-OS implementation.
+	// rely on, and it falls out of flock's per-descriptor semantics rather than
+	// being arranged explicitly -- so it is worth pinning.
 	if err := first.Close(); err != nil {
 		t.Fatalf("closing the first lock: %v", err)
 	}
