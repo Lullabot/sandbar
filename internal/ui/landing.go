@@ -881,9 +881,23 @@ func (p landingPane) landingActBinding() key.Binding {
 // FIRST and takes over every key, exactly the way m.confirm takes over the
 // board and progress screens (updateConfirm) — the row list underneath is
 // frozen until the flow is cancelled or completes.
+//
+// m.confirm is checked SECOND, and the order between those two is a safety
+// property rather than a style choice. The publish flow owns a text input
+// (its issue-number prompt), so letting a confirmation that arrived while the
+// user was mid-keystroke jump the queue would route their typing into a
+// destructive action — a "y" meant for an issue number answering a `git reset
+// --hard` prompt they never saw. The confirmation is state, not an event: it
+// simply waits, and lands the moment the flow closes.
+//
+// Everything below this point was previously unreachable while a confirmation
+// was pending — see landingView for the other half of that bug.
 func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.landing.publish != nil {
 		return m.updateLandingPublish(msg)
+	}
+	if m.confirm != nil {
+		return m.updateConfirm(msg)
 	}
 	switch msg.Code {
 	case tea.KeyUp:
@@ -918,6 +932,13 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // row's REAL verb (see landingActBinding), so the footer answers "what happens
 // if I press enter" without the user having to press it.
 func (m model) landingHelp() []key.Binding {
+	// A pending confirmation owns the keys (updateLanding), so it owns the help
+	// bar too — offering "move/act/refresh" beside a prompt that answers none of
+	// them is how a live overlay comes to look like a dead one. Mirrors
+	// progressHelp.
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
 	return []key.Binding{
 		landingMoveKey,
 		m.landing.landingActBinding(),
@@ -1005,6 +1026,14 @@ func styleForLandRow(k landRowKind) lipgloss.Style {
 // confirmView): the confirmation it must show — every commit, its files, and
 // its destination — is fundamentally multi-line, and clipping it to fit
 // beside the row list would defeat the reason it exists.
+//
+// m.confirm gets that one-line overlay here, above the footer, exactly as the
+// board renders it. Without it this pane was the one screen that could RAISE a
+// confirmation it could not show: handleLandingSync sets m.confirm after a
+// publish, and a user who had navigated back to this pane while the job
+// finished saw nothing at all — the post-publish offer to adopt the published
+// commits was set in the model, invisible, and unanswerable until they
+// happened to return to the board.
 func (m model) landingView() string {
 	if m.landing.publish != nil {
 		return m.landingPublishView()
@@ -1040,6 +1069,9 @@ func (m model) landingView() string {
 		b.WriteString("\n")
 	}
 
+	if m.confirm != nil {
+		b.WriteString("\n" + m.confirmView())
+	}
 	b.WriteString("\n" + m.footerView(m.landingHelp()))
 	return appStyle.Render(b.String())
 }
@@ -1603,10 +1635,13 @@ func landingAdoptCmd(prov provider.Provider, t publishSyncTarget) tea.Cmd {
 //
 // The overlay is the right shape for this and a new bespoke prompt would be
 // the wrong one: this is a destructive, VM-scoped action needing one yes,
-// which is exactly what m.confirm is for everywhere else in sand. It is also
-// answerable from the progress screen the finished publish leaves the user
-// on (updateProgress hands off to updateConfirm first), so the offer lands
-// where they already are.
+// which is exactly what m.confirm is for everywhere else in sand. It is answerable
+// from every screen the finished publish can leave the user on: the progress
+// screen it opened (updateProgress), the board that screen's esc returns to
+// (updateBoard), and the Landing pane they may have navigated back to
+// (updateLanding). All three hand off to updateConfirm and render confirmView,
+// so the offer lands where they already are rather than waiting somewhere
+// they are not.
 //
 // A failure is logged, never raised: the publish it followed has already
 // succeeded, and a stale ref is not worth a scary dialog.
@@ -1617,6 +1652,12 @@ func (m *model) handleLandingSync(msg landingSyncMsg) tea.Cmd {
 	}
 	m.logMsg("published: " + msg.status.Summary())
 	if !msg.status.CanAdopt() {
+		// Named rather than left as silence, matching the CLI's syncCheckout.
+		// The summary above says what the checkout looks like; without this
+		// line nothing says that the state SUPPRESSED an offer, so a user who
+		// expected the prompt is left unable to tell "not offered" from "not
+		// implemented" — which is exactly how this was first reported.
+		m.logMsg("not offering to adopt the published commits — see the message above")
 		return nil
 	}
 	t := msg.target

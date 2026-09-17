@@ -2090,3 +2090,95 @@ func TestLandingSyncFailureIsOnlyLogged(t *testing.T) {
 		t.Errorf("raised a confirmation after a failed fetch: %q", m.confirm.prompt)
 	}
 }
+
+// Untracked files are the normal state of a checkout an agent has been
+// working in, and the reset provably cannot touch them (SameContent means the
+// fork's tree equals HEAD's, and an untracked file is in neither). Counting
+// them as uncommitted work withheld this offer essentially always, and said
+// so only in a single log line.
+func TestLandingSyncOffersDespiteUntrackedFiles(t *testing.T) {
+	m := newTestModel(t)
+	m.handleLandingSync(landingSyncMsg{
+		target: publishSyncTarget{path: "/home/u/mod", branch: "mod-1234"},
+		status: drupalorg.SyncStatus{
+			Local: "aaa", Fork: "bbb", Ahead: 1, Behind: 1, SameContent: true, Untracked: 4,
+		},
+	})
+	if m.confirm == nil {
+		t.Fatal("untracked files withheld the offer to adopt the published commits")
+	}
+}
+
+// THE OTHER HALF OF THE SAME BUG. handleLandingSync raises the confirmation
+// wherever the user happens to be, so the Landing pane has to be able to SHOW
+// it and ANSWER it. Until it could, a publish that finished while the user had
+// navigated back to this pane set m.confirm invisibly: the offer was never
+// drawn, never answerable, and waited for a trip to the board where it arrived
+// with no context at all.
+//
+// The rendering and the routing are asserted together deliberately — either
+// one alone still leaves the user with a prompt they cannot act on.
+func TestLandingPaneShowsAndAnswersTheAdoptConfirmation(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.openLandingPane(v)
+	m.view = viewLanding
+
+	m.handleLandingSync(landingSyncMsg{
+		target: publishSyncTarget{path: "/home/u/mod", branch: "mod-1234", vm: vm.VM{Name: "web"}},
+		status: drupalorg.SyncStatus{Local: "aaa", Fork: "bbb", Ahead: 3, Behind: 3, SameContent: true},
+	})
+	if m.confirm == nil {
+		t.Fatal("no confirmation raised for an adoptable divergence")
+	}
+
+	rendered := ansi.Strip(m.landingView())
+	if !strings.Contains(rendered, "/home/u/mod") {
+		t.Errorf("the Landing pane does not render the pending confirmation:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "[y] yes") {
+		t.Errorf("the rendered confirmation does not say how to answer it:\n%s", rendered)
+	}
+
+	next, _ := m.updateLanding(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if next.(model).confirm != nil {
+		t.Error(`"y" on the Landing pane did not answer the confirmation`)
+	}
+}
+
+// "n" must reach it too, and must leave the pane usable rather than also
+// treating the key as the pane's own Back.
+func TestLandingPaneCancelsTheAdoptConfirmation(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.openLandingPane(v)
+	m.view = viewLanding
+	m.confirm = &confirmState{prompt: "Reset /home/u/mod onto the published commits?"}
+
+	next, _ := m.updateLanding(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	after := next.(model)
+	if after.confirm != nil {
+		t.Error(`"n" did not cancel the confirmation`)
+	}
+	if after.view != viewLanding {
+		t.Errorf("view = %v after cancelling, want the pane to stay open", after.view)
+	}
+}
+
+// Ordering between the two overlays is a SAFETY property, not a style choice.
+// The publish flow owns a text input, so a confirmation arriving mid-keystroke
+// must not jump the queue and turn the user's typing into a hard reset they
+// never saw. The confirmation is state: it waits.
+func TestLandingPublishFlowOutranksAPendingConfirmation(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	m.drupalOrgActions = &fakeDrupalOrgActions{tokenAvailable: true}
+	m.openLandingPane(v)
+	m.view = viewLanding
+	m.landing.publish = &landingPublish{
+		stage: publishAskIssue, issueInput: newIssueInput(), upstream: "origin/1.0.x", module: "mod",
+	}
+	m.confirm = &confirmState{prompt: "Reset /home/u/mod onto the published commits?"}
+
+	next, _ := m.updateLanding(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if next.(model).confirm == nil {
+		t.Error("a keystroke meant for the issue prompt answered the reset confirmation")
+	}
+}
