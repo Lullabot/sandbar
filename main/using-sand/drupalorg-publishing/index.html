@@ -1814,7 +1814,9 @@ origin/&lt;branch&gt;</code> now tell you the truth about what is public.</p>
 <p><code>sand</code> offers to reset your branch onto the published commits:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Reset this checkout onto the published commits? [y/N]
 </code></pre></div>
-<p>In the TUI this arrives as the usual <code>[y] yes  [n] cancel</code> confirmation.
+<p>In the TUI this arrives as the usual <code>[y] yes  [n] cancel</code> confirmation, on
+whichever screen the finished publish left you on — the run's progress screen,
+the board, or the Landing pane.
 Saying yes runs <code>git reset --hard</code> onto the fetched commits, leaving your
 checkout exactly matching what is public. Nothing is lost: the content is
 identical by construction, and the only things discarded are the local commit
@@ -1824,13 +1826,19 @@ with its own answer — <code>--yes</code> confirms the publish and never the re
 without a terminal <code>sand publish</code> prints the command instead of running it.</p>
 <p>The offer is withheld, with the reason printed, when:</p>
 <ul>
-<li><strong>your tree is dirty.</strong> Publication carries committed commits only, so the
-  uncommitted remainder was deliberately left behind — a reset would destroy
-  it. Commit or stash it, then publish again.</li>
+<li><strong>you have uncommitted changes to tracked files.</strong> Publication carries
+  committed commits only, so the uncommitted remainder was deliberately left
+  behind — a reset would destroy it. Commit or stash it, then publish again.</li>
 <li><strong>the content genuinely differs.</strong> That is not a SHA-divergence artifact;
   you have real local changes the fork doesn't, and a reset would discard
   them.</li>
 </ul>
+<p><strong>Untracked files do not withhold the offer.</strong> These checkouts live in a VM
+whose whole job is running agents over them, so untracked scratch files are the
+normal state rather than a warning sign. They also cannot be harmed here: the
+offer is only ever made when the fork's tree is <em>identical</em> to yours, and a file
+that is untracked is in neither tree, so the reset has nothing to collide with.
+They are counted in the summary and left exactly where they are.</p>
 <p>The reset re-checks both conditions <strong>inside the guest</strong>, immediately before
 it acts. A VM runs agent code that can write files at any moment, so a guard
 evaluated on the host when the question was asked is a guard against the
