@@ -2,6 +2,7 @@ package drupalorg
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -264,18 +265,29 @@ func TestParseCollect_TruncatedStreamRefused(t *testing.T) {
 	}
 }
 
-// TestBuildCollectCommand exercises the command builder: a well-formed base
-// ref produces a script containing the substituted ref, the per-file cap,
-// and both delimiters (and nothing that looks like a checkout path — see
+// testProjectBase is a syntactically valid canonical-project base tip: a
+// full 40-character SHA, which is the only shape validateCommitSHA accepts.
+const testProjectBase = "0123456789abcdef0123456789abcdef01234567"
+
+// TestBuildCollectCommand exercises the command builder: well-formed bases
+// produce a script containing BOTH substituted bases, the per-file cap, and
+// both delimiters (and nothing that looks like a checkout path — see
 // BuildCollectCommand's doc comment on why it takes none); anything outside
 // a plain git-ref character set is refused outright rather than escaped.
 func TestBuildCollectCommand(t *testing.T) {
-	got, err := BuildCollectCommand("issue/drupal-3181657")
+	got, err := BuildCollectCommand("issue/drupal-3181657", testProjectBase)
 	if err != nil {
 		t.Fatalf("BuildCollectCommand returned error: %v", err)
 	}
 	for _, want := range []string{
-		`"issue/drupal-3181657..HEAD"`,
+		// Both exclusions must reach the same rev-list: that is the property
+		// keeping the canonical base branch's own commits out of the change
+		// set. Asserted as whole argument lists rather than as separate
+		// substring hits, so an edit that drops one exclusion — or restores
+		// the single-base "<base>..HEAD" form this replaced — fails here.
+		`git rev-list --reverse --no-merges HEAD --not "issue/drupal-3181657" "` + testProjectBase + `"`,
+		`git rev-list --merges HEAD --not "issue/drupal-3181657" "` + testProjectBase + `"`,
+		`git cat-file -e "` + testProjectBase + `^{commit}"`,
 		"8388608", // collectMaxFileBytes
 		collectFileDelim,
 		collectCommitDelim,
@@ -299,9 +311,65 @@ func TestBuildCollectCommand(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := BuildCollectCommand(tc.baseRef); err == nil {
+			if _, err := BuildCollectCommand(tc.baseRef, testProjectBase); err == nil {
 				t.Errorf("BuildCollectCommand(%q) = nil error, want a refusal", tc.baseRef)
 			}
 		})
+	}
+}
+
+// TestBuildCollectCommandRefusesNonSHAProjectBase pins the stricter rule the
+// canonical base is held to. It is never a name a human typed — it is always
+// an object id this package just read from drupal.org — so a ref name, a
+// short SHA, or an empty string all mean a caller wired the wrong value
+// through, and it is about to become script text either way.
+func TestBuildCollectCommandRefusesNonSHAProjectBase(t *testing.T) {
+	cases := []struct {
+		name        string
+		projectBase string
+	}{
+		{"empty", ""},
+		{"branch name", "2.x"},
+		{"remote-tracking ref", "origin/2.x"},
+		{"abbreviated sha", "0123456"},
+		{"uppercase sha", strings.ToUpper(testProjectBase)},
+		{"shell metacharacters", "$(whoami)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := BuildCollectCommand("issue/drupal-3181657", tc.projectBase); err == nil {
+				t.Errorf("BuildCollectCommand(_, %q) = nil error, want a refusal", tc.projectBase)
+			}
+		})
+	}
+}
+
+// TestParseCollectRefusesMergeCommits guards the failure that motivated the
+// second exclusion, in the one shape the exclusions cannot fix by
+// themselves. A branch with the destination branch merged INTO it carries a
+// merge commit whose second parent publication has no way to express; the
+// old script dropped it silently via --no-merges and published whatever the
+// single exclusion left behind, which was the base branch's own commits
+// under the publishing account's name. Here the guest reports the merge and
+// the whole change set is refused, with the SHAs named.
+func TestParseCollectRefusesMergeCommits(t *testing.T) {
+	raw := "merge=1111111111111111111111111111111111111111\n" +
+		"merge=2222222222222222222222222222222222222222\n"
+
+	_, err := ParseCollect(raw)
+	if err == nil {
+		t.Fatal("ParseCollect accepted a range containing merge commits, want a refusal")
+	}
+	var mergeErr *MergeCommitsError
+	if !errors.As(err, &mergeErr) {
+		t.Fatalf("ParseCollect error = %v (%T), want a *MergeCommitsError", err, err)
+	}
+	if len(mergeErr.SHAs) != 2 {
+		t.Errorf("MergeCommitsError.SHAs = %v, want both merge commits", mergeErr.SHAs)
+	}
+	// The actionable half: a developer who hits this must be told that
+	// rebasing, not merging, is what produces a publishable branch.
+	if !strings.Contains(err.Error(), "Rebase") {
+		t.Errorf("MergeCommitsError does not tell the developer to rebase:\n%s", err.Error())
 	}
 }

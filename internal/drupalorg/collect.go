@@ -48,12 +48,18 @@
 // # No network, ever
 //
 // Every git read the guest script runs is local: `rev-list`, `log`,
-// `diff-tree`, `cat-file -s`, `show`. None of them contacts a remote. The
-// base ref this task needs ("what has not yet reached the fork") is either
-// resolved from the guest's own local remote-tracking ref by the caller
-// before this command is built, or supplied directly — either way, nothing
-// here fetches. Remote truth is confirmed host-side, by the publish flow
-// itself, not by the guest.
+// `diff-tree`, `cat-file -e`, `cat-file -s`, `show`. None of them contacts a
+// remote, and nothing here fetches.
+//
+// Both base refs the script needs arrive already resolved. forkBase ("what
+// the fork branch already holds") is the checkout's own local
+// remote-tracking ref, resolved by the caller before this command is built.
+// projectBase ("what the canonical project's base branch already carries")
+// is a full SHA the HOST read from drupal.org's API — which is the one place
+// remote truth enters this flow, and it enters as an argument rather than as
+// a fetch. The consequence is that the guest can be asked about a commit it
+// does not have, so the script checks for the object before it uses it (step
+// 0) instead of letting `rev-list` fail opaquely.
 package drupalorg
 
 import (
@@ -98,19 +104,53 @@ var collectMaxTotalBytes int64 = 20 << 20
 // BuildCollectCommand substitutes its tokens in. It is intentionally small,
 // mirroring sweep.go's sweepScriptTemplate:
 //
-//  1. `git rev-list --reverse --no-merges "<base>..HEAD"` lists the commits
-//     not yet on the base ref, oldest first — the order a replay must send
-//     them in.
+//  0. `git cat-file -e "<projectBase>^{commit}"` proves the checkout
+//     actually holds the canonical project's base-branch tip before
+//     anything is enumerated against it. projectBase is a SHA resolved
+//     HOST-side from drupal.org's API (Client.BranchTip), so the guest may
+//     genuinely not have that object: nothing in this flow fetches, and the
+//     issue fork's own copy of the base branch is not auto-synced and in
+//     practice never synced by hand — which is exactly why the fork's copy
+//     is not what this excludes against. Without this probe the missing
+//     object surfaces as `rev-list`'s bare "fatal: bad object", which says
+//     nothing about what to do; with it the developer is told to fetch the
+//     canonical project and rebase.
 //
-//     --no-merges is load-bearing rather than tidy. A merge commit carries no
-//     file changes of its own, so `diff-tree` emits nothing for it and it
-//     would arrive here as a commit with zero file actions — which the
-//     publisher refuses, failing the WHOLE change set after the human has
-//     already confirmed it. Skipping merges is also the only coherent reading
-//     for a content-API replay: the API lands one commit per call from a list
-//     of file actions and cannot express a second parent, so a merge is not
-//     something publication could reproduce even if it were carried. The
-//     changes a merge brought in travel as the commits themselves.
+//  1. `git rev-list --reverse --no-merges HEAD --not "<forkBase>"
+//     "<projectBase>"` lists the commits to replay, oldest first — the
+//     order a replay must send them in.
+//
+//     TWO exclusions, not one, and the second is the whole point. Excluding
+//     only forkBase (the checkout's own upstream tracking ref — what the
+//     fork branch already holds) answers "what has not yet reached the
+//     fork", which is NOT the same question as "which commits are this
+//     contributor's". The moment the canonical base branch enters the
+//     branch's ancestry — a back-merge of the destination branch, or a
+//     rebase onto a newer base — every upstream commit it brought along is
+//     reachable from HEAD and unreachable from forkBase, so a single
+//     exclusion sweeps other people's already-published work into the
+//     change set and replays it onto the merge request under the
+//     publishing account's name. Excluding the canonical project's base tip
+//     as well is what makes the range mean "mine, and not yet published".
+//
+//     --no-merges stays, but it is no longer load-bearing on its own: a
+//     merge commit carries no file changes of its own, so `diff-tree` emits
+//     nothing for it and it would arrive here as a commit with zero file
+//     actions, which the publisher refuses. Step 1a below now refuses such a
+//     range outright and explains why, rather than silently dropping the
+//     merge and publishing whatever the two exclusions left behind.
+//
+//     1a. `git rev-list --merges ...` over the SAME range decides whether this
+//     range is publishable at all. The content API lands one commit per call
+//     from a list of file actions and has no way to express a second parent,
+//     so a merge is not something publication can reproduce — and silently
+//     skipping it means publishing a history that never existed. Rather than
+//     exit non-zero (whose stdout a captured run may never show a human),
+//     the offending SHAs are emitted as ordinary `merge=` field lines and
+//     the script stops before collecting anything: ParseCollect sees them
+//     and refuses the whole change set with MergeCommitsError. That keeps
+//     the decision in Go, where it is testable against synthetic text, which
+//     is this file's standing rule.
 //
 //  2. For each commit, one line per author-name/author-email/message field,
 //     each base64-encoded (see the package doc comment for why). Each field
@@ -176,7 +216,19 @@ var collectMaxTotalBytes int64 = 20 << 20
 // sweep.go's) never needs escaping.
 const collectScriptTemplate = `set -ef -o pipefail
 b64() { base64 -w0; }
-git rev-list --reverse --no-merges "__BASE__..HEAD" | while IFS= read -r c; do
+if ! git cat-file -e "__PROJECTBASE__^{commit}" 2>/dev/null; then
+  echo "this checkout does not contain __PROJECTBASE__, the current tip of the canonical project's base branch; fetch the canonical project and rebase this branch onto it before publishing" >&2
+  exit 1
+fi
+merges=$(git rev-list --merges HEAD --not "__FORKBASE__" "__PROJECTBASE__")
+if [ -n "$merges" ]; then
+  printf '%s\n' "$merges" | while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    printf 'merge=%s\n' "$m"
+  done
+  exit 0
+fi
+git rev-list --reverse --no-merges HEAD --not "__FORKBASE__" "__PROJECTBASE__" | while IFS= read -r c; do
   [ -z "$c" ] && continue
   name=$(git log -1 --format=%an "$c")
   email=$(git log -1 --format=%ae "$c")
@@ -226,6 +278,23 @@ done
 // provably inert before it is ever substituted in.
 var baseRefPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// commitSHAPattern is what a projectBase must match. It is deliberately far
+// stricter than baseRefPattern: a projectBase is never a name a human typed
+// or a guest reported, it is always a full object id this package itself
+// just read from drupal.org's API (Client.BranchTip), so anything that is
+// not 40 hex characters means a caller wired the wrong value through rather
+// than a user made a typo — and it is about to be substituted into script
+// text either way.
+var commitSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// validateCommitSHA refuses a projectBase that is not a full commit SHA.
+func validateCommitSHA(sha string) error {
+	if !commitSHAPattern.MatchString(sha) {
+		return fmt.Errorf("drupalorg: %q is not a full 40-character commit SHA; the canonical project's base-branch tip must be resolved before a change set can be collected against it", sha)
+	}
+	return nil
+}
+
 // validateBaseRef refuses a base ref that could do anything other than name
 // a git ref once embedded, double-quoted, in collectScriptTemplate.
 func validateBaseRef(ref string) error {
@@ -258,21 +327,37 @@ func validateBaseRef(ref string) error {
 // The script below therefore operates on the process's current directory
 // throughout.
 //
-// baseRef is different: it is host-computed (either the caller's own
-// resolution of the fork's local remote-tracking ref, or an explicit
-// fallback — see the package doc comment's "No network, ever" section), not
+// The two base refs are different: both are host-computed, not
 // guest-observed, and RunArgv's (workdir, expr) signature leaves no argv
-// slot to pass it any other way. It is therefore substituted into the
-// script as text, mirroring sweep.go's strings.Replacer token style — but
-// only after validateBaseRef refuses anything outside a plain git-ref
-// character set, which is what keeps that substitution safe rather than
-// merely convenient.
-func BuildCollectCommand(baseRef string) (string, error) {
-	if err := validateBaseRef(baseRef); err != nil {
+// slot to pass either any other way. They are therefore substituted into
+// the script as text, mirroring sweep.go's strings.Replacer token style —
+// but only after validateBaseRef and validateCommitSHA refuse anything
+// outside their respective safe sets, which is what keeps those
+// substitutions safe rather than merely convenient.
+//
+// forkBase is what the fork branch already holds: the checkout's own
+// upstream tracking ref, resolved by BuildRemoteInfoCommand (see the
+// package doc comment's "No network, ever" section).
+//
+// projectBase is the tip of the CANONICAL project's base branch, as a full
+// SHA read host-side from drupal.org. It is deliberately not the fork's own
+// copy of that branch: an issue fork's base branch is not auto-synced and
+// is in practice never synced by hand, so the fork's copy answers a
+// question about a snapshot nobody has refreshed. Excluding both is what
+// makes the collected range mean "this contributor's commits, not yet
+// published" rather than "everything that has not reached the fork branch",
+// which is a materially different set the moment the base branch enters
+// HEAD's ancestry — see collectScriptTemplate's step 1.
+func BuildCollectCommand(forkBase, projectBase string) (string, error) {
+	if err := validateBaseRef(forkBase); err != nil {
+		return "", err
+	}
+	if err := validateCommitSHA(projectBase); err != nil {
 		return "", err
 	}
 	r := strings.NewReplacer(
-		"__BASE__", baseRef,
+		"__FORKBASE__", forkBase,
+		"__PROJECTBASE__", projectBase,
 		"__MAXFILE__", strconv.FormatInt(collectMaxFileBytes, 10),
 		"__FILE_DELIM__", collectFileDelim,
 		"__COMMIT_DELIM__", collectCommitDelim,
@@ -292,6 +377,34 @@ var (
 	collectFileFieldKeys   = map[string]bool{"kind": true, "path": true, "prevpath": true, "content": true, "oversize": true}
 )
 
+// MergeCommitsError reports that the range to publish contains merge
+// commits, which publication cannot carry, and names them.
+//
+// It is a typed error rather than a formatted string because the two
+// surfaces phrase their own wrapping differently and a test should be able
+// to assert the condition without matching prose — the same reason
+// ErrForkMoved exists in publish.go. The guidance it carries is the
+// actionable half: a content-API replay has no way to express a second
+// parent, so a branch that has the destination branch merged INTO it cannot
+// be published as-is, and rebasing is the operation that produces a
+// publishable shape.
+type MergeCommitsError struct {
+	// SHAs are the merge commits found in the range, as the guest reported
+	// them. They are the guest's own output and so are only ever printed,
+	// never fed back to git or to drupal.org.
+	SHAs []string
+}
+
+func (e *MergeCommitsError) Error() string {
+	return fmt.Sprintf(
+		"drupalorg: the range to publish contains %d merge commit(s) (%s), which publication cannot carry: "+
+			"each commit is replayed through drupal.org's content API, which lands one commit per call from a list "+
+			"of file actions and has no way to express a merge's second parent. "+
+			"Rebase this branch onto the canonical project's base branch instead of merging that branch into it, then publish again",
+		len(e.SHAs), strings.Join(e.SHAs, ", "),
+	)
+}
+
 // ParseCollect converts one collection run's raw guest stdout into a
 // ChangeSet, decoding every base64-carried field, classifying each
 // diff-tree status into a payload.ActionKind, choosing each file's payload
@@ -309,6 +422,7 @@ var (
 func ParseCollect(raw string) (ChangeSet, error) {
 	var cs ChangeSet
 	var total int64
+	var merges []string
 	commitRec := map[string]string{}
 	fileRec := map[string]string{}
 	var actions []FileAction
@@ -368,6 +482,11 @@ func ParseCollect(raw string) (ChangeSet, error) {
 			continue // noise: not a "key=value" field line
 		}
 		switch {
+		case key == "merge":
+			// Record-less and scope-less, unlike every other key here: the
+			// script emits these INSTEAD of a change set and stops, so there
+			// is no commit or file record for one to belong to.
+			merges = append(merges, value)
 		case collectFileFieldKeys[key]:
 			fileRec[key] = value
 		case collectCommitFieldKeys[key]:
@@ -375,6 +494,15 @@ func ParseCollect(raw string) (ChangeSet, error) {
 		default:
 			continue // noise: unrecognized key
 		}
+	}
+
+	// Checked before the truncation guard below, and before anything is
+	// returned: a range containing a merge is refused whole, so a partial
+	// or empty commit list alongside it is not a second, separate problem
+	// to report. The guest stops before collecting when it finds one, so in
+	// practice nothing else has accumulated.
+	if len(merges) > 0 {
+		return ChangeSet{}, &MergeCommitsError{SHAs: merges}
 	}
 
 	// Anything still pending here means the stream ended before its final

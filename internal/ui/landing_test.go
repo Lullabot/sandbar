@@ -91,6 +91,24 @@ type fakeDrupalOrgActions struct {
 		nid    int
 	}
 
+	// baseTip is what the fake's BaseTip returns; baseTipCalls records the
+	// (path, branch) pairs it was asked for, which is how a test observes
+	// that collection excludes against the CANONICAL parent's base branch
+	// rather than the issue fork's unsynced copy of it.
+	//
+	// Unlike issueTitle, an empty value is not a meaningful answer here:
+	// BuildCollectCommand refuses anything that is not a full 40-character
+	// SHA, so the zero value would fail every flow that reaches collection
+	// for a reason no test is about. The fake therefore substitutes
+	// fakeBaseTip when neither a tip nor an error is set — a real BaseTip
+	// either returns a SHA or fails, never both empty.
+	baseTip      string
+	baseTipErr   error
+	baseTipCalls []struct {
+		path   string
+		branch string
+	}
+
 	publishCalls []struct {
 		dest drupalorg.Destination
 		cs   drupalorg.ChangeSet
@@ -100,6 +118,22 @@ type fakeDrupalOrgActions struct {
 }
 
 func (f *fakeDrupalOrgActions) TokenAvailable() bool { return f.tokenAvailable }
+
+// fakeBaseTip is the canonical-project base-branch tip the fake reports when
+// a test does not care which commit it is — a full 40-character SHA, the
+// only shape BuildCollectCommand accepts.
+const fakeBaseTip = "0123456789abcdef0123456789abcdef01234567"
+
+func (f *fakeDrupalOrgActions) BaseTip(_ context.Context, path, branch string) (string, error) {
+	f.baseTipCalls = append(f.baseTipCalls, struct {
+		path   string
+		branch string
+	}{path, branch})
+	if f.baseTip == "" && f.baseTipErr == nil {
+		return fakeBaseTip, nil
+	}
+	return f.baseTip, f.baseTipErr
+}
 
 func (f *fakeDrupalOrgActions) ResolveFork(_ context.Context, forkPath string) (*drupalorg.ProjectInfo, error) {
 	f.resolveForkCalls = append(f.resolveForkCalls, forkPath)
@@ -1912,6 +1946,103 @@ func landingPublishForkFixture(t *testing.T) (model, boardVM, *fakeDrupalOrgActi
 		return []string{"cat", collectFile}
 	}}
 	return m, v, fakeDO
+}
+
+// TestLandingPublishCollectsAgainstTheCanonicalBaseBranch is the pane's half
+// of the regression guard for the wrong-commit publish: the change set must
+// be collected against the CANONICAL project's base branch as well as the
+// fork branch.
+//
+// Excluding only the fork branch answers "what has not reached the fork",
+// and the moment the base branch enters the checkout's ancestry — a
+// back-merge of the destination branch, or a rebase onto a newer base — that
+// range carries other contributors' already-public commits, which the replay
+// then lands on the merge request under the publishing account's name. The
+// fork's OWN copy of the base branch is not the right exclusion either:
+// nothing syncs it, so it names whatever commit the branch sat at when the
+// fork was created.
+//
+// It also pins the ordering the fix depends on — the fork resolves before
+// collection, because the base tip is not known until it has.
+func TestLandingPublishCollectsAgainstTheCanonicalBaseBranch(t *testing.T) {
+	m, v, fakeDO := landingPublishForkFixture(t)
+	fakeDO.baseTip = "abc0123456789abcdef0123456789abcdef01234"
+
+	// Capture the script the collection step actually asks the guest to run,
+	// which is where both exclusions have to show up.
+	var collectExpr string
+	collectFile := filepath.Join(t.TempDir(), "collect")
+	if err := os.WriteFile(collectFile, []byte(collectFixtureRaw()), 0o600); err != nil {
+		t.Fatalf("write collect fixture: %v", err)
+	}
+	remoteInfoFile := filepath.Join(t.TempDir(), "remoteinfo")
+	if err := os.WriteFile(remoteInfoFile, []byte("git@git.drupalcode.org:issue/mod-1234.git\norigin/1234-fix\n"), 0o600); err != nil {
+		t.Fatalf("write remote-info fixture: %v", err)
+	}
+	m.members[0].prov = &providerfake.Provider{RunArgvFunc: func(_ vm.VM, _, expr string) []string {
+		if expr == drupalorg.BuildRemoteInfoCommand() {
+			return []string{"cat", remoteInfoFile}
+		}
+		collectExpr = expr
+		return []string{"cat", collectFile}
+	}}
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("starting the publish flow should fire the guest remote read")
+	}
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to reach confirmation", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishConfirm
+	})
+
+	// The tip was read off the canonical parent, never the issue fork.
+	if len(fakeDO.baseTipCalls) != 1 {
+		t.Fatalf("baseTipCalls = %+v, want exactly one", fakeDO.baseTipCalls)
+	}
+	if got := fakeDO.baseTipCalls[0]; got.path != "project/mod" || got.branch != "1.0.x" {
+		t.Errorf("BaseTip asked about (%q, %q), want the canonical parent (%q, %q)",
+			got.path, got.branch, "project/mod", "1.0.x")
+	}
+	// And both exclusions reached the guest.
+	for _, want := range []string{`"origin/1234-fix"`, `"` + fakeDO.baseTip + `"`} {
+		if !strings.Contains(collectExpr, want) {
+			t.Errorf("collection script does not exclude %s:\n%s", want, collectExpr)
+		}
+	}
+}
+
+// TestLandingPublishStopsWhenTheBaseTipCannotBeResolved pins the "refuse,
+// don't guess" half in the pane: without the canonical base branch there is
+// no way to tell this contributor's commits from the base branch's own, so
+// the flow returns to the issue prompt with the reason rather than
+// collecting against the fork branch alone.
+func TestLandingPublishStopsWhenTheBaseTipCannotBeResolved(t *testing.T) {
+	m, v, fakeDO := landingPublishForkFixture(t)
+	fakeDO.baseTipErr = errors.New("drupal.org said no")
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("starting the publish flow should fire the guest remote read")
+	}
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to park at the issue prompt", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishAskIssue && m.landing.publish.err != ""
+	})
+	m = l.m
+
+	if !strings.Contains(m.landing.publish.err, "drupal.org said no") {
+		t.Errorf("publish error = %q, want it to carry the base-tip failure", m.landing.publish.err)
+	}
+	if len(fakeDO.publishCalls) != 0 {
+		t.Errorf("Publish called %d time(s), want none", len(fakeDO.publishCalls))
+	}
 }
 
 // TestLandingPublishIssuePromptAcceptsPaste pins the routing fix for a real

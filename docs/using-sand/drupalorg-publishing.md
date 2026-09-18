@@ -64,16 +64,9 @@ you a narrower one.
 For a checkout `PATH`, publication:
 
 1. Reads the checkout's origin remote and upstream branch to work out which
-   module it belongs to, **which issue it belongs to** (see
-   [Where the issue number comes from](#where-the-issue-number-comes-from)),
-   and how many local commits are ahead.
-2. Collects those commits — in order, oldest first — as an inert list of
-   commit messages, authors, and file actions (create/update/delete/move,
-   with resulting content). **Merge commits are skipped**: a merge carries
-   no file changes of its own, and the destination API this uses has no way
-   to express a second parent — the changes a merge brought in still travel,
-   as the ordinary commits that made them.
-3. Resolves where those commits go: the drupal.org **issue fork** for the
+   module it belongs to and **which issue it belongs to** (see
+   [Where the issue number comes from](#where-the-issue-number-comes-from)).
+2. Resolves where the commits will go: the drupal.org **issue fork** for the
    issue number (`issue/<module>-<nid>`), read anonymously, with
    its canonical parent project (e.g. `project/<module>`) derived from that
    fork's own `forked_from_project` — never guessed, and never something the
@@ -83,6 +76,15 @@ For a checkout `PATH`, publication:
    --allow-outside-issue-namespace`) is available but is not the normal
    path, and its own guard rail exists for exactly the reason this whole
    design does.
+3. Collects **your** commits — in order, oldest first — as an inert list of
+   commit messages, authors, and file actions (create/update/delete/move,
+   with resulting content). "Yours" means reachable from the checkout's
+   `HEAD` but from *neither* what the fork branch already holds *nor* what
+   the canonical project's base branch already carries. Both exclusions
+   matter: see
+   [Rebase onto the base branch — don't merge it in](#rebase-onto-the-base-branch-dont-merge-it-in).
+   A range containing a **merge commit is refused outright**, with the merge
+   named, rather than published with the merge silently dropped.
 4. Shows you a **confirmation**: the destination and branch, the merge
    request's target and **title** (see
    [How the merge request is titled](#how-the-merge-request-is-titled)), and
@@ -242,7 +244,50 @@ Note that this only ever moves you **onto** the fork. The fork branch can
 only grow (see [There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows)),
 so there is no version of this that rewrites drupal.org to match you.
 
-## Four things you'll otherwise learn the hard way
+## Five things you'll otherwise learn the hard way
+
+### Rebase onto the base branch — don't merge it in
+
+When your issue branch falls behind the project's development branch, **rebase
+onto it**. Do not merge it into your branch:
+
+```console
+$ git fetch https://git.drupalcode.org/project/<module>.git 2.x
+$ git rebase FETCH_HEAD
+```
+
+Merging the destination branch back into your own is a normal enough habit
+elsewhere, and on a forge that takes a `git push` it costs you nothing. Here
+it cannot work, for a reason that is structural rather than fussy: a merge
+commit's entire content is *"these two histories join here"*, and publication
+lands one commit at a time through an API that takes a list of file actions
+and has no field for a second parent. There is nothing for the merge to
+become. `sand` therefore **refuses** a range containing one, names the merge
+commit, and publishes nothing — rather than dropping the merge and publishing
+whatever is left, which is what produced merge requests full of other
+people's commits.
+
+The other half of the same rule is invisible until it bites: publication
+collects the commits reachable from your `HEAD` that are on **neither** the
+fork branch **nor the canonical project's base branch**. That second
+exclusion is why a rebase is safe. Without it, every base-branch commit your
+rebase moved you onto would look like unpublished work of yours and be
+replayed onto the merge request under your account.
+
+That exclusion is read from the **canonical project** (`project/<module>`),
+never from your issue fork's own copy of the base branch. A fork's base
+branch is not auto-synced and in practice nobody syncs it by hand, so it
+names whatever commit the branch sat at when the fork was created — which
+would put every base-branch commit since then back in scope.
+
+One consequence worth knowing: your checkout has to actually *have* the
+canonical project's base-branch tip as a local object, which the `git fetch`
+above is what gives you. If it doesn't, publication stops and says so rather
+than guessing.
+
+Rebasing is the right move **before your first publish**. Once commits are
+public on the fork, rewriting local history has its own problems — see
+[There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows).
 
 ### Replay, not squash — your local history is what lands
 

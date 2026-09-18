@@ -574,6 +574,13 @@ type landingForkMsg struct {
 	// the destination keeps its branch-name default; see
 	// drupalorg.LookupIssueTitle.
 	mrTitle string
+	// baseTip is the canonical parent project's base-branch tip, resolved in
+	// the same stage as the fork itself (see resolveForkCmd). The collection
+	// that follows excludes against it, so an error resolving it fails the
+	// stage rather than being carried as an empty string: unlike mrTitle, a
+	// missing value here is not a cosmetic loss but the difference between
+	// publishing this contributor's commits and publishing the base branch's.
+	baseTip string
 	err     error
 }
 
@@ -1059,6 +1066,15 @@ type drupalOrgActions interface {
 	TokenAvailable() bool
 	// ResolveFork looks up the drupal.org issue fork at forkPath, anonymously.
 	ResolveFork(ctx context.Context, forkPath string) (*drupalorg.ProjectInfo, error)
+	// BaseTip returns the tip commit of branch on the CANONICAL parent
+	// project at path, anonymously — what the change-set collection excludes
+	// against, alongside the fork branch itself. Deliberately the parent's
+	// copy of that branch and not the issue fork's: a fork's base branch is
+	// not auto-synced and in practice never synced by hand, so excluding
+	// against it would leave every base-branch commit since the fork was
+	// created looking like this contributor's unpublished work. See
+	// drupalorg.Client.BranchTip.
+	BaseTip(ctx context.Context, path, branch string) (string, error)
 	// IssueTitle returns the merge-request title issue nid warrants for
 	// module, or "" when drupal.org cannot vouch for one. It returns no
 	// error by design — see drupalorg.LookupIssueTitle: a title is a
@@ -1092,6 +1108,10 @@ func (d *drupalOrgClient) ResolveFork(ctx context.Context, forkPath string) (*dr
 	return d.client.Project(ctx, forkPath)
 }
 
+func (d *drupalOrgClient) BaseTip(ctx context.Context, path, branch string) (string, error) {
+	return d.client.BranchTip(ctx, path, branch)
+}
+
 func (d *drupalOrgClient) IssueTitle(ctx context.Context, module string, nid int) string {
 	return drupalorg.LookupIssueTitle(ctx, d.client, module, nid)
 }
@@ -1102,13 +1122,19 @@ func (d *drupalOrgClient) Publish(ctx context.Context, dest drupalorg.Destinatio
 
 // landingPublishStage sequences the drupal.org publish flow: entering the
 // issue number, then resolving — in order — the checkout's origin remote and
-// upstream branch (guest), its change set (guest), and its drupal.org fork
-// (anonymous network read) into a Destination and a rendered confirmation,
-// and finally awaiting the user's explicit yes/no on that confirmation.
-// Nothing is published until the LAST stage's 'y' — see
-// confirmLandingPublish. All three resolve steps share ONE publishResolving
-// stage; only their own async messages (landingRemoteInfoMsg,
-// landingCollectMsg, landingForkMsg) distinguish where the flow actually is.
+// upstream branch (guest), its drupal.org fork and that fork's canonical
+// parent base-branch tip (anonymous network reads) into a Destination, and
+// finally its change set (guest) into a rendered confirmation, before
+// awaiting the user's explicit yes/no on that confirmation. Nothing is
+// published until the LAST stage's 'y' — see confirmLandingPublish. All
+// three resolve steps share ONE publishResolving stage; only their own async
+// messages (landingRemoteInfoMsg, landingForkMsg, landingCollectMsg)
+// distinguish where the flow actually is.
+//
+// The fork step precedes collection rather than following it, which is the
+// reverse of how this flow first shipped: collection excludes the canonical
+// project's base branch as well as the fork branch, and neither is known
+// until the fork has resolved. See handleLandingFork.
 type landingPublishStage int
 
 const (
@@ -1362,7 +1388,24 @@ func (m model) submitLandingIssue() (tea.Model, tea.Cmd) {
 		// remote turns out to name a fork of its own.
 		return m, resolveRemoteInfoCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, m.landingPublishEpoch)
 	}
-	return m, collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, p.upstream, m.landingPublishEpoch)
+	return m, m.startForkResolution(p)
+}
+
+// startForkResolution begins the resolve chain's drupal.org half, from a
+// module and issue the flow has already settled. Both entry points into that
+// half — the issue prompt's submission and the remote-info step that skipped
+// the prompt — go through here so neither can derive a fork path the other
+// way, the same "resolution logic lives once" rule the CLI and the TUI
+// already share at the package boundary.
+//
+// It is the step collection now WAITS on rather than the step that follows
+// collection; see handleLandingFork for why that order is load-bearing.
+func (m *model) startForkResolution(p *landingPublish) tea.Cmd {
+	forkPath, err := drupalorg.ForkPath(p.module, p.issue)
+	if err != nil {
+		return p.backToIssuePrompt(err.Error())
+	}
+	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, p.module, p.issue, forkPath, m.landingPublishEpoch)
 }
 
 // resolveRemoteInfoCmd runs originAndUpstreamExpr in the guest and reports
@@ -1424,15 +1467,18 @@ func (m *model) handleLandingRemoteInfo(msg landingRemoteInfoMsg) tea.Cmd {
 		p.stage = publishAskIssue
 		return tea.Batch(p.issueInput.Focus(), textinput.Blink)
 	}
-	return collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, p.upstream, m.landingPublishEpoch)
+	return m.startForkResolution(p)
 }
 
 // collectCmd builds and runs the guest change-set collection
-// (drupalorg.BuildCollectCommand/ParseCollect) for path against baseRef, and
-// reports the parsed ChangeSet (or the failure) as a landingCollectMsg.
-func collectCmd(ctx context.Context, prov provider.Provider, v vm.VM, path, baseRef string, epoch uint64) tea.Cmd {
+// (drupalorg.BuildCollectCommand/ParseCollect) for path against both bases —
+// forkBase, the checkout's upstream tracking ref, and projectBase, the
+// canonical project's base-branch tip — and reports the parsed ChangeSet (or
+// the failure, including a *drupalorg.MergeCommitsError) as a
+// landingCollectMsg.
+func collectCmd(ctx context.Context, prov provider.Provider, v vm.VM, path, forkBase, projectBase string, epoch uint64) tea.Cmd {
 	return func() tea.Msg {
-		script, err := drupalorg.BuildCollectCommand(baseRef)
+		script, err := drupalorg.BuildCollectCommand(forkBase, projectBase)
 		if err != nil {
 			return landingCollectMsg{epoch: epoch, err: err}
 		}
@@ -1448,11 +1494,14 @@ func collectCmd(ctx context.Context, prov provider.Provider, v vm.VM, path, base
 	}
 }
 
-// handleLandingCollect folds a guest collection result into the flow: on
-// success it derives the fork path (drupalorg.ForkPath) and fires the
-// anonymous fork resolution (resolveForkCmd); on failure — including "no
-// commits to publish" — it returns the flow to the issue prompt with the
-// reason shown, so the user can fix it and retry without starting over.
+// handleLandingCollect folds a guest collection result into the flow — now
+// the LAST resolve step rather than the first, since collection needs the
+// canonical base branch the fork resolution before it supplied. On success
+// it renders the confirmation against the Destination already built and
+// advances to publishConfirm; on failure — including "no commits to
+// publish" and a range containing merge commits — it returns the flow to the
+// issue prompt with the reason shown, so the user can fix it and retry
+// without starting over.
 func (m *model) handleLandingCollect(msg landingCollectMsg) tea.Cmd {
 	p := m.landing.publish
 	if p == nil || msg.epoch != m.landingPublishEpoch {
@@ -1463,14 +1512,14 @@ func (m *model) handleLandingCollect(msg landingCollectMsg) tea.Cmd {
 		return p.backToIssuePrompt(msg.err.Error())
 	}
 	if len(msg.cs.Commits) == 0 {
-		return p.backToIssuePrompt("nothing to publish: no commits ahead of this checkout's upstream branch")
+		return p.backToIssuePrompt(fmt.Sprintf(
+			"nothing to publish: no commits beyond what %s already holds and what %s's %s branch already carries",
+			p.dest.ForkPath, p.dest.ParentPath, p.dest.ParentBranch))
 	}
 	p.cs = msg.cs
-	forkPath, err := drupalorg.ForkPath(p.module, p.issue)
-	if err != nil {
-		return p.backToIssuePrompt(err.Error())
-	}
-	return resolveForkCmd(p.stepContext(), m.drupalOrgActions, p.module, p.issue, forkPath, m.landingPublishEpoch)
+	p.text = drupalorg.RenderConfirmation(p.cs, p.dest)
+	p.stage = publishConfirm
+	return nil
 }
 
 // resolveForkCmd looks up the drupal.org issue fork at forkPath and, in the
@@ -1488,10 +1537,32 @@ func resolveForkCmd(ctx context.Context, actions drupalOrgActions, module string
 		if err != nil {
 			return landingForkMsg{epoch: epoch, forkPath: forkPath, err: err}
 		}
+		// The parent is read straight off the fork's own forked_from_project
+		// rather than waiting for NewDestination to derive it, because the
+		// base tip must be in hand before the collection this stage leads
+		// into. NewDestination still validates the same fields immediately
+		// afterwards (handleLandingFork) and remains the only thing that
+		// decides a destination — this reads two of its inputs early, it
+		// does not decide anything with them.
+		var parent *drupalorg.ForkedFromProject
+		if fork != nil {
+			parent = fork.ForkedFromProject
+		}
+		if parent == nil || parent.PathWithNamespace == "" || parent.DefaultBranch == "" {
+			return landingForkMsg{epoch: epoch, forkPath: forkPath, err: fmt.Errorf(
+				"%s names no canonical parent project with a default branch, so there is no base branch to collect against; "+
+					"publication cannot tell your commits apart from the base branch's own", forkPath)}
+		}
+		baseTip, err := actions.BaseTip(ctx, parent.PathWithNamespace, parent.DefaultBranch)
+		if err != nil {
+			return landingForkMsg{epoch: epoch, forkPath: forkPath, err: fmt.Errorf(
+				"read %s's %s branch: %w", parent.PathWithNamespace, parent.DefaultBranch, err)}
+		}
 		return landingForkMsg{
 			epoch:    epoch,
 			forkPath: forkPath,
 			fork:     fork,
+			baseTip:  baseTip,
 			mrTitle:  actions.IssueTitle(ctx, module, issue),
 		}
 	}
@@ -1500,9 +1571,15 @@ func resolveForkCmd(ctx context.Context, actions drupalOrgActions, module string
 // handleLandingFork folds the fork resolution into the flow: on success it
 // builds the Destination (drupalorg.NewDestination — never allowing a
 // destination outside the issue/ namespace from the TUI, unlike the CLI's
-// power-user override) and renders the confirmation
-// (drupalorg.RenderConfirmation), advancing to publishConfirm. On failure it
-// returns to the issue prompt with the reason shown.
+// power-user override) and then fires the change-set collection against it.
+// On failure it returns to the issue prompt with the reason shown.
+//
+// This runs BEFORE collection, where it used to run after. The order is
+// load-bearing rather than incidental: collection excludes the canonical
+// project's base branch as well as the fork branch, and neither the parent
+// project nor its base-branch tip is known until this step has run. The
+// visible cost is that a checkout with nothing to publish now pays for an
+// anonymous drupal.org read before it is told so.
 func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
 	p := m.landing.publish
 	if p == nil || msg.epoch != m.landingPublishEpoch {
@@ -1516,11 +1593,8 @@ func (m *model) handleLandingFork(msg landingForkMsg) tea.Cmd {
 	if err != nil {
 		return p.backToIssuePrompt(err.Error())
 	}
-	dest = dest.WithMergeRequestTitle(msg.mrTitle)
-	p.dest = dest
-	p.text = drupalorg.RenderConfirmation(p.cs, dest)
-	p.stage = publishConfirm
-	return nil
+	p.dest = dest.WithMergeRequestTitle(msg.mrTitle)
+	return collectCmd(p.stepContext(), m.provFor(m.landing.scope), m.landing.vm, p.checkout.Path, p.upstream, msg.baseTip, m.landingPublishEpoch)
 }
 
 // publishSyncTarget is what a dispatched publish job leaves behind so that

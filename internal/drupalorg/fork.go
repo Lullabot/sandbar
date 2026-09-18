@@ -286,6 +286,38 @@ func (c *Client) BranchExists(ctx context.Context, path, branch string) (bool, e
 	}
 }
 
+// BranchInfo is the subset of a GitLab branch resource this package reads.
+type BranchInfo struct {
+	Name   string `json:"name"`
+	Commit struct {
+		ID string `json:"id"`
+	} `json:"commit"`
+}
+
+// BranchTip returns the full commit SHA at the tip of branch on the project
+// at path, using no credential. A missing project or branch yields *APIError
+// with Status 404, checkable with IsNotFound.
+//
+// Its one caller resolves the CANONICAL parent project's base branch, which
+// a change set is then collected against (see BuildCollectCommand's
+// projectBase). That it reads the parent rather than the issue fork is the
+// entire point: an issue fork carries its own copy of the base branch, but
+// nothing on drupal.org syncs it and in practice nobody syncs it by hand, so
+// the fork's copy names whatever commit the branch happened to be at when
+// the fork was created. Excluding against that stale snapshot would leave
+// every base-branch commit made since then looking like the contributor's
+// own unpublished work.
+func (c *Client) BranchTip(ctx context.Context, path, branch string) (string, error) {
+	var b BranchInfo
+	if err := c.do(ctx, http.MethodGet, encodedProjectPath(path)+"/repository/branches/"+url.PathEscape(branch), nil, &b); err != nil {
+		return "", err
+	}
+	if b.Commit.ID == "" {
+		return "", fmt.Errorf("drupalorg: %s branch %q reported no commit id", path, branch)
+	}
+	return b.Commit.ID, nil
+}
+
 // MergeRequest is the subset of a GitLab merge request resource this package
 // reads.
 type MergeRequest struct {
