@@ -2096,7 +2096,18 @@ func (m model) landingPublishView() string {
 		b.WriteString(p.issueInput.View())
 		b.WriteString("\n")
 		if p.err != "" {
-			b.WriteString("\n" + errStyle.Render(p.err) + "\n")
+			// WRAPPED, not clipped. Every other long string this pane shows
+			// is a change set it can honestly truncate, because the full
+			// text is one `sand publish` away. A resolve failure is the
+			// opposite: it is the only account the user gets of why nothing
+			// happened, and the actionable half is at the END of it — the
+			// merge-commit refusal spends its first line naming SHAs and its
+			// last telling you to rebase. Clipping to the terminal width
+			// showed the SHAs and ate the instruction.
+			b.WriteString("\n")
+			for _, l := range wrapText(p.err, m.layout.ContentWidth) {
+				b.WriteString(errStyle.Render(l) + "\n")
+			}
 		}
 	case publishResolving:
 		b.WriteString(statusStyle.Render("resolving the change set and the drupal.org fork…"))
