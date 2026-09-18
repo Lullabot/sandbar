@@ -60,6 +60,7 @@ type fixtureRequest struct {
 type fixtureCommitRequest struct {
 	Branch        string `json:"branch"`
 	StartBranch   string `json:"start_branch"`
+	StartProject  int    `json:"start_project"`
 	CommitMessage string `json:"commit_message"`
 	AuthorName    string `json:"author_name"`
 	AuthorEmail   string `json:"author_email"`
@@ -106,7 +107,7 @@ func newForkFixture() *forkFixture {
 	return &forkFixture{
 		forkPath:     "issue/drupal-3181657",
 		forkID:       241450,
-		forkDefault:  "11.x",
+		forkDefault:  "10.x",
 		parentPath:   "project/drupal",
 		parentID:     106348,
 		parentBranch: "11.x",
@@ -374,7 +375,7 @@ func (f *forkFixture) createCommit(w http.ResponseWriter, r *http.Request, proje
 	case req.StartBranch == "" && !f.branchExists:
 		f.fail(w, http.StatusBadRequest, "You can only create or edit files when you are on a branch")
 		return
-	case req.StartBranch != "" && req.StartBranch != f.forkDefault:
+	case req.StartBranch != "" && req.StartBranch != f.parentBranch:
 		f.fail(w, http.StatusBadRequest, fmt.Sprintf("Invalid reference name: %s", req.StartBranch))
 		return
 	}
@@ -725,14 +726,27 @@ func TestPublish_ExistingBranchReplaysEveryCommitThenOpensMergeRequest(t *testin
 	}
 }
 
-// TestPublish_AbsentBranchIsCreatedFromTheForkDefaultOnFirstCallOnly covers
-// the uncommon arm: an issue branch that genuinely does not exist yet.
-// start_branch appears on the first call, naming the fork's own
-// default_branch, and must not appear on the second — by then the first call
-// has created the branch, and start_branch against an existing branch is an
-// error. It also asserts the ordering the plan requires: branch existence is
-// resolved anonymously BEFORE any authenticated call.
-func TestPublish_AbsentBranchIsCreatedFromTheForkDefaultOnFirstCallOnly(t *testing.T) {
+// TestPublish_AbsentBranchIsCreatedFromTheCanonicalParentOnFirstCallOnly
+// covers the uncommon arm: an issue branch that genuinely does not exist
+// yet. start_branch appears on the first call and must not appear on the
+// second — by then the first call has created the branch, and start_branch
+// against an existing branch is an error. It also asserts the ordering the
+// plan requires: branch existence is resolved anonymously BEFORE any
+// authenticated call.
+//
+// The branch is created from the CANONICAL PARENT's base branch, carried by
+// start_project, and not from the fork's own default_branch. This test named
+// the fork's default until a measured case showed why it must not: GitLab
+// pins a new fork's default_branch at the commit it was forked from and
+// nothing on drupal.org ever moves it, so creating from it and then
+// replaying commits collected against the current base silently reverts
+// every upstream change in between.
+//
+// The fixture's forkDefault and parentBranch are deliberately DIFFERENT
+// ("10.x" vs "11.x") so this assertion can tell them apart. They were the
+// same string while the old behaviour shipped, which is exactly why no test
+// caught it.
+func TestPublish_AbsentBranchIsCreatedFromTheCanonicalParentOnFirstCallOnly(t *testing.T) {
 	writeTokenFile(t, testToken, 0o600)
 
 	fx := newForkFixture()
@@ -754,11 +768,21 @@ func TestPublish_AbsentBranchIsCreatedFromTheForkDefaultOnFirstCallOnly(t *testi
 	if len(typed) != 2 {
 		t.Fatalf("commit POSTs = %d, want 2", len(typed))
 	}
-	if typed[0].StartBranch != fx.forkDefault {
-		t.Errorf("commit POST 1 start_branch = %q, want the fork's own default branch %q", typed[0].StartBranch, fx.forkDefault)
+	if typed[0].StartBranch != fx.parentBranch {
+		t.Errorf("commit POST 1 start_branch = %q, want the canonical parent's base branch %q", typed[0].StartBranch, fx.parentBranch)
+	}
+	if typed[0].StartBranch == fx.forkDefault {
+		t.Errorf("commit POST 1 started from the fork's own default branch %q, which nothing syncs", fx.forkDefault)
+	}
+	if typed[0].StartProject != fx.parentID {
+		t.Errorf("commit POST 1 start_project = %d, want the canonical parent %d; without it start_branch names a branch on the FORK",
+			typed[0].StartProject, fx.parentID)
 	}
 	if v, present := raw[1]["start_branch"]; present {
 		t.Errorf("commit POST 2 carries start_branch %v; the first call created the branch so the second must omit it", v)
+	}
+	if v, present := raw[1]["start_project"]; present {
+		t.Errorf("commit POST 2 carries start_project %v; it is meaningless without start_branch", v)
 	}
 
 	reqs := fx.snapshotRequests()
@@ -1329,6 +1353,157 @@ func TestAlreadyLandedCount(t *testing.T) {
 				t.Errorf("alreadyLandedCount = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCheckForkDiverged exercises the guard that turns the one failure
+// alreadyLandedCount's tip anchoring cannot survive into a pre-write
+// refusal: a branch that holds this change set's commits but does not END
+// with them.
+//
+// The case that motivated it is "a foreign commit sits at the tip". One such
+// commit defeats the ordered run at every length, resumption reports nothing
+// landed, and the replay restarts from commit 1 — whose create action names
+// a file the branch already has, so GitLab answers "A file with this name
+// already exists" after an unrevocable write has been attempted.
+func TestCheckForkDiverged(t *testing.T) {
+	commit := func(message, name string) Commit {
+		return Commit{Message: message, AuthorName: name, AuthorEmail: strings.ToLower(name) + "@example.com"}
+	}
+	remote := func(id, message, name string) remoteCommit {
+		return remoteCommit{ID: id, Message: message + "\n", AuthorName: name, AuthorEmail: strings.ToLower(name) + "@example.com"}
+	}
+	changeSet := []Commit{commit("one", "alice"), commit("two", "bob"), commit("three", "alice")}
+
+	cases := []struct {
+		name        string
+		history     []remoteCommit // newest first
+		commits     []Commit
+		present     int
+		wantRefusal bool
+		wantOverlap int
+	}{
+		{
+			name:    "an empty branch is an ordinary first publish",
+			commits: changeSet,
+		},
+		{
+			name:    "a branch holding only other people's work is an ordinary first publish",
+			history: []remoteCommit{remote("z", "upstream", "carol")},
+			commits: changeSet,
+		},
+		{
+			name:    "a resumable run is not divergence",
+			history: []remoteCommit{remote("b", "one", "alice"), remote("a", "upstream", "carol")},
+			commits: changeSet,
+			present: 1,
+		},
+		{
+			// The observed failure: an earlier bug republished a canonical
+			// base-branch commit onto the issue branch, where it became the
+			// tip. Every commit of the change set was already public.
+			name: "a foreign commit at the tip strands commits that are already public",
+			history: []remoteCommit{
+				remote("d", "a base branch commit from another issue", "carol"),
+				remote("c", "three", "alice"), remote("b", "two", "bob"), remote("a", "one", "alice"),
+			},
+			commits:     changeSet,
+			wantRefusal: true,
+			wantOverlap: 3,
+		},
+		{
+			name:        "one of ours on the branch under someone else's push",
+			history:     []remoteCommit{remote("c", "unrelated", "carol"), remote("b", "one", "alice")},
+			commits:     changeSet,
+			wantRefusal: true,
+			wantOverlap: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkForkDiverged(tc.history, tc.commits, tc.present)
+			if !tc.wantRefusal {
+				if err != nil {
+					t.Fatalf("checkForkDiverged refused an ordinary publish: %v", err)
+				}
+				return
+			}
+			var div *ForkDivergedError
+			if !errors.As(err, &div) {
+				t.Fatalf("checkForkDiverged = %v (%T), want a *ForkDivergedError", err, err)
+			}
+			if div.Overlap != tc.wantOverlap {
+				t.Errorf("Overlap = %d, want %d", div.Overlap, tc.wantOverlap)
+			}
+			if div.TipSubject != subjectOf(tc.history[0].Message) {
+				t.Errorf("TipSubject = %q, want the tip's subject %q", div.TipSubject, subjectOf(tc.history[0].Message))
+			}
+		})
+	}
+}
+
+// TestPublish_DivergedForkIsRefusedBeforeAnyWrite is the end-to-end half:
+// the refusal must land while nothing has been sent.
+//
+// That is the entire value of the guard. The replay it replaces discovered
+// the same fact by POSTing to a public repository and reading GitLab's
+// rejection — and on a change set whose first commit had genuinely new work,
+// that POST would have succeeded and duplicated a public commit with no way
+// to undo it.
+func TestPublish_DivergedForkIsRefusedBeforeAnyWrite(t *testing.T) {
+	writeTokenFile(t, testToken, 0o600)
+
+	fx := seededFixture()
+	cs := threeCommitChangeSet()
+
+	// Put every one of the change set's commits on the branch (history is
+	// oldest first), then a foreign commit on top of them — the shape
+	// observed on issue/dubbot-3622063.
+	for _, c := range cs.Commits {
+		paths := make([]string, 0, len(c.Actions))
+		for _, a := range c.Actions {
+			paths = append(paths, a.Path)
+			// Seeded into the tree as well, so that a replay really would
+			// hit "A file with this name already exists" on commit 1 — the
+			// production symptom. Without this the fake would happily
+			// re-create the files and the old code would look like it
+			// succeeded, which is a softer failure than the real one.
+			fx.files[a.Path] = true
+		}
+		fx.history = append(fx.history, fixtureCommit{
+			id:          fixtureSHA(len(fx.history) + 1),
+			message:     c.Message,
+			authorName:  c.AuthorName,
+			authorEmail: c.AuthorEmail,
+			paths:       paths,
+		})
+	}
+	fx.history = append(fx.history, fixtureCommit{
+		id:          fixtureSHA(len(fx.history) + 1),
+		message:     "Issue #3619578 by someone-else: a canonical base branch commit",
+		authorName:  "Someone Else",
+		authorEmail: "else@example.com",
+	})
+
+	dest := fx.destination(t)
+	p := fx.publisher(t)
+
+	res, err := p.Publish(context.Background(), dest, cs)
+
+	var div *ForkDivergedError
+	if !errors.As(err, &div) {
+		t.Fatalf("Publish error = %v (%T), want a *ForkDivergedError", err, err)
+	}
+	if _, raw := fx.snapshotCommitRequests(); len(raw) != 0 {
+		t.Errorf("%d commit POST(s) were sent; a diverged fork must be refused before any write", len(raw))
+	}
+	if res.MergeRequest != nil {
+		t.Error("a merge request was touched despite the refusal")
+	}
+	// The tip is the actionable part: it names what has to come off.
+	if !strings.Contains(div.Error(), "Issue #3619578") {
+		t.Errorf("refusal does not name the offending tip commit:\n%s", div.Error())
 	}
 }
 
