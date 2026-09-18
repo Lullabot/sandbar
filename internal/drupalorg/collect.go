@@ -378,16 +378,21 @@ var (
 )
 
 // MergeCommitsError reports that the range to publish contains merge
-// commits, which publication cannot carry, and names them.
+// commits, which sand cannot publish, and names them.
 //
 // It is a typed error rather than a formatted string because the two
 // surfaces phrase their own wrapping differently and a test should be able
 // to assert the condition without matching prose — the same reason
-// ErrForkMoved exists in publish.go. The guidance it carries is the
-// actionable half: a content-API replay has no way to express a second
-// parent, so a branch that has the destination branch merged INTO it cannot
-// be published as-is, and rebasing is the operation that produces a
-// publishable shape.
+// ErrForkMoved exists in publish.go.
+//
+// Its Error() text is kept SHORT on purpose, and the why-it-cannot-work
+// explanation (a content-API replay has no way to express a second parent —
+// see collectScriptTemplate's step 1a) deliberately does not appear in it.
+// This string is read in the Landing pane's issue prompt, a few lines of a
+// terminal, where the actionable half is the only half that earns the room:
+// which commits are in the way, and that rebasing rather than merging is
+// what produces a publishable branch. The reasoning belongs in the docs
+// (docs/using-sand/drupalorg-publishing.md) and in these comments.
 type MergeCommitsError struct {
 	// SHAs are the merge commits found in the range, as the guest reported
 	// them. They are the guest's own output and so are only ever printed,
@@ -397,10 +402,8 @@ type MergeCommitsError struct {
 
 func (e *MergeCommitsError) Error() string {
 	return fmt.Sprintf(
-		"drupalorg: the range to publish contains %d merge commit(s) (%s), which publication cannot carry: "+
-			"each commit is replayed through drupal.org's content API, which lands one commit per call from a list "+
-			"of file actions and has no way to express a merge's second parent. "+
-			"Rebase this branch onto the canonical project's base branch instead of merging that branch into it, then publish again",
+		"drupalorg: the range to publish contains %d merge commit(s) (%s), which sand cannot publish. "+
+			"Rebase this branch on the upstream branch instead of merging, and then try publishing again",
 		len(e.SHAs), strings.Join(e.SHAs, ", "),
 	)
 }
