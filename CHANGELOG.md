@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/Lullabot/sandbar/compare/v0.10.0...v0.10.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to c615ff2 ([#182](https://github.com/Lullabot/sandbar/issues/182)) ([f48c402](https://github.com/Lullabot/sandbar/commit/f48c402d193579d41e1c21b13d59ca03f7693f2b))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260913004009-c615ff2f7805 ([#183](https://github.com/Lullabot/sandbar/issues/183)) ([d7a9c2a](https://github.com/Lullabot/sandbar/commit/d7a9c2ae6ce377a446b95b3ed9cc209933f5d08a))
+* **drupalorg,ui:** post-publish reset doens't trigger if the checkout is dirty ([#185](https://github.com/Lullabot/sandbar/issues/185)) ([f4fff8e](https://github.com/Lullabot/sandbar/commit/f4fff8e2d53cba3d449850bbca44c885a0d39640))
+
 ## [0.10.0](https://github.com/Lullabot/sandbar/compare/v0.9.1...v0.10.0) (2026-09-14)
 
 
