@@ -2015,6 +2015,69 @@ func TestLandingPublishCollectsAgainstTheCanonicalBaseBranch(t *testing.T) {
 	}
 }
 
+// TestLandingPublishErrorWraps pins that a resolve failure is WRAPPED to the
+// pane rather than running off the right edge.
+//
+// It matters most for the refusal this branch adds: the merge-commit message
+// opens by naming SHAs and closes with the instruction to rebase, so a
+// single unwrapped line showed the part the user can do nothing about and
+// lost the part they can. Nothing else in this pane has that shape — a
+// clipped change set is one `sand publish` away from being read in full,
+// while this text is the only account of why nothing happened.
+func TestLandingPublishErrorWraps(t *testing.T) {
+	m, v, fakeDO := landingPublishForkFixture(t)
+	longErr := "drupalorg: the range to publish contains 1 merge commit(s) " +
+		"(36c84f849059d55300a7f1ae082df37b02bd4218), which sand cannot publish. " +
+		"Rebase this branch on the upstream branch instead of merging, and then try publishing again"
+	fakeDO.baseTipErr = errors.New(longErr)
+
+	m.openLandingPane(v)
+	next, cmd := m.updateLanding(runeKey('o'))
+	m = next.(model)
+	l := newTeaLoop(t, m)
+	l.exec(cmd)
+	l.pump("the publish flow to park at the issue prompt", func(m model) bool {
+		return m.landing.publish != nil && m.landing.publish.stage == publishAskIssue && m.landing.publish.err != ""
+	})
+	m = l.m
+
+	view := m.landingPublishView()
+
+	// The error must not be what sets the pane's width. Asserted against the
+	// error's own length rather than against ContentWidth, because
+	// appStyle's padding means even a correctly wrapped pane is a few cells
+	// wider than the content budget — and the regression being pinned is an
+	// error hundreds of cells long, not a handful.
+	var widest int
+	for _, line := range strings.Split(view, "\n") {
+		if w := ansi.StringWidth(line); w > widest {
+			widest = w
+		}
+	}
+	if widest >= len(longErr) {
+		t.Errorf("widest rendered line is %d cells: the %d-cell error was not wrapped", widest, len(longErr))
+	}
+
+	// Wrapped, not truncated: the closing instruction must survive, and the
+	// error must occupy more than the one line it used to.
+	flat := strings.Join(strings.Fields(ansi.Strip(view)), " ")
+	if !strings.Contains(flat, "try publishing again") {
+		t.Errorf("the error's closing instruction was lost; view:\n%s", view)
+	}
+	// And it really is spread over extra rows rather than merely fitting:
+	// the same pane showing a one-word error is shorter by more than one
+	// line. Comparing two renders avoids guessing at how appStyle's padding
+	// and the footer contribute to an absolute line count.
+	m.landing.publish.err = "nope"
+	short := m.landingPublishView()
+	longLines := strings.Count(view, "\n")
+	shortLines := strings.Count(short, "\n")
+	if longLines <= shortLines {
+		t.Errorf("pane is %d lines with the long error and %d with a short one: the error is not wrapping onto extra rows",
+			longLines, shortLines)
+	}
+}
+
 // TestLandingPublishStopsWhenTheBaseTipCannotBeResolved pins the "refuse,
 // don't guess" half in the pane: without the canonical base branch there is
 // no way to tell this contributor's commits from the base branch's own, so
