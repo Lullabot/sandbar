@@ -804,8 +804,17 @@ confirms only the publish; without a terminal the command to run is printed
 instead. See
 [Your checkout after a publish](drupalorg-publishing.md#your-checkout-after-a-publish).
 
-If `PATH` has no local commits ahead of its upstream branch, `sand publish`
-says so and exits cleanly without prompting for anything.
+If `PATH` has no commits beyond what the fork branch already holds and what
+the canonical project's base branch already carries, `sand publish` says so
+and exits cleanly without prompting for anything. Resolving the destination
+is what tells it which base branch that is, so this answer now costs one
+anonymous drupal.org read rather than coming straight off the guest.
+
+If the range to publish contains a **merge commit**, `sand publish` refuses
+it outright, names the merge, and publishes nothing — a merge cannot be
+expressed through the content API. Rebase onto the project's base branch
+instead of merging that branch into yours; see
+[Rebase onto the base branch](drupalorg-publishing.md#rebase-onto-the-base-branch-dont-merge-it-in).
 
 The printed report lists every change-set commit in order — its status
 (`landed`, `already-present`, `failed`, or `not-attempted`) and its SHA on

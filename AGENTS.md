@@ -622,6 +622,42 @@ every bullet, not the constraint itself.
   `internal/drupalorg/publish.go`'s file doc comment for why a failed
   replay leaves earlier commits public with no rollback, and why a re-run
   is the only recovery.
+- **A change set is collected against TWO exclusions, and the second one is
+  the canonical project's — never the fork's
+  (`internal/drupalorg/collect.go`).** `BuildCollectCommand` takes
+  `forkBase` (the checkout's upstream tracking ref) *and* `projectBase` (the
+  tip of `ForkedFromProject`'s default branch, read host-side by
+  `Client.BranchTip`), and the guest lists `HEAD --not "$forkBase"
+  "$projectBase"`. Excluding only the fork branch answers "what has not
+  reached the fork", which stops being the same set as "what this
+  contributor wrote" the moment the base branch enters `HEAD`'s ancestry —
+  a back-merge or a rebase — and the replay then lands other people's
+  already-public commits on the merge request under the PAT owner's name.
+  That shipped, and produced a real merge request; `collect_integration_test.go`
+  reproduces both shapes against real git repositories and is the guard, so
+  do not "simplify" the range back to `"<base>..HEAD"`. The second exclusion
+  must come from the canonical parent: an issue fork's own copy of the base
+  branch is not auto-synced and in practice never synced by hand, so it
+  names whatever commit the branch sat at when the fork was created.
+  Because `projectBase` is host-resolved and nothing in this flow fetches,
+  the guest may not hold that object — the script probes with `cat-file -e`
+  first and refuses with an actionable message rather than letting
+  `rev-list` die on "bad object".
+  This is also why **destination resolution now runs BEFORE collection** in
+  both surfaces (`cmd/sand/publish.go`'s `doPublish`, `internal/ui/landing.go`'s
+  `handleLandingFork` → `collectCmd`): the parent project is not known any
+  earlier. The cost is that "nothing to publish" now takes one anonymous
+  drupal.org read to discover; that is deliberate, and
+  `TestDoPublishNothingToPublishSkipsConfirmation` documents it.
+- **A merge commit in the range is refused, never skipped
+  (`MergeCommitsError`).** The content API lands one commit per call from a
+  list of file actions and has no field for a second parent, so a merge is
+  not something publication can reproduce. `--no-merges` alone used to drop
+  it silently and publish whatever remained. The guest now emits `merge=`
+  lines and stops; `ParseCollect` turns them into a `*MergeCommitsError`
+  naming the SHAs and telling the developer to rebase. Keep that decision in
+  Go — the guest reports, the host decides — and keep the refusal, because
+  "publish a history that never existed" is the failure it exists to prevent.
   A second, unrelated follow-up surfaced while investigating the withheld
   escape hatch above: a linked git worktree silently inherits its main
   clone's `GH_TOKEN`, because git matches `includeIf "gitdir:…"` against

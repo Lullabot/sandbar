@@ -21,6 +21,15 @@ type fakeCollector struct {
 	err    error
 	calls  int
 
+	// resolveErr drives the (now separate) ResolveTarget step, and
+	// gotForkBase/gotProjectBase record the two bases Collect was actually
+	// asked for — the only way to observe that doPublish excludes against
+	// the canonical project's base branch and not just the fork's branch.
+	resolveErr     error
+	resolveCalls   int
+	gotForkBase    string
+	gotProjectBase string
+
 	// syncStatus/syncErr drive Fetch; adoptErr drives Adopt. The zero
 	// SyncStatus is "not diverged", which is what the tests that predate the
 	// post-publish sync want: nothing to report, nothing offered.
@@ -51,9 +60,15 @@ func divergedSync() drupalorg.SyncStatus {
 	}
 }
 
-func (f *fakeCollector) Collect(context.Context, vm.VM, string) (drupalorg.RemoteTarget, drupalorg.ChangeSet, error) {
+func (f *fakeCollector) ResolveTarget(context.Context, vm.VM, string) (drupalorg.RemoteTarget, string, error) {
+	f.resolveCalls++
+	return f.target, "origin/foo-1", f.resolveErr
+}
+
+func (f *fakeCollector) Collect(_ context.Context, _ vm.VM, _, forkBase, projectBase string) (drupalorg.ChangeSet, error) {
 	f.calls++
-	return f.target, f.cs, f.err
+	f.gotForkBase, f.gotProjectBase = forkBase, projectBase
+	return f.cs, f.err
 }
 
 // fakeDestPublisher is a destPublisher double that records every call and
@@ -74,12 +89,32 @@ type fakeDestPublisher struct {
 	// used the ISSUE it was given or the one read off the checkout's remote.
 	gotModule string
 	gotIssue  int
+
+	// baseTip/baseTipErr drive ResolveBaseTip; gotBaseTipFor records the
+	// Destination it was handed, which is how a test observes that the tip
+	// is read off the canonical PARENT rather than the fork.
+	baseTip       string
+	baseTipErr    error
+	baseTipCalls  int
+	gotBaseTipFor drupalorg.Destination
 }
 
 func (f *fakeDestPublisher) ResolveDestination(_ context.Context, module string, issue int, _ bool) (drupalorg.Destination, error) {
 	f.resolveCalls++
 	f.gotModule, f.gotIssue = module, issue
 	return f.dest, f.resolveErr
+}
+
+func (f *fakeDestPublisher) ResolveBaseTip(_ context.Context, dest drupalorg.Destination) (string, error) {
+	f.baseTipCalls++
+	f.gotBaseTipFor = dest
+	if f.baseTip == "" && f.baseTipErr == nil {
+		// The shape a real tip always has, so tests that do not care about
+		// this step still hand Collect something a real BuildCollectCommand
+		// would accept.
+		return "0123456789abcdef0123456789abcdef01234567", nil
+	}
+	return f.baseTip, f.baseTipErr
 }
 
 func (f *fakeDestPublisher) Publish(context.Context, drupalorg.Destination, drupalorg.ChangeSet) (drupalorg.Result, error) {
@@ -219,7 +254,17 @@ func TestDoPublishReportsPartialFailureFromResult(t *testing.T) {
 	}
 }
 
-func TestDoPublishNothingToPublishSkipsConfirmationAndDestination(t *testing.T) {
+// TestDoPublishNothingToPublishSkipsConfirmation pins what an empty change
+// set does NOT do: no confirmation is printed and nothing is published.
+//
+// It deliberately no longer asserts that the destination went unresolved.
+// Collection excludes the canonical project's base branch as well as the
+// fork branch, and neither is known until the destination has been resolved,
+// so resolution now necessarily runs first — a checkout with nothing to
+// publish pays for one anonymous drupal.org read before being told so. That
+// is the documented cost of the reordering, not a regression; the line that
+// matters is that the PUBLISH is still never reached.
+func TestDoPublishNothingToPublishSkipsConfirmation(t *testing.T) {
 	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "foo"}, cs: drupalorg.ChangeSet{}}
 	dp := &fakeDestPublisher{dest: sampleDestination()}
 
@@ -228,11 +273,69 @@ func TestDoPublishNothingToPublishSkipsConfirmationAndDestination(t *testing.T) 
 	if err != nil {
 		t.Fatalf("doPublish: unexpected error with nothing to publish: %v", err)
 	}
-	if dp.resolveCalls != 0 || dp.publishCalls != 0 {
-		t.Errorf("destPublisher called (resolve=%d, publish=%d), want neither called when there is nothing to publish", dp.resolveCalls, dp.publishCalls)
+	if dp.publishCalls != 0 {
+		t.Errorf("destPublisher.Publish called %d time(s), want none when there is nothing to publish", dp.publishCalls)
 	}
 	if !strings.Contains(stdout.String(), "nothing to publish") {
 		t.Errorf("doPublish stdout = %q, want a nothing-to-publish notice", stdout.String())
+	}
+}
+
+// TestDoPublishCollectsAgainstBothBases is the regression guard for the bug
+// this reordering exists to fix: a change set must be collected against the
+// canonical parent project's base branch as well as the fork branch.
+//
+// With only the fork branch excluded, a branch that has the destination
+// branch in its ancestry — back-merged or rebased onto a newer base — offers
+// up that base branch's own commits as unpublished work, and publication
+// replays other contributors' commits onto the merge request under the
+// publishing account's name.
+func TestDoPublishCollectsAgainstBothBases(t *testing.T) {
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "dubbot", Issue: 3619578}, cs: sampleChangeSet()}
+	dp := &fakeDestPublisher{dest: sampleDestination(), baseTip: "abc0123456789abcdef0123456789abcdef01234"}
+
+	var stdout strings.Builder
+	if err := doPublish(context.Background(), &stdout, strings.NewReader("y\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 0, false, false); err != nil {
+		t.Fatalf("doPublish: %v", err)
+	}
+
+	if dp.baseTipCalls != 1 {
+		t.Errorf("ResolveBaseTip called %d time(s), want exactly 1", dp.baseTipCalls)
+	}
+	// Read off the destination, whose ParentPath/ParentBranch name the
+	// canonical project — never the fork, whose own copy of the base branch
+	// nothing syncs.
+	if got := dp.gotBaseTipFor.ParentPath; got != sampleDestination().ParentPath {
+		t.Errorf("ResolveBaseTip asked about %q, want the canonical parent %q", got, sampleDestination().ParentPath)
+	}
+	if coll.gotProjectBase != dp.baseTip {
+		t.Errorf("Collect got projectBase %q, want the resolved base tip %q", coll.gotProjectBase, dp.baseTip)
+	}
+	if coll.gotForkBase == "" {
+		t.Error("Collect got an empty forkBase; the fork branch must still be excluded alongside the canonical base")
+	}
+}
+
+// TestDoPublishStopsWhenBaseTipCannotBeResolved pins the "refuse, don't
+// guess" half. Without the canonical base branch there is no way to tell
+// this contributor's commits from the base branch's own, and both fallbacks
+// are worse than stopping: excluding nothing republishes other people's
+// work, and excluding the fork's unsynced copy trusts a stale snapshot.
+func TestDoPublishStopsWhenBaseTipCannotBeResolved(t *testing.T) {
+	baseErr := errors.New("no default branch")
+	coll := &fakeCollector{target: drupalorg.RemoteTarget{Module: "dubbot", Issue: 3619578}, cs: sampleChangeSet()}
+	dp := &fakeDestPublisher{dest: sampleDestination(), baseTipErr: baseErr}
+
+	var stdout strings.Builder
+	err := doPublish(context.Background(), &stdout, strings.NewReader("y\n"), true, coll, dp, vm.VM{Name: "foo"}, "/path", 0, false, false)
+	if err == nil || !errors.Is(err, baseErr) {
+		t.Fatalf("doPublish error = %v, want it to wrap %v", err, baseErr)
+	}
+	if coll.calls != 0 {
+		t.Errorf("Collect called %d time(s), want none once the canonical base could not be resolved", coll.calls)
+	}
+	if dp.publishCalls != 0 {
+		t.Errorf("Publish called %d time(s), want none", dp.publishCalls)
 	}
 }
 
