@@ -220,19 +220,40 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 
 	// drupal.org creates the issue branch alongside the fork, so it almost
 	// always exists already and start_branch must then be omitted — sending
-	// it against an existing branch is an error. The uncommon case starts
-	// from the fork's own default_branch, which GitLab sets to the branch
-	// the fork was taken from.
+	// it against an existing branch is an error.
+	//
+	// The uncommon case creates it from the CANONICAL PARENT's base branch,
+	// via start_project, and NOT from the fork's own default_branch. That
+	// was the original behaviour and it is the same defect collect.go's
+	// second exclusion exists to fix, one layer over: GitLab points a new
+	// fork's default_branch at the branch it was taken from and then never
+	// moves it again, and nothing on drupal.org syncs an issue fork's base
+	// branch. A measured example from the bug that prompted this:
+	// issue/dubbot-3622063's 2.x sat at 2026-08-27 while project/dubbot's
+	// 2.x was at 2026-09-17, three weeks ahead.
+	//
+	// Creating the branch from that snapshot and then replaying commits
+	// collected against the CURRENT base writes today's file contents onto a
+	// three-week-old tree, so every file touched by both quietly reverts the
+	// upstream work in between — a wrong merge request that looks right,
+	// which is worse than the loud failure it replaced.
 	branchExists, err := p.client.BranchExists(ctx, dest.ForkPath, dest.Branch)
 	if err != nil {
 		return res, fmt.Errorf("drupalorg: checking whether %q exists on %q: %w", dest.Branch, dest.ForkPath, err)
 	}
 	var startBranch string
+	var startProject int
 	if !branchExists {
-		if fork.DefaultBranch == "" {
-			return res, fmt.Errorf("drupalorg: branch %q does not exist on %q and the fork reports no default_branch to create it from", dest.Branch, dest.ForkPath)
+		// Refused rather than quietly falling back to fork.DefaultBranch.
+		// The fallback is precisely the stale-base behaviour above, and a
+		// silent revert of other people's work is not a thing to do on
+		// anyone's behalf — the same stance ResolveBaseTip takes when
+		// collection cannot name a canonical base either.
+		if dest.ParentBranch == "" {
+			return res, fmt.Errorf("drupalorg: branch %q does not exist on %q and its canonical parent %q reports no base branch to create it from", dest.Branch, dest.ForkPath, dest.ParentPath)
 		}
-		startBranch = fork.DefaultBranch
+		startBranch = dest.ParentBranch
+		startProject = dest.ParentID
 	}
 
 	var history []remoteCommit
@@ -243,6 +264,9 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 		}
 	}
 	present := alreadyLandedCount(history, cs.Commits)
+	if err := checkForkDiverged(history, cs.Commits, present); err != nil {
+		return res, err
+	}
 	pending := cs.Commits[present:]
 	for i := range present {
 		res.Commits = append(res.Commits, CommitResult{
@@ -317,7 +341,7 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 			return res, err
 		}
 
-		sha, err := p.postCommit(ctx, dest, commit, startBranch, lastCommits, tok)
+		sha, err := p.postCommit(ctx, dest, commit, startBranch, startProject, lastCommits, tok)
 		if err != nil {
 			failed := CommitResult{
 				Index:   index,
@@ -353,8 +377,12 @@ func (p *Publisher) Publish(ctx context.Context, dest Destination, cs ChangeSet)
 				lastCommits[a.PreviousPath] = sha
 			}
 		}
-		// The branch exists from here on, whether or not it did before.
+		// The branch exists from here on, whether or not it did before, so
+		// the creation-only fields must stop being sent: start_branch
+		// against an existing branch is an error, and start_project is
+		// meaningless without it.
 		startBranch = ""
+		startProject = 0
 	}
 
 	if existingMR != nil {
@@ -613,6 +641,79 @@ func identityOf(message, authorName, authorEmail string) commitIdentity {
 // OTHER kind of divergence — a branch someone else has pushed to, a change
 // set derived against stale state — is caught by last_commit_id instead, and
 // surfaces as ErrForkMoved rather than as a silent skip.
+// ForkDivergedError reports that the fork branch holds commits from this
+// change set but does not END with them, so resumption cannot line the two
+// up and a replay would re-send work the branch already has.
+//
+// # The failure it exists to prevent
+//
+// alreadyLandedCount matches an ordered run anchored at the branch TIP (see
+// its doc comment for why that anchoring is the right identity rule). The
+// cost of anchoring is that ONE foreign commit at the tip defeats the match
+// completely: every k fails, resumption reports nothing already landed, and
+// the replay starts again from commit 1. That replay is not merely wasteful,
+// it is doomed — the first commit's create action names a file the branch
+// already has, and GitLab answers "A file with this name already exists".
+//
+// That is a real, observed failure, and the shape is worth recording. An
+// earlier bug (see collect.go's second exclusion) republished a canonical
+// base-branch commit onto an issue branch; it became the branch tip; every
+// subsequent publish of that issue then tried a full replay and died on
+// commit 1, with all four of its commits already public.
+//
+// Left to the replay, that costs an unrevocable public write attempt to
+// discover. Detected here it costs nothing: history is already in hand, no
+// credential has been read, and nothing has been sent.
+//
+// # Why overlap, and not just "the tip did not match"
+//
+// present == 0 is perfectly normal on a first publish onto a branch that
+// carries other work, so it cannot be the signal on its own. The signal is
+// present == 0 AND some of this change set is nonetheless already on the
+// branch — which is only explicable as a branch that diverged after an
+// earlier publish. The comparison window is bounded to what branchCommits
+// fetched (len(commits)), so an old coincidence deep in the fork's history
+// cannot reach it.
+type ForkDivergedError struct {
+	// TipSubject is the subject of the commit at the branch tip — the one
+	// that is not part of this change set, and so the thing to remove.
+	TipSubject string
+	// Overlap is how many of the change set's commits were found on the
+	// branch anyway.
+	Overlap int
+}
+
+func (e *ForkDivergedError) Error() string {
+	return fmt.Sprintf(
+		"drupalorg: the fork branch's newest commit (%q) is not part of this change set, but %d of its commits are already on the branch. "+
+			"Republishing would duplicate them and fail partway. Force-push the branch back past that commit, or delete the branch and publish again",
+		e.TipSubject, e.Overlap,
+	)
+}
+
+// checkForkDiverged refuses a publish whose change set overlaps the fork
+// branch without resuming against it. See ForkDivergedError.
+func checkForkDiverged(history []remoteCommit, commits []Commit, present int) error {
+	if present > 0 || len(history) == 0 || len(commits) == 0 {
+		return nil
+	}
+
+	onBranch := make(map[commitIdentity]bool, len(history))
+	for _, h := range history {
+		onBranch[identityOf(h.Message, h.AuthorName, h.AuthorEmail)] = true
+	}
+	overlap := 0
+	for _, c := range commits {
+		if onBranch[identityOf(c.Message, c.AuthorName, c.AuthorEmail)] {
+			overlap++
+		}
+	}
+	if overlap == 0 {
+		return nil // an ordinary first publish onto a branch holding other work
+	}
+	return &ForkDivergedError{TipSubject: subjectOf(history[0].Message), Overlap: overlap}
+}
+
 func alreadyLandedCount(history []remoteCommit, commits []Commit) int {
 	n := min(len(history), len(commits))
 
@@ -657,8 +758,13 @@ type commitAction struct {
 // because sending it against an existing branch is an error, and the branch
 // usually exists.
 type commitRequest struct {
-	Branch        string         `json:"branch"`
-	StartBranch   string         `json:"start_branch,omitempty"`
+	Branch      string `json:"branch"`
+	StartBranch string `json:"start_branch,omitempty"`
+	// StartProject names the project StartBranch lives on, so a missing
+	// branch is created from the CANONICAL PARENT's base branch rather than
+	// from the fork's own unsynced copy of it. omitempty, so it is absent
+	// on every call that is not creating the branch.
+	StartProject  int            `json:"start_project,omitempty"`
 	CommitMessage string         `json:"commit_message"`
 	AuthorName    string         `json:"author_name,omitempty"`
 	AuthorEmail   string         `json:"author_email,omitempty"`
@@ -667,10 +773,11 @@ type commitRequest struct {
 
 // postCommit replays one commit as one authenticated call and returns the
 // commit id the API assigned it.
-func (p *Publisher) postCommit(ctx context.Context, dest Destination, commit Commit, startBranch string, lastCommits map[string]string, token string) (string, error) {
+func (p *Publisher) postCommit(ctx context.Context, dest Destination, commit Commit, startBranch string, startProject int, lastCommits map[string]string, token string) (string, error) {
 	body := commitRequest{
 		Branch:        dest.Branch,
 		StartBranch:   startBranch,
+		StartProject:  startProject,
 		CommitMessage: commit.Message,
 		AuthorName:    commit.AuthorName,
 		AuthorEmail:   commit.AuthorEmail,

@@ -554,6 +554,71 @@ every bullet, not the constraint itself.
   `internal/drupalorg/publish.go`'s file doc comment for why a failed
   replay leaves earlier commits public with no rollback, and why a re-run
   is the only recovery.
+- **A change set is collected against TWO exclusions, and the second one is
+  the canonical project's — never the fork's
+  (`internal/drupalorg/collect.go`).** `BuildCollectCommand` takes
+  `forkBase` (the checkout's upstream tracking ref) *and* `projectBase` (the
+  tip of `ForkedFromProject`'s default branch, read host-side by
+  `Client.BranchTip`), and the guest lists `HEAD --not "$forkBase"
+  "$projectBase"`. Excluding only the fork branch answers "what has not
+  reached the fork", which stops being the same set as "what this
+  contributor wrote" the moment the base branch enters `HEAD`'s ancestry —
+  a back-merge or a rebase — and the replay then lands other people's
+  already-public commits on the merge request under the PAT owner's name.
+  That shipped, and produced a real merge request; `collect_integration_test.go`
+  reproduces both shapes against real git repositories and is the guard, so
+  do not "simplify" the range back to `"<base>..HEAD"`. The second exclusion
+  must come from the canonical parent: an issue fork's own copy of the base
+  branch is not auto-synced and in practice never synced by hand, so it
+  names whatever commit the branch sat at when the fork was created.
+  Because `projectBase` is host-resolved and nothing in this flow fetches,
+  the guest may not hold that object — the script probes with `cat-file -e`
+  first and refuses with an actionable message rather than letting
+  `rev-list` die on "bad object".
+  This is also why **destination resolution now runs BEFORE collection** in
+  both surfaces (`cmd/sand/publish.go`'s `doPublish`, `internal/ui/landing.go`'s
+  `handleLandingFork` → `collectCmd`): the parent project is not known any
+  earlier. The cost is that "nothing to publish" now takes one anonymous
+  drupal.org read to discover; that is deliberate, and
+  `TestDoPublishNothingToPublishSkipsConfirmation` documents it.
+- **A missing issue branch is created from the CANONICAL PARENT, not the
+  fork's default branch (`publish.go`'s `startBranch`/`startProject`).** This
+  is the same defect as the collection one above, one layer over, and it
+  shipped for the same reason: GitLab pins a new fork's `default_branch` at
+  the commit it was forked from and never moves it, and nothing on
+  drupal.org syncs an issue fork's base branch. Measured while fixing it:
+  `issue/dubbot-3622063`'s `2.x` was at 2026-08-27 while `project/dubbot`'s
+  `2.x` was at 2026-09-17. Creating the branch from that snapshot and then
+  replaying commits collected against the CURRENT base writes today's
+  content onto a three-week-old tree, reverting the upstream delta in every
+  file both touched — a wrong merge request that looks right. An absent
+  `ParentBranch` is refused rather than falling back. Note the test fixture
+  had `forkDefault` and `parentBranch` set to the same string, so no test
+  could tell the two apart; they are now deliberately different ("10.x" vs
+  "11.x") and must stay so.
+- **A diverged fork branch is refused before the first write
+  (`checkForkDiverged`/`ForkDivergedError`).** `alreadyLandedCount` anchors
+  its ordered match at the branch TIP, so ONE foreign commit there defeats
+  the match at every length, resumption reports nothing landed, and the
+  replay restarts from commit 1 — which fails on `create` for a file the
+  branch already has ("A file with this name already exists"). Observed in
+  production on `issue/dubbot-3622063`, where all four commits were already
+  public. The guard fires on `present == 0` AND some change-set identity
+  already on the branch; `present == 0` alone is an ordinary first publish
+  onto a branch carrying other work and must NOT refuse. The comparison
+  window is whatever `branchCommits` fetched (`len(cs.Commits)`), which is
+  what keeps an old coincidence deep in the fork's history out of it. Do not
+  "improve" resumption by switching `alreadyLandedCount` to set membership —
+  its doc comment explains what the tip anchoring buys.
+- **A merge commit in the range is refused, never skipped
+  (`MergeCommitsError`).** The content API lands one commit per call from a
+  list of file actions and has no field for a second parent, so a merge is
+  not something publication can reproduce. `--no-merges` alone used to drop
+  it silently and publish whatever remained. The guest now emits `merge=`
+  lines and stops; `ParseCollect` turns them into a `*MergeCommitsError`
+  naming the SHAs and telling the developer to rebase. Keep that decision in
+  Go — the guest reports, the host decides — and keep the refusal, because
+  "publish a history that never existed" is the failure it exists to prevent.
   A second, unrelated follow-up surfaced while investigating the withheld
   escape hatch above: a linked git worktree silently inherits its main
   clone's `GH_TOKEN`, because git matches `includeIf "gitdir:…"` against

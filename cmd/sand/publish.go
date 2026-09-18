@@ -30,7 +30,21 @@ import (
 // returns canned values — no VM, no guest, no network. providerCollector
 // (below) is the only production implementation.
 type collector interface {
-	Collect(ctx context.Context, v vm.VM, path string) (target drupalorg.RemoteTarget, cs drupalorg.ChangeSet, err error)
+	// ResolveTarget reads what the checkout's own origin remote identifies
+	// and which ref its branch tracks. It is split from Collect because the
+	// change set can no longer be gathered without first knowing the
+	// canonical parent project: collection excludes that project's base
+	// branch as well as the fork branch (see drupalorg.BuildCollectCommand),
+	// and the parent is only known once this target has been resolved to a
+	// Destination. The two guest reads therefore now bracket an anonymous
+	// drupal.org read rather than running back to back.
+	ResolveTarget(ctx context.Context, v vm.VM, path string) (target drupalorg.RemoteTarget, forkBase string, err error)
+	// Collect gathers the commits to publish: those reachable from the
+	// checkout's HEAD but from neither forkBase (what the fork branch
+	// already holds) nor projectBase (the canonical project's base-branch
+	// tip). It refuses the whole change set — with *drupalorg.MergeCommitsError
+	// — when that range contains a merge commit.
+	Collect(ctx context.Context, v vm.VM, path, forkBase, projectBase string) (drupalorg.ChangeSet, error)
 	// Fetch refreshes the checkout's view of the fork branch just published
 	// to and reports how the two compare. It writes nothing in the guest —
 	// no branch moves, no file changes — which is what makes it safe to run
@@ -63,6 +77,12 @@ type destPublisher interface {
 	// allowOutsideIssueNS is threaded straight through to it — see
 	// NewDestination's doc comment for exactly what it permits.
 	ResolveDestination(ctx context.Context, module string, issue int, allowOutsideIssueNS bool) (drupalorg.Destination, error)
+	// ResolveBaseTip reads the tip of dest's canonical parent project's base
+	// branch (drupalorg.Client.BranchTip), anonymously. It is what collection
+	// excludes against, so that a branch which has that base branch in its
+	// ancestry — back-merged or rebased — does not offer up the base
+	// branch's own commits as this contributor's unpublished work.
+	ResolveBaseTip(ctx context.Context, dest drupalorg.Destination) (string, error)
 	// Publish replays cs onto dest — see drupalorg.Publisher.Publish.
 	Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error)
 }
@@ -255,13 +275,19 @@ func reorderPublishFlags(args []string) []string {
 // typed must still be a destination they can see before the confirmation
 // asks them to accept it.
 func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool, coll collector, dp destPublisher, v vm.VM, path string, issue int, yes, allowOutsideNS bool) error {
-	target, cs, err := coll.Collect(ctx, v, path)
+	// Resolution now runs BEFORE collection, which is a reordering rather
+	// than a reshuffle: collection excludes the canonical project's base
+	// branch as well as the fork branch, and the canonical project is only
+	// known once the fork has been resolved. The cost is that the cheap
+	// local "is there anything to publish at all" answer no longer comes
+	// first, so a checkout with nothing to publish now pays for one
+	// anonymous drupal.org read before being told so. That is the right way
+	// round: the alternative is collecting against the only base available
+	// this early — the fork branch alone — which is precisely the range
+	// that sweeps other contributors' commits in.
+	target, forkBase, err := coll.ResolveTarget(ctx, v, path)
 	if err != nil {
 		return err
-	}
-	if len(cs.Commits) == 0 {
-		fmt.Fprintln(stdout, "sand publish: nothing to publish — no local commits ahead of this checkout's upstream branch")
-		return nil
 	}
 
 	if issue <= 0 {
@@ -275,6 +301,21 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 	dest, err := dp.ResolveDestination(ctx, target.Module, issue, allowOutsideNS)
 	if err != nil {
 		return err
+	}
+
+	projectBase, err := dp.ResolveBaseTip(ctx, dest)
+	if err != nil {
+		return err
+	}
+
+	cs, err := coll.Collect(ctx, v, path, forkBase, projectBase)
+	if err != nil {
+		return err
+	}
+	if len(cs.Commits) == 0 {
+		fmt.Fprintf(stdout, "sand publish: nothing to publish — no local commits beyond what %s already holds and what %s's %s branch already carries\n",
+			dest.ForkPath, dest.ParentPath, dest.ParentBranch)
+		return nil
 	}
 
 	// ONE buffered reader for every prompt this command asks, built here and
@@ -496,6 +537,27 @@ func (l *liveDestPublisher) ResolveDestination(ctx context.Context, module strin
 	return dest.WithMergeRequestTitle(drupalorg.LookupIssueTitle(ctx, l.client, module, issue)), nil
 }
 
+// ResolveBaseTip reads the canonical parent's base-branch tip anonymously,
+// through the same credential-free Client the fork lookup uses.
+//
+// An absent ParentBranch is refused rather than worked around. It is the one
+// Destination field NewDestination deliberately does not require — a replay
+// onto the fork does not need a merge request to exist — but collection now
+// does need it, and the two plausible fallbacks are both worse than
+// stopping: excluding nothing republishes other contributors' commits, and
+// excluding the FORK's copy of the base branch trusts a snapshot nothing
+// syncs. Refusing names the gap instead of guessing past it.
+func (l *liveDestPublisher) ResolveBaseTip(ctx context.Context, dest drupalorg.Destination) (string, error) {
+	if dest.ParentBranch == "" {
+		return "", fmt.Errorf("sand publish: %s reports no default branch, so there is no canonical base branch to collect against; publication cannot tell your commits apart from the base branch's own", dest.ParentPath)
+	}
+	tip, err := l.client.BranchTip(ctx, dest.ParentPath, dest.ParentBranch)
+	if err != nil {
+		return "", fmt.Errorf("sand publish: reading %s's %s branch: %w", dest.ParentPath, dest.ParentBranch, err)
+	}
+	return tip, nil
+}
+
 // Publish delegates to the wrapped *drupalorg.Publisher — see its doc
 // comment in publish.go. No logic of its own.
 func (l *liveDestPublisher) Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error) {
@@ -523,34 +585,37 @@ type providerCollector struct {
 // logic beyond wiring those two calls to path's actual origin and upstream
 // lives here; deciding whether the derived issue is the one actually used is
 // doPublish's, not this collector's.
-func (c providerCollector) Collect(ctx context.Context, v vm.VM, path string) (drupalorg.RemoteTarget, drupalorg.ChangeSet, error) {
+func (c providerCollector) ResolveTarget(ctx context.Context, v vm.VM, path string) (drupalorg.RemoteTarget, string, error) {
 	out, err := provider.RunCaptured(ctx, c.p, v, path, drupalorg.BuildRemoteInfoCommand())
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: resolving %q's remote and upstream branch: %w", path, err)
+		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sand publish: resolving %q's remote and upstream branch: %w", path, err)
 	}
 	remoteURL, upstream, err := drupalorg.ParseRemoteInfo(out)
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, err
+		return drupalorg.RemoteTarget{}, "", err
 	}
 
 	target, err := drupalorg.TargetFromRemoteURL(remoteURL)
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: checkout %q: %w", path, err)
+		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sand publish: checkout %q: %w", path, err)
 	}
+	return target, upstream, nil
+}
 
-	script, err := drupalorg.BuildCollectCommand(upstream)
+func (c providerCollector) Collect(ctx context.Context, v vm.VM, path, forkBase, projectBase string) (drupalorg.ChangeSet, error) {
+	script, err := drupalorg.BuildCollectCommand(forkBase, projectBase)
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
 	}
 	collected, err := provider.RunCaptured(ctx, c.p, v, path, script)
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: collecting changes from %q: %w", path, err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: collecting changes from %q: %w", path, err)
 	}
 	cs, err := drupalorg.ParseCollect(string(collected))
 	if err != nil {
-		return drupalorg.RemoteTarget{}, drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
 	}
-	return target, cs, nil
+	return cs, nil
 }
 
 // Fetch refreshes path's view of the fork branch and parses the comparison.

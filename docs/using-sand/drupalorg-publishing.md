@@ -64,16 +64,9 @@ you a narrower one.
 For a checkout `PATH`, publication:
 
 1. Reads the checkout's origin remote and upstream branch to work out which
-   module it belongs to, **which issue it belongs to** (see
-   [Where the issue number comes from](#where-the-issue-number-comes-from)),
-   and how many local commits are ahead.
-2. Collects those commits — in order, oldest first — as an inert list of
-   commit messages, authors, and file actions (create/update/delete/move,
-   with resulting content). **Merge commits are skipped**: a merge carries
-   no file changes of its own, and the destination API this uses has no way
-   to express a second parent — the changes a merge brought in still travel,
-   as the ordinary commits that made them.
-3. Resolves where those commits go: the drupal.org **issue fork** for the
+   module it belongs to and **which issue it belongs to** (see
+   [Where the issue number comes from](#where-the-issue-number-comes-from)).
+2. Resolves where the commits will go: the drupal.org **issue fork** for the
    issue number (`issue/<module>-<nid>`), read anonymously, with
    its canonical parent project (e.g. `project/<module>`) derived from that
    fork's own `forked_from_project` — never guessed, and never something the
@@ -83,6 +76,15 @@ For a checkout `PATH`, publication:
    --allow-outside-issue-namespace`) is available but is not the normal
    path, and its own guard rail exists for exactly the reason this whole
    design does.
+3. Collects **your** commits — in order, oldest first — as an inert list of
+   commit messages, authors, and file actions (create/update/delete/move,
+   with resulting content). "Yours" means reachable from the checkout's
+   `HEAD` but from *neither* what the fork branch already holds *nor* what
+   the canonical project's base branch already carries. Both exclusions
+   matter: see
+   [Rebase onto the base branch — don't merge it in](#rebase-onto-the-base-branch-dont-merge-it-in).
+   A range containing a **merge commit is refused outright**, with the merge
+   named, rather than published with the merge silently dropped.
 4. Shows you a **confirmation**: the destination and branch, the merge
    request's target and **title** (see
    [How the merge request is titled](#how-the-merge-request-is-titled)), and
@@ -251,7 +253,50 @@ Note that this only ever moves you **onto** the fork. The fork branch can
 only grow (see [There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows)),
 so there is no version of this that rewrites drupal.org to match you.
 
-## Four things you'll otherwise learn the hard way
+## Five things you'll otherwise learn the hard way
+
+### Rebase onto the base branch — don't merge it in
+
+When your issue branch falls behind the project's development branch, **rebase
+onto it**. Do not merge it into your branch:
+
+```console
+$ git fetch https://git.drupalcode.org/project/<module>.git 2.x
+$ git rebase FETCH_HEAD
+```
+
+Merging the destination branch back into your own is a normal enough habit
+elsewhere, and on a forge that takes a `git push` it costs you nothing. Here
+it cannot work, for a reason that is structural rather than fussy: a merge
+commit's entire content is *"these two histories join here"*, and publication
+lands one commit at a time through an API that takes a list of file actions
+and has no field for a second parent. There is nothing for the merge to
+become. `sand` therefore **refuses** a range containing one, names the merge
+commit, and publishes nothing — rather than dropping the merge and publishing
+whatever is left, which is what produced merge requests full of other
+people's commits.
+
+The other half of the same rule is invisible until it bites: publication
+collects the commits reachable from your `HEAD` that are on **neither** the
+fork branch **nor the canonical project's base branch**. That second
+exclusion is why a rebase is safe. Without it, every base-branch commit your
+rebase moved you onto would look like unpublished work of yours and be
+replayed onto the merge request under your account.
+
+That exclusion is read from the **canonical project** (`project/<module>`),
+never from your issue fork's own copy of the base branch. A fork's base
+branch is not auto-synced and in practice nobody syncs it by hand, so it
+names whatever commit the branch sat at when the fork was created — which
+would put every base-branch commit since then back in scope.
+
+One consequence worth knowing: your checkout has to actually *have* the
+canonical project's base-branch tip as a local object, which the `git fetch`
+above is what gives you. If it doesn't, publication stops and says so rather
+than guessing.
+
+Rebasing is the right move **before your first publish**. Once commits are
+public on the fork, rewriting local history has its own problems — see
+[There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows).
 
 ### Replay, not squash — your local history is what lands
 
@@ -315,15 +360,43 @@ Once commits are public on the fork, treat that history as fixed and add to
 it rather than rewriting it.
 
 If you genuinely need published history changed — a secret committed by
-mistake, a series too tangled to live with — that is out-of-band work this
-tool deliberately does not do for you. Do it from your workstation with your
-own git and credentials (`git push --force` to the issue fork), or close the
-merge request and delete the branch through drupal.org's web UI. The branch
-is derived from the issue rather than from your local state, so a later
-`sand publish` targets the same `<module>-<nid>` branch on
-`issue/<module>-<nid>` either way. A fresh publish onto a branch you deleted
-recreates it from the fork's default branch and replays your change set from
-scratch, which is the one clean way back to a history you chose.
+mistake, a commit that does not belong on the branch, a series too tangled to
+live with — that is out-of-band work this tool deliberately does not do for
+you. There are two ways back, and the first is almost always the one you
+want:
+
+- **Force-push from your workstation**, with your own git and credentials.
+  You can move the branch back past a bad commit without having the rest of
+  the series to hand:
+
+    ```console
+    $ git push --force <fork-remote> <good-sha>:refs/heads/<module>-<nid>
+    ```
+
+    This keeps the merge request and everything said on it.
+
+- **Delete the branch through drupal.org's web UI and publish again.** The
+  branch is derived from the issue rather than from your local state, so a
+  later `sand publish` targets the same `<module>-<nid>` branch either way,
+  recreating it from the **canonical project's** base branch and replaying
+  your change set from scratch. The cost is the merge request: deleting its
+  source branch closes it, and `sand` opens a *new* one rather than reviving
+  the old, so any review discussion is left behind.
+
+### `sand publish` refuses a branch it cannot line up with
+
+Publication resumes by matching your change set against the **end** of the
+fork branch (see [Replay, not squash](#replay-not-squash-your-local-history-is-what-lands)).
+If the branch holds commits from your change set but does not *end* with
+them — most often because something that is not yours sits on top — there is
+no way to resume, and replaying would duplicate commits the branch already
+has. `sand` stops before sending anything and names the commit in the way:
+
+> the fork branch's newest commit ("…") is not part of this change set, but
+> 3 of its commits are already on the branch.
+
+Fix it with one of the two recoveries above. Nothing was written, so there is
+nothing to undo.
 
 ### Commits published this way are not GPG-signed
 
