@@ -360,15 +360,43 @@ Once commits are public on the fork, treat that history as fixed and add to
 it rather than rewriting it.
 
 If you genuinely need published history changed — a secret committed by
-mistake, a series too tangled to live with — that is out-of-band work this
-tool deliberately does not do for you. Do it from your workstation with your
-own git and credentials (`git push --force` to the issue fork), or close the
-merge request and delete the branch through drupal.org's web UI. The branch
-is derived from the issue rather than from your local state, so a later
-`sand publish` targets the same `<module>-<nid>` branch on
-`issue/<module>-<nid>` either way. A fresh publish onto a branch you deleted
-recreates it from the fork's default branch and replays your change set from
-scratch, which is the one clean way back to a history you chose.
+mistake, a commit that does not belong on the branch, a series too tangled to
+live with — that is out-of-band work this tool deliberately does not do for
+you. There are two ways back, and the first is almost always the one you
+want:
+
+- **Force-push from your workstation**, with your own git and credentials.
+  You can move the branch back past a bad commit without having the rest of
+  the series to hand:
+
+    ```console
+    $ git push --force <fork-remote> <good-sha>:refs/heads/<module>-<nid>
+    ```
+
+    This keeps the merge request and everything said on it.
+
+- **Delete the branch through drupal.org's web UI and publish again.** The
+  branch is derived from the issue rather than from your local state, so a
+  later `sand publish` targets the same `<module>-<nid>` branch either way,
+  recreating it from the **canonical project's** base branch and replaying
+  your change set from scratch. The cost is the merge request: deleting its
+  source branch closes it, and `sand` opens a *new* one rather than reviving
+  the old, so any review discussion is left behind.
+
+### `sand publish` refuses a branch it cannot line up with
+
+Publication resumes by matching your change set against the **end** of the
+fork branch (see [Replay, not squash](#replay-not-squash-your-local-history-is-what-lands)).
+If the branch holds commits from your change set but does not *end* with
+them — most often because something that is not yours sits on top — there is
+no way to resume, and replaying would duplicate commits the branch already
+has. `sand` stops before sending anything and names the commit in the way:
+
+> the fork branch's newest commit ("…") is not part of this change set, but
+> 3 of its commits are already on the branch.
+
+Fix it with one of the two recoveries above. Nothing was written, so there is
+nothing to undo.
 
 ### Commits published this way are not GPG-signed
 
