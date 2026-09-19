@@ -520,7 +520,10 @@ func TestReviewServerExitFailureBeatsTheReadinessTimeout(t *testing.T) {
 	// A server that never announces a port is overwhelmingly a base image
 	// without the review tool, so this arm has to say how to fix that — the
 	// guest's own `not found` names a command, not a way out of it.
-	if !strings.Contains(err.Error(), "sand create --rebuild") {
+	// --with-review, NOT --rebuild: a --with-* flag the user does not pass
+	// adopts whatever the existing base's stamp recorded, so a rebuild of a
+	// base that never had the review tool produces another base without it.
+	if !strings.Contains(err.Error(), "sand create --with-review") {
 		t.Errorf("landReview error = %v, want it to say how to get the tool installed", err)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {

@@ -17,9 +17,10 @@ opening your browser, cleaning up after it — and nothing else.
 
 ## Getting a VM that has it
 
-Nothing: it's installed by default, like Claude Code and DDEV. It's a pinned
-17 MB npm package with no build step, which is cheap enough that every base
-carries it rather than you discovering at review time that this one doesn't.
+Nothing, for a base built from scratch: it's installed by default, like Claude
+Code and DDEV. It's a pinned 17 MB npm package with no build step, which is
+cheap enough that every base carries it rather than you discovering at review
+time that this one doesn't.
 
 If you don't want it, it's an opt-out like the rest of the tool-set:
 
@@ -32,12 +33,24 @@ or clear "Install browser review UI" in the TUI's create form. Like every
 (or back on) invalidates that base and the next create reprovisions it
 before cloning. See [`--with-*` flags](cli-reference.md#sand-create).
 
-!!! note "Your existing base will reprovision once"
+!!! warning "An existing base needs `--with-review` once, explicitly"
 
-    Bases built before this tool existed recorded a tool-set without it, so
-    the first `sand create` after upgrading sees the base as stale and
-    converges it in place — which is exactly what installs the review tool.
-    One slower create, then back to normal.
+    A `--with-*` flag you don't pass adopts whatever the **existing base**
+    was built with (see [`--with-*` flags](cli-reference.md#sand-create)),
+    and a base stamped before this tool existed recorded a tool-set without
+    it. So a plain `sand create` — and `sand create --rebuild`, which reads
+    that same stamp before it destroys anything — keeps the base without the
+    review tool, and `--review` then fails with "command not found" in the
+    guest. Ask for it once, explicitly:
+
+    ```sh
+    sand create --with-review NAME
+    ```
+
+    (or tick "Install browser review UI" in the TUI's create form). That
+    invalidates the base, so the create converges it in place and installs
+    the tool. One slower create, then back to normal — later creates adopt
+    the new stamp, which now records it.
 
 ## Opening a review
 
@@ -51,8 +64,8 @@ sand land NAME PATH --review
 or, in the TUI, press `l` on a VM's tile to open the [Landing pane](files-and-shells.md#landing),
 select a checkout row, and press `v`. Either entry point runs the same code
 underneath, so the two are equivalent — the CLI blocks the terminal while a
-review is open, and the row shows `reviewing… (browser open)` while the TUI
-one is.
+review is open, and the row shows `reviewing…` (followed by the URL, once the
+server has reported one) while the TUI one is.
 
 `--review` has none of `--pr`'s or `--web`'s preconditions: no pushed
 branch, no configured remote, no `gh`. Reviewing uncommitted or unpushed
@@ -73,8 +86,12 @@ What happens next:
 If no browser opens — a headless SSH session, a locked-down desktop — the
 URL is printed and the review stays up. Open it by hand.
 
-Two checkouts, on the same VM or different ones, can be under review at the
-same time; each server picks its own port, so they don't collide.
+Two `sand land --review` commands, against checkouts on the same VM or on
+different ones, can run at the same time: each server picks its own port, so
+they don't collide. The **TUI runs one review at a time** — pressing `v`
+while another is still in flight (including one you just cancelled, which
+takes a moment to tear down) says so in the session log and does nothing
+else.
 
 ## Finishing a review
 

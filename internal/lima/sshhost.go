@@ -1159,10 +1159,13 @@ func (h *SSHHost) AttachArgvMode(name, guestHome, colorterm string, mode AttachM
 // (landreview.freePort), so anything else on the workstation can claim it in
 // the gap. ssh's default is to print "bind: Address already in use" and carry
 // on serving the connection with no forward attached — at which point the
-// caller's readiness probe, which deliberately accepts ANY HTTP response,
-// succeeds against whatever unrelated service holds that port, the reviewer's
-// browser opens onto it, and the session blocks forever on a review that can
-// never arrive. Exiting non-zero makes the collision a reported failure.
+// caller's readiness probe then talks to whatever unrelated service holds that
+// port instead of to the review server. The probe now identifies the responder
+// (it demands the review server's own JSON endpoint), so the collision surfaces
+// as a readiness timeout rather than as a browser opened onto someone else's
+// application — but a timeout that names the wrong problem is still the wrong
+// error. Exiting non-zero makes the collision a reported failure at the moment
+// it happens.
 // The listen side is spelled 127.0.0.1 EXPLICITLY rather than left as a bare
 // port, and that is what makes ExitOnForwardFailure actually bite. A bare
 // `-L <port>:...` asks ssh to bind every loopback address getaddrinfo returns,

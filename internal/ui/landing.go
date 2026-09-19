@@ -1009,11 +1009,11 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Back):
 		if m.review.isFor(m.landing.scope, m.landing.vmName) && m.review.cancel != nil {
 			// Leaving the pane must not orphan the review's guest server and
-			// forwarder child — see landingPane.reviewCancel's doc. The
-			// landReviewDoneMsg this produces still arrives later;
-			// handleLandReviewDone's staleness check (scope/vm no longer
-			// matching, once this pane is reopened or opened for another VM)
-			// makes folding it in a no-op by then.
+			// forwarder child — see activeReview.cancel's doc. The state is
+			// deliberately NOT cleared here: the landReviewDoneMsg this
+			// produces is what clears it, and only once the session's own
+			// teardown has actually finished, so a quit in the interval still
+			// finds the handles it needs to wait on (reviewTeardownQuitCmd).
 			m.review.cancel()
 		}
 		m.view = viewBoard
@@ -2047,7 +2047,13 @@ func (m *model) runLandingReview() tea.Cmd {
 		return nil // empty sweep: nothing under the cursor to review
 	}
 	if m.review.path != "" {
-		return nil // one review already in flight; a second would leak the first's cancel func
+		// One review already in flight; a second would leak the first's cancel
+		// func. It is said out loud rather than dropped, because the state
+		// outlives the pane (see activeReview) — a review cancelled by Back a
+		// moment ago is still tearing down, and its row is no longer on screen
+		// to explain why 'v' now does nothing at all.
+		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+		return nil
 	}
 	p := m.provFor(m.landing.scope)
 	if p == nil {
@@ -2055,21 +2061,20 @@ func (m *model) runLandingReview() tea.Cmd {
 	}
 	co := m.landing.rows[m.landing.cursor].Checkout
 
-	// A context this pane OWNS, not context.Background() handed to the
-	// Session bare: the cancel func is retained on landingPane precisely so
+	// A context this session OWNS, not context.Background() handed to the
+	// Session bare: the cancel func is retained on m.review precisely so
 	// leaving this pane or quitting the whole program can reach in and
 	// cancel it, driving Session.Run's own deferred teardown (killing the
 	// guest server and its forwarder child) instead of orphaning them. This
 	// is "how the pane's existing async actions obtain their context" one
 	// level up from beginStream's per-job context.WithCancel(Background()) —
 	// beginStream's cancel lives on the job registry and is reachable via
-	// ctrl+c on the progress screen; this one lives on the pane itself
-	// because a review is not run through the job registry at all (see
-	// reviewPath's doc).
+	// ctrl+c on the progress screen; this one lives on the model because a
+	// review is not run through the job registry at all (see activeReview).
 	ctx, cancel := context.WithCancel(context.Background())
 	// done is closed only once run() below has actually RETURNED — see
-	// reviewDone's doc for why this, and not reviewCancel alone, is what
-	// the quit path needs to avoid orphaning the guest server.
+	// activeReview.done's doc for why this, and not the cancel func alone, is
+	// what the quit path needs to avoid orphaning the guest server.
 	done := make(chan struct{})
 	scope, vmName := m.landing.scope, m.landing.vmName
 	m.review = activeReview{
@@ -2232,11 +2237,11 @@ var quitTeardownTimeout = 15 * time.Second
 // pane, not the job registry, owns the teardown for — needs this extra step.
 //
 // Cancelling the context is NOT enough by itself, and that is measured, not
-// assumed: on a real Lima VM, calling reviewCancel and returning tea.Quit()
+// assumed: on a real Lima VM, calling m.review.cancel and returning tea.Quit()
 // immediately let the whole `sand` process exit — main() returns the instant
 // tea.Program.Run() does — while the goroutine actually killing the guest
 // server was still mid-flight (waiting on a `limactl shell` round trip),
-// orphaning it every time. So this BLOCKS on reviewDone (bounded by
+// orphaning it every time. So this BLOCKS on m.review.done (bounded by
 // quitTeardownTimeout) before returning the QuitMsg, which is safe to do
 // here specifically: this func runs as its own tea.Cmd goroutine, off the
 // Update goroutine that renders the board, so holding it does not freeze the

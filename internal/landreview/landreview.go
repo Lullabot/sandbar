@@ -176,13 +176,18 @@ var errServerGone = errors.New("the review server exited before it was reachable
 // review tool has no ServeBinary at all, so the guest's own message is a bare
 // `command not found` that says nothing about which sand flag produces it.
 //
-// The review tool is installed by default, so the two ways to be missing it
-// are both historical: a base built with `--with-review=false`, or one built
-// before the tool existed. Both are fixed the same way, which is what this
-// says.
+// The review tool is installed by default in a NEW base, so the two ways to be
+// missing it are both historical: a base built with `--with-review=false`, or
+// one built before the tool existed. Both are fixed the same way, and the fix
+// is NOT `--rebuild`: a `--with-*` flag the user does not pass adopts whatever
+// the existing base's stamp recorded (cmd/sand/create.go), and neither of those
+// stamps records the review tool — so an unqualified create (with or without
+// `--rebuild`, which reads the same stamp before destroying anything) rebuilds a
+// base that still has no review tool. Only passing the flag explicitly overrides
+// the adoption, which is what this says.
 const missingToolHint = "\n(if this VM's base image predates the review tool, or was built with " +
 	"`sand create --with-review=false`, " + ServeBinary + " does not exist in the guest — " +
-	"rebuild the base with `sand create --rebuild`)"
+	"add it with `sand create --with-review` and create the VM again)"
 
 // serveReadyRe matches the line @self-review/serve prints once its listener
 // is up, which is the ONLY way to learn the port: upstream binds an ephemeral
@@ -284,21 +289,31 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// number on both sides) — there is nothing to start, and therefore
 	// nothing to tear down, and the port to browse is the guest's own.
 	//
-	// ForwardArgv is pure and its nil-ness does not depend on the port
-	// numbers, so asking it with the guest's own port settles "does this
-	// backend need a forward at all?" before any workstation port is
-	// reserved. That ordering is deliberate: local Lima has nothing to
-	// reserve, and a port-picker failure must not fail a review that was
-	// never going to use the picker.
+	// Whether a forward is needed does not depend on the port numbers, so
+	// asking with the guest's own port settles "does this backend need one at
+	// all?" before any workstation port is reserved. That ordering is
+	// deliberate: local Lima has nothing to reserve, and a port-picker failure
+	// must not fail a review that was never going to use the picker.
+	//
+	// It does mean the seam is asked twice, and ForwardArgv is not quite as
+	// pure as its doc claims: the Proxmox implementation resolves the guest's
+	// address on each call (bounded, and cached after the first), so the second
+	// ask can in principle fail where the first succeeded. That degrades to a
+	// failArgv child which exits at once and whose message is carried into the
+	// readiness error below (fwdOut), rather than to a silent wrong forward.
 	hostPort := guestPort
+	fwdArgv := s.Provider.ForwardArgv(s.VM, guestPort, guestPort)
 	var fwdOut lockedBuffer
-	if s.Provider.ForwardArgv(s.VM, guestPort, guestPort) != nil {
+	if fwdArgv != nil {
 		picked, err := s.pickPort()
 		if err != nil {
 			return "", fmt.Errorf("picking a free workstation port for the review forward: %w", err)
 		}
 		hostPort = picked
-		stop, err := s.startForward(ctx, s.Provider.ForwardArgv(s.VM, hostPort, guestPort), &fwdOut)
+		if hostPort != guestPort {
+			fwdArgv = s.Provider.ForwardArgv(s.VM, hostPort, guestPort)
+		}
+		stop, err := s.startForward(ctx, fwdArgv, &fwdOut)
 		if err != nil {
 			return "", fmt.Errorf("starting the port forward to %s: %w", s.VM.Name, err)
 		}
@@ -453,6 +468,14 @@ func (s *Session) awaitGuestPort(ctx context.Context, out *lockedBuffer, exited 
 		case <-time.After(s.pollInterval()):
 		}
 		if !time.Now().Before(deadline) {
+			// One last look before giving up, for the same reason the exit
+			// branch takes one: this polls a BUFFER another goroutine is
+			// filling, so the banner may well have landed during the sleep
+			// that just expired the budget. Returning without re-reading
+			// would throw away an answer already in hand.
+			if port := parseServePort(out.String()); port != 0 {
+				return port, nil
+			}
 			return 0, fmt.Errorf("gave up after %s", s.readyTimeout())
 		}
 	}
