@@ -1430,6 +1430,11 @@ out; every other page links here instead of restating them.</p>
 <td>Only if you're prepared to re-enter every secret for every VM — deleting it does not touch a running VM's already-rendered guest files, but the next apply will have nothing to render.</td>
 </tr>
 <tr>
+<td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json.lock</code>, <code>…/secrets.json.lock</code></td>
+<td>Empty advisory lock files, one per state file above. Every write takes its file's lock, re-reads the file, applies the change and writes it back, so two <code>sand</code> processes (a TUI you left open and a <code>sand create</code> in another terminal) cannot overwrite each other's entries. They hold no data.</td>
+<td>Yes — they are re-created on the next write. Deleting one while <code>sand</code> is running just means that write is unserialized.</td>
+</tr>
+<tr>
 <td><code>${LIMA_HOME:-~/.lima}</code></td>
 <td>Lima's own instance store — disk images, <code>lima.yaml</code>, per-instance logs. <code>sand</code> does not own this directory; Lima does.</td>
 <td><code>sand</code> never deletes it directly; use <code>limactl delete</code> or Lima's own tooling.</td>
