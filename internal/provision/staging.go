@@ -81,11 +81,47 @@ func guestHome(ctx context.Context, cli guestRunner, name, user string) (string,
 	return fields[5], nil
 }
 
+// stageBaseDir is the directory newStageDir creates its per-reset staging
+// directory INSIDE, or "" to accept os.MkdirTemp's own default.
+//
+// The default is deliberately NOT the system temp dir. A staged archive is, for
+// the whole window between the guest being destroyed and the restore landing,
+// the ONLY copy of the user's work in existence — StageGuard's whole contract is
+// built on that — and on Debian trixie and later /tmp is a tmpfs, so that only
+// copy would be sitting in RAM. Preserving a whole home makes the point
+// unarguable: it is routinely gigabytes, which is not a thing to put in memory
+// on a machine that is simultaneously running VMs. ~/.local/state
+// (XDG_STATE_HOME) is the spelling for "keep this across a reboot, but it is not
+// a document" — exactly what a staged archive is, and disk-backed everywhere.
+//
+// An explicit TMPDIR is honoured ahead of it, because a user who set TMPDIR has
+// already said where large temporary files belong on their machine, and every
+// test in this repo relies on that override to keep its archives off the
+// developer's real host state.
+func stageBaseDir() string {
+	if os.Getenv("TMPDIR") != "" {
+		return "" // the user (or a test) already chose; os.MkdirTemp honours it
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "" // no home to anchor to: fall back to the system temp dir
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	dir := filepath.Join(base, "sandbar", "staging")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "" // unwritable: a system temp dir beats failing the reset outright
+	}
+	return dir
+}
+
 // newStageDir creates a private (0700) host staging directory for archives that
 // cross a destroy/recreate. The temp name carries a recognisable prefix so a
 // leaked dir is easy to spot.
 func newStageDir() (string, error) {
-	dir, err := os.MkdirTemp("", "sand-reset-*")
+	dir, err := os.MkdirTemp(stageBaseDir(), "sand-reset-*")
 	if err != nil {
 		return "", fmt.Errorf("create stage dir: %w", err)
 	}
@@ -196,18 +232,72 @@ func (g *StageGuard) Done() {
 // such file or directory" warning on stderr whenever that host path is absent
 // in the guest. Merging that warning into the archive corrupts the gzip, and
 // the later StageIn `tar -xzf` then aborts with exit status 2.
-func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive string) error {
+func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive string, out io.Writer, excludes ...string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
 		return fmt.Errorf("create archive %s: %w", hostArchive, err)
 	}
 	defer file.Close()
 
-	argv := append([]string{"sudo", "tar", "-C", home, "--ignore-failed-read", "-czf", "-"}, guestPaths...)
+	argv := []string{"sudo", "tar", "-C", home, "--ignore-failed-read"}
+	for _, ex := range excludes {
+		argv = append(argv, "--exclude="+ex)
+	}
+	argv = append(argv, "-czf", "-")
+	argv = append(argv, guestPaths...)
 	if err := cli.ShellStreamOut(ctx, name, nil, file, argv...); err != nil {
-		return fmt.Errorf("stage out: %w", err)
+		if !tarFilesChanged(err) {
+			return fmt.Errorf("stage out: %w", err)
+		}
+		// Exit status 1 from `tar -c` means one thing only — a file changed size
+		// while tar was reading it — and the archive is complete either way. The
+		// source VM is RUNNING during stage-out (it has to be; that is where the
+		// data is), so an agent still writing a log, a shell appending to
+		// .bash_history, or a dev server touching its cache is enough to produce
+		// it. Failing the reset over that would mean "preserve my home" worked
+		// only on a VM with nothing happening inside it. Every other status tar
+		// can exit with is a real failure and still aborts, while the guest is
+		// still intact.
+		note(out, "Note: some files in %q changed while they were being copied out; they are preserved as tar read them (%s).", name, firstLine(err.Error(), 200))
+	}
+	// An os.File's writes are unbuffered, but a close error on a network or full
+	// filesystem is the difference between a complete archive and a truncated one
+	// that only fails at restore time — after the VM is gone.
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("finish archive %s: %w", hostArchive, err)
 	}
 	return nil
+}
+
+// tarFilesChanged reports whether err is `tar`'s exit status 1. GNU tar reserves
+// 1 for "some files differ" — when creating an archive that is only ever "file
+// changed as we read it" — and uses 2 for every genuine failure, so the status
+// alone is a sound discriminator and no stderr scraping is needed.
+func tarFilesChanged(err error) bool {
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && ee.ExitCode() == 1
+}
+
+// firstLine returns s up to its first newline, truncated to max bytes, for
+// folding a multi-line tar/ssh diagnostic into one line of progress output.
+func firstLine(s string, max int) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
+}
+
+// note writes one progress line, tolerating the nil writer both backends' resets
+// are legitimately called with.
+func note(out io.Writer, format string, args ...any) {
+	if out == nil {
+		return
+	}
+	step(out, format, args...)
 }
 
 // ancestorDirs returns the intermediate directories a relative path passes
@@ -396,7 +486,27 @@ type ProjectPlan struct {
 // The checkout is probed FIRST because it implies the org directory it lives in:
 // the healthy case costs one guest round trip, and the second probe is paid only
 // when the checkout is already gone.
-func PlanProject(ctx context.Context, cli guestRunner, name, home, cloneURL, hostArchive string) (ProjectPlan, error) {
+func PlanProject(ctx context.Context, cli guestRunner, name, home, cloneURL, hostArchive string, out io.Writer) (ProjectPlan, error) {
+	plan, err := probeProject(ctx, cli, name, home, cloneURL)
+	if err != nil || !plan.Staged {
+		return plan, err
+	}
+	if err := StageOut(ctx, cli, name, home, []string{plan.OrgRel}, hostArchive, out); err != nil {
+		return plan, err
+	}
+	return plan, nil
+}
+
+// probeProject is PlanProject's decision without its archive: it asks the guest
+// what is actually there and fills OrgRel/RestoresCheckout/Staged, where Staged
+// means "there is a tree here worth archiving" rather than "an archive exists".
+//
+// It is separate because a whole-home preserve needs one half of the answer and
+// not the other: the home archive already contains the checkout, so nothing
+// project-shaped needs staging — but the finalize playbook must STILL be told to
+// skip its clone, or it would clone over the tree the restore just put back. The
+// probe is the part both spellings share.
+func probeProject(ctx context.Context, cli guestRunner, name, home, cloneURL string) (ProjectPlan, error) {
 	var plan ProjectPlan
 	plan.OrgRel, _ = OrgRelDir(cloneURL) // "" when the URL carries no org segment
 	if plan.OrgRel == "" {
@@ -414,12 +524,6 @@ func PlanProject(ctx context.Context, cli guestRunner, name, home, cloneURL, hos
 		if plan.Staged, err = GuestPathExists(ctx, cli, name, home+"/"+plan.OrgRel); err != nil {
 			return plan, err
 		}
-	}
-	if !plan.Staged {
-		return plan, nil
-	}
-	if err := StageOut(ctx, cli, name, home, []string{plan.OrgRel}, hostArchive); err != nil {
-		return plan, err
 	}
 	return plan, nil
 }

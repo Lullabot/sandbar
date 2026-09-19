@@ -321,6 +321,8 @@ gate, same defaults, same preserve options.
 sand reset web                                    # clean rebuild, same settings
 sand reset web --preserve-claude                  # keep the Claude Code login
 sand reset web --preserve-claude --preserve-project
+sand reset web --preserve ~/src/app --preserve ~/scratch/spike
+sand reset web --preserve-home                    # keep everything in ~
 sand reset web --cpus 8 --memory 16GiB            # rebuild bigger
 ```
 
@@ -336,16 +338,34 @@ Everything inside the guest is destroyed unless you ask for it back:
 |---|---|
 | `--preserve-claude` | `~/.claude` and `~/.claude.json` — the Claude Code login and its history. |
 | `--preserve-project` | The cloned project's per-org directory: the checkout, its uncommitted work, and the `.env` beside it. Also **skips the re-clone**, so a private repo needs no token. |
+| `--preserve PATH` | One more directory inside the guest home — **any** git checkout or linked worktree, whether `sand` cloned it or you made it yourself. Repeatable. |
+| `--preserve-home` | The **entire** home directory. Implies every flag above. |
 
-Both copy that data out of the VM to a private (`0700`) host temp directory and
-restore it into the rebuilt VM, then delete the copy. **Do not preserve
+`--preserve` takes an absolute guest path (`/home/you/src/app`), a tilde path
+(`~/src/app`) or a home-relative one (`src/app`). Run
+[`sand land NAME`](#sand-land-name) to see the checkouts a VM actually holds —
+that is the same sweep the TUI's reset form builds its list from. A path
+**outside** the guest home is refused before the VM is touched, so a mistake
+costs you a retyped command, not a rebuilt VM.
+
+`--preserve-home` is the option for the ordinary reason to rebuild a VM that is
+working perfectly well: picking up playbook changes. The whole home is copied
+out, the VM is rebuilt from a current base image, the home is copied back, and
+*then* the playbook runs on top of it — so the files Ansible owns are freshly
+rendered while everything else is exactly as you left it. It is also the
+slowest and largest thing a reset can do, and `~/.ssh/authorized_keys` is the
+one file it deliberately leaves behind (the rebuilt VM needs the key Lima just
+installed, not the old VM's).
+
+All of these copy that data out of the VM to a private (`0700`) host directory
+and restore it into the rebuilt VM, then delete the copy. **Do not preserve
 anything from a VM you believe is compromised** — you would be copying its
 Claude Code login and its project token onto your workstation. See
 [Security Model](../reference/security-model.md).
 
-Nothing outside `~/.claude` and the cloned project's org directory survives: a
-second org's checkouts, other forges, `~/.ssh`, `~/.config/gh`, shell history
-and anything under `/srv` are all gone with the disk.
+Anything you do not name is gone with the disk: other forges, `~/.ssh`,
+`~/.config/gh`, shell history, and everything under `/srv` (which is outside
+the home directory and so cannot be preserved at all).
 
 ### Flags
 
@@ -353,6 +373,8 @@ and anything under `/srv` are all gone with the disk.
 |---|---|---|---|
 | `--preserve-claude` | bool | `false` | Keep the Claude Code login and history. |
 | `--preserve-project` | bool | `false` | Keep the project's per-org directory. |
+| `--preserve` | string (repeatable) | *(none)* | Keep one more directory inside the guest home. Pass it once per directory. |
+| `--preserve-home` | bool | `false` | Keep the entire guest home directory; implies the three flags above. |
 | `--cpus` | string (parsed as int) | *this VM's* | vCPUs. |
 | `--memory` | string | *this VM's* | RAM, e.g. `16GiB`. |
 | `--disk` | string | *this VM's* | Disk size. A clone's disk can grow but never shrink, so a smaller value is not something you can actually get (see [disk sizing](#disk-sizing)). |
@@ -413,8 +435,17 @@ Everything inside the guest is lost unless you ask for it back:
                        and its history)
   --preserve-project   keep the cloned project's per-org directory (the checkout,
                        its uncommitted work, and the .env alongside it)
+  --preserve PATH      keep one more directory inside the guest home — any git
+                       checkout or worktree, whether sand cloned it or you did.
+                       Repeatable. Run 'sand land NAME' to list what this VM
+                       holds. Paths may be absolute (/home/you/src/app), tilde
+                       (~/src/app) or home-relative (src/app).
+  --preserve-home      keep the WHOLE home directory, then re-run the playbook
+                       on top of it. This is the one to use when the VM is fine
+                       and you only want an up-to-date build; it implies every
+                       flag above.
 
-Both copy data out of the VM to this host and back in afterwards. Do NOT
+All of these copy data out of the VM to this host and back in afterwards. Do NOT
 preserve anything from a VM you believe is compromised.
 
 Every other flag you omit is taken from the VM's own recorded settings, so
@@ -428,6 +459,8 @@ Examples:
   sand reset web                                  # clean rebuild, same settings
   sand reset web --preserve-claude                # keep the Claude login
   sand reset web --preserve-claude --preserve-project
+  sand reset web --preserve ~/src/app --preserve ~/scratch/spike
+  sand reset web --preserve-home                  # keep everything, rebuild the OS
   sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
 
 Flags:
@@ -451,8 +484,12 @@ Flags:
     	System locale (default: whatever this VM has)
   -memory string
     	RAM, e.g. 8GiB (default: whatever this VM has)
+  -preserve PATH
+    	Keep one more directory PATH inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts
   -preserve-claude
     	Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild
+  -preserve-home
+    	Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)
   -preserve-project
     	Keep the cloned project's per-org directory (checkout + .env) across the rebuild
   -profile string

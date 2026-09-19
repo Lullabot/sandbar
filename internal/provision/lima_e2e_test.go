@@ -20,6 +20,7 @@ package provision
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,7 +124,7 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 			`printf '{"oauth":"keepme"}' > ~/.claude.json`)
 
 	archive := filepath.Join(t.TempDir(), "claude.tgz")
-	if err := StageOut(context.Background(), cli, clone, home, []string{".claude", ".claude.json"}, archive); err != nil {
+	if err := StageOut(context.Background(), cli, clone, home, []string{".claude", ".claude.json"}, archive, io.Discard); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 	if fi, err := os.Stat(archive); err != nil || fi.Size() == 0 {
