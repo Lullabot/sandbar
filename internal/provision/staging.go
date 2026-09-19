@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -98,6 +99,92 @@ func newStageDir() (string, error) {
 // removeStageDir best-effort deletes a staging directory; cleanup failures are
 // non-fatal to the reset flow.
 func removeStageDir(dir string) { _ = os.RemoveAll(dir) }
+
+// StageGuard owns the host staging directory for one reset, and the single rule
+// that decides whether a failure keeps it: THE STAGED ARCHIVES ARE A COPY. Until
+// the guest is destroyed, everything in them is still inside the VM, so a
+// failure there has nothing to recover and the copy is deleted. Once the guest
+// is gone the archives are the only copy in existence, so every later failure
+// keeps them and names the path in its error.
+//
+// The distinction is not cosmetic. Keeping the directory on ANY failure meant a
+// stage-out that failed while the source VM sat untouched — a dropped ssh
+// transport, a full host disk — left a tarball of ~/.claude/.credentials.json on
+// the host indefinitely, pointed at by an error that promised recovery of data
+// the user could still simply read out of the running VM. On a host where /tmp
+// is tmpfs (Debian's default since trixie) a preserved project tree is sitting
+// in RAM, too.
+//
+// Both backends' resets (internal/provision's Lima Reset and the Proxmox
+// provider's resetInstance) share this rather than restating the rule, the same
+// way they share PlanProject: it is one sentence stated once, in the place that
+// owns the directory's lifetime.
+//
+// Every method is nil-safe, because a reset with no preserve option selected
+// never creates a guard and must still be able to call Fail/Done on the way
+// past.
+type StageGuard struct {
+	dir string
+	// destroyed flips the moment the reset COMMITS to destroying the guest —
+	// before the delete call, not after it. A delete that reports failure may
+	// still have removed (or half-removed) the instance, so a guard that only
+	// flipped on a clean delete would throw away the archives in exactly the
+	// case where they are most likely to be all that is left.
+	destroyed bool
+}
+
+// NewStageGuard creates the private (0700) staging directory and returns the
+// guard that owns it.
+func NewStageGuard() (*StageGuard, error) {
+	dir, err := newStageDir()
+	if err != nil {
+		return nil, err
+	}
+	return &StageGuard{dir: dir}, nil
+}
+
+// Dir is the staging directory's path, or "" when nothing is staged.
+func (g *StageGuard) Dir() string {
+	if g == nil {
+		return ""
+	}
+	return g.dir
+}
+
+// Path names an archive inside the staging directory.
+func (g *StageGuard) Path(archive string) string {
+	return filepath.Join(g.Dir(), archive)
+}
+
+// DestroyingGuest records that the reset is about to delete the VM — call it
+// immediately BEFORE the delete, never after (see the destroyed field).
+func (g *StageGuard) DestroyingGuest() {
+	if g != nil {
+		g.destroyed = true
+	}
+}
+
+// Fail applies the rule above to err: with the guest still intact the staged
+// copy is dropped and err is returned unchanged; with the guest destroyed the
+// directory is kept and its path is wrapped into the error so the user can
+// recover the data by hand.
+func (g *StageGuard) Fail(err error) error {
+	if err == nil || g.Dir() == "" {
+		return err
+	}
+	if !g.destroyed {
+		removeStageDir(g.dir)
+		return err
+	}
+	return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", g.dir, err)
+}
+
+// Done drops the staging directory after a fully successful reset.
+func (g *StageGuard) Done() {
+	if g.Dir() != "" {
+		removeStageDir(g.dir)
+	}
+}
 
 // StageOut streams guestPaths (relative to home) out of a running VM into the
 // host archive file using `tar` over `limactl shell` as root. --ignore-failed-read
