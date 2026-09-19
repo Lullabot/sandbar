@@ -27,9 +27,23 @@ on:
 permissions:
   contents: write
 
+# The two behaviours above want OPPOSITE things from a concurrency group, so
+# they no longer share one.
+#
+#   * deploy — `pages`, never cancelled. mike commits and pushes to `gh-pages`,
+#     so two deploys racing would fight over the same branch, and cancelling one
+#     half-way through leaves that push unfinished.
+#   * build — one group per PR, superseding its own older runs. A PR build
+#     touches nothing shared; the only run worth keeping is the newest.
+#
+# Sharing `pages` made every PR build queue behind the deploy lane, and with
+# `cancel-in-progress: false` GitHub keeps just ONE pending run per group and
+# cancels the rest — so opening a stack of seven PRs at once ran the strict docs
+# build on two of them and silently cancelled five. A cancelled run registers no
+# check, so those PRs looked green with the guard never having run.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
