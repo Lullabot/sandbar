@@ -218,8 +218,9 @@ jobs:
             node --version
           '
 
-      # The review tool is opt-OUT, so the create above did not ask for it and
-      # its presence here is the default asserting itself.
+      # The review tool is not a tool-set selection at all, so the create above
+      # could not have asked for it: its presence here is the role running
+      # unconditionally, which is the whole point of it not being a flag.
       #
       # The size check is the dependency substitution's own regression test.
       # roles/self-review replaces @self-review/serve's declared (but unused)

@@ -38,14 +38,16 @@
       when:
         - toolset_codex | default(false) | bool
         - provision_phase | default('full') != 'finalize'
-    # The browser review UI is part of the configurable base tool-set, and
-    # unlike codex it is opt-OUT (sand create --with-review=false): it is a
-    # pinned 17MB npm install with no build step, which is small enough that
-    # every base should have it rather than discovering at review time that
-    # this one does not.
+    # The browser review UI is NOT a tool-set selection: it is a pinned 17MB
+    # npm install with no build step that runs only when `sand land --review`
+    # invokes it, so it is simply part of the image. Making it a selection
+    # bought nothing and cost real correctness -- an unpassed --with-* flag
+    # adopts the existing base's stamp, so a base built before this role
+    # existed adopted "off" and skipped the role, which no amount of
+    # rebuilding fixed. Unconditional, it installs on the next converge like
+    # any other playbook change.
     - role: self-review
       when:
-        - toolset_review | default(true) | bool
         - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'

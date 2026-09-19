@@ -155,9 +155,9 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.CPUs != 2 {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
-	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava || !c.WithReview {
-		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava/WithReview = %v/%v/%v/%v/%v, want all true (an unconfigured `sand create` installs the full default tool-set)",
-			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava, c.WithReview)
+	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
+		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (an unconfigured `sand create` installs the full default tool-set)",
+			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
 	}
 	// Codex is the deliberate exception: opt-IN, so it must default false even
 	// though the others default true — an unconfigured `sand create` must NOT
@@ -172,7 +172,7 @@ func TestDefaultCreateConfig(t *testing.T) {
 // hardcode until this key replaced it.
 func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)
 	}
 }
@@ -182,34 +182,13 @@ func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 // out of the stamp entirely.
 func TestToolsetKey_WithCodex(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
-		t.Errorf("ToolsetKey() with codex omitted = %q, want %q", got, want)
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+		t.Errorf("ToolsetKey() with codex omitted = %q, want %q (unchanged stamp for existing users)", got, want)
 	}
 
 	c.WithCodex = true
-	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java+review"; got != want {
+	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() with codex enabled = %q, want %q", got, want)
-	}
-}
-
-// TestToolsetKey_WithReview proves review slots alphabetically into the key
-// (last, after java), and that de-selecting it takes it back out.
-//
-// Being in the DEFAULT key is a deliberate, one-time cost, and it is the
-// reason this tool is worth calling out here: every existing base recorded a
-// stamp without `+review`, so the first `sand create` after this change sees
-// its base as stale and converges it in place. That converge is exactly what
-// installs the review tool on a base that predates it, which is why the flip
-// is the whole delivery mechanism rather than a side effect of it.
-func TestToolsetKey_WithReview(t *testing.T) {
-	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
-		t.Errorf("ToolsetKey() by default = %q, want %q", got, want)
-	}
-
-	c.WithReview = false
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
-		t.Errorf("ToolsetKey() with review de-selected = %q, want %q", got, want)
 	}
 }
 

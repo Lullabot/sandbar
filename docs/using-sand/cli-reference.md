@@ -70,7 +70,6 @@ not a prompt.
 | `--with-ddev` | bool | `true` | Install DDEV in the base image. |
 | `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
 | `--with-java` | bool | `true` | Install a headless JDK in the base image. |
-| `--with-review` | bool | `true` | Install the browser review UI in the base image. See [Reviewing changes in a browser](review.md). |
 
 The `--with-*` flags configure the **shared base image**, not the individual
 VM. A flag you don't pass adopts whatever the existing base was actually
@@ -273,8 +272,6 @@ Flags:
     	Install the Go toolchain in the base image (default true)
   -with-java
     	Install a headless JDK in the base image (default true)
-  -with-review
-    	Install the browser review UI in the base image (default true)
 ```
 
 (`--user` has no printed default because it is resolved to the host username
@@ -414,9 +411,9 @@ an existing PR for the branch on its own.
 --review needs no pushed branch, no remote and no gh at all: it runs a review
 server inside the VM against PATH, opens it in a browser on this machine, and
 blocks until you finish the review — which writes review.xml into PATH inside
-the VM, where the agent can read it. Nothing leaves the VM. A new base image
-gets the review tool by default; an older base, or one built with
-'--with-review=false', needs 'sand create --with-review' once to add it.
+the VM, where the agent can read it. Nothing leaves the VM. The review tool is
+part of every base image; a base older than the tool itself picks it up on the
+next 'sand create'.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than

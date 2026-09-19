@@ -518,12 +518,11 @@ func TestReviewServerExitFailureBeatsTheReadinessTimeout(t *testing.T) {
 		t.Errorf("landReview error = %v, want it to carry the guest server's own message", err)
 	}
 	// A server that never announces a port is overwhelmingly a base image
-	// without the review tool, so this arm has to say how to fix that — the
-	// guest's own `not found` names a command, not a way out of it.
-	// --with-review, NOT --rebuild: a --with-* flag the user does not pass
-	// adopts whatever the existing base's stamp recorded, so a rebuild of a
-	// base that never had the review tool produces another base without it.
-	if !strings.Contains(err.Error(), "sand create --with-review") {
+	// older than the review role, so this arm has to say how to fix that — the
+	// guest's own `not found` names a command, not a way out of it. There is
+	// no flag to name any more: adding the role moved the playbook hash, so
+	// the next create converges the base and installs it.
+	if !strings.Contains(err.Error(), "sand create") {
 		t.Errorf("landReview error = %v, want it to say how to get the tool installed", err)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {

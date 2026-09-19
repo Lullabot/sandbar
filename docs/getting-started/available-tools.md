@@ -31,18 +31,20 @@ covers how to reach it from your browser — locally and on a remote profile.
   `--with-codex` to `sand create` (or enable the toggle in the TUI create
   form). Codex is not provisioned by default; only include it if you want to
   use it alongside Claude Code.
-- A **browser review UI** ([`@self-review/serve`](https://www.npmjs.com/package/@self-review/serve))
-  — installed by default. `sand land NAME PATH --review` opens a
-  browser-based review of that checkout's diff, served from inside the VM,
-  and writes your comments back into the checkout where the agent can read
-  them. Opt out with `--with-review=false`. See
-  [Reviewing changes in a browser](../using-sand/review.md).
-
 Like every `--with-*` flag, these configure the **shared base image**:
 toggling one from what the base was last built with invalidates it, so the
 next `sand create` reprovisions the base before cloning — see
 [`--with-*` flags](../using-sand/cli-reference.md#sand-create) in the CLI
 reference.
+
+Not a selection, and always present:
+
+- A **browser review UI** ([`@self-review/serve`](https://www.npmjs.com/package/@self-review/serve)).
+  `sand land NAME PATH --review` opens a browser-based review of a checkout's
+  diff, served from inside the VM, and writes your comments back into the
+  checkout where the agent can read them. It is a pinned 17 MB npm package
+  with no build step that runs only when you ask for a review, so there is no
+  flag for it. See [Reviewing changes in a browser](../using-sand/review.md).
 
 ## Shell & utilities
 

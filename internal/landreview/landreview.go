@@ -176,18 +176,19 @@ var errServerGone = errors.New("the review server exited before it was reachable
 // review tool has no ServeBinary at all, so the guest's own message is a bare
 // `command not found` that says nothing about which sand flag produces it.
 //
-// The review tool is installed by default in a NEW base, so the two ways to be
-// missing it are both historical: a base built with `--with-review=false`, or
-// one built before the tool existed. Both are fixed the same way, and the fix
-// is NOT `--rebuild`: a `--with-*` flag the user does not pass adopts whatever
-// the existing base's stamp recorded (cmd/sand/create.go), and neither of those
-// stamps records the review tool — so an unqualified create (with or without
-// `--rebuild`, which reads the same stamp before destroying anything) rebuilds a
-// base that still has no review tool. Only passing the flag explicitly overrides
-// the adoption, which is what this says.
-const missingToolHint = "\n(if this VM's base image predates the review tool, or was built with " +
-	"`sand create --with-review=false`, " + ServeBinary + " does not exist in the guest — " +
-	"add it with `sand create --with-review` and create the VM again)"
+// The review tool is not a tool-set selection, so the only way to be missing
+// it is a base image older than the role itself — and the next create fixes
+// that on its own, because adding the role changed the playbook hash and that
+// is what marks a base stale (internal/provision's baseStale). There is no
+// flag to pass and nothing to opt into, so the hint says the one thing that is
+// actually true.
+//
+// This used to name a flag, and naming one was the bug: while the tool was a
+// selection, an unpassed --with-* adopted the existing base's stamp, so the
+// advice a user could act on and the advice that worked were different
+// sentences.
+const missingToolHint = "\n(if this VM's base image predates the review tool, " + ServeBinary +
+	" does not exist in the guest — the next `sand create` brings the base up to date and installs it)"
 
 // serveReadyRe matches the line @self-review/serve prints once its listener
 // is up, which is the ONLY way to learn the port: upstream binds an ephemeral

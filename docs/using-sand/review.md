@@ -17,40 +17,15 @@ opening your browser, cleaning up after it — and nothing else.
 
 ## Getting a VM that has it
 
-Nothing, for a base built from scratch: it's installed by default, like Claude
-Code and DDEV. It's a pinned 17 MB npm package with no build step, which is
-cheap enough that every base carries it rather than you discovering at review
-time that this one doesn't.
+Nothing. It's part of every base image — not a `--with-*` selection, because
+a pinned 17 MB npm package with no build step, which runs only when you ask
+for a review, isn't worth a knob. (The tools that do have knobs are the ones
+that cost hundreds of megabytes: Go, Java, Codex.)
 
-If you don't want it, it's an opt-out like the rest of the tool-set:
-
-```sh
-sand create --with-review=false
-```
-
-or clear "Install browser review UI" in the TUI's create form. Like every
-`--with-*` flag it configures the **shared base image**, so turning it off
-(or back on) invalidates that base and the next create reprovisions it
-before cloning. See [`--with-*` flags](cli-reference.md#sand-create).
-
-!!! warning "An existing base needs `--with-review` once, explicitly"
-
-    A `--with-*` flag you don't pass adopts whatever the **existing base**
-    was built with (see [`--with-*` flags](cli-reference.md#sand-create)),
-    and a base stamped before this tool existed recorded a tool-set without
-    it. So a plain `sand create` — and `sand create --rebuild`, which reads
-    that same stamp before it destroys anything — keeps the base without the
-    review tool, and `--review` then fails with "command not found" in the
-    guest. Ask for it once, explicitly:
-
-    ```sh
-    sand create --with-review NAME
-    ```
-
-    (or tick "Install browser review UI" in the TUI's create form). That
-    invalidates the base, so the create converges it in place and installs
-    the tool. One slower create, then back to normal — later creates adopt
-    the new stamp, which now records it.
+If your base predates the tool, the next `sand create` picks it up on its own:
+adding it changed the playbook, and a base built from an older playbook is
+brought up to date in place before the VM is cloned from it. One slower
+create, then back to normal.
 
 ## Opening a review
 

@@ -114,11 +114,9 @@ Flags:
 	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
 	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
-	// --with-review is opt-OUT like the four above (it installs a pinned 17MB
-	// npm package with no build step). --with-codex is the one opt-IN flag
-	// (cfg.WithCodex defaults false): an unconfigured `sand create` must not
-	// start installing a tool that heavy without being asked.
-	fs.BoolVar(&cfg.WithReview, "with-review", cfg.WithReview, "Install the browser review UI in the base image")
+	// --with-codex is the one opt-IN flag (cfg.WithCodex defaults false): an
+	// unconfigured `sand create` must not start installing a tool that heavy
+	// without being asked.
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")

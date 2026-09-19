@@ -86,7 +86,6 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 		"toolset_go":     true,
 		"toolset_java":   true,
 		"toolset_codex":  false,
-		"toolset_review": false,
 	} {
 		v, ok := m[key]
 		if !ok {
@@ -156,7 +155,7 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
 	m := parseVars(t, data)
-	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex", "toolset_review"} {
+	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex"} {
 		if _, ok := m[k]; ok {
 			t.Errorf("finalize phase unexpectedly emitted %q", k)
 		}
@@ -181,73 +180,6 @@ func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 	}
 	if v, ok := m["toolset_claude"].(bool); !ok || !v {
 		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
-	}
-}
-
-// TestBuildExtraVars_ReviewCanBeSelected mirrors
-// TestBuildExtraVars_CodexCanBeSelected for the browser review UI's
-// toolset_review extra-var, which gates the self-review role in site.yml.
-//
-// It is emitted UNCONDITIONALLY, which is the point: the selection travels
-// explicitly in both directions rather than the base falling back to the
-// role's own default. The de-selected direction is the one that would
-// silently break — see TestBuildExtraVars_ReviewDeselectionIsEmitted.
-func TestBuildExtraVars_ReviewCanBeSelected(t *testing.T) {
-	cfg := fullConfig()
-	cfg.WithReview = true
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
-	if err != nil {
-		t.Fatalf("BuildExtraVars: %v", err)
-	}
-	m := parseVars(t, data)
-
-	if v, ok := m["toolset_review"].(bool); !ok || !v {
-		t.Errorf("toolset_review = %v, want true", m["toolset_review"])
-	}
-	if v, ok := m["toolset_claude"].(bool); !ok || !v {
-		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
-	}
-}
-
-// TestBuildExtraVars_ReviewDeselectionIsEmitted is the half that matters now
-// that the review tool defaults ON.
-//
-// site.yml gates the role on `toolset_review | default(true)`. So an OMITTED
-// var does not mean "off" there — it means "on". If BuildExtraVars dropped
-// the var when the user de-selected the tool, `sand create --with-review=false`
-// would install it anyway, and would do so silently: the flag would parse,
-// the base would rebuild, and the tool would still be there. Emitting the
-// false explicitly is the entire mechanism by which opting out works.
-func TestBuildExtraVars_ReviewDeselectionIsEmitted(t *testing.T) {
-	cfg := fullConfig()
-	cfg.WithReview = false
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
-	if err != nil {
-		t.Fatalf("BuildExtraVars: %v", err)
-	}
-	m := parseVars(t, data)
-
-	v, ok := m["toolset_review"]
-	if !ok {
-		t.Fatal("toolset_review was omitted entirely; site.yml defaults it to TRUE, so omitting it installs the tool the user just de-selected")
-	}
-	if b, isBool := v.(bool); !isBool || b {
-		t.Errorf("toolset_review = %v, want false", v)
-	}
-}
-
-// TestBuildExtraVars_ReviewOmittedOnFinalize: like the other tool-set
-// booleans, toolset_review is only meaningful in the base phase.
-func TestBuildExtraVars_ReviewOmittedOnFinalize(t *testing.T) {
-	cfg := fullConfig()
-	cfg.WithReview = true
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
-	if err != nil {
-		t.Fatalf("BuildExtraVars: %v", err)
-	}
-	m := parseVars(t, data)
-	if _, ok := m["toolset_review"]; ok {
-		t.Errorf("finalize phase unexpectedly emitted toolset_review")
 	}
 }
 

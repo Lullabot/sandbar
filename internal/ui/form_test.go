@@ -277,11 +277,11 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 	if cfg.WithClaude {
 		t.Fatalf("WithClaude = true after flipping the Claude Code toggle off, want false")
 	}
-	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava || !cfg.WithReview {
-		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v WithReview=%v",
-			cfg.WithDDEV, cfg.WithGo, cfg.WithJava, cfg.WithReview)
+	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
+		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v",
+			cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
 	}
-	if got, want := cfg.ToolsetKey(), "ddev+go+java+review"; got != want {
+	if got, want := cfg.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Fatalf("ToolsetKey() = %q, want %q", got, want)
 	}
 }
@@ -327,47 +327,6 @@ func TestCreateFormCodexToggleOn(t *testing.T) {
 	}
 }
 
-// TestCreateFormReviewToggleOff is the mirror of TestCreateFormCodexToggleOn
-// for the browser review UI, which is opt-OUT: it defaults ON, and the create
-// form must still surface it as a toggle — last among the tool toggles, right
-// before Rebuild — so a user who does not want it can drop it from the base.
-func TestCreateFormReviewToggleOff(t *testing.T) {
-	m := newTestModel(t)
-	m.openForm()
-	m.inputs[fName].SetValue("web")
-	m.inputs[fGitName].SetValue("Dev")
-	m.inputs[fGitEmail].SetValue("dev@example.com")
-
-	if !m.toolReview {
-		t.Fatalf("the browser review UI must default ON (opt-out)")
-	}
-
-	// Walk from the last text input onto the toggles: Claude (0), Codex (1),
-	// DDEV (2), Go (3), Java (4), Review (5).
-	m.focusIdx = fCloneToken
-	for i := 0; i < 6; i++ {
-		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-		m = next.(model)
-	}
-	if m.toggleFocus != 5 {
-		t.Fatalf("expected focus on the self-review toggle (index 5), got toggleFocus=%d", m.toggleFocus)
-	}
-	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-	m = sp.(model)
-
-	cfg, err := m.buildConfig()
-	if err != nil {
-		t.Fatalf("buildConfig: %v", err)
-	}
-	if cfg.WithReview {
-		t.Fatalf("WithReview = true after flipping the review toggle off, want false")
-	}
-	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
-		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v WithJava=%v",
-			cfg.WithClaude, cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
-	}
-}
-
 // TestCreateFormCodexDefaultOff pins that an untouched create form submits
 // WithCodex: false — the opt-in default carries through buildConfig even
 // though the form shows the toggle.
@@ -395,12 +354,12 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 	m.openForm()
 	m.focusIdx = fCloneToken
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 6; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 6 {
-		t.Fatalf("expected focus on the Rebuild toggle (index 6), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 5 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 5), got toggleFocus=%d", m.toggleFocus)
 	}
 	if m.toolRebuild {
 		t.Fatalf("rebuild should default off")
