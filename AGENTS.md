@@ -106,7 +106,17 @@ it is not where prose belongs.
   derived from which profile's provider created it (`LocalScope` for local
   Lima, a remote identity like `user@host:port` for remote), so the same VM
   name can exist independently under two different profiles and a remote
-  profile's VMs never mix with the local list.
+  profile's VMs never mix with the local list. Every write goes through
+  `mutate`: take the file's `statelock`, RE-READ, apply, write. A whole-file
+  rewrite from a stale in-memory map is how a long-open TUI used to erase the
+  entry a concurrent `sand create` had just added, so `save` is called from
+  nowhere else — and `Reconcile` prunes only entries the caller already knew
+  about, since a VM another process created after this one's instance listing
+  is not evidence of a VM that went away.
+- `statelock` — the advisory file lock (`<path>.lock`, `syscall.Flock`) behind
+  `registry` and `secrets`' read-modify-write. Never fails hard: an unlockable
+  path or a holder past the wait budget proceeds unserialized, the same posture
+  `provision`'s base lock takes.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
