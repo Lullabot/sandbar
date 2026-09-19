@@ -19,14 +19,15 @@ import (
 func TestConfigureArgvStripsWritableMounts(t *testing.T) {
 	f := &fakeRunner{outputs: map[string][]byte{}}
 	c := New(f)
-	if err := c.Configure("vm1", 4, "8GiB", "100GiB"); err != nil {
+	if err := c.Configure("vm1", 4, "8GiB", "100GiB", "/host/playbook"); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if len(f.calls) != 1 {
 		t.Fatalf("got %d calls, want 1: %v", len(f.calls), f.calls)
 	}
 	want := []string{"edit", "--set",
-		`.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`,
+		`.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))` +
+			` | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/host/playbook"`,
 		"vm1"}
 	got := f.calls[0]
 	if len(got) != len(want) {
@@ -104,8 +105,16 @@ func TestConfigureStripsWritableMountAgainstRealLimactl(t *testing.T) {
 		t.Fatalf("write fixture lima.yaml: %v", err)
 	}
 
+	// The clone is repointed at a DIFFERENT playbook directory than the one the
+	// fixture (standing in for the base) was built with — the whole point of
+	// passing it: a clone must finalize from the playbook of the run that made
+	// it, not the one its base happens to still name. Using the same directory
+	// here would make the assertion below pass whether or not the expression
+	// does anything at all.
+	newPlaybookHostDir := t.TempDir()
+
 	c := New(NewExecRunner())
-	if err := c.Configure(name, 4, "8GiB", "100GiB"); err != nil {
+	if err := c.Configure(name, 4, "8GiB", "100GiB", newPlaybookHostDir); err != nil {
 		t.Fatalf("Configure against real limactl: %v", err)
 	}
 
@@ -136,7 +145,10 @@ func TestConfigureStripsWritableMountAgainstRealLimactl(t *testing.T) {
 			t.Errorf("clone's lima.yaml still carries a WRITABLE mount after Configure: %+v\nfull file:\n%s", m, after)
 		}
 	}
-	if len(doc.Mounts) != 1 || doc.Mounts[0].MountPoint != "/mnt/playbook" || doc.Mounts[0].Location != playbookHostDir || doc.Mounts[0].Writable {
-		t.Errorf("mounts = %+v, want exactly the read-only playbook mount at %s", doc.Mounts, playbookHostDir)
+	if len(doc.Mounts) != 1 || doc.Mounts[0].MountPoint != "/mnt/playbook" || doc.Mounts[0].Location != newPlaybookHostDir || doc.Mounts[0].Writable {
+		t.Errorf("mounts = %+v, want exactly the read-only playbook mount at %s", doc.Mounts, newPlaybookHostDir)
+	}
+	if doc.Mounts[0].Location == playbookHostDir {
+		t.Errorf("playbook mount still points at the BASE's build-time directory %s; a clone must finalize from this run's playbook", playbookHostDir)
 	}
 }
