@@ -787,6 +787,69 @@ comment at `roles/claude-code/tasks/main.yml`.
   story: without them a reaped connection hangs forever instead of failing, and a
   hang carries no evidence at all.
 
+## What a reset preserves (read before touching `internal/provision/preserve.go`)
+
+A reset destroys a VM and clones it back, so everything it keeps is copied to
+the HOST and copied in again. `preserve.go` is the single place that decides
+what is staged and, more importantly, WHEN each piece is restored; both
+backends' resets (`internal/provision`'s Lima `Reset` and the Proxmox
+provider's `resetInstance`) drive it rather than restating the rules.
+
+- **Restore order is decided by what the finalize playbook does to the thing.**
+  Anything the playbook should get the LAST word over goes back BEFORE finalize
+  (the Claude login, whose `settings.json` the playbook re-renders; a whole
+  home, where getting an up-to-date build is the entire point). Anything the
+  playbook must not touch goes back AFTER (the project tree, the user's
+  hand-picked checkouts), with the finalize pass omitting `project_clone_url`
+  whenever a checkout is genuinely coming back. Getting this backwards does not
+  fail: it silently produces a VM with stale dotfiles, or a cloned-over
+  checkout.
+- **`PreserveHome` subsumes every other option by CONSTRUCTION, not
+  convention.** One archive of `~` already holds the Claude login, the project
+  and every selectable checkout, so `StagePreserve` returns early rather than
+  staging any of them again. It still PROBES for the project checkout, because
+  the playbook must be told to skip its clone — that probe is why `PlanProject`
+  was split into `probeProject` plus an archive.
+- **A preserve path must stay inside the guest home, and that check is a
+  security control.** `PreservePaths` values come from a sweep of the GUEST —
+  the lowest-trust source in the system — and end up in `tar -C <home> <rel>`
+  and, on the way back, `chown -R <user> <home>/<rel>` run as root. A `..` that
+  survived to the restore would hand a recursive chown to `/`.
+  `preservePathRel` is the only gate, it runs BEFORE the VM is deleted (so a
+  refusal costs a retyped path, not a VM), and a path that merely no longer
+  EXISTS is a note rather than a failure — the list comes from a cache.
+- **`tar`'s exit status 1 is tolerated on stage-out; every other status is
+  not.** GNU tar reserves 1 for "file changed as we read it", and the source VM
+  is running while its data is copied out, so an agent writing a log is enough
+  to produce it. Failing on it would mean "preserve my home" only ever worked
+  on an idle VM. Do not widen this to other statuses — 2 is a real failure.
+- **The staging directory is deliberately NOT in `/tmp`.** `/tmp` is a tmpfs on
+  current Debian, and a staged archive is the only copy of the user's work
+  between the destroy and the restore; a whole home is routinely gigabytes.
+  `stageBaseDir` puts it under `XDG_STATE_HOME`, honouring an explicit `TMPDIR`
+  ahead of that — which is also how every test in this repo keeps its archives
+  off the developer's host state. A test that drives a reset with a preserve
+  option MUST set `TMPDIR`.
+- **`~/.ssh/authorized_keys` is the one thing a whole-home preserve leaves
+  behind** (`homeExcludes`). The rebuilt VM is reached over ssh with the key
+  Lima just installed; restoring the old VM's file is at best a no-op and at
+  worst a VM nobody can log into, discovered halfway through its own reset.
+- **The reset form's checkout list is read from the host-side registry
+  (`internal/checkouts`), never from a fresh sweep** — see
+  `internal/ui/resetpreserve.go`. The form opens on a key press and the VM may
+  be stopped, so contacting a guest there is not an option; the rows are as
+  stale as the last sweep and each row's help says so. The row carries the
+  ABSOLUTE guest path the sweep recorded, and that is what is acted on; the
+  `~/…` label is shortened against a GUESS at the guest home (`/home/<user>`)
+  and must never be what reaches `ResetOptions`.
+- **Reset-mode toggle indices are not stable, and tests must not assume they
+  are.** The list is whole-home, Claude, the project (only when there is one),
+  then one row per checkout. Whole-home is FIRST because it is the only row
+  that changes the labels of the rows below it, and turning it on must not
+  REMOVE rows — a row that vanishes takes the focus ring's meaning with it, and
+  a user who turns it back off must find their earlier picks where they left
+  them.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**

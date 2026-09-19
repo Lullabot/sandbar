@@ -389,7 +389,19 @@ type model struct {
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
 	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
-	toggleFocus          int    // -1 = focus is in the text inputs; index into m.toggles() otherwise
+	// preserveHome is reset mode's whole-home toggle. It subsumes every other
+	// preserve toggle on the form (the rest say so while it is on), and it is the
+	// answer to "rebuild this VM to pick up playbook changes" — the reason to
+	// reset a VM that has nothing wrong with it.
+	preserveHome bool
+	// resetCheckouts are the git checkouts and worktrees the last sweep found in
+	// the VM being reset, offered as one toggle each — including the ones sand
+	// never cloned. Built in openResetForm from the host-side checkout registry,
+	// which means NO guest contact when the form opens (resetpreserve.go).
+	// resetCheckoutsHidden is how many the row cap left out.
+	resetCheckouts       []resetCheckout
+	resetCheckoutsHidden int
+	toggleFocus          int // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
 	// Create-mode tool-set + rebuild toggles (defaults set in openForm). The
 	// tool toggles configure the SHARED base image, not this one VM — see

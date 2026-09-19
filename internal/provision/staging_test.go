@@ -134,7 +134,7 @@ func TestStageOut(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "claude.tar.gz")
 	paths := []string{".claude", ".claude.json"}
 
-	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", paths, archive); err != nil {
+	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", paths, archive, io.Discard); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 

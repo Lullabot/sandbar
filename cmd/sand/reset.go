@@ -28,7 +28,7 @@ type resetter interface {
 // runReset implements `sand reset NAME`: the headless spelling of the TUI's `R`,
 // with the same gate (a sand-managed VM only), the same defaulting (every
 // setting you do not restate comes from the VM's own recorded config), the same
-// two preserve options, and the same follow-up bookkeeping.
+// preserve options, and the same follow-up bookkeeping.
 //
 // It exists because the two entrypoints had drifted into different verbs for
 // the same act. The TUI could preserve a Claude login or a project tree across a
@@ -61,8 +61,28 @@ func runReset(args []string) error {
 type resetOptions struct {
 	preserveClaude  bool
 	preserveProject bool
+	preserveHome    bool
+	preservePaths   repeatedString
 	profile         string
 	values          resetFlagValues
+}
+
+// repeatedString collects every occurrence of a flag that may be passed more
+// than once (`--preserve A --preserve B`). flag.FlagSet has no built-in for it,
+// and the alternative — one comma-separated string — cannot express a path with
+// a comma in it, which a checkout directory is perfectly entitled to have.
+type repeatedString []string
+
+func (r *repeatedString) String() string {
+	if r == nil {
+		return ""
+	}
+	return strings.Join(*r, ", ")
+}
+
+func (r *repeatedString) Set(v string) error {
+	*r = append(*r, v)
+	return nil
 }
 
 // newResetFlagSet defines `sand reset`'s flags, bound to o.
@@ -78,6 +98,11 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.BoolVar(&o.preserveClaude, "preserve-claude", false, "Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild")
 	fs.BoolVar(&o.preserveProject, "preserve-project", false, "Keep the cloned project's per-org directory (checkout + .env) across the rebuild")
+	fs.BoolVar(&o.preserveHome, "preserve-home", false, "Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)")
+	// The backquoted PATH is not decoration: flag.PrintDefaults takes the FIRST
+	// backquoted run in a usage string as the argument's display name, so a
+	// stray `sand land NAME` in here printed "-preserve sand land NAME".
+	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts")
 	fs.StringVar(&o.values.cpus, "cpus", "", "vCPUs (default: whatever this VM has)")
 	fs.StringVar(&o.values.hostname, "hostname", "", "VM hostname (default: whatever this VM has)")
 	fs.StringVar(&o.values.user, "user", "", "Primary VM user (default: whatever this VM has)")
@@ -104,8 +129,17 @@ Everything inside the guest is lost unless you ask for it back:
                        and its history)
   --preserve-project   keep the cloned project's per-org directory (the checkout,
                        its uncommitted work, and the .env alongside it)
+  --preserve PATH      keep one more directory inside the guest home — any git
+                       checkout or worktree, whether sand cloned it or you did.
+                       Repeatable. Run 'sand land NAME' to list what this VM
+                       holds. Paths may be absolute (/home/you/src/app), tilde
+                       (~/src/app) or home-relative (src/app).
+  --preserve-home      keep the WHOLE home directory, then re-run the playbook
+                       on top of it. This is the one to use when the VM is fine
+                       and you only want an up-to-date build; it implies every
+                       flag above.
 
-Both copy data out of the VM to this host and back in afterwards. Do NOT
+All of these copy data out of the VM to this host and back in afterwards. Do NOT
 preserve anything from a VM you believe is compromised.
 
 Every other flag you omit is taken from the VM's own recorded settings, so
@@ -119,6 +153,8 @@ Examples:
   sand reset web                                  # clean rebuild, same settings
   sand reset web --preserve-claude                # keep the Claude login
   sand reset web --preserve-claude --preserve-project
+  sand reset web --preserve ~/src/app --preserve ~/scratch/spike
+  sand reset web --preserve-home                  # keep everything, rebuild the OS
   sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
 
 Flags:
@@ -202,7 +238,12 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		fmt.Fprintf(os.Stderr, "sand: %s clones %s; tokens are never stored, so pass --clone-token if that repo is private.\n", name, cfg.CloneURL)
 	}
 
-	opts := provision.ResetOptions{PreserveClaude: o.preserveClaude, PreserveProject: o.preserveProject}
+	opts := provision.ResetOptions{
+		PreserveClaude:  o.preserveClaude,
+		PreserveProject: o.preserveProject,
+		PreserveHome:    o.preserveHome,
+		PreservePaths:   o.preservePaths,
+	}
 	if err := doReset(ctx, reg, p, cfg, scope, opts, os.Stdout, provenancer); err != nil {
 		return err
 	}

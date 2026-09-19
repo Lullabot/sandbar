@@ -56,41 +56,56 @@ func walkResetFocusPrev(m *model, n int) []int {
 	return seen
 }
 
-// TestResetFocusNextToggleHidden pins the invariant that toggleFocus must never
-// rest on 1 when the project toggle is hidden (no cloned project): forward
-// focus from fCloneToken must land on the Claude toggle (0) and then wrap to
-// fHostname.
+// lastToggle is the index of the final toggle in the current mode's list — what
+// focus must wrap through, and never past. The reset form's toggle COUNT now
+// varies with the VM (a whole-home row, a Claude row, a project row only when
+// there is a project, and one row per checkout the sweep found), so these tests
+// pin the invariant — focus visits every toggle exactly once and then wraps —
+// rather than literal indices, which would have to be rewritten every time a
+// preserve option is added and would stop meaning anything in the process.
+func lastToggle(m model) int { return len(m.toggles()) - 1 }
+
+// TestResetFocusNextToggleHidden pins that forward focus from the last editable
+// input walks the toggle list in order and then wraps to fHostname, never
+// resting on an index the list does not have. Run with no cloned project, so the
+// project toggle is absent from the list entirely.
 func TestResetFocusNextToggleHidden(t *testing.T) {
 	m := newTestModel(t)
 	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
 	if m.projectToggleEnabled {
 		t.Fatalf("projectToggleEnabled = true, want false for empty CloneURL")
 	}
+	n := len(m.toggles())
+	if n == 0 {
+		t.Fatal("reset mode must offer at least one preserve toggle")
+	}
 
 	// Advance focus from fHostname all the way to fCloneToken.
 	m.focusIdx = fCloneToken
 	m.toggleFocus = -1
 
-	// One more Next from fCloneToken should land on the Claude toggle (0), not 1.
-	m.resetFocusNext()
-	if m.toggleFocus != 0 {
-		t.Fatalf("after fCloneToken -> Next: toggleFocus = %d, want 0", m.toggleFocus)
+	for want := 0; want < n; want++ {
+		m.resetFocusNext()
+		if m.toggleFocus != want {
+			t.Fatalf("step %d: toggleFocus = %d, want %d", want, m.toggleFocus, want)
+		}
 	}
 
-	// Next again should wrap back to the editable inputs at fHostname.
+	// One more Next wraps back to the editable inputs at fHostname.
 	m.resetFocusNext()
 	if m.toggleFocus != -1 || m.focusIdx != fHostname {
 		t.Fatalf("after wrap: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fHostname", m.toggleFocus, m.focusIdx)
 	}
 
-	// Full cycle from fHostname must never observe toggleFocus == 1.
+	// A full cycle from fHostname must never observe a toggle index past the end
+	// of the list — the failure that hiding a toggle used to cause.
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
-	steps := resetCycleSteps(m, 1) // one toggle: the project one is hidden
+	steps := resetCycleSteps(m, n)
 	seen := walkResetFocusNext(&m, steps)
 	for _, v := range seen {
-		if v == 1 {
-			t.Fatalf("resetFocusNext walk observed toggleFocus == 1 while toggle hidden; sequence=%v", seen)
+		if v >= n {
+			t.Fatalf("resetFocusNext walk observed toggleFocus == %d with %d toggles; sequence=%v", v, n, seen)
 		}
 	}
 	if m.toggleFocus != -1 || m.focusIdx != fHostname {
@@ -99,18 +114,20 @@ func TestResetFocusNextToggleHidden(t *testing.T) {
 }
 
 // TestResetFocusPrevToggleHidden mirrors TestResetFocusNextToggleHidden for the
-// reverse direction: backward focus from fHostname must land on the Claude
-// toggle (0), never 1.
+// reverse direction.
 func TestResetFocusPrevToggleHidden(t *testing.T) {
 	m := newTestModel(t)
 	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1"}) // no CloneURL => toggle hidden
+	n := len(m.toggles())
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
 
-	m.resetFocusPrev()
-	if m.toggleFocus != 0 {
-		t.Fatalf("after fHostname -> Prev: toggleFocus = %d, want 0", m.toggleFocus)
+	for want := n - 1; want >= 0; want-- {
+		m.resetFocusPrev()
+		if m.toggleFocus != want {
+			t.Fatalf("backward step: toggleFocus = %d, want %d", m.toggleFocus, want)
+		}
 	}
 
 	m.resetFocusPrev()
@@ -120,11 +137,11 @@ func TestResetFocusPrevToggleHidden(t *testing.T) {
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
-	steps := resetCycleSteps(m, 1)
+	steps := resetCycleSteps(m, n)
 	seen := walkResetFocusPrev(&m, steps)
 	for _, v := range seen {
-		if v == 1 {
-			t.Fatalf("resetFocusPrev walk observed toggleFocus == 1 while toggle hidden; sequence=%v", seen)
+		if v >= n {
+			t.Fatalf("resetFocusPrev walk observed toggleFocus == %d with %d toggles; sequence=%v", v, n, seen)
 		}
 	}
 	if m.toggleFocus != -1 || m.focusIdx != fHostname {
@@ -132,25 +149,25 @@ func TestResetFocusPrevToggleHidden(t *testing.T) {
 	}
 }
 
-// TestResetFocusNextToggleShown confirms the two-toggle cycle still works when
-// the project toggle is visible: fCloneToken -> toggle0 -> toggle1 -> fHostname.
+// TestResetFocusNextToggleShown confirms the cycle still works when the project
+// toggle is visible — one more toggle than the hidden case, and the last one is
+// still what a wrap goes through.
 func TestResetFocusNextToggleShown(t *testing.T) {
 	m := newTestModel(t)
 	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
 	if !m.projectToggleEnabled {
 		t.Fatalf("projectToggleEnabled = false, want true for a URL with an org segment")
 	}
+	n := len(m.toggles())
 
 	m.focusIdx = fCloneToken
 	m.toggleFocus = -1
 
-	m.resetFocusNext()
-	if m.toggleFocus != 0 {
-		t.Fatalf("toggleFocus = %d, want 0", m.toggleFocus)
-	}
-	m.resetFocusNext()
-	if m.toggleFocus != 1 {
-		t.Fatalf("toggleFocus = %d, want 1", m.toggleFocus)
+	for want := 0; want < n; want++ {
+		m.resetFocusNext()
+		if m.toggleFocus != want {
+			t.Fatalf("step %d: toggleFocus = %d, want %d", want, m.toggleFocus, want)
+		}
 	}
 	m.resetFocusNext()
 	if m.toggleFocus != -1 || m.focusIdx != fHostname {
@@ -162,17 +179,16 @@ func TestResetFocusNextToggleShown(t *testing.T) {
 func TestResetFocusPrevToggleShown(t *testing.T) {
 	m := newTestModel(t)
 	m.openResetForm(registry.LocalScope, "vm1", vm.CreateConfig{Name: "vm1", CloneURL: "https://github.com/lullabot/sandbar"})
+	n := len(m.toggles())
 
 	m.focusIdx = fHostname
 	m.toggleFocus = -1
 
-	m.resetFocusPrev()
-	if m.toggleFocus != 1 {
-		t.Fatalf("toggleFocus = %d, want 1", m.toggleFocus)
-	}
-	m.resetFocusPrev()
-	if m.toggleFocus != 0 {
-		t.Fatalf("toggleFocus = %d, want 0", m.toggleFocus)
+	for want := n - 1; want >= 0; want-- {
+		m.resetFocusPrev()
+		if m.toggleFocus != want {
+			t.Fatalf("backward step: toggleFocus = %d, want %d", m.toggleFocus, want)
+		}
 	}
 	m.resetFocusPrev()
 	if m.toggleFocus != -1 || m.focusIdx != fCloneToken {

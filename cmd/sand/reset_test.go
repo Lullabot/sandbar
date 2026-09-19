@@ -174,7 +174,7 @@ func TestDoResetRecordsSuccess(t *testing.T) {
 	if !stub.called {
 		t.Fatal("doReset did not drive the provider's Reset")
 	}
-	if stub.opts != opts {
+	if !reflect.DeepEqual(stub.opts, opts) {
 		t.Errorf("Reset got options %+v, want %+v", stub.opts, opts)
 	}
 	back, ok := reg.Config("web")
@@ -249,6 +249,78 @@ func TestReorderFlagsPutsFlagsBeforeTheName(t *testing.T) {
 	}
 	if fs.Lookup("preserve-claude").Value.String() != "true" || fs.Lookup("disk").Value.String() != "200GiB" {
 		t.Errorf("flags did not reach the set: %v", fs.Args())
+	}
+}
+
+// TestResetPreserveFlagsReachTheOptions drives the real flag set — the one the
+// command parses — rather than a hand-rolled copy, so "--preserve is
+// repeatable" and "--preserve-home exists" cannot be true in a test and false in
+// the binary.
+//
+// It also pins the spelling users will actually type: the flags come AFTER the
+// VM name, which only works because reorderFlags asks the set itself which of
+// its flags take a value, and a repeated flag.Value is one of them.
+func TestResetPreserveFlagsReachTheOptions(t *testing.T) {
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	fs.SetOutput(io.Discard)
+
+	args := []string{"web", "--preserve", "~/src/app", "--preserve", "/home/dev/scratch", "--preserve-claude"}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "web" {
+		t.Fatalf("positional = %v, want [web]", fs.Args())
+	}
+	want := []string{"~/src/app", "/home/dev/scratch"}
+	if !reflect.DeepEqual([]string(o.preservePaths), want) {
+		t.Errorf("--preserve collected %v, want %v", o.preservePaths, want)
+	}
+	if !o.preserveClaude {
+		t.Error("--preserve-claude did not survive the repeated --preserve flags")
+	}
+	if o.preserveHome {
+		t.Error("--preserve-home was set without being passed")
+	}
+
+	// And the whole-home flag is a plain bool, so it must not swallow the name.
+	var o2 resetOptions
+	fs2 := newResetFlagSet(&o2)
+	fs2.SetOutput(io.Discard)
+	if err := fs2.Parse(reorderFlags(fs2, []string{"--preserve-home", "web"})); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !o2.preserveHome || fs2.NArg() != 1 || fs2.Arg(0) != "web" {
+		t.Errorf("--preserve-home web: home=%v positional=%v", o2.preserveHome, fs2.Args())
+	}
+}
+
+// TestResetHelpDocumentsEveryPreserveFlag: the usage block is hand-written prose
+// beside a generated flag list, which is exactly the pair that drifts. Every
+// preserve flag the set defines has to appear in the text a user reads.
+func TestResetHelpDocumentsEveryPreserveFlag(t *testing.T) {
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	var buf strings.Builder
+	fs.SetOutput(&buf)
+	fs.Usage()
+
+	help := buf.String()
+	fs.VisitAll(func(f *flag.Flag) {
+		if !strings.HasPrefix(f.Name, "preserve") {
+			return
+		}
+		if !strings.Contains(help, "--"+f.Name) {
+			t.Errorf("sand reset's help never mentions --%s:\n%s", f.Name, help)
+		}
+	})
+
+	// flag.PrintDefaults takes the first BACKQUOTED run of a usage string as the
+	// argument's display name, so a usage string that quotes anything else
+	// renders as nonsense ("-preserve sand land NAME"). Pin the one flag here
+	// that takes a value and has prose worth quoting.
+	if !strings.Contains(help, "-preserve PATH") {
+		t.Errorf("--preserve's argument is not named PATH in the generated flag list:\n%s", help)
 	}
 }
 

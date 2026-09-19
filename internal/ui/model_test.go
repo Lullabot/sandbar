@@ -59,6 +59,14 @@ func isolateHostState(t *testing.T) {
 	// developer's REAL ~/.config/sandbar/profiles.yaml the first time it built
 	// a model.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// TMPDIR covers a reset's host staging directory (provision.newStageDir).
+	// Its production default is deliberately a durable, disk-backed directory
+	// under XDG_STATE_HOME — a staged archive is the only copy of the user's
+	// work while the VM is being rebuilt, so it must survive a reboot and must
+	// not sit in a tmpfs — and once staging has begun, no later error deletes
+	// it. Right in production, litter in a test; os.MkdirTemp honours TMPDIR
+	// ahead of that default for exactly this reason.
+	t.Setenv("TMPDIR", t.TempDir())
 }
 
 // newTestModelWithCli is newTestModel's parametrized form, for tests that need
@@ -423,19 +431,52 @@ func TestResetGateManagedOpensForm(t *testing.T) {
 	}
 }
 
+// toggleIndexByLabel finds a toggle by a prefix of its label. The reset form's
+// toggles are no longer at fixed indices — a whole-home row, a Claude row, a
+// project row only when there is a project, and one row per checkout the sweep
+// found — so a test that means "the Claude toggle" has to say so.
+func toggleIndexByLabel(m model, prefix string) int {
+	for i, t := range m.toggles() {
+		if strings.HasPrefix(t.label, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+// tabToToggle tabs until the named toggle has focus, failing the test if it is
+// never reached.
+func tabToToggle(t *testing.T, m model, prefix string) model {
+	t.Helper()
+	want := toggleIndexByLabel(m, prefix)
+	if want < 0 {
+		t.Fatalf("the reset form has no %q toggle; labels=%v", prefix, toggleLabels(m))
+	}
+	for i := 0; i < 40 && m.toggleFocus != want; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+	}
+	if m.toggleFocus != want {
+		t.Fatalf("could not navigate to the %q toggle (toggleFocus=%d)", prefix, m.toggleFocus)
+	}
+	return m
+}
+
+// toggleLabels is for failure messages: what the form is actually offering.
+func toggleLabels(m model) []string {
+	var out []string
+	for _, t := range m.toggles() {
+		out = append(out, t.label)
+	}
+	return out
+}
+
 // Navigating onto a preserve toggle and pressing space flips its bool and shows
 // the compromise warning.
 func TestResetToggleFlipsAndWarns(t *testing.T) {
 	m := openReset(t, resetConfig())
 
-	// Tab through the inputs until focus lands on the first toggle.
-	for i := 0; i < 20 && m.toggleFocus != 0; i++ {
-		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-		m = next.(model)
-	}
-	if m.toggleFocus != 0 {
-		t.Fatalf("could not navigate to the first toggle (toggleFocus=%d)", m.toggleFocus)
-	}
+	m = tabToToggle(t, m, "Preserve Claude Code settings")
 	if m.preserveClaude {
 		t.Fatalf("preserveClaude should start false")
 	}
@@ -446,10 +487,40 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
 	if !m.preserveClaude {
-		t.Fatalf("space on the first toggle should enable preserveClaude")
+		t.Fatalf("space on the Claude toggle should enable preserveClaude")
 	}
 	if !strings.Contains(m.formView(), "compromised") {
 		t.Fatalf("the compromise warning should appear once a toggle is on")
+	}
+}
+
+// The whole-home toggle is the first preserve option, it flips like the rest,
+// and turning it on marks every option it subsumes as already included rather
+// than removing them from the form (which would move the focus ring out from
+// under the key the user just pressed).
+func TestResetWholeHomeToggle(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	if got := toggleIndexByLabel(m, "Preserve the entire home directory"); got != 0 {
+		t.Fatalf("the whole-home toggle is at index %d, want 0; labels=%v", got, toggleLabels(m))
+	}
+	before := len(m.toggles())
+
+	m = tabToToggle(t, m, "Preserve the entire home directory")
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+
+	if !m.preserveHome {
+		t.Fatal("space on the whole-home toggle should enable preserveHome")
+	}
+	if got := len(m.toggles()); got != before {
+		t.Fatalf("toggle count changed from %d to %d when whole-home was enabled", before, got)
+	}
+	if !strings.Contains(m.formView(), "already in the whole home") {
+		t.Fatalf("the subsumed toggles should say so; view:\n%s", m.formView())
+	}
+	if !strings.Contains(m.formView(), "compromised") {
+		t.Fatal("the compromise warning should appear once whole-home is on")
 	}
 }
 
@@ -766,27 +837,28 @@ func TestDiskOverflowWarning(t *testing.T) {
 func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 	m := openReset(t, resetConfig())
 
-	sawToggle0, sawToggle1, wrapped := false, false, false
+	last := lastToggle(m)
+	seen := make([]bool, last+1)
+	wrapped := false
 	for i := 0; i < 40; i++ {
 		if m.toggleFocus == -1 && m.focusIdx == fName {
 			t.Fatalf("focus landed on the locked Name field")
 		}
-		switch m.toggleFocus {
-		case 0:
-			sawToggle0 = true
-		case 1:
-			sawToggle1 = true
+		if m.toggleFocus >= 0 {
+			seen[m.toggleFocus] = true
 		}
-		// A full cycle is complete once we return to Hostname after seeing a toggle.
-		if sawToggle1 && m.toggleFocus == -1 && m.focusIdx == fHostname {
+		// A full cycle is complete once we return to Hostname after the last toggle.
+		if seen[last] && m.toggleFocus == -1 && m.focusIdx == fHostname {
 			wrapped = true
 			break
 		}
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if !sawToggle0 || !sawToggle1 {
-		t.Fatalf("tab cycle missed a toggle (claude=%v project=%v)", sawToggle0, sawToggle1)
+	for i, ok := range seen {
+		if !ok {
+			t.Fatalf("tab cycle missed toggle %d (%q)", i, toggleLabels(m)[i])
+		}
 	}
 	if !wrapped {
 		t.Fatalf("tab navigation never wrapped back to the first editable field")
@@ -799,8 +871,8 @@ func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 	}
 	prev, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = prev.(model)
-	if m.toggleFocus != 1 {
-		t.Fatalf("shift+tab from Hostname should wrap to the last toggle, got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != last {
+		t.Fatalf("shift+tab from Hostname should wrap to the last toggle (%d), got toggleFocus=%d", last, m.toggleFocus)
 	}
 }
 
@@ -812,22 +884,11 @@ func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
 	cfg.CloneURL = ""
 	m := openReset(t, cfg)
 
-	sawClaude := false
-	for i := 0; i < 40; i++ {
-		if m.toggleFocus == 1 {
-			t.Fatalf("navigation must skip the disabled project toggle")
-		}
-		if m.toggleFocus == 0 {
-			sawClaude = true
-			break
-		}
-		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-		m = next.(model)
-	}
-	if !sawClaude {
-		t.Fatalf("navigation never reached the Claude toggle")
+	if i := toggleIndexByLabel(m, "Preserve ~/"); i >= 0 {
+		t.Fatalf("the project toggle is still in the list at %d; labels=%v", i, toggleLabels(m))
 	}
 	// Space still flips the Claude toggle even with the project toggle disabled.
+	m = tabToToggle(t, m, "Preserve Claude Code settings")
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
 	if !m.preserveClaude {

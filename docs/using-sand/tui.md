@@ -155,11 +155,21 @@ different repo, press `n` and make another VM. The GitHub token field stays
 editable, because re-cloning a private repo still needs one.
 
 The headless equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name),
-with the same gate, the same defaults and the same two preserve options.
+with the same gate, the same defaults and the same preserve options.
 
-Two **preserve toggles** follow the fields (space/enter flips the focused
-one). Both default off:
+### Choosing what survives
 
+**Preserve toggles** follow the fields (space/enter flips the focused one).
+They all default off, and each one's help text — shown under the form while
+that row has focus — says exactly what it copies:
+
+- **Preserve the entire home directory** is first, and it is the one to reach
+  for when nothing is *wrong* with the VM and you only want an up-to-date
+  build. The whole home is copied out, the VM is rebuilt from a current base
+  image, the home is copied back, and the playbook then runs on top of it — so
+  Ansible's own files are freshly rendered while your work is exactly where you
+  left it. It includes everything below (those rows say so while it is on), and
+  it copies the most data.
 - **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`
   (your Claude Code login and history) across the reset.
 - **Preserve ~/&lt;host&gt;/&lt;org&gt;** — named for the exact directory it
@@ -170,9 +180,24 @@ one). Both default off:
   [Reset and the token](secrets.md#reset-and-the-token)). This toggle is
   hidden entirely when the VM cloned no project, since there'd be nothing to
   preserve.
+- **One row per git checkout** the VM holds — `Preserve ~/src/app`,
+  `Preserve ~/src/app/.claude/worktrees/spike`, and so on. These come from the
+  same background sweep that feeds the
+  [unlanded-work badge](#the-unlanded-work-badge), so a repo you cloned by hand
+  and a worktree an agent created three levels down are both offered, and each
+  row's help says what branch it was on and how long ago it was seen. Checkouts
+  already inside the project's own org directory are left out, since the toggle
+  above keeps them. A VM that has never been swept (one stopped all session)
+  simply has no rows here; preserve the whole home instead.
 
-Enabling either toggle copies that data out of the VM to a private host
-temp directory and restores it into the freshly cloned VM, then deletes the
-temporary copy. The form warns that this moves your Claude Code login and
-project token off the VM: **do not preserve if you suspect the VM is
-compromised** — see [Security Model](../reference/security-model.md).
+Enabling any toggle copies that data out of the VM to a private host
+directory and restores it into the freshly cloned VM, then deletes the
+temporary copy. The form warns that this moves your Claude Code login,
+project token and working trees off the VM: **do not preserve if you suspect
+the VM is compromised** — see
+[Security Model](../reference/security-model.md).
+
+Only directories **inside the guest home** can be preserved. Nothing under
+`/srv`, `/opt` or anywhere else outside `~` survives a reset, and a row
+pointing somewhere outside the home is refused before the VM is touched rather
+than silently skipped.
