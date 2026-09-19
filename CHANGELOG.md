@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/Lullabot/sandbar/compare/v0.10.1...v0.10.2) (2026-09-19)
+
+
+### Bug Fixes
+
+* **registry,secrets:** serialize the host state files behind an advisory lock ([#172](https://github.com/Lullabot/sandbar/issues/172)) ([9527238](https://github.com/Lullabot/sandbar/commit/95272387b3f9596b75b08a312261279120471f1d))
+
 ## [0.10.1](https://github.com/Lullabot/sandbar/compare/v0.10.0...v0.10.1) (2026-09-17)
 
 
