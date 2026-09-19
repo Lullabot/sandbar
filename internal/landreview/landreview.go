@@ -1,8 +1,15 @@
 // Package landreview runs ONE browser review session against ONE checkout
-// inside a guest VM: it picks a workstation port, starts the guest's review
-// server on it, makes that port reachable, waits for it to answer, opens a
-// browser at it, and blocks until the reviewer finishes — which is the guest
-// server writing review.xml into the checkout and exiting.
+// inside a guest VM: it starts upstream @self-review/serve in the guest, reads
+// back the port that server chose for itself, makes that port reachable from
+// the workstation, waits for it to answer, opens a browser at it, and blocks
+// until the reviewer finishes — which is the guest server writing review.xml
+// into the checkout and exiting.
+//
+// The order is dictated by upstream and is the thing most likely to surprise
+// a reader: @self-review/serve binds an EPHEMERAL port and has no flag to ask
+// for a particular one, so sand cannot choose the port and then connect. It
+// must start the server first, parse the port out of the banner the server
+// prints, and only then build the bridge.
 //
 // It lives in internal/ rather than beside `sand land` because BOTH entry
 // points need it: the CLI action (cmd/sand/land.go's --review) and the TUI's
@@ -28,6 +35,7 @@ package landreview
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,25 +53,48 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// ServerPath is the guest path of the review server's entry module. It is
-// hard-coded rather than discovered because the Ansible role installs the web
-// app at exactly one fixed, untunable location — see
-// roles/self-review/defaults/main.yml's selfreview_install_dir, whose own
-// comment names this caller as the reason it must not become configurable.
-const ServerPath = "/opt/sandbar/self-review/server/index.mjs"
+// ServeBinary is the guest command that serves the review UI: upstream
+// @self-review/serve's own CLI, put on PATH by a global npm install in
+// roles/self-review. It is a bare NAME rather than an absolute path on
+// purpose — npm owns where a global bin lands, and hard-coding that layout
+// here would break the moment the role's install method changed.
+const ServeBinary = "self-review-serve"
 
-// outputFile is the file the guest server writes a finished review to, inside
-// the checkout. It matches @self-review/core's own default (config.outputFile),
-// which a project could in principle override with a .self-review.yaml; the
-// reported path is that default, since the browser — not sand — is the client
-// that learns the real one.
+// serveScript runs ServeBinary with the checkout as its working directory,
+// because @self-review/serve takes no --repo flag: it reviews the repository
+// it is started in, and resolves its output file relative to that same
+// directory (so a checkout's own .self-review.yaml applies).
+//
+// It is a FIXED, LITERAL string, and the checkout path and diff base arrive
+// as positional arguments that are only ever expanded inside double quotes —
+// the same rule mergeBaseScript and the Landing pane's commitAndPushExpr
+// keep, for the same reason: both values come from a sweep of the guest, the
+// lowest-trust source in the system, and neither may ever be parsed as shell
+// syntax.
+//
+// `exec` matters beyond tidiness. Without it the guest command is the shell,
+// and the server is its child — so the teardown that kills what the transport
+// started would reap the shell and leave the server listening. Replacing the
+// shell makes the process sand supervises the process that serves.
+const serveScript = `set -f
+d=$1
+shift
+cd "$d" || exit 1
+exec ` + ServeBinary + ` "$@"
+`
+
+// outputFile is the file a finished review lands in, inside the checkout. It
+// matches @self-review/core's own default (config.outputFile). It is only a
+// FALLBACK: the server announces the real path itself (see writtenPath), which
+// is what a project's .self-review.yaml can redirect.
 const outputFile = "review.xml"
 
 const (
-	// defaultReadyTimeout bounds the wait for the guest server to answer:
-	// long enough for a cold `node` start plus Lima noticing the new guest
-	// listener (~1s) or an ssh -L completing its handshake, short enough that
-	// a VM built without --with-review says so rather than appearing to hang.
+	// defaultReadyTimeout bounds BOTH waits — for the server to announce its
+	// port, and then for that port to answer. Long enough for a cold `node`
+	// start plus Lima noticing the new guest listener (~1s) or an ssh -L
+	// completing its handshake, short enough that a VM whose base predates
+	// the review tool says so rather than appearing to hang.
 	defaultReadyTimeout = 30 * time.Second
 	// defaultPollInterval is the gap between readiness attempts.
 	defaultPollInterval = 250 * time.Millisecond
@@ -117,7 +148,9 @@ type Session struct {
 	// fatal: see Run.
 	Open func(ctx context.Context, url string) error
 
-	// PickPort returns a port free on the WORKSTATION, used on both ends.
+	// PickPort returns a port free on the WORKSTATION, used as the near end
+	// of a forward. Backends that need no forward (local Lima) ignore it and
+	// browse the guest's own port.
 	PickPort func() (int, error)
 	// Probe reports whether the review UI answers at addr (host:port), nil
 	// meaning ready.
@@ -137,12 +170,30 @@ type Session struct {
 // caller has.
 var errServerGone = errors.New("the review server exited before it was reachable")
 
-// missingWebAppHint is appended to BOTH ways a review can fail to start,
+// missingToolHint is appended to BOTH ways a review can fail to start,
 // because both have the same overwhelmingly likely cause and a reader should
-// not have to reach the second one to be told. A base image built without
-// --with-review has no web app at all, so the guest's own message is a bare
-// MODULE_NOT_FOUND that says nothing about which sand flag produces it.
-const missingWebAppHint = "\n(if this VM's base image was built without `sand create --with-review`, " + ServerPath + " does not exist in the guest)"
+// not have to reach the second one to be told. A base image built without the
+// review tool has no ServeBinary at all, so the guest's own message is a bare
+// `command not found` that says nothing about which sand flag produces it.
+//
+// The review tool is installed by default, so the two ways to be missing it
+// are both historical: a base built with `--with-review=false`, or one built
+// before the tool existed. Both are fixed the same way, which is what this
+// says.
+const missingToolHint = "\n(if this VM's base image predates the review tool, or was built with " +
+	"`sand create --with-review=false`, " + ServeBinary + " does not exist in the guest — " +
+	"rebuild the base with `sand create --rebuild`)"
+
+// serveReadyRe matches the line @self-review/serve prints once its listener
+// is up, which is the ONLY way to learn the port: upstream binds an ephemeral
+// port (listenLoopback's `listen(0)`) and offers no flag to dictate one, so
+// the guest chooses and sand is told after the fact. That inverts the usual
+// order — the forward cannot be built until the server is already running.
+//
+// Anchored on 127.0.0.1 because that is what upstream binds and all this side
+// knows how to bridge; a future upstream that bound something else must not be
+// silently misread as reachable.
+var serveReadyRe = regexp.MustCompile(`Review ready at http://127\.0\.0\.1:([0-9]{1,5})/`)
 
 // Run performs the whole session and returns the guest path the finished
 // review was written to.
@@ -158,18 +209,14 @@ const missingWebAppHint = "\n(if this VM's base image was built without `sand cr
 // command is killed, the forwarder child is killed and reaped, and Run
 // returns an error.
 func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
-	port, err := s.pickPort()
-	if err != nil {
-		return "", fmt.Errorf("picking a free workstation port for the review server: %w", err)
-	}
-
-	// Discrete argv elements, never an `sh -c` string: see the package doc.
-	// The diff range is optional by design — without it the server reviews
-	// the working tree, which is a worse default but never a failure.
-	argv := []string{"node", ServerPath, "--repo", s.Checkout.Path, "--port", strconv.Itoa(port)}
+	// Discrete argv elements around a FIXED script, never a shell string
+	// built from data: see the package doc and serveScript. The diff range is
+	// optional by design — without it the server reviews the working tree,
+	// which is a worse default but never a failure.
+	argv := []string{"sh", "-c", serveScript, "sh", s.Checkout.Path}
 	base := s.diffBase(ctx)
 	if base != "" {
-		argv = append(argv, "--diff-args", base)
+		argv = append(argv, base)
 	}
 	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
 
@@ -203,41 +250,72 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// submitted review does not: there the server has already exited on its
 	// own, and the extra round trip would be pure latency on the path users
 	// actually take.
+	// guestPort is not known until the server announces it, so teardown must
+	// tolerate never having learned it: 0 means the server never got that
+	// far, and there is correspondingly nothing in the guest to stop.
+	guestPort := 0
 	submitted := false
 	defer func() {
 		cancelServer()
 		<-exited
-		if !submitted {
-			s.stopGuestServer(ctx, port, w)
+		if !submitted && guestPort != 0 {
+			s.stopGuestServer(ctx, guestPort, w)
 		}
 	}()
 
+	// FIRST wait for the guest's own banner, because upstream picks the port
+	// itself and no forward can be built before that number is known. This is
+	// also where a guest with no review tool fails, in well under a second.
+	guestPort, err := s.awaitGuestPort(ctx, &srvOut, exited)
+	if err != nil {
+		if errors.Is(err, errServerGone) {
+			// exited is closed, so srvErr is safe to read here (and only
+			// here, before the wait below) — the close/receive pair is what
+			// orders the goroutine's write against this read.
+			return "", fmt.Errorf("%w: %w%s%s", errServerGone, orExitedCleanly(srvErr),
+				detail(srvOut.String()), missingToolHint)
+		}
+		return "", fmt.Errorf("the review server never reported a URL (%w)%s%s",
+			err, detail(srvOut.String()), missingToolHint)
+	}
+
 	// A nil ForwardArgv means the backend already puts the guest port on the
-	// workstation's loopback (local Lima) — there is nothing to start, and
-	// therefore nothing to tear down.
+	// workstation's loopback (local Lima, whose auto-forward uses the SAME
+	// number on both sides) — there is nothing to start, and therefore
+	// nothing to tear down, and the port to browse is the guest's own.
+	//
+	// ForwardArgv is pure and its nil-ness does not depend on the port
+	// numbers, so asking it with the guest's own port settles "does this
+	// backend need a forward at all?" before any workstation port is
+	// reserved. That ordering is deliberate: local Lima has nothing to
+	// reserve, and a port-picker failure must not fail a review that was
+	// never going to use the picker.
+	hostPort := guestPort
 	var fwdOut lockedBuffer
-	if fwdArgv := s.Provider.ForwardArgv(s.VM, port, port); len(fwdArgv) > 0 {
-		stop, err := s.startForward(ctx, fwdArgv, &fwdOut)
+	if s.Provider.ForwardArgv(s.VM, guestPort, guestPort) != nil {
+		picked, err := s.pickPort()
+		if err != nil {
+			return "", fmt.Errorf("picking a free workstation port for the review forward: %w", err)
+		}
+		hostPort = picked
+		stop, err := s.startForward(ctx, s.Provider.ForwardArgv(s.VM, hostPort, guestPort), &fwdOut)
 		if err != nil {
 			return "", fmt.Errorf("starting the port forward to %s: %w", s.VM.Name, err)
 		}
 		defer stop()
 	}
 
-	switch err := s.waitReady(ctx, port, exited); {
+	switch err := s.waitReady(ctx, hostPort, exited); {
 	case err == nil:
 	case errors.Is(err, errServerGone):
-		// exited is closed, so srvErr is safe to read here (and only here,
-		// before the wait below) — the close/receive pair is what orders the
-		// goroutine's write against this read.
-		return "", fmt.Errorf("%w: %w%s%s", errServerGone, orExitedCleanly(srvErr),
-			detail(srvOut.String(), fwdOut.String()), missingWebAppHint)
+		return "", fmt.Errorf("%w: %w%s", errServerGone, orExitedCleanly(srvErr),
+			detail(srvOut.String(), fwdOut.String()))
 	default:
-		return "", fmt.Errorf("the review server never answered at 127.0.0.1:%d (%w)%s%s",
-			port, err, detail(srvOut.String(), fwdOut.String()), missingWebAppHint)
+		return "", fmt.Errorf("the review UI never answered at 127.0.0.1:%d (%w)%s%s",
+			hostPort, err, detail(srvOut.String(), fwdOut.String()), unreachableHint(hostPort, guestPort))
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
 	fmt.Fprintf(w, "review UI ready at %s\n", url)
 	if s.Open != nil {
 		if err := s.Open(ctx, url); err != nil {
@@ -262,17 +340,15 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	return writtenPath(srvOut.String(), s.Checkout.Path), nil
 }
 
-// reviewWrittenPrefix is the marker the guest server prints on stdout naming
-// the file it wrote. It must match server/index.mjs's REVIEW_WRITTEN_PREFIX
-// exactly; both spell it out as a named constant so the pairing is findable
-// from either side.
-const reviewWrittenPrefix = "self-review: review written to "
-
-// serverHeader is the response header the guest server sets on every response
-// to identify itself to the readiness probe. It must match server/index.mjs's
-// SERVER_HEADER exactly; both spell it out as a named constant so the pairing
-// is findable from either side.
-const serverHeader = "X-Sandbar-Review"
+// The two lines @self-review/serve prints about where a review lands.
+// reviewWrittenPrefix is emitted on success and names the file it actually
+// wrote; outputPathPrefix is emitted at startup and names where it INTENDS to
+// write, which is the best answer available if the process is torn down
+// before it finishes.
+const (
+	reviewWrittenPrefix = "[serve] Review written to "
+	outputPathPrefix    = "[serve] Output path: "
+)
 
 // writtenPath reports where the review actually landed, preferring what the
 // guest server announced over this side's assumption.
@@ -284,14 +360,22 @@ const serverHeader = "X-Sandbar-Review"
 // is worse than useless: docs/using-sand/review.md tells the user to point
 // their agent at it, so a wrong path sends the agent to read nothing.
 //
-// Falls back to the default when no marker is present, so a guest running an
-// older build of the web app still reports something sensible rather than "".
+// Falls back to the startup announcement, and then to the default, so a guest
+// running a build that words either line differently still reports something
+// sensible rather than "".
 func writtenPath(serverOut, checkoutPath string) string {
+	var announced string
 	for _, line := range strings.Split(serverOut, "\n") {
 		line = strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(line, reviewWrittenPrefix); ok && after != "" {
 			return after
 		}
+		if after, ok := strings.CutPrefix(line, outputPathPrefix); ok && after != "" {
+			announced = after
+		}
+	}
+	if announced != "" {
+		return announced
 	}
 	return path.Join(checkoutPath, outputFile)
 }
@@ -312,7 +396,7 @@ func writtenPath(serverOut, checkoutPath string) string {
 const stopServerScript = `set -f
 pid=$(ss -H -ltnp "sport = :$1" 2>/dev/null | sed -n "s/.*pid=\([0-9]\{1,\}\),.*/\1/p" | head -n 1)
 [ -n "$pid" ] || exit 0
-grep -qa "self-review/server/index.mjs" "/proc/$pid/cmdline" 2>/dev/null || exit 0
+grep -qa "self-review-serve" "/proc/$pid/cmdline" 2>/dev/null || exit 0
 kill "$pid" 2>/dev/null || true
 exit 0
 `
@@ -337,13 +421,84 @@ func (s *Session) stopGuestServer(ctx context.Context, port int, w io.Writer) {
 	}
 }
 
+// awaitGuestPort waits for the port @self-review/serve announces at startup.
+//
+// It polls the buffer the server goroutine is filling rather than reading a
+// pipe, and that is what keeps the whole flow testable with no VM:
+// Provider.Shell takes an io.Writer, so the banner arrives by exactly the same
+// path on a fake provider as on a real guest. (Upstream prints it to STDERR,
+// which every guest-command transport in sand merges into that one writer.)
+//
+// Noticing the exit matters as much as noticing the banner: a guest with no
+// review tool fails in well under a second, and waiting out the full timeout
+// to report a generic "no URL" would bury the guest's own explanation.
+func (s *Session) awaitGuestPort(ctx context.Context, out *lockedBuffer, exited <-chan struct{}) (int, error) {
+	deadline := time.Now().Add(s.readyTimeout())
+	for {
+		if port := parseServePort(out.String()); port != 0 {
+			return port, nil
+		}
+		select {
+		case <-exited:
+			// The goroutine writes every byte before it closes this channel,
+			// so one more look settles the case where the banner and the exit
+			// arrive together: a server that announced its port and then died
+			// still told us the number teardown needs.
+			if port := parseServePort(out.String()); port != 0 {
+				return port, nil
+			}
+			return 0, errServerGone
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(s.pollInterval()):
+		}
+		if !time.Now().Before(deadline) {
+			return 0, fmt.Errorf("gave up after %s", s.readyTimeout())
+		}
+	}
+}
+
+// parseServePort extracts the guest port from whatever the server has printed
+// so far, returning 0 when it has not announced one yet. A number outside the
+// port range is treated as no answer rather than trusted: it is about to be
+// used to build a forward.
+func parseServePort(out string) int {
+	m := serveReadyRe.FindStringSubmatch(out)
+	if m == nil {
+		return 0
+	}
+	port, err := strconv.Atoi(m[1])
+	if err != nil || port <= 0 || port > 65535 {
+		return 0
+	}
+	return port
+}
+
+// unreachableHint explains the likeliest reason a server that DID announce a
+// port is nonetheless unreachable. It only has something to say about local
+// Lima, where the two port numbers are necessarily the same.
+//
+// Lima's auto-forward puts the guest's port on the workstation under the SAME
+// number, so the one thing that can go wrong is that number already being
+// taken here — which Lima reports only in its own log. sand cannot prevent
+// it: upstream chooses the guest port and offers no way to ask for another,
+// so the collision is either explained here or not at all.
+func unreachableHint(hostPort, guestPort int) string {
+	if hostPort != guestPort {
+		return ""
+	}
+	return fmt.Sprintf("\n(the guest chose port %d, and Lima forwards it to the same port on this "+
+		"machine — if something here already holds %d that forward cannot bind; "+
+		"running the review again picks a different guest port)", guestPort, hostPort)
+}
+
 // waitReady polls until the review UI answers, the guest command exits, ctx is
 // cancelled, or the budget runs out.
 //
-// Noticing the exit matters as much as noticing readiness: a missing `node`,
-// or a VM built without --with-review, fails in under a second, and waiting
-// out the full timeout to report a generic "not reachable" would bury the
-// guest's own explanation.
+// Noticing the exit matters as much as noticing readiness: a server that
+// announced a port and then died fails in under a second, and waiting out the
+// full timeout to report a generic "not reachable" would bury the guest's own
+// explanation.
 func (s *Session) waitReady(ctx context.Context, port int, exited <-chan struct{}) error {
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	deadline := time.Now().Add(s.readyTimeout())
@@ -497,12 +652,12 @@ func (s *Session) pollInterval() time.Duration {
 }
 
 // freePort asks the kernel for an unused loopback port and immediately gives
-// it back. The gap between letting go and the guest server claiming it is a
-// real (if tiny) race, and it is unavoidable: local Lima forwards a guest
-// loopback port to the SAME number on the host, so the host and guest ports
-// cannot be chosen independently, and sand keeps one rule for all three
-// backends. A collision surfaces as the readiness wait failing, not as
-// silent misbehaviour.
+// it back, for use as the near end of an ssh -L. The gap between letting go
+// and ssh binding it is a real (if tiny) race, and a loss surfaces as the
+// forwarder failing to start rather than as silent misbehaviour.
+//
+// This is only ever the WORKSTATION's end. The guest's port is upstream's to
+// choose, and nothing here can influence it.
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -511,6 +666,10 @@ func freePort() (int, error) {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
+
+// probePath is the route the readiness probe asks for: upstream's smallest
+// JSON endpoint. See probeHTTP for why identifying the responder matters.
+const probePath = "/api/config"
 
 // probeClient is the readiness prober's HTTP client. Keep-alives are off so a
 // probe never leaves a pooled connection behind on a port that is about to be
@@ -528,24 +687,25 @@ var probeClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: tru
 // Lima and Proxmox and open the browser onto a connection error. A completed
 // request round trip means the same thing on all three backends.
 //
-// Any STATUS counts, including an error status: the question is whether the
-// server is there, not whether it likes the request. But it must be OUR server,
-// which is what serverHeader settles.
+// It must also be OUR server, and accepting any HTTP responder was a real
+// hazard rather than a theoretical one. Lima's auto-forward lands a guest
+// loopback port on the SAME number on the host — the workstation for local
+// Lima, the remote host for remote Lima — and nothing reserves that number
+// there. When something else already holds it, the connection reaches that
+// other process instead, and a probe satisfied by any response would declare
+// readiness, open the reviewer's browser onto an unrelated application, and
+// then block forever waiting for a submission that could never arrive.
 //
-// Accepting any HTTP responder was a real hazard, not a theoretical one. The
-// port is chosen by what is free on the WORKSTATION and the same number is
-// reused in the guest; on remote Lima it must ALSO be free on the remote host's
-// loopback, where Lima's own auto-forward lands the guest port, and nothing
-// verifies that. When it is not, the tunnel reaches whatever else holds that
-// port — and a probe satisfied by any response would declare readiness, open
-// the reviewer's browser onto an unrelated application, and then block forever
-// waiting for a submission that could never arrive. Requiring the header turns
-// every one of those into an ordinary readiness timeout naming the problem.
+// probePath settles it. It is upstream's own small JSON route, so a 200 whose
+// body carries a `config` object is a strong statement that the thing on the
+// far end is @self-review/serve — where the bare `/` this used to request is
+// just an HTML page, which any number of things serve. Everything else becomes
+// an ordinary readiness timeout naming the problem.
 func probeHTTP(ctx context.Context, addr string) error {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+probePath, nil)
 	if err != nil {
 		return err
 	}
@@ -554,10 +714,20 @@ func probeHTTP(ctx context.Context, addr string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<12))
-	if resp.Header.Get(serverHeader) == "" {
-		return fmt.Errorf("something is listening on %s but it is not the review server "+
-			"(no %s header) — most likely another process holds this port", addr, serverHeader)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("something is listening on %s but answered %s for %s — "+
+			"most likely another process holds this port", addr, resp.Status, probePath)
+	}
+	var probed struct {
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(body, &probed); err != nil || len(probed.Config) == 0 {
+		return fmt.Errorf("something is listening on %s but %s did not answer like the review "+
+			"server — most likely another process holds this port", addr, probePath)
 	}
 	return nil
 }

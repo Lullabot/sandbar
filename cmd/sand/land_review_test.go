@@ -44,6 +44,21 @@ type reviewHarness struct {
 	// how) the guest server "exits". The default blocks until ctx is done.
 	serverBody func(ctx context.Context, out io.Writer) error
 
+	// guestPort is the port the fake server announces, standing in for the
+	// ephemeral one upstream @self-review/serve chooses for itself. It is
+	// deliberately NOT the number the port picker returns: keeping the two
+	// distinct is what proves the session bridges to the guest's own port
+	// rather than reusing whatever it picked for the workstation end.
+	guestPort int
+	// silent suppresses the readiness banner, modelling a server that starts
+	// and then dies (or hangs) without ever reporting a URL — the shape of a
+	// guest whose base image has no review tool at all.
+	silent bool
+	// outputPath is where the fake server says it will write, and then says
+	// it did. session() derives it from the checkout, as the real server
+	// derives it from the directory it was started in.
+	outputPath string
+
 	// probeReady gates the readiness prober: nil means "ready immediately".
 	probeReady func() bool
 
@@ -54,7 +69,33 @@ type reviewHarness struct {
 }
 
 func newReviewHarness() *reviewHarness {
-	return &reviewHarness{release: make(chan struct{}), mergeBase: strings.Repeat("a1b2c3d4", 5)}
+	return &reviewHarness{
+		release:   make(chan struct{}),
+		mergeBase: strings.Repeat("a1b2c3d4", 5),
+		guestPort: 41234,
+	}
+}
+
+// announceOn writes the startup lines @self-review/serve prints to stderr,
+// which every guest transport in sand merges into the single writer Shell is
+// handed. The session learns the port from nowhere else, so a fake that
+// skipped this would be modelling a server that never came up.
+func (h *reviewHarness) announceOn(out io.Writer, port int) {
+	h.mu.Lock()
+	outputPath := h.outputPath
+	h.mu.Unlock()
+	fmt.Fprintf(out, "[serve] Output path: %s\n", outputPath)
+	fmt.Fprintf(out, "[serve] Review ready at http://127.0.0.1:%d/\n", port)
+}
+
+// finishOn writes the line the real server prints just before exiting 0 on a
+// submitted review. It is the authoritative statement of where the review
+// landed, which is why the session prefers it over its own assumption.
+func (h *reviewHarness) finishOn(out io.Writer) {
+	h.mu.Lock()
+	outputPath := h.outputPath
+	h.mu.Unlock()
+	fmt.Fprintf(out, "[serve] Review written to %s\n", outputPath)
 }
 
 // provider builds the fake backend. forwardArgv is what ForwardArgv reports:
@@ -67,14 +108,21 @@ func (h *reviewHarness) provider(forwardArgv []string) *providerfake.Provider {
 			h.serverCtx = ctx
 			h.serverArgv = append([]string(nil), argv...)
 			body := h.serverBody
+			silent, port := h.silent, h.guestPort
 			h.mu.Unlock()
 
+			if !silent {
+				h.announceOn(out, port)
+			}
 			if body != nil {
 				return body(ctx, out)
 			}
 			select {
 			case <-h.release:
-				return nil // the reviewer pressed Finish Review; the server exits 0
+				// The reviewer pressed Finish Review: the real server writes
+				// the file, says so, and exits 0.
+				h.finishOn(out)
+				return nil
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -106,6 +154,12 @@ func (h *reviewHarness) provider(forwardArgv []string) *providerfake.Provider {
 // replaced. The timings are deliberately tiny so a readiness-timeout test
 // costs milliseconds rather than the production 30s.
 func (h *reviewHarness) session(p *providerfake.Provider, gh *fakeGh, co checkouts.Checkout) *landreview.Session {
+	// The real server resolves its output path against the checkout it was
+	// started in and announces it, so the fake does the same rather than
+	// letting the session fall back to assuming it.
+	h.mu.Lock()
+	h.outputPath = co.Path + "/review.xml"
+	h.mu.Unlock()
 	return &landreview.Session{
 		Provider: p,
 		VM:       vm.VM{Name: "box"},
@@ -215,7 +269,10 @@ func TestReviewHappyPathOnALocalBackend(t *testing.T) {
 		t.Fatalf("landReview: unexpected error: %v", err)
 	}
 
-	if want := "http://127.0.0.1:45123"; len(gh.openCalls) != 1 || gh.openCalls[0] != want {
+	// The GUEST's port, not the picker's: local Lima forwards a guest
+	// loopback port to the same number here, so there is no near end to
+	// choose and the picked 45123 must go unused.
+	if want := "http://127.0.0.1:41234"; len(gh.openCalls) != 1 || gh.openCalls[0] != want {
 		t.Errorf("OpenInBrowser calls = %v, want exactly [%q]", gh.openCalls, want)
 	}
 	if want := "/home/dev/proj/review.xml"; !strings.Contains(out.String(), want) {
@@ -248,14 +305,21 @@ func TestReviewGuestArgvIsDiscreteElements(t *testing.T) {
 	}
 
 	got := h.argv()
+	// A fixed script, then the path and the diff base as positional
+	// arguments. A script is how the server gets a working directory at all:
+	// upstream reviews the repository it is STARTED IN and has no --repo
+	// flag, so the one thing that must never happen is the path reaching that
+	// script as text.
 	want := []string{
-		"node", "/opt/sandbar/self-review/server/index.mjs",
-		"--repo", nasty,
-		"--port", "45123",
-		"--diff-args", strings.Repeat("a1b2c3d4", 5),
+		"sh", "-c", got[2], // checked for content, not equality, below
+		"sh", nasty,
+		strings.Repeat("a1b2c3d4", 5),
 	}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+	if len(got) != len(want) || strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("guest server argv =\n  %#v\nwant\n  %#v", got, want)
+	}
+	if !strings.Contains(got[2], "exec self-review-serve") {
+		t.Errorf("guest script does not exec the review tool:\n%s", got[2])
 	}
 	// The path must be ONE element, verbatim — not quoted, not escaped, not
 	// concatenated into a neighbouring element.
@@ -264,9 +328,12 @@ func TestReviewGuestArgvIsDiscreteElements(t *testing.T) {
 			t.Errorf("argv element %q has the checkout path spliced into it; it must travel alone", a)
 		}
 	}
-	// And no shell is invoked to launch the server at all.
-	if got[0] == "sh" || got[0] == "bash" || got[0] == "sh -c" {
-		t.Errorf("guest server argv[0] = %q, want the interpreter directly — never a shell", got[0])
+	// A shell IS invoked here, to supply the working directory upstream has
+	// no flag for. So the property is not "no shell" but "no data in the
+	// shell": every variable part arrives AFTER the script, as its own
+	// argument, and the script itself never mentions them.
+	if strings.Contains(got[2], nasty) || strings.Contains(got[2], "my repo") {
+		t.Errorf("guest script has the checkout path interpolated into it:\n%s", got[2])
 	}
 
 	// The merge-base probe follows the same rule: a fixed literal script with
@@ -304,9 +371,11 @@ func TestReviewForwardedBackendStartsAndStopsTheForwarder(t *testing.T) {
 	h.mu.Lock()
 	fwd := append([]string(nil), h.forwardArgv...)
 	h.mu.Unlock()
-	// Host port and guest port are the SAME number, because local Lima's own
-	// forward is same-port and sand keeps one rule for all three backends.
-	want := []string{"ssh", "-N", "-L", "45123:127.0.0.1:45123"}
+	// The two ends are DIFFERENT numbers, and that is the point: the guest
+	// chose 41234 for itself and announced it, while 45123 is what the picker
+	// reserved on this machine. A forward using one number on both ends would
+	// bridge to a port nothing is listening on.
+	want := []string{"ssh", "-N", "-L", "45123:127.0.0.1:41234"}
 	if strings.Join(fwd, " ") != strings.Join(want, " ") {
 		t.Errorf("forwarder argv = %v, want %v", fwd, want)
 	}
@@ -342,8 +411,11 @@ func TestReviewTearsDownOnEveryExitPath(t *testing.T) {
 			},
 		},
 		{
-			name:    "readiness timeout: the server never answers",
-			wantErr: "--with-review",
+			name: "readiness timeout: the server never answers",
+			// NOT the missing-tool hint: this server announced a port, so the
+			// tool plainly exists. What the reader needs here is the address
+			// that went unanswered.
+			wantErr: "never answered at 127.0.0.1:45123",
 			arrange: func(_ *testing.T, h *reviewHarness, _ *landreview.Session) context.Context {
 				h.mu.Lock()
 				h.probeReady = func() bool { return false }
@@ -398,7 +470,10 @@ func TestReviewTearsDownOnEveryExitPath(t *testing.T) {
 			// and stop it — and the successful one must NOT, because there
 			// the server has already exited on its own and the round trip
 			// would be pure latency on the path users actually take.
-			stops := h.guestStops("45123")
+			// The GUEST's port: the stop script runs inside the VM and finds
+			// the server by the socket it listens on THERE, which is never
+			// the workstation end of the forward.
+			stops := h.guestStops("41234")
 			if tc.wantErr == "" {
 				if len(stops) != 0 {
 					t.Errorf("guest stop commands = %v, want none after a submitted review", stops)
@@ -414,15 +489,19 @@ func TestReviewTearsDownOnEveryExitPath(t *testing.T) {
 
 // --- failure modes ---
 
-// A server that dies on startup — no node, or a VM built without
-// --with-review, so the module does not exist — must surface ITS OWN message
-// straight away instead of the reader waiting out the readiness timeout for a
-// generic "not reachable".
+// A server that dies on startup — a base image built without the review tool,
+// so the command does not exist — must surface ITS OWN message straight away
+// instead of the reader waiting out the readiness timeout for a generic "not
+// reachable".
 func TestReviewServerExitFailureBeatsTheReadinessTimeout(t *testing.T) {
 	h := newReviewHarness()
 	h.probeReady = func() bool { return false }
+	// SILENT, because that is what this failure actually looks like: a guest
+	// with no review tool never gets far enough to announce a port, so the
+	// session is still waiting for the banner when the command dies.
+	h.silent = true
 	h.serverBody = func(context.Context, io.Writer) error {
-		return errors.New("bash: line 1: node: command not found")
+		return errors.New("sh: 1: self-review-serve: not found")
 	}
 	gh := &fakeGh{}
 	sess := h.session(h.provider(nil), gh, reviewCheckout("/home/dev/proj"))
@@ -435,14 +514,14 @@ func TestReviewServerExitFailureBeatsTheReadinessTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("landReview: want an error when the guest server exits before it is ready")
 	}
-	if !strings.Contains(err.Error(), "node: command not found") {
+	if !strings.Contains(err.Error(), "self-review-serve: not found") {
 		t.Errorf("landReview error = %v, want it to carry the guest server's own message", err)
 	}
-	// A server that dies on startup is overwhelmingly a base image built
-	// without the web app, so this arm has to name the flag too — not only
-	// the readiness timeout, which is the arm a reader reaches LAST.
-	if !strings.Contains(err.Error(), "--with-review") {
-		t.Errorf("landReview error = %v, want it to name `sand create --with-review` as the likely cause", err)
+	// A server that never announces a port is overwhelmingly a base image
+	// without the review tool, so this arm has to say how to fix that — the
+	// guest's own `not found` names a command, not a way out of it.
+	if !strings.Contains(err.Error(), "sand create --rebuild") {
+		t.Errorf("landReview error = %v, want it to say how to get the tool installed", err)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("landReview took %s to notice the server had exited; it must not wait out the readiness timeout", elapsed)
@@ -502,7 +581,9 @@ func TestReviewCancelledWhileWaitingForReadiness(t *testing.T) {
 func TestReviewPortPickerFailureIsReported(t *testing.T) {
 	h := newReviewHarness()
 	gh := &fakeGh{}
-	sess := h.session(h.provider(nil), gh, reviewCheckout("/home/dev/proj"))
+	// A FORWARDING backend, because that is the only kind that needs a
+	// workstation port at all.
+	sess := h.session(h.provider([]string{"ssh", "-N", "-L"}), gh, reviewCheckout("/home/dev/proj"))
 	wantErr := errors.New("no free port")
 	sess.PickPort = func() (int, error) { return 0, wantErr }
 
@@ -510,8 +591,33 @@ func TestReviewPortPickerFailureIsReported(t *testing.T) {
 	if err == nil || !errors.Is(err, wantErr) {
 		t.Fatalf("landReview error = %v, want it to wrap %v", err, wantErr)
 	}
-	if h.argv() != nil {
-		t.Errorf("guest server argv = %v, want the server never started without a port", h.argv())
+	if len(gh.openCalls) != 0 {
+		t.Errorf("OpenInBrowser calls = %v, want none — no port was ever bridged", gh.openCalls)
+	}
+}
+
+// The mirror of the test above, and the reason the session asks whether a
+// forward is needed BEFORE reserving anything. On local Lima nothing is
+// forwarded, so no workstation port is reserved and a picker that cannot
+// produce one is never consulted: a review must not fail over a resource it
+// was never going to use. Reserving the port first reads as harmless tidying,
+// which is exactly what makes this worth pinning.
+func TestReviewLocalBackendNeedsNoPortPicker(t *testing.T) {
+	h := newReviewHarness()
+	gh := &fakeGh{}
+	sess := h.session(h.provider(nil), gh, reviewCheckout("/home/dev/proj"))
+	sess.PickPort = func() (int, error) { return 0, errors.New("no free port") }
+	realOpen := sess.Open
+	sess.Open = func(ctx context.Context, url string) error {
+		close(h.release)
+		return realOpen(ctx, url)
+	}
+
+	if err := landReview(context.Background(), io.Discard, sess); err != nil {
+		t.Fatalf("landReview: a local backend must not consult the port picker: %v", err)
+	}
+	if want := "http://127.0.0.1:41234"; len(gh.openCalls) != 1 || gh.openCalls[0] != want {
+		t.Errorf("OpenInBrowser calls = %v, want exactly [%q]", gh.openCalls, want)
 	}
 }
 
@@ -532,7 +638,7 @@ func TestReviewBrowserFailureDoesNotAbortTheReview(t *testing.T) {
 	if err := landReview(context.Background(), &out, sess); err != nil {
 		t.Fatalf("landReview: unexpected error when the browser could not be opened: %v", err)
 	}
-	for _, want := range []string{"http://127.0.0.1:45123", "xdg-open", "/home/dev/proj/review.xml"} {
+	for _, want := range []string{"http://127.0.0.1:41234", "xdg-open", "/home/dev/proj/review.xml"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("landReview output missing %q; got:\n%s", want, out.String())
 		}

@@ -2,6 +2,7 @@ package landreview
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -32,9 +33,8 @@ func TestFreePortReturnsABindableLoopbackPort(t *testing.T) {
 	if port <= 0 || port > 65535 {
 		t.Fatalf("freePort = %d, want a usable TCP port", port)
 	}
-	// The port must have been RELEASED, not held: the guest server is about
-	// to claim this same number, and on local Lima the host and guest ports
-	// are necessarily identical.
+	// The port must have been RELEASED, not held: an ssh -L is about to bind
+	// this same number as the near end of the forward.
 	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
 	if err != nil {
 		t.Fatalf("listening on the port freePort just returned: %v", err)
@@ -44,15 +44,22 @@ func TestFreePortReturnsABindableLoopbackPort(t *testing.T) {
 
 // --- probeHTTP ---
 
-func TestProbeHTTPAcceptsAnyStatusFromTheReviewServer(t *testing.T) {
-	// An error status still means "the server is there", which is the only
-	// question readiness asks — a guest whose dist/ was not built answers 500
-	// and is nonetheless ready to be looked at. What identifies it as the
-	// review server is the header, not the status.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(serverHeader, "1")
-		http.Error(w, "dist/ not built", http.StatusInternalServerError)
-	}))
+// reviewServerStub answers probePath the way @self-review/serve does. The
+// shape is taken from a real 1.45.0 response, trimmed to the part the probe
+// actually reads.
+func reviewServerStub() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != probePath {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"config":{"theme":"system","outputFile":"./review.xml"}}`))
+	})
+}
+
+func TestProbeHTTPAcceptsTheReviewServer(t *testing.T) {
+	srv := httptest.NewServer(reviewServerStub())
 	defer srv.Close()
 
 	if err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://")); err != nil {
@@ -60,27 +67,54 @@ func TestProbeHTTPAcceptsAnyStatusFromTheReviewServer(t *testing.T) {
 	}
 }
 
-// TestProbeHTTPRejectsAForeignListener covers the port-collision hazard. sand
-// picks the port by what is free on the WORKSTATION and reuses the number in
-// the guest; on remote Lima it must ALSO be free on the remote host's loopback,
-// where Lima's auto-forward lands it, and nothing verifies that. When something
-// else holds it, a probe satisfied by any HTTP response declared readiness and
-// opened the reviewer's browser onto an unrelated application, then blocked
-// forever waiting for a submission that could never come.
+// TestProbeHTTPRejectsAForeignListener covers the port-collision hazard.
+// Lima's auto-forward lands a guest loopback port on the SAME number on the
+// host, and nothing reserves that number there. When something else already
+// holds it, the connection reaches that other process — and a probe satisfied
+// by any HTTP response would declare readiness, open the reviewer's browser
+// onto an unrelated application, then block forever waiting for a submission
+// that could never come.
+//
+// The plain HTML case is why asking for `/` was not enough: any number of
+// things serve a page there.
 func TestProbeHTTPRejectsAForeignListener(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// A perfectly healthy, entirely unrelated web application.
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("<html>some other app</html>"))
-	}))
-	defer srv.Close()
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "a healthy but entirely unrelated web application",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("<html>some other app</html>"))
+			},
+		},
+		{
+			name: "an unrelated JSON API that happens to answer this route",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"ok","version":3}`))
+			},
+		},
+		{
+			name: "something that refuses the route outright",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(tc.handler)
+			defer srv.Close()
 
-	err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"))
-	if err == nil {
-		t.Fatal("probeHTTP accepted a listener that is not the review server — the browser would open onto the wrong application and the session would hang forever")
-	}
-	if !strings.Contains(err.Error(), "not the review server") {
-		t.Fatalf("probeHTTP error = %v, want it to name the collision plainly", err)
+			err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"))
+			if err == nil {
+				t.Fatal("probeHTTP accepted a listener that is not the review server — the browser would open onto the wrong application and the session would hang forever")
+			}
+			if !strings.Contains(err.Error(), "another process holds this port") {
+				t.Fatalf("probeHTTP error = %v, want it to name the collision plainly", err)
+			}
+		})
 	}
 }
 
@@ -402,7 +436,7 @@ time.sleep(120)`
 	}
 
 	t.Run("kills the review server holding the port", func(t *testing.T) {
-		port, cmd := listen(t, "/opt/sandbar/self-review/server/index.mjs")
+		port, cmd := listen(t, "/opt/sandbar/self-review/node_modules/.bin/self-review-serve")
 		run(t, port)
 		if err := waitExit(t, cmd); err == nil {
 			t.Error("the review server survived the stop script — this is the orphan the script exists to prevent")
@@ -502,23 +536,39 @@ func TestWrittenPathPrefersWhatTheServerAnnounced(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "configured outputFile is honoured",
-			serverOut: "self-review server listening on 127.0.0.1:4100 (repo: /src/repo)\nself-review: review written to /src/repo/reviews/latest.xml\n",
+			name:      "a configured outputFile is honoured",
+			serverOut: "[serve] Output path: /src/repo/reviews/latest.xml\n[serve] Review written to /src/repo/reviews/latest.xml\n",
 			want:      "/src/repo/reviews/latest.xml",
 		},
 		{
-			name:      "no marker falls back to the documented default",
-			serverOut: "self-review server listening on 127.0.0.1:4100 (repo: /src/repo)\n",
+			name: "the completion line wins over the startup announcement",
+			// They agree in practice, but only one of them is a statement
+			// about what actually happened.
+			serverOut: "[serve] Output path: /src/repo/review.xml\n[serve] Review written to /src/repo/elsewhere.xml\n",
+			want:      "/src/repo/elsewhere.xml",
+		},
+		{
+			name: "a torn-down server still reports where it was going to write",
+			// No completion line: the process was killed mid-review. The
+			// startup announcement is the best answer available, and it is a
+			// far better one than the checkout default when the project has
+			// redirected outputFile.
+			serverOut: "[serve] Output path: /src/repo/reviews/latest.xml\n[serve] Review ready at http://127.0.0.1:41234/\n",
+			want:      "/src/repo/reviews/latest.xml",
+		},
+		{
+			name:      "no marker at all falls back to the documented default",
+			serverOut: "[serve] Startup mode: directory\n",
 			want:      "/src/repo/review.xml",
 		},
 		{
 			name:      "login-shell noise before the marker does not hide it",
-			serverOut: "Welcome to Debian\nMOTD line\nself-review: review written to /src/repo/review.xml\n",
+			serverOut: "Welcome to Debian\nMOTD line\n[serve] Review written to /src/repo/review.xml\n",
 			want:      "/src/repo/review.xml",
 		},
 		{
 			name:      "an empty path is ignored rather than reported as \"\"",
-			serverOut: "self-review: review written to \n",
+			serverOut: "[serve] Review written to \n",
 			want:      "/src/repo/review.xml",
 		},
 	} {
@@ -527,5 +577,127 @@ func TestWrittenPathPrefersWhatTheServerAnnounced(t *testing.T) {
 				t.Fatalf("writtenPath() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// --- the readiness banner, which is the only way the port is learned ---
+
+// TestParseServePortReadsUpstreamsBanner pins the one string this side
+// depends on upstream printing. Upstream has no --port flag, so if this line
+// ever changes shape the review command stops working entirely — the test
+// exists so that breaks here, loudly, rather than as a 30s timeout in a VM.
+func TestParseServePortReadsUpstreamsBanner(t *testing.T) {
+	// Verbatim from @self-review/serve 1.45.0, in the order it prints them.
+	const real = "[serve] Output path: /work/repo/review.xml\n" +
+		"[serve] Startup mode: git\n" +
+		"[serve] Loaded 3 files\n" +
+		"[serve] Review ready at http://127.0.0.1:33749/\n" +
+		"[serve] Completing the review writes /work/repo/review.xml and stops this process.\n" +
+		"[serve] The listener is loopback-only and unauthenticated.\n"
+
+	for _, tc := range []struct {
+		name string
+		out  string
+		want int
+	}{
+		{"the real banner", real, 33749},
+		{"nothing printed yet", "", 0},
+		{"started but not yet listening", "[serve] Output path: /work/repo/review.xml\n", 0},
+		{"login-shell noise ahead of it does not hide it",
+			"Welcome to Debian\n[serve] Review ready at http://127.0.0.1:41234/\n", 41234},
+		{"a partial line is not a port yet", "[serve] Review ready at http://127.0.0.1:", 0},
+		// A host this side cannot bridge must not be read as reachable.
+		{"a non-loopback bind is not accepted",
+			"[serve] Review ready at http://0.0.0.0:41234/\n", 0},
+		// Refused rather than trusted: this number is about to be used to
+		// build a forward.
+		{"an out-of-range port is refused",
+			"[serve] Review ready at http://127.0.0.1:99999/\n", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseServePort(tc.out); got != tc.want {
+				t.Fatalf("parseServePort() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAwaitGuestPortReturnsAsSoonAsTheBannerLands(t *testing.T) {
+	s := &Session{ReadyTimeout: 2 * time.Second, PollInterval: time.Millisecond}
+	var buf lockedBuffer
+	exited := make(chan struct{})
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_, _ = buf.Write([]byte("[serve] Review ready at http://127.0.0.1:41234/\n"))
+	}()
+
+	port, err := s.awaitGuestPort(context.Background(), &buf, exited)
+	if err != nil {
+		t.Fatalf("awaitGuestPort: %v", err)
+	}
+	if port != 41234 {
+		t.Fatalf("awaitGuestPort = %d, want 41234", port)
+	}
+}
+
+// A server that announces and then immediately dies still told us its port,
+// and teardown needs that number to stop it in the guest. Losing the race to
+// the exit signal must not throw the answer away.
+func TestAwaitGuestPortPrefersALateBannerOverTheExit(t *testing.T) {
+	s := &Session{ReadyTimeout: time.Second, PollInterval: 5 * time.Millisecond}
+	var buf lockedBuffer
+	_, _ = buf.Write([]byte("[serve] Review ready at http://127.0.0.1:41234/\n"))
+	exited := make(chan struct{})
+	close(exited) // the command has ALREADY finished
+
+	port, err := s.awaitGuestPort(context.Background(), &buf, exited)
+	if err != nil {
+		t.Fatalf("awaitGuestPort: %v, want the port it plainly announced", err)
+	}
+	if port != 41234 {
+		t.Fatalf("awaitGuestPort = %d, want 41234", port)
+	}
+}
+
+func TestAwaitGuestPortReportsASilentExit(t *testing.T) {
+	s := &Session{ReadyTimeout: time.Second, PollInterval: time.Millisecond}
+	var buf lockedBuffer
+	exited := make(chan struct{})
+	close(exited)
+
+	if _, err := s.awaitGuestPort(context.Background(), &buf, exited); !errors.Is(err, errServerGone) {
+		t.Fatalf("awaitGuestPort error = %v, want errServerGone", err)
+	}
+}
+
+func TestAwaitGuestPortGivesUp(t *testing.T) {
+	s := &Session{ReadyTimeout: 30 * time.Millisecond, PollInterval: time.Millisecond}
+	var buf lockedBuffer
+
+	_, err := s.awaitGuestPort(context.Background(), &buf, make(chan struct{}))
+	if err == nil || errors.Is(err, errServerGone) {
+		t.Fatalf("awaitGuestPort error = %v, want a plain timeout", err)
+	}
+}
+
+func TestAwaitGuestPortHonoursCancellation(t *testing.T) {
+	s := &Session{ReadyTimeout: 10 * time.Second, PollInterval: time.Millisecond}
+	var buf lockedBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := s.awaitGuestPort(ctx, &buf, make(chan struct{})); !errors.Is(err, context.Canceled) {
+		t.Fatalf("awaitGuestPort error = %v, want context.Canceled", err)
+	}
+}
+
+// unreachableHint speaks only to the backend it can say something true about.
+func TestUnreachableHintOnlyExplainsTheSamePortCase(t *testing.T) {
+	if got := unreachableHint(41234, 41234); !strings.Contains(got, "41234") {
+		t.Errorf("unreachableHint(same, same) = %q, want it to explain the collision", got)
+	}
+	if got := unreachableHint(45123, 41234); got != "" {
+		t.Errorf("unreachableHint(different) = %q, want nothing — a forwarded backend picked its own near end", got)
 	}
 }

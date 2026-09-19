@@ -122,8 +122,9 @@ an existing PR for the branch on its own.
 --review needs no pushed branch, no remote and no gh at all: it runs a review
 server inside the VM against PATH, opens it in a browser on this machine, and
 blocks until you finish the review — which writes review.xml into PATH inside
-the VM, where the agent can read it. Nothing leaves the VM. It requires a base
-image built with 'sand create --with-review'.
+the VM, where the agent can read it. Nothing leaves the VM. The review tool is
+installed by default; a base built with 'sand create --with-review=false' does
+not have it.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
