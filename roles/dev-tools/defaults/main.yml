@@ -33,10 +33,10 @@ devtools_docker_registry_proxy_port: 3128
 devtools_user_name: "{{ user_name }}"
 
 # GitLab CLI (glab) — pinned official .deb release asset
-devtools_glab_version: "1.117.0"
+devtools_glab_version: "1.118.0"
 devtools_glab_deb_arch_map:
   x86_64: amd64
   aarch64: arm64
 
 # Drupal.org CLI (drupalorg) — pinned PHAR release
-devtools_drupalorg_cli_version: "0.12.0"
+devtools_drupalorg_cli_version: "0.13.0"

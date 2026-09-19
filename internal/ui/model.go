@@ -1774,7 +1774,7 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // confirmView renders the pending confirmation prompt. Shared by boardView,
-// detailView and progressView so no screen formats its own overlay text — and
+// progressView and landingView so no screen formats its own overlay text — and
 // clipped to ContentWidth like every other line, since a prompt that wrapped
 // would cost the screen a row it never budgeted.
 func (m model) confirmView() string {
