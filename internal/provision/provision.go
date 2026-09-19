@@ -966,8 +966,18 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// is nothing on the host to preserve or clean up.
 	var stageDir string
 	var home string
-	var orgRel string
-	var ok bool
+	var project ProjectPlan
+
+	// wrap adds the recovery path to any error raised once host data exists, so
+	// the one statement of that contract lives here rather than at each return.
+	// It reads stageDir at CALL time, so it is correct before staging has run
+	// (nothing to recover, nothing to add) as well as after.
+	wrap := func(err error) error {
+		if err == nil || stageDir == "" {
+			return err
+		}
+		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+	}
 
 	// 1. Stage out the selected state while the source VM is still alive.
 	if opts.PreserveClaude || opts.PreserveProject {
@@ -985,32 +995,20 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		if stageDir, err = newStageDir(); err != nil {
 			return err
 		}
-		// From here on, errors must keep stageDir and surface its path.
+		// From here on, errors must keep stageDir and surface its path (wrap).
 		if opts.PreserveClaude {
 			if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-				return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
+				return wrap(err)
 			}
 		}
 		if opts.PreserveProject {
-			if orgRel, ok = OrgRelDir(cfg.CloneURL); ok {
-				if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
-					return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-				}
+			if project, err = PlanProject(ctx, p.Lima, cfg.Name, home, cfg.CloneURL, filepath.Join(stageDir, "project.tgz")); err != nil {
+				return wrap(err)
+			}
+			if !project.Staged && project.OrgRel != "" {
+				step(out, "Note: %q has no ~/%s to preserve; the project will be cloned fresh instead.", cfg.Name, project.OrgRel)
 			}
 		}
-	}
-
-	// staged reports whether host data exists; staged errors are wrapped with the
-	// recovery path so the user can retrieve it.
-	staged := stageDir != ""
-	wrap := func(err error) error {
-		if err == nil {
-			return nil
-		}
-		if staged {
-			return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-		}
-		return err
 	}
 
 	// 2. Delete the existing VM.
@@ -1046,11 +1044,13 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		}
 	}
 
-	// 5. Finalize, skipping the project clone only when a tree was actually
-	// staged for restore (ok). If PreserveProject was requested but the URL had
-	// no org component (nothing staged), fall back to the role's normal clone.
+	// 5. Finalize, skipping the project clone only when the restore in step 6 will
+	// put the checkout back. Anything else — no org component in the URL, no
+	// directory to stage, or an org directory that no longer holds the checkout —
+	// falls back to the role's normal clone, because a reset that neither restores
+	// a project nor clones one leaves the user with neither.
 	finCfg := cfg
-	if opts.PreserveProject && ok {
+	if project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
 	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out); err != nil {
@@ -1058,11 +1058,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	}
 
 	// 6. Restore the project tree AFTER finalize, then re-approve its .env.
-	if opts.PreserveProject && ok {
-		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
+	if project.Staged {
+		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{project.OrgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
 			return wrap(fmt.Errorf("restore project into %q: %w", cfg.Name, err))
 		}
-		if err := p.Lima.Shell(ctx, cfg.Name, nil, out, "sudo", "-iu", cfg.User, "direnv", "allow", home+"/"+orgRel); err != nil {
+		if err := AllowDirenv(ctx, p.Lima, cfg.Name, cfg.User, home+"/"+project.OrgRel, out); err != nil {
 			return wrap(fmt.Errorf("direnv allow in %q: %w", cfg.Name, err))
 		}
 	}
@@ -1113,7 +1113,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	}
 
 	// 8. Full success: drop the host staging dir.
-	if staged {
+	if stageDir != "" {
 		removeStageDir(stageDir)
 	}
 	return nil
