@@ -751,10 +751,10 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
 		// Codex is replayed like its siblings: the RECORDED selection is the
-		// truth here, not the default. WithCodex's default-off only protects the
-		// ADD direction (an unconfigured create never installs it); a VM reset
+		// truth here, not the default. Its default-off only protects the ADD
+		// direction (an unconfigured create never installs it); a VM reset
 		// from a recorded WithCodex=true must still replay true, or the reset
-		// would silently de-select it and mark the shared base stale.
+		// would silently de-select the tool and mark the shared base stale.
 	} else {
 		cfg.WithClaude = m.toolClaude
 		cfg.WithCodex = m.toolCodex

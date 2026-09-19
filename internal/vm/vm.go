@@ -87,7 +87,7 @@ type CreateConfig struct {
 	CloneURL         string
 	CloneToken       string
 
-	// WithClaude, WithDDEV, WithGo, WithJava, and WithCodex select the
+	// WithClaude, WithDDEV, WithGo, WithJava and WithCodex select the
 	// configurable base-image tool-set (sand create --with-claude/--with-ddev/
 	// --with-go/--with-java/--with-codex). They configure the shared BASE
 	// image, not the individual clone — there is still exactly one base per
@@ -100,6 +100,13 @@ type CreateConfig struct {
 	// WithCodex is the deliberate exception: it defaults to FALSE (opt-IN), so
 	// existing users' bases keep the exact tool-set (and stamp) they already
 	// have unless they explicitly ask for Codex too.
+	//
+	// The browser review UI is deliberately NOT here. A tool earns a selection
+	// by being expensive enough that someone would want it gone — Go and Java
+	// are 500-700MB between them, Codex is a heavy install. The review tool is
+	// a pinned 17MB npm package with no build step that runs only when `sand
+	// land --review` invokes it, so it is simply part of the image
+	// (roles/self-review, unconditional in site.yml).
 	WithClaude bool
 	WithDDEV   bool
 	WithGo     bool
@@ -135,7 +142,7 @@ func DefaultCreateConfig() CreateConfig {
 		WithGo:     true,
 		WithJava:   true,
 		// WithCodex is deliberately omitted: its zero value (false) IS the
-		// default — codex is opt-in, unlike the four tools above.
+		// default — it is the one opt-in tool.
 	}
 }
 
