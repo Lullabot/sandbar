@@ -32,8 +32,9 @@ it is not where prose belongs.
   implements `Provenancer` via PVE tags + the description field rather than a
   sidecar marker. `Provider.ForwardArgv(v, hostPort, guestPort)` returns the
   argv of a long-running process that makes a guest loopback port reachable
-  at the same-numbered port on the workstation, or **nil when the backend
-  already does so on its own** — local Lima returns nil (Lima auto-forwards
+  on the workstation's loopback (the two port numbers are independent — the
+  guest's is chosen by the server there, the workstation's by sand), or
+  **nil when the backend already does so on its own** — local Lima returns nil (Lima auto-forwards
   guest loopback to the SAME port on its own host's loopback, and for local
   Lima that host IS the workstation); remote Lima and Proxmox both return an
   `ssh -N -L` argv (remote Lima against the configured `SSHHost`, bridging to
@@ -121,13 +122,21 @@ it is not where prose belongs.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
 - `landreview` — orchestrates ONE browser review session against ONE guest
-  checkout: picks a workstation port, starts the guest review server
-  (`ServerPath`, `/opt/sandbar/self-review/server/index.mjs`), starts
-  `Provider.ForwardArgv`'s
-  child when non-nil, polls for readiness, opens the browser, and blocks
-  until the server exits (the guest writing `review.xml` into the checkout
-  and exiting is the completion signal). Lives here rather than under
-  `cmd/sand` because both `sand land NAME PATH --review` and the TUI's
+  checkout by driving upstream's `self-review-serve` (`ServeBinary`) in the
+  guest. **The ordering is upstream's, and it is the opposite of the obvious
+  one:** `@self-review/serve` binds an EPHEMERAL port and offers no flag to
+  request a particular one, so sand cannot choose a port and then connect. It
+  starts the server first, parses the port out of the `[serve] Review ready
+  at http://127.0.0.1:<port>/` line the server prints (`serveReadyRe`), and
+  only then builds the bridge — reserving a workstation port and starting
+  `Provider.ForwardArgv`'s child when that returns non-nil, or, on local
+  Lima, browsing the guest's own port because Lima already forwards it to the
+  same number. Readiness is an HTTP probe of `/api/config`, whose JSON
+  identifies the responder: a bare `/` would be satisfied by whatever else
+  happens to hold a colliding port, which would open the reviewer's browser
+  onto an unrelated application and then block forever. The server writing
+  `review.xml` and exiting is the completion signal. Lives here rather than
+  under `cmd/sand` because both `sand land NAME PATH --review` and the TUI's
   Landing pane (`internal/ui`, which cannot import a `main` package) need it
   — one orchestration, two entry points.
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
@@ -710,40 +719,41 @@ comment at `roles/claude-code/tasks/main.yml`.
 - **`playbook_embed.go`'s `go:embed` set and the rsync filter in
   `internal/provision/provision.go` (`inGuestScript`) must stay in step.**
   Both spell out the same fileset — `site.yml`, `ansible.cfg`, `inventory`,
-  `group_vars/`, and every role directory — and the base version stamp
+  `roles/`, `group_vars/` — and the base version stamp
   (`internal/provision/baseversion.go`, `playbookFileset`) now hashes exactly
   that fileset too, so a test pinning the embed set to the rsync filter
   (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's correctness as
   well. Add a file to one and forget the other two, and either the guest gets
   content the stamp never sees, or the stamp churns on content the guest
-  never gets. **`roles/` is NOT one blanket `all:roles/***` embed** —
-  `playbook_embed.go` enumerates every role directory individually, and
-  `roles/self-review/files/webapp/` down to its *individual source files*
-  (`package.json`, `server/***`, `src/***`, …), never `all:` over the whole
-  webapp directory. That is deliberate: `go:embed` does not consult
-  `.gitignore`, so a blanket embed there would pull in `node_modules/` and
-  `dist/` (a real, measured defect: it inflated the binary from 16.7 MB to
-  288.7 MB) the moment either exists on a contributor's disk, and ship them
-  to every VM the binary provisions, not just ones built with
-  `--with-review`. **Adding a new role — or a new file under
-  `roles/self-review/files/webapp/` — means adding it to BOTH
-  `playbook_embed.go`'s `go:embed` directives AND `playbookSyncCmd`'s rsync
-  `--include` list in `provision.go`**; `TestGuestSyncCopiesOnlyThePlaybook`
-  and `TestEmbedExcludesWebappBuildArtifacts` (`internal/provision/embed_test.go`)
-  both enforce the two lists agreeing, but neither can tell you what the
-  *right* list is — that's a human call every time a role's fileset changes.
-- **The self-review web app's source lives in this repository**, at
-  `roles/self-review/files/webapp/` (`server/` the Node review server,
-  `src/` the browser client, a real `package.json` + lockfile pinning
-  `@self-review/core`, `@self-review/react` and `@self-review/types`). It is
-  NOT prebuilt and committed: the `self-review` Ansible role runs `npm ci`
-  and the vite build **inside the guest**, at base-image build time, gated
-  behind `toolset_review` (`sand create --with-review`, default off) the
-  same way `toolset_codex` gates the codex role. The three `@self-review/*`
-  packages are upstream's own internal seams (`ReviewAdapter`,
-  `DiffLoadPayload`, `ReviewState`) — **they must always be bumped together,
-  to the identical version**; `renovate.json` groups `@self-review/**` into
-  one `packageRules` entry so Renovate can never propose moving them apart.
+  never gets. **Keep `roles/` a single blanket embed.** An earlier version of
+  the review feature vendored a Node web app under `roles/`, which forced
+  `playbook_embed.go` to enumerate every role individually so a contributor's
+  gitignored `node_modules/` could not be swept into the binary (measured:
+  16.7 MB → 288.7 MB) and rsynced into every guest. Installing upstream's
+  published package instead removed the whole problem. Do not reintroduce a
+  role whose `files/` carry a package manager's output.
+- **The browser review UI is upstream's published package, not vendored
+  source** (`roles/self-review`). The role templates a tiny `package.json`
+  pinning `@self-review/serve` (`selfreview_version`, tracked by a
+  `renovate.json` regex manager) into one guest directory, runs `npm install`
+  there, links the CLI onto PATH, and then RUNS it to prove the install
+  works. There is no build step and no committed lockfile.
+  The one subtle part is the npm `overrides` entry, and it is load-bearing:
+  `@self-review/serve` declares `@self-review/react` as a runtime dependency
+  but does not use one — its browser client ships prebuilt in the package's
+  own `dist/client`, and `dist/cli.js`'s only non-builtin import is
+  `@self-review/core`. Left alone that unused dependency costs **310MB and
+  320 packages** against **17MB and 17**, the difference being mermaid,
+  lucide-react, @emoji-mart and @base-ui. Deleting the directory afterwards
+  does not help, because npm hoists those transitive packages to the top
+  level. So the override substitutes `@self-review/types` (a real package,
+  already in the tree, tiny) and the subtree is never fetched. The
+  verification task at the end of the role, plus the size and resolution
+  assertions in `lima-e2e`, are what keep that substitution honest — if a
+  release ever does need React at runtime, the base build fails rather than
+  every review. The upstream fix is to move that dependency to
+  `devDependencies`; when it lands, the override stops having anything to
+  substitute and can go.
 - **Every base mutation belongs inside the base lock held by
   `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
   refresh, and `--rebuild`'s destroy are all reached through

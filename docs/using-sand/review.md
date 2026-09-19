@@ -7,21 +7,37 @@ uncommitted or unpushed changes. `sand land NAME PATH --review` skips all of
 that: it opens the real diff of that checkout in a browser, running entirely
 against what's on disk in the VM right now.
 
+Under the hood this is [`@self-review/serve`][serve], the browser front end
+of the [self-review][upstream] project, installed in the VM and pointed at
+one checkout. `sand` supplies the plumbing — starting it, bridging its port,
+opening your browser, cleaning up after it — and nothing else.
+
+[serve]: https://www.npmjs.com/package/@self-review/serve
+[upstream]: https://github.com/e0ipso/self-review
+
 ## Getting a VM that has it
 
-The review UI is an **opt-in** tool, like Codex: it isn't provisioned by
-default, because building it costs base-image time that most VMs don't need
-to pay.
+Nothing: it's installed by default, like Claude Code and DDEV. It's a pinned
+17 MB npm package with no build step, which is cheap enough that every base
+carries it rather than you discovering at review time that this one doesn't.
+
+If you don't want it, it's an opt-out like the rest of the tool-set:
 
 ```sh
-sand create --with-review
+sand create --with-review=false
 ```
 
-or enable "Install self-review web UI" in the TUI's create form. Like every
-`--with-*` flag it configures the **shared base image**: turning it on (or
-off) for a VM whose base was built without it invalidates that base, so the
-next create rebuilds it before cloning. See
-[`--with-*` flags](cli-reference.md#sand-create) in the CLI reference.
+or clear "Install browser review UI" in the TUI's create form. Like every
+`--with-*` flag it configures the **shared base image**, so turning it off
+(or back on) invalidates that base and the next create reprovisions it
+before cloning. See [`--with-*` flags](cli-reference.md#sand-create).
+
+!!! note "Your existing base will reprovision once"
+
+    Bases built before this tool existed recorded a tool-set without it, so
+    the first `sand create` after upgrading sees the base as stale and
+    converges it in place — which is exactly what installs the review tool.
+    One slower create, then back to normal.
 
 ## Opening a review
 
@@ -44,20 +60,21 @@ work is the point.
 
 What happens next:
 
-1. `sand` starts a review server inside the VM, pointed at that checkout.
-   The diff it reviews defaults to the checkout's branch against its merge
-   base with the repository's default branch — what the change would land
-   as, uncommitted changes included.
-2. It makes the server's port reachable from your workstation (see
-   [Reachability](#reachability) below) and opens it in your default
-   browser.
-3. The page renders the checkout's file tree and diff — the same review UI
-   this feature is built on, just pointed at a real VM checkout instead of a
-   local clone.
+1. `sand` starts the review server inside the VM, in that checkout. The diff
+   it reviews defaults to the checkout's branch against its merge base with
+   the repository's default branch — what the change would land as,
+   uncommitted and untracked files included.
+2. The server picks a free port inside the VM and prints the URL it's on.
+   `sand` reads that port back, makes it reachable from your workstation
+   (see [Reachability](#reachability)), waits for it to answer, and opens it
+   in your default browser.
+3. The page renders the checkout's file tree and diff.
 
-Two checkouts — on the same VM or different ones — can be under review at
-the same time; each gets its own server and its own port, so they don't
-interfere with each other.
+If no browser opens — a headless SSH session, a locked-down desktop — the
+URL is printed and the review stays up. Open it by hand.
+
+Two checkouts, on the same VM or different ones, can be under review at the
+same time; each server picks its own port, so they don't collide.
 
 ## Finishing a review
 
@@ -68,8 +85,13 @@ landed, and returns control of your terminal (or, in the TUI, clears the
 row's `reviewing…` state):
 
 ```
-review written to /home/claude/checkouts/my-repo in myvm
+review written to /home/claude/checkouts/my-repo/review.xml in myvm
 ```
+
+Closing the browser tab does **not** finish the review — nothing tells the
+server you left, and your comments live only in that page until you submit
+them. Ctrl-C (or leaving the TUI's Landing pane) tears the session down and
+discards them, which is the same trade the upstream tool makes.
 
 ## Feeding it back to the agent
 
@@ -84,17 +106,19 @@ except for the browser tab rendering it.
 
 The server inside the VM always binds `127.0.0.1` — never a VM-wide
 address — so a review is never reachable from anything on the VM's network.
-How the connection reaches it depends on where the VM lives:
+It also refuses any request that doesn't name a loopback host, which is what
+stops a web page you happen to be visiting from reaching it. How the
+connection gets there depends on where the VM lives:
 
 - **Local Lima** needs nothing extra: Lima already forwards every guest
   loopback port to the same port on your machine's own loopback (the same
   mechanism [Web Servers and Ports](web-servers.md) describes), so the
   server is reachable the moment it starts listening.
 - **Remote Lima and Proxmox** each start a short-lived `ssh -L` process for
-  the duration of the review, bridging your workstation's loopback to the
-  remote host's (where Lima has already landed the port) or straight to the
-  guest (Proxmox). It's torn down — along with the guest server — when the
-  review ends or you cancel with Ctrl-C.
+  the duration of the review, bridging a free port on your workstation's
+  loopback to the remote host's (where Lima has already landed the guest
+  port) or straight to the guest (Proxmox). It's torn down — along with the
+  guest server — when the review ends or you cancel with Ctrl-C.
 
 The reviewed code itself never crosses that boundary: only the rendered diff
 and your comments do, over a connection that terminates on your own machine's
@@ -119,10 +143,22 @@ loopback.
     remote Lima host with people who should not read the work in progress,
     review it from a VM on a host you do not share.
 
-## What this isn't (yet)
+### If the review never becomes reachable
 
-This is a v1 of the review workflow. A few things the underlying review UI
-supports upstream are not wired up here: there's no "expand context" beyond
-what the diff already shows, no image previews, no accompanying walkthrough
-guide, and no `--resume-from` to reopen a previous review. `sand` just
-serves the diff and writes the comments back to `review.xml`.
+On **local Lima** the guest and host port numbers are necessarily the same,
+because that's how Lima's forwarding works — and the guest picks that number
+itself, from whatever was free *in the VM*. If something on your own machine
+already holds it, Lima can't bind the forward and the review times out
+waiting to answer. `sand` says so, and names the port. Running the review
+again picks a different one; there's nothing to configure, because the
+upstream server offers no way to request a particular port.
+
+## Limits
+
+`sand` doesn't expose `--resume-from`, so each review starts fresh rather
+than carrying a previous `review.xml`'s comments back in. Everything else
+the browser UI does — expanding context around a hunk, image and attachment
+previews, applying a suggestion, and walkthrough guides picked up from a
+`review.guide.xml` sitting next to the output path — is upstream's and works
+here, because this is upstream's own server rather than a re-implementation
+of it.
