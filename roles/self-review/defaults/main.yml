@@ -1,0 +1,24 @@
+---
+# The pinned upstream release of @self-review/serve. It is a variable rather
+# than a literal in tasks/main.yml so Renovate can bump one line (see the
+# regex manager in renovate.json) and so a base can be built against a
+# different release without editing the role.
+#
+# The template uses this ONE value twice: for @self-review/serve itself and
+# for the @self-review/types release that stands in for its unused
+# @self-review/react dependency (see tasks/main.yml). That is correct rather
+# than lazy — every @self-review/* package is published in lockstep at the
+# same version, so a single pin is what keeps the substitute in step with the
+# thing it substitutes for.
+selfreview_version: "1.45.0"
+
+# selfreview_install_dir is the ONE fixed, predictable guest path the review
+# tool is installed into. Nothing outside this role depends on it — the CLI is
+# reached through selfreview_bin_dir, on PATH — so unlike its predecessor this
+# path is genuinely local to the role and safe to change.
+selfreview_install_dir: /opt/sandbar/self-review
+
+# Where the CLI is linked so every login shell finds it. internal/landreview
+# runs it by BARE NAME (landreview.ServeBinary), so what matters is that it is
+# on the default PATH, not where it physically lives.
+selfreview_bin_dir: /usr/local/bin

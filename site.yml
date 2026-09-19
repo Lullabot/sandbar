@@ -38,12 +38,14 @@
       when:
         - toolset_codex | default(false) | bool
         - provision_phase | default('full') != 'finalize'
-    # The self-review web UI is part of the configurable base tool-set (sand
-    # create --with-review). Like codex it is opt-IN: toolset_review defaults
-    # to false, so an unconfigured run does not build it.
+    # The browser review UI is part of the configurable base tool-set, and
+    # unlike codex it is opt-OUT (sand create --with-review=false): it is a
+    # pinned 17MB npm install with no build step, which is small enough that
+    # every base should have it rather than discovering at review time that
+    # this one does not.
     - role: self-review
       when:
-        - toolset_review | default(false) | bool
+        - toolset_review | default(true) | bool
         - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'

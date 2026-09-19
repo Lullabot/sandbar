@@ -107,18 +107,19 @@ Flags:
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
 	// The base-image tool-set (~500-700MB installed between Go and Java alone).
-	// All three default true, so these are opt-OUT flags: an unconfigured `sand
+	// All four default true, so these are opt-OUT flags: an unconfigured `sand
 	// create` installs everything today's base does. They configure the SHARED
 	// base image, not this individual clone.
 	fs.BoolVar(&cfg.WithClaude, "with-claude", cfg.WithClaude, "Install Claude Code in the base image")
 	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
 	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
-	// Unlike the four above, --with-codex and --with-review are opt-IN
-	// (cfg.WithCodex/cfg.WithReview default false): an unconfigured `sand
-	// create` must not start installing a tool no existing base has.
+	// --with-review is opt-OUT like the four above (it installs a pinned 17MB
+	// npm package with no build step). --with-codex is the one opt-IN flag
+	// (cfg.WithCodex defaults false): an unconfigured `sand create` must not
+	// start installing a tool that heavy without being asked.
+	fs.BoolVar(&cfg.WithReview, "with-review", cfg.WithReview, "Install the browser review UI in the base image")
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
-	fs.BoolVar(&cfg.WithReview, "with-review", cfg.WithReview, "Install the self-review web UI in the base image")
 	recreate := fs.Bool("recreate", false, "If the named instance exists and is sand-managed, delete and re-clone it")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")

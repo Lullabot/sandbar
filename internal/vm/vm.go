@@ -87,15 +87,16 @@ type CreateConfig struct {
 	CloneURL         string
 	CloneToken       string
 
-	// WithClaude, WithDDEV, WithGo, WithJava, and WithCodex select the
-	// configurable base-image tool-set (sand create --with-claude/--with-ddev/
-	// --with-go/--with-java/--with-codex). They configure the shared BASE
-	// image, not the individual clone — there is still exactly one base per
-	// user, its contents just differ by selection. The first four default to
-	// true (see DefaultCreateConfig), so an unconfigured `sand create` installs
-	// everything today's base does; those flags are opt-OUT. Claude Code is one
-	// selection among the tools rather than a fixture of the image, so a user
-	// can bring their own agent instead.
+	// WithClaude, WithDDEV, WithGo, WithJava, WithCodex and WithReview select
+	// the configurable base-image tool-set (sand create --with-claude/
+	// --with-ddev/--with-go/--with-java/--with-codex/--with-review). They
+	// configure the shared BASE image, not the individual clone — there is
+	// still exactly one base per user, its contents just differ by selection.
+	// All but WithCodex default to true (see DefaultCreateConfig), so an
+	// unconfigured `sand create` installs everything today's base does; those
+	// flags are opt-OUT. Claude Code is one selection among the tools rather
+	// than a fixture of the image, so a user can bring their own agent
+	// instead.
 	//
 	// WithCodex is the deliberate exception: it defaults to FALSE (opt-IN), so
 	// existing users' bases keep the exact tool-set (and stamp) they already
@@ -105,11 +106,10 @@ type CreateConfig struct {
 	WithGo     bool
 	WithJava   bool
 	WithCodex  bool
-	// WithReview selects the self-review web UI (sand create --with-review),
-	// the second opt-in tool after WithCodex and for the same reason: it is a
-	// heavy `npm ci` + vite build that most bases should not pay for, so its
-	// zero value (false) IS the default (see DefaultCreateConfig, which
-	// deliberately omits it) rather than being flipped on there.
+	// WithReview selects the browser review UI `sand land --review` serves
+	// from inside a VM. It defaults to TRUE: what it installs is a pinned
+	// 17MB npm package with no build step, and a review tool that might not
+	// be there is worth far less than one that always is.
 	WithReview bool
 }
 
@@ -140,8 +140,9 @@ func DefaultCreateConfig() CreateConfig {
 		WithDDEV:   true,
 		WithGo:     true,
 		WithJava:   true,
-		// WithCodex and WithReview are deliberately omitted: their zero value
-		// (false) IS the default — both are opt-in, unlike the four tools above.
+		WithReview: true,
+		// WithCodex is deliberately omitted: its zero value (false) IS the
+		// default — it is the one opt-in tool.
 	}
 }
 

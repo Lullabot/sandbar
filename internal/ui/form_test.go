@@ -277,10 +277,11 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 	if cfg.WithClaude {
 		t.Fatalf("WithClaude = true after flipping the Claude Code toggle off, want false")
 	}
-	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
-		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v", cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava || !cfg.WithReview {
+		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v WithReview=%v",
+			cfg.WithDDEV, cfg.WithGo, cfg.WithJava, cfg.WithReview)
 	}
-	if got, want := cfg.ToolsetKey(), "ddev+go+java"; got != want {
+	if got, want := cfg.ToolsetKey(), "ddev+go+java+review"; got != want {
 		t.Fatalf("ToolsetKey() = %q, want %q", got, want)
 	}
 }
@@ -326,19 +327,19 @@ func TestCreateFormCodexToggleOn(t *testing.T) {
 	}
 }
 
-// TestCreateFormReviewToggleOn mirrors TestCreateFormCodexToggleOn for the
-// self-review web UI: also opt-in (defaults off), also a hand-maintained
-// entry in createToggles(), placed last among the tool toggles (right before
-// Rebuild) since it was the second tool added after Codex.
-func TestCreateFormReviewToggleOn(t *testing.T) {
+// TestCreateFormReviewToggleOff is the mirror of TestCreateFormCodexToggleOn
+// for the browser review UI, which is opt-OUT: it defaults ON, and the create
+// form must still surface it as a toggle — last among the tool toggles, right
+// before Rebuild — so a user who does not want it can drop it from the base.
+func TestCreateFormReviewToggleOff(t *testing.T) {
 	m := newTestModel(t)
 	m.openForm()
 	m.inputs[fName].SetValue("web")
 	m.inputs[fGitName].SetValue("Dev")
 	m.inputs[fGitEmail].SetValue("dev@example.com")
 
-	if m.toolReview {
-		t.Fatalf("self-review web UI must default OFF (opt-in)")
+	if !m.toolReview {
+		t.Fatalf("the browser review UI must default ON (opt-out)")
 	}
 
 	// Walk from the last text input onto the toggles: Claude (0), Codex (1),
@@ -358,8 +359,8 @@ func TestCreateFormReviewToggleOn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	if !cfg.WithReview {
-		t.Fatalf("WithReview = false after flipping the self-review toggle on, want true")
+	if cfg.WithReview {
+		t.Fatalf("WithReview = true after flipping the review toggle off, want false")
 	}
 	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
 		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v WithJava=%v",

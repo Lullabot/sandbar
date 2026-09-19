@@ -185,10 +185,13 @@ func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 }
 
 // TestBuildExtraVars_ReviewCanBeSelected mirrors
-// TestBuildExtraVars_CodexCanBeSelected for the self-review web UI's
-// toolset_review extra-var: it defaults off like codex, so this proves
-// toolset_review=true is emitted (and the other tools unaffected) when a user
-// opts in via --with-review, gating the self-review role on in site.yml.
+// TestBuildExtraVars_CodexCanBeSelected for the browser review UI's
+// toolset_review extra-var, which gates the self-review role in site.yml.
+//
+// It is emitted UNCONDITIONALLY, which is the point: the selection travels
+// explicitly in both directions rather than the base falling back to the
+// role's own default. The de-selected direction is the one that would
+// silently break — see TestBuildExtraVars_ReviewDeselectionIsEmitted.
 func TestBuildExtraVars_ReviewCanBeSelected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithReview = true
@@ -203,6 +206,33 @@ func TestBuildExtraVars_ReviewCanBeSelected(t *testing.T) {
 	}
 	if v, ok := m["toolset_claude"].(bool); !ok || !v {
 		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
+	}
+}
+
+// TestBuildExtraVars_ReviewDeselectionIsEmitted is the half that matters now
+// that the review tool defaults ON.
+//
+// site.yml gates the role on `toolset_review | default(true)`. So an OMITTED
+// var does not mean "off" there — it means "on". If BuildExtraVars dropped
+// the var when the user de-selected the tool, `sand create --with-review=false`
+// would install it anyway, and would do so silently: the flag would parse,
+// the base would rebuild, and the tool would still be there. Emitting the
+// false explicitly is the entire mechanism by which opting out works.
+func TestBuildExtraVars_ReviewDeselectionIsEmitted(t *testing.T) {
+	cfg := fullConfig()
+	cfg.WithReview = false
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars: %v", err)
+	}
+	m := parseVars(t, data)
+
+	v, ok := m["toolset_review"]
+	if !ok {
+		t.Fatal("toolset_review was omitted entirely; site.yml defaults it to TRUE, so omitting it installs the tool the user just de-selected")
+	}
+	if b, isBool := v.(bool); !isBool || b {
+		t.Errorf("toolset_review = %v, want false", v)
 	}
 }
 

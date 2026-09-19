@@ -560,8 +560,8 @@ func (m model) createToggles() []formToggle {
 			set:   func(m *model, v bool) { m.toolJava = v },
 		},
 		{
-			label: "Install self-review web UI",
-			help:  baseWideHelp("the self-review web UI"),
+			label: "Install browser review UI",
+			help:  baseWideHelp("the browser review UI"),
 			get:   func(m *model) bool { return m.toolReview },
 			set:   func(m *model, v bool) { m.toolReview = v },
 		},

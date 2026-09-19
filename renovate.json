@@ -38,6 +38,16 @@
     },
     {
       "customType": "regex",
+      "description": "Track the pinned @self-review/serve release in the self-review role",
+      "managerFilePatterns": ["/^roles/self-review/defaults/main\\.yml$/"],
+      "matchStrings": [
+        "selfreview_version:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "depNameTemplate": "@self-review/serve",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
       "description": "Track the Node.js major version used for the NodeSource apt repo in the base role",
       "managerFilePatterns": ["/^roles/base/defaults/main\\.yml$/"],
       "matchStrings": [
@@ -79,9 +89,10 @@
       "automerge": false
     },
     {
-      "description": "self-review's three packages are released in lockstep; a mixed set breaks the embedding contract, so bump them together",
+      "description": "The review tool is a pinned guest install, not a module dependency: a bump changes the base image's tool-set, so it is reviewed rather than automerged",
       "matchPackageNames": ["@self-review/**"],
-      "groupName": "self-review"
+      "groupName": "self-review",
+      "automerge": false
     }
   ]
 }

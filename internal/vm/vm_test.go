@@ -155,60 +155,61 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.CPUs != 2 {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
-	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
-		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (backwards compatibility: an unconfigured `sand create` must install everything today's base does)", c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
+	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava || !c.WithReview {
+		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava/WithReview = %v/%v/%v/%v/%v, want all true (an unconfigured `sand create` installs the full default tool-set)",
+			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava, c.WithReview)
 	}
 	// Codex is the deliberate exception: opt-IN, so it must default false even
-	// though the other four default true — an unconfigured `sand create` must
-	// NOT start installing a tool no existing base has.
+	// though the others default true — an unconfigured `sand create` must NOT
+	// start installing a tool that heavy without being asked.
 	if c.WithCodex {
-		t.Errorf("WithCodex = true, want false (codex is opt-in, unlike the other four tools)")
+		t.Errorf("WithCodex = true, want false (codex is the one opt-in tool)")
 	}
 }
 
 // TestToolsetKey_DefaultIsEveryTool locks the canonical rendering of the
-// default (everything-on) selection, which baseversion.go's
-// toolsetPlaceholder used to hardcode until this key replaced it.
+// default selection, which baseversion.go's toolsetPlaceholder used to
+// hardcode until this key replaced it.
 func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)
 	}
 }
 
 // TestToolsetKey_WithCodex proves codex slots alphabetically into the key
-// when enabled (between claude and ddev), and — the load-bearing half of this
-// test — that a default (codex-off) config still renders the exact
-// byte-identical stamp `claude+ddev+go+java` that existed before codex was
-// added. If the default key changed at all, every existing base would look
-// stale against its own recorded stamp and needlessly re-converge.
+// when enabled (between claude and ddev), and that leaving it off keeps it
+// out of the stamp entirely.
 func TestToolsetKey_WithCodex(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
-		t.Errorf("ToolsetKey() with codex omitted = %q, want %q (unchanged stamp for existing users)", got, want)
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
+		t.Errorf("ToolsetKey() with codex omitted = %q, want %q", got, want)
 	}
 
 	c.WithCodex = true
-	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java+review"; got != want {
 		t.Errorf("ToolsetKey() with codex enabled = %q, want %q", got, want)
 	}
 }
 
-// TestToolsetKey_WithReview proves review — like codex, a second opt-in
-// tool — slots alphabetically into the key (last, after java) when enabled,
-// and that a default (review-off) config still renders the exact
-// byte-identical stamp that existed before review was added, so an existing
-// base does not read as stale against its own recorded stamp merely because
-// this binary now knows a new tool name.
+// TestToolsetKey_WithReview proves review slots alphabetically into the key
+// (last, after java), and that de-selecting it takes it back out.
+//
+// Being in the DEFAULT key is a deliberate, one-time cost, and it is the
+// reason this tool is worth calling out here: every existing base recorded a
+// stamp without `+review`, so the first `sand create` after this change sees
+// its base as stale and converges it in place. That converge is exactly what
+// installs the review tool on a base that predates it, which is why the flip
+// is the whole delivery mechanism rather than a side effect of it.
 func TestToolsetKey_WithReview(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
-		t.Errorf("ToolsetKey() with review omitted = %q, want %q (unchanged stamp for existing users)", got, want)
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
+		t.Errorf("ToolsetKey() by default = %q, want %q", got, want)
 	}
 
-	c.WithReview = true
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java+review"; got != want {
-		t.Errorf("ToolsetKey() with review enabled = %q, want %q", got, want)
+	c.WithReview = false
+	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+		t.Errorf("ToolsetKey() with review de-selected = %q, want %q", got, want)
 	}
 }
 
