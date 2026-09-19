@@ -14,6 +14,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/landreview"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -98,7 +99,39 @@ func confirmOpenPrompt() bool {
 	return reply == "y" || reply == "yes"
 }
 
-// runLand implements the `sand land NAME [PATH] [--pr|--web]` subcommand,
+// landUsage writes `sand land`'s help text to w. It is a function taking an
+// io.Writer rather than an inline closure over fs.Output() so the help can be
+// asserted in a test without capturing the process's real stderr — the same
+// reason landPR takes its stdout as a parameter.
+func landUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review] [--profile <name>]
+
+List NAME's git checkouts and their branch/push/PR state, or act on one:
+
+  sand land NAME                list checkouts + branch/push/PR state
+  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
+  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
+  sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
+
+--pr uses the workstation's own 'gh' (never the guest's token). Without gh
+it prints the compare URL and, on a terminal, offers to open it; piped or
+scripted, it exits non-zero with the URL on stderr so automation can react.
+--web never needs gh: it opens a constructed GitHub URL, which redirects to
+an existing PR for the branch on its own.
+
+--review needs no pushed branch, no remote and no gh at all: it runs a review
+server inside the VM against PATH, opens it in a browser on this machine, and
+blocks until you finish the review — which writes review.xml into PATH inside
+the VM, where the agent can read it. Nothing leaves the VM. It requires a base
+image built with 'sand create --with-review'.
+
+The named VM must already exist and be running (see 'sand' to list
+instances, or 'sand create' to make one). If NAME is managed under more than
+one connection profile, --profile picks which one to act on.
+`)
+}
+
+// runLand implements the `sand land NAME [PATH] [--pr|--web|--review]` subcommand,
 // mirroring `create`/`shell`'s single-profile dispatch (cmd/sand/main.go's
 // switch calls this the same way it calls runCreate/runShell).
 //
@@ -107,7 +140,10 @@ func confirmOpenPrompt() bool {
 // branch via host gh, falling back to the gh-free compare URL when gh is
 // unavailable. --web PATH opens the checkout's branch (or, thanks to
 // GitHub's own redirect for an existing PR, its PR) in a browser — gh-free by
-// construction.
+// construction. --review PATH serves a review UI for that checkout from
+// inside the VM and blocks until the review is submitted; unlike the other
+// two it needs no pushed branch and no remote at all, because reviewing work
+// that has not left the sandbox is the whole point of it.
 //
 // Detection is entirely internal/checkouts' shared code
 // (BuildSweepCommand/ParseSweep): runLand runs it ONCE via a single
@@ -120,27 +156,9 @@ func runLand(args []string) error {
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	prFlag := fs.Bool("pr", false, "Open a one-shot draft PR for PATH's pushed branch (host gh; falls back to the compare URL without gh)")
 	webFlag := fs.Bool("web", false, "Open PATH's branch (or its PR) in a browser — gh-free")
-	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand land NAME [PATH] [--pr | --web] [--profile <name>]
-
-List NAME's git checkouts and their branch/push/PR state, or act on one:
-
-  sand land NAME                list checkouts + branch/push/PR state
-  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
-  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
-
---pr uses the workstation's own 'gh' (never the guest's token). Without gh
-it prints the compare URL and, on a terminal, offers to open it; piped or
-scripted, it exits non-zero with the URL on stderr so automation can react.
---web never needs gh: it opens a constructed GitHub URL, which redirects to
-an existing PR for the branch on its own.
-
-The named VM must already exist and be running (see 'sand' to list
-instances, or 'sand create' to make one). If NAME is managed under more than
-one connection profile, --profile picks which one to act on.
-`)
-	}
-	// --profile/--pr/--web may appear before or after the positional
+	reviewFlag := fs.Bool("review", false, "Review PATH's changes in a browser, served from inside the VM (needs no pushed branch)")
+	fs.Usage = func() { landUsage(fs.Output()) }
+	// --profile/--pr/--web/--review may appear before or after the positional
 	// arguments (e.g. "sand land NAME PATH --pr"); reorder so all flags
 	// precede them, which is what flag.FlagSet.Parse requires (it stops
 	// parsing flags at the first non-flag token) — mirrors shell.go's
@@ -155,19 +173,22 @@ one connection profile, --profile picks which one to act on.
 		fs.Usage()
 		return errors.New("sand land: need a VM NAME, and optionally a checkout PATH")
 	}
-	if *prFlag && *webFlag {
-		return errors.New("sand land: --pr and --web cannot be used together")
+	// The three actions are mutually exclusive: each is a different thing to
+	// do with ONE checkout, so asking for two is a mistake, not a request to
+	// do both.
+	if countTrue(*prFlag, *webFlag, *reviewFlag) > 1 {
+		return errors.New("sand land: --pr, --web and --review cannot be used together")
 	}
 	name := fs.Arg(0)
 	var path string
 	if fs.NArg() == 2 {
 		path = fs.Arg(1)
 	}
-	if (*prFlag || *webFlag) && path == "" {
-		return errors.New("sand land: --pr/--web require a checkout PATH (run 'sand land NAME' to list them)")
+	if (*prFlag || *webFlag || *reviewFlag) && path == "" {
+		return errors.New("sand land: --pr/--web/--review require a checkout PATH (run 'sand land NAME' to list them)")
 	}
-	if path != "" && !*prFlag && !*webFlag {
-		return errors.New("sand land: PATH was given but neither --pr nor --web was set")
+	if path != "" && !*prFlag && !*webFlag && !*reviewFlag {
+		return errors.New("sand land: PATH was given but neither --pr nor --web nor --review was set")
 	}
 
 	store := loadStore()
@@ -186,7 +207,8 @@ one connection profile, --profile picks which one to act on.
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-	if _, err := requireRunningVM(p, name); err != nil {
+	target, err := requireRunningVM(p, name)
+	if err != nil {
 		return err
 	}
 
@@ -217,6 +239,22 @@ one connection profile, --profile picks which one to act on.
 			return err
 		}
 		return landWeb(ctx, gh, co)
+	case *reviewFlag:
+		co, err := findCheckout(vc, path)
+		if err != nil {
+			return err
+		}
+		// ctx is the signal.NotifyContext installed above, so ctrl-C during a
+		// review tears the guest server and the forwarder down through the
+		// session's own teardown rather than orphaning them — the session
+		// installs no handler of its own precisely so the TUI can pass a
+		// Bubble Tea command's context here instead.
+		return landReview(ctx, os.Stdout, &landreview.Session{
+			Provider: p,
+			VM:       target,
+			Checkout: co,
+			Open:     gh.OpenInBrowser,
+		})
 	default:
 		return listCheckouts(ctx, os.Stdout, gh, vc)
 	}
@@ -226,7 +264,8 @@ one connection profile, --profile picks which one to act on.
 // its value) ahead of the positional arguments, so "sand land NAME PATH
 // --pr" parses the same as "sand land --pr NAME PATH" under flag.FlagSet,
 // which otherwise stops parsing flags at the first non-flag token. Mirrors
-// shell.go's reorderShellFlags, extended with the boolean --pr/--web tokens.
+// shell.go's reorderShellFlags, extended with the boolean --pr/--web/--review
+// tokens.
 // Anything else is left positional so an unrecognised flag still reaches
 // fs.Parse and produces its normal error.
 func reorderLandFlags(args []string) []string {
@@ -236,7 +275,7 @@ func reorderLandFlags(args []string) []string {
 		switch {
 		case a == "-h" || a == "--help" || a == "-help":
 			flagArgs = append(flagArgs, a)
-		case a == "--pr" || a == "-pr" || a == "--web" || a == "-web":
+		case a == "--pr" || a == "-pr" || a == "--web" || a == "-web" || a == "--review" || a == "-review":
 			flagArgs = append(flagArgs, a)
 		case a == "--profile" || a == "-profile":
 			flagArgs = append(flagArgs, a)
@@ -251,6 +290,19 @@ func reorderLandFlags(args []string) []string {
 		}
 	}
 	return append(flagArgs, positional...)
+}
+
+// countTrue reports how many of flags are set — the tiny helper that keeps the
+// three-way action exclusion above readable as one condition instead of three
+// pairwise ones that would need a fourth the moment a fifth action appears.
+func countTrue(flags ...bool) int {
+	n := 0
+	for _, f := range flags {
+		if f {
+			n++
+		}
+	}
+	return n
 }
 
 // findCheckout returns the checkout at path within vc, or a clear error
@@ -396,6 +448,26 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 			return fmt.Errorf("sand land: opening browser: %w", err)
 		}
 	}
+	return nil
+}
+
+// landReview implements the --review action. It is deliberately thin: the
+// whole orchestration — port, guest server, forwarder, readiness, browser,
+// teardown — lives in internal/landreview so the TUI's Landing pane runs the
+// SAME code from a Bubble Tea command instead of a second copy of it, which
+// is also why the session takes its context and writer as parameters rather
+// than reaching for os.Stdout.
+//
+// What stays here is what belongs to the CLI: the "sand land:" error prefix
+// every other action uses, and reporting the result the way landPR reports a
+// created PR's URL. Unlike --pr/--web there is no pushed-branch or known-remote
+// precondition to check — reviewing uncommitted, unpushed work is the point.
+func landReview(ctx context.Context, stdout io.Writer, sess *landreview.Session) error {
+	written, err := sess.Run(ctx, stdout)
+	if err != nil {
+		return fmt.Errorf("sand land: %w", err)
+	}
+	fmt.Fprintf(stdout, "review written to %s in %s\n", written, sess.VM.Name)
 	return nil
 }
 

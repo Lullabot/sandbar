@@ -38,5 +38,12 @@
       when:
         - toolset_codex | default(false) | bool
         - provision_phase | default('full') != 'finalize'
+    # The self-review web UI is part of the configurable base tool-set (sand
+    # create --with-review). Like codex it is opt-IN: toolset_review defaults
+    # to false, so an unconfigured run does not build it.
+    - role: self-review
+      when:
+        - toolset_review | default(false) | bool
+        - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'
