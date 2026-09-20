@@ -104,10 +104,17 @@ footer row naming git work that has not yet reached a PR:
   repo's default branch doesn't count: a fresh clone is "pushed" in the literal
   sense but has nothing to turn into a PR, so it never lights the badge.
 - **At-risk** (`↑N`, `unpushed`, and/or `dirty`, in dim chrome) — commits or
-  uncommitted changes that exist only in the VM: `↑N` is the number of
-  commits ahead of the remote-tracking branch, `unpushed` marks a branch
-  that's never been pushed at all, and `dirty` marks uncommitted changes.
+  uncommitted changes that exist only in the VM: `↑N` counts the commits that
+  are reachable from **no remote-tracking ref at all**, `unpushed` marks a
+  branch that's never been pushed, and `dirty` marks uncommitted changes.
   This is exactly the work the delete guard (below) calls out.
+
+    `↑N` is deliberately not "commits ahead of the remote-tracking branch".
+    That number compares your branch to one possibly-stale copy of itself by
+    commit hash, so rebasing onto a trunk that has moved inflates it without
+    a byte of work becoming at risk — a five-commit branch rebased onto a
+    trunk 4,404 commits ahead reports 4,409. `↑N` counts what would actually
+    be lost if the VM went away, so in that case it says 5.
 
 The badge shows nothing for a VM that has never been swept, is stopped, or
 whose last sweep is stale — it never guesses.

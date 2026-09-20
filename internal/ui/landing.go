@@ -375,7 +375,7 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAv
 // changes, or both.
 func atRiskLabel(c checkouts.Checkout) string {
 	// A never-pushed branch has no honest ahead count to show (there is no
-	// tracking ref to count against — Checkout.Ahead is defined 0 for it), so
+	// tracking ref to count against — Checkout.LocalOnly is 0 for it), so
 	// it is named in words rather than with a fabricated "↑0". It gets its own
 	// arms rather than falling through to the dirty-only default, which used
 	// to render a clean never-pushed branch as "0 uncommitted" — a label that
@@ -385,10 +385,19 @@ func atRiskLabel(c checkouts.Checkout) string {
 		return fmt.Sprintf("never pushed + %d uncommitted", c.Dirty)
 	case c.PushState == checkouts.PushStateNever:
 		return "never pushed"
+	// An unpushed branch holding nothing that is only local — every commit
+	// reachable on some other remote-tracking ref, which is what a rebase
+	// onto a moved trunk leaves behind — has no at-risk count to show. It
+	// gets its own arms rather than rendering "↑0 unpushed", a label that
+	// would be both wrong and alarming.
+	case c.PushState == checkouts.PushStateUnpushed && c.LocalOnly == 0 && c.Dirty > 0:
+		return fmt.Sprintf("diverged from its pushed copy + %d uncommitted", c.Dirty)
+	case c.PushState == checkouts.PushStateUnpushed && c.LocalOnly == 0:
+		return "diverged from its pushed copy"
 	case c.PushState == checkouts.PushStateUnpushed && c.Dirty > 0:
-		return fmt.Sprintf("↑%d unpushed + %d uncommitted", c.Ahead, c.Dirty)
+		return fmt.Sprintf("↑%d unpushed + %d uncommitted", c.LocalOnly, c.Dirty)
 	case c.PushState == checkouts.PushStateUnpushed:
-		return fmt.Sprintf("↑%d unpushed", c.Ahead)
+		return fmt.Sprintf("↑%d unpushed", c.LocalOnly)
 	default:
 		return fmt.Sprintf("%d uncommitted", c.Dirty)
 	}

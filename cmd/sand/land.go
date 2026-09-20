@@ -332,12 +332,18 @@ func prLabel(pr *landgh.PR) string {
 }
 
 // pushLabel renders a checkout's push state for the listing's PUSH column,
-// including the ahead count for an unpushed branch so "3 commits sitting
-// only in the VM" reads as urgency, not just a bare enum value.
+// including, for an unpushed branch, the count of commits that exist nowhere
+// but the VM so "3 commits sitting only in the VM" reads as urgency, not just
+// a bare enum value. That count is Checkout.LocalOnly rather than
+// Checkout.Ahead — see its doc; Ahead measures against one possibly-stale ref
+// by hash and a rebase turns it into a number nobody can act on.
 func pushLabel(co checkouts.Checkout) string {
 	switch co.PushState {
 	case checkouts.PushStateUnpushed:
-		return fmt.Sprintf("unpushed (+%d)", co.Ahead)
+		if co.LocalOnly == 0 {
+			return "diverged"
+		}
+		return fmt.Sprintf("unpushed (+%d)", co.LocalOnly)
 	case checkouts.PushStatePushed:
 		if co.Dirty > 0 {
 			return "pushed (dirty)"

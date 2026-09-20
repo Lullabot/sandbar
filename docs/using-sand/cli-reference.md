@@ -643,9 +643,13 @@ one connection profile, --profile picks which one to act on.
 ```
 
 With no `PATH` or flags, `sand land NAME` prints a table (`PATH KIND BRANCH
-PUSH PR`) of every checkout the sweep found, including an ahead count for an
-unpushed branch (`unpushed (+3)`) and the PR's number/state when one exists
-(`#42 open (draft)`).
+PUSH PR`) of every checkout the sweep found, including a count of the commits
+that exist nowhere but the VM for an unpushed branch (`unpushed (+3)`) and the
+PR's number/state when one exists (`#42 open (draft)`).
+
+A branch whose commits are all published somewhere, but which no longer
+matches its own pushed copy — the usual result of a rebase — reads `diverged`
+rather than `unpushed (+0)`: there is nothing there to lose.
 
 `--pr PATH`, `--web PATH` and `--review PATH` require a `PATH` from that
 listing, and are mutually exclusive.

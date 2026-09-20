@@ -191,7 +191,7 @@ func TestClassifyLandRowPushedHasPR(t *testing.T) {
 }
 
 func TestClassifyLandRowUnpushed(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "acme/repo", Forge: "github.com"}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, OrgRepo: "acme/repo", Forge: "github.com"}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
@@ -228,7 +228,7 @@ func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
 // the most fragile thing in the VM, so a bare "local only" would understate it
 // exactly where it matters most.
 func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 2}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1, Dirty: 2}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly — there is no remote at all", row.Kind)
@@ -277,7 +277,7 @@ func TestCommitAndPushExprIsLiteral(t *testing.T) {
 }
 
 func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
@@ -431,7 +431,7 @@ func TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish(t *testing.T) {
 	}{
 		{
 			name:     "unpushed commits",
-			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
+			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
 		},
 		{
 			name:     "never pushed",
@@ -480,6 +480,7 @@ func TestClassifyLandRowDrupalOrgSSHHostIsRecognized(t *testing.T) {
 		Path:      "/home/user/drupal.org/dubbot",
 		PushState: checkouts.PushStateUnpushed,
 		Ahead:     2,
+		LocalOnly: 2,
 		OrgRepo:   "issue/dubbot-3622063",
 		Forge:     "git.drupal.org",
 		Branch:    "3622063-allow-sites-to",
@@ -1135,7 +1136,7 @@ func TestLandingActLabelNamesTheRealAction(t *testing.T) {
 		{"dirty", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "commit + push"},
 		// Clean but unpushed: promising an editor that never opens would be
 		// worse than saying nothing.
-		{"unpushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
+		{"unpushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
 		{"never pushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
 		{"pushed, no PR", checkouts.Checkout{Path: "/a", Branch: "f", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}, "open draft PR"},
 	}
@@ -1175,7 +1176,7 @@ func TestLandingFooterDoesNotClaimEnterMoves(t *testing.T) {
 	m, v := landingTestVM(t, "web")
 	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
 		Checkouts: []checkouts.Checkout{
-			{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 1, OrgRepo: "acme/repo", Forge: "github.com"},
+			{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1, OrgRepo: "acme/repo", Forge: "github.com"},
 		},
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
@@ -1275,7 +1276,7 @@ func TestLandingRescanKey(t *testing.T) {
 	m.landing.scanning = true
 	_ = m.handleLandRefresh(landRefreshMsg{scope: v.scope, vm: v.Name, vc: checkouts.VMCheckouts{
 		SweptAt:   swept,
-		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 4, OrgRepo: "acme/repo", Forge: "github.com"}},
+		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 4, LocalOnly: 4, OrgRepo: "acme/repo", Forge: "github.com"}},
 	}})
 	_ = swept
 	if m.landing.scanning {
@@ -2180,5 +2181,44 @@ func TestLandingPublishFlowOutranksAPendingConfirmation(t *testing.T) {
 	next, _ := m.updateLanding(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if next.(model).confirm == nil {
 		t.Error("a keystroke meant for the issue prompt answered the reset confirmation")
+	}
+}
+
+// TestAtRiskLabelUsesLocalOnly pins the Landing pane's at-risk row against the
+// rebase case, and against the row it must NOT render: "↑0 unpushed", which
+// would be alarming and false at once.
+func TestAtRiskLabelUsesLocalOnly(t *testing.T) {
+	cases := []struct {
+		name string
+		c    checkouts.Checkout
+		want string
+	}{
+		{
+			name: "a rebased branch names its own work, not the trunk it landed on",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5},
+			want: "↑5 unpushed",
+		},
+		{
+			name: "with uncommitted work alongside",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5, Dirty: 2},
+			want: "↑5 unpushed + 2 uncommitted",
+		},
+		{
+			name: "nothing local: named as divergence, never as ↑0",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 12, LocalOnly: 0},
+			want: "diverged from its pushed copy",
+		},
+		{
+			name: "nothing local but a dirty tree",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 12, LocalOnly: 0, Dirty: 3},
+			want: "diverged from its pushed copy + 3 uncommitted",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := atRiskLabel(tc.c); got != tc.want {
+				t.Errorf("atRiskLabel = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

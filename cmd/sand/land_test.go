@@ -92,6 +92,7 @@ func TestListCheckoutsAnnotatesPRState(t *testing.T) {
 				OrgRepo:   "acme/other",
 				PushState: checkouts.PushStateUnpushed,
 				Ahead:     3,
+				LocalOnly: 3,
 			},
 			{
 				Path:      "/home/dev/local-only",

@@ -257,8 +257,8 @@ that state calls for:
   whether a PR exists, because host `gh` is unusable or the lookup failed.
   Opening a draft PR still works (it falls back to the compare URL).
 - **Never pushed, unpushed, or dirty** — work that exists only in this VM:
-  a branch you created in the guest and haven't pushed, commits ahead of the
-  remote, uncommitted changes, or any combination. Acting on this row
+  a branch you created in the guest and haven't pushed, commits that have
+  reached no remote, uncommitted changes, or any combination. Acting on this row
   **commits and pushes it**: sand drops you into the guest with your editor
   open on `git commit -a`, and pushes the branch when you save (setting its
   upstream if it has none). Quit the editor without saving and nothing is
