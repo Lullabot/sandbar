@@ -160,7 +160,7 @@ func TestStageOutNarratesProgress(t *testing.T) {
 	}
 	archive := filepath.Join(t.TempDir(), "home.tar")
 
-	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, "home", stream); err != nil {
+	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", "andrew", []string{"."}, archive, "home", stream); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 

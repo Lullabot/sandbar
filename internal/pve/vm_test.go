@@ -318,11 +318,11 @@ func TestCreateVMFormValuesCloudInitDefaultsAndImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateVM: %v", err)
 	}
-	if got := rec.form.Get("scsihw"); got != "virtio-scsi-pci" {
-		t.Errorf("scsihw = %q; want virtio-scsi-pci (PVE defaults to lsi)", got)
+	if got := rec.form.Get("scsihw"); got != "virtio-scsi-single" {
+		t.Errorf("scsihw = %q; want virtio-scsi-single (PVE defaults to lsi, and iothread needs -single)", got)
 	}
-	if got := rec.form.Get("scsi0"); got != "local-zfs:0,import-from=local:import/debian-13.qcow2" {
-		t.Errorf("scsi0 = %q; want the :0 import form", got)
+	if got := rec.form.Get("scsi0"); got != "local-zfs:0,import-from=local:import/debian-13.qcow2,iothread=1,cache=writeback,discard=on,ssd=1" {
+		t.Errorf("scsi0 = %q; want the :0 import form carrying the disk performance options", got)
 	}
 	if got := rec.form.Get("net0"); got != "virtio,bridge=vmbr0" {
 		t.Errorf("net0 = %q", got)
@@ -384,8 +384,8 @@ func TestCreateVMDiskGBBareNumberMeansGiB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateVM: %v", err)
 	}
-	if got := rec.form.Get("scsi0"); got != "local-zfs:32" {
-		t.Errorf("scsi0 = %q; want local-zfs:32 (bare number means GiB for disk creation)", got)
+	if got := rec.form.Get("scsi0"); got != "local-zfs:32,iothread=1,cache=writeback,discard=on,ssd=1" {
+		t.Errorf("scsi0 = %q; want local-zfs:32 plus the disk performance options (bare number means GiB for disk creation)", got)
 	}
 }
 

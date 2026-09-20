@@ -117,7 +117,7 @@ func TestStageOutToleratesAChangingFile(t *testing.T) {
 	}
 	var out bytes.Buffer
 	archive := t.TempDir() + "/home.tgz"
-	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, "home", &out); err != nil {
+	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", "andrew", []string{"."}, archive, "home", &out); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 	if !strings.Contains(out.String(), "changed while they were being copied out") {
@@ -133,7 +133,7 @@ func TestStageOutFailsOnARealTarError(t *testing.T) {
 		failErr: errors.New("exit status 2: tar: Cannot write: No space left on device"),
 	}
 	archive := t.TempDir() + "/home.tgz"
-	err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, "home", io.Discard)
+	err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", "andrew", []string{"."}, archive, "home", io.Discard)
 	if err == nil {
 		t.Fatal("a failed tar was reported as a successful stage-out")
 	}
@@ -243,15 +243,20 @@ func TestReset_PreservePathsStagesAndRestores(t *testing.T) {
 	if restore < finalize {
 		t.Errorf("the checkout was restored at call %d, before finalize at %d: the playbook could write over the user's work", restore, finalize)
 	}
-	// The restore must re-own the extracted tree, and by its home-relative path.
-	chowned := false
+	// The restored tree must come back owned by the user rather than by root,
+	// which the ARCHIVE is what guarantees: its members name the user as their
+	// owner, so the root-run extract lands them that way and no ownership pass
+	// follows it. (It used to be a `chown -R` after the extract — a second full
+	// metadata pass over every restored inode, on the one resource a guest full
+	// of small files has least of.)
+	owned := false
 	for _, c := range f.calls {
-		if hasTok(c, "chown") && hasTok(c, "/home/andrew/src/app") {
-			chowned = true
+		if isTarOut(c) && hasTok(c, "--owner=andrew") && hasTok(c, "--group=andrew") {
+			owned = true
 		}
 	}
-	if !chowned {
-		t.Errorf("the restored checkout was left owned by root; calls=%v", f.calls)
+	if !owned {
+		t.Errorf("the staged archive does not force the user's ownership, so the restore would land root-owned; calls=%v", f.calls)
 	}
 }
 

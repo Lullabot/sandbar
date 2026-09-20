@@ -122,6 +122,48 @@ type CreateVMOptions struct {
 	Cpu string
 }
 
+// diskPerfOptions are the options appended to scsi0 on every VM this package
+// creates, and they are about ONE workload: hundreds of thousands of small
+// files. PVE's defaults are tuned for a general-purpose server; a sand VM is a
+// development sandbox holding a node_modules, a Go build cache and a working
+// tree, and everything it does — a build, a test run, and above all a reset's
+// copy of the home directory in and out — is metadata-bound rather than
+// throughput-bound. Both defaults work against exactly that.
+//
+// iothread=1 gives this disk its own QEMU IO thread instead of sharing the
+// emulator's main thread with every other device, so a queue of small reads
+// stops serialising behind unrelated work. It is why scsihw above is
+// virtio-scsi-single: PVE only accepts iothread on that controller.
+//
+// cache=writeback replaces PVE's default of no host cache (`cache=none`,
+// O_DIRECT), under which every read the GUEST's own page cache misses goes all
+// the way to the storage backend. Writeback lets the Proxmox host's page cache
+// serve them, which is the whole game for a tree of small files read shortly
+// after it was written — a reset reads a home directory the VM has been living
+// in for days. The trade is honest and bounded: writeback still honours the
+// guest's flushes, so the guest filesystem's journal stays consistent, but
+// writes not yet flushed can be lost if the HOST loses power. That is the same
+// exposure a physical workstation has, on a machine whose VMs are explicitly
+// disposable, and it is what PVE's own documentation recommends for
+// performance.
+//
+// discard=on and ssd=1 are the pair that lets freed space actually come back.
+// Without discard=on, a guest's TRIM is dropped by QEMU and never reaches the
+// storage, so a thin-provisioned volume or a ZFS/Ceph dataset only ever grows —
+// which is a poor fit for VMs that are created, filled with a build tree and
+// destroyed on repeat. ssd=1 advertises the disk as non-rotational, which is
+// what makes the guest's own weekly fstrim meaningful (and stops its IO
+// scheduler optimising for seeks that do not exist). Both assume the backing
+// store is an SSD or a copy-on-write filesystem, which is what these VMs are
+// realistically hosted on; neither is harmful where it is not, they simply stop
+// being useful.
+//
+// None of these takes effect on a VM that already exists: the disk options live
+// in the VM's config, clones inherit them from the template, and the template is
+// built once. A base image rebuild (`sand create --rebuild`) is what puts them
+// on new VMs.
+const diskPerfOptions = ",iothread=1,cache=writeback,discard=on,ssd=1"
+
 // formValues builds the POST body for CreateVM. Storage, Bridge, and Pool are
 // required: Storage backs scsi0/ide2, an omitted Bridge silently gives QEMU
 // user-mode NAT (unreachable over SSH in a way that looks like a boot
@@ -141,7 +183,12 @@ func (o CreateVMOptions) formValues() (url.Values, error) {
 	form := url.Values{
 		"vmid": {strconv.Itoa(o.VMID)},
 		// PVE defaults scsihw to "lsi", which cloud images do not drive.
-		"scsihw": {"virtio-scsi-pci"},
+		//
+		// "-single" rather than "-pci" because it is the controller variant that
+		// PVE will accept iothread=1 on (see diskPerfOptions): it gives each disk
+		// its own controller, and therefore its own IO thread, instead of funnelling
+		// every disk through the one QEMU main thread.
+		"scsihw": {"virtio-scsi-single"},
 		// The bare/legacy "boot=scsi0" form is deprecated in favour of
 		// the explicit "order=" form.
 		"boot":    {"order=scsi0"},
@@ -181,11 +228,11 @@ func (o CreateVMOptions) formValues() (url.Values, error) {
 	}
 	if o.ImportFrom != "" {
 		// The ":0" is enforced by PVE when import-from is used.
-		form.Set("scsi0", fmt.Sprintf("%s:0,import-from=%s", o.Storage, o.ImportFrom))
+		form.Set("scsi0", fmt.Sprintf("%s:0,import-from=%s%s", o.Storage, o.ImportFrom, diskPerfOptions))
 	} else {
 		// A bare number here means GiB (unlike resize, where a bare
 		// number means bytes).
-		form.Set("scsi0", fmt.Sprintf("%s:%d", o.Storage, o.DiskGB))
+		form.Set("scsi0", fmt.Sprintf("%s:%d%s", o.Storage, o.DiskGB, diskPerfOptions))
 	}
 	// Requires a storage with "images" content; the built-in "local"
 	// storage has none by default. Callers are responsible for surfacing
