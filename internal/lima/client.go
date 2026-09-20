@@ -184,8 +184,44 @@ func (c *Client) Delete(name string, force bool) error {
 // Clone creates a new instance as a copy of an existing base image.
 func (c *Client) Clone(base, name string) error { return c.run("clone", base, name) }
 
-// Configure sets a STOPPED clone's cpus/memory/disk — and strips any writable
-// mount the clone inherited from its base.
+// PlaybookMountPoint is where a base image — and therefore every clone taken
+// from it — mounts the host playbook directory read-only. It lives in this
+// package because both ends of that contract need it: internal/provision writes
+// the mount into the base overlay and rsyncs the playbook out of it inside the
+// guest, and Configure repoints it on every clone.
+const PlaybookMountPoint = "/mnt/playbook"
+
+// Configure sets a STOPPED clone's cpus/memory/disk, repoints its read-only
+// playbook mount at playbookDir, and strips any writable mount the clone
+// inherited from its base.
+//
+// THE REPOINT IS NOT COSMETIC — it is what stops a clone from provisioning
+// itself out of a directory that has nothing to do with this run. `limactl
+// clone` copies the base's lima.yaml wholesale, so a clone mounts the host
+// directory the BASE was created with, and finalize rsyncs its playbook out of
+// exactly that mount (see internal/provision's inGuestScript). Nothing else
+// re-checks it: ensureBaseStopped only reads the base's overlay when the base
+// is STALE, so a base whose version stamp is current hands its build-time path
+// to every clone forever. Two ways that path goes wrong, both ordinary:
+//
+//   - A second checkout. Build the base from one git worktree, create from
+//     another, and the new VM runs the FIRST worktree's roles/. Observed: a
+//     create died in rsync (exit 23) on symlinks under a role that exists only
+//     on the other branch.
+//   - A released binary. Outside a checkout, LocatePlaybook extracts the
+//     embedded playbook to a FRESH temp dir per run, so the base mounts the
+//     temp dir of the run that BUILT it. Once /tmp is cleared, Lima silently
+//     re-creates that location as an EMPTY directory, the guest's
+//     `rsync --delete` empties /root/playbook, and ansible-playbook fails with
+//     "the playbook: site.yml could not be found".
+//
+// For a plain create that is a failed build. For a RESET it is much worse: the
+// VM is deleted and re-cloned before finalize runs, so the reset destroys a
+// working VM and then cannot rebuild it — and every retry fails identically,
+// because nothing about the stale mount changes. Pinning the mount here, on the
+// clone, makes finalize depend on the playbook THIS binary resolved. The base's
+// CONTENT is already guaranteed to match it: ensureBaseStopped has converged or
+// rebuilt the base against the current playbook version before any clone is taken.
 //
 // Clones inherit the base's lima.yaml wholesale (`limactl clone` copies the
 // whole instance dir), so ANY writable mount RenderBaseOverlay ever puts on
@@ -214,10 +250,14 @@ func (c *Client) Clone(base, name string) error { return c.run("clone", base, na
 // cover command construction and, where limactl is on PATH, a real
 // `limactl edit` round trip (see TestConfigureStripsWritableMountAgainstRealLimactl
 // in configure_strip_test.go) — do not remove either without replacing it.
-func (c *Client) Configure(name string, cpus int, memory, disk string) error {
+func (c *Client) Configure(name string, cpus int, memory, disk, playbookDir string) error {
+	// The mount assignment is targeted rather than a replacement of the whole
+	// list: a mount the user added to the base by hand is not this function's to
+	// discard.
 	expr := fmt.Sprintf(
-		`.cpus=%d | .memory=%q | .disk=%q | .mounts |= map(select(.writable != true))`,
-		cpus, memory, disk)
+		`.cpus=%d | .memory=%q | .disk=%q | .mounts |= map(select(.writable != true))`+
+			` | (.mounts[] | select(.mountPoint == %q) | .location) = %q`,
+		cpus, memory, disk, PlaybookMountPoint, playbookDir)
 	return c.run("edit", "--set", expr, name)
 }
 
