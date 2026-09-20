@@ -23,11 +23,18 @@ import (
 // per KIND of thing preserved rather than one shared file, because they are
 // restored at different moments — before the finalize playbook or after it — and
 // a single archive could not be.
+//
+// They are compressed, but the name does not say with what: the compressor is
+// whatever the SOURCE guest turned out to have (see compress.go), so a fixed
+// ".tgz" would be a lie on every guest with zstd — and a misleading one exactly
+// when it is read, which is a user recovering a failed reset's data by hand from
+// the path StageGuard.Fail names. A plain ".tar" is honest for both, because GNU
+// tar detects the compression itself when it is reading a file it can seek.
 const (
-	claudeArchive  = "claude.tgz"
-	projectArchive = "project.tgz"
-	homeArchive    = "home.tgz"
-	extrasArchive  = "extras.tgz"
+	claudeArchive  = "claude.tar"
+	projectArchive = "project.tar"
+	homeArchive    = "home.tar"
+	extrasArchive  = "extras.tar"
 )
 
 // claudePaths are the two home-relative paths "preserve Claude" keeps: the

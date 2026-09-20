@@ -823,6 +823,24 @@ provider's `resetInstance`) drive it rather than restating the rules.
   is running while its data is copied out, so an agent writing a log is enough
   to produce it. Failing on it would mean "preserve my home" only ever worked
   on an idle VM. Do not widen this to other statuses — 2 is a real failure.
+- **The archives are compressed with zstd where the guest has it, and the format
+  is read back off the archive, never remembered.** Compression runs inside the
+  guest on the critical path of a reset, so the compressor is the reset's speed:
+  on a 1.3 GB tree gzip took 54s where `zstd -T0 -3` took 2.5s and produced a
+  slightly smaller archive (`internal/provision/compress.go`). Two halves of that
+  are load-bearing. It is PROBED, not assumed — the archive is written by the
+  SOURCE VM, which may predate zstd being in the base image, and a reset that
+  refused to run there would refuse while holding the only copy of the user's
+  work, so a guest without zstd falls back to gzip. And the extract flag comes
+  from `tarDecompressFlag` sniffing the archive's magic bytes rather than from
+  anything the stage-out wrote down, because the two halves are separated by the
+  guest being destroyed and rebuilt, and bookkeeping carried across that gap is a
+  chance for the restore to disagree with the file it is restoring. The flag is
+  not optional for zstd the way it is for gzip: GNU tar auto-detects only when it
+  can seek, and a stage-in arrives on stdin. The staged files are named `.tar`,
+  not `.tgz`, for the same reason — the name must not claim a format the file may
+  not have, least of all to someone recovering data by hand from the path
+  `StageGuard.Fail` printed.
 - **The staging directory is deliberately NOT in `/tmp`.** `/tmp` is a tmpfs on
   current Debian, and a staged archive is the only copy of the user's work
   between the destroy and the restore; a whole home is routinely gigabytes.

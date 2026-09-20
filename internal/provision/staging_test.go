@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,6 +22,20 @@ type stagingFakeRunner struct {
 	streams   []string
 	streamOut map[string][]byte
 	err       error
+	// failSubstr fails just the calls whose joined argv contains it, which is how
+	// a guest that does not have a command answers a `command -v` probe. A blanket
+	// err cannot express that: it would fail the tar as well.
+	failSubstr string
+}
+
+// errNoSuchCommand is what a `command -v <missing>` probe comes back as.
+var errNoSuchCommand = errors.New("exit status 1")
+
+func (f *stagingFakeRunner) fails(joined string) error {
+	if f.failSubstr != "" && strings.Contains(joined, f.failSubstr) {
+		return errNoSuchCommand
+	}
+	return f.err
 }
 
 func (f *stagingFakeRunner) Output(_ context.Context, args ...string) ([]byte, error) {
@@ -28,10 +43,10 @@ func (f *stagingFakeRunner) Output(_ context.Context, args ...string) ([]byte, e
 	joined := strings.Join(args, " ")
 	for key, val := range f.streamOut {
 		if strings.Contains(joined, key) {
-			return val, f.err
+			return val, f.fails(joined)
 		}
 	}
-	return nil, f.err
+	return nil, f.fails(joined)
 }
 
 func (f *stagingFakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Writer, args ...string) error {
@@ -48,7 +63,7 @@ func (f *stagingFakeRunner) Stream(_ context.Context, stdin io.Reader, out io.Wr
 			}
 		}
 	}
-	return f.err
+	return f.fails(joined)
 }
 
 func (f *stagingFakeRunner) StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
@@ -128,10 +143,14 @@ func TestGuestHome(t *testing.T) {
 	}
 }
 
+// TestStageOut pins the stage-out argv on a guest that HAS zstd: the probe, then
+// a tar handed zstd as its compressor. gzip on a preserved home is minutes where
+// this is seconds, so which compressor gets chosen is worth asserting rather
+// than assuming.
 func TestStageOut(t *testing.T) {
 	f := &stagingFakeRunner{}
 	cli := lima.New(f)
-	archive := filepath.Join(t.TempDir(), "claude.tar.gz")
+	archive := filepath.Join(t.TempDir(), "claude.tar")
 	paths := []string{".claude", ".claude.json"}
 
 	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", paths, archive, io.Discard); err != nil {
@@ -139,19 +158,40 @@ func TestStageOut(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "-czf", "-", ".claude", ".claude.json"},
+		{"shell", "claude", "sudo", "sh", "-c", "command -v zstd"},
+		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "-I", "zstd -T0 -3", "-cf", "-", ".claude", ".claude.json"},
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("StageOut argv = %v, want %v", f.calls, want)
 	}
 }
 
+// TestStageOutFallsBackToGzipWithoutZstd: the archive is written by the SOURCE
+// VM, which may have been cloned from a base built before zstd was part of the
+// image. A reset that refused to run there would refuse while holding the only
+// copy of the user's work, so a missing compressor costs speed, not the reset.
+func TestStageOutFallsBackToGzipWithoutZstd(t *testing.T) {
+	f := &stagingFakeRunner{failSubstr: "command -v zstd"}
+	cli := lima.New(f)
+	archive := filepath.Join(t.TempDir(), "claude.tar")
+
+	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", []string{".claude"}, archive, io.Discard); err != nil {
+		t.Fatalf("StageOut: %v", err)
+	}
+
+	want := []string{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "-z", "-cf", "-", ".claude"}
+	if got := f.calls[len(f.calls)-1]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("StageOut argv = %v, want %v", got, want)
+	}
+}
+
 func TestStageIn(t *testing.T) {
 	f := &stagingFakeRunner{}
 	cli := lima.New(f)
-	archive := filepath.Join(t.TempDir(), "claude.tar.gz")
-	// StageIn opens the archive for reading, so it must exist.
-	if err := os.WriteFile(archive, []byte("dummy"), 0o600); err != nil {
+	archive := filepath.Join(t.TempDir(), "claude.tar")
+	// StageIn opens the archive for reading, so it must exist — and the extract
+	// flag is chosen from its leading bytes, so they have to be a real format's.
+	if err := os.WriteFile(archive, append(gzipMagic, "dummy"...), 0o600); err != nil {
 		t.Fatalf("seed archive: %v", err)
 	}
 	paths := []string{".claude", ".claude.json"}
@@ -162,7 +202,7 @@ func TestStageIn(t *testing.T) {
 
 	want := [][]string{
 		// Extract MUST precede chown.
-		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-xzf", "-"},
+		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-z", "-xf", "-"},
 		// Each path is probed before the chown, which covers only what the
 		// extract actually produced (see StageIn).
 		{"shell", "claude", "sudo", "test", "-e", "/home/andrew/.claude"},

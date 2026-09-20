@@ -830,19 +830,19 @@ func TestProxmoxResetPreservesStateOverSSH(t *testing.T) {
 	for _, argv := range *argvs {
 		joined := strings.Join(argv, " ")
 		switch {
-		case strings.Contains(joined, "tar") && strings.Contains(joined, "-czf"):
+		case strings.Contains(joined, "tar") && strings.Contains(joined, "-cf"):
 			stagedOut = true
-		case strings.Contains(joined, "tar") && strings.Contains(joined, "-xzf"):
+		case strings.Contains(joined, "tar") && strings.Contains(joined, "-xf"):
 			stagedIn = true
 		case strings.Contains(joined, "direnv") && strings.Contains(joined, "allow"):
 			direnv = true
 		}
 	}
 	if !stagedOut {
-		t.Error("no `tar -czf` stage-out ran; preserved state was never captured")
+		t.Error("no `tar -cf` stage-out ran; preserved state was never captured")
 	}
 	if !stagedIn {
-		t.Error("no `tar -xzf` stage-in ran; preserved state was never restored")
+		t.Error("no `tar -xf` stage-in ran; preserved state was never restored")
 	}
 	if !direnv {
 		t.Error("no `direnv allow` ran; the restored project's .env was not re-approved")

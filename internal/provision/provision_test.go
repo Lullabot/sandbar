@@ -1506,14 +1506,14 @@ func TestReset_BothPreserve(t *testing.T) {
 	}
 	calls := f.calls
 
-	// Stage-out: getent resolves home, then two `tar -czf -` archives (claude,
+	// Stage-out: getent resolves home, then two `tar -cf -` archives (claude,
 	// then project under github.com/lullabot).
 	getent := findCall(t, calls, 0, "getent", func(c []string) bool { return hasTok(c, "getent") })
-	outClaude := findCall(t, calls, getent+1, "stage-out claude (-czf .claude)", func(c []string) bool {
-		return hasTok(c, "-czf") && hasTok(c, ".claude")
+	outClaude := findCall(t, calls, getent+1, "stage-out claude (tar -cf .claude)", func(c []string) bool {
+		return isTarOut(c) && hasTok(c, ".claude")
 	})
-	outProject := findCall(t, calls, outClaude+1, "stage-out project (-czf github.com/lullabot)", func(c []string) bool {
-		return hasTok(c, "-czf") && hasTok(c, "github.com/lullabot")
+	outProject := findCall(t, calls, outClaude+1, "stage-out project (tar -cf github.com/lullabot)", func(c []string) bool {
+		return isTarOut(c) && hasTok(c, "github.com/lullabot")
 	})
 
 	// Recreate sized: delete -> ensure base -> clone -> configure -> start.
@@ -1527,8 +1527,8 @@ func TestReset_BothPreserve(t *testing.T) {
 	})
 
 	// Claude restore (extract + chown) BEFORE finalize.
-	inClaude := findCall(t, calls, startClone+1, "stage-in claude (-xzf)", func(c []string) bool {
-		return hasTok(c, "-xzf")
+	inClaude := findCall(t, calls, startClone+1, "stage-in claude (tar -xf)", func(c []string) bool {
+		return isTarIn(c)
 	})
 	chownClaude := findCall(t, calls, inClaude+1, "chown claude", func(c []string) bool {
 		return hasTok(c, "chown") && hasTok(c, "/home/andrew/.claude")
@@ -1538,8 +1538,8 @@ func TestReset_BothPreserve(t *testing.T) {
 	})
 
 	// Project restore AFTER finalize: extract + chown + direnv allow.
-	inProject := findCall(t, calls, finalize+1, "stage-in project (-xzf)", func(c []string) bool {
-		return hasTok(c, "-xzf")
+	inProject := findCall(t, calls, finalize+1, "stage-in project (tar -xf)", func(c []string) bool {
+		return isTarIn(c)
 	})
 	chownProject := findCall(t, calls, inProject+1, "chown project", func(c []string) bool {
 		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/lullabot")
@@ -1578,8 +1578,8 @@ func countCalls(calls [][]string, match func([]string) bool) int {
 	return n
 }
 
-func isTarOut(c []string) bool { return hasTok(c, "-czf") }
-func isTarIn(c []string) bool  { return hasTok(c, "-xzf") }
+func isTarOut(c []string) bool { return hasTok(c, "tar") && hasTok(c, "-cf") }
+func isTarIn(c []string) bool  { return hasTok(c, "tar") && hasTok(c, "-xf") }
 
 // finalizeStream returns the streamed stdin of the finalize provision (the one
 // carrying provision_phase: finalize), failing the test if none was captured.
@@ -1630,7 +1630,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 		t.Fatalf("claude-only reset should stage in exactly once, got %d", n)
 	}
 	for _, c := range f.calls {
-		if hasTok(c, "-czf") && hasTok(c, "github.com/lullabot") {
+		if isTarOut(c) && hasTok(c, "github.com/lullabot") {
 			t.Fatalf("claude-only reset must not stage out the project tree: %v", c)
 		}
 		if hasTok(c, "direnv") {
@@ -1638,7 +1638,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 		}
 	}
 
-	// Claude restore (-xzf) must land BEFORE finalize so the playbook re-applies
+	// Claude restore (tar -xf) must land BEFORE finalize so the playbook re-applies
 	// settings.json on top.
 	inClaude := findCall(t, f.calls, 0, "stage-in claude", isTarIn)
 	findCall(t, f.calls, inClaude+1, "finalize after restore", func(c []string) bool {
@@ -1675,12 +1675,12 @@ func TestReset_ProjectOnly(t *testing.T) {
 		t.Fatalf("project-only reset should stage out exactly once, got %d", n)
 	}
 	for _, c := range f.calls {
-		if hasTok(c, "-czf") && hasTok(c, ".claude") {
+		if isTarOut(c) && hasTok(c, ".claude") {
 			t.Fatalf("project-only reset must not stage out ~/.claude: %v", c)
 		}
 	}
 
-	// The project restore (-xzf) must land AFTER finalize, followed by direnv allow.
+	// The project restore (tar -xf) must land AFTER finalize, followed by direnv allow.
 	finalize := findCall(t, f.calls, 0, "finalize", func(c []string) bool {
 		return hasTok(c, "bash") && hasTok(c, "-c")
 	})

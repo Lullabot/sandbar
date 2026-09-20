@@ -47,8 +47,8 @@ func TestAncestorDirs(t *testing.T) {
 func TestStageInCreatesParentsAsTheUser(t *testing.T) {
 	f := &stagingFakeRunner{}
 	cli := lima.New(f)
-	archive := filepath.Join(t.TempDir(), "project.tar.gz")
-	if err := os.WriteFile(archive, []byte("dummy"), 0o600); err != nil {
+	archive := filepath.Join(t.TempDir(), "project.tar")
+	if err := os.WriteFile(archive, append(gzipMagic, "dummy"...), 0o600); err != nil {
 		t.Fatalf("seed archive: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestStageInCreatesParentsAsTheUser(t *testing.T) {
 
 	want := [][]string{
 		{"shell", "claude", "sudo", "install", "-d", "-o", "andrew", "-g", "andrew", "-m", "755", "/home/andrew/github.com"},
-		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-xzf", "-"},
+		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-z", "-xf", "-"},
 		// The chown covers only what the extract actually produced, so each path
 		// is probed first (see StageIn).
 		{"shell", "claude", "sudo", "test", "-e", "/home/andrew/github.com/octocat"},

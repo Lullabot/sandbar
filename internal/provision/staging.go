@@ -227,11 +227,16 @@ func (g *StageGuard) Done() {
 // keeps a missing optional path (e.g. ~/.claude.json) from aborting the archive;
 // tar preserves the original modes/ownership inside the tarball.
 //
+// The compressor is chosen per guest by tarCompressFlags (zstd where the guest
+// has it, gzip otherwise); the restore half reads the format back off the
+// archive's own magic bytes rather than being told.
+//
 // It uses ShellStreamOut (stdout only), NOT Shell (merged stdout+stderr): the
-// gzip stream is tar's stdout, and `limactl shell` emits a `cd <host-cwd>` "No
-// such file or directory" warning on stderr whenever that host path is absent
-// in the guest. Merging that warning into the archive corrupts the gzip, and
-// the later StageIn `tar -xzf` then aborts with exit status 2.
+// compressed stream is tar's stdout, and `limactl shell` emits a `cd <host-cwd>`
+// "No such file or directory" warning on stderr whenever that host path is
+// absent in the guest. Merging that warning into the archive corrupts the
+// compressed stream, and the later StageIn extract then aborts with exit
+// status 2.
 func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive string, out io.Writer, excludes ...string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
@@ -243,7 +248,8 @@ func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPath
 	for _, ex := range excludes {
 		argv = append(argv, "--exclude="+ex)
 	}
-	argv = append(argv, "-czf", "-")
+	argv = append(argv, tarCompressFlags(ctx, cli, name)...)
+	argv = append(argv, "-cf", "-")
 	argv = append(argv, guestPaths...)
 	if err := cli.ShellStreamOut(ctx, name, nil, file, argv...); err != nil {
 		if !tarFilesChanged(err) {
@@ -353,7 +359,12 @@ func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topP
 		}
 	}
 
-	if err := cli.Shell(ctx, name, file, io.Discard, "sudo", "tar", "-C", home, "-xzf", "-"); err != nil {
+	extract := []string{"sudo", "tar", "-C", home}
+	if flag := tarDecompressFlag(file); flag != "" {
+		extract = append(extract, flag)
+	}
+	extract = append(extract, "-xf", "-")
+	if err := cli.Shell(ctx, name, file, io.Discard, extract...); err != nil {
 		return fmt.Errorf("stage in extract: %w", err)
 	}
 
