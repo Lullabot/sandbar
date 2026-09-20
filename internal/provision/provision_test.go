@@ -1728,11 +1728,29 @@ func TestReset_PreserveProject_NoOrgURL(t *testing.T) {
 	}
 }
 
+// stageRecoveryDir extracts the staging directory a reset error points at, or
+// "" when the error makes no such promise.
+func stageRecoveryDir(err error) string {
+	const marker = "your data is preserved at "
+	i := strings.Index(err.Error(), marker)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.SplitN(err.Error()[i+len(marker):], ":", 2)[0])
+}
+
 // TestReset_StageOutFailureAbortsWithoutDelete is the load-bearing safety
-// property: if stage-out fails, the reset must NOT delete the source VM (its data
-// is still only inside it), and the error must name the host staging dir so the
-// user can recover whatever was written.
+// property: if stage-out fails, the reset must NOT delete the source VM — its
+// data is still only inside it.
+//
+// And because the VM is still there, the half-written archive is a COPY of data
+// the user can still simply read out of the running guest, so the reset must
+// take it away again rather than leave a tarball of ~/.claude/.credentials.json
+// in /tmp (which is tmpfs on a modern Debian host, so a staged project tree sits
+// in RAM) behind an error promising a recovery nobody needs. Keeping the dir on
+// EVERY failure — including this one — is what this replaces.
 func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
+	before := len(stageDirs(t))
 	f := &fakeRunner{
 		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
 		failOn:  isTarOut, // the stage-out tar fails
@@ -1751,17 +1769,39 @@ func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
 			t.Fatalf("stage-out failure must not delete the source VM; calls=%v", f.calls)
 		}
 	}
-	// The error must point the user at the preserved staging dir, and it must exist.
-	const marker = "your data is preserved at "
-	i := strings.Index(err.Error(), marker)
-	if i < 0 {
-		t.Fatalf("error must name the recovery dir, got %q", err.Error())
+	// The guest is intact, so nothing is promised and nothing is left behind.
+	if dir := stageRecoveryDir(err); dir != "" {
+		t.Errorf("error promises a recovery dir (%s) for data still in the untouched VM: %q", dir, err.Error())
 	}
-	path := strings.TrimSpace(strings.SplitN(err.Error()[i+len(marker):], ":", 2)[0])
-	if st, statErr := os.Stat(path); statErr != nil || !st.IsDir() {
-		t.Fatalf("named recovery dir %q should exist: %v", path, statErr)
+	if after := stageDirs(t); len(after) != before {
+		t.Errorf("staging dir left behind while the VM was never touched: had %d, now %d (%v)", before, len(after), after)
 	}
-	_ = os.RemoveAll(path) // this failure path intentionally leaves the dir; clean up the test artifact
+}
+
+// TestReset_KeepsStagingOnceTheVMIsGone is the other half of that rule: after
+// the delete, the staged archives are the ONLY copy of what the guest held, so a
+// failure past that point must keep them and say where they are.
+func TestReset_KeepsStagingOnceTheVMIsGone(t *testing.T) {
+	f := &fakeRunner{
+		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
+		failOn:  func(c []string) bool { return c[0] == "clone" },
+		failErr: errors.New("no space left on device"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard)
+	if err == nil {
+		t.Fatal("Reset should fail when the re-clone fails")
+	}
+	dir := stageRecoveryDir(err)
+	if dir == "" {
+		t.Fatalf("a failure after the delete must name the recovery dir, got %q", err.Error())
+	}
+	if st, statErr := os.Stat(dir); statErr != nil || !st.IsDir() {
+		t.Fatalf("named recovery dir %q should exist: %v", dir, statErr)
+	}
+	_ = os.RemoveAll(dir) // this failure path intentionally leaves the dir; clean up the test artifact
 }
 
 // TestReset_StartsStoppedSourceForStaging: when a preserve option is set but the
