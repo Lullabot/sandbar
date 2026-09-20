@@ -495,9 +495,9 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 }
 
 // The whole-home toggle is the first preserve option, it flips like the rest,
-// and turning it on marks every option it subsumes as already included rather
-// than removing them from the form (which would move the focus ring out from
-// under the key the user just pressed).
+// and turning it on locks every option it subsumes — shown checked and
+// unoperable — rather than removing them from the form (which would move the
+// focus ring out from under the key the user just pressed).
 func TestResetWholeHomeToggle(t *testing.T) {
 	m := openReset(t, resetConfig())
 
@@ -516,11 +516,111 @@ func TestResetWholeHomeToggle(t *testing.T) {
 	if got := len(m.toggles()); got != before {
 		t.Fatalf("toggle count changed from %d to %d when whole-home was enabled", before, got)
 	}
-	if !strings.Contains(m.formView(), "already in the whole home") {
-		t.Fatalf("the subsumed toggles should say so; view:\n%s", m.formView())
-	}
 	if !strings.Contains(m.formView(), "compromised") {
 		t.Fatal("the compromise warning should appear once whole-home is on")
+	}
+
+	// Every row below the whole-home one is now the form's answer, not a
+	// question: locked, and rendered checked whatever its own bool says.
+	toggles := m.toggles()
+	if toggles[0].locked {
+		t.Error("the whole-home toggle locked itself; it is the one row that must stay operable")
+	}
+	for i, tg := range toggles[1:] {
+		if !tg.locked {
+			t.Errorf("toggle %d (%q) is not locked while whole-home is on", i+1, tg.label)
+		}
+	}
+	view := ansi.Strip(m.formView())
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "Preserve Claude Code settings") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "[x]") {
+				t.Errorf("a subsumed row renders unchecked while whole-home is on: %q", line)
+			}
+			if !strings.Contains(line, "(locked)") {
+				t.Errorf("a subsumed row gives no non-colour sign that it is locked: %q", line)
+			}
+		}
+	}
+	if strings.Contains(view, "already in the whole home") {
+		t.Error("the per-row explanation should be gone; the lock is the statement now")
+	}
+}
+
+// Locking is a DISPLAY state: the user's own picks are untouched underneath, so
+// turning whole-home back off finds them exactly where they were left. Forcing
+// the fields to true instead would silently rewrite a choice the user made.
+func TestResetWholeHomeLockKeepsUnderlyingPicks(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	m = tabToToggle(t, m, "Preserve Claude Code settings")
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+	if !m.preserveClaude {
+		t.Fatal("preserveClaude should be on after space")
+	}
+
+	m = tabToToggle(t, m, "Preserve the entire home directory")
+	sp, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+	if !m.preserveClaude {
+		t.Error("turning whole-home on cleared an earlier pick")
+	}
+
+	// ...and off again, with the earlier pick still standing and operable.
+	sp, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+	if m.preserveHome {
+		t.Fatal("space should have turned whole-home back off")
+	}
+	if !m.preserveClaude {
+		t.Error("the earlier pick did not survive the whole-home round trip")
+	}
+	for i, tg := range m.toggles() {
+		if tg.locked {
+			t.Errorf("toggle %d (%q) is still locked after whole-home went off", i, tg.label)
+		}
+	}
+}
+
+// A locked row is stepped OVER by the focus walk rather than being focusable and
+// inert: a ring that can land on a row no key will change is the "advertise it,
+// then do nothing" pattern this UI is free of. With whole-home on, the only
+// operable toggle is whole-home itself, so tab walks straight past the rest and
+// back into the inputs.
+func TestResetWholeHomeLockSkipsFocus(t *testing.T) {
+	m := openReset(t, resetConfig())
+
+	m = tabToToggle(t, m, "Preserve the entire home directory")
+	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = sp.(model)
+	if len(m.toggles()) < 2 {
+		t.Fatalf("this test needs a subsumed row to skip; labels=%v", toggleLabels(m))
+	}
+
+	// One tab forward from the (only operable) whole-home row leaves the toggles
+	// entirely rather than landing on a locked one.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = next.(model)
+	if m.toggleFocus != -1 {
+		t.Fatalf("focus landed on locked toggle %d (%q)", m.toggleFocus, m.toggles()[m.toggleFocus].label)
+	}
+
+	// And a full lap never rests on one either.
+	for i := 0; i < 40; i++ {
+		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		m = next.(model)
+		if m.toggleFocus >= 0 && m.toggles()[m.toggleFocus].locked {
+			t.Fatalf("tab %d landed on locked toggle %d (%q)", i, m.toggleFocus, m.toggles()[m.toggleFocus].label)
+		}
+	}
+	// The same going backwards (up is the form's prev-field key).
+	for i := 0; i < 40; i++ {
+		prev, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+		m = prev.(model)
+		if m.toggleFocus >= 0 && m.toggles()[m.toggleFocus].locked {
+			t.Fatalf("up %d landed on locked toggle %d (%q)", i, m.toggleFocus, m.toggles()[m.toggleFocus].label)
+		}
 	}
 }
 
