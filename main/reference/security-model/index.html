@@ -1537,12 +1537,18 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   <a href="../files-and-state/">Files and State</a> for the path and what deleting it
   costs. Treat that file as sensitive: anyone who can read your user
   account's files can read every VM's secrets.</li>
-<li><strong>The TUI's reset "preserve" options are a deliberate, opt-in exception</strong>
-  to "nothing leaves the VM": when enabled, the selected data (your Claude
-  Code login, and/or a cloned project's checkout with its <code>.env</code>) is copied
-  to a private host temp dir, restored into the reset VM, then deleted. They
-  default off. Do not enable them if you suspect the VM you're resetting is
-  compromised.</li>
+<li><strong>A reset's "preserve" options are a deliberate, opt-in exception</strong> to
+  "nothing leaves the VM": when enabled, the selected data is copied to a
+  private (<code>0700</code>) host directory, restored into the rebuilt VM, then deleted.
+  What that data can be has grown — the Claude Code login, a cloned project's
+  checkout with its <code>.env</code>, any git checkout or worktree in the guest home,
+  or (with <code>--preserve-home</code> / the whole-home toggle) <em>the entire home
+  directory</em> — but the rule has not: they all default off, they are all
+  enabled per reset by a human, and the copy is deleted afterwards. The bigger
+  the option, the more it matters: do not enable any of them if you suspect
+  the VM you are resetting is compromised, and note that preserving a whole
+  home copies whatever that VM's agent wrote anywhere in <code>~</code> onto your
+  workstation. Only paths inside the guest home can be preserved at all.</li>
 </ul>
 <p>Together these mean: assume a <code>sand</code> VM can be fully compromised by whatever
 you run inside it, and rely on deletion — not defense — to recover. Nothing

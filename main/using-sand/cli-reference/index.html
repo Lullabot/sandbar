@@ -928,6 +928,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-reset-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand reset NAME
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="sand reset NAME">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flags_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#there-is-no-clone-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        There is no --clone-url
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secrets-are-re-applied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets are re-applied
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verified-help-output_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified --help output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-shell-name" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1657,6 +1718,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#sand-reset-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand reset NAME
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="sand reset NAME">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#flags_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flags
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#there-is-no-clone-url" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        There is no --clone-url
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secrets-are-re-applied" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets are re-applied
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verified-help-output_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified --help output
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sand-shell-name" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1777,29 +1899,31 @@
 
 
 <h1 id="cli-reference">CLI Reference</h1>
-<p>There are seven entry points:</p>
+<p>There are eight entry points:</p>
 <ul>
 <li><a href="#sand"><code>sand</code></a> — no arguments — launches the interactive TUI.</li>
 <li><a href="#sand-create"><code>sand create</code></a> — headless, non-interactive VM provisioning.</li>
+<li><a href="#sand-reset-name"><code>sand reset NAME</code></a> — rebuild an existing VM from its base
+  image, optionally keeping the Claude login or the project.</li>
 <li><a href="#sand-shell-name"><code>sand shell NAME</code></a> — attach to a running VM's persistent
   tmux session.</li>
-<li>
-<p><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
-  host clipboard on a running VM's guest clipboard.</p>
-</li>
-<li>
-<p><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
-  draft PR / browser for one of them.</p>
-</li>
+<li><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
+  host clipboard on a running VM's guest clipboard.</li>
+<li><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
+  draft PR / browser for one of them.</li>
 <li><a href="#sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></a> — publish
   a checkout's local commits to a drupal.org issue fork.</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
   the build identity.</li>
 </ul>
 <p>Any other first argument is an unknown subcommand and exits <code>2</code>.</p>
+<p>Each headless command is the same verb as a TUI key, under the same name and
+sharing the same implementation: <code>sand create</code> is the form behind <code>n</code>, <code>sand
+reset</code> is <code>R</code>, <code>sand shell</code> is <code>S</code>, <code>sand land</code> is <code>l</code>, <code>sand publish</code> is the
+Landing pane's publish action, <code>sand paste-image</code> is <code>v</code>. Whichever you reach for, the gates, defaults and bookkeeping are the same.</p>
 <h2 id="sand"><code>sand</code></h2>
 <p>Run with no arguments, <code>sand</code> launches the interactive TUI: it lists
-instances, streams a build's progress, and drives the same create/recreate/
+instances, streams a build's progress, and drives the same create/reset/
 delete/start/stop lifecycle as the headless commands below. See
 <a href="../tui/">The TUI</a> for the keybindings and screens.</p>
 <h2 id="sand-create"><code>sand create</code></h2>
@@ -1921,7 +2045,7 @@ not a prompt.</p>
 <td><code>--recreate</code></td>
 <td>bool</td>
 <td><code>false</code></td>
-<td>If <code>--name</code> already exists <strong>and is sand-managed</strong>, delete and re-clone it. Flags you omit are taken from that VM's recorded settings — see <a href="#-rebuild-vs-recreate"><code>--rebuild</code> vs <code>--recreate</code></a>.</td>
+<td>Delete and re-clone <code>--name</code> if it is <strong>sand-managed</strong>. The older spelling of <a href="#sand-reset-name"><code>sand reset NAME</code></a>, which does the same thing and can additionally preserve state — see <a href="#-rebuild-vs-recreate"><code>--rebuild</code> vs <code>--recreate</code></a>.</td>
 </tr>
 <tr>
 <td><code>--rebuild</code></td>
@@ -2040,21 +2164,24 @@ VM's persistent disk and never appears in a process listing.</p>
   is not going to get, or if the base image is corrupted. It is independent of
   <code>--recreate</code> and the two may be combined.</li>
 <li><strong><code>--recreate</code></strong> deletes and re-clones <strong>this VM</strong> (<code>--name</code>) from the
-  (possibly still-old) base image. Use it to throw away one VM's disk and get
-  a clean clone without touching anything else. It is gated: <code>sand</code> refuses to
-  recreate a target that is not already a sand-managed VM, since recreate
-  would otherwise delete and replace <em>any</em> instance it is pointed at,
-  sand-managed or not.</li>
+  (possibly still-old) base image. It is the older spelling of
+  <a href="#sand-reset-name"><code>sand reset NAME</code></a> and does exactly what that command does
+  with neither preserve flag: the same managed-VM gate, the same recorded
+  settings, the same bookkeeping. Prefer <code>sand reset</code> in new scripts — it is the
+  same verb the TUI calls Reset, and it is the only spelling that can keep
+  anything from inside the guest.</li>
 </ul>
 <p>A recreate rebuilds a VM <code>sand</code> already knows, so <strong>every flag you leave off
   comes from that VM's own recorded settings</strong> — its base image, sizing,
   hostname, git identity and clone URL — rather than from this command's
-  defaults. That is the same rule the <code>--with-*</code> flags follow, and it makes
-  <code>sand create --recreate --name mybox</code> mean "give me this VM back", not "give
-  me a default VM with this name". A flag you <em>do</em> pass still wins, so
-  <code>--recreate --disk 200GiB</code> remains the way to resize one. This matches the
-  TUI's Reset, which has always pre-filled its form from the same recorded
-  settings.</p>
+  defaults. That makes <code>sand create --recreate --name mybox</code> mean "give me this
+  VM back", not "give me a default VM with this name". A flag you <em>do</em> pass
+  still wins, so <code>--recreate --disk 200GiB</code> remains the way to resize one.</p>
+<p><code>--clone-url</code> is the exception: <code>--recreate --clone-url ...</code> is <strong>refused</strong>.
+  A rebuild keeps the VM's project, and asking to change it in the same breath
+  used to leave the old checkout stranded beside a freshly cloned different
+  repo. Rebuild the VM as it is with <code>sand reset mybox</code>, or create another VM
+  for the other repo. (The TUI's reset form locks the same field.)</p>
 <p>The one thing that is <em>not</em> remembered is <code>--clone-token</code>: tokens are never
   written to the managed index (see <a href="#-clone-token-is-a-credential">credential
   handling</a>). If the recorded <code>--clone-url</code>
@@ -2062,7 +2189,8 @@ VM's persistent disk and never appears in a process listing.</p>
   VM will fail; <code>sand</code> warns when it reuses a recorded URL with no token.</p>
 <p>What a recreate does <strong>not</strong> do is preserve anything inside the guest: the
   disk is deleted. To keep the Claude Code login or the project checkout across
-  a rebuild, use the TUI's Reset and its preserve toggles (<a href="../tui/#resetting-a-vm">The
+  a rebuild, use <a href="#sand-reset-name"><code>sand reset</code></a>'s <code>--preserve-claude</code> /
+  <code>--preserve-project</code>, or the TUI's equivalent toggles (<a href="../tui/#resetting-a-vm">The
   TUI</a>).</p>
 <h3 id="disk-sizing">Disk sizing</h3>
 <p>The base image is always built at a fixed <strong>20GiB floor</strong>
@@ -2145,7 +2273,7 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a>  -rebuild
 <a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a>        Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
 <a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>  -recreate
-<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>        If the named instance exists and is sand-managed, delete and re-clone it
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>        Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild
 <a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>  -timezone string
 <a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>        IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)
 <a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>  -user string
@@ -2164,36 +2292,313 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <p>(<code>--user</code> has no printed default because it is resolved to the host username
 <em>after</em> flags are parsed, not at registration time — see the flags table
 above.)</p>
+<h2 id="sand-reset-name"><code>sand reset NAME</code></h2>
+<p>Delete a sand-managed VM and clone it fresh from its base image, keeping its
+name, its project, and every setting it was built with. This is the headless
+spelling of the TUI's <code>R</code> (<a href="../tui/#resetting-a-vm">Resetting a VM</a>) — same
+gate, same defaults, same preserve options.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w">                                    </span><span class="c1"># clean rebuild, same settings</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-claude<span class="w">                  </span><span class="c1"># keep the Claude Code login</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-claude<span class="w"> </span>--preserve-project
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve<span class="w"> </span>~/src/app<span class="w"> </span>--preserve<span class="w"> </span>~/scratch/spike
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-home<span class="w">                    </span><span class="c1"># keep everything in ~</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB<span class="w">            </span><span class="c1"># rebuild bigger</span>
+</code></pre></div>
+<p>It is <strong>gated</strong>: <code>sand</code> refuses a target that is not a sand-managed VM, since a
+reset clones from a sandbar base image and would otherwise replace whatever
+instance it was pointed at. Ownership is resolved from the VM's provenance
+marker first, then the managed index — the same resolution <code>sand shell</code> uses,
+so a VM created by another controller on the same host is still resettable.</p>
+<p>Everything inside the guest is destroyed unless you ask for it back:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What survives</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--preserve-claude</code></td>
+<td><code>~/.claude</code> and <code>~/.claude.json</code> — the Claude Code login and its history.</td>
+</tr>
+<tr>
+<td><code>--preserve-project</code></td>
+<td>The cloned project's per-org directory: the checkout, its uncommitted work, and the <code>.env</code> beside it. Also <strong>skips the re-clone</strong>, so a private repo needs no token.</td>
+</tr>
+<tr>
+<td><code>--preserve PATH</code></td>
+<td>One more directory inside the guest home — <strong>any</strong> git checkout or linked worktree, whether <code>sand</code> cloned it or you made it yourself. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--preserve-home</code></td>
+<td>The <strong>entire</strong> home directory. Implies every flag above.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--preserve</code> takes an absolute guest path (<code>/home/you/src/app</code>), a tilde path
+(<code>~/src/app</code>) or a home-relative one (<code>src/app</code>). Run
+<a href="#sand-land-name"><code>sand land NAME</code></a> to see the checkouts a VM actually holds —
+that is the same sweep the TUI's reset form builds its list from. A path
+<strong>outside</strong> the guest home is refused before the VM is touched, so a mistake
+costs you a retyped command, not a rebuilt VM.</p>
+<p><code>--preserve-home</code> is the option for the ordinary reason to rebuild a VM that is
+working perfectly well: picking up playbook changes. The whole home is copied
+out, the VM is rebuilt from a current base image, the home is copied back, and
+<em>then</em> the playbook runs on top of it — so the files Ansible owns are freshly
+rendered while everything else is exactly as you left it. It is also the
+slowest and largest thing a reset can do, and <code>~/.ssh/authorized_keys</code> is the
+one file it deliberately leaves behind (the rebuilt VM needs the key Lima just
+installed, not the old VM's).</p>
+<p>All of these copy that data out of the VM to a private (<code>0700</code>) host directory
+and restore it into the rebuilt VM, then delete the copy. <strong>Do not preserve
+anything from a VM you believe is compromised</strong> — you would be copying its
+Claude Code login and its project token onto your workstation. See
+<a href="../../reference/security-model/">Security Model</a>.</p>
+<p>Anything you do not name is gone with the disk: other forges, <code>~/.ssh</code>,
+<code>~/.config/gh</code>, shell history, and everything under <code>/srv</code> (which is outside
+the home directory and so cannot be preserved at all).</p>
+<h3 id="flags_1">Flags</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--preserve-claude</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Keep the Claude Code login and history.</td>
+</tr>
+<tr>
+<td><code>--preserve-project</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Keep the project's per-org directory.</td>
+</tr>
+<tr>
+<td><code>--preserve</code></td>
+<td>string (repeatable)</td>
+<td><em>(none)</em></td>
+<td>Keep one more directory inside the guest home. Pass it once per directory.</td>
+</tr>
+<tr>
+<td><code>--preserve-home</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Keep the entire guest home directory; implies the three flags above.</td>
+</tr>
+<tr>
+<td><code>--cpus</code></td>
+<td>string (parsed as int)</td>
+<td><em>this VM's</em></td>
+<td>vCPUs.</td>
+</tr>
+<tr>
+<td><code>--memory</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>RAM, e.g. <code>16GiB</code>.</td>
+</tr>
+<tr>
+<td><code>--disk</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>Disk size. A clone's disk can grow but never shrink, so a smaller value is not something you can actually get (see <a href="#disk-sizing">disk sizing</a>).</td>
+</tr>
+<tr>
+<td><code>--hostname</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>VM hostname.</td>
+</tr>
+<tr>
+<td><code>--user</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>Primary VM user.</td>
+</tr>
+<tr>
+<td><code>--git-name</code> / <code>--git-email</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>git identity written into the guest.</td>
+</tr>
+<tr>
+<td><code>--locale</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>System locale.</td>
+</tr>
+<tr>
+<td><code>--timezone</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>IANA timezone. Naming one explicitly makes an unknown zone fatal in the guest, exactly as it does on <code>sand create</code>.</td>
+</tr>
+<tr>
+<td><code>--domain</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>Domain suffix.</td>
+</tr>
+<tr>
+<td><code>--docker-proxy-host</code></td>
+<td>string</td>
+<td><em>this VM's</em></td>
+<td>Docker registry pull-through proxy host.</td>
+</tr>
+<tr>
+<td><code>--clone-token</code></td>
+<td>string</td>
+<td><em>(empty)</em></td>
+<td>Token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless <code>--preserve-project</code> is keeping the checkout, in which case nothing is cloned.</td>
+</tr>
+<tr>
+<td><code>--profile</code></td>
+<td>string</td>
+<td><em>the profile that owns NAME</em></td>
+<td>Which <a href="../connection-profiles/">Connection Profile</a> <code>NAME</code> lives on. Only needed when the same name exists under more than one enabled profile.</td>
+</tr>
+</tbody>
+</table>
+<p><code>NAME</code> is required (exactly one positional argument), and flags may appear
+before or after it.</p>
+<p><strong>A flag you omit means "whatever this VM already was"</strong>, taken from its own
+recorded settings rather than from any default — which is what makes <code>sand
+reset web</code> mean "give me this VM back". A flag you pass wins, and the result is
+recorded, so the <em>next</em> reset defaults to what this one produced.</p>
+<h3 id="there-is-no-clone-url">There is no <code>--clone-url</code></h3>
+<p>A reset rebuilds the VM it is pointed at, project included. Pointing it at a
+different repo would make it a different VM: the preserve option is named for
+the org directory the VM <em>has</em>, so a changed URL means asking to keep a tree
+and having the old one discarded, and even without preserving you would get the
+new repo cloned beside a stranded old checkout. To work on another repo, make
+another VM with <code>sand create</code>. <code>sand create --recreate --clone-url ...</code> is
+refused for the same reason, and the TUI's reset form locks the same field.</p>
+<p>There is no <code>--base-name</code> either (the base comes from the VM's own provenance
+record — resetting onto a different base is a create), and no <code>--rebuild</code>: that
+one acts on the <strong>shared</strong> base image every other VM clones from, so it stays on
+<code>sand create</code> where it cannot be a side effect of rebuilding one VM.</p>
+<h3 id="secrets-are-re-applied">Secrets are re-applied</h3>
+<p>A reset ends by writing the VM's host-stored <a href="../secrets/">secrets</a> into the
+rebuilt guest, so the VM comes back with the environment it had. <code>sand create</code>
+does the same after a build, and additionally records <code>--clone-token</code> as the
+VM's <code>GH_TOKEN</code> secret so it can be rotated later without a rebuild — the same
+thing the TUI has always done with the create form's token.</p>
+<h3 id="verified-help-output_1">Verified <code>--help</code> output</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$ sand reset --help
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Usage: sand reset NAME [flags]
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>Delete a sand-managed VM and clone it fresh from its base image, keeping its
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>name, its project, and every setting it was built with. This is the headless
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>spelling of the TUI's R (Reset).
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>Everything inside the guest is lost unless you ask for it back:
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>  --preserve-claude    keep ~/.claude and ~/.claude.json (the Claude Code login
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>                       and its history)
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>  --preserve-project   keep the cloned project's per-org directory (the checkout,
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>                       its uncommitted work, and the .env alongside it)
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>  --preserve PATH      keep one more directory inside the guest home — any git
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>                       checkout or worktree, whether sand cloned it or you did.
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>                       Repeatable. Run 'sand land NAME' to list what this VM
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>                       holds. Paths may be absolute (/home/you/src/app), tilde
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>                       (~/src/app) or home-relative (src/app).
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>  --preserve-home      keep the WHOLE home directory, then re-run the playbook
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>                       on top of it. This is the one to use when the VM is fine
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>                       and you only want an up-to-date build; it implies every
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>                       flag above.
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>All of these copy data out of the VM to this host and back in afterwards. Do NOT
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>preserve anything from a VM you believe is compromised.
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>Every other flag you omit is taken from the VM's own recorded settings, so
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>'sand reset web' means "give me this VM back". Pass one to change it:
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>'sand reset web --disk 200GiB' resizes on the way through.
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>There is no --clone-url: a reset rebuilds the project this VM already has. To
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>work on a different repo, create another VM with 'sand create'.
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>Examples:
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>  sand reset web                                  # clean rebuild, same settings
+<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>  sand reset web --preserve-claude                # keep the Claude login
+<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>  sand reset web --preserve-claude --preserve-project
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>  sand reset web --preserve ~/src/app --preserve ~/scratch/spike
+<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>  sand reset web --preserve-home                  # keep everything, rebuild the OS
+<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a>  sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
+<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a>
+<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a>Flags:
+<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a>  -clone-token string
+<a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a>        Token for this VM's recorded repo (tokens are never stored in the index; pass it again for a private repo)
+<a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a>  -cpus string
+<a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a>        vCPUs (default: whatever this VM has)
+<a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a>  -disk string
+<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>        Disk size, e.g. 100GiB (default: whatever this VM has; a clone's disk can grow but never shrink)
+<a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a>  -docker-proxy-host string
+<a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a>        Docker registry pull-through proxy host (default: whatever this VM has)
+<a id="__codelineno-4-51" name="__codelineno-4-51" href="#__codelineno-4-51"></a>  -domain string
+<a id="__codelineno-4-52" name="__codelineno-4-52" href="#__codelineno-4-52"></a>        Domain suffix (default: whatever this VM has)
+<a id="__codelineno-4-53" name="__codelineno-4-53" href="#__codelineno-4-53"></a>  -git-email string
+<a id="__codelineno-4-54" name="__codelineno-4-54" href="#__codelineno-4-54"></a>        git user.email written into the VM (default: whatever this VM has)
+<a id="__codelineno-4-55" name="__codelineno-4-55" href="#__codelineno-4-55"></a>  -git-name string
+<a id="__codelineno-4-56" name="__codelineno-4-56" href="#__codelineno-4-56"></a>        git user.name written into the VM (default: whatever this VM has)
+<a id="__codelineno-4-57" name="__codelineno-4-57" href="#__codelineno-4-57"></a>  -hostname string
+<a id="__codelineno-4-58" name="__codelineno-4-58" href="#__codelineno-4-58"></a>        VM hostname (default: whatever this VM has)
+<a id="__codelineno-4-59" name="__codelineno-4-59" href="#__codelineno-4-59"></a>  -locale string
+<a id="__codelineno-4-60" name="__codelineno-4-60" href="#__codelineno-4-60"></a>        System locale (default: whatever this VM has)
+<a id="__codelineno-4-61" name="__codelineno-4-61" href="#__codelineno-4-61"></a>  -memory string
+<a id="__codelineno-4-62" name="__codelineno-4-62" href="#__codelineno-4-62"></a>        RAM, e.g. 8GiB (default: whatever this VM has)
+<a id="__codelineno-4-63" name="__codelineno-4-63" href="#__codelineno-4-63"></a>  -preserve PATH
+<a id="__codelineno-4-64" name="__codelineno-4-64" href="#__codelineno-4-64"></a>        Keep one more directory PATH inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts
+<a id="__codelineno-4-65" name="__codelineno-4-65" href="#__codelineno-4-65"></a>  -preserve-claude
+<a id="__codelineno-4-66" name="__codelineno-4-66" href="#__codelineno-4-66"></a>        Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild
+<a id="__codelineno-4-67" name="__codelineno-4-67" href="#__codelineno-4-67"></a>  -preserve-home
+<a id="__codelineno-4-68" name="__codelineno-4-68" href="#__codelineno-4-68"></a>        Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)
+<a id="__codelineno-4-69" name="__codelineno-4-69" href="#__codelineno-4-69"></a>  -preserve-project
+<a id="__codelineno-4-70" name="__codelineno-4-70" href="#__codelineno-4-70"></a>        Keep the cloned project's per-org directory (checkout + .env) across the rebuild
+<a id="__codelineno-4-71" name="__codelineno-4-71" href="#__codelineno-4-71"></a>  -profile string
+<a id="__codelineno-4-72" name="__codelineno-4-72" href="#__codelineno-4-72"></a>        Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)
+<a id="__codelineno-4-73" name="__codelineno-4-73" href="#__codelineno-4-73"></a>  -timezone string
+<a id="__codelineno-4-74" name="__codelineno-4-74" href="#__codelineno-4-74"></a>        IANA timezone for the guest (default: whatever this VM has)
+<a id="__codelineno-4-75" name="__codelineno-4-75" href="#__codelineno-4-75"></a>  -user string
+<a id="__codelineno-4-76" name="__codelineno-4-76" href="#__codelineno-4-76"></a>        Primary VM user (default: whatever this VM has)
+</code></pre></div>
 <h2 id="sand-shell-name"><code>sand shell NAME</code></h2>
 <p>Attach a shell to <code>NAME</code>'s persistent tmux session in the guest. This is the
 same attach path the TUI's <code>S</code> key uses, so the two entrypoints never drift.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Usage: sand shell NAME [--profile &lt;name&gt;] [--cc]
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Attach a shell to NAME's persistent tmux session in the guest.
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  C-a c   new window          C-a d   detach
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  C-a |   split vertically    C-a S   split horizontally
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>Detaching — or just closing the terminal — leaves the session and everything
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>running in it alive; attach again with this same command and it is all still
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>there. Note C-a is tmux's prefix here, so it no longer moves the cursor to the
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>start of the line.
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>A second terminal running this command shares the same windows but keeps its
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>own current one, so two terminals can look at two different windows of the
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>same VM.
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>--cc attaches in tmux control mode instead. In a terminal that speaks the
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>protocol, each guest window becomes a native tab, so C-a c opens a real tab
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>rather than a window drawn inside this one. iTerm2 is the reference
-<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>implementation; WezTerm implements a subset; the list is not exhaustive and
-<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>sand does not detect your terminal, it just starts a tmux -CC client.
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>Run it from a plain terminal window: a host tmux pane strips the control-mode
-<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>handshake, so --cc refuses when $TMUX is set.
-<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>The named VM must already exist and be running (see 'sand' to list instances,
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>or 'sand create' to make one). If NAME is managed under more than one
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>connection profile, --profile picks which one to attach to.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Usage: sand shell NAME [--profile &lt;name&gt;] [--cc]
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Attach a shell to NAME's persistent tmux session in the guest.
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  C-a c   new window          C-a d   detach
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  C-a |   split vertically    C-a S   split horizontally
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>Detaching — or just closing the terminal — leaves the session and everything
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>running in it alive; attach again with this same command and it is all still
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>there. Note C-a is tmux's prefix here, so it no longer moves the cursor to the
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>start of the line.
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>A second terminal running this command shares the same windows but keeps its
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>own current one, so two terminals can look at two different windows of the
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>same VM.
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>--cc attaches in tmux control mode instead. In a terminal that speaks the
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>protocol, each guest window becomes a native tab, so C-a c opens a real tab
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>rather than a window drawn inside this one. iTerm2 is the reference
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>implementation; WezTerm implements a subset; the list is not exhaustive and
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>sand does not detect your terminal, it just starts a tmux -CC client.
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>Run it from a plain terminal window: a host tmux pane strips the control-mode
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>handshake, so --cc refuses when $TMUX is set.
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>The named VM must already exist and be running (see 'sand' to list instances,
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>or 'sand create' to make one). If NAME is managed under more than one
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>connection profile, --profile picks which one to attach to.
 </code></pre></div>
 <p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> and <code>--cc</code>
 may each appear before or after <code>NAME</code>. <code>sand shell</code> refuses a VM that does
@@ -2225,17 +2630,17 @@ which one you mean like this:</p>
 <h2 id="sand-paste-image-name"><code>sand paste-image NAME</code></h2>
 <p>Stage the host clipboard's image on a running VM's guest clipboard, ready for
 Ctrl-V inside Claude Code in the guest.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Usage: sand paste-image NAME [--profile &lt;name&gt;]
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Read the host clipboard image and stage it on NAME's guest clipboard at
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>&lt;guest-home&gt;/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>The named VM must already exist and be running (see 'sand' to list instances,
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>or 'sand create' to make one). If NAME is managed under more than one
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>connection profile, --profile picks which one to target.
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>If the host clipboard holds no image, nothing is staged and the command
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>exits non-zero.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Usage: sand paste-image NAME [--profile &lt;name&gt;]
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Read the host clipboard image and stage it on NAME's guest clipboard at
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>&lt;guest-home&gt;/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>The named VM must already exist and be running (see 'sand' to list instances,
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>or 'sand create' to make one). If NAME is managed under more than one
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>connection profile, --profile picks which one to target.
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>If the host clipboard holds no image, nothing is staged and the command
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>exits non-zero.
 </code></pre></div>
 <p><code>NAME</code> is required (exactly one positional argument); <code>--profile</code> may appear
 before or after <code>NAME</code>. The command requires a running VM. If the host
@@ -2259,23 +2664,23 @@ you mean using the same logic described above under <code>sand shell</code>'s
 <p>List <code>NAME</code>'s git checkouts and their branch/push/PR state, or act on one.
 This is the same detection and the same <code>gh</code> actions the TUI's <code>l</code> (Land)
 key uses — see <a href="../files-and-shells/#landing">Landing</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Usage: sand land NAME [PATH] [--pr | --web] [--profile &lt;name&gt;]
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>List NAME's git checkouts and their branch/push/PR state, or act on one:
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  sand land NAME                list checkouts + branch/push/PR state
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>--pr uses the workstation's own 'gh' (never the guest's token). Without gh
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>an existing PR for the branch on its own.
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>The named VM must already exist and be running (see 'sand' to list
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>one connection profile, --profile picks which one to act on.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Usage: sand land NAME [PATH] [--pr | --web] [--profile &lt;name&gt;]
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>List NAME's git checkouts and their branch/push/PR state, or act on one:
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  sand land NAME                list checkouts + branch/push/PR state
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>--pr uses the workstation's own 'gh' (never the guest's token). Without gh
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>an existing PR for the branch on its own.
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>one connection profile, --profile picks which one to act on.
 </code></pre></div>
 <p>With no <code>PATH</code> or flags, <code>sand land NAME</code> prints a table (<code>PATH KIND BRANCH
 PUSH PR</code>) of every checkout the sweep found, including an ahead count for an
@@ -2307,23 +2712,23 @@ publication logic (<code>internal/drupalorg</code>) the TUI's Landing pane offer
 its <code>publish to drupal.org</code> row; see
 <a href="../drupalorg-publishing/">Publishing to drupal.org</a> for what it does, what
 the confirmation shows, and what to know before you rely on it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile &lt;name&gt;]
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>Publish PATH's local commits (inside the VM named NAME) to the drupal.org
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>issue fork for issue ISSUE, using the workstation's own drupal.org token —
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>never a credential inside the VM. Prints the destination and every commit
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>and file that will change, then asks for confirmation before writing
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>anything; declining publishes nothing.
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>ISSUE may be omitted when PATH was cloned from its issue fork: such a
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>checkout's origin remote is "issue/&lt;module&gt;-&lt;ISSUE&gt;", which already names
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>the issue, so it is read from there. Give ISSUE explicitly to override that,
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>or when the checkout's remote is the canonical "project/&lt;module&gt;" repository
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>and so names no issue at all.
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>The named VM must already exist and be running (see 'sand' to list
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>one connection profile, --profile picks which one to act on.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile &lt;name&gt;]
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Publish PATH's local commits (inside the VM named NAME) to the drupal.org
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>issue fork for issue ISSUE, using the workstation's own drupal.org token —
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>never a credential inside the VM. Prints the destination and every commit
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>and file that will change, then asks for confirmation before writing
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>anything; declining publishes nothing.
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>ISSUE may be omitted when PATH was cloned from its issue fork: such a
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>checkout's origin remote is "issue/&lt;module&gt;-&lt;ISSUE&gt;", which already names
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>the issue, so it is read from there. Give ISSUE explicitly to override that,
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>or when the checkout's remote is the canonical "project/&lt;module&gt;" repository
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>and so names no issue at all.
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>one connection profile, --profile picks which one to act on.
 </code></pre></div>
 <p><code>ISSUE</code> is optional. If you cloned the issue fork — the normal way to work
 an issue — the checkout's own <code>origin</code> already spells the issue out
@@ -2331,8 +2736,8 @@ an issue — the checkout's own <code>origin</code> already spells the issue out
 <code>https://git.drupalcode.org/issue/&lt;module&gt;-&lt;ISSUE&gt;.git</code>), and <code>sand publish</code>
 reads it from there, printing the number it derived before the confirmation
 so you can see what it settled on:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>$ sand publish web /home/u/dubbot
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sand publish: issue 3619578, read from this checkout's remote
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>$ sand publish web /home/u/dubbot
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sand publish: issue 3619578, read from this checkout's remote
 </code></pre></div>
 <p>Pass <code>ISSUE</code> yourself to override that, or when the checkout was cloned from
 the canonical <code>project/&lt;module&gt;</code> repository — that remote names no issue, so
@@ -2392,8 +2797,8 @@ it works even without <code>limactl</code> installed.</p>
 (<code>-ldflags "-X main.version=..."</code>). A binary built from source instead prints
 the git revision Go's toolchain embeds automatically, with a <code>-dirty</code> suffix
 if the working tree had uncommitted changes at build time — for example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>$ sand --version
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>07bae1a-dirty
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>$ sand --version
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>07bae1a-dirty
 </code></pre></div>
 
 
