@@ -364,6 +364,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
+	m.resetCloneURL = cfg.CloneURL
 	m.resetWithClaude = cfg.WithClaude
 	m.resetWithCodex = cfg.WithCodex
 	m.resetWithDDEV = cfg.WithDDEV
@@ -641,20 +642,53 @@ func (m *model) resetFocusPrev() tea.Cmd {
 	return m.formFocusPrev(fHostname, fCloneToken)
 }
 
+// fieldLocked reports whether field i is displayed but not editable in the
+// current mode. Reset mode locks two:
+//
+//   - Name, because a reset rebuilds THIS VM; typing another name would make it
+//     a create wearing a reset's clothes.
+//   - The repo URL, because a reset rebuilds this VM's PROJECT. Editing it made
+//     one form mean two different things: the preserve toggle is labelled with
+//     the org the VM actually has ("Preserve ~/github.com/octocat") while acting
+//     on whatever org the edited URL named, so a reset asked to keep a project
+//     could discard the old tree, and a reset that intended to switch projects
+//     had no way to say what should happen to the old one. The verb is "give me
+//     this VM again"; a different repo is a different VM, and `n` makes one.
+//
+// Create mode locks nothing — every field there is a real choice.
+func (m model) fieldLocked(i int) bool {
+	return m.resetMode && (i == fName || i == fCloneURL)
+}
+
+// nextEditable walks from index `from` in direction step (+1/-1) to the first
+// unlocked input inside [firstInput, lastInput], reporting false when the walk
+// runs off that range. It is what lets a locked field sit in the middle of the
+// ring (the repo URL, between the docker proxy host and the token) without
+// focus ever landing on it.
+func (m model) nextEditable(from, step, firstInput, lastInput int) (int, bool) {
+	for i := from + step; i >= firstInput && i <= lastInput; i += step {
+		if !m.fieldLocked(i) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // formFocusNext/Prev are the shared focus walk behind focusNext/Prev and
 // resetFocusNext/Prev: text inputs from firstInput to lastInput, then the
 // current mode's toggles (m.toggles(), which already excludes any hidden
 // ones), wrapping back to firstInput. Create mode passes fName as firstInput
 // (the Name field is editable there); reset mode passes fHostname (the Name
-// is locked and never focused).
+// is locked and never focused). Locked fields inside the range are stepped
+// over — see fieldLocked.
 func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
 	n := len(m.toggles())
 	switch {
 	case m.toggleFocus == -1:
-		if m.focusIdx < lastInput {
+		if next, ok := m.nextEditable(m.focusIdx, 1, firstInput, lastInput); ok {
 			m.inputs[m.focusIdx].Blur()
-			m.focusIdx++
-			return m.inputs[m.focusIdx].Focus()
+			m.focusIdx = next
+			return m.inputs[next].Focus()
 		}
 		// Past the last input → first toggle; blur all text inputs.
 		m.inputs[m.focusIdx].Blur()
@@ -682,10 +716,10 @@ func (m *model) formFocusPrev(firstInput, lastInput int) tea.Cmd {
 		m.focusIdx = lastInput
 		return m.inputs[lastInput].Focus()
 	default: // focus is in the inputs
-		if m.focusIdx > firstInput {
+		if prev, ok := m.nextEditable(m.focusIdx, -1, firstInput, lastInput); ok {
 			m.inputs[m.focusIdx].Blur()
-			m.focusIdx--
-			return m.inputs[m.focusIdx].Focus()
+			m.focusIdx = prev
+			return m.inputs[prev].Focus()
 		}
 		// At the first editable input → wrap up to the last toggle.
 		m.inputs[m.focusIdx].Blur()
@@ -879,13 +913,26 @@ func (m model) checkNotBusy(name string) error {
 	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)
 }
 
-// submitReset validates a reset-mode form and dispatches provision.Reset. The
-// Name and base image come from the locked targets (not the editable fields), and
-// the disk must be at least the base floor: the base image is built at
-// BaseDiskFloor and a clone's qcow2 disk can grow but not shrink.
-func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
+// resetConfig overrides everything a reset does not let the form decide: the
+// VM's name, its base image, and its repo. All three come from the locked
+// target captured in openResetForm rather than from the inputs — the name and
+// URL fields are rendered but unfocusable (fieldLocked), and reading them back
+// here would leave a second copy of the truth able to drift from the one the
+// preserve toggle was labelled from.
+func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 	cfg.Name = m.resetName
 	cfg.BaseName = m.resetBaseName
+	cfg.CloneURL = m.resetCloneURL
+	return cfg
+}
+
+// submitReset validates a reset-mode form and dispatches provision.Reset. The
+// Name, base image and repo come from the locked targets (not the editable
+// fields — see resetConfig), and the disk must be at least the base floor: the
+// base image is built at BaseDiskFloor and a clone's qcow2 disk can grow but
+// not shrink.
+func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
+	cfg = m.resetConfig(cfg)
 	if err := cfg.Validate(); err != nil {
 		// Validate now enforces the base-disk floor for every entrypoint (a clone
 		// cannot shrink below it), so the reset path no longer needs its own check.
@@ -1048,6 +1095,16 @@ func (m model) profileSelectorRow() string {
 	return ls.Render("Profile:") + " " + value
 }
 
+// lockedFieldValue renders a locked field's value, saying so in words when
+// there is none — an empty line beside a label reads as "sand lost this", where
+// a VM that simply cloned no repo has nothing to show and never will.
+func lockedFieldValue(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "(none)"
+	}
+	return v
+}
+
 // formHelp returns the bindings shown in the create/reset form's help bar.
 // 'q' is a text character in the form, so Quit is intentionally omitted (only
 // ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
@@ -1075,10 +1132,12 @@ func (m model) formView() string {
 	}
 
 	for i := range m.inputs {
-		// In reset mode the Name is fixed to the target VM: render it as a static,
-		// dimmed line rather than an editable input box.
-		if m.resetMode && i == fName {
-			b.WriteString(statusStyle.Render("Name: "+m.resetName+" (locked)") + "\n")
+		// A locked field (reset mode's Name and repo URL — see fieldLocked) is
+		// still SHOWN, as a static dimmed line rather than an editable box: it is
+		// what identifies the VM being rebuilt, and hiding it would leave the
+		// preserve toggle below referring to a repo the form never names.
+		if m.fieldLocked(i) {
+			b.WriteString(statusStyle.Render(fieldLabels[i]+": "+lockedFieldValue(m.inputs[i].Value())+" (locked)") + "\n")
 			continue
 		}
 		ls := labelStyle
