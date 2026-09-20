@@ -155,7 +155,7 @@ func TestCreateVM_StoppedBase(t *testing.T) {
 		{"list", "claude", "--format", "{{.Status}}"},       // exists-guard: target absent
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // Status(base) -> Stopped
 		{"clone", "sandbar-base", "claude"},                 // Clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true)) | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/playbook"`, "claude"}, // Configure clone sizes (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // Start
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize provision
 		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check
@@ -1402,7 +1402,7 @@ func TestReset_NoPreserve(t *testing.T) {
 		{"delete", "claude", "-f"},                          // destroy
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // ensureBaseStopped
 		{"clone", "sandbar-base", "claude"},                 // re-clone
-		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true))`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
+		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true)) | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/playbook"`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // start clone
 		{"shell", "claude", "sudo", "bash", "-c", inGuestScript},      // finalize
 		{"shell", "claude", "test", "-e", "/var/run/reboot-required"}, // needsReboot check
@@ -1506,14 +1506,14 @@ func TestReset_BothPreserve(t *testing.T) {
 	}
 	calls := f.calls
 
-	// Stage-out: getent resolves home, then two `tar -czf -` archives (claude,
+	// Stage-out: getent resolves home, then two `tar -cf -` archives (claude,
 	// then project under github.com/lullabot).
 	getent := findCall(t, calls, 0, "getent", func(c []string) bool { return hasTok(c, "getent") })
-	outClaude := findCall(t, calls, getent+1, "stage-out claude (-czf .claude)", func(c []string) bool {
-		return hasTok(c, "-czf") && hasTok(c, ".claude")
+	outClaude := findCall(t, calls, getent+1, "stage-out claude (tar -cf .claude)", func(c []string) bool {
+		return isTarOut(c) && hasTok(c, ".claude")
 	})
-	outProject := findCall(t, calls, outClaude+1, "stage-out project (-czf github.com/lullabot)", func(c []string) bool {
-		return hasTok(c, "-czf") && hasTok(c, "github.com/lullabot")
+	outProject := findCall(t, calls, outClaude+1, "stage-out project (tar -cf github.com/lullabot)", func(c []string) bool {
+		return isTarOut(c) && hasTok(c, "github.com/lullabot")
 	})
 
 	// Recreate sized: delete -> ensure base -> clone -> configure -> start.
@@ -1527,8 +1527,8 @@ func TestReset_BothPreserve(t *testing.T) {
 	})
 
 	// Claude restore (extract + chown) BEFORE finalize.
-	inClaude := findCall(t, calls, startClone+1, "stage-in claude (-xzf)", func(c []string) bool {
-		return hasTok(c, "-xzf")
+	inClaude := findCall(t, calls, startClone+1, "stage-in claude (tar -xf)", func(c []string) bool {
+		return isTarIn(c)
 	})
 	chownClaude := findCall(t, calls, inClaude+1, "chown claude", func(c []string) bool {
 		return hasTok(c, "chown") && hasTok(c, "/home/andrew/.claude")
@@ -1538,8 +1538,8 @@ func TestReset_BothPreserve(t *testing.T) {
 	})
 
 	// Project restore AFTER finalize: extract + chown + direnv allow.
-	inProject := findCall(t, calls, finalize+1, "stage-in project (-xzf)", func(c []string) bool {
-		return hasTok(c, "-xzf")
+	inProject := findCall(t, calls, finalize+1, "stage-in project (tar -xf)", func(c []string) bool {
+		return isTarIn(c)
 	})
 	chownProject := findCall(t, calls, inProject+1, "chown project", func(c []string) bool {
 		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/lullabot")
@@ -1578,8 +1578,8 @@ func countCalls(calls [][]string, match func([]string) bool) int {
 	return n
 }
 
-func isTarOut(c []string) bool { return hasTok(c, "-czf") }
-func isTarIn(c []string) bool  { return hasTok(c, "-xzf") }
+func isTarOut(c []string) bool { return hasTok(c, "tar") && hasTok(c, "-cf") }
+func isTarIn(c []string) bool  { return hasTok(c, "tar") && hasTok(c, "-xf") }
 
 // finalizeStream returns the streamed stdin of the finalize provision (the one
 // carrying provision_phase: finalize), failing the test if none was captured.
@@ -1630,7 +1630,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 		t.Fatalf("claude-only reset should stage in exactly once, got %d", n)
 	}
 	for _, c := range f.calls {
-		if hasTok(c, "-czf") && hasTok(c, "github.com/lullabot") {
+		if isTarOut(c) && hasTok(c, "github.com/lullabot") {
 			t.Fatalf("claude-only reset must not stage out the project tree: %v", c)
 		}
 		if hasTok(c, "direnv") {
@@ -1638,7 +1638,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 		}
 	}
 
-	// Claude restore (-xzf) must land BEFORE finalize so the playbook re-applies
+	// Claude restore (tar -xf) must land BEFORE finalize so the playbook re-applies
 	// settings.json on top.
 	inClaude := findCall(t, f.calls, 0, "stage-in claude", isTarIn)
 	findCall(t, f.calls, inClaude+1, "finalize after restore", func(c []string) bool {
@@ -1675,12 +1675,12 @@ func TestReset_ProjectOnly(t *testing.T) {
 		t.Fatalf("project-only reset should stage out exactly once, got %d", n)
 	}
 	for _, c := range f.calls {
-		if hasTok(c, "-czf") && hasTok(c, ".claude") {
+		if isTarOut(c) && hasTok(c, ".claude") {
 			t.Fatalf("project-only reset must not stage out ~/.claude: %v", c)
 		}
 	}
 
-	// The project restore (-xzf) must land AFTER finalize, followed by direnv allow.
+	// The project restore (tar -xf) must land AFTER finalize, followed by direnv allow.
 	finalize := findCall(t, f.calls, 0, "finalize", func(c []string) bool {
 		return hasTok(c, "bash") && hasTok(c, "-c")
 	})
@@ -1728,11 +1728,29 @@ func TestReset_PreserveProject_NoOrgURL(t *testing.T) {
 	}
 }
 
+// stageRecoveryDir extracts the staging directory a reset error points at, or
+// "" when the error makes no such promise.
+func stageRecoveryDir(err error) string {
+	const marker = "your data is preserved at "
+	i := strings.Index(err.Error(), marker)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.SplitN(err.Error()[i+len(marker):], ":", 2)[0])
+}
+
 // TestReset_StageOutFailureAbortsWithoutDelete is the load-bearing safety
-// property: if stage-out fails, the reset must NOT delete the source VM (its data
-// is still only inside it), and the error must name the host staging dir so the
-// user can recover whatever was written.
+// property: if stage-out fails, the reset must NOT delete the source VM — its
+// data is still only inside it.
+//
+// And because the VM is still there, the half-written archive is a COPY of data
+// the user can still simply read out of the running guest, so the reset must
+// take it away again rather than leave a tarball of ~/.claude/.credentials.json
+// in /tmp (which is tmpfs on a modern Debian host, so a staged project tree sits
+// in RAM) behind an error promising a recovery nobody needs. Keeping the dir on
+// EVERY failure — including this one — is what this replaces.
 func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
+	before := len(stageDirs(t))
 	f := &fakeRunner{
 		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
 		failOn:  isTarOut, // the stage-out tar fails
@@ -1751,17 +1769,39 @@ func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
 			t.Fatalf("stage-out failure must not delete the source VM; calls=%v", f.calls)
 		}
 	}
-	// The error must point the user at the preserved staging dir, and it must exist.
-	const marker = "your data is preserved at "
-	i := strings.Index(err.Error(), marker)
-	if i < 0 {
-		t.Fatalf("error must name the recovery dir, got %q", err.Error())
+	// The guest is intact, so nothing is promised and nothing is left behind.
+	if dir := stageRecoveryDir(err); dir != "" {
+		t.Errorf("error promises a recovery dir (%s) for data still in the untouched VM: %q", dir, err.Error())
 	}
-	path := strings.TrimSpace(strings.SplitN(err.Error()[i+len(marker):], ":", 2)[0])
-	if st, statErr := os.Stat(path); statErr != nil || !st.IsDir() {
-		t.Fatalf("named recovery dir %q should exist: %v", path, statErr)
+	if after := stageDirs(t); len(after) != before {
+		t.Errorf("staging dir left behind while the VM was never touched: had %d, now %d (%v)", before, len(after), after)
 	}
-	_ = os.RemoveAll(path) // this failure path intentionally leaves the dir; clean up the test artifact
+}
+
+// TestReset_KeepsStagingOnceTheVMIsGone is the other half of that rule: after
+// the delete, the staged archives are the ONLY copy of what the guest held, so a
+// failure past that point must keep them and say where they are.
+func TestReset_KeepsStagingOnceTheVMIsGone(t *testing.T) {
+	f := &fakeRunner{
+		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
+		failOn:  func(c []string) bool { return c[0] == "clone" },
+		failErr: errors.New("no space left on device"),
+	}
+	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+
+	cfg := testConfig()
+	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard)
+	if err == nil {
+		t.Fatal("Reset should fail when the re-clone fails")
+	}
+	dir := stageRecoveryDir(err)
+	if dir == "" {
+		t.Fatalf("a failure after the delete must name the recovery dir, got %q", err.Error())
+	}
+	if st, statErr := os.Stat(dir); statErr != nil || !st.IsDir() {
+		t.Fatalf("named recovery dir %q should exist: %v", dir, statErr)
+	}
+	_ = os.RemoveAll(dir) // this failure path intentionally leaves the dir; clean up the test artifact
 }
 
 // TestReset_StartsStoppedSourceForStaging: when a preserve option is set but the

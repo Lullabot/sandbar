@@ -112,13 +112,28 @@ it is not where prose belongs.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
-  not directly on `Provider`.
+  not directly on `Provider`. Both backends' resets share `staging.go`'s
+  `PlanProject` (what the GUEST actually holds decides what is preserved, not
+  what the config implies) and `StageGuard`, which owns the one rule about the
+  host staging directory: the archives are a COPY until the guest is destroyed,
+  so a failure BEFORE the delete drops them (the original is still in the
+  untouched VM) and every failure after it keeps them and names the path.
 - `registry` — managed-VM index, now `(connection scope, name)`-keyed
   (schema v3, auto-migrated on read). Each entry's connection `Scope` is
   derived from which profile's provider created it (`LocalScope` for local
   Lima, a remote identity like `user@host:port` for remote), so the same VM
   name can exist independently under two different profiles and a remote
-  profile's VMs never mix with the local list.
+  profile's VMs never mix with the local list. Every write goes through
+  `mutate`: take the file's `statelock`, RE-READ, apply, write. A whole-file
+  rewrite from a stale in-memory map is how a long-open TUI used to erase the
+  entry a concurrent `sand create` had just added, so `save` is called from
+  nowhere else — and `Reconcile` prunes only entries the caller already knew
+  about, since a VM another process created after this one's instance listing
+  is not evidence of a VM that went away.
+- `statelock` — the advisory file lock (`<path>.lock`, `syscall.Flock`) behind
+  `registry` and `secrets`' read-modify-write. Never fails hard: an unlockable
+  path or a holder past the wait budget proceeds unserialized, the same posture
+  `provision`'s base lock takes.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
 - `landreview` — orchestrates ONE browser review session against ONE guest
@@ -144,14 +159,37 @@ it is not where prose belongs.
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
 
-Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
-(`internal/manage`), the TUI, and a standalone `sand shell` (`cmd/sand/shell.go`);
-keep them from drifting — the create/TUI paths construct their provider(s) via
-`provider.BuildFleet` over the `profiles` store's enabled profiles (a headless
-command binds only the one profile it targets; the TUI binds every enabled
-one), and both shell entrypoints (the TUI's `S` verb and `sand shell`)
-construct their guest-attach command exclusively via `provider.AttachArgv()`,
-the one place in sand that knows tmux exists (for local Lima) or SSH (for remote).
+Entrypoint: `cmd/sand/main.go`. **Every headless subcommand is a TUI verb under
+the same name, and the pair shares one implementation**: `sand create` is the
+form behind `n`, `sand reset` is `R` (`cmd/sand/reset.go`), `sand shell` is `S`,
+`sand land` is `l`, `sand paste-image` is `v`. A verb that exists in only one of
+the two entrypoints is one users have to discover twice, and the drift is not
+hypothetical — `sand reset` exists because the TUI could preserve a Claude login
+or a project tree across a rebuild and the CLI's `sand create --recreate` could
+not, so the docs' own answer to a CLI user was "open the TUI".
+
+Keep them from drifting by SHARING, not by copying: the create/reset gates and
+bookkeeping are `internal/manage` (`RecreateBase`, `RecordSuccess`,
+`Reconcile`), the host-secrets follow-up after any build is
+`cmd/sand/secrets.go`'s `settleSecrets` mirroring the TUI's `provisionDoneMsg`
+handler, and both shell entrypoints construct their guest-attach command
+exclusively via `provider.AttachArgv()` — the one place in sand that knows tmux
+exists (for local Lima) or SSH (for remote). The create/TUI paths construct
+their provider(s) via `provider.BuildFleet` over the `profiles` store's enabled
+profiles (a headless command binds only the one profile it targets; the TUI
+binds every enabled one), while a command acting on an EXISTING VM (`sand
+reset`/`shell`/`land`/`paste-image`) resolves the owning profile from the VM
+itself via `resolveVMProfile` (marker, then registry, then a live listing)
+rather than from a default.
+
+**A reset never changes which VM it is resetting.** Its name, base image and
+clone URL come from the target's own record, not from the form/flags: the TUI
+renders the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`),
+`sand reset` has no `--clone-url` at all, and `sand create --recreate
+--clone-url` is refused. An editable URL made one form mean two things — the
+preserve toggle is labelled from the org the VM HAS while the clone used the
+edited URL — so "keep my project" could discard the tree it named. A different
+repo is a different VM; `n` / `sand create` makes one.
 
 ## Build, run, format
 
@@ -806,6 +844,100 @@ comment at `roles/claude-code/tasks/main.yml`.
   keepalive options in `sshBase` (`internal/lima/sshhost.go`) belong to the same
   story: without them a reaped connection hangs forever instead of failing, and a
   hang carries no evidence at all.
+
+## What a reset preserves (read before touching `internal/provision/preserve.go`)
+
+A reset destroys a VM and clones it back, so everything it keeps is copied to
+the HOST and copied in again. `preserve.go` is the single place that decides
+what is staged and, more importantly, WHEN each piece is restored; both
+backends' resets (`internal/provision`'s Lima `Reset` and the Proxmox
+provider's `resetInstance`) drive it rather than restating the rules.
+
+- **Restore order is decided by what the finalize playbook does to the thing.**
+  Anything the playbook should get the LAST word over goes back BEFORE finalize
+  (the Claude login, whose `settings.json` the playbook re-renders; a whole
+  home, where getting an up-to-date build is the entire point). Anything the
+  playbook must not touch goes back AFTER (the project tree, the user's
+  hand-picked checkouts), with the finalize pass omitting `project_clone_url`
+  whenever a checkout is genuinely coming back. Getting this backwards does not
+  fail: it silently produces a VM with stale dotfiles, or a cloned-over
+  checkout.
+- **`PreserveHome` subsumes every other option by CONSTRUCTION, not
+  convention.** One archive of `~` already holds the Claude login, the project
+  and every selectable checkout, so `StagePreserve` returns early rather than
+  staging any of them again. It still PROBES for the project checkout, because
+  the playbook must be told to skip its clone — that probe is why `PlanProject`
+  was split into `probeProject` plus an archive.
+- **A preserve path must stay inside the guest home, and that check is a
+  security control.** `PreservePaths` values come from a sweep of the GUEST —
+  the lowest-trust source in the system — and end up in `tar -C <home> <rel>`
+  and, on the way back, `chown -R <user> <home>/<rel>` run as root. A `..` that
+  survived to the restore would hand a recursive chown to `/`.
+  `preservePathRel` is the only gate, it runs BEFORE the VM is deleted (so a
+  refusal costs a retyped path, not a VM), and a path that merely no longer
+  EXISTS is a note rather than a failure — the list comes from a cache.
+- **`tar`'s exit status 1 is tolerated on stage-out; every other status is
+  not.** GNU tar reserves 1 for "file changed as we read it", and the source VM
+  is running while its data is copied out, so an agent writing a log is enough
+  to produce it. Failing on it would mean "preserve my home" only ever worked
+  on an idle VM. Do not widen this to other statuses — 2 is a real failure.
+- **The archives are compressed with zstd where the guest has it, and the format
+  is read back off the archive, never remembered.** Compression runs inside the
+  guest on the critical path of a reset, so the compressor is the reset's speed:
+  on a 1.3 GB tree gzip took 54s where `zstd -T0 -3` took 2.5s and produced a
+  slightly smaller archive (`internal/provision/compress.go`). Two halves of that
+  are load-bearing. It is PROBED, not assumed — the archive is written by the
+  SOURCE VM, which may predate zstd being in the base image, and a reset that
+  refused to run there would refuse while holding the only copy of the user's
+  work, so a guest without zstd falls back to gzip. And the extract flag comes
+  from `tarDecompressFlag` sniffing the archive's magic bytes rather than from
+  anything the stage-out wrote down, because the two halves are separated by the
+  guest being destroyed and rebuilt, and bookkeeping carried across that gap is a
+  chance for the restore to disagree with the file it is restoring. The flag is
+  not optional for zstd the way it is for gzip: GNU tar auto-detects only when it
+  can seek, and a stage-in arrives on stdin. The staged files are named `.tar`,
+  not `.tgz`, for the same reason — the name must not claim a format the file may
+  not have, least of all to someone recovering data by hand from the path
+  `StageGuard.Fail` printed.
+- **The staging directory is deliberately NOT in `/tmp`.** `/tmp` is a tmpfs on
+  current Debian, and a staged archive is the only copy of the user's work
+  between the destroy and the restore; a whole home is routinely gigabytes.
+  `stageBaseDir` puts it under `XDG_STATE_HOME`, honouring an explicit `TMPDIR`
+  ahead of that — which is also how every test in this repo keeps its archives
+  off the developer's host state. A test that drives a reset with a preserve
+  option MUST set `TMPDIR`.
+- **`~/.ssh/authorized_keys` is the one thing a whole-home preserve leaves
+  behind** (`homeExcludes`). The rebuilt VM is reached over ssh with the key
+  Lima just installed; restoring the old VM's file is at best a no-op and at
+  worst a VM nobody can log into, discovered halfway through its own reset.
+- **The reset form's checkout list is read from the host-side registry
+  (`internal/checkouts`), never from a fresh sweep** — see
+  `internal/ui/resetpreserve.go`. The form opens on a key press and the VM may
+  be stopped, so contacting a guest there is not an option; the rows are as
+  stale as the last sweep and each row's help says so. The row carries the
+  ABSOLUTE guest path the sweep recorded, and that is what is acted on; the
+  `~/…` label is shortened against a GUESS at the guest home (`/home/<user>`)
+  and must never be what reaches `ResetOptions`.
+- **Reset-mode toggle indices are not stable, and tests must not assume they
+  are.** The list is whole-home, Claude, the project (only when there is one),
+  then one row per checkout. Whole-home is FIRST because it is the only row
+  that changes the rows below it, and turning it on must not REMOVE them — a row
+  that vanishes takes the focus ring's meaning with it, and a user who turns it
+  back off must find their earlier picks where they left them.
+- **Whole-home LOCKS the rows it subsumes; it does not annotate them, and it
+  does not write to them** (`formToggle.locked`, `internal/ui/form.go`). They
+  render checked — that is what the reset will actually do, whether or not the
+  row was ever ticked — and the focus walk steps over them
+  (`nextOperableToggle`), because a row the ring can land on but no key will
+  change is the "advertise it, then silently do nothing" pattern the command
+  registry exists to keep out of this UI. Two things follow. The underlying
+  model fields are left ALONE rather than forced true, so the user's own picks
+  are still there when whole-home goes back off — the display is what changed,
+  not their answer. And the lock carries `lockedToggleSuffix` (" (locked)", the
+  same word the locked Name/repo fields use) rather than relying on its dimmer
+  colour: colour is never the only carrier of meaning here (styles.go), and a
+  lock that exists only as an ANSI code is invisible in a monochrome terminal
+  and to every golden, which are ANSI-stripped.
 
 ## Conventions
 

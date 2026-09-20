@@ -180,6 +180,34 @@ func (p *Provisioner) playbookDir() (string, error) {
 	return p.PlaybookDir, nil
 }
 
+// stagedPlaybookDir locates the playbook and makes it available ON THE HOST
+// WHERE LIMACTL RUNS, returning the path to mount at /mnt/playbook — for the
+// base overlay (buildBase) and, pinned onto each clone, for the finalize pass
+// (see lima.Client.Configure for why a clone must not keep the base's).
+//
+// The staging step is not optional for either caller: `limactl start`
+// bind-mounts the location on its OWN host, which for remote Lima is the remote
+// machine, so a local path would mount an absent directory. StagePlaybook is a
+// no-op for local Lima and a refresh of the stable remote copy for remote Lima,
+// stamped with the playbook's content hash so a remote that already holds this
+// exact playbook is left untouched. A hash that cannot be computed is passed as
+// "", which simply forces the copy — the behaviour this had before the stamp.
+func (p *Provisioner) stagedPlaybookDir(ctx context.Context) (string, error) {
+	dir, err := p.playbookDir()
+	if err != nil {
+		return "", fmt.Errorf("locate playbook: %w", err)
+	}
+	stamp, err := playbookContentHash(os.DirFS(dir))
+	if err != nil {
+		stamp = ""
+	}
+	mountDir, err := p.hostFiles().StagePlaybook(ctx, dir, stamp)
+	if err != nil {
+		return "", fmt.Errorf("stage playbook: %w", err)
+	}
+	return mountDir, nil
+}
+
 // step writes a phase banner to the streamed output so the user sees which
 // lifecycle stage is running even before limactl/ansible prints anything — the
 // slow base build and boots are otherwise long stretches of silence.
@@ -231,9 +259,9 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// for remote Lima that is the remote machine, not this laptop, so a local
 	// playbook path would mount an empty/absent directory. StagePlaybook is a
 	// no-op for local Lima and a copy to the remote host for remote Lima.
-	mountDir, err := hf.StagePlaybook(ctx, dir)
+	mountDir, err := p.stagedPlaybookDir(ctx)
 	if err != nil {
-		return fmt.Errorf("stage playbook: %w", err)
+		return err
 	}
 	overlay, err := RenderBaseOverlay(cfg, mountDir)
 	if err != nil {
@@ -403,8 +431,14 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	if err := timer.time("clone start", func() error {
 		// Size the clone before its first start: the base is built at a small
 		// disk floor, so this grows the disk (and applies cpus/memory) for this
-		// VM.
-		if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
+		// VM. The playbook dir goes with it so finalize rsyncs from THIS run's
+		// playbook rather than whatever host directory the base was built with —
+		// see lima.Client.Configure.
+		pbDir, err := p.stagedPlaybookDir(ctx)
+		if err != nil {
+			return err
+		}
+		if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
 			return fmt.Errorf("configure clone %q: %w", cfg.Name, err)
 		}
 		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
@@ -907,36 +941,75 @@ func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool 
 	return true
 }
 
-// ResetOptions selects which of a VM's local state survives a reset. When both
-// are false a reset rebuilds the VM cleanly from the base image.
+// ResetOptions selects which of a VM's local state survives a reset. The zero
+// value rebuilds the VM cleanly from the base image, keeping nothing.
 type ResetOptions struct {
 	PreserveClaude  bool // keep ~/.claude and ~/.claude.json (login + history)
 	PreserveProject bool // keep the per-org checkout + restored .env
+
+	// PreserveHome keeps the ENTIRE guest home directory, and is the option for
+	// the common reason to rebuild a VM that is working fine: picking up playbook
+	// changes. It subsumes every other option here — the home archive already
+	// contains the Claude login, the project tree and every checkout — so
+	// StagePreserve short-circuits the rest rather than copying anything twice.
+	//
+	// It is not the safe default and must not become one. Preserving a home means
+	// a full copy of it crosses onto the host and back, which is exactly what a
+	// user resetting a VM they suspect has been fed a prompt injection is trying
+	// to get away from, and it is the slowest and largest thing a reset can do.
+	PreserveHome bool
+
+	// PreservePaths are individual directories inside the guest home to carry
+	// across — the git checkouts and linked worktrees a user picks by hand, which
+	// the host-side checkout registry (internal/checkouts) discovered on the last
+	// sweep. Accepted as absolute guest paths, "~/"-relative paths, or plain
+	// home-relative ones; anything outside the home is refused before the VM is
+	// touched (see preservePathRel).
+	//
+	// This is what makes a reset able to keep work that the VM's own recorded
+	// clone URL knows nothing about: a second repo cloned by hand, or the
+	// worktree an agent created three levels down inside the first one.
+	PreservePaths []string
+}
+
+// Any reports whether the options ask for anything at all to survive the
+// rebuild — the gate on starting the source VM and creating a staging
+// directory.
+func (o ResetOptions) Any() bool {
+	return o.PreserveClaude || o.PreserveProject || o.PreserveHome || len(o.PreservePaths) > 0
 }
 
 // Reset recreates a managed VM from a (possibly edited) config, optionally
-// preserving the Claude login and/or the per-org project tree across the
-// destroy/recreate by staging them on the host and restoring them in the right
-// order relative to the finalize playbook.
+// preserving some or all of the guest's own state across the destroy/recreate by
+// staging it on the host and restoring it in the right order relative to the
+// finalize playbook.
 //
-// Ordering is load-bearing: the Claude restore runs BEFORE finalize so the
-// playbook re-applies ~/.claude/settings.json on top of the restored
-// credentials/history; the project restore runs AFTER finalize and the finalize
-// pass omits project_clone_url (CloneURL cleared) so the project role's clone
-// step does not clobber the restored tree.
+// Ordering is load-bearing, and it is StagePreserve/RestoreBeforeFinalize/
+// RestoreAfterFinalize that own it (see preserve.go): anything the playbook
+// should get the last word over — the Claude login, a whole home — goes back
+// BEFORE finalize, and anything it must not touch — the project tree, the user's
+// hand-picked checkouts — goes back AFTER, with the finalize pass omitting
+// project_clone_url (CloneURL cleared) so the project role's clone step does not
+// clobber a restored checkout.
 //
-// Once stage-out has begun, no later error removes the staging dir — the error
-// is wrapped with its path so the user can recover their data manually.
+// Once the VM has been deleted, no later error removes the staging dir — the
+// error is wrapped with its path so the user can recover their data manually. A
+// failure BEFORE that point drops the staged copy, because the original is
+// still sitting in the untouched guest; StageGuard owns that whole rule (see
+// staging.go), and both this reset and the Proxmox provider's share it.
 func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts ResetOptions, out io.Writer) error {
-	// stageDir is only set once staging actually runs; an empty value means there
-	// is nothing on the host to preserve or clean up.
-	var stageDir string
+	// stage is only created once staging actually runs; a nil guard means there
+	// is nothing on the host to preserve or clean up, and every method on it is
+	// nil-safe for exactly that case.
+	var stage *StageGuard
 	var home string
-	var orgRel string
-	var ok bool
+	var plan PreservePlan
 
-	// 1. Stage out the selected state while the source VM is still alive.
-	if opts.PreserveClaude || opts.PreserveProject {
+	// 1. Stage out the selected state while the source VM is still alive. WHAT is
+	// staged, and in what order it comes back, is StagePreserve's and the two
+	// Restore* helpers' — shared with the Proxmox provider's reset so the two
+	// backends cannot drift on the ordering rules.
+	if opts.Any() {
 		// Ensure the source VM is running so tar can read from it.
 		if status, _ := p.Lima.Status(cfg.Name); status != "Running" {
 			step(out, "Starting %q to stage its data…", cfg.Name)
@@ -948,40 +1021,21 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
 			return fmt.Errorf("resolve home for %q: %w", cfg.Name, err)
 		}
-		if stageDir, err = newStageDir(); err != nil {
+		if stage, err = NewStageGuard(); err != nil {
 			return err
 		}
-		// From here on, errors must keep stageDir and surface its path.
-		if opts.PreserveClaude {
-			if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-				return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-			}
-		}
-		if opts.PreserveProject {
-			if orgRel, ok = OrgRelDir(cfg.CloneURL); ok {
-				if err := StageOut(ctx, p.Lima, cfg.Name, home, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
-					return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-				}
-			}
+		if plan, err = StagePreserve(ctx, p.Lima, cfg.Name, home, cfg.CloneURL, opts, stage, out); err != nil {
+			return stage.Fail(err)
 		}
 	}
 
-	// staged reports whether host data exists; staged errors are wrapped with the
-	// recovery path so the user can retrieve it.
-	staged := stageDir != ""
-	wrap := func(err error) error {
-		if err == nil {
-			return nil
-		}
-		if staged {
-			return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", stageDir, err)
-		}
-		return err
-	}
-
-	// 2. Delete the existing VM.
+	// 2. Delete the existing VM. From here on the staged archives are the only
+	// copy of what was in the guest, so every later failure keeps them — flipped
+	// BEFORE the call, since a delete that reports an error may still have taken
+	// the instance with it.
+	stage.DestroyingGuest()
 	if err := p.Lima.Delete(cfg.Name, true); err != nil {
-		return wrap(fmt.Errorf("delete %q: %w", cfg.Name, err))
+		return stage.Fail(fmt.Errorf("delete %q: %w", cfg.Name, err))
 	}
 
 	// 3. Recreate sized from the base image. A reset re-clones ONE VM; it never
@@ -991,42 +1045,42 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// still needs a timer to share its signature with createVM, so give it one whose
 	// readings are simply discarded here.
 	if err := p.prepareBaseAndClone(ctx, cfg, CreateOptions{}, out, newPhaseTimer(out)); err != nil {
-		return wrap(err)
+		return stage.Fail(err)
 	}
-	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk); err != nil {
-		return wrap(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
+	pbDir, err := p.stagedPlaybookDir(ctx)
+	if err != nil {
+		return stage.Fail(err)
+	}
+	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
+		return stage.Fail(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
 	}
 	step(out, "Starting %q…", cfg.Name)
 	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-		return wrap(fmt.Errorf("start %q: %w", cfg.Name, err))
+		return stage.Fail(fmt.Errorf("start %q: %w", cfg.Name, err))
 	}
 
-	// 4. Restore Claude BEFORE finalize so the playbook layers settings on top.
-	if opts.PreserveClaude {
-		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{".claude", ".claude.json"}, filepath.Join(stageDir, "claude.tgz")); err != nil {
-			return wrap(fmt.Errorf("restore Claude into %q: %w", cfg.Name, err))
-		}
+	// 4. Restore what the playbook must land on top of, BEFORE finalize.
+	if err := RestoreBeforeFinalize(ctx, p.Lima, cfg.Name, home, cfg.User, plan, stage); err != nil {
+		return stage.Fail(err)
 	}
 
-	// 5. Finalize, skipping the project clone only when a tree was actually
-	// staged for restore (ok). If PreserveProject was requested but the URL had
-	// no org component (nothing staged), fall back to the role's normal clone.
+	// 5. Finalize, skipping the project clone only when the restore in step 6 will
+	// put the checkout back. Anything else — no org component in the URL, no
+	// directory to stage, or an org directory that no longer holds the checkout —
+	// falls back to the role's normal clone, because a reset that neither restores
+	// a project nor clones one leaves the user with neither.
 	finCfg := cfg
-	if opts.PreserveProject && ok {
+	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
 	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out); err != nil {
-		return wrap(err)
+		return stage.Fail(err)
 	}
 
-	// 6. Restore the project tree AFTER finalize, then re-approve its .env.
-	if opts.PreserveProject && ok {
-		if err := StageIn(ctx, p.Lima, cfg.Name, home, cfg.User, []string{orgRel}, filepath.Join(stageDir, "project.tgz")); err != nil {
-			return wrap(fmt.Errorf("restore project into %q: %w", cfg.Name, err))
-		}
-		if err := p.Lima.Shell(ctx, cfg.Name, nil, out, "sudo", "-iu", cfg.User, "direnv", "allow", home+"/"+orgRel); err != nil {
-			return wrap(fmt.Errorf("direnv allow in %q: %w", cfg.Name, err))
-		}
+	// 6. Restore the working trees the playbook must not clobber, AFTER finalize,
+	// then re-approve the restored .env.
+	if err := RestoreAfterFinalize(ctx, p.Lima, cfg.Name, home, cfg.User, plan, stage, out); err != nil {
+		return stage.Fail(err)
 	}
 
 	// 7. Bounce only when the guest actually asked for one (mirror createVM's
@@ -1067,17 +1121,15 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		}
 		step(out, "Restarting %q to apply a pending reboot…", cfg.Name)
 		if err := p.Lima.StopStreaming(ctx, cfg.Name, out); err != nil {
-			return wrap(fmt.Errorf("stop %q: %w", cfg.Name, err))
+			return stage.Fail(fmt.Errorf("stop %q: %w", cfg.Name, err))
 		}
 		if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-			return wrap(fmt.Errorf("restart %q: %w", cfg.Name, err))
+			return stage.Fail(fmt.Errorf("restart %q: %w", cfg.Name, err))
 		}
 	}
 
 	// 8. Full success: drop the host staging dir.
-	if staged {
-		removeStageDir(stageDir)
-	}
+	stage.Done()
 	return nil
 }
 
