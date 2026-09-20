@@ -49,9 +49,17 @@ work is the point.
 What happens next:
 
 1. `sand` starts the review server inside the VM, in that checkout. The diff
-   it reviews defaults to the checkout's branch against its merge base with
-   the repository's default branch — what the change would land as,
-   uncommitted and untracked files included.
+   it reviews starts at the point your own work begins: the parent of the
+   oldest commit that exists on no remote, which is what the change would
+   land as, uncommitted and untracked files included. When every commit is
+   already published, it falls back to the nearest merge base with a trunk
+   branch (`main`, `master`, or the remote's own default).
+
+    sand prints the base it chose, its age and its size before the server
+    starts — `everything since 6ac1f20b1e77 (2026-09-18, 5 commits, 12
+    files)` — so an unexpected range is visible immediately rather than after
+    a browser tab opens onto it. A range so large the review tool cannot load
+    it is refused outright, with that same line naming the commit to check.
 2. The server picks a free port inside the VM and prints the URL it's on.
    `sand` reads that port back, makes it reachable from your workstation
    (see [Reachability](#reachability)), waits for it to answer, and opens it

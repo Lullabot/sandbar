@@ -62,8 +62,9 @@ type reviewHarness struct {
 	// probeReady gates the readiness prober: nil means "ready immediately".
 	probeReady func() bool
 
-	// mergeBase is what the guest's merge-base probe reports (empty = none).
-	mergeBase string
+	// diffBase is the object name the guest's base probe reports (empty =
+	// the guest found none, and the server is left to its own default).
+	diffBase string
 
 	release chan struct{} // closed to let the default serverBody return nil
 }
@@ -71,7 +72,7 @@ type reviewHarness struct {
 func newReviewHarness() *reviewHarness {
 	return &reviewHarness{
 		release:   make(chan struct{}),
-		mergeBase: strings.Repeat("a1b2c3d4", 5),
+		diffBase:  strings.Repeat("a1b2c3d4", 5),
 		guestPort: 41234,
 	}
 }
@@ -130,7 +131,7 @@ func (h *reviewHarness) provider(forwardArgv []string) *providerfake.Provider {
 		ShellOutFunc: func(ctx context.Context, name string, argv ...string) ([]byte, error) {
 			h.mu.Lock()
 			h.shellOuts = append(h.shellOuts, append([]string(nil), argv...))
-			base := h.mergeBase
+			base := h.diffBase
 			h.mu.Unlock()
 			// The guest-side stop runs during teardown, when the caller's
 			// context is typically ALREADY cancelled (that is what ctrl-C
@@ -139,7 +140,13 @@ func (h *reviewHarness) provider(forwardArgv []string) *providerfake.Provider {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			return []byte(base + "\n"), nil
+			// The base probe answers in the guest's key=value report
+			// format, not a bare object name: parseDiffBase reads the counts
+			// beside the commit, and the size guard refuses on them.
+			if base == "" {
+				return nil, nil
+			}
+			return []byte("sandbase=" + base + "\nsanddate=2026-09-18\nsandcommits=3\nsandfiles=4\n"), nil
 		},
 		ForwardArgvFunc: func(_ vm.VM, hostPort, guestPort int) []string {
 			if forwardArgv == nil {
@@ -652,7 +659,7 @@ func TestReviewBrowserFailureDoesNotAbortTheReview(t *testing.T) {
 // is the right fallback, not a failed command.
 func TestReviewWithoutAMergeBaseOmitsDiffArgs(t *testing.T) {
 	h := newReviewHarness()
-	h.mergeBase = "" // the guest script found nothing to diff against
+	h.diffBase = "" // the guest script found nothing to diff against
 	gh := &fakeGh{}
 	sess := h.session(h.provider(nil), gh, reviewCheckout("/home/dev/proj"))
 	realOpen := sess.Open

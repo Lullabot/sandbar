@@ -3,6 +3,7 @@ package landreview
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // This file covers the pieces a Session test cannot: the seams that are
@@ -256,28 +260,28 @@ func git(t *testing.T, dir, home string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// runMergeBase executes the REAL script the guest runs, with the checkout
+// runDiffBase executes the REAL script the guest runs, with the checkout
 // path and default branch arriving as positional arguments exactly as
-// Provider.ShellOut delivers them.
-func runMergeBase(t *testing.T, home, repo, defaultBranch string) string {
+// Provider.ShellOut delivers them, and parses it with the REAL parser.
+func runDiffBase(t *testing.T, home, repo, defaultBranch string) diffBaseInfo {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", mergeBaseScript, "sh", repo, defaultBranch)
+	cmd := exec.Command("sh", "-c", diffBaseScript, "sh", repo, defaultBranch)
 	cmd.Env = gitEnv(home)
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("merge-base script: %v", err)
+		t.Fatalf("diff-base script: %v", err)
 	}
-	return lastObjectID(string(out))
+	return parseDiffBase(string(out))
 }
 
-// TestMergeBaseScriptAgainstRealGit runs the script the guest actually runs
+// TestDiffBaseScriptAgainstRealGit runs the script the guest actually runs
 // against real repositories. A synthetic test could only assert the answers
 // the script was ASSUMED to give; this pins the ones git really produces —
 // most importantly that the base is the point the branch diverged, and that
 // `git diff <base>` from it therefore covers committed AND uncommitted work,
 // which is the whole reason a two-dot base is passed rather than a three-dot
 // range.
-func TestMergeBaseScriptAgainstRealGit(t *testing.T) {
+func TestDiffBaseScriptAgainstRealGit(t *testing.T) {
 	requireTools(t, "git", "sh")
 
 	home := t.TempDir()
@@ -319,9 +323,16 @@ func TestMergeBaseScriptAgainstRealGit(t *testing.T) {
 	// against a clean tree.
 	write("a.txt", "base\nfeature\nwip\n")
 
-	got := runMergeBase(t, home, work, "main")
+	info := runDiffBase(t, home, work, "main")
+	got := info.Commit
 	if got != mainTip {
-		t.Fatalf("merge base = %q, want the commit the branch diverged at, %q", got, mainTip)
+		t.Fatalf("diff base = %q, want the commit the branch diverged at, %q", got, mainTip)
+	}
+	if info.Commits != 1 {
+		t.Errorf("commits since the base = %d, want the branch's single commit", info.Commits)
+	}
+	if info.Files == 0 {
+		t.Error("files since the base = 0, want the changed file counted — the size guard reads this")
 	}
 
 	// The load-bearing consequence: diffing from that base against the
@@ -338,15 +349,15 @@ func TestMergeBaseScriptAgainstRealGit(t *testing.T) {
 	// The sweep's default-branch field can be empty (a clone whose
 	// origin/HEAD was never set); the script's own main/master fallback must
 	// still find the same answer.
-	if got := runMergeBase(t, home, work, ""); got != mainTip {
-		t.Errorf("merge base with no default branch given = %q, want the same %q via the main fallback", got, mainTip)
+	if got := runDiffBase(t, home, work, "").Commit; got != mainTip {
+		t.Errorf("diff base with no default branch given = %q, want the same %q", got, mainTip)
 	}
 }
 
 // A repo with no remote and no main/master to compare against — and a path
 // that is not a repo at all — must yield NO base, so the session falls back
 // to the server's own default rather than failing the review.
-func TestMergeBaseScriptYieldsNothingWhenThereIsNoBase(t *testing.T) {
+func TestDiffBaseScriptYieldsNothingWhenThereIsNoBase(t *testing.T) {
 	requireTools(t, "git", "sh")
 
 	home := t.TempDir()
@@ -358,11 +369,11 @@ func TestMergeBaseScriptYieldsNothingWhenThereIsNoBase(t *testing.T) {
 	git(t, solo, home, "add", "a.txt")
 	git(t, solo, home, "commit", "-q", "-m", "only commit")
 
-	if got := runMergeBase(t, home, solo, ""); got != "" {
-		t.Errorf("merge base for a remote-less repo on a non-default branch = %q, want none", got)
+	if got := runDiffBase(t, home, solo, "").Commit; got != "" {
+		t.Errorf("diff base for a remote-less repo on a non-default branch = %q, want none", got)
 	}
-	if got := runMergeBase(t, home, filepath.Join(home, "not-a-repo"), "main"); got != "" {
-		t.Errorf("merge base for a path that is not a repo = %q, want none", got)
+	if got := runDiffBase(t, home, filepath.Join(home, "not-a-repo"), "main").Commit; got != "" {
+		t.Errorf("diff base for a path that is not a repo = %q, want none", got)
 	}
 }
 
@@ -467,24 +478,66 @@ time.sleep(120)`
 
 // --- pure helpers ---
 
-func TestLastObjectIDIgnoresNoise(t *testing.T) {
+func TestParseDiffBaseIgnoresNoise(t *testing.T) {
 	const sha = "0123456789abcdef0123456789abcdef01234567"
+	report := "sandbase=" + sha + "\nsanddate=2026-09-18\nsandcommits=5\nsandfiles=12\n"
+
 	cases := []struct {
 		name string
 		in   string
-		want string
+		want diffBaseInfo
 	}{
-		{name: "bare sha", in: sha + "\n", want: sha},
-		{name: "login noise before the answer", in: "Welcome to Debian\nLast login: today\n" + sha + "\n", want: sha},
-		{name: "nothing to report", in: "\n\n", want: ""},
-		{name: "an option-shaped answer is refused", in: "--output=/etc/passwd\n", want: ""},
-		{name: "a ref name is refused", in: "origin/main\n", want: ""},
-		{name: "too short to be an object name", in: "abc\n", want: ""},
+		{
+			name: "a clean report",
+			in:   report,
+			want: diffBaseInfo{Commit: sha, Date: "2026-09-18", Commits: 5, Files: 12},
+		},
+		{
+			name: "login noise before the answer",
+			in:   "Welcome to Debian\nLast login: today\n" + report,
+			want: diffBaseInfo{Commit: sha, Date: "2026-09-18", Commits: 5, Files: 12},
+		},
+		{
+			name: "nothing to report",
+			in:   "\n\n",
+			want: diffBaseInfo{},
+		},
+		{
+			// The gate that matters: whatever comes back is handed to
+			// `git diff` in the guest, so an option-shaped answer must never
+			// reach it.
+			name: "an option-shaped base is refused",
+			in:   "sandbase=--output=/etc/passwd\nsandfiles=3\n",
+			want: diffBaseInfo{},
+		},
+		{
+			name: "a ref name is refused",
+			in:   "sandbase=origin/main\n",
+			want: diffBaseInfo{},
+		},
+		{
+			name: "too short to be an object name",
+			in:   "sandbase=abc\n",
+			want: diffBaseInfo{},
+		},
+		{
+			// Counts without a base describe nothing: the whole record goes.
+			name: "counts alone are not a base",
+			in:   "sandcommits=5\nsandfiles=12\n",
+			want: diffBaseInfo{},
+		},
+		{
+			// A date that is not a date is dropped, but it must not cost the
+			// base — the review still runs, it just says less about it.
+			name: "a junk date is dropped, the base survives",
+			in:   "sandbase=" + sha + "\nsanddate=$(rm -rf /)\nsandfiles=2\n",
+			want: diffBaseInfo{Commit: sha, Files: 2},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := lastObjectID(tc.in); got != tc.want {
-				t.Errorf("lastObjectID(%q) = %q, want %q", tc.in, got, tc.want)
+			if got := parseDiffBase(tc.in); got != tc.want {
+				t.Errorf("parseDiffBase(%q) = %+v, want %+v", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -502,6 +555,12 @@ func TestSessionSeamDefaults(t *testing.T) {
 	if s.readyTimeout() != time.Second || s.pollInterval() != time.Millisecond {
 		t.Errorf("an explicit timeout/interval was ignored: %s/%s", s.readyTimeout(), s.pollInterval())
 	}
+	if got := (&Session{}).maxDiffFiles(); got != maxDiffFiles {
+		t.Errorf("maxDiffFiles with no override = %d, want %d", got, maxDiffFiles)
+	}
+	if got := (&Session{MaxDiffFiles: 7}).maxDiffFiles(); got != 7 {
+		t.Errorf("an explicit MaxDiffFiles was ignored: %d", got)
+	}
 }
 
 func TestDetailAppendsOnlyWhatWasSaid(t *testing.T) {
@@ -514,13 +573,23 @@ func TestDetailAppendsOnlyWhatWasSaid(t *testing.T) {
 }
 
 func TestDescribeBaseNamesTheRange(t *testing.T) {
-	if got := describeBase(""); !strings.Contains(got, "working tree") {
-		t.Errorf("describeBase(\"\") = %q, want it to say the working tree is being reviewed", got)
+	if got := describeBase(diffBaseInfo{}); !strings.Contains(got, "working tree") {
+		t.Errorf("describeBase of no base = %q, want it to say the working tree is being reviewed", got)
 	}
 	const sha = "0123456789abcdef0123456789abcdef01234567"
-	got := describeBase(sha)
+	got := describeBase(diffBaseInfo{Commit: sha, Date: "2021-02-11", Commits: 4409, Files: 37082})
 	if !strings.Contains(got, sha[:12]) || strings.Contains(got, sha) {
-		t.Errorf("describeBase(%q) = %q, want an abbreviated object name", sha, got)
+		t.Errorf("describeBase = %q, want an abbreviated object name", got)
+	}
+	// The size and the age are the whole point: they are what makes a wrong
+	// base self-evident in the one line every review prints.
+	for _, want := range []string{"2021-02-11", "4409 commits", "37082 files"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describeBase = %q, want it to mention %q", got, want)
+		}
+	}
+	if got := describeBase(diffBaseInfo{Commit: sha, Commits: 1, Files: 1}); !strings.Contains(got, "1 commit,") || !strings.Contains(got, "1 file") {
+		t.Errorf("describeBase = %q, want singular nouns for a one-commit range", got)
 	}
 }
 
@@ -699,5 +768,173 @@ func TestUnreachableHintOnlyExplainsTheSamePortCase(t *testing.T) {
 	}
 	if got := unreachableHint(45123, 41234); got != "" {
 		t.Errorf("unreachableHint(different) = %q, want nothing — a forwarded backend picked its own near end", got)
+	}
+}
+
+// --- the defect this base selection was rewritten around ---
+
+// forkFixture builds the repository shape that broke review selection in the
+// field, and it is worth spelling out because every detail is load-bearing:
+//
+//   - a FORK (origin) and the real project (upstream), the ordinary way one
+//     contributes to someone else's repository;
+//   - origin's master AND dev frozen at the commit the fork was taken from,
+//     because nobody ever pushes those branches again once they start
+//     rebasing from upstream;
+//   - no refs/remotes/origin/HEAD, so the sweep reports no default branch at
+//     all — which is what sends the candidate list falling through to "main",
+//     then "master";
+//   - a project that has moved a long way since, visible only via upstream.
+//
+// The old rule — first candidate ref that exists, wins — resolved that to
+// origin/master and asked for a diff of the whole project's history. In the
+// real case it was a 2021 commit, 4,409 commits and 240MB of patch, against a
+// checkout the user had five commits in, and the review died inside the
+// browser tool's 50MB buffer with a message naming none of it.
+//
+// HEAD is left on dev at the project's tip; each test moves it where it needs.
+func forkFixture(t *testing.T) (home, work, forkPoint, devTip string) {
+	t.Helper()
+	requireTools(t, "git", "sh")
+
+	home = t.TempDir()
+	origin := filepath.Join(home, "origin.git")
+	upstream := filepath.Join(home, "upstream.git")
+	work = filepath.Join(home, "work")
+	git(t, home, home, "init", "-q", "--bare", "-b", "dev", origin)
+	git(t, home, home, "init", "-q", "--bare", "-b", "dev", upstream)
+	git(t, home, home, "init", "-q", "-b", "dev", work)
+	git(t, work, home, "remote", "add", "origin", origin)
+	git(t, work, home, "remote", "add", "upstream", upstream)
+
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(work, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("a.txt", "ancient\n")
+	git(t, work, home, "add", "a.txt")
+	git(t, work, home, "commit", "-q", "-m", "ancient")
+	forkPoint = git(t, work, home, "rev-parse", "HEAD")
+	git(t, work, home, "push", "-q", "origin", "dev:master")
+	git(t, work, home, "push", "-q", "origin", "dev")
+
+	for i := range 6 {
+		write("a.txt", fmt.Sprintf("ancient\nupstream %d\n", i))
+		git(t, work, home, "commit", "-q", "-am", fmt.Sprintf("upstream work %d", i))
+	}
+	devTip = git(t, work, home, "rev-parse", "HEAD")
+	git(t, work, home, "push", "-q", "upstream", "dev")
+	git(t, work, home, "push", "-q", "upstream", "dev:master")
+
+	// The premise, asserted rather than assumed: if a future git starts
+	// setting origin/HEAD here, this fixture stops reproducing the defect and
+	// the test must say so instead of passing for the wrong reason.
+	probe := exec.Command("git", "-C", work, "rev-parse", "--verify", "-q", "refs/remotes/origin/HEAD")
+	probe.Env = gitEnv(home)
+	if err := probe.Run(); err == nil {
+		t.Fatal("the fixture has an origin/HEAD, so it no longer reproduces the empty-default-branch case")
+	}
+	return home, work, forkPoint, devTip
+}
+
+// TestDiffBaseScriptIgnoresAnAncientForkMaster pins the primary rule: the base
+// comes from what exists ONLY here, so no stale ref on any remote can drag it
+// backwards.
+func TestDiffBaseScriptIgnoresAnAncientForkMaster(t *testing.T) {
+	home, work, forkPoint, devTip := forkFixture(t)
+
+	// Two commits of the user's own, on top of the CURRENT project.
+	git(t, work, home, "checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(work, "b.txt"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, home, "add", "b.txt")
+	git(t, work, home, "commit", "-q", "-m", "mine one")
+	if err := os.WriteFile(filepath.Join(work, "b.txt"), []byte("mine\nmore\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, work, home, "commit", "-q", "-am", "mine two")
+
+	// "" is what the sweep reports for DefaultBranch with no origin/HEAD.
+	info := runDiffBase(t, home, work, "")
+	if info.Commit != devTip {
+		t.Fatalf("diff base = %q, want %q, the commit the work branched from (the old rule picked the fork point %q and reviewed the entire project)",
+			info.Commit, devTip, forkPoint)
+	}
+	if info.Commits != 2 {
+		t.Errorf("commits since the base = %d, want 2 — the user's own work and nothing else", info.Commits)
+	}
+	if info.Files != 1 {
+		t.Errorf("files since the base = %d, want 1; this is the number the size guard refuses on", info.Files)
+	}
+}
+
+// TestDiffBaseScriptPrefersTheNearestTrunk covers the fallback, which runs
+// only when nothing is local — and which must still not take the first ref it
+// finds. `git remote` prints alphabetically, so "origin" is always offered
+// before "upstream": ranking by distance is the only thing standing between a
+// fork's frozen master and the review.
+func TestDiffBaseScriptPrefersTheNearestTrunk(t *testing.T) {
+	home, work, forkPoint, devTip := forkFixture(t)
+
+	// Every commit is published, so the local-only anchor finds nothing and
+	// the merge-base walk decides.
+	info := runDiffBase(t, home, work, "")
+	if info.Commit != devTip {
+		t.Fatalf("diff base = %q, want the nearest trunk %q, not the alphabetically-first remote's frozen master %q",
+			info.Commit, devTip, forkPoint)
+	}
+}
+
+// --- the size guard ---
+
+// stubProvider implements the package's narrow Provider for tests that must
+// never reach the guest. Shell fails the test outright: the entire value of
+// the size guard is that the review server is not started.
+type stubProvider struct {
+	t        *testing.T
+	shellOut []byte
+}
+
+func (p stubProvider) Shell(context.Context, string, io.Reader, io.Writer, ...string) error {
+	p.t.Error("the review server was started despite a diff too large for it to load")
+	return nil
+}
+
+func (p stubProvider) ShellOut(context.Context, string, ...string) ([]byte, error) {
+	return p.shellOut, nil
+}
+
+func (p stubProvider) ForwardArgv(vm.VM, int, int) []string { return nil }
+
+// TestRunRefusesADiffTooLargeForTheReviewTool asserts the failure a user
+// actually gets. Upstream reads `git diff` through a 50MB buffer and dies with
+// "stdout maxBuffer length exceeded" — a message that names neither the base
+// nor the size, and sends the reader looking for a bug in the review tool
+// rather than at the commit that was chosen. This refuses first, and says
+// which commit, how old, and how big.
+func TestRunRefusesADiffTooLargeForTheReviewTool(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	s := &Session{
+		Provider: stubProvider{
+			t:        t,
+			shellOut: []byte("sandbase=" + sha + "\nsanddate=2021-02-11\nsandcommits=4409\nsandfiles=37082\n"),
+		},
+		Checkout:     checkouts.Checkout{Path: "/home/u/core"},
+		MaxDiffFiles: 5000,
+	}
+
+	var out strings.Builder
+	if _, err := s.Run(context.Background(), &out); err == nil {
+		t.Fatal("Run started a review of a 37082-file diff, want a refusal")
+	} else {
+		for _, want := range []string{"37082 files", "2021-02-11", sha[:12], "--not --remotes"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal does not mention %q, which is what makes it actionable:\n%v", want, err)
+			}
+		}
 	}
 }

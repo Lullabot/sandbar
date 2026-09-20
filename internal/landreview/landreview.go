@@ -67,7 +67,7 @@ const ServeBinary = "self-review-serve"
 //
 // It is a FIXED, LITERAL string, and the checkout path and diff base arrive
 // as positional arguments that are only ever expanded inside double quotes —
-// the same rule mergeBaseScript and the Landing pane's commitAndPushExpr
+// the same rule diffBaseScript and the Landing pane's commitAndPushExpr
 // keep, for the same reason: both values come from a sweep of the guest, the
 // lowest-trust source in the system, and neither may ever be parsed as shell
 // syntax.
@@ -106,12 +106,30 @@ const (
 	// same remedy, as internal/lima's runner (an ssh child can outlive the
 	// process that spawned it and keep the pipes open forever).
 	forwardWaitDelay = 2 * time.Second
-	// diffBaseTimeout bounds the merge-base lookup, the FIRST thing Run does
-	// and the only guest round trip that happens before any output reaches the
-	// user. Generous enough for a cold ssh handshake plus a `git merge-base` on
-	// a large repository, short enough that a stalled guest surfaces as a
-	// working-tree review rather than a silent hang.
-	diffBaseTimeout = 20 * time.Second
+	// diffBaseTimeout bounds the base lookup, the FIRST thing Run does and
+	// the only guest round trip that happens before any output reaches the
+	// user. Generous enough for a cold ssh handshake, a revision walk and a
+	// name-only tree diff on a large repository, short enough that a stalled
+	// guest surfaces as a working-tree review rather than a silent hang.
+	diffBaseTimeout = 30 * time.Second
+	// maxDiffFiles is the changed-file count above which Run refuses to start
+	// a review at all.
+	//
+	// The ceiling being defended is upstream's: @self-review/serve reads
+	// `git diff` through a 50MB execFile buffer, and a diff past it dies with
+	// a Node buffer error that names neither the base nor the size. That
+	// message sends the reader hunting for a bug in the review tool when the
+	// real fault is a base thousands of commits too old, which is exactly the
+	// wrong place to look — so this refuses first, in a sentence that says
+	// which commit was picked, how old it is, and how big the diff would be.
+	//
+	// It counts FILES rather than bytes because the file count comes from a
+	// name-only tree diff costing milliseconds, while measuring bytes means
+	// generating the entire patch — the very work being guarded against. Five
+	// thousand files is far above any diff a human reviews in a browser and
+	// far below the ~37,000 a wrong base produced in the case this guard was
+	// written for, so it discriminates without ever needing to be tuned.
+	maxDiffFiles = 5000
 	// guestStopTimeout bounds the guest-side half of teardown. It is short
 	// on purpose: this runs while the user is waiting for ctrl-C to take
 	// effect, and a wedged guest must degrade to a warning rather than a
@@ -162,6 +180,9 @@ type Session struct {
 	// between attempts.
 	ReadyTimeout time.Duration
 	PollInterval time.Duration
+	// MaxDiffFiles caps how many changed files a review may cover before Run
+	// refuses to start it; zero means maxDiffFiles.
+	MaxDiffFiles int
 }
 
 // errServerGone reports that the guest command exited while the session was
@@ -221,8 +242,14 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// which is a worse default but never a failure.
 	argv := []string{"sh", "-c", serveScript, "sh", s.Checkout.Path}
 	base := s.diffBase(ctx)
-	if base != "" {
-		argv = append(argv, base)
+	if base.Commit != "" {
+		// Refused BEFORE the server starts, so the user gets a sentence about
+		// the base instead of a Node buffer error several seconds later. See
+		// maxDiffFiles.
+		if limit := s.maxDiffFiles(); base.Files > limit {
+			return "", diffTooLargeError(base, limit)
+		}
+		argv = append(argv, base.Commit)
 	}
 	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
 
@@ -551,36 +578,78 @@ func (s *Session) waitReady(ctx context.Context, port int, exited <-chan struct{
 	}
 }
 
-// mergeBaseScript resolves, inside the guest, the commit this checkout's work
-// began from: the merge base between HEAD and the repository's default
-// branch. Printing nothing is a valid answer (a repo with no such branch, an
-// unborn HEAD, unrelated histories) and the caller then leaves the range to
-// the server's own default.
+// diffBaseScript resolves, inside the guest, the commit a review of this
+// checkout should start from, and measures how big that review would be.
+//
+// It asks the question that needs no guessing FIRST: which commits exist
+// nowhere but this VM. `rev-list HEAD --not --remotes` excludes everything
+// reachable from ANY remote-tracking ref, so the oldest commit it returns is
+// the first piece of local work and its parent is the review's base. That is
+// immune to which remote is stale, to a rebase rewriting every hash, and to
+// the repository's branch naming, because it names no branch at all.
+//
+// Only when there is no local-only history — every commit already published
+// somewhere — does it fall back to a merge base with a trunk candidate, and
+// then it takes the CLOSEST base among all candidates rather than the first
+// ref that happens to exist. "First that exists" is what made this script
+// dangerous: with `refs/remotes/<remote>/HEAD` unset the sweep reports no
+// default branch, the candidate list falls through to `main` and then
+// `master`, and on a fork `master` is frozen at the moment the fork was
+// taken. One real case resolved to a 2021 commit and asked for a 240MB,
+// 37,000-file diff of a repository the user had five commits in. Ranking by
+// distance cannot make that mistake: the trunk the work actually branched
+// from is always the nearest one.
 //
 // It is a FIXED, LITERAL string. The checkout path and the sweep's
 // default-branch name arrive as positional arguments ($1, $2) and are only
 // ever expanded inside double quotes, so nothing guest-derived is ever parsed
-// as shell syntax — the same rule the Landing pane's commitAndPushExpr keeps
-// by passing its checkout through Provider.RunArgv's workdir element.
+// as shell syntax — the same rule the Landing pane's commitAndPushExpr keeps.
 //
-// The result is used as a bare `git diff <base>` argument rather than a
+// The base is used as a bare two-dot `git diff <base>` argument rather than a
 // three-dot `base...HEAD` range, and that difference is the point: two-dot
 // against the working tree covers the branch's commits AND its uncommitted
 // edits, which is what "review what I have here" means in a sandbox where
 // nothing has been pushed yet.
-const mergeBaseScript = `set -f
+//
+// Printing nothing is a valid answer (no remotes and no trunk, an unborn
+// HEAD, unrelated histories); the caller then leaves the range to the
+// server's own default.
+const diffBaseScript = `set -f
 d=$1
-for c in "$2" main master; do
-  [ -n "$c" ] || continue
-  for r in $(git -C "$d" remote 2>/dev/null); do
-    if git -C "$d" rev-parse --verify -q "refs/remotes/$r/$c" >/dev/null 2>&1; then
-      git -C "$d" merge-base "refs/remotes/$r/$c" HEAD 2>/dev/null && exit 0
+db=$2
+base=
+
+oldest=$(git -C "$d" rev-list --topo-order HEAD --not --remotes 2>/dev/null | tail -n 1)
+if [ -n "$oldest" ]; then
+  base=$(git -C "$d" rev-parse --verify -q "$oldest^" 2>/dev/null)
+fi
+
+if [ -z "$base" ]; then
+  bestn=
+  for c in "$db" main master; do
+    [ -n "$c" ] || continue
+    for r in $(git -C "$d" remote 2>/dev/null); do
+      git -C "$d" rev-parse --verify -q "refs/remotes/$r/$c" >/dev/null 2>&1 || continue
+      b=$(git -C "$d" merge-base "refs/remotes/$r/$c" HEAD 2>/dev/null)
+      [ -n "$b" ] || continue
+      n=$(git -C "$d" rev-list --count "$b..HEAD" 2>/dev/null)
+      [ -n "$n" ] || continue
+      if [ -z "$bestn" ] || [ "$n" -lt "$bestn" ]; then bestn=$n; base=$b; fi
+    done
+    if git -C "$d" rev-parse --verify -q "refs/heads/$c" >/dev/null 2>&1; then
+      b=$(git -C "$d" merge-base "refs/heads/$c" HEAD 2>/dev/null)
+      n=
+      [ -n "$b" ] && n=$(git -C "$d" rev-list --count "$b..HEAD" 2>/dev/null)
+      if [ -n "$n" ] && { [ -z "$bestn" ] || [ "$n" -lt "$bestn" ]; }; then bestn=$n; base=$b; fi
     fi
   done
-  if git -C "$d" rev-parse --verify -q "refs/heads/$c" >/dev/null 2>&1; then
-    git -C "$d" merge-base "refs/heads/$c" HEAD 2>/dev/null && exit 0
-  fi
-done
+fi
+
+[ -n "$base" ] || exit 0
+printf 'sandbase=%s\n' "$base"
+printf 'sanddate=%s\n' "$(git -C "$d" log -1 --format=%cs "$base" 2>/dev/null)"
+printf 'sandcommits=%s\n' "$(git -C "$d" rev-list --count "$base..HEAD" 2>/dev/null)"
+printf 'sandfiles=%s\n' "$(git -C "$d" diff --name-only --no-renames "$base" 2>/dev/null | grep -c .)"
 exit 0
 `
 
@@ -591,10 +660,26 @@ exit 0
 // all.
 var objectID = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
-// diffBase asks the guest for the merge base, returning "" for every failure —
-// a broken lookup must degrade to reviewing the working tree, never fail the
-// command.
-func (s *Session) diffBase(ctx context.Context) string {
+// diffBaseInfo is what the guest reports about the commit a review should
+// start from: the commit itself, plus enough about the resulting diff to
+// state the range out loud and to refuse an impossible one.
+type diffBaseInfo struct {
+	// Commit is the base object name, or "" when the guest found none usable
+	// and the server should fall back to its own default.
+	Commit string
+	// Date is Commit's committer date as YYYY-MM-DD, "" when unknown. It is
+	// shown because age is the single most legible symptom of a wrong base.
+	Date string
+	// Commits is how many commits separate Commit from HEAD.
+	Commits int
+	// Files is how many files the review would cover.
+	Files int
+}
+
+// diffBase asks the guest where a review should start and how big it would
+// be, returning a zero diffBaseInfo for every failure — a broken lookup must
+// degrade to reviewing the working tree, never fail the command.
+func (s *Session) diffBase(ctx context.Context) diffBaseInfo {
 	// Bounded, like every other guest interaction in this package (waitReady's
 	// ReadyTimeout, probeHTTP's probeTimeout, stopGuestServer's
 	// guestStopTimeout) — and this one needs it most. It runs BEFORE Run has
@@ -603,39 +688,115 @@ func (s *Session) diffBase(ctx context.Context) string {
 	// forever having produced no output at all: no port, no URL, no hint that
 	// anything was happening. Its own contract already degrades every failure
 	// to "review the working tree", so a timeout costs nothing but the
-	// merge-base refinement.
+	// refinement.
 	ctx, cancel := context.WithTimeout(ctx, diffBaseTimeout)
 	defer cancel()
-	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", mergeBaseScript, "sh", s.Checkout.Path, s.Checkout.DefaultBranch)
+	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", diffBaseScript, "sh", s.Checkout.Path, s.Checkout.DefaultBranch)
 	if err != nil {
-		return ""
+		return diffBaseInfo{}
 	}
-	return lastObjectID(string(out))
+	return parseDiffBase(string(out))
 }
 
-// lastObjectID returns the last line of out that is an object name. Last, not
-// first, because the script prints its answer immediately before exiting: any
-// login-shell noise a guest prepends is therefore behind it.
-func lastObjectID(out string) string {
-	var found string
+// maxDiffFiles returns the effective refusal threshold.
+func (s *Session) maxDiffFiles() int {
+	if s.MaxDiffFiles > 0 {
+		return s.MaxDiffFiles
+	}
+	return maxDiffFiles
+}
+
+// safeDate matches the one date shape the guest is asked for (git's %cs). It
+// is a gate for the same reason objectID is: the value is guest-derived and
+// ends up in output the user reads, so anything that is not plainly a date —
+// a login banner, an error, a line of someone's motd — is dropped rather
+// than printed as though sand had computed it.
+var safeDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// parseDiffBase reads the guest's key=value report. Later lines win, because
+// the script prints its answer immediately before exiting: any login-shell
+// noise a guest prepends is therefore behind it — the same reasoning the
+// sweep parser and the heartbeat parser use for the same hazard.
+//
+// A record whose base fails objectID yields the zero value, never a partial
+// one: without a usable commit the counts describe nothing, and reporting
+// them beside a working-tree review would be a confident lie.
+func parseDiffBase(out string) diffBaseInfo {
+	var info diffBaseInfo
 	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); objectID.MatchString(line) {
-			found = line
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "sandbase":
+			if objectID.MatchString(value) {
+				info.Commit = value
+			}
+		case "sanddate":
+			if safeDate.MatchString(value) {
+				info.Date = value
+			}
+		case "sandcommits":
+			if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+				info.Commits = n
+			}
+		case "sandfiles":
+			if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+				info.Files = n
+			}
 		}
 	}
-	return found
+	if info.Commit == "" {
+		return diffBaseInfo{}
+	}
+	return info
 }
 
-// describeBase renders the chosen range for the human reading Run's output,
-// so an unexpectedly small (or large) diff is explainable without guessing.
-func describeBase(base string) string {
-	if base == "" {
-		return "the working tree: no merge base with a default branch was found"
+// describeBase renders the chosen range for the human reading Run's output.
+//
+// The size and the date are in it deliberately. A wrong base is not otherwise
+// visible until the review either fails or opens onto thousands of files
+// nobody touched, and "everything since c10bf079 (2021-02-11, 4409 commits,
+// 37082 files)" is a sentence that diagnoses itself at a glance — whereas the
+// bare object name this used to print told a reader nothing they could check.
+func describeBase(info diffBaseInfo) string {
+	if info.Commit == "" {
+		return "the working tree: no commit older than this VM's own work was found"
 	}
-	if len(base) > 12 {
-		base = base[:12]
+	short := info.Commit
+	if len(short) > 12 {
+		short = short[:12]
 	}
-	return "everything since " + base
+	var detail []string
+	if info.Date != "" {
+		detail = append(detail, info.Date)
+	}
+	detail = append(detail, plural(info.Commits, "commit"), plural(info.Files, "file"))
+	return "everything since " + short + " (" + strings.Join(detail, ", ") + ")"
+}
+
+// diffTooLargeError explains a refusal in terms the reader can act on: which
+// commit was chosen, how old it is, and the one guest command that shows
+// whether the checkout's history and its remotes have drifted apart — which
+// is what a base this old always means.
+func diffTooLargeError(info diffBaseInfo, limit int) error {
+	return fmt.Errorf(
+		"the review would cover %s changed since %s — more than the %d-file limit, and past what the browser review tool can load "+
+			"(it reads `git diff` through a 50MB buffer and would fail with an unexplained buffer error)\n"+
+			"a base that old means this checkout's history and its remote-tracking refs have drifted apart: in the guest, "+
+			"`git rev-list --count HEAD --not --remotes` should report the work you expect to review, and `git fetch` the "+
+			"remote the branch was built on if it does not",
+		plural(info.Files, "file"), describeBase(info), limit)
+}
+
+// plural formats a count with its noun, so a one-commit range does not read
+// as "1 commits" in the line every review prints.
+func plural(n int, singular string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %ss", n, singular)
 }
 
 // --- seams and their production defaults ---
