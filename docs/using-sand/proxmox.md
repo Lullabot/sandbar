@@ -142,7 +142,7 @@ failures — so, for the record, why each of the less-obvious ones is here:
 
 | Privilege | Why `sand` needs it |
 | --- | --- |
-| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need `virtio-scsi-pci`, not the PVE default. |
+| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of `lsi` — `sand` uses `virtio-scsi-single` (see [How `sand` configures a VM's disk](#how-sand-configures-a-vms-disk)). |
 | `VM.Config.Options` | Setting `agent`, `name`, and `ostype`. |
 | `VM.Config.Disk` | Covers disk devices **and** the `boot` order. |
 | `VM.Config.Cloudinit` | Injecting the SSH key, user, and network config. |
