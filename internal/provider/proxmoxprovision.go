@@ -908,9 +908,12 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	// 3. Bring the clone up to the point just before finalize, cleaning up the
 	// partial VM on any failure here (as provisionClone does for a plain create).
 	//
-	// The MACs go back BEFORE the first boot, not after it: a guest that has
-	// already DHCPed under the clone's generated address has taken the lease, and
-	// been seen by everything on the segment, under the wrong identity.
+	// The MACs go back BEFORE the first boot, not after it, for two reasons that
+	// point the same way: a guest that has already DHCPed under the clone's
+	// generated address has taken the lease, and been seen by everything on the
+	// segment, under the wrong identity — and a netN change to a RUNNING VM lands
+	// in PVE's *pending* config rather than the live one, so it would not take
+	// effect until something rebooted the guest anyway.
 	p.applyNICMACs(ctx, cloneVMID, macs, out)
 	if err := p.applyCloudInitIdentity(ctx, cloneVMID, out); err != nil {
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
