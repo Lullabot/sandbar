@@ -880,10 +880,19 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 		}
 	}
 
-	// 2. Delete the existing VM (force), then re-clone from the base. From here
-	// on the staged archives are the only copy of what the guest held, so every
-	// later failure keeps them — flipped BEFORE the call, since a delete that
-	// reports an error may still have taken the VM with it.
+	// 2. Remember the MACs, delete the existing VM (force), then re-clone from
+	// the base. From here on the staged archives are the only copy of what the
+	// guest held, so every later failure keeps them — flipped BEFORE the call,
+	// since a delete that reports an error may still have taken the VM with it.
+	//
+	// The MAC read has to happen here, while the VM still exists, and it is the
+	// last thing done before it stops existing. It cannot fail the reset: see
+	// proxmoxmac.go.
+	macs, err := p.nicMACs(ctx, cfg.Name)
+	if err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
+		progress(out, "Warning: could not read %s's MAC address(es), so the rebuilt VM will have new ones: %v\n", cfg.Name, err)
+	}
+
 	stage.DestroyingGuest()
 	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
 		return stage.Fail(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
@@ -898,6 +907,11 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 
 	// 3. Bring the clone up to the point just before finalize, cleaning up the
 	// partial VM on any failure here (as provisionClone does for a plain create).
+	//
+	// The MACs go back BEFORE the first boot, not after it: a guest that has
+	// already DHCPed under the clone's generated address has taken the lease, and
+	// been seen by everything on the segment, under the wrong identity.
+	p.applyNICMACs(ctx, cloneVMID, macs, out)
 	if err := p.applyCloudInitIdentity(ctx, cloneVMID, out); err != nil {
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
 		return stage.Fail(err)
