@@ -874,7 +874,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 			// ACTUALLY holds decides what is staged, the rules for reading an
 			// unreachable one are subtle enough that two copies would drift, and
 			// the order things go back in is the same order on both backends.
-			if plan, err = provision.StagePreserve(ctx, p, cfg.Name, home, cfg.CloneURL, opts, stage, out); err != nil {
+			if plan, err = provision.StagePreserve(ctx, p, cfg.Name, home, user, cfg.CloneURL, opts, stage, out); err != nil {
 				return stage.Fail(err)
 			}
 		}

@@ -124,7 +124,7 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 			`printf '{"oauth":"keepme"}' > ~/.claude.json`)
 
 	archive := filepath.Join(t.TempDir(), "claude.tar")
-	if err := StageOut(context.Background(), cli, clone, home, []string{".claude", ".claude.json"}, archive, "Claude data", io.Discard); err != nil {
+	if err := StageOut(context.Background(), cli, clone, home, user, []string{".claude", ".claude.json"}, archive, "Claude data", io.Discard); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 	if fi, err := os.Stat(archive); err != nil || fi.Size() == 0 {

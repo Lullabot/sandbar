@@ -419,6 +419,85 @@
     mode: "0644"
   when: _timezone_file.stat.exists and _timezone_file.stat.isreg
 
+# --- Root filesystem read tuning. Like the timezone tasks above, these are
+# deliberately NOT gated to the base phase: they are cheap, and a VM cloned from
+# an older base image would otherwise never pick the setting up.
+#
+# Debian mounts / with the kernel's relatime default, under which READING a file
+# whose access time is more than a day stale WRITES its inode back to disk. A
+# development sandbox is full of trees that are exactly that shape — a
+# node_modules, a Go build cache, a vendor directory — so a single pass over one
+# turns into hundreds of thousands of small metadata writes on top of the reads
+# it actually came for. A reset's `tar` of a preserved home is the worst case and
+# the most visible one: it reads every file in the home directory exactly once,
+# which is the access pattern relatime penalises hardest, on the one resource a
+# guest full of small files has least of.
+#
+# Nothing in a VM like this reads atime. Mail clients and cache-expiry tools do;
+# builds, greps, editors and archivers do not, and none of them is what a
+# disposable sandbox is for. The writes are pure cost.
+- name: Check whether this guest has an /etc/fstab to tune
+  ansible.builtin.stat:
+    path: /etc/fstab
+    get_checksum: false
+  register: _fstab
+
+# The lookahead is what makes this idempotent: a second run finds noatime
+# already among the options and rewrites nothing. Field 2 is the mount point, so
+# only the ROOT entry is touched — an fstab holding other filesystems keeps them
+# exactly as they were.
+- name: Mount the root filesystem with noatime
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\S+\s+/\s+\S+\s+)((?!\S*noatime)\S+)(\s.*)$'
+    replace: '\1\2,noatime\3'
+    backup: true
+  register: _fstab_noatime
+  when: _fstab.stat.exists
+
+# fstab is the durable half; this makes it true without waiting for a reboot,
+# which matters because the phase that reaches an EXISTING VM (finalize) is
+# followed by a reset's tar rather than by a boot.
+#
+# It cannot be fatal. A filesystem that refuses a remount still comes up noatime
+# at its next boot, and a base build has no business failing over a read
+# optimisation. It runs only when the fstab edit actually changed something,
+# which is also what keeps it out of the way of a container (the molecule suite),
+# where there is no root entry to match and nothing to remount.
+- name: Apply noatime to the running root filesystem
+  ansible.builtin.command:
+    cmd: mount -o remount,noatime /
+  changed_when: true
+  failed_when: false
+  when: _fstab_noatime is changed
+
+# --- Discard (TRIM), the guest half. The hypervisor half is the disk's
+# discard=on/ssd=1 (internal/pve's diskPerfOptions); without BOTH, freed space
+# never comes back: the guest has to say which blocks it no longer needs, and
+# QEMU has to be willing to pass that on. The pair is what keeps a
+# thin-provisioned volume, a ZFS dataset or a Ceph image from growing
+# monotonically under VMs whose whole life is "fill a disk with a build tree,
+# then get deleted".
+#
+# Periodic trim rather than the `discard` mount option, which is Debian's own
+# default and the current recommendation: continuous discard issues a TRIM
+# inline with every delete, which on a CoW filesystem or a busy build tree costs
+# more than it saves, while the weekly pass batches the whole filesystem at once.
+# util-linux ships the timer and Debian's presets enable it, so this is normally
+# a no-op — it is stated anyway because the hypervisor-side flags above are
+# pointless without it, and "normally enabled" is not the same as enabled.
+#
+# Ungated for the same reason as its neighbours: a VM cloned from an older base
+# image should pick this up at its next finalize rather than never.
+- name: Enable the weekly fstrim timer so discarded blocks are returned
+  ansible.builtin.systemd_service:
+    name: fstrim.timer
+    enabled: true
+    state: started
+  # A container has no systemd to talk to, and a guest whose image genuinely
+  # ships no fstrim.timer should not fail a build over reclaiming disk space.
+  failed_when: false
+
 # Let an SSH client forward COLORTERM so truecolor terminals (iTerm2, WezTerm,
 # kitty, Ghostty, …) keep 24-bit color instead of being downgraded to 256-color:
 # Debian's sshd accepts only LANG/LC_* by default, so a client's `SendEnv COLORTERM`

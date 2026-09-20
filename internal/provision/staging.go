@@ -225,7 +225,22 @@ func (g *StageGuard) Done() {
 // StageOut streams guestPaths (relative to home) out of a running VM into the
 // host archive file using `tar` over `limactl shell` as root. --ignore-failed-read
 // keeps a missing optional path (e.g. ~/.claude.json) from aborting the archive;
-// tar preserves the original modes/ownership inside the tarball.
+// tar preserves the original modes inside the tarball.
+//
+// OWNERSHIP IS NORMALISED HERE, at creation, rather than repaired after the
+// restore. Every member is recorded as belonging to user, so the root-run
+// extract on the far side lands the whole tree owned by them and the restore has
+// nothing left to fix. It used to be a `chown -R` over everything that came
+// back, which is a second full metadata pass over the same hundreds of thousands
+// of inodes the extract has just written — on a guest whose disk is the
+// bottleneck (the usual case for a tree of small files) that pass is not free,
+// and it bought nothing that a header field could not. The effect is identical,
+// including for the odd root-owned file a whole-home archive picks up: the chown
+// forced those to the user too, and --owner forces them in the archive.
+//
+// The name, not a uid, is what is recorded, so the restore maps it through the
+// REBUILT VM's passwd file — which is what makes this survive a guest whose user
+// came back with a different uid.
 //
 // The compressor is chosen per guest by tarCompressFlags (zstd where the guest
 // has it, gzip otherwise); the restore half reads the format back off the
@@ -237,7 +252,7 @@ func (g *StageGuard) Done() {
 // absent in the guest. Merging that warning into the archive corrupts the
 // compressed stream, and the later StageIn extract then aborts with exit
 // status 2.
-func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive, label string, out io.Writer, excludes ...string) error {
+func StageOut(ctx context.Context, cli guestRunner, name, home, user string, guestPaths []string, hostArchive, label string, out io.Writer, excludes ...string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
 		return fmt.Errorf("create archive %s: %w", hostArchive, err)
@@ -250,7 +265,7 @@ func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPath
 	meter := newStageMeter(out, "Backing up", "Backed up", label, 0)
 	defer meter.stop()
 
-	argv := []string{"sudo", "tar", "-C", home, "--ignore-failed-read"}
+	argv := []string{"sudo", "tar", "-C", home, "--ignore-failed-read", "--owner=" + user, "--group=" + user}
 	for _, ex := range excludes {
 		argv = append(argv, "--exclude="+ex)
 	}
@@ -327,22 +342,21 @@ func ancestorDirs(relPath string) []string {
 	return dirs
 }
 
-// StageIn extracts the host archive back into the guest home and re-chowns the
-// restored top-level paths to the user. Extraction runs as root (so the files
-// land root-owned and must be chowned back); the extract MUST complete before
-// the chown, since chown targets the just-written paths.
+// StageIn extracts the host archive back into the guest home. Extraction runs
+// as root, and the archive's members already name the user as their owner (see
+// StageOut), so the tree lands owned by them with no ownership pass afterwards.
 //
 // The ancestors of each restored path are created — as the user — BEFORE the
 // extract, and that ordering is the whole point. tar creates a missing
-// intermediate directory itself, as root, since the extract runs as root; that
-// directory is not a member of the archive (`tar -C home github.com/octocat`
-// stores "github.com/octocat/" and below, never "github.com/"), so the chown
-// below, which targets only the restored paths, never reaches it. A restored
-// project therefore left ~/github.com owned by root:root on a VM where a plain
-// create leaves it owned by the user, and the next `git clone` into a sibling
-// org directory failed with "Permission denied". `install -d` repairs an
-// existing directory's owner and mode as well as creating a missing one, so a
-// VM already left in that state by an earlier reset is healed by the next one.
+// intermediate directory itself, as root, and that directory is NOT a member of
+// the archive (`tar -C home github.com/octocat` stores "github.com/octocat/" and
+// below, never "github.com/"), so it is the one thing the archive's own
+// ownership cannot speak for. A restored project therefore left ~/github.com
+// owned by root:root on a VM where a plain create leaves it owned by the user,
+// and the next `git clone` into a sibling org directory failed with "Permission
+// denied". `install -d` repairs an existing directory's owner and mode as well
+// as creating a missing one, so a VM already left in that state by an earlier
+// reset is healed by the next one.
 func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topPaths []string, hostArchive, label string, out io.Writer) error {
 	file, err := os.Open(hostArchive)
 	if err != nil {
@@ -384,32 +398,6 @@ func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topP
 	extract = append(extract, "-xf", "-")
 	if err := cli.Shell(ctx, name, meteredReader{r: file, m: meter}, io.Discard, extract...); err != nil {
 		return fmt.Errorf("stage in extract: %w", err)
-	}
-
-	// chown needs concrete paths, and only the ones the extract actually
-	// produced. A top-level path that was missing in the SOURCE VM is missing
-	// from the archive too — StageOut's --ignore-failed-read drops it rather than
-	// aborting — and `chown -R` on a path that is not there fails, taking the
-	// whole call with it. That turned a completed reset into a REPORTED FAILURE
-	// for any VM whose user had never launched Claude Code, since ~/.claude.json
-	// only appears on first use.
-	absPaths := make([]string, 0, len(topPaths))
-	for _, p := range topPaths {
-		abs := home + "/" + p
-		present, err := GuestPathExists(ctx, cli, name, abs)
-		if err != nil {
-			return fmt.Errorf("stage in chown: %w", err)
-		}
-		if present {
-			absPaths = append(absPaths, abs)
-		}
-	}
-	if len(absPaths) == 0 {
-		return nil
-	}
-	argv := append([]string{"sudo", "chown", "-R", user + ":" + user}, absPaths...)
-	if err := cli.Shell(ctx, name, nil, io.Discard, argv...); err != nil {
-		return fmt.Errorf("stage in chown: %w", err)
 	}
 	return nil
 }
@@ -515,12 +503,12 @@ type ProjectPlan struct {
 // The checkout is probed FIRST because it implies the org directory it lives in:
 // the healthy case costs one guest round trip, and the second probe is paid only
 // when the checkout is already gone.
-func PlanProject(ctx context.Context, cli guestRunner, name, home, cloneURL, hostArchive string, out io.Writer) (ProjectPlan, error) {
+func PlanProject(ctx context.Context, cli guestRunner, name, home, user, cloneURL, hostArchive string, out io.Writer) (ProjectPlan, error) {
 	plan, err := probeProject(ctx, cli, name, home, cloneURL)
 	if err != nil || !plan.Staged {
 		return plan, err
 	}
-	if err := StageOut(ctx, cli, name, home, []string{plan.OrgRel}, hostArchive, projectLabel, out); err != nil {
+	if err := StageOut(ctx, cli, name, home, user, []string{plan.OrgRel}, hostArchive, projectLabel, out); err != nil {
 		return plan, err
 	}
 	return plan, nil

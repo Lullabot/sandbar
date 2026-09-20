@@ -103,12 +103,12 @@ type PreservePlan struct {
 // What the GUEST actually holds decides every branch here, never what the config
 // implies should be there — see PlanProject for the reset that cloned nothing
 // and restored nothing while believing it had done both.
-func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL string, opts ResetOptions, stage *StageGuard, out io.Writer) (PreservePlan, error) {
+func StagePreserve(ctx context.Context, cli guestRunner, name, home, user, cloneURL string, opts ResetOptions, stage *StageGuard, out io.Writer) (PreservePlan, error) {
 	var plan PreservePlan
 
 	if opts.PreserveHome {
 		plan.WholeHome = true
-		if err := StageOut(ctx, cli, name, home, []string{"."}, stage.Path(homeArchive), homeLabel, out, homeExcludes...); err != nil {
+		if err := StageOut(ctx, cli, name, home, user, []string{"."}, stage.Path(homeArchive), homeLabel, out, homeExcludes...); err != nil {
 			return plan, err
 		}
 		// The tree is in the archive, but the finalize playbook still has to be
@@ -124,14 +124,14 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL st
 	}
 
 	if opts.PreserveClaude {
-		if err := StageOut(ctx, cli, name, home, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
+		if err := StageOut(ctx, cli, name, home, user, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
 			return plan, err
 		}
 		plan.Claude = true
 	}
 
 	if opts.PreserveProject {
-		project, err := PlanProject(ctx, cli, name, home, cloneURL, stage.Path(projectArchive), out)
+		project, err := PlanProject(ctx, cli, name, home, user, cloneURL, stage.Path(projectArchive), out)
 		if err != nil {
 			return plan, err
 		}
@@ -146,7 +146,7 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL st
 		return plan, err
 	}
 	if len(extras) > 0 {
-		if err := StageOut(ctx, cli, name, home, extras, stage.Path(extrasArchive), extrasLabel, out); err != nil {
+		if err := StageOut(ctx, cli, name, home, user, extras, stage.Path(extrasArchive), extrasLabel, out); err != nil {
 			return plan, err
 		}
 		plan.Extras = extras
