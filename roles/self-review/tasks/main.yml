@@ -106,3 +106,111 @@
   failed_when: >-
     selfreview_check.rc != 0
     or selfreview_version not in (selfreview_check.stdout | default('') ~ selfreview_check.stderr | default(''))
+
+# --- the assistant skills -------------------------------------------------
+#
+# Fetched from upstream's git tag rather than vendored into this repository,
+# so they move with selfreview_version and Renovate's existing pin bumps all
+# of it at once. A vendored copy would be a fork of someone else's prose that
+# nothing bumps and nothing notices going stale.
+#
+# The whole repository tarball is 8.1MB to extract 99KB, which is the one
+# unattractive part and is accepted deliberately: fetching the files
+# individually means enumerating each skill's assets/ directory (three XSD
+# schema versions today, an unknown number tomorrow), and that enumeration is
+# exactly the thing that rots silently when upstream adds a file. The tarball
+# cannot miss one. It is paid once per BASE build, next to an npm install that
+# already pulls more.
+- name: Check whether the pinned skills are already staged
+  ansible.builtin.stat:
+    path: "{{ selfreview_skills_dir }}/.sandbar-{{ selfreview_version }}"
+  register: selfreview_skills_stamp
+
+# Removed and recreated rather than extracted over: a version bump that
+# DELETED a file upstream would otherwise leave it behind forever, and a
+# half-extracted directory from an interrupted run would look complete.
+- name: Reset the skills staging directory
+  ansible.builtin.file:
+    path: "{{ selfreview_skills_dir }}"
+    state: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [absent, directory]
+  when: not selfreview_skills_stamp.stat.exists
+
+- name: Fetch the pinned assistant skills
+  ansible.builtin.unarchive:
+    src: "https://codeload.github.com/e0ipso/self-review/tar.gz/refs/tags/v{{ selfreview_version }}"
+    dest: "{{ selfreview_skills_dir }}"
+    remote_src: true
+    owner: root
+    group: root
+    extra_opts:
+      - --wildcards
+      - --strip-components=3
+      - "*/.agents/skills/self-review-*"
+  when: not selfreview_skills_stamp.stat.exists
+
+# The wildcard above matching nothing would leave an empty directory and no
+# error at all, so the result is asserted rather than assumed — the same
+# reason the npm install is made to prove itself by running.
+- name: Verify every pinned skill was staged
+  ansible.builtin.stat:
+    path: "{{ selfreview_skills_dir }}/{{ item }}/SKILL.md"
+  register: selfreview_skill_files
+  loop: "{{ selfreview_skills }}"
+  failed_when: not selfreview_skill_files.stat.exists
+
+- name: Stamp the staged skills with their version
+  ansible.builtin.copy:
+    content: "{{ selfreview_version }}\n"
+    dest: "{{ selfreview_skills_dir }}/.sandbar-{{ selfreview_version }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- keeping a review out of the user's project ---------------------------
+#
+# A review writes review.xml into the checkout and sand copies three skill
+# directories in beside it, so without this every reviewed repository grows
+# five entries of untracked noise that `git status` reports and a careless
+# `git add -A` commits.
+#
+# The USER'S global excludes file is the right home for that, not the
+# project's .gitignore: sand must not write a tracked file into someone
+# else's repository to tidy up after itself. git reads
+# ~/.config/git/ignore with no core.excludesFile set at all, so this needs no
+# `git config` and cannot fight a value the user set themselves.
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    selfreview_user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+- name: Create the user's git config directory
+  ansible.builtin.file:
+    path: "{{ selfreview_user_home }}/.config/git"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+# blockinfile, not copy or template: the file is the user's, it may already
+# hold their own patterns, and a review's entries must be removable as a unit
+# without taking anything else with them.
+- name: Ignore review output and installed skills globally
+  ansible.builtin.blockinfile:
+    path: "{{ selfreview_user_home }}/.config/git/ignore"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+    marker: "# {mark} sand: self-review"
+    block: |
+      {% for pattern in selfreview_ignore_patterns %}
+      {{ pattern }}
+      {% endfor %}

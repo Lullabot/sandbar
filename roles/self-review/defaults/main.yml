@@ -22,10 +22,14 @@ selfreview_install_dir: /opt/sandbar/self-review
 #
 # libxml2-utils is the Debian package that provides `xmllint` — the binary
 # name is not a package name, which is the trap this variable exists to spell
-# out once. A finished review lands as review.xml inside the checkout, and the
-# agent in the guest is pointed at that file (see
-# docs/using-sand/review.md); a guest with no XML tooling can read it but
-# cannot check or reformat it.
+# out once.
+#
+# It is here for the SKILLS, not for human convenience: all three of them
+# shell out to `xmllint --schema <skill>/assets/*.xsd <file> --noout` to
+# validate the XML they produce, and every one of them degrades to "warn the
+# user and continue without validation" when the binary is missing. That
+# degradation is silent enough to be worse than a failure — an invalid
+# review.xml reaches the assistant that has to act on it.
 #
 # It lives here, beside the pin, rather than in roles/base's aggregated
 # package transaction, because it and the review tool rise and fall together:
@@ -35,6 +39,47 @@ selfreview_install_dir: /opt/sandbar/self-review
 # site.yml.
 selfreview_packages:
   - libxml2-utils
+
+# The assistant skills that close the review loop, staged into the base image
+# here and copied into a checkout by internal/landreview when a review starts.
+#
+#   self-review-critique  pre-generates a review to curate (and runs the
+#                         guide skill as its first step)
+#   self-review-guide     writes the review.guide.xml walkthrough sidecar
+#   self-review-apply     reads a finished review.xml and executes the changes
+#
+# They are NOT published to npm — they live only in upstream's git repository
+# under .agents/skills/ — which is why they are fetched rather than declared
+# as a dependency beside @self-review/serve.
+selfreview_skills:
+  - self-review-apply
+  - self-review-critique
+  - self-review-guide
+
+# Where the skills are staged in the base image. Root-owned and read-only to
+# the user: a checkout gets its own copy, and this is the pristine source that
+# copy is made from, so a guest that has mangled one checkout's skills still
+# has an intact one to install into the next.
+selfreview_skills_dir: /opt/sandbar/self-review/skills
+
+# The git ignore patterns written to the USER'S global excludes file in the
+# guest, so a review never shows up as untracked work in someone's project.
+#
+# The skills are per-checkout by necessity, not by preference: upstream's own
+# issue #162, "Allow skills to be installed globally", is open, and until it
+# lands every assistant that can read them wants them inside the project. The
+# skills themselves hard-code the checkout-relative path — `xmllint --schema
+# .agents/skills/self-review-apply/assets/self-review-v3.xsd` — so a
+# guest-wide install would break their own instructions even for the one
+# assistant that could find it.
+#
+# Ignoring is therefore the mitigation for something sand is forced to do.
+selfreview_ignore_patterns:
+  - review.xml
+  - review.guide.xml
+  - .agents/skills/self-review-apply/
+  - .agents/skills/self-review-critique/
+  - .agents/skills/self-review-guide/
 
 # Where the CLI is linked so every login shell finds it. internal/landreview
 # runs it by BARE NAME (landreview.ServeBinary), so what matters is that it is
