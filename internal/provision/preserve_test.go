@@ -117,7 +117,7 @@ func TestStageOutToleratesAChangingFile(t *testing.T) {
 	}
 	var out bytes.Buffer
 	archive := t.TempDir() + "/home.tgz"
-	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, &out); err != nil {
+	if err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, "home", &out); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 	if !strings.Contains(out.String(), "changed while they were being copied out") {
@@ -133,7 +133,7 @@ func TestStageOutFailsOnARealTarError(t *testing.T) {
 		failErr: errors.New("exit status 2: tar: Cannot write: No space left on device"),
 	}
 	archive := t.TempDir() + "/home.tgz"
-	err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, io.Discard)
+	err := StageOut(context.Background(), lima.New(f), "web", "/home/andrew", []string{"."}, archive, "home", io.Discard)
 	if err == nil {
 		t.Fatal("a failed tar was reported as a successful stage-out")
 	}

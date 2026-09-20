@@ -929,7 +929,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	}
 
 	// 4. Restore what the playbook must land on top of, BEFORE finalize.
-	if err := provision.RestoreBeforeFinalize(ctx, p, cfg.Name, home, user, plan, stage); err != nil {
+	if err := provision.RestoreBeforeFinalize(ctx, p, cfg.Name, home, user, plan, stage, out); err != nil {
 		return stage.Fail(fmt.Errorf("proxmox: %w", err))
 	}
 

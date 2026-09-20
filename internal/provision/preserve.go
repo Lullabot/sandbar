@@ -37,6 +37,17 @@ const (
 	extrasArchive  = "extras.tar"
 )
 
+// The noun each archive is narrated with while it moves: "Backing up home:
+// 1.4 GB, 61 MB/s" (see stageprogress.go). They are short because that line is
+// rendered inside a tile barely wider than it is — and they are words rather
+// than file names because "home.tar" is not what a user is waiting for.
+const (
+	claudeLabel  = "Claude data"
+	projectLabel = "project tree"
+	homeLabel    = "home"
+	extrasLabel  = "checkouts"
+)
+
 // claudePaths are the two home-relative paths "preserve Claude" keeps: the
 // Claude Code state directory and the login/history file beside it.
 var claudePaths = []string{".claude", ".claude.json"}
@@ -97,8 +108,7 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL st
 
 	if opts.PreserveHome {
 		plan.WholeHome = true
-		note(out, "Copying all of %s's home directory to this host…", name)
-		if err := StageOut(ctx, cli, name, home, []string{"."}, stage.Path(homeArchive), out, homeExcludes...); err != nil {
+		if err := StageOut(ctx, cli, name, home, []string{"."}, stage.Path(homeArchive), homeLabel, out, homeExcludes...); err != nil {
 			return plan, err
 		}
 		// The tree is in the archive, but the finalize playbook still has to be
@@ -114,7 +124,7 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL st
 	}
 
 	if opts.PreserveClaude {
-		if err := StageOut(ctx, cli, name, home, claudePaths, stage.Path(claudeArchive), out); err != nil {
+		if err := StageOut(ctx, cli, name, home, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
 			return plan, err
 		}
 		plan.Claude = true
@@ -136,7 +146,7 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, cloneURL st
 		return plan, err
 	}
 	if len(extras) > 0 {
-		if err := StageOut(ctx, cli, name, home, extras, stage.Path(extrasArchive), out); err != nil {
+		if err := StageOut(ctx, cli, name, home, extras, stage.Path(extrasArchive), extrasLabel, out); err != nil {
 			return plan, err
 		}
 		plan.Extras = extras
@@ -275,14 +285,14 @@ func pruneCovered(rels, covered []string) []string {
 // it is the entire point of preserving one: rebuilding a VM to pick up playbook
 // changes is only useful if the playbook gets the last word over the files it
 // owns.
-func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, user string, plan PreservePlan, stage *StageGuard) error {
+func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, user string, plan PreservePlan, stage *StageGuard, out io.Writer) error {
 	switch {
 	case plan.WholeHome:
-		if err := StageIn(ctx, cli, name, home, user, []string{"."}, stage.Path(homeArchive)); err != nil {
+		if err := StageIn(ctx, cli, name, home, user, []string{"."}, stage.Path(homeArchive), homeLabel, out); err != nil {
 			return fmt.Errorf("restore the home directory into %q: %w", name, err)
 		}
 	case plan.Claude:
-		if err := StageIn(ctx, cli, name, home, user, claudePaths, stage.Path(claudeArchive)); err != nil {
+		if err := StageIn(ctx, cli, name, home, user, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
 			return fmt.Errorf("restore Claude into %q: %w", name, err)
 		}
 	}
@@ -306,12 +316,12 @@ func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, use
 // loads because the .env came back unapproved.
 func RestoreAfterFinalize(ctx context.Context, cli guestRunner, name, home, user string, plan PreservePlan, stage *StageGuard, out io.Writer) error {
 	if plan.Project.Staged {
-		if err := StageIn(ctx, cli, name, home, user, []string{plan.Project.OrgRel}, stage.Path(projectArchive)); err != nil {
+		if err := StageIn(ctx, cli, name, home, user, []string{plan.Project.OrgRel}, stage.Path(projectArchive), projectLabel, out); err != nil {
 			return fmt.Errorf("restore the project into %q: %w", name, err)
 		}
 	}
 	if len(plan.Extras) > 0 {
-		if err := StageIn(ctx, cli, name, home, user, plan.Extras, stage.Path(extrasArchive)); err != nil {
+		if err := StageIn(ctx, cli, name, home, user, plan.Extras, stage.Path(extrasArchive), extrasLabel, out); err != nil {
 			return fmt.Errorf("restore preserved checkouts into %q: %w", name, err)
 		}
 	}
