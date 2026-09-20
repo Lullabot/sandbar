@@ -349,6 +349,33 @@ jobs:
             exit 1
           fi
 
+          # The assistant skills must actually have been installed...
+          limactl shell claude-ci test -f "$REPO/.agents/skills/self-review-apply/SKILL.md" \
+            || { echo "::error::the review did not install the assistant skills into the checkout"; exit 1; }
+
+          # ...and must NOT appear in the review it just opened. This pair is
+          # a positive and negative control, and the negative one is the point:
+          # the skills are untracked files, and upstream lists untracked files
+          # with `git ls-files --others --exclude-standard`, which honours the
+          # guest's global excludes. So this asserts the excludes
+          # roles/self-review writes are really taking effect — without them
+          # every review would open with seven files of sand's own tooling
+          # sitting in the diff, and the check for their absence alone would
+          # have passed vacuously on a VM where they were never installed.
+          if grep -q '\.agents/skills/' <<<"$DIFF"; then
+            echo "::error::the review contains the skills sand installed; the guest's global git excludes are not taking effect"
+            exit 1
+          fi
+
+          # The same claim from git's own mouth, since that is the one the
+          # docs make to the user: none of this shows up as work in progress.
+          dirty=$(limactl shell claude-ci git -C "$REPO" status --porcelain)
+          echo "git status in the reviewed checkout:"; printf '%s\n' "$dirty"
+          if printf '%s\n' "$dirty" | grep -q '\.agents/'; then
+            echo "::error::the installed skills show up in git status in the reviewed checkout"
+            exit 1
+          fi
+
           # Echo the server's own source block back, so the submitted payload's
           # range matches the session exactly instead of hard-coding a merge
           # base that differs on every run.

@@ -364,13 +364,14 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 			return "", diffTooLargeError(base, limit)
 		}
 	}
-	// Flags first, then the range: upstream scans the whole argv and treats
-	// everything it does not recognise as a `git diff` argument, so the order
-	// is for the reader rather than the parser.
 	// The Fresh arm above already removed the file, so the probe cannot have
 	// reported one; the second half of this condition is belt and braces
 	// against a probe that somehow saw it anyway.
 	resuming := base.Resume && !s.Fresh
+
+	// Flags first, then the range. That order is for the reader rather than
+	// the parser: upstream scans the whole argv and treats everything it does
+	// not recognise as a `git diff` argument, so either order works.
 	if resuming {
 		argv = append(argv, "--resume-from", path.Join(s.Checkout.Path, outputFile))
 	}
@@ -378,6 +379,9 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		argv = append(argv, base.Commit)
 	}
 
+	// After the refusal above, deliberately: this WRITES into the checkout,
+	// and a review that is not going to start has no business leaving three
+	// skill directories behind in someone's repository.
 	s.installSkills(ctx, w)
 	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
 	if resuming {
