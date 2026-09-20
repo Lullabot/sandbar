@@ -394,6 +394,34 @@ real CPU, memory, and storage usage, sampled from the API.
     first-boot behaviour is untouched) and strips machine-specific state so clones
     stay independent.
 
+## MAC addresses survive a rebuild
+
+Rebuilding a VM (`sand create --recreate`, or Reset in the TUI) deletes it and
+clones a fresh one from the template, and Proxmox gives every clone a brand-new
+random MAC. `sand` puts the old one back: it reads the VM's NIC MACs just before
+the delete and writes them onto the clone before its first boot.
+
+That matters because the MAC is the identity your *network* knows the VM by, and
+none of what it keys lives anywhere `sand` could restore afterwards:
+
+- a DHCP reservation, so the VM comes back on the same IP;
+- a firewall rule, a switch port ACL or a captive-portal exemption;
+- anything you pinned in your router's address book.
+
+Each NIC keeps the rest of its configuration exactly as Proxmox cloned it —
+bridge, VLAN tag, firewall flag, MTU — with only the address substituted, so a
+tagged NIC does not quietly land on the wrong VLAN.
+
+It needs no extra privilege: `VM.Config.Network` is already in the role above,
+because `sand` sets `net0` when it creates a VM in the first place. If the read
+or the write fails, the rebuild carries on and says so — a VM with a new MAC is
+an inconvenience, and aborting a rebuild (or destroying the clone that just
+succeeded) over one would be worse. You'll see a warning in the build output
+naming what it could not keep.
+
+If you actually *want* a fresh MAC, delete the VM and create it again: that is
+the verb that means "a different machine".
+
 ## A separate pool for automated tests
 
 If you run `sand`'s opt-in end-to-end test suite (or otherwise want a throwaway
