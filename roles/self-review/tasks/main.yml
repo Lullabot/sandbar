@@ -1,4 +1,17 @@
 ---
+# Base-phase by construction: site.yml runs this whole role only when
+# provision_phase is not 'finalize', so the package is in the clone's /etc
+# before it first boots and no per-VM re-run is needed.
+#
+# Adding it changes the playbook hash, so every existing base image goes stale
+# and installs it on the next `sand create` — the same path that already
+# delivers the review tool itself, and the reason neither needs a flag.
+- name: Install the review workflow's apt packages
+  ansible.builtin.apt:
+    name: "{{ selfreview_packages }}"
+    state: present
+    update_cache: false # roles/base already refreshed the lists this run
+
 - name: Create the self-review install directory
   ansible.builtin.file:
     path: "{{ selfreview_install_dir }}"

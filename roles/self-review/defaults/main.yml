@@ -18,6 +18,24 @@ selfreview_version: "1.45.0"
 # path is genuinely local to the role and safe to change.
 selfreview_install_dir: /opt/sandbar/self-review
 
+# The apt packages the review workflow needs beyond the npm install.
+#
+# libxml2-utils is the Debian package that provides `xmllint` — the binary
+# name is not a package name, which is the trap this variable exists to spell
+# out once. A finished review lands as review.xml inside the checkout, and the
+# agent in the guest is pointed at that file (see
+# docs/using-sand/review.md); a guest with no XML tooling can read it but
+# cannot check or reformat it.
+#
+# It lives here, beside the pin, rather than in roles/base's aggregated
+# package transaction, because it and the review tool rise and fall together:
+# whoever removes this role should not have to find a package name in another
+# role's list to finish the job. The cost is one extra apt transaction per
+# BASE build — not per VM, since the whole role is gated to the base phase in
+# site.yml.
+selfreview_packages:
+  - libxml2-utils
+
 # Where the CLI is linked so every login shell finds it. internal/landreview
 # runs it by BARE NAME (landreview.ServeBinary), so what matters is that it is
 # on the default PATH, not where it physically lives.
