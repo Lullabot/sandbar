@@ -90,6 +90,24 @@ func TestSyncScriptShapes(t *testing.T) {
 	if strings.Index(reset, "git reset --hard") < strings.Index(reset, "git status --porcelain") {
 		t.Error("the reset script resets before it checks the tree is clean")
 	}
+	// Both scripts must measure the working tree the SAME way, and it must be
+	// the tracked-only way. A fetch that reported untracked files as dirt
+	// would never offer the reset; a reset that refused on them would reject
+	// the offer the fetch had just made. They are two halves of one decision.
+	for name, script := range map[string]string{"fetch": fetch, "reset": reset} {
+		if !strings.Contains(script, "git status --porcelain --untracked-files=no") {
+			t.Errorf("the %s script counts untracked files as uncommitted work", name)
+		}
+	}
+	// The fetch still has to REPORT the untracked count — it is in the
+	// summary the user reads, and ParseSyncStatus requires the field.
+	if !strings.Contains(fetch, "git ls-files --others --exclude-standard") {
+		t.Error("the fetch script does not count untracked files at all")
+	}
+	if !strings.Contains(fetch, "untracked=%s") {
+		t.Error("the fetch script does not print the untracked field")
+	}
+
 	// Neither script may assume the remote is called "origin" — a checkout
 	// published from a differently-named remote must be fetched from the
 	// same place the publish read it from.
@@ -101,24 +119,30 @@ func TestSyncScriptShapes(t *testing.T) {
 }
 
 func TestParseSyncStatus(t *testing.T) {
-	out := []byte("dirty=0\nlocal=aaa111\nfork=bbb222\nahead=3\nbehind=3\nsame=1\n")
+	out := []byte("dirty=0\nuntracked=2\nlocal=aaa111\nfork=bbb222\nahead=3\nbehind=3\nsame=1\n")
 	got, err := ParseSyncStatus(out)
 	if err != nil {
 		t.Fatalf("ParseSyncStatus: %v", err)
 	}
-	want := SyncStatus{Dirty: 0, Local: "aaa111", Fork: "bbb222", Ahead: 3, Behind: 3, SameContent: true}
+	want := SyncStatus{Dirty: 0, Untracked: 2, Local: "aaa111", Fork: "bbb222", Ahead: 3, Behind: 3, SameContent: true}
 	if got != want {
 		t.Fatalf("ParseSyncStatus = %+v, want %+v", got, want)
 	}
 	if !got.Diverged() || !got.CanAdopt() {
 		t.Errorf("a clean replay must read as diverged and adoptable: %+v", got)
 	}
+	// The untracked files above must be visible in the offer rather than
+	// silently dropped: they are exactly what a `git reset --hard` prompt
+	// makes a developer nervous about.
+	if !strings.Contains(got.Summary(), "2 untracked file(s) are left untouched") {
+		t.Errorf("Summary() does not account for the untracked files: %q", got.Summary())
+	}
 }
 
 // A login shell's banner, or anything else the guest prints, is noise around
 // the fields — not a parse failure and not a value.
 func TestParseSyncStatusIgnoresNoise(t *testing.T) {
-	out := []byte("Welcome to Ubuntu!\ndirty=1\nrandom line\nlocal=aaa\nfork=bbb\nahead=2\nbehind=5\nsame=0\nbye\n")
+	out := []byte("Welcome to Ubuntu!\ndirty=1\nrandom line\nuntracked=0\nlocal=aaa\nfork=bbb\nahead=2\nbehind=5\nsame=0\nbye\n")
 	got, err := ParseSyncStatus(out)
 	if err != nil {
 		t.Fatalf("ParseSyncStatus: %v", err)
@@ -133,11 +157,15 @@ func TestParseSyncStatusIgnoresNoise(t *testing.T) {
 // whether to destroy a working tree from values nothing reported.
 func TestParseSyncStatusRejectsPartialOutput(t *testing.T) {
 	cases := map[string]string{
-		"no dirty":  "local=a\nfork=b\nahead=1\nbehind=1\nsame=1\n",
-		"no same":   "dirty=0\nlocal=a\nfork=b\nahead=1\nbehind=1\n",
-		"no local":  "dirty=0\nfork=b\nahead=1\nbehind=1\nsame=1\n",
-		"empty":     "",
-		"non-numer": "dirty=lots\nlocal=a\nfork=b\nahead=1\nbehind=1\nsame=1\n",
+		"no dirty": "untracked=0\nlocal=a\nfork=b\nahead=1\nbehind=1\nsame=1\n",
+		"no same":  "dirty=0\nuntracked=0\nlocal=a\nfork=b\nahead=1\nbehind=1\n",
+		"no local": "dirty=0\nuntracked=0\nfork=b\nahead=1\nbehind=1\nsame=1\n",
+		// A missing "untracked" must fail like any other absent field rather
+		// than defaulting to 0. It gates nothing, but a reading that invents
+		// values is not a reading.
+		"no untracked": "dirty=0\nlocal=a\nfork=b\nahead=1\nbehind=1\nsame=1\n",
+		"empty":        "",
+		"non-numer":    "dirty=lots\nuntracked=0\nlocal=a\nfork=b\nahead=1\nbehind=1\nsame=1\n",
 	}
 	for name, out := range cases {
 		if _, err := ParseSyncStatus([]byte(out)); err == nil {
@@ -163,6 +191,24 @@ func TestSyncStatusCanAdopt(t *testing.T) {
 			// would destroy it.
 			name:   "uncommitted work would be lost",
 			status: SyncStatus{Local: "a", Fork: "b", SameContent: true, Dirty: 1},
+			want:   false,
+		},
+		{
+			// THE REGRESSION THIS GUARDS. These checkouts live in a VM whose
+			// job is running agents over them, so untracked scratch files are
+			// the normal state. Counting them as dirt withheld the offer
+			// essentially always, and the reset provably cannot touch them:
+			// SameContent means the fork's tree equals HEAD's, and an
+			// untracked file is absent from both.
+			name:   "untracked files alone do not block adopting",
+			status: SyncStatus{Local: "a", Fork: "b", SameContent: true, Untracked: 7},
+			want:   true,
+		},
+		{
+			// Tracked changes still do, and the two must not be conflated:
+			// a reset --hard discards these outright.
+			name:   "tracked changes still block, untracked or not",
+			status: SyncStatus{Local: "a", Fork: "b", SameContent: true, Dirty: 1, Untracked: 7},
 			want:   false,
 		},
 		{

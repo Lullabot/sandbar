@@ -214,7 +214,9 @@ When — and only when — all three of these hold:
 Reset this checkout onto the published commits? [y/N]
 ```
 
-In the TUI this arrives as the usual `[y] yes  [n] cancel` confirmation.
+In the TUI this arrives as the usual `[y] yes  [n] cancel` confirmation, on
+whichever screen the finished publish left you on — the run's progress screen,
+the board, or the Landing pane.
 Saying yes runs `git reset --hard` onto the fetched commits, leaving your
 checkout exactly matching what is public. Nothing is lost: the content is
 identical by construction, and the only things discarded are the local commit
@@ -226,12 +228,19 @@ without a terminal `sand publish` prints the command instead of running it.
 
 The offer is withheld, with the reason printed, when:
 
-- **your tree is dirty.** Publication carries committed commits only, so the
-  uncommitted remainder was deliberately left behind — a reset would destroy
-  it. Commit or stash it, then publish again.
+- **you have uncommitted changes to tracked files.** Publication carries
+  committed commits only, so the uncommitted remainder was deliberately left
+  behind — a reset would destroy it. Commit or stash it, then publish again.
 - **the content genuinely differs.** That is not a SHA-divergence artifact;
   you have real local changes the fork doesn't, and a reset would discard
   them.
+
+**Untracked files do not withhold the offer.** These checkouts live in a VM
+whose whole job is running agents over them, so untracked scratch files are the
+normal state rather than a warning sign. They also cannot be harmed here: the
+offer is only ever made when the fork's tree is *identical* to yours, and a file
+that is untracked is in neither tree, so the reset has nothing to collide with.
+They are counted in the summary and left exactly where they are.
 
 The reset re-checks both conditions **inside the guest**, immediately before
 it acts. A VM runs agent code that can write files at any moment, so a guard

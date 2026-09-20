@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
@@ -282,6 +283,7 @@ func (m *model) openForm() tea.Cmd {
 	m.toolGo = cfg.WithGo
 	m.toolJava = cfg.WithJava
 	m.toolRebuild = false
+	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
 	m.view = viewForm
 	return tea.Batch(m.inputs[0].Focus(), m.kickFormToolsetLoad())
 }
@@ -364,6 +366,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
+	m.resetCloneURL = cfg.CloneURL
 	m.resetWithClaude = cfg.WithClaude
 	m.resetWithCodex = cfg.WithCodex
 	m.resetWithDDEV = cfg.WithDDEV
@@ -371,6 +374,11 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetWithJava = cfg.WithJava
 	m.preserveClaude = false
 	m.preserveProject = false
+	m.preserveHome = false
+	// The checkouts to offer come from the host-side registry the sweep fills, not
+	// from the guest: the form has to open instantly, and the VM may not even be
+	// running yet. See resetpreserve.go.
+	m.resetCheckouts, m.resetCheckoutsHidden = resetPreserveCandidates(m.checkouts, scope, cfg.Name, cfg.User, cfg.CloneURL, time.Now())
 	orgRel, ok := provision.OrgRelDir(cfg.CloneURL)
 	m.projectToggleEnabled = ok // no clone, or no org segment => nothing to preserve
 	m.projectToggleLabel = ""
@@ -511,6 +519,17 @@ type formToggle struct {
 	help  string // shown as the focused-field help; "" renders nothing (reset mode's toggles)
 	get   func(*model) bool
 	set   func(*model, bool)
+
+	// locked marks a toggle whose answer is already decided by another toggle:
+	// it renders CHECKED regardless of its own state, it is skipped by the focus
+	// walk, and its set is never called. Today the only source is the whole-home
+	// preserve option, which subsumes every option below it.
+	//
+	// The underlying model field is deliberately left alone rather than forced to
+	// true. A user who turns the whole-home option back off must find their
+	// earlier picks where they left them — the display is what changes, not the
+	// choice they made.
+	locked bool
 }
 
 // baseWideHelp is shared by the three tool toggles: they configure the SHARED
@@ -567,25 +586,99 @@ func (m model) createToggles() []formToggle {
 	}
 }
 
-// resetToggles is reset mode's toggle list: preserve Claude Code settings,
-// plus preserve the cloned project — the latter only when there is one
-// (projectToggleEnabled), matching the pre-generalization behavior exactly.
+// lockedToggleSuffix marks a row the form is answering on the user's behalf.
+//
+// It is the same word the locked Name and repo URL fields use (see
+// fieldLocked), because it is the same idea, and it is TEXT rather than dimming
+// alone on purpose: this UI's rule is that colour is never the only carrier of
+// meaning (styles.go), so a row that cannot be operated has to say so in a
+// monochrome terminal, in an ANSI-stripped golden, and to a reader who does not
+// separate two greys.
+//
+// It replaced a per-row sentence explaining that the whole-home copy already
+// carried this directory. The rows now simply read as checked and locked, which
+// is the state itself rather than a paragraph about it; the reason is one row
+// up, in the whole-home option's own help.
+const lockedToggleSuffix = " (locked)"
+
+// resetToggles is reset mode's toggle list, in the order a reset is decided:
+// the one option that keeps everything, then the individual things worth
+// keeping — the Claude login, the cloned project (only when there is one:
+// projectToggleEnabled), and one row per git checkout the last sweep found in
+// this VM.
+//
+// The whole-home toggle is FIRST, and that is a focus-stability decision as much
+// as a reading-order one: it is the only row whose state changes the labels of
+// every row below it, so leaving it where the eye starts means the change is
+// seen. The per-checkout rows are last because they are the only ones whose
+// COUNT varies between VMs — everything at a fixed index stays at a fixed index.
 func (m model) resetToggles() []formToggle {
+	// Everything below the whole-home row is subsumed by it, so while it is on
+	// those rows are shown decided — checked and locked — rather than offering a
+	// choice that would change nothing. The rows stay VISIBLE: one that vanished
+	// would take the focus ring's meaning with it and leave a user who turns
+	// whole-home back off hunting for the picks they had already made.
+	subsumed := m.preserveHome
 	t := []formToggle{
 		{
-			label: "Preserve Claude Code settings",
-			get:   func(m *model) bool { return m.preserveClaude },
-			set:   func(m *model, v bool) { m.preserveClaude = v },
+			label: "Preserve the entire home directory",
+			help: "Copies all of ~ out of the VM to this host and back, then re-runs the playbook on top of it. " +
+				"This is the option for rebuilding a VM that is working fine, just to pick up playbook changes. " +
+				"It includes everything below, and it copies the most data — do NOT use it on a VM you suspect is compromised.",
+			get: func(m *model) bool { return m.preserveHome },
+			set: func(m *model, v bool) { m.preserveHome = v },
+		},
+		{
+			label:  "Preserve Claude Code settings",
+			help:   "Keeps ~/.claude and ~/.claude.json: the Claude Code login and its history.",
+			get:    func(m *model) bool { return m.preserveClaude },
+			set:    func(m *model, v bool) { m.preserveClaude = v },
+			locked: subsumed,
 		},
 	}
 	if m.projectToggleEnabled {
 		t = append(t, formToggle{
-			label: m.projectToggleLabel,
-			get:   func(m *model) bool { return m.preserveProject },
-			set:   func(m *model, v bool) { m.preserveProject = v },
+			label:  m.projectToggleLabel,
+			help:   "Keeps this VM's own checkout, its uncommitted work, and the .env beside it — and skips the re-clone, so a private repo needs no token.",
+			get:    func(m *model) bool { return m.preserveProject },
+			set:    func(m *model, v bool) { m.preserveProject = v },
+			locked: subsumed,
+		})
+	}
+	for i := range m.resetCheckouts {
+		t = append(t, formToggle{
+			label:  m.resetCheckouts[i].label,
+			help:   m.resetCheckouts[i].help,
+			get:    func(m *model) bool { return m.resetCheckouts[i].selected },
+			set:    func(m *model, v bool) { m.resetCheckouts[i].selected = v },
+			locked: subsumed,
 		})
 	}
 	return t
+}
+
+// preserveRequested reports whether the reset form is asking for anything at all
+// to survive the rebuild — what the copy-to-host warning and the options handed
+// to provision.Reset both hang off.
+func (m model) preserveRequested() bool {
+	if m.preserveHome || m.preserveClaude || (m.preserveProject && m.projectToggleEnabled) {
+		return true
+	}
+	return len(m.selectedPreservePaths()) > 0
+}
+
+// selectedPreservePaths is the absolute guest paths of the ticked checkout rows,
+// in the order they are listed. The stored path is used, never the displayed
+// label: the label is shortened against a GUESS at the guest home, and acting on
+// a guess is how a reset would preserve the wrong directory.
+func (m model) selectedPreservePaths() []string {
+	var out []string
+	for _, c := range m.resetCheckouts {
+		if c.selected {
+			out = append(out, c.path)
+		}
+	}
+	return out
 }
 
 // toggles returns the active toggle list for the current form mode.
@@ -641,29 +734,70 @@ func (m *model) resetFocusPrev() tea.Cmd {
 	return m.formFocusPrev(fHostname, fCloneToken)
 }
 
+// fieldLocked reports whether field i is displayed but not editable in the
+// current mode. Reset mode locks two:
+//
+//   - Name, because a reset rebuilds THIS VM; typing another name would make it
+//     a create wearing a reset's clothes.
+//   - The repo URL, because a reset rebuilds this VM's PROJECT. Editing it made
+//     one form mean two different things: the preserve toggle is labelled with
+//     the org the VM actually has ("Preserve ~/github.com/octocat") while acting
+//     on whatever org the edited URL named, so a reset asked to keep a project
+//     could discard the old tree, and a reset that intended to switch projects
+//     had no way to say what should happen to the old one. The verb is "give me
+//     this VM again"; a different repo is a different VM, and `n` makes one.
+//
+// Create mode locks nothing — every field there is a real choice.
+func (m model) fieldLocked(i int) bool {
+	return m.resetMode && (i == fName || i == fCloneURL)
+}
+
+// nextEditable walks from index `from` in direction step (+1/-1) to the first
+// unlocked input inside [firstInput, lastInput], reporting false when the walk
+// runs off that range. It is what lets a locked field sit in the middle of the
+// ring (the repo URL, between the docker proxy host and the token) without
+// focus ever landing on it.
+func (m model) nextEditable(from, step, firstInput, lastInput int) (int, bool) {
+	for i := from + step; i >= firstInput && i <= lastInput; i += step {
+		if !m.fieldLocked(i) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // formFocusNext/Prev are the shared focus walk behind focusNext/Prev and
 // resetFocusNext/Prev: text inputs from firstInput to lastInput, then the
 // current mode's toggles (m.toggles(), which already excludes any hidden
 // ones), wrapping back to firstInput. Create mode passes fName as firstInput
 // (the Name field is editable there); reset mode passes fHostname (the Name
-// is locked and never focused).
+// is locked and never focused). Locked fields inside the range are stepped
+// over — see fieldLocked — and so are locked TOGGLES, which is the same idea one
+// row further down: see nextOperableToggle.
 func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
-	n := len(m.toggles())
 	switch {
 	case m.toggleFocus == -1:
-		if m.focusIdx < lastInput {
+		if next, ok := m.nextEditable(m.focusIdx, 1, firstInput, lastInput); ok {
 			m.inputs[m.focusIdx].Blur()
-			m.focusIdx++
-			return m.inputs[m.focusIdx].Focus()
+			m.focusIdx = next
+			return m.inputs[next].Focus()
 		}
-		// Past the last input → first toggle; blur all text inputs.
+		// Past the last input → first operable toggle; blur all text inputs.
+		if first, ok := m.nextOperableToggle(-1, 1); ok {
+			m.inputs[m.focusIdx].Blur()
+			m.toggleFocus = first
+			return nil
+		}
+		// Every toggle is locked (or there are none): wrap straight back round.
 		m.inputs[m.focusIdx].Blur()
-		m.toggleFocus = 0
-		return nil
-	case m.toggleFocus < n-1:
-		m.toggleFocus++
-		return nil
-	default: // last toggle → wrap around to the first editable input
+		m.focusIdx = firstInput
+		return m.inputs[firstInput].Focus()
+	default:
+		if next, ok := m.nextOperableToggle(m.toggleFocus, 1); ok {
+			m.toggleFocus = next
+			return nil
+		}
+		// Last operable toggle → wrap around to the first editable input.
 		m.toggleFocus = -1
 		m.focusIdx = firstInput
 		return m.inputs[firstInput].Focus()
@@ -673,25 +807,49 @@ func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
 func (m *model) formFocusPrev(firstInput, lastInput int) tea.Cmd {
 	n := len(m.toggles())
 	switch {
-	case m.toggleFocus > 0:
-		m.toggleFocus--
-		return nil
-	case m.toggleFocus == 0:
-		// Back up from the first toggle to the last input.
+	case m.toggleFocus >= 0:
+		if prev, ok := m.nextOperableToggle(m.toggleFocus, -1); ok {
+			m.toggleFocus = prev
+			return nil
+		}
+		// Back up from the first operable toggle to the last input.
 		m.toggleFocus = -1
 		m.focusIdx = lastInput
 		return m.inputs[lastInput].Focus()
 	default: // focus is in the inputs
-		if m.focusIdx > firstInput {
+		if prev, ok := m.nextEditable(m.focusIdx, -1, firstInput, lastInput); ok {
 			m.inputs[m.focusIdx].Blur()
-			m.focusIdx--
-			return m.inputs[m.focusIdx].Focus()
+			m.focusIdx = prev
+			return m.inputs[prev].Focus()
 		}
-		// At the first editable input → wrap up to the last toggle.
-		m.inputs[m.focusIdx].Blur()
-		m.toggleFocus = n - 1
+		// At the first editable input → wrap up to the last operable toggle.
+		if last, ok := m.nextOperableToggle(n, -1); ok {
+			m.inputs[m.focusIdx].Blur()
+			m.toggleFocus = last
+			return nil
+		}
 		return nil
 	}
+}
+
+// nextOperableToggle walks from index `from` in direction step (+1/-1) to the
+// first toggle the user can actually act on, reporting false when the walk runs
+// off the end of the list.
+//
+// A locked toggle is stepped over rather than focused-but-inert, which is the
+// same call the board's command registry makes about a verb that does not apply:
+// a row the ring can land on but no key will change is the "advertise it, then
+// silently do nothing" pattern this UI is deliberately free of. The row is still
+// RENDERED — it is part of the answer the form is giving — it just cannot be
+// aimed at.
+func (m model) nextOperableToggle(from, step int) (int, bool) {
+	toggles := m.toggles()
+	for i := from + step; i >= 0 && i < len(toggles); i += step {
+		if !toggles[i].locked {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // field returns a trimmed form value, so a field holding only whitespace counts
@@ -879,13 +1037,26 @@ func (m model) checkNotBusy(name string) error {
 	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)
 }
 
-// submitReset validates a reset-mode form and dispatches provision.Reset. The
-// Name and base image come from the locked targets (not the editable fields), and
-// the disk must be at least the base floor: the base image is built at
-// BaseDiskFloor and a clone's qcow2 disk can grow but not shrink.
-func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
+// resetConfig overrides everything a reset does not let the form decide: the
+// VM's name, its base image, and its repo. All three come from the locked
+// target captured in openResetForm rather than from the inputs — the name and
+// URL fields are rendered but unfocusable (fieldLocked), and reading them back
+// here would leave a second copy of the truth able to drift from the one the
+// preserve toggle was labelled from.
+func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 	cfg.Name = m.resetName
 	cfg.BaseName = m.resetBaseName
+	cfg.CloneURL = m.resetCloneURL
+	return cfg
+}
+
+// submitReset validates a reset-mode form and dispatches provision.Reset. The
+// Name, base image and repo come from the locked targets (not the editable
+// fields — see resetConfig), and the disk must be at least the base floor: the
+// base image is built at BaseDiskFloor and a clone's qcow2 disk can grow but
+// not shrink.
+func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
+	cfg = m.resetConfig(cfg)
 	if err := cfg.Validate(); err != nil {
 		// Validate now enforces the base-disk floor for every entrypoint (a clone
 		// cannot shrink below it), so the reset path no longer needs its own check.
@@ -900,7 +1071,16 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.formErr = nil
-	opts := provision.ResetOptions{PreserveClaude: m.preserveClaude, PreserveProject: m.preserveProject && m.projectToggleEnabled}
+	// A whole-home preserve is sent ALONE rather than alongside the individual
+	// toggles it subsumes. The staging layer would short-circuit them anyway, but
+	// a request that says exactly what it means is what shows up in a log, and in
+	// the next person's reading of it.
+	opts := provision.ResetOptions{PreserveHome: m.preserveHome}
+	if !m.preserveHome {
+		opts.PreserveClaude = m.preserveClaude
+		opts.PreserveProject = m.preserveProject && m.projectToggleEnabled
+		opts.PreservePaths = m.selectedPreservePaths()
+	}
 	// Capture the provider by value (see submitForm): the run closure runs on
 	// beginStream's goroutine and must not read the mutable m.members slice.
 	prov := m.formProvider()
@@ -928,7 +1108,7 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.submitForm()
 	}
 
-	// Reset mode locks the Name field and adds two preserve toggles after the
+	// Reset mode locks the Name field and adds the preserve toggles after the
 	// inputs, so it navigates differently; create mode keeps its existing flow.
 	if m.resetMode {
 		return m.updateResetForm(msg)
@@ -937,8 +1117,9 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// On a focused toggle, space/enter flips it rather than navigating, and the
 	// key must NOT reach the text inputs below — mirrors updateResetForm.
 	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		t := m.toggles()[m.toggleFocus]
-		t.set(&m, !t.get(&m))
+		if t := m.toggles()[m.toggleFocus]; !t.locked {
+			t.set(&m, !t.get(&m))
+		}
 		return m, nil
 	}
 
@@ -977,13 +1158,17 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateResetForm handles keys for the reset-mode form: navigation skips the
-// locked Name and extends into the two preserve toggles, and space/enter on a
+// locked Name and extends into the preserve toggles, and space/enter on a
 // focused toggle flips it instead of moving focus.
 func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// On a focused toggle, space/enter flips its bool rather than navigating.
+	// On a focused toggle, space/enter flips its bool rather than navigating. A
+	// locked one (see formToggle.locked) is skipped by the focus walk and so is
+	// not reachable here; the guard is what keeps that true if it ever becomes
+	// reachable by another route.
 	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		t := m.toggles()[m.toggleFocus]
-		t.set(&m, !t.get(&m))
+		if t := m.toggles()[m.toggleFocus]; !t.locked {
+			t.set(&m, !t.get(&m))
+		}
 		return m, nil
 	}
 
@@ -1005,18 +1190,28 @@ func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleRow renders one reset-mode preserve toggle: a checkbox glyph and the
-// label, highlighted when focused. It uses inline styles rather than
+// toggleRow renders one form toggle: a checkbox glyph and the label,
+// highlighted when focused. It uses inline styles rather than
 // labelStyle/focusedLabelStyle, whose fixed width would wrap these longer
-// lines. Callers only render a toggle that is actually usable — a disabled,
-// unreachable toggle never reaches the screen.
-func toggleRow(label string, on, focused bool) string {
+// lines. A toggle that can never apply is not rendered at all (the project row
+// on a VM that cloned nothing); locked is a different thing — the row applies,
+// the answer is just already decided elsewhere.
+//
+// A locked row renders CHECKED whatever its own state says, because that is the
+// truth of what the reset will do: the whole-home copy is taking that directory
+// whether or not its row was ever ticked. It is dimmer than an ordinary row AND
+// carries lockedToggleSuffix, since colour alone is never allowed to be the
+// carrier (styles.go).
+func toggleRow(label string, on, focused, locked bool) string {
 	box := "[ ]"
-	if on {
+	if on || locked {
 		box = "[x]"
 	}
 	line := box + " " + label
-	if focused {
+	switch {
+	case locked:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(line + lockedToggleSuffix)
+	case focused:
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render(line)
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
@@ -1048,6 +1243,16 @@ func (m model) profileSelectorRow() string {
 	return ls.Render("Profile:") + " " + value
 }
 
+// lockedFieldValue renders a locked field's value, saying so in words when
+// there is none — an empty line beside a label reads as "sand lost this", where
+// a VM that simply cloned no repo has nothing to show and never will.
+func lockedFieldValue(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "(none)"
+	}
+	return v
+}
+
 // formHelp returns the bindings shown in the create/reset form's help bar.
 // 'q' is a text character in the form, so Quit is intentionally omitted (only
 // ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
@@ -1075,10 +1280,12 @@ func (m model) formView() string {
 	}
 
 	for i := range m.inputs {
-		// In reset mode the Name is fixed to the target VM: render it as a static,
-		// dimmed line rather than an editable input box.
-		if m.resetMode && i == fName {
-			b.WriteString(statusStyle.Render("Name: "+m.resetName+" (locked)") + "\n")
+		// A locked field (reset mode's Name and repo URL — see fieldLocked) is
+		// still SHOWN, as a static dimmed line rather than an editable box: it is
+		// what identifies the VM being rebuilt, and hiding it would leave the
+		// preserve toggle below referring to a repo the form never names.
+		if m.fieldLocked(i) {
+			b.WriteString(statusStyle.Render(fieldLabels[i]+": "+lockedFieldValue(m.inputs[i].Value())+" (locked)") + "\n")
 			continue
 		}
 		ls := labelStyle
@@ -1097,21 +1304,25 @@ func (m model) formView() string {
 	if len(toggles) > 0 {
 		b.WriteString("\n")
 		for i, t := range toggles {
-			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i) + "\n")
+			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i, t.locked) + "\n")
 		}
 	}
 	if m.resetMode {
-		if m.preserveClaude || m.preserveProject {
-			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies your Claude login and the .env token out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
+		if m.resetCheckoutsHidden > 0 {
+			b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fmt.Sprintf(
+				"%d more checkout(s) in this VM are not listed. Preserve the entire home directory to keep them all.", m.resetCheckoutsHidden)) + "\n")
+		}
+		if m.preserveRequested() {
+			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies data — your Claude login, the .env token, your working trees — out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
 		}
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render("Disk can only grow from the base floor (min "+vm.BaseDiskFloor+").") + "\n")
 	}
 
 	// Help for the focused field (where to get a GitHub token, what defaults
 	// apply, which fields are required) or, when a toggle is focused, that
-	// toggle's own help (e.g. the tool toggles' base-wide-effect warning).
-	// Reset mode's toggles carry no help text, matching the pre-existing
-	// behavior of showing nothing while one of them is focused.
+	// toggle's own help — the tool toggles' base-wide-effect warning in create
+	// mode, and in reset mode what each preserve option actually copies and how
+	// stale the sweep that found it is.
 	switch {
 	case m.toggleFocus >= 0 && m.toggleFocus < len(toggles) && toggles[m.toggleFocus].help != "":
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(toggles[m.toggleFocus].help) + "\n")

@@ -364,11 +364,17 @@ type model struct {
 	// reset always targets its own VM's already-fixed member.
 	formProfileIdx int
 
-	// Reset mode reuses the create form to reset a managed VM: the Name is locked
-	// to the target and two preserve toggles follow the inputs.
+	// Reset mode reuses the create form to reset a managed VM: the Name and the
+	// repo URL are locked to the target (see fieldLocked) and two preserve
+	// toggles follow the inputs.
 	resetMode     bool
 	resetName     string // locked Name when in reset mode
 	resetBaseName string // base image the reset clones from
+	// resetCloneURL is the target VM's RECORDED repo, and the reset's clone URL
+	// full stop: a reset rebuilds the project this VM already has. It is also
+	// what projectToggleLabel/projectToggleEnabled below are derived from, so the
+	// toggle and the clone can never name two different orgs.
+	resetCloneURL string
 	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
 	// form shows no tool toggles, so without carrying these the rebuilt config
 	// would fall back to DefaultCreateConfig()'s all-on selection and a reset
@@ -383,7 +389,19 @@ type model struct {
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
 	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
-	toggleFocus          int    // -1 = focus is in the text inputs; index into m.toggles() otherwise
+	// preserveHome is reset mode's whole-home toggle. It subsumes every other
+	// preserve toggle on the form (the rest say so while it is on), and it is the
+	// answer to "rebuild this VM to pick up playbook changes" — the reason to
+	// reset a VM that has nothing wrong with it.
+	preserveHome bool
+	// resetCheckouts are the git checkouts and worktrees the last sweep found in
+	// the VM being reset, offered as one toggle each — including the ones sand
+	// never cloned. Built in openResetForm from the host-side checkout registry,
+	// which means NO guest contact when the form opens (resetpreserve.go).
+	// resetCheckoutsHidden is how many the row cap left out.
+	resetCheckouts       []resetCheckout
+	resetCheckoutsHidden int
+	toggleFocus          int // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
 	// Create-mode tool-set + rebuild toggles (defaults set in openForm). The
 	// tool toggles configure the SHARED base image, not this one VM — see
@@ -1774,7 +1792,7 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // confirmView renders the pending confirmation prompt. Shared by boardView,
-// detailView and progressView so no screen formats its own overlay text — and
+// progressView and landingView so no screen formats its own overlay text — and
 // clipped to ContentWidth like every other line, since a prompt that wrapped
 // would cost the screen a row it never budgeted.
 func (m model) confirmView() string {

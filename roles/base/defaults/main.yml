@@ -72,6 +72,12 @@ base_packages:
   - vim
   - wget
   - yq
+  # A reset copies everything the user asked to keep out of the guest as a tar
+  # stream, and the compressor runs HERE, in the guest, on the critical path. A
+  # whole preserved home is routinely several gigabytes, where gzip is minutes
+  # and zstd is seconds for the same archive size. A guest without it still
+  # resets — internal/provision/compress.go falls back to gzip — just slowly.
+  - zstd
 
 # Configurable base-image tool-set (sand create --with-claude/--with-codex/
 # --with-ddev/--with-go/--with-java). Four of the five default true so an

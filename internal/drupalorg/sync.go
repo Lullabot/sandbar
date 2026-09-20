@@ -81,6 +81,17 @@ fi
 // git's version and the remote's configured refspec, and a sync must not
 // report on a ref it cannot be sure it refreshed.
 //
+// The working tree is measured as TWO counts, not one, and the split is the
+// difference between an offer that appears and one that never does.
+// `git status --porcelain` on its own counts untracked files as dirt, and a
+// guest that has been running agents essentially always holds some — one
+// stray build artifact was enough to withhold the offer permanently. So
+// tracked changes are counted with --untracked-files=no (they are the ones a
+// reset destroys) and untracked files are counted separately with `git
+// ls-files --others --exclude-standard`, for reporting only. SyncStatus.
+// Untracked carries the proof that ignoring them is safe rather than
+// convenient.
+//
 // "same" is the field that decides everything downstream. After a clean
 // replay the two histories are divergent (each is "ahead" of the other in
 // commit count) while their TREES are identical — which is precisely the
@@ -107,13 +118,15 @@ const fetchScriptTemplate = `set -e
 ` + remoteResolution + `git fetch --quiet "$r" "__BRANCH__"
 head=$(git rev-parse --verify HEAD)
 fork=$(git rev-parse --verify FETCH_HEAD)
-status=$(git status --porcelain)
+status=$(git status --porcelain --untracked-files=no)
 if [ -z "$status" ]; then dirty=0; else dirty=$(printf '%s\n' "$status" | wc -l | tr -d ' '); fi
+others=$(git ls-files --others --exclude-standard)
+if [ -z "$others" ]; then untracked=0; else untracked=$(printf '%s\n' "$others" | wc -l | tr -d ' '); fi
 ahead=$(git rev-list --count "$fork..$head")
 behind=$(git rev-list --count "$head..$fork")
 if git diff --quiet "$head" "$fork"; then same=1; else same=0; fi
-printf 'dirty=%s\nlocal=%s\nfork=%s\nahead=%s\nbehind=%s\nsame=%s\n' \
-  "$dirty" "$head" "$fork" "$ahead" "$behind" "$same"
+printf 'dirty=%s\nuntracked=%s\nlocal=%s\nfork=%s\nahead=%s\nbehind=%s\nsame=%s\n' \
+  "$dirty" "$untracked" "$head" "$fork" "$ahead" "$behind" "$same"
 `
 
 // resetScriptTemplate adopts the published commits: it re-fetches, re-checks
@@ -129,6 +142,12 @@ printf 'dirty=%s\nlocal=%s\nfork=%s\nahead=%s\nbehind=%s\nsame=%s\n' \
 // --hard` and abort it with a diagnostic instead of destroying whatever
 // appeared in the meantime.
 //
+// The status read excludes untracked files for the reason SyncStatus.
+// Untracked sets out in full: the `git diff` below proves the fork's tree is
+// identical to HEAD's, so an untracked file is a path NEITHER tree mentions
+// and the reset cannot collide with it. Tracked changes are a different
+// matter entirely, and still refuse.
+//
 // The status read is assigned to a variable rather than tested inline for
 // the reason fetchScriptTemplate explains at length: `[ -n "$(git status
 // --porcelain)" ]` treats a FAILED git status as a clean tree, and a clean
@@ -138,9 +157,9 @@ const resetScriptTemplate = `set -e
 ` + remoteResolution + `git fetch --quiet "$r" "__BRANCH__"
 head=$(git rev-parse --verify HEAD)
 fork=$(git rev-parse --verify FETCH_HEAD)
-status=$(git status --porcelain)
+status=$(git status --porcelain --untracked-files=no)
 if [ -n "$status" ]; then
-  echo "refusing to adopt: this checkout has uncommitted changes" >&2
+  echo "refusing to adopt: this checkout has uncommitted changes to tracked files" >&2
   exit 1
 fi
 if ! git diff --quiet "$head" "$fork"; then
@@ -182,10 +201,26 @@ func BuildResetCommand(branch string) (string, error) {
 
 // SyncStatus is how a checkout compares to the fork branch just published to.
 type SyncStatus struct {
-	// Dirty is the number of uncommitted changes in the working tree.
+	// Dirty is the number of uncommitted changes to TRACKED files.
 	// Publication carries committed commits ONLY, so a dirty tree means work
 	// stayed behind — and adopting the fork's history would destroy it.
 	Dirty int
+	// Untracked is the number of untracked, non-ignored files. It is REPORTED
+	// but is never a safety gate, because a reset cannot harm them here.
+	//
+	// `git reset --hard` DOES clobber an untracked file when the target commit
+	// holds a file at the same path — it is `git checkout` that refuses, not
+	// reset. That collision is nevertheless impossible in this flow: adopting
+	// is offered only when SameContent holds, which means the fork's tree is
+	// identical to HEAD's, and a file that is untracked is by definition
+	// absent from HEAD's tree and therefore from the fork's too. Every
+	// untracked file here is a path neither tree mentions, and the reset
+	// leaves it exactly where it is.
+	//
+	// Counting it apart from Dirty is what makes the offer reachable at all.
+	// These checkouts live in a VM whose whole job is running agents over
+	// them, so untracked scratch files are the normal state, not an anomaly.
+	Untracked int
 	// Local is the checkout's HEAD; Fork is the commit the fork's branch
 	// points at. After a replay these always differ: the content API creates
 	// new commit objects rather than transporting the local ones.
@@ -213,10 +248,14 @@ func (s SyncStatus) Diverged() bool { return s.Local != s.Fork && s.Fork != "" }
 // and there is no uncommitted work that the reset would throw away.
 //
 // All three conditions are required. Without SameContent a reset would
-// discard real local changes that never made it to the fork; with a dirty
-// tree it would discard the uncommitted remainder publication deliberately
+// discard real local changes that never made it to the fork; with tracked
+// changes uncommitted it would discard the remainder publication deliberately
 // left behind. Neither is a thing to do on a developer's behalf, and neither
 // is a thing to offer.
+//
+// Untracked files are deliberately NOT part of this. They are the most common
+// thing in one of these checkouts and the reset provably cannot touch them —
+// see SyncStatus.Untracked.
 func (s SyncStatus) CanAdopt() bool {
 	return s.Diverged() && s.SameContent && s.Dirty == 0
 }
@@ -230,11 +269,11 @@ func (s SyncStatus) Summary() string {
 		return "this checkout already matches the fork"
 	case s.SameContent && s.Dirty == 0:
 		return fmt.Sprintf(
-			"this checkout and the fork hold the same content under different commits (%d local, %d published) — publication replays commits rather than pushing them, so the SHAs differ",
-			s.Ahead, s.Behind)
+			"this checkout and the fork hold the same content under different commits (%d local, %d published) — publication replays commits rather than pushing them, so the SHAs differ%s",
+			s.Ahead, s.Behind, s.untrackedNote())
 	case s.SameContent:
 		return fmt.Sprintf(
-			"this checkout and the fork hold the same committed content under different commits (%d local, %d published), but %d uncommitted change(s) would be lost by adopting the published history",
+			"this checkout and the fork hold the same committed content under different commits (%d local, %d published), but %d uncommitted change(s) to tracked files would be lost by adopting the published history",
 			s.Ahead, s.Behind, s.Dirty)
 	default:
 		return fmt.Sprintf(
@@ -243,11 +282,23 @@ func (s SyncStatus) Summary() string {
 	}
 }
 
+// untrackedNote is the reassurance that rides along with an offer to adopt.
+// Untracked files are exactly what a developer looking at a `git reset --hard`
+// prompt is afraid for, so the count says outright that they survive it,
+// rather than leaving their absence from the decision to be inferred.
+func (s SyncStatus) untrackedNote() string {
+	if s.Untracked == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d untracked file(s) are left untouched)", s.Untracked)
+}
+
 // syncFieldKeys are the recognized "key=value" field names, so that a login
 // shell's banner or any other stray guest output is ignored as noise rather
 // than misparsed — the same rule sweep.go and ParseCollect apply.
 var syncFieldKeys = map[string]bool{
-	"dirty": true, "local": true, "fork": true, "ahead": true, "behind": true, "same": true,
+	"dirty": true, "untracked": true, "local": true, "fork": true,
+	"ahead": true, "behind": true, "same": true,
 }
 
 // ParseSyncStatus converts BuildFetchCommand's stdout into a SyncStatus. It
@@ -279,6 +330,8 @@ func ParseSyncStatus(out []byte) (SyncStatus, error) {
 			switch key {
 			case "dirty":
 				s.Dirty = n
+			case "untracked":
+				s.Untracked = n
 			case "ahead":
 				s.Ahead = n
 			case "behind":

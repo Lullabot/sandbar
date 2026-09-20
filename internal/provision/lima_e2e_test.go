@@ -20,6 +20,7 @@ package provision
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -87,7 +88,10 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 	if err := cli.Clone(base, clone); err != nil {
 		t.Fatalf("clone: %v", err)
 	}
-	if err := cli.Configure(clone, 2, "2GiB", "30GiB"); err != nil {
+	// Configure also repoints the clone's playbook mount; this fixture's overlay
+	// declares no such mount, so the assignment is a no-op here and any real
+	// directory will do.
+	if err := cli.Configure(clone, 2, "2GiB", "30GiB", t.TempDir()); err != nil {
 		t.Fatalf("configure (edit --set): %v", err)
 	}
 	if err := cli.Start(clone); err != nil {
@@ -119,8 +123,8 @@ func TestE2E_ConfigureGrowsDiskAndStageRoundTrip(t *testing.T) {
 			"printf SECRET-TOKEN > ~/.claude/.credentials.json; chmod 600 ~/.claude/.credentials.json; "+
 			`printf '{"oauth":"keepme"}' > ~/.claude.json`)
 
-	archive := filepath.Join(t.TempDir(), "claude.tgz")
-	if err := StageOut(context.Background(), cli, clone, home, []string{".claude", ".claude.json"}, archive); err != nil {
+	archive := filepath.Join(t.TempDir(), "claude.tar")
+	if err := StageOut(context.Background(), cli, clone, home, []string{".claude", ".claude.json"}, archive, io.Discard); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 	if fi, err := os.Stat(archive); err != nil || fi.Size() == 0 {

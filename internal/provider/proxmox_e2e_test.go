@@ -302,13 +302,25 @@ func TestE2EProxmoxLifecycle(t *testing.T) {
 	// inactive storage legitimately leaves it 0 ("unknown"), which is the whole
 	// point of the no-false-warning contract, so a 0 here is not a failure.
 
-	// --- reset recreates it in place ----------------------------------------
+	// --- reset recreates it in place, keeping its MAC ------------------------
+	//
+	// The MAC is read from inside the GUEST, on both sides of the reset, because
+	// that is the address the network actually sees — the thing a DHCP
+	// reservation matches. Asserting the API call went out, or that the build log
+	// said so, would only prove sand believes it succeeded. PVE gives every clone
+	// a fresh random MAC, so these two being equal cannot happen by accident.
+	macBefore := proxmoxGuestMAC(t, prov, name)
+
 	var resetLog bytes.Buffer
 	if err := prov.Reset(ctx, vmCfg, provision.ResetOptions{}, &resetLog); err != nil {
 		t.Fatalf("Reset: %v\n%s", err, resetLog.String())
 	}
 	if _, err := prov.Get(name); err != nil {
 		t.Fatalf("Get after Reset: %v", err)
+	}
+	if macAfter := proxmoxGuestMAC(t, prov, name); macAfter != macBefore {
+		t.Errorf("the rebuilt VM came up on %s, not its previous %s; a DHCP reservation or firewall rule keyed to the old address would have stopped matching\n%s",
+			macAfter, macBefore, resetLog.String())
 	}
 
 	// --- delete removes it ---------------------------------------------------
@@ -320,6 +332,32 @@ func TestE2EProxmoxLifecycle(t *testing.T) {
 	} else if proxmoxContainsVM(vms, name) {
 		t.Fatalf("%s still present after Delete: %+v", name, vms)
 	}
+}
+
+// guestPrimaryMACScript prints the MAC of the interface the guest's default
+// route uses.
+//
+// The interface is found by walking `ip route get`'s output for the word "dev"
+// rather than by indexing a fixed field, because the output has one more field
+// when the route has a gateway than when it does not. The NIC cannot be named
+// (ens18/enp0s18/eth0 all appear across PVE machine types) and it cannot be
+// "the only one" either: the base image installs Docker, so docker0 is sitting
+// right there in /sys/class/net.
+const guestPrimaryMACScript = `set -- $(ip -o route get 1.1.1.1); while [ "$1" != dev ] && [ $# -gt 1 ]; do shift; done; cat /sys/class/net/"$2"/address`
+
+// proxmoxGuestMAC reads the guest's own primary MAC over a shell, lower-cased
+// (which is how Linux renders it, and how sand compares them).
+func proxmoxGuestMAC(t *testing.T, prov provider.Provider, name string) string {
+	t.Helper()
+	out, err := prov.ShellOut(context.Background(), name, "sh", "-c", guestPrimaryMACScript)
+	if err != nil {
+		t.Fatalf("reading %s's MAC from inside the guest: %v", name, err)
+	}
+	mac := strings.ToLower(strings.TrimSpace(string(out)))
+	if mac == "" {
+		t.Fatalf("%s reported no MAC for its default-route interface", name)
+	}
+	return mac
 }
 
 // TestE2EProxmoxPoolIsolation proves the plan's central security claim: a
