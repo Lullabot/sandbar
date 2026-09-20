@@ -1921,7 +1921,7 @@ not a prompt.</p>
 <td><code>--recreate</code></td>
 <td>bool</td>
 <td><code>false</code></td>
-<td>If <code>--name</code> already exists <strong>and is sand-managed</strong>, delete and re-clone it.</td>
+<td>If <code>--name</code> already exists <strong>and is sand-managed</strong>, delete and re-clone it. Flags you omit are taken from that VM's recorded settings — see <a href="#-rebuild-vs-recreate"><code>--rebuild</code> vs <code>--recreate</code></a>.</td>
 </tr>
 <tr>
 <td><code>--rebuild</code></td>
@@ -2046,6 +2046,24 @@ VM's persistent disk and never appears in a process listing.</p>
   would otherwise delete and replace <em>any</em> instance it is pointed at,
   sand-managed or not.</li>
 </ul>
+<p>A recreate rebuilds a VM <code>sand</code> already knows, so <strong>every flag you leave off
+  comes from that VM's own recorded settings</strong> — its base image, sizing,
+  hostname, git identity and clone URL — rather than from this command's
+  defaults. That is the same rule the <code>--with-*</code> flags follow, and it makes
+  <code>sand create --recreate --name mybox</code> mean "give me this VM back", not "give
+  me a default VM with this name". A flag you <em>do</em> pass still wins, so
+  <code>--recreate --disk 200GiB</code> remains the way to resize one. This matches the
+  TUI's Reset, which has always pre-filled its form from the same recorded
+  settings.</p>
+<p>The one thing that is <em>not</em> remembered is <code>--clone-token</code>: tokens are never
+  written to the managed index (see <a href="#-clone-token-is-a-credential">credential
+  handling</a>). If the recorded <code>--clone-url</code>
+  points at a private repo, pass <code>--clone-token</code> again or the clone inside the
+  VM will fail; <code>sand</code> warns when it reuses a recorded URL with no token.</p>
+<p>What a recreate does <strong>not</strong> do is preserve anything inside the guest: the
+  disk is deleted. To keep the Claude Code login or the project checkout across
+  a rebuild, use the TUI's Reset and its preserve toggles (<a href="../tui/#resetting-a-vm">The
+  TUI</a>).</p>
 <h3 id="disk-sizing">Disk sizing</h3>
 <p>The base image is always built at a fixed <strong>20GiB floor</strong>
 (<code>vm.BaseDiskFloor</code>), regardless of <code>--disk</code> — <code>--disk</code> sizes the <em>clone</em>, not

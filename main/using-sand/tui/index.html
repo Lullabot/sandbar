@@ -1749,12 +1749,15 @@ new VM is created on without leaving the TUI. See
 <a href="../connection-profiles/">Connection Profiles</a> for the full model.</p>
 <h2 id="resetting-a-vm">Resetting a VM</h2>
 <p>Pressing <code>R</code> on a managed tile opens the create form again, titled <em>Reset
-VM</em>, pre-filled with that VM's recorded settings. <code>Name</code> is locked; every
-other field — CPUs, memory, disk, hostname, git identity, clone URL — is
-editable, so a reset doubles as the way to resize a VM or change its
-identity. Confirm with <code>ctrl+s</code> to delete the VM and re-clone it from the
-base image with the edited settings; the new settings are then recorded, so
-the <em>next</em> reset defaults to them.</p>
+VM</em>, pre-filled with that VM's recorded settings. Confirm with <code>ctrl+s</code> to
+delete the VM and re-clone it from the base image; the settings you changed
+are then recorded, so the <em>next</em> reset defaults to them.</p>
+<p>Two fields are shown but <strong>locked</strong>: <code>Name</code> and <code>GitHub repo URL</code>. A reset
+gives you <em>this</em> VM again — same name, same project — so CPUs, memory, disk,
+hostname and git identity are editable (a reset doubles as the way to resize a
+VM), while the two things that say <em>which</em> VM it is are not. To work on a
+different repo, press <code>n</code> and make another VM. The GitHub token field stays
+editable, because re-cloning a private repo still needs one.</p>
 <p>Two <strong>preserve toggles</strong> follow the fields (space/enter flips the focused
 one). Both default off:</p>
 <ul>
