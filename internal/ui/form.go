@@ -519,6 +519,17 @@ type formToggle struct {
 	help  string // shown as the focused-field help; "" renders nothing (reset mode's toggles)
 	get   func(*model) bool
 	set   func(*model, bool)
+
+	// locked marks a toggle whose answer is already decided by another toggle:
+	// it renders CHECKED regardless of its own state, it is skipped by the focus
+	// walk, and its set is never called. Today the only source is the whole-home
+	// preserve option, which subsumes every option below it.
+	//
+	// The underlying model field is deliberately left alone rather than forced to
+	// true. A user who turns the whole-home option back off must find their
+	// earlier picks where they left them — the display is what changes, not the
+	// choice they made.
+	locked bool
 }
 
 // baseWideHelp is shared by the three tool toggles: they configure the SHARED
@@ -575,12 +586,20 @@ func (m model) createToggles() []formToggle {
 	}
 }
 
-// preserveIncludedSuffix marks a toggle whose subject the whole-home copy is
-// already carrying. The rows stay visible and keep their own state rather than
-// disappearing while "preserve everything" is on: a row that vanishes takes the
-// focus ring's meaning with it, and a user who turns the whole-home option back
-// off must find their earlier selections where they left them.
-const preserveIncludedSuffix = " (already in the whole home)"
+// lockedToggleSuffix marks a row the form is answering on the user's behalf.
+//
+// It is the same word the locked Name and repo URL fields use (see
+// fieldLocked), because it is the same idea, and it is TEXT rather than dimming
+// alone on purpose: this UI's rule is that colour is never the only carrier of
+// meaning (styles.go), so a row that cannot be operated has to say so in a
+// monochrome terminal, in an ANSI-stripped golden, and to a reader who does not
+// separate two greys.
+//
+// It replaced a per-row sentence explaining that the whole-home copy already
+// carried this directory. The rows now simply read as checked and locked, which
+// is the state itself rather than a paragraph about it; the reason is one row
+// up, in the whole-home option's own help.
+const lockedToggleSuffix = " (locked)"
 
 // resetToggles is reset mode's toggle list, in the order a reset is decided:
 // the one option that keeps everything, then the individual things worth
@@ -594,10 +613,12 @@ const preserveIncludedSuffix = " (already in the whole home)"
 // seen. The per-checkout rows are last because they are the only ones whose
 // COUNT varies between VMs — everything at a fixed index stays at a fixed index.
 func (m model) resetToggles() []formToggle {
-	suffix := ""
-	if m.preserveHome {
-		suffix = preserveIncludedSuffix
-	}
+	// Everything below the whole-home row is subsumed by it, so while it is on
+	// those rows are shown decided — checked and locked — rather than offering a
+	// choice that would change nothing. The rows stay VISIBLE: one that vanished
+	// would take the focus ring's meaning with it and leave a user who turns
+	// whole-home back off hunting for the picks they had already made.
+	subsumed := m.preserveHome
 	t := []formToggle{
 		{
 			label: "Preserve the entire home directory",
@@ -608,26 +629,29 @@ func (m model) resetToggles() []formToggle {
 			set: func(m *model, v bool) { m.preserveHome = v },
 		},
 		{
-			label: "Preserve Claude Code settings" + suffix,
-			help:  "Keeps ~/.claude and ~/.claude.json: the Claude Code login and its history.",
-			get:   func(m *model) bool { return m.preserveClaude },
-			set:   func(m *model, v bool) { m.preserveClaude = v },
+			label:  "Preserve Claude Code settings",
+			help:   "Keeps ~/.claude and ~/.claude.json: the Claude Code login and its history.",
+			get:    func(m *model) bool { return m.preserveClaude },
+			set:    func(m *model, v bool) { m.preserveClaude = v },
+			locked: subsumed,
 		},
 	}
 	if m.projectToggleEnabled {
 		t = append(t, formToggle{
-			label: m.projectToggleLabel + suffix,
-			help:  "Keeps this VM's own checkout, its uncommitted work, and the .env beside it — and skips the re-clone, so a private repo needs no token.",
-			get:   func(m *model) bool { return m.preserveProject },
-			set:   func(m *model, v bool) { m.preserveProject = v },
+			label:  m.projectToggleLabel,
+			help:   "Keeps this VM's own checkout, its uncommitted work, and the .env beside it — and skips the re-clone, so a private repo needs no token.",
+			get:    func(m *model) bool { return m.preserveProject },
+			set:    func(m *model, v bool) { m.preserveProject = v },
+			locked: subsumed,
 		})
 	}
 	for i := range m.resetCheckouts {
 		t = append(t, formToggle{
-			label: m.resetCheckouts[i].label + suffix,
-			help:  m.resetCheckouts[i].help,
-			get:   func(m *model) bool { return m.resetCheckouts[i].selected },
-			set:   func(m *model, v bool) { m.resetCheckouts[i].selected = v },
+			label:  m.resetCheckouts[i].label,
+			help:   m.resetCheckouts[i].help,
+			get:    func(m *model) bool { return m.resetCheckouts[i].selected },
+			set:    func(m *model, v bool) { m.resetCheckouts[i].selected = v },
+			locked: subsumed,
 		})
 	}
 	return t
@@ -748,9 +772,9 @@ func (m model) nextEditable(from, step, firstInput, lastInput int) (int, bool) {
 // ones), wrapping back to firstInput. Create mode passes fName as firstInput
 // (the Name field is editable there); reset mode passes fHostname (the Name
 // is locked and never focused). Locked fields inside the range are stepped
-// over — see fieldLocked.
+// over — see fieldLocked — and so are locked TOGGLES, which is the same idea one
+// row further down: see nextOperableToggle.
 func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
-	n := len(m.toggles())
 	switch {
 	case m.toggleFocus == -1:
 		if next, ok := m.nextEditable(m.focusIdx, 1, firstInput, lastInput); ok {
@@ -758,14 +782,22 @@ func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
 			m.focusIdx = next
 			return m.inputs[next].Focus()
 		}
-		// Past the last input → first toggle; blur all text inputs.
+		// Past the last input → first operable toggle; blur all text inputs.
+		if first, ok := m.nextOperableToggle(-1, 1); ok {
+			m.inputs[m.focusIdx].Blur()
+			m.toggleFocus = first
+			return nil
+		}
+		// Every toggle is locked (or there are none): wrap straight back round.
 		m.inputs[m.focusIdx].Blur()
-		m.toggleFocus = 0
-		return nil
-	case m.toggleFocus < n-1:
-		m.toggleFocus++
-		return nil
-	default: // last toggle → wrap around to the first editable input
+		m.focusIdx = firstInput
+		return m.inputs[firstInput].Focus()
+	default:
+		if next, ok := m.nextOperableToggle(m.toggleFocus, 1); ok {
+			m.toggleFocus = next
+			return nil
+		}
+		// Last operable toggle → wrap around to the first editable input.
 		m.toggleFocus = -1
 		m.focusIdx = firstInput
 		return m.inputs[firstInput].Focus()
@@ -775,11 +807,12 @@ func (m *model) formFocusNext(firstInput, lastInput int) tea.Cmd {
 func (m *model) formFocusPrev(firstInput, lastInput int) tea.Cmd {
 	n := len(m.toggles())
 	switch {
-	case m.toggleFocus > 0:
-		m.toggleFocus--
-		return nil
-	case m.toggleFocus == 0:
-		// Back up from the first toggle to the last input.
+	case m.toggleFocus >= 0:
+		if prev, ok := m.nextOperableToggle(m.toggleFocus, -1); ok {
+			m.toggleFocus = prev
+			return nil
+		}
+		// Back up from the first operable toggle to the last input.
 		m.toggleFocus = -1
 		m.focusIdx = lastInput
 		return m.inputs[lastInput].Focus()
@@ -789,11 +822,34 @@ func (m *model) formFocusPrev(firstInput, lastInput int) tea.Cmd {
 			m.focusIdx = prev
 			return m.inputs[prev].Focus()
 		}
-		// At the first editable input → wrap up to the last toggle.
-		m.inputs[m.focusIdx].Blur()
-		m.toggleFocus = n - 1
+		// At the first editable input → wrap up to the last operable toggle.
+		if last, ok := m.nextOperableToggle(n, -1); ok {
+			m.inputs[m.focusIdx].Blur()
+			m.toggleFocus = last
+			return nil
+		}
 		return nil
 	}
+}
+
+// nextOperableToggle walks from index `from` in direction step (+1/-1) to the
+// first toggle the user can actually act on, reporting false when the walk runs
+// off the end of the list.
+//
+// A locked toggle is stepped over rather than focused-but-inert, which is the
+// same call the board's command registry makes about a verb that does not apply:
+// a row the ring can land on but no key will change is the "advertise it, then
+// silently do nothing" pattern this UI is deliberately free of. The row is still
+// RENDERED — it is part of the answer the form is giving — it just cannot be
+// aimed at.
+func (m model) nextOperableToggle(from, step int) (int, bool) {
+	toggles := m.toggles()
+	for i := from + step; i >= 0 && i < len(toggles); i += step {
+		if !toggles[i].locked {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // field returns a trimmed form value, so a field holding only whitespace counts
@@ -1061,8 +1117,9 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// On a focused toggle, space/enter flips it rather than navigating, and the
 	// key must NOT reach the text inputs below — mirrors updateResetForm.
 	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		t := m.toggles()[m.toggleFocus]
-		t.set(&m, !t.get(&m))
+		if t := m.toggles()[m.toggleFocus]; !t.locked {
+			t.set(&m, !t.get(&m))
+		}
 		return m, nil
 	}
 
@@ -1104,10 +1161,14 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // locked Name and extends into the preserve toggles, and space/enter on a
 // focused toggle flips it instead of moving focus.
 func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// On a focused toggle, space/enter flips its bool rather than navigating.
+	// On a focused toggle, space/enter flips its bool rather than navigating. A
+	// locked one (see formToggle.locked) is skipped by the focus walk and so is
+	// not reachable here; the guard is what keeps that true if it ever becomes
+	// reachable by another route.
 	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		t := m.toggles()[m.toggleFocus]
-		t.set(&m, !t.get(&m))
+		if t := m.toggles()[m.toggleFocus]; !t.locked {
+			t.set(&m, !t.get(&m))
+		}
 		return m, nil
 	}
 
@@ -1129,18 +1190,28 @@ func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleRow renders one reset-mode preserve toggle: a checkbox glyph and the
-// label, highlighted when focused. It uses inline styles rather than
+// toggleRow renders one form toggle: a checkbox glyph and the label,
+// highlighted when focused. It uses inline styles rather than
 // labelStyle/focusedLabelStyle, whose fixed width would wrap these longer
-// lines. Callers only render a toggle that is actually usable — a disabled,
-// unreachable toggle never reaches the screen.
-func toggleRow(label string, on, focused bool) string {
+// lines. A toggle that can never apply is not rendered at all (the project row
+// on a VM that cloned nothing); locked is a different thing — the row applies,
+// the answer is just already decided elsewhere.
+//
+// A locked row renders CHECKED whatever its own state says, because that is the
+// truth of what the reset will do: the whole-home copy is taking that directory
+// whether or not its row was ever ticked. It is dimmer than an ordinary row AND
+// carries lockedToggleSuffix, since colour alone is never allowed to be the
+// carrier (styles.go).
+func toggleRow(label string, on, focused, locked bool) string {
 	box := "[ ]"
-	if on {
+	if on || locked {
 		box = "[x]"
 	}
 	line := box + " " + label
-	if focused {
+	switch {
+	case locked:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(line + lockedToggleSuffix)
+	case focused:
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render(line)
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
@@ -1233,7 +1304,7 @@ func (m model) formView() string {
 	if len(toggles) > 0 {
 		b.WriteString("\n")
 		for i, t := range toggles {
-			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i) + "\n")
+			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i, t.locked) + "\n")
 		}
 	}
 	if m.resetMode {

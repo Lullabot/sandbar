@@ -863,10 +863,23 @@ provider's `resetInstance`) drive it rather than restating the rules.
 - **Reset-mode toggle indices are not stable, and tests must not assume they
   are.** The list is whole-home, Claude, the project (only when there is one),
   then one row per checkout. Whole-home is FIRST because it is the only row
-  that changes the labels of the rows below it, and turning it on must not
-  REMOVE rows — a row that vanishes takes the focus ring's meaning with it, and
-  a user who turns it back off must find their earlier picks where they left
-  them.
+  that changes the rows below it, and turning it on must not REMOVE them — a row
+  that vanishes takes the focus ring's meaning with it, and a user who turns it
+  back off must find their earlier picks where they left them.
+- **Whole-home LOCKS the rows it subsumes; it does not annotate them, and it
+  does not write to them** (`formToggle.locked`, `internal/ui/form.go`). They
+  render checked — that is what the reset will actually do, whether or not the
+  row was ever ticked — and the focus walk steps over them
+  (`nextOperableToggle`), because a row the ring can land on but no key will
+  change is the "advertise it, then silently do nothing" pattern the command
+  registry exists to keep out of this UI. Two things follow. The underlying
+  model fields are left ALONE rather than forced true, so the user's own picks
+  are still there when whole-home goes back off — the display is what changed,
+  not their answer. And the lock carries `lockedToggleSuffix` (" (locked)", the
+  same word the locked Name/repo fields use) rather than relying on its dimmer
+  colour: colour is never the only carrier of meaning here (styles.go), and a
+  lock that exists only as an ANSI code is invisible in a monochrome terminal
+  and to every golden, which are ANSI-stripped.
 
 ## Conventions
 
