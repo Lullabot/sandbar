@@ -150,13 +150,19 @@ func checkoutPreserveHelp(c checkouts.Checkout, sweptAt, now time.Time) string {
 	}
 	if c.Branch != "" {
 		fmt.Fprintf(&b, " On %s", c.Branch)
+		// LocalOnly, not Ahead: this row is telling the user what a rebuild
+		// would destroy if they left the toggle off, and only LocalOnly
+		// counts commits that exist nowhere else. Ahead measures against one
+		// possibly-stale ref by hash, so a rebased branch would claim
+		// thousands of commits at stake that are safely published upstream —
+		// see checkouts.Checkout.LocalOnly.
 		switch {
-		case c.Dirty > 0 && c.Ahead > 0:
-			fmt.Fprintf(&b, ", %d uncommitted file(s) and %d unpushed commit(s).", c.Dirty, c.Ahead)
+		case c.Dirty > 0 && c.LocalOnly > 0:
+			fmt.Fprintf(&b, ", %d uncommitted file(s) and %d unpushed commit(s).", c.Dirty, c.LocalOnly)
 		case c.Dirty > 0:
 			fmt.Fprintf(&b, ", %d uncommitted file(s).", c.Dirty)
-		case c.Ahead > 0:
-			fmt.Fprintf(&b, ", %d unpushed commit(s).", c.Ahead)
+		case c.LocalOnly > 0:
+			fmt.Fprintf(&b, ", %d unpushed commit(s).", c.LocalOnly)
 		default:
 			b.WriteString(".")
 		}
