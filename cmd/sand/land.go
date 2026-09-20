@@ -104,7 +104,7 @@ func confirmOpenPrompt() bool {
 // asserted in a test without capturing the process's real stderr — the same
 // reason landPR takes its stdout as a parameter.
 func landUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review] [--profile <name>]
+	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review [--fresh]] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
@@ -112,6 +112,8 @@ List NAME's git checkouts and their branch/push/PR state, or act on one:
   sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
   sand land NAME PATH --web     open PATH's branch (or PR) in a browser
   sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
+  sand land NAME PATH --review --fresh
+                                the same, discarding any review already saved there
 
 --pr uses the workstation's own 'gh' (never the guest's token). Without gh
 it prints the compare URL and, on a terminal, offers to open it; piped or
@@ -125,6 +127,13 @@ blocks until you finish the review — which writes review.xml into PATH inside
 the VM, where the agent can read it. Nothing leaves the VM. The review tool is
 part of every base image; a base older than the tool itself picks it up on the
 next 'sand create'.
+
+A review.xml already in PATH is carried into the new review, so comments you
+wrote earlier are there to keep, edit or drop. Nothing ever removes that file
+on its own, so --fresh is how you start over: it deletes the saved review and
+its walkthrough sidecar first. The review tool's assistant skills are
+installed into PATH/.agents/skills as the review starts, and the guest's
+global git excludes keep all of it out of 'git status'.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
@@ -158,6 +167,7 @@ func runLand(args []string) error {
 	prFlag := fs.Bool("pr", false, "Open a one-shot draft PR for PATH's pushed branch (host gh; falls back to the compare URL without gh)")
 	webFlag := fs.Bool("web", false, "Open PATH's branch (or its PR) in a browser — gh-free")
 	reviewFlag := fs.Bool("review", false, "Review PATH's changes in a browser, served from inside the VM (needs no pushed branch)")
+	freshFlag := fs.Bool("fresh", false, "With --review: discard any review already saved in PATH and start over")
 	fs.Usage = func() { landUsage(fs.Output()) }
 	// --profile/--pr/--web/--review may appear before or after the positional
 	// arguments (e.g. "sand land NAME PATH --pr"); reorder so all flags
@@ -179,6 +189,12 @@ func runLand(args []string) error {
 	// do both.
 	if countTrue(*prFlag, *webFlag, *reviewFlag) > 1 {
 		return errors.New("sand land: --pr, --web and --review cannot be used together")
+	}
+	// --fresh modifies --review and means nothing without it. Refused rather
+	// than ignored: a user who typed it meant to discard a saved review, and
+	// silently not doing that is the one outcome they would not forgive.
+	if *freshFlag && !*reviewFlag {
+		return errors.New("sand land: --fresh only applies to --review")
 	}
 	name := fs.Arg(0)
 	var path string
@@ -255,6 +271,7 @@ func runLand(args []string) error {
 			VM:       target,
 			Checkout: co,
 			Open:     gh.OpenInBrowser,
+			Fresh:    *freshFlag,
 		})
 	default:
 		return listCheckouts(ctx, os.Stdout, gh, vc)
@@ -276,7 +293,8 @@ func reorderLandFlags(args []string) []string {
 		switch {
 		case a == "-h" || a == "--help" || a == "-help":
 			flagArgs = append(flagArgs, a)
-		case a == "--pr" || a == "-pr" || a == "--web" || a == "-web" || a == "--review" || a == "-review":
+		case a == "--pr" || a == "-pr" || a == "--web" || a == "-web" || a == "--review" || a == "-review",
+			a == "--fresh" || a == "-fresh":
 			flagArgs = append(flagArgs, a)
 		case a == "--profile" || a == "-profile":
 			flagArgs = append(flagArgs, a)

@@ -934,6 +934,23 @@ var landingRefreshKey = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "res
 // 'r' ("rescan") collides with the board's 'r' ("restart") the same way.
 var landingReviewKey = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review"))
 
+// landingReviewFreshKey starts the selected checkout's review OVER: it
+// removes any review.xml sitting there (and its walkthrough sidecar) and
+// opens a review that carries nothing in.
+//
+// It is the shift-pair of the review key because it is the same verb with one
+// thing changed, and because the plain key's new behaviour makes it
+// necessary: 'v' now resumes from a review already in the checkout, and
+// upstream has no notion of a review being finished with — no "done" state,
+// no cleanup, nothing that ever removes the file. Without this, the only way
+// to stop resuming a review you had moved on from was to delete review.xml by
+// hand in a guest shell.
+//
+// It raises a confirmation, because the file it removes is the only copy of
+// comments the user wrote: they live in the browser page until submitted, and
+// nothing else in the system has them.
+var landingReviewFreshKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "review afresh"))
+
 // landingMoveKey describes the pane's row cursor in the footer. It is a
 // pane-local binding rather than the shared form keys (m.keys.Up/Down) for two
 // reasons: those are labelled "prev field"/"next field", which is the wrong
@@ -967,7 +984,13 @@ func actionVerb(row landRow) string {
 	case landActionOpenInBrowser:
 		return "open in browser"
 	case landActionPublish:
-		return "publish to drupal.org"
+		// "publish", not "publish to drupal.org": the ROW one line above
+		// already says where it publishes to, and the footer is a key legend
+		// rather than a sentence. The long form cost 14 columns that an
+		// 80-column terminal does not have — with it, the footer wrapped to a
+		// second line, taking a row the pane never budgeted for and pushing
+		// content off the bottom.
+		return "publish"
 	default:
 		return ""
 	}
@@ -1053,6 +1076,9 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, landingReviewKey):
 		cmd := m.runLandingReview()
 		return m, cmd
+	case key.Matches(msg, landingReviewFreshKey):
+		m.confirmFreshReview()
+		return m, nil
 	}
 	return m, nil
 }
@@ -1073,6 +1099,7 @@ func (m model) landingHelp() []key.Binding {
 		m.landing.landingActBinding(),
 		landingRefreshKey,
 		landingReviewKey,
+		landingReviewFreshKey,
 		m.keys.Back,
 	}
 }
@@ -2093,6 +2120,70 @@ func (m *model) handleLandCommitPushDone(msg landCommitPushDoneMsg) tea.Cmd {
 // reviewing — potentially many minutes — and Update must never block the
 // board's event loop waiting for it.
 func (m *model) runLandingReview() tea.Cmd {
+	return m.startLandingReview(false)
+}
+
+// confirmFreshReview raises the confirmation behind the afresh verb.
+//
+// It confirms whether or not a review.xml is actually there, which is a
+// deliberate choice over checking first. Knowing would cost a guest round
+// trip on a keypress, and the prompt has to be truthful in both cases anyway
+// — so it states what the action does rather than what it found. The cost of
+// a needless "y" is one keystroke; the cost of a missing prompt is somebody's
+// review comments.
+func (m *model) confirmFreshReview() {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return // empty sweep: nothing under the cursor to review
+	}
+	if m.review.path != "" {
+		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+		return
+	}
+	co := m.landing.rows[m.landing.cursor].Checkout
+	scope, vmName := m.landing.scope, m.landing.vmName
+	m.confirm = &confirmState{
+		prompt:  "Start a fresh review of " + co.Path + "? Any review already saved there is discarded.",
+		scope:   scope,
+		vmName:  vmName,
+		working: "starting a fresh review of " + co.Path,
+		// A message rather than the review command itself: starting a review
+		// MUTATES the model (m.review holds the session's cancel func and its
+		// done channel), and a confirmState.run is a bare tea.Cmd with no
+		// model to mutate. Update owns the mutation, as it does for every
+		// other asynchronous action on this pane.
+		run: func() tea.Msg {
+			return landReviewFreshMsg{scope: scope, vm: vmName, path: co.Path}
+		},
+	}
+}
+
+// landReviewFreshMsg asks Update to start an afresh review, once the user has
+// confirmed discarding whatever was already saved. It carries the identity
+// the confirmation was raised for, so a confirmation answered after the pane
+// moved on cannot start a review of the wrong checkout.
+type landReviewFreshMsg struct {
+	scope registry.Scope
+	vm    string
+	path  string
+}
+
+// handleLandReviewFresh starts the confirmed afresh review, having first
+// checked that the pane is still showing what the user answered about.
+func (m *model) handleLandReviewFresh(msg landReviewFreshMsg) tea.Cmd {
+	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
+		return nil // the pane moved on between the prompt and the answer
+	}
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) ||
+		m.landing.rows[m.landing.cursor].Checkout.Path != msg.path {
+		return nil // the cursor moved between the prompt and the answer
+	}
+	return m.startLandingReview(true)
+}
+
+// startLandingReview is the body both review verbs share. fresh discards any
+// review already saved in the checkout and carries nothing in; see
+// landreview.Session.Fresh.
+func (m *model) startLandingReview(fresh bool) tea.Cmd {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return nil // empty sweep: nothing under the cursor to review
 	}
@@ -2140,6 +2231,7 @@ func (m *model) runLandingReview() tea.Cmd {
 		VM:       m.landing.vm,
 		Checkout: co,
 		Open:     m.ghActions.OpenInBrowser,
+		Fresh:    fresh,
 	}
 	run := m.reviewRun
 	// urls carries the review UI's URL out of Session.Run's writer and back

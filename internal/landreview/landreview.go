@@ -83,11 +83,94 @@ cd "$d" || exit 1
 exec ` + ServeBinary + ` "$@"
 `
 
+// skillsStageDir is where roles/self-review stages the pinned assistant
+// skills in the BASE IMAGE: a root-owned, pristine copy that every checkout's
+// copy is made from. A guest whose base predates that role simply has no such
+// directory, and a review still runs — see installSkills.
+const skillsStageDir = "/opt/sandbar/self-review/skills"
+
+// skillsTargetDir is where they are installed INSIDE the checkout, relative
+// to its root. Per-checkout is not a preference: upstream issue #162 ("Allow
+// skills to be installed globally") is open, and the skills hard-code this
+// path in the commands they tell an assistant to run — `xmllint --schema
+// .agents/skills/self-review-apply/assets/self-review-v3.xsd` — so even the
+// one assistant that could find a guest-wide copy would be following
+// instructions that no longer resolve.
+//
+// roles/self-review adds this path, and the review output beside it, to the
+// guest user's global git excludes, so none of it surfaces as untracked work
+// in the project being reviewed.
+const skillsTargetDir = ".agents/skills"
+
+// installSkillsScript copies each staged skill into the checkout.
+//
+// It is a FIXED, LITERAL string taking the checkout and the staging directory
+// as positional arguments, for the reason every guest script in this package
+// is one: the checkout path comes from a sweep of the guest, the
+// lowest-trust source in the system.
+//
+// The rule with teeth here is the tracked-file check. Upstream's own install
+// instruction is `cp -r` into your project, so a project may legitimately
+// keep these skills under version control — and overwriting a tracked file
+// would drop an edit nobody asked for into someone's working tree, which the
+// global excludes cannot hide, because ignore rules do not apply to files git
+// already tracks. A skill git tracks is therefore left exactly as it is, and
+// only untracked copies (the ones sand itself put there) are refreshed.
+const installSkillsScript = `set -f
+d=$1
+src=$2
+[ -d "$src" ] || exit 0
+cd "$d" || exit 0
+# Pathname expansion is off everywhere else in this package precisely so a
+# guest-derived value can never be expanded — but this one loop needs it to
+# enumerate what the base staged, and its pattern has no guest-derived part:
+# $src is skillsStageDir, a compile-time constant. It goes back off as soon
+# as the loop ends, and every expansion inside the loop is quoted.
+set +f
+for s in "$src"/self-review-*; do
+  [ -d "$s" ] || continue
+  n=${s##*/}
+  dest=` + skillsTargetDir + `/$n
+  if git ls-files --error-unmatch "$dest" >/dev/null 2>&1; then
+    printf 'skipped=%s\n' "$n"
+    continue
+  fi
+  mkdir -p ` + skillsTargetDir + ` || exit 0
+  rm -rf "$dest"
+  cp -R "$s" "$dest" || continue
+  printf 'installed=%s\n' "$n"
+done
+set -f
+exit 0
+`
+
+// removeOutputScript deletes a finished review and its walkthrough sidecar
+// from the checkout, which is what "start this review over" has to mean:
+// upstream has no notion of a review being done or discarded and never
+// removes either file itself, so without this the next run would resume from
+// comments the user just asked to abandon.
+//
+// Both names are FIXED and the checkout arrives as $1, so those two literals
+// are the only things this can ever delete.
+const removeOutputScript = `set -f
+d=$1
+cd "$d" || exit 1
+rm -f ` + outputFile + ` ` + guideFile + `
+exit 0
+`
+
 // outputFile is the file a finished review lands in, inside the checkout. It
 // matches @self-review/core's own default (config.outputFile). It is only a
 // FALLBACK: the server announces the real path itself (see writtenPath), which
 // is what a project's .self-review.yaml can redirect.
 const outputFile = "review.xml"
+
+// guideFile is the walkthrough sidecar upstream reads at startup when it sits
+// beside the output path: self-review-guide writes it, and self-review-
+// critique runs that skill as its first step. sand never writes it and never
+// reads it — it only needs the name in order to remove it alongside the
+// review it belongs to.
+const guideFile = "review.guide.xml"
 
 const (
 	// defaultReadyTimeout bounds BOTH waits — for the server to announce its
@@ -130,6 +213,16 @@ const (
 	// far below the ~37,000 a wrong base produced in the case this guard was
 	// written for, so it discriminates without ever needing to be tuned.
 	maxDiffFiles = 5000
+	// installSkillsTimeout bounds the one-shot skill install. It copies about
+	// 100KB inside the guest, so it is generous enough to be invisible and
+	// short enough that a wedged guest costs a review its skills rather than
+	// the review itself — installSkills treats every failure as non-fatal.
+	installSkillsTimeout = 20 * time.Second
+	// removeOutputTimeout bounds the two `rm -f`s behind "review afresh".
+	// Unlike the install, this one's failure IS fatal to the action it serves:
+	// starting a fresh review over a review.xml that is still there would
+	// resume from the comments the user asked to discard.
+	removeOutputTimeout = 10 * time.Second
 	// guestStopTimeout bounds the guest-side half of teardown. It is short
 	// on purpose: this runs while the user is waiting for ctrl-C to take
 	// effect, and a wedged guest must degrade to a warning rather than a
@@ -183,6 +276,15 @@ type Session struct {
 	// MaxDiffFiles caps how many changed files a review may cover before Run
 	// refuses to start it; zero means maxDiffFiles.
 	MaxDiffFiles int
+	// Fresh starts the review over: any previous review.xml (and its
+	// walkthrough sidecar) is REMOVED from the checkout before the server
+	// starts, and nothing is carried in.
+	//
+	// Removal is the session's job rather than the caller's because the two
+	// halves are one decision. A caller that deleted the file itself and left
+	// this false would race its own probe; a caller that set this without
+	// deleting would leave a review.xml the NEXT run silently resumes from.
+	Fresh bool
 }
 
 // errServerGone reports that the guest command exited while the session was
@@ -241,6 +343,18 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// optional by design — without it the server reviews the working tree,
 	// which is a worse default but never a failure.
 	argv := []string{"sh", "-c", serveScript, "sh", s.Checkout.Path}
+
+	// Before the probe, not after: the probe is what reports a resumable
+	// review, and removing the file first means it simply has nothing to
+	// report. Fatal on failure — a "fresh" review that quietly resumed from
+	// the comments the user asked to discard is the one outcome this verb
+	// exists to prevent.
+	if s.Fresh {
+		if err := s.removeOutput(ctx); err != nil {
+			return "", err
+		}
+	}
+
 	base := s.diffBase(ctx)
 	if base.Commit != "" {
 		// Refused BEFORE the server starts, so the user gets a sentence about
@@ -249,9 +363,26 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		if limit := s.maxDiffFiles(); base.Files > limit {
 			return "", diffTooLargeError(base, limit)
 		}
+	}
+	// Flags first, then the range: upstream scans the whole argv and treats
+	// everything it does not recognise as a `git diff` argument, so the order
+	// is for the reader rather than the parser.
+	// The Fresh arm above already removed the file, so the probe cannot have
+	// reported one; the second half of this condition is belt and braces
+	// against a probe that somehow saw it anyway.
+	resuming := base.Resume && !s.Fresh
+	if resuming {
+		argv = append(argv, "--resume-from", path.Join(s.Checkout.Path, outputFile))
+	}
+	if base.Commit != "" {
 		argv = append(argv, base.Commit)
 	}
+
+	s.installSkills(ctx, w)
 	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
+	if resuming {
+		fmt.Fprintf(w, "carrying in the comments already in %s\n", outputFile)
+	}
 
 	// Provider.Shell BLOCKS until the guest command exits, and the guest
 	// server exits when the review is submitted — so running it in a
@@ -614,10 +745,27 @@ func (s *Session) waitReady(ctx context.Context, port int, exited <-chan struct{
 // Printing nothing is a valid answer (no remotes and no trunk, an unborn
 // HEAD, unrelated histories); the caller then leaves the range to the
 // server's own default.
+//
+// It also reports whether a previous review is sitting in the checkout, so
+// the caller can carry its comments in. That check is deliberately narrow: it
+// looks for the DEFAULT output path only, and stays silent when either config
+// file sets `output-file`, because a project that redirects its output has a
+// path only upstream's own config precedence can resolve. Guessing it wrong
+// would resume from somebody else's review, which is worse than not resuming.
+//
+// Only a flag comes back, never a path — Go composes that from the checkout
+// it already holds, so nothing reaching `--resume-from` originates in the
+// guest.
 const diffBaseScript = `set -f
 d=$1
 db=$2
 base=
+
+if [ -f "$d/` + outputFile + `" ] \
+  && ! grep -q '^[[:space:]]*output-file:' "$d/.self-review.yaml" 2>/dev/null \
+  && ! grep -q '^[[:space:]]*output-file:' "$HOME/.config/self-review/config.yaml" 2>/dev/null; then
+  printf 'sandresume=1\n'
+fi
 
 oldest=$(git -C "$d" rev-list --topo-order HEAD --not --remotes 2>/dev/null | tail -n 1)
 if [ -n "$oldest" ]; then
@@ -674,6 +822,11 @@ type diffBaseInfo struct {
 	Commits int
 	// Files is how many files the review would cover.
 	Files int
+
+	// Resume reports that a previous review is sitting at the checkout's
+	// default output path and can be carried in. See diffBaseScript for why
+	// this is a flag rather than a path.
+	Resume bool
 }
 
 // diffBase asks the guest where a review should start and how big it would
@@ -696,6 +849,74 @@ func (s *Session) diffBase(ctx context.Context) diffBaseInfo {
 		return diffBaseInfo{}
 	}
 	return parseDiffBase(string(out))
+}
+
+// installSkills copies the base image's staged assistant skills into the
+// checkout, so `/self-review-critique` before a review and
+// `/self-review-apply` after one both work in the guest with no setup.
+//
+// Every failure is reported and none is fatal. The skills bracket a review;
+// they are not part of serving one, and a guest whose base predates them (or
+// whose copy cannot be written) still has a perfectly good review to run. The
+// opposite choice — failing the review because an optional convenience could
+// not be installed — would trade the feature for its accessory.
+func (s *Session) installSkills(ctx context.Context, w io.Writer) {
+	ctx, cancel := context.WithTimeout(ctx, installSkillsTimeout)
+	defer cancel()
+
+	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", installSkillsScript, "sh", s.Checkout.Path, skillsStageDir)
+	if err != nil {
+		fmt.Fprintf(w, "could not install the review skills into %s: %v\n", s.Checkout.Path, err)
+		return
+	}
+
+	installed, skipped := countSkillReport(string(out))
+	switch {
+	case installed == 0 && skipped == 0:
+		// Nothing staged: a base image older than the skills. Said once, in
+		// the same shape as missingToolHint, because the next create fixes it
+		// on its own and there is no flag to pass.
+		fmt.Fprintf(w, "no review skills staged in this VM's base image; the next `sand create` brings them in\n")
+	case skipped > 0:
+		fmt.Fprintf(w, "review skills in %s/: %d installed, %d left alone (this repo tracks its own)\n",
+			skillsTargetDir, installed, skipped)
+	default:
+		fmt.Fprintf(w, "review skills installed in %s/ (%d)\n", skillsTargetDir, installed)
+	}
+}
+
+// countSkillReport tallies the install script's key=value lines. Anything
+// else on the stream — a login banner, a motd — is noise, the same tolerance
+// every other parser in this package extends to a real login shell.
+func countSkillReport(out string) (installed, skipped int) {
+	for _, line := range strings.Split(out, "\n") {
+		switch key, _, ok := strings.Cut(strings.TrimSpace(line), "="); {
+		case !ok:
+		case key == "installed":
+			installed++
+		case key == "skipped":
+			skipped++
+		}
+	}
+	return installed, skipped
+}
+
+// removeOutput deletes the checkout's review output and walkthrough sidecar
+// inside the guest. It is the whole of "start this review over": upstream
+// never removes either file, and a review.xml left in place is silently
+// resumed by the next run.
+//
+// Unexported on purpose. Removing the file and not resuming are two halves of
+// one decision, so the only way to ask for either is Session.Fresh — there is
+// no way for a caller to do one and forget the other.
+func (s *Session) removeOutput(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, removeOutputTimeout)
+	defer cancel()
+
+	if _, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", removeOutputScript, "sh", s.Checkout.Path); err != nil {
+		return fmt.Errorf("removing %s in %s: %w", outputFile, s.VM.Name, err)
+	}
+	return nil
 }
 
 // maxDiffFiles returns the effective refusal threshold.
@@ -745,10 +966,15 @@ func parseDiffBase(out string) diffBaseInfo {
 			if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 				info.Files = n
 			}
+		case "sandresume":
+			info.Resume = value == "1"
 		}
 	}
 	if info.Commit == "" {
-		return diffBaseInfo{}
+		// The counts describe a commit that was just rejected, so they go —
+		// but Resume does not depend on the base at all, and a checkout with
+		// no usable base still has a review worth carrying in.
+		return diffBaseInfo{Resume: info.Resume}
 	}
 	return info
 }

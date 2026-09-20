@@ -479,6 +479,11 @@ func TestRunLandReviewArgValidation(t *testing.T) {
 		{name: "review with pr", args: []string{"vm", "/path", "--review", "--pr"}, wantErr: "cannot be used together"},
 		{name: "review with web", args: []string{"vm", "/path", "--review", "--web"}, wantErr: "cannot be used together"},
 		{name: "review without path", args: []string{"vm", "--review"}, wantErr: "run 'sand land NAME' to list them"},
+		// --fresh deletes a saved review, so a user who typed it and got a
+		// resumed review anyway would have lost the thing they asked to
+		// discard. Refused, never ignored.
+		{name: "fresh without review", args: []string{"vm", "/path", "--fresh"}, wantErr: "--fresh only applies to --review"},
+		{name: "fresh with web", args: []string{"vm", "/path", "--web", "--fresh"}, wantErr: "--fresh only applies to --review"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -493,6 +498,18 @@ func TestRunLandReviewArgValidation(t *testing.T) {
 func TestReorderLandFlagsMovesReview(t *testing.T) {
 	got := reorderLandFlags([]string{"myvm", "/path/to/repo", "--review"})
 	want := []string{"--review", "myvm", "/path/to/repo"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("reorderLandFlags = %v, want %v", got, want)
+	}
+}
+
+// TestReorderLandFlagsMovesFresh covers the trailing-flag form a person
+// actually types. A --fresh left among the positionals would be read as a
+// third argument and the command would fail with an arity error naming
+// nothing the user did wrong.
+func TestReorderLandFlagsMovesFresh(t *testing.T) {
+	got := reorderLandFlags([]string{"myvm", "/path/to/repo", "--review", "--fresh"})
+	want := []string{"--review", "--fresh", "myvm", "/path/to/repo"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("reorderLandFlags = %v, want %v", got, want)
 	}

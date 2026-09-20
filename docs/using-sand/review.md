@@ -93,6 +93,89 @@ server you left, and your comments live only in that page until you submit
 them. Ctrl-C (or leaving the TUI's Landing pane) tears the session down and
 discards them, which is the same trade the upstream tool makes.
 
+## Picking up where you left off
+
+Nothing ever deletes `review.xml`. Upstream has no notion of a review being
+"done" — finishing one writes the file and stops the process, and that is the
+whole lifecycle. So a checkout you have reviewed before still has that file
+in it the next time you look.
+
+`sand` carries it in. Start a review on a checkout that already holds a
+`review.xml` and its comments are loaded, along with which files you had
+marked as viewed:
+
+```
+carrying in the comments already in review.xml
+[serve] Resumed 7 comments and 4 viewed files from /home/claude/…/review.xml
+```
+
+You can then keep them, edit them, or delete them in the browser, and
+**Finish Review** writes the result back over the same file.
+
+To **start over instead**, discarding what was saved:
+
+| Where | How |
+| ----- | --- |
+| TUI's Landing pane | `V` (shift-V) on the checkout's row |
+| CLI | `sand land NAME PATH --review --fresh` |
+
+Both delete `review.xml` and its `review.guide.xml` sidecar before the server
+starts. `V` asks first — those comments exist nowhere else, and it asks
+whether or not a file is actually there, because checking would cost a round
+trip into the VM on a keypress.
+
+## The assistant skills
+
+Upstream ships three skills that bracket a review, and `sand` installs them
+into the checkout as the review starts:
+
+| Skill | What it does |
+| ----- | ------------ |
+| `self-review-critique` | Pre-generates a review for you to curate, rather than starting from a blank page |
+| `self-review-guide` | Writes the `review.guide.xml` walkthrough sidecar that turns the file tree into ordered reading groups |
+| `self-review-apply` | Reads a finished `review.xml`, prioritises the comments, and makes the changes |
+
+They land in `.agents/skills/` inside the checkout — upstream's own
+vendor-neutral layout, which Claude Code, Codex and OpenCode all read. That
+is per-checkout rather than installed once per VM because
+[upstream issue #162](https://github.com/e0ipso/self-review/issues/162) is
+still open, and because the skills reference their own schema files by a
+checkout-relative path, so a copy anywhere else would break their
+instructions.
+
+The version is pinned to the same release as the review server, and the whole
+set is baked into the base image, so installing costs no network at review
+time.
+
+A typical loop, all inside the guest:
+
+```
+/self-review-critique --staged     # in the agent: pre-generate a review
+```
+
+then `v` in the Landing pane to curate what it wrote, and afterwards:
+
+```
+/self-review-apply review.xml      # in the agent: act on what you kept
+```
+
+!!! note "A copy your project tracks is never touched"
+
+    If the repository already has its own `.agents/skills/self-review-*`
+    under version control, `sand` leaves it exactly as it is. Overwriting a
+    tracked file would put an edit you never asked for into your working
+    tree.
+
+### None of it shows up in `git status`
+
+`review.xml`, `review.guide.xml` and the three installed skill directories
+are added to the **guest user's global git excludes**
+(`~/.config/git/ignore`), not to any project's `.gitignore` — `sand` does not
+write a tracked file into your repository to tidy up after itself.
+
+Git reads that file with no `core.excludesFile` set at all, so nothing
+conflicts with a value you have configured yourself.
+
 ## Feeding it back to the agent
 
 `review.xml` lands in the checkout it reviewed, inside the VM — the same
@@ -155,10 +238,14 @@ upstream server offers no way to request a particular port.
 
 ## Limits
 
-`sand` doesn't expose `--resume-from`, so each review starts fresh rather
-than carrying a previous `review.xml`'s comments back in. Everything else
-the browser UI does — expanding context around a hunk, image and attachment
-previews, applying a suggestion, and walkthrough guides picked up from a
-`review.guide.xml` sitting next to the output path — is upstream's and works
-here, because this is upstream's own server rather than a re-implementation
-of it.
+Resuming is looked up by the **default** output path only. A project that
+redirects `output-file` in its `.self-review.yaml` (or you, in your own
+`~/.config/self-review/config.yaml`) has a path that only upstream's config
+precedence can resolve, so `sand` leaves that review alone rather than
+guessing at it and loading the wrong one.
+
+Everything else the browser UI does — expanding context around a hunk, image
+and attachment previews, applying a suggestion, and walkthrough guides picked
+up from a `review.guide.xml` sitting next to the output path — is upstream's
+and works here, because this is upstream's own server rather than a
+re-implementation of it.

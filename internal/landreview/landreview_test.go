@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -892,23 +893,70 @@ func TestDiffBaseScriptPrefersTheNearestTrunk(t *testing.T) {
 // --- the size guard ---
 
 // stubProvider implements the package's narrow Provider for tests that must
-// never reach the guest. Shell fails the test outright: the entire value of
-// the size guard is that the review server is not started.
+// not reach a guest. ShellOut is dispatched on the script it is handed, so
+// one stub serves a run's three different one-shot guest commands; Shell
+// records the server argv and returns at once, which Run reports as
+// errServerGone — an error these tests ignore, because what they assert is
+// the argv that was built, not a session that completed.
 type stubProvider struct {
-	t        *testing.T
-	shellOut []byte
+	mu sync.Mutex
+
+	t *testing.T
+	// noShell fails the test if the review server is started at all.
+	noShell bool
+
+	baseReport  string // answer to diffBaseScript
+	shellArgv   []string
+	shellOuts   [][]string
+	installCall bool
 }
 
-func (p stubProvider) Shell(context.Context, string, io.Reader, io.Writer, ...string) error {
-	p.t.Error("the review server was started despite a diff too large for it to load")
+func (p *stubProvider) Shell(_ context.Context, _ string, _ io.Reader, _ io.Writer, argv ...string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.noShell {
+		p.t.Error("the review server was started when the test required it not to be")
+	}
+	p.shellArgv = append([]string(nil), argv...)
 	return nil
 }
 
-func (p stubProvider) ShellOut(context.Context, string, ...string) ([]byte, error) {
-	return p.shellOut, nil
+func (p *stubProvider) ShellOut(_ context.Context, _ string, argv ...string) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.shellOuts = append(p.shellOuts, append([]string(nil), argv...))
+	if len(argv) < 3 {
+		return nil, nil
+	}
+	switch argv[2] {
+	case diffBaseScript:
+		return []byte(p.baseReport), nil
+	case installSkillsScript:
+		p.installCall = true
+		return []byte("installed=self-review-apply\n"), nil
+	}
+	return nil, nil
 }
 
-func (p stubProvider) ForwardArgv(vm.VM, int, int) []string { return nil }
+func (p *stubProvider) ForwardArgv(vm.VM, int, int) []string { return nil }
+
+// ranScript reports whether one of the package's guest scripts was run.
+func (p *stubProvider) ranScript(script string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, argv := range p.shellOuts {
+		if len(argv) > 2 && argv[2] == script {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *stubProvider) serverArgv() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.shellArgv...)
+}
 
 // TestRunRefusesADiffTooLargeForTheReviewTool asserts the failure a user
 // actually gets. Upstream reads `git diff` through a 50MB buffer and dies with
@@ -919,9 +967,10 @@ func (p stubProvider) ForwardArgv(vm.VM, int, int) []string { return nil }
 func TestRunRefusesADiffTooLargeForTheReviewTool(t *testing.T) {
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 	s := &Session{
-		Provider: stubProvider{
-			t:        t,
-			shellOut: []byte("sandbase=" + sha + "\nsanddate=2021-02-11\nsandcommits=4409\nsandfiles=37082\n"),
+		Provider: &stubProvider{
+			t:          t,
+			noShell:    true,
+			baseReport: "sandbase=" + sha + "\nsanddate=2021-02-11\nsandcommits=4409\nsandfiles=37082\n",
 		},
 		Checkout:     checkouts.Checkout{Path: "/home/u/core"},
 		MaxDiffFiles: 5000,
@@ -937,4 +986,276 @@ func TestRunRefusesADiffTooLargeForTheReviewTool(t *testing.T) {
 			}
 		}
 	}
+}
+
+// --- resume, and starting over ---
+
+// TestRunResumesFromAnExistingReview pins the argv both halves of the resume
+// feature produce. Upstream has no concept of a review being finished with,
+// so a review.xml left in a checkout is the ONLY record of comments already
+// written — starting a second review without carrying it in silently
+// overwrites them.
+func TestRunResumesFromAnExistingReview(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	report := "sandresume=1\nsandbase=" + sha + "\nsanddate=2026-09-18\nsandcommits=2\nsandfiles=3\n"
+
+	t.Run("carries the previous review in", func(t *testing.T) {
+		p := &stubProvider{t: t, baseReport: report}
+		s := &Session{Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"}}
+		var out strings.Builder
+		_, _ = s.Run(context.Background(), &out)
+
+		argv := p.serverArgv()
+		if !argvHas(argv, "--resume-from", "/home/u/repo/review.xml") {
+			t.Errorf("server argv = %q, want --resume-from the checkout's review.xml", argv)
+		}
+		// Composed host-side from the checkout, never echoed back by the
+		// guest: the path must be a discrete argv element, not text.
+		if !strings.Contains(out.String(), "carrying in the comments") {
+			t.Errorf("output %q never says the review was resumed", out.String())
+		}
+	})
+
+	t.Run("Fresh removes the review and starts from scratch", func(t *testing.T) {
+		p := &stubProvider{t: t, baseReport: report}
+		s := &Session{Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"}, Fresh: true}
+		var out strings.Builder
+		_, _ = s.Run(context.Background(), &out)
+
+		if argv := p.serverArgv(); argvHas(argv, "--resume-from", "/home/u/repo/review.xml") {
+			t.Errorf("server argv = %q, want no --resume-from when Fresh is set", argv)
+		}
+		// The removal is the other half of the same decision: without it the
+		// NEXT review would resume from the comments just abandoned.
+		if !p.ranScript(removeOutputScript) {
+			t.Error("Fresh did not remove the existing review from the checkout")
+		}
+	})
+
+	t.Run("nothing to resume from", func(t *testing.T) {
+		p := &stubProvider{t: t, baseReport: "sandbase=" + sha + "\nsandfiles=3\n"}
+		s := &Session{Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"}}
+		var out strings.Builder
+		_, _ = s.Run(context.Background(), &out)
+
+		if argv := p.serverArgv(); argvHas(argv, "--resume-from", "/home/u/repo/review.xml") {
+			t.Errorf("server argv = %q, want no --resume-from when the guest reported none", argv)
+		}
+	})
+}
+
+// argvHas reports whether argv contains flag immediately followed by value —
+// adjacency matters, because that is what makes the value the flag's argument
+// rather than a `git diff` range.
+func argvHas(argv []string, flag, value string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+// TestParseDiffBaseKeepsResumeWithoutABase covers the one field that must
+// survive the "no usable base" reset. A checkout whose every commit is
+// already published has no base to diff from, and still has a review worth
+// carrying in; dropping the flag with the counts would silently discard it.
+func TestParseDiffBaseKeepsResumeWithoutABase(t *testing.T) {
+	got := parseDiffBase("sandresume=1\nsandbase=origin/main\nsandfiles=9\n")
+	if !got.Resume {
+		t.Error("Resume = false, want it kept even though the base was rejected")
+	}
+	if got.Commit != "" || got.Files != 0 {
+		t.Errorf("got %+v, want the counts dropped with the base they describe", got)
+	}
+}
+
+func TestCountSkillReport(t *testing.T) {
+	installed, skipped := countSkillReport(
+		"Welcome to Debian\ninstalled=self-review-apply\nskipped=self-review-guide\ninstalled=self-review-critique\n")
+	if installed != 2 || skipped != 1 {
+		t.Errorf("countSkillReport = %d installed / %d skipped, want 2/1", installed, skipped)
+	}
+	if i, s := countSkillReport("Last login: today\n\n"); i != 0 || s != 0 {
+		t.Errorf("countSkillReport over pure noise = %d/%d, want 0/0", i, s)
+	}
+}
+
+// --- the guest scripts, against real git and a real shell ---
+
+// TestInstallSkillsScriptAgainstRealGit runs the REAL install script. The
+// case that matters is the last one: upstream tells people to `cp -r` these
+// skills into their project, so a repository may TRACK its own copy — and
+// overwriting a tracked file drops an edit nobody asked for into someone's
+// working tree, which the global git excludes cannot hide because ignore
+// rules do not apply to tracked files.
+func TestInstallSkillsScriptAgainstRealGit(t *testing.T) {
+	requireTools(t, "git", "sh")
+
+	home := t.TempDir()
+	stage := filepath.Join(home, "stage")
+	work := filepath.Join(home, "work")
+
+	// Three staged skills, as roles/self-review leaves them in the base.
+	for _, name := range []string{"self-review-apply", "self-review-critique", "self-review-guide"} {
+		dir := filepath.Join(stage, name, "assets")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(stage, name, "SKILL.md"), "staged "+name+"\n")
+		writeFile(t, filepath.Join(dir, "schema.xsd"), "<xsd/>\n")
+	}
+	// Something that is not a self-review skill must be left where it is.
+	if err := os.MkdirAll(filepath.Join(stage, "unrelated-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(stage, "unrelated-skill", "SKILL.md"), "not ours\n")
+
+	git(t, home, home, "init", "-q", "-b", "main", work)
+
+	// A copy the project tracks itself, with content of its own.
+	tracked := filepath.Join(work, ".agents", "skills", "self-review-critique")
+	if err := os.MkdirAll(tracked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(tracked, "SKILL.md"), "the project's own copy\n")
+	git(t, work, home, "add", ".agents")
+	git(t, work, home, "commit", "-qm", "vendor our own review skill")
+
+	// A stale untracked copy sand itself left on a previous run.
+	stale := filepath.Join(work, ".agents", "skills", "self-review-apply")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(stale, "SKILL.md"), "an old version\n")
+
+	out := runScript(t, home, installSkillsScript, work, stage)
+	installed, skipped := countSkillReport(out)
+	if installed != 2 || skipped != 1 {
+		t.Fatalf("report = %d installed / %d skipped, want 2/1:\n%s", installed, skipped, out)
+	}
+
+	// The tracked copy is untouched, byte for byte.
+	if got := readFile(t, filepath.Join(tracked, "SKILL.md")); got != "the project's own copy\n" {
+		t.Errorf("the tracked skill was overwritten: %q", got)
+	}
+	// The stale untracked copy is refreshed, assets and all.
+	if got := readFile(t, filepath.Join(stale, "SKILL.md")); got != "staged self-review-apply\n" {
+		t.Errorf("the stale skill was not refreshed: %q", got)
+	}
+	if got := readFile(t, filepath.Join(stale, "assets", "schema.xsd")); got != "<xsd/>\n" {
+		t.Errorf("the skill's assets did not come with it: %q", got)
+	}
+	// And the one that was simply missing is there.
+	if got := readFile(t, filepath.Join(work, ".agents", "skills", "self-review-guide", "SKILL.md")); got != "staged self-review-guide\n" {
+		t.Errorf("a missing skill was not installed: %q", got)
+	}
+	// Nothing outside the self-review-* glob came along.
+	if _, err := os.Stat(filepath.Join(work, ".agents", "skills", "unrelated-skill")); err == nil {
+		t.Error("the script installed a skill that is not self-review's")
+	}
+}
+
+// TestInstallSkillsScriptWithNothingStaged covers the base image that
+// predates the skills: no staging directory, no output, and above all no
+// failure — installSkills treats this as a note, not an error.
+func TestInstallSkillsScriptWithNothingStaged(t *testing.T) {
+	requireTools(t, "git", "sh")
+
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	git(t, home, home, "init", "-q", "-b", "main", work)
+
+	out := runScript(t, home, installSkillsScript, work, filepath.Join(home, "absent"))
+	if installed, skipped := countSkillReport(out); installed != 0 || skipped != 0 {
+		t.Errorf("report = %d/%d, want nothing at all:\n%s", installed, skipped, out)
+	}
+	if _, err := os.Stat(filepath.Join(work, ".agents")); err == nil {
+		t.Error("the script created .agents/ in the checkout with nothing to put in it")
+	}
+}
+
+// TestRemoveOutputScriptRemovesOnlyTheReview pins what "start over" deletes.
+// The script runs `rm -f` inside a directory swept from the guest, so the
+// assertion that matters as much as the two removals is the third file
+// staying exactly where it is.
+func TestRemoveOutputScriptRemovesOnlyTheReview(t *testing.T) {
+	requireTools(t, "sh")
+
+	work := t.TempDir()
+	writeFile(t, filepath.Join(work, "review.xml"), "<review/>\n")
+	writeFile(t, filepath.Join(work, "review.guide.xml"), "<guide/>\n")
+	writeFile(t, filepath.Join(work, "reviewed-code.go"), "package main\n")
+
+	runScript(t, work, removeOutputScript, work)
+
+	for _, gone := range []string{"review.xml", "review.guide.xml"} {
+		if _, err := os.Stat(filepath.Join(work, gone)); err == nil {
+			t.Errorf("%s survived", gone)
+		}
+	}
+	if got := readFile(t, filepath.Join(work, "reviewed-code.go")); got != "package main\n" {
+		t.Errorf("the script touched a file that was not the review: %q", got)
+	}
+}
+
+// TestDiffBaseScriptReportsAResumableReview pins the resume probe against a
+// real shell, including the case it must stay quiet for: a project that
+// redirects output-file has a path only upstream's config precedence can
+// resolve, and resuming from the default path would load somebody else's
+// review.
+func TestDiffBaseScriptReportsAResumableReview(t *testing.T) {
+	requireTools(t, "git", "sh")
+
+	home := t.TempDir()
+	work := filepath.Join(home, "work")
+	git(t, home, home, "init", "-q", "-b", "main", work)
+	writeFile(t, filepath.Join(work, "a.txt"), "x\n")
+	git(t, work, home, "add", "a.txt")
+	git(t, work, home, "commit", "-qm", "one")
+
+	if got := runDiffBase(t, home, work, ""); got.Resume {
+		t.Error("Resume = true with no review.xml in the checkout")
+	}
+
+	writeFile(t, filepath.Join(work, "review.xml"), "<review/>\n")
+	if got := runDiffBase(t, home, work, ""); !got.Resume {
+		t.Error("Resume = false with a review.xml sitting in the checkout")
+	}
+
+	writeFile(t, filepath.Join(work, ".self-review.yaml"), "output-file: ./elsewhere.xml\n")
+	if got := runDiffBase(t, home, work, ""); got.Resume {
+		t.Error("Resume = true although the project redirects output-file; the default path is not its review")
+	}
+}
+
+// --- small helpers for the scripts above ---
+
+// runScript executes one of the package's real guest scripts with the same
+// positional-argument shape Provider.ShellOut gives it.
+func runScript(t *testing.T, home, script string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("sh", append([]string{"-c", script, "sh"}, args...)...)
+	cmd.Env = gitEnv(home)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("script: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return string(b)
 }

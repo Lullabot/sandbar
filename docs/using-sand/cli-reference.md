@@ -615,7 +615,7 @@ This is the same detection and the same `gh` actions the TUI's `l` (Land)
 key uses — see [Landing](files-and-shells.md#landing).
 
 ```
-Usage: sand land NAME [PATH] [--pr | --web | --review] [--profile <name>]
+Usage: sand land NAME [PATH] [--pr | --web | --review [--fresh]] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
@@ -623,6 +623,8 @@ List NAME's git checkouts and their branch/push/PR state, or act on one:
   sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
   sand land NAME PATH --web     open PATH's branch (or PR) in a browser
   sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
+  sand land NAME PATH --review --fresh
+                                the same, discarding any review already saved there
 
 --pr uses the workstation's own 'gh' (never the guest's token). Without gh
 it prints the compare URL and, on a terminal, offers to open it; piped or
@@ -636,6 +638,13 @@ blocks until you finish the review — which writes review.xml into PATH inside
 the VM, where the agent can read it. Nothing leaves the VM. The review tool is
 part of every base image; a base older than the tool itself picks it up on the
 next 'sand create'.
+
+A review.xml already in PATH is carried into the new review, so comments you
+wrote earlier are there to keep, edit or drop. Nothing ever removes that file
+on its own, so --fresh is how you start over: it deletes the saved review and
+its walkthrough sidecar first. The review tool's assistant skills are
+installed into PATH/.agents/skills as the review starts, and the guest's
+global git excludes keep all of it out of 'git status'.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
@@ -652,7 +661,9 @@ matches its own pushed copy — the usual result of a rebase — reads `diverged
 rather than `unpushed (+0)`: there is nothing there to lose.
 
 `--pr PATH`, `--web PATH` and `--review PATH` require a `PATH` from that
-listing, and are mutually exclusive.
+listing, and are mutually exclusive. `--fresh` modifies `--review`: it
+discards any review already saved in that checkout before starting, and is
+refused (rather than ignored) alongside any other action.
 
 - **`--pr`** and **`--web`** both refuse a checkout that isn't pushed or has
   no recognized remote — there's nothing to open a PR or browser page
