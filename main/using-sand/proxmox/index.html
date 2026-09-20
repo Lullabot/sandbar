@@ -951,6 +951,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#mac-addresses-survive-a-rebuild" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MAC addresses survive a rebuild
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-separate-pool-for-automated-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1495,6 +1506,17 @@
     <span class="md-ellipsis">
       
         Step 6 — Point sand at the host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mac-addresses-survive-a-rebuild" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MAC addresses survive a rebuild
       
     </span>
   </a>
@@ -2332,6 +2354,29 @@ waiting for the agent. Bake it in offline on any Linux box with libguestfs'
 first-boot behaviour is untouched) and strips machine-specific state so clones
 stay independent.</p>
 </div>
+<h2 id="mac-addresses-survive-a-rebuild">MAC addresses survive a rebuild</h2>
+<p>Rebuilding a VM (<code>sand create --recreate</code>, or Reset in the TUI) deletes it and
+clones a fresh one from the template, and Proxmox gives every clone a brand-new
+random MAC. <code>sand</code> puts the old one back: it reads the VM's NIC MACs just before
+the delete and writes them onto the clone before its first boot.</p>
+<p>That matters because the MAC is the identity your <em>network</em> knows the VM by, and
+none of what it keys lives anywhere <code>sand</code> could restore afterwards:</p>
+<ul>
+<li>a DHCP reservation, so the VM comes back on the same IP;</li>
+<li>a firewall rule, a switch port ACL or a captive-portal exemption;</li>
+<li>anything you pinned in your router's address book.</li>
+</ul>
+<p>Each NIC keeps the rest of its configuration exactly as Proxmox cloned it —
+bridge, VLAN tag, firewall flag, MTU — with only the address substituted, so a
+tagged NIC does not quietly land on the wrong VLAN.</p>
+<p>It needs no extra privilege: <code>VM.Config.Network</code> is already in the role above,
+because <code>sand</code> sets <code>net0</code> when it creates a VM in the first place. If the read
+or the write fails, the rebuild carries on and says so — a VM with a new MAC is
+an inconvenience, and aborting a rebuild (or destroying the clone that just
+succeeded) over one would be worse. You'll see a warning in the build output
+naming what it could not keep.</p>
+<p>If you actually <em>want</em> a fresh MAC, delete the VM and create it again: that is
+the verb that means "a different machine".</p>
 <h2 id="a-separate-pool-for-automated-tests">A separate pool for automated tests</h2>
 <p>If you run <code>sand</code>'s opt-in end-to-end test suite (or otherwise want a throwaway
 pool that can never touch your day-to-day VMs), set up a <strong>second</strong> pool and
