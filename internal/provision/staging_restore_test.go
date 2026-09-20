@@ -52,7 +52,7 @@ func TestStageInCreatesParentsAsTheUser(t *testing.T) {
 		t.Fatalf("seed archive: %v", err)
 	}
 
-	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", []string{"github.com/octocat"}, archive); err != nil {
+	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", []string{"github.com/octocat"}, archive, "project tree", io.Discard); err != nil {
 		t.Fatalf("StageIn: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestStageInSkipsTheChownForAPathThatWasNeverThere(t *testing.T) {
 		t.Fatalf("seed archive: %v", err)
 	}
 
-	if err := StageIn(context.Background(), cli, "claude", home, "andrew", []string{".claude", ".claude.json"}, archive); err != nil {
+	if err := StageIn(context.Background(), cli, "claude", home, "andrew", []string{".claude", ".claude.json"}, archive, "Claude data", io.Discard); err != nil {
 		t.Fatalf("StageIn: %v", err)
 	}
 

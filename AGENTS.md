@@ -770,6 +770,19 @@ comment at `roles/claude-code/tasks/main.yml`.
   side of that trade. `TestTmuxConfDeployedInEveryPhase` guards it, the way
   `molecule/base` guards the same property for the timezone tasks.
 
+- **A reset's staging transfers are metered ON THE HOST, and a stage-out has no
+  percentage on purpose** (`internal/provision/stageprogress.go`). The count
+  comes from the archive file sand itself is writing (stage-out) or reading
+  (stage-in), so it needs nothing installed in the guest, works identically on
+  both backends, and cannot report bytes that did not cross. The missing
+  stage-out percentage is the part that invites a "fix": the only way to get a
+  denominator is a second full walk of the same tree (`du -sb` over hundreds of
+  thousands of files), which spends a slice of the very cost being measured on a
+  number the compressor then invalidates. Report bytes and a rate, never an
+  estimated fraction. The lines are short and lead with the numbers because the
+  TUI renders the latest `==>` banner inside a tile with as little as 36 columns
+  of content, and prose there gets ellipsised exactly where the digits are.
+
 - **A provisioning failure must say WHICH LAYER failed.** Each phase runs as one
   ssh session to the guest, so an `exit status 255` from it is ssh's own status —
   the connection dropped, or the remote command was killed by a signal — and

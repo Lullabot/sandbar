@@ -153,7 +153,7 @@ func TestStageOut(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "claude.tar")
 	paths := []string{".claude", ".claude.json"}
 
-	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", paths, archive, io.Discard); err != nil {
+	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", paths, archive, "Claude data", io.Discard); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 
@@ -170,18 +170,30 @@ func TestStageOut(t *testing.T) {
 // VM, which may have been cloned from a base built before zstd was part of the
 // image. A reset that refused to run there would refuse while holding the only
 // copy of the user's work, so a missing compressor costs speed, not the reset.
+//
+// The fallback is also SAID, and that half is asserted here rather than left to
+// inspection. Falling back silently is how a user ends up watching a copy run
+// several times slower than the same copy on the VM beside it with no way to
+// find out why — the cause is a base image built before zstd joined the package
+// list, which no amount of resetting THIS VM can change.
 func TestStageOutFallsBackToGzipWithoutZstd(t *testing.T) {
 	f := &stagingFakeRunner{failSubstr: "command -v zstd"}
 	cli := lima.New(f)
 	archive := filepath.Join(t.TempDir(), "claude.tar")
 
-	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", []string{".claude"}, archive, io.Discard); err != nil {
+	var out strings.Builder
+	if err := StageOut(context.Background(), cli, "claude", "/home/andrew", []string{".claude"}, archive, "Claude data", &out); err != nil {
 		t.Fatalf("StageOut: %v", err)
 	}
 
 	want := []string{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "-z", "-cf", "-", ".claude"}
 	if got := f.calls[len(f.calls)-1]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StageOut argv = %v, want %v", got, want)
+	}
+	for _, phrase := range []string{"no zstd", "gzip", "--rebuild"} {
+		if !strings.Contains(out.String(), phrase) {
+			t.Fatalf("gzip fallback was not explained (%q missing); got:\n%s", phrase, out.String())
+		}
 	}
 }
 
@@ -196,7 +208,7 @@ func TestStageIn(t *testing.T) {
 	}
 	paths := []string{".claude", ".claude.json"}
 
-	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", paths, archive); err != nil {
+	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", paths, archive, "Claude data", io.Discard); err != nil {
 		t.Fatalf("StageIn: %v", err)
 	}
 

@@ -237,21 +237,27 @@ func (g *StageGuard) Done() {
 // absent in the guest. Merging that warning into the archive corrupts the
 // compressed stream, and the later StageIn extract then aborts with exit
 // status 2.
-func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive string, out io.Writer, excludes ...string) error {
+func StageOut(ctx context.Context, cli guestRunner, name, home string, guestPaths []string, hostArchive, label string, out io.Writer, excludes ...string) error {
 	file, err := os.Create(hostArchive)
 	if err != nil {
 		return fmt.Errorf("create archive %s: %w", hostArchive, err)
 	}
 	defer file.Close()
 
+	// The meter wraps the archive FILE rather than the guest command, so what it
+	// counts is bytes that reached the host — the only measure of this transfer
+	// that cannot be optimistic (see stageprogress.go).
+	meter := newStageMeter(out, "Backing up", "Backed up", label, 0)
+	defer meter.stop()
+
 	argv := []string{"sudo", "tar", "-C", home, "--ignore-failed-read"}
 	for _, ex := range excludes {
 		argv = append(argv, "--exclude="+ex)
 	}
-	argv = append(argv, tarCompressFlags(ctx, cli, name)...)
+	argv = append(argv, tarCompressFlags(ctx, cli, name, out)...)
 	argv = append(argv, "-cf", "-")
 	argv = append(argv, guestPaths...)
-	if err := cli.ShellStreamOut(ctx, name, nil, file, argv...); err != nil {
+	if err := cli.ShellStreamOut(ctx, name, nil, meteredWriter{w: file, m: meter}, argv...); err != nil {
 		if !tarFilesChanged(err) {
 			return fmt.Errorf("stage out: %w", err)
 		}
@@ -337,12 +343,24 @@ func ancestorDirs(relPath string) []string {
 // org directory failed with "Permission denied". `install -d` repairs an
 // existing directory's owner and mode as well as creating a missing one, so a
 // VM already left in that state by an earlier reset is healed by the next one.
-func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topPaths []string, hostArchive string) error {
+func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topPaths []string, hostArchive, label string, out io.Writer) error {
 	file, err := os.Open(hostArchive)
 	if err != nil {
 		return fmt.Errorf("open archive %s: %w", hostArchive, err)
 	}
 	defer file.Close()
+
+	// A restore is the one half that CAN report a percentage: the archive is
+	// sitting on the host disk, so its size is known before the first byte moves.
+	// A stat that fails is not worth failing a restore over — the transfer is
+	// about to open the same file anyway — so an unknown size simply degrades to
+	// the byte-and-rate reading a stage-out gives (see stageprogress.go).
+	var total int64
+	if st, err := file.Stat(); err == nil {
+		total = st.Size()
+	}
+	meter := newStageMeter(out, "Restoring", "Restored", label, total)
+	defer meter.stop()
 
 	// `install -d` is happy to be handed the same directory twice, so no dedup is
 	// needed for the overlapping ancestors two top-level paths could share.
@@ -364,7 +382,7 @@ func StageIn(ctx context.Context, cli guestRunner, name, home, user string, topP
 		extract = append(extract, flag)
 	}
 	extract = append(extract, "-xf", "-")
-	if err := cli.Shell(ctx, name, file, io.Discard, extract...); err != nil {
+	if err := cli.Shell(ctx, name, meteredReader{r: file, m: meter}, io.Discard, extract...); err != nil {
 		return fmt.Errorf("stage in extract: %w", err)
 	}
 
@@ -502,7 +520,7 @@ func PlanProject(ctx context.Context, cli guestRunner, name, home, cloneURL, hos
 	if err != nil || !plan.Staged {
 		return plan, err
 	}
-	if err := StageOut(ctx, cli, name, home, []string{plan.OrgRel}, hostArchive, out); err != nil {
+	if err := StageOut(ctx, cli, name, home, []string{plan.OrgRel}, hostArchive, projectLabel, out); err != nil {
 		return plan, err
 	}
 	return plan, nil
