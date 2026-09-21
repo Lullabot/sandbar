@@ -62,6 +62,15 @@ for the model and
 [Proxmox VE Setup](https://lullabot.github.io/sandbar/latest/using-sand/proxmox/)
 for the one-time host setup.
 
+## Reviewing what Claude wrote
+
+Before any of it is pushed anywhere, `sand land NAME PATH --review` (or `v` in
+the TUI's Landing pane) opens the real diff of an uncommitted or unpushed
+checkout in your browser and writes your comments back into the VM. The review
+UI is served from inside the VM and reached over a loopback-only forward, so
+unfinished work never leaves it. See
+[Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
+
 ## Development
 
 Building from a checkout, running tests, and how `sand` embeds and runs
