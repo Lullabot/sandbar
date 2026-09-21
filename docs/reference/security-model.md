@@ -71,18 +71,17 @@ tenant or a determined attacker.
   [Files and State](files-and-state.md) for the path and what deleting it
   costs. Treat that file as sensitive: anyone who can read your user
   account's files can read every VM's secrets.
-- **A reset's "preserve" options are a deliberate, opt-in exception** to
-  "nothing leaves the VM": when enabled, the selected data is copied to a
-  private (`0700`) host directory, restored into the rebuilt VM, then deleted.
-  What that data can be has grown — the Claude Code login, a cloned project's
-  checkout with its `.env`, any git checkout or worktree in the guest home,
-  or (with `--preserve-home` / the whole-home toggle) *the entire home
-  directory* — but the rule has not: they all default off, they are all
-  enabled per reset by a human, and the copy is deleted afterwards. The bigger
-  the option, the more it matters: do not enable any of them if you suspect
-  the VM you are resetting is compromised, and note that preserving a whole
-  home copies whatever that VM's agent wrote anywhere in `~` onto your
-  workstation. Only paths inside the guest home can be preserved at all.
+- **Reset preserve options copy selected guest files to your workstation.**
+  They are off by default and must be enabled for each reset. You can keep
+  the Claude Code login, the project's checkout and `.env`, selected
+  directories inside the guest home, or the whole home with
+  `--preserve-home`. The data passes through a private (`0700`) host
+  directory and is restored into the rebuilt VM. After a successful reset,
+  `sand` removes the temporary copy. If a reset fails after attempting to
+  delete the VM, it keeps the archives and reports their path for recovery.
+  **Do not preserve data from a VM you suspect is compromised.** Preserving
+  the whole home copies credentials and any files an agent wrote there onto
+  your workstation. See [`sand reset`](../using-sand/cli-reference.md#sand-reset-name).
 
 Together these mean: assume a `sand` VM can be fully compromised by whatever
 you run inside it, and rely on deletion — not defense — to recover. Nothing

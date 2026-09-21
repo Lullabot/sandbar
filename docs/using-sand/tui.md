@@ -103,18 +103,14 @@ footer row naming git work that has not yet reached a PR:
   branch of its own, so a PR is one `l` (Land) away. A checkout sitting on its
   repo's default branch doesn't count: a fresh clone is "pushed" in the literal
   sense but has nothing to turn into a PR, so it never lights the badge.
-- **At-risk** (`↑N`, `unpushed`, and/or `dirty`, in dim chrome) — commits or
-  uncommitted changes that exist only in the VM: `↑N` counts the commits that
-  are reachable from **no remote-tracking ref at all**, `unpushed` marks a
-  branch that's never been pushed, and `dirty` marks uncommitted changes.
-  This is exactly the work the delete guard (below) calls out.
+- **At-risk** (`↑N`, `unpushed`, and/or `dirty`, shown dimmed) — work that may
+  be lost if the VM is deleted. `↑N` counts commits absent from every
+  remote-tracking branch in the guest. `unpushed` marks a branch that has
+  never been pushed, and `dirty` marks uncommitted changes.
 
-    `↑N` is deliberately not "commits ahead of the remote-tracking branch".
-    That number compares your branch to one possibly-stale copy of itself by
-    commit hash, so rebasing onto a trunk that has moved inflates it without
-    a byte of work becoming at risk — a five-commit branch rebased onto a
-    trunk 4,404 commits ahead reports 4,409. `↑N` counts what would actually
-    be lost if the VM went away, so in that case it says 5.
+    Comparing against all remote-tracking branches avoids counting upstream
+    commits brought in by a rebase as your unpublished work. The count uses
+    the guest's local Git records; it does not query remotes.
 
 The badge shows nothing for a VM that has never been swept, is stopped, or
 whose last sweep is stale — it never guesses.
@@ -149,62 +145,50 @@ new VM is created on without leaving the TUI. See
 
 ## Resetting a VM
 
-Pressing `R` on a managed tile opens the create form again, titled *Reset
-VM*, pre-filled with that VM's recorded settings. Confirm with `ctrl+s` to
-delete the VM and re-clone it from the base image; the settings you changed
-are then recorded, so the *next* reset defaults to them.
+Press `R` on a managed VM's tile to open the *Reset VM* form, filled with
+its recorded settings. Change resources or settings as needed, then press
+`ctrl+s` to delete and rebuild the VM. The next reset uses the new settings.
 
-Two fields are shown but **locked**: `Name` and `GitHub repo URL`. A reset
-gives you *this* VM again — same name, same project — so CPUs, memory, disk,
-hostname and git identity are editable (a reset doubles as the way to resize a
-VM), while the two things that say *which* VM it is are not. To work on a
-different repo, press `n` and make another VM. The GitHub token field stays
-editable, because re-cloning a private repo still needs one.
+`Name` and `GitHub repo URL` are locked: a reset keeps the VM's identity and
+project. Press `n` to create another VM for a different repository. The
+`GitHub token` field stays editable because cloning a private repository
+again requires a token.
 
-The headless equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name),
-with the same gate, the same defaults and the same preserve options.
+The CLI equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name).
 
 ### Choosing what survives
 
-**Preserve toggles** follow the fields (space/enter flips the focused one).
-They all default off, and each one's help text — shown under the form while
-that row has focus — says exactly what it copies:
+Preserve options follow the settings. **All default off.** Press space or
+enter to toggle the focused option; its help text describes what it copies.
 
-- **Preserve the entire home directory** is first, and it is the one to reach
-  for when nothing is *wrong* with the VM and you only want an up-to-date
-  build. The whole home is copied out, the VM is rebuilt from a current base
-  image, the home is copied back, and the playbook then runs on top of it — so
-  Ansible's own files are freshly rendered while your work is exactly where you
-  left it. It includes everything below (those rows say so while it is on), and
-  it copies the most data.
-- **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`
-  (your Claude Code login and history) across the reset.
-- **Preserve ~/&lt;host&gt;/&lt;org&gt;** — named for the exact directory it
-  protects, e.g. `Preserve ~/github.com/lullabot` — keeps the cloned
-  project's checkout and its `.env`. Enabling it also **skips the re-clone**
-  during the reset's finalize pass, so you don't need to re-supply a clone
-  token to reset a VM that had cloned a private repo (see
-  [Reset and the token](secrets.md#reset-and-the-token)). This toggle is
-  hidden entirely when the VM cloned no project, since there'd be nothing to
-  preserve.
-- **One row per git checkout** the VM holds — `Preserve ~/src/app`,
-  `Preserve ~/src/app/.claude/worktrees/spike`, and so on. These come from the
-  same background sweep that feeds the
-  [unlanded-work badge](#the-unlanded-work-badge), so a repo you cloned by hand
-  and a worktree an agent created three levels down are both offered, and each
-  row's help says what branch it was on and how long ago it was seen. Checkouts
-  already inside the project's own org directory are left out, since the toggle
-  above keeps them. A VM that has never been swept (one stopped all session)
-  simply has no rows here; preserve the whole home instead.
+- **Preserve the entire home directory** keeps your files while updating the
+  VM. The home is restored before the playbook runs, so Ansible can update
+  its configuration files. It includes the options below, which appear
+  checked and locked while this option is on. It copies the most data and
+  excludes `~/.ssh/authorized_keys`, so the rebuilt VM keeps its new access
+  key.
+- **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`,
+  including your login and history.
+- **Preserve ~/&lt;host&gt;/&lt;org&gt;** keeps the organisation directory for
+  the VM's cloned project, including the checkout, uncommitted work, and the
+  `.env` beside it. If the checkout is present, the reset skips cloning it
+  again, so a private repository needs no clone token. This option appears
+  only when the VM has a configured project.
+- **Preserve a checkout**, such as `Preserve ~/src/app`, keeps one checkout
+  found by the background sweep. This includes linked worktrees. The help
+  text shows the branch and when it was last seen. Checkouts within the
+  project's organisation directory are covered by that directory's option
+  and have no separate row. A VM with no cached sweep has no checkout rows;
+  use the whole-home option if you need to keep its files.
 
-Enabling any toggle copies that data out of the VM to a private host
-directory and restores it into the freshly cloned VM, then deletes the
-temporary copy. The form warns that this moves your Claude Code login,
-project token and working trees off the VM: **do not preserve if you suspect
-the VM is compromised** — see
+Preserved data passes through a private directory on your workstation.
+`sand` removes the copy after a successful reset. If a reset fails after
+attempting to delete the VM, it keeps the archives and prints their path
+for recovery. See [`sand reset`](cli-reference.md#sand-reset-name).
+
+**Do not preserve data if you suspect the VM is compromised.** It can
+include credentials and files written by an agent. See
 [Security Model](../reference/security-model.md).
 
-Only directories **inside the guest home** can be preserved. Nothing under
-`/srv`, `/opt` or anywhere else outside `~` survives a reset, and a row
-pointing somewhere outside the home is refused before the VM is touched rather
-than silently skipped.
+Only directories inside the guest home can be preserved. Paths outside it,
+such as `/srv` or `/opt`, are rejected before the VM is deleted.
