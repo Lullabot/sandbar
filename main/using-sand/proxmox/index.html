@@ -962,6 +962,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-sand-configures-a-vms-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sand configures a VM's disk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-separate-pool-for-automated-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1524,6 +1535,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-sand-configures-a-vms-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sand configures a VM's disk
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-separate-pool-for-automated-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2048,7 +2070,7 @@ failures — so, for the record, why each of the less-obvious ones is here:</p>
 <tbody>
 <tr>
 <td><code>VM.Config.HWType</code></td>
-<td>Setting <code>scsihw</code>, <code>vga</code>, and <code>machine</code> on the base VM. Cloud images need <code>virtio-scsi-pci</code>, not the PVE default.</td>
+<td>Setting <code>scsihw</code>, <code>vga</code>, and <code>machine</code> on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of <code>lsi</code> — <code>sand</code> uses <code>virtio-scsi-single</code> (see <a href="#how-sand-configures-a-vms-disk">How <code>sand</code> configures a VM's disk</a>).</td>
 </tr>
 <tr>
 <td><code>VM.Config.Options</code></td>
@@ -2377,6 +2399,57 @@ succeeded) over one would be worse. You'll see a warning in the build output
 naming what it could not keep.</p>
 <p>If you actually <em>want</em> a fresh MAC, delete the VM and create it again: that is
 the verb that means "a different machine".</p>
+<h2 id="how-sand-configures-a-vms-disk">How <code>sand</code> configures a VM's disk</h2>
+<p>Proxmox's own defaults are tuned for a general-purpose server. A <code>sand</code> VM is a
+development sandbox, where nearly everything that feels slow — a build, a test
+run, and above all a reset copying a preserved home in and out — is bound by the
+cost of touching <em>many small files</em> rather than by throughput. <code>sand</code> sets four
+options on <code>scsi0</code> for that, and one controller type to make the first of them
+possible:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scsihw=virtio-scsi-single</code></td>
+<td>The controller variant Proxmox accepts <code>iothread</code> on.</td>
+</tr>
+<tr>
+<td><code>iothread=1</code></td>
+<td>Gives the disk its own IO thread instead of sharing the QEMU main thread with every other device, so a queue of small reads stops serialising behind unrelated work.</td>
+</tr>
+<tr>
+<td><code>cache=writeback</code></td>
+<td>Proxmox's default is no host cache at all, so every read the <em>guest's</em> cache misses goes to the storage backend. Writeback lets the Proxmox host's page cache serve them.</td>
+</tr>
+<tr>
+<td><code>discard=on</code></td>
+<td>Passes the guest's TRIM through, so deleting files actually returns space to a thin volume, a ZFS dataset or a Ceph image. Without it a disposable VM's storage only ever grows.</td>
+</tr>
+<tr>
+<td><code>ssd=1</code></td>
+<td>Advertises the disk as non-rotational, which is what makes the guest's weekly <code>fstrim</code> meaningful and stops its IO scheduler optimising for seeks that do not exist.</td>
+</tr>
+</tbody>
+</table>
+<p><code>cache=writeback</code> is the only one with a trade, and it is a bounded one: the
+guest's flushes are still honoured, so its filesystem journal stays consistent,
+but writes it has not yet flushed can be lost if the <strong>host</strong> loses power. That
+is the same exposure a physical workstation has, on machines that are explicitly
+disposable. If your VMs hold work you would not want to lose to a host power
+cut, land it (<code>sand land</code>) rather than relying on the disk.</p>
+<p>The guest side is set up to match: its root filesystem is mounted <code>noatime</code> (so
+reading a file does not write its inode back, which a <code>tar</code> of a home directory
+full of small files would otherwise do hundreds of thousands of times), and
+<code>fstrim.timer</code> is enabled so <code>discard=on</code> has something to pass along.</p>
+<p><strong>These apply to VMs created from here on.</strong> Disk options live in a VM's config
+and clones inherit them from the template, so an existing VM keeps whatever it
+was created with. Run <code>sand create --rebuild</code> to rebuild the base template, then
+recreate or reset a VM to put it on the new settings.</p>
 <h2 id="a-separate-pool-for-automated-tests">A separate pool for automated tests</h2>
 <p>If you run <code>sand</code>'s opt-in end-to-end test suite (or otherwise want a throwaway
 pool that can never touch your day-to-day VMs), set up a <strong>second</strong> pool and
