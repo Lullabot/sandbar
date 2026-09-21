@@ -396,99 +396,65 @@ real CPU, memory, and storage usage, sampled from the API.
 
 ## MAC addresses survive a rebuild
 
-Rebuilding a VM (`sand create --recreate`, or Reset in the TUI) deletes it and
-clones a fresh one from the template, and Proxmox gives every clone a brand-new
-random MAC. `sand` puts the old one back: it reads the VM's NIC MACs just before
-the delete and writes them onto the clone before its first boot.
+A reset (`sand reset NAME`, `sand create --recreate`, or `R` in the TUI)
+tries to keep the VM's network interface MAC addresses. `sand` reads them
+before deleting the VM and restores them to the new clone before its first
+boot. This preserves the addresses used by DHCP reservations, firewall
+rules, and other network settings.
 
-That matters because the MAC is the identity your *network* knows the VM by, and
-none of what it keys lives anywhere `sand` could restore afterwards:
+Only the MAC addresses are restored. Each interface keeps the bridge, VLAN,
+firewall flag, and MTU inherited from the template.
 
-- a DHCP reservation, so the VM comes back on the same IP;
-- a firewall rule, a switch port ACL or a captive-portal exemption;
-- anything you pinned in your router's address book.
+The guest's DHCP client identifier also follows its MAC address, through
+`DUIDType=link-layer` in
+`/etc/systemd/networkd.conf.d/10-sand-dhcp-identity.conf`. This gives each new
+clone a distinct identifier and keeps that identifier stable across a reset,
+so changing `/etc/machine-id` does not by itself change the DHCP lease.
 
-Each NIC keeps the rest of its configuration exactly as Proxmox cloned it —
-bridge, VLAN tag, firewall flag, MTU — with only the address substituted, so a
-tagged NIC does not quietly land on the wrong VLAN.
+No additional API privilege is needed: the role above already includes
+`VM.Config.Network`. If reading or restoring an address fails, the reset
+continues and prints a warning. The VM may then receive a different IP
+address.
 
-For the *lease* to come back with it, the VM's DHCP client identity has to
-follow the MAC too. By default `systemd-networkd` derives that identity from
-`/etc/machine-id` — not from the MAC at all — and the template build empties
-`/etc/machine-id` on purpose, so that every clone mints its own and no two VMs
-collide on one lease. Left there, a rebuild would restore the MAC faithfully
-and still introduce itself to your DHCP server as a stranger. So `sand`
-configures every guest with `DUIDType=link-layer`
-(`/etc/systemd/networkd.conf.d/10-sand-dhcp-identity.conf`), which puts the
-identity back on the MAC: distinct per clone, because Proxmox gives each clone
-a distinct MAC, and unchanged across a rebuild, because `sand` restores it.
-
-It needs no extra privilege: `VM.Config.Network` is already in the role above,
-because `sand` sets `net0` when it creates a VM in the first place. If the read
-or the write fails, the rebuild carries on and says so — a VM with a new MAC is
-an inconvenience, and aborting a rebuild (or destroying the clone that just
-succeeded) over one would be worse. You'll see a warning in the build output
-naming what it could not keep.
-
-If you actually *want* a fresh MAC, delete the VM and create it again: that is
-the verb that means "a different machine".
+To get a new MAC address, delete the VM and create another one.
 
 ## VM names in DNS
 
-Many routers publish DNS from the hostname a client sends in its DHCP request,
-so a `sand` VM usually shows up on your network as `<name>.<your domain>`.
+If your router creates DNS records from DHCP hostnames, a `sand` VM can
+appear as `<name>.<your domain>`.
 
-The name a VM sends is fixed up over its first minute of life, and the ordering
-matters if you are watching. The base template deliberately ships **no**
-hostname, so a clone's first DHCP request carries none either — better a
-nameless lease than one registered under the base image's name, which is what
-used to happen and left several addresses on the segment all claiming to be
-`sandbar-base`. Cloud-init then applies the VM's Proxmox name, the provisioning
-playbook confirms it, and `sand` asks for a DHCP renew so the name reaches your
-server immediately rather than at the next lease renewal.
+The base template has no hostname, so a clone's first DHCP request does not
+announce the base image's name. Cloud-init then sets the VM's Proxmox name,
+the playbook applies its configured hostname, and `sand` requests a DHCP
+renewal to send that name to the server.
 
-Two things this does not do:
-
-- **It does not remove a record that is already wrong.** A stale entry from a
-  VM you deleted, or from before the fix above, lives in your DHCP server's
-  lease database until that lease expires. Clear it there if it is in the way.
-- **It does not register anything on a network whose DNS ignores the DHCP
-  hostname option.** That is a router setting, not something `sand` can
-  arrange.
+Stale DNS entries can remain in your DHCP server's lease database until the
+lease expires. Clear them there if needed. Networks that do not create DNS
+records from DHCP hostnames need their own DNS configuration.
 
 ## How `sand` configures a VM's disk
 
-Proxmox's own defaults are tuned for a general-purpose server. A `sand` VM is a
-development sandbox, where nearly everything that feels slow — a build, a test
-run, and above all a reset copying a preserved home in and out — is bound by the
-cost of touching *many small files* rather than by throughput. `sand` sets four
-options on `scsi0` for that, and one controller type to make the first of them
-possible:
+`sand` configures the disk for development work that reads and writes many
+small files, including builds, tests, and reset backups:
 
-| Setting | Why |
+| Setting | Purpose |
 |---|---|
-| `scsihw=virtio-scsi-single` | The controller variant Proxmox accepts `iothread` on. |
-| `iothread=1` | Gives the disk its own IO thread instead of sharing the QEMU main thread with every other device, so a queue of small reads stops serialising behind unrelated work. |
-| `cache=writeback` | Proxmox's default is no host cache at all, so every read the *guest's* cache misses goes to the storage backend. Writeback lets the Proxmox host's page cache serve them. |
-| `discard=on` | Passes the guest's TRIM through, so deleting files actually returns space to a thin volume, a ZFS dataset or a Ceph image. Without it a disposable VM's storage only ever grows. |
-| `ssd=1` | Advertises the disk as non-rotational, which is what makes the guest's weekly `fstrim` meaningful and stops its IO scheduler optimising for seeks that do not exist. |
+| `scsihw=virtio-scsi-single` | Selects a controller that supports a separate I/O thread for the disk. |
+| `iothread=1` | Gives disk I/O its own thread instead of sharing QEMU's main thread. |
+| `cache=writeback` | Uses the Proxmox host's page cache for disk I/O. |
+| `discard=on` | Passes discard requests to the storage backend so it can reclaim unused space. |
+| `ssd=1` | Presents the disk to the guest as non-rotational storage. |
 
-`cache=writeback` is the only one with a trade, and it is a bounded one: the
-guest's flushes are still honoured, so its filesystem journal stays consistent,
-but writes it has not yet flushed can be lost if the **host** loses power. That
-is the same exposure a physical workstation has, on machines that are explicitly
-disposable. If your VMs hold work you would not want to lose to a host power
-cut, land it (`sand land`) rather than relying on the disk.
+Writeback caching honours guest flush requests, but writes that have not
+been flushed can be lost if the host loses power. Keep important work
+committed and pushed to a remote repository.
 
-The guest side is set up to match: its root filesystem is mounted `noatime` (so
-reading a file does not write its inode back, which a `tar` of a home directory
-full of small files would otherwise do hundreds of thousands of times), and
-`fstrim.timer` is enabled so `discard=on` has something to pass along.
+Inside the guest, `noatime` avoids updating file access times on reads.
+`fstrim.timer` periodically requests reclamation of unused disk space.
 
-**These apply to VMs created from here on.** Disk options live in a VM's config
-and clones inherit them from the template, so an existing VM keeps whatever it
-was created with. Run `sand create --rebuild` to rebuild the base template, then
-recreate or reset a VM to put it on the new settings.
+Existing VMs keep the disk settings they were created with. To apply these
+settings, rebuild the base template with `sand create --rebuild`, then reset
+or recreate the VM from it.
 
 ## A separate pool for automated tests
 
