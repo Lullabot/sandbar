@@ -607,24 +607,42 @@ func (m *model) beginAction(cmd tea.Cmd) tea.Cmd {
 // regardless, and on the progress screen it cancels the run it is showing.
 func (m *model) requestQuit() tea.Cmd {
 	busy := m.busyVMs()
-	if len(busy) == 0 {
+	// A review counts as work in flight even though it is not in the job
+	// registry, and it is the kind most easily lost: comments live only in
+	// the browser page until they are submitted, so quitting discards them
+	// with nothing written anywhere. It became easy to forget one was running
+	// when leaving the Landing pane stopped cancelling it — the review is
+	// then alive and off screen, which is exactly when a guard earns its
+	// keep.
+	reviewing := m.review.path != ""
+	if len(busy) == 0 && !reviewing {
 		return m.quit()
 	}
-	noun := "VM"
-	if len(busy) > 1 {
-		noun = "VMs"
+
+	var parts []string
+	if len(busy) > 0 {
+		noun := "VM"
+		if len(busy) > 1 {
+			noun = "VMs"
+		}
+		// The count is of VMs, not runs, and the noun says so: a VM can hold two
+		// runs at once (jobs.go), and "abandon 1 run" while abandoning two would be
+		// a small lie told at the exact moment the user is deciding whether to walk
+		// away from work.
+		parts = append(parts, fmt.Sprintf("work in flight on %d %s (%s)",
+			len(busy), noun, summarizeNames(busy, m.width)))
 	}
-	// The count is of VMs, not runs, and the noun says so: a VM can hold two runs at
-	// once (jobs.go), and "abandon 1 run" while abandoning two would be a small lie
-	// told at the exact moment the user is deciding whether to walk away from work.
+	if reviewing {
+		parts = append(parts, "an unsubmitted review of "+m.review.path)
+	}
+
 	// quits: this branch OPENS an overlay and does not quit, so quit() cannot be
 	// called here. The fact travels on the confirmation instead, and updateConfirm
 	// calls quit() when the user actually answers 'y'.
 	m.confirm = &confirmState{
-		prompt: fmt.Sprintf("Quit and abandon work in flight on %d %s (%s)?",
-			len(busy), noun, summarizeNames(busy, m.width)),
-		run:   tea.Quit,
-		quits: true,
+		prompt: "Quit and abandon " + strings.Join(parts, " and ") + "?",
+		run:    tea.Quit,
+		quits:  true,
 	}
 	return nil
 }
@@ -636,9 +654,17 @@ func (m *model) requestQuit() tea.Cmd {
 // the bug silently — nothing fails, the board just costs an agent prompt apiece on
 // the way out. One symbol is greppable; three hand-written assignments are an
 // invariant a fourth quit site can quietly break.
+//
+// It returns reviewTeardownQuitCmd rather than tea.Quit directly because a
+// Landing-pane review owns guest-side processes this model must kill on the
+// way out; that Cmd is what finally returns tea.Quit. Every exit routes here
+// — ctrl+c (model.go), 'q' with nothing in flight, and the confirmed
+// "abandon work in flight" answer (updateConfirm, which REPLACES the
+// confirmation's run with this) — so the teardown cannot be skipped by
+// picking a different door.
 func (m *model) quit() tea.Cmd {
 	m.quitting = true
-	return tea.Quit
+	return m.reviewTeardownQuitCmd()
 }
 
 // updateBoard handles keys on the board. Order matters: a pending confirmation

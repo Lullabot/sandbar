@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/drupalorg"
 	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/landreview"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -191,7 +193,7 @@ func TestClassifyLandRowPushedHasPR(t *testing.T) {
 }
 
 func TestClassifyLandRowUnpushed(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "acme/repo", Forge: "github.com"}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, OrgRepo: "acme/repo", Forge: "github.com"}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
@@ -228,7 +230,7 @@ func TestClassifyLandRowDirtyOverridesAnAlreadyPushedPR(t *testing.T) {
 // the most fragile thing in the VM, so a bare "local only" would understate it
 // exactly where it matters most.
 func TestClassifyLandRowNoRemoteStillNamesTheRisk(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 2}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1, Dirty: 2}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowLocalOnly {
 		t.Fatalf("Kind = %v, want landRowLocalOnly — there is no remote at all", row.Kind)
@@ -277,7 +279,7 @@ func TestCommitAndPushExprIsLiteral(t *testing.T) {
 }
 
 func TestClassifyLandRowUnpushedAndDirtyCombinedLabel(t *testing.T) {
-	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
+	c := checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2, Dirty: 1, OrgRepo: "acme/repo", Forge: "github.com"}
 	row := classifyLandRow(c, nil, prCheckPending, false)
 	if row.Kind != landRowAtRisk {
 		t.Fatalf("Kind = %v, want landRowAtRisk", row.Kind)
@@ -431,7 +433,7 @@ func TestClassifyLandRowDrupalOrgUnpushedStillOffersPublish(t *testing.T) {
 	}{
 		{
 			name:     "unpushed commits",
-			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
+			checkout: checkouts.Checkout{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, OrgRepo: "project/module", Forge: "git.drupalcode.org", Branch: "1.0.x"},
 		},
 		{
 			name:     "never pushed",
@@ -480,6 +482,7 @@ func TestClassifyLandRowDrupalOrgSSHHostIsRecognized(t *testing.T) {
 		Path:      "/home/user/drupal.org/dubbot",
 		PushState: checkouts.PushStateUnpushed,
 		Ahead:     2,
+		LocalOnly: 2,
 		OrgRepo:   "issue/dubbot-3622063",
 		Forge:     "git.drupal.org",
 		Branch:    "3622063-allow-sites-to",
@@ -1135,7 +1138,7 @@ func TestLandingActLabelNamesTheRealAction(t *testing.T) {
 		{"dirty", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, Dirty: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "commit + push"},
 		// Clean but unpushed: promising an editor that never opens would be
 		// worse than saying nothing.
-		{"unpushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
+		{"unpushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
 		{"never pushed, clean", checkouts.Checkout{Path: "/a", Branch: "f", PushState: checkouts.PushStateNever, OrgRepo: "acme/repo", Forge: "github.com"}, "push"},
 		{"pushed, no PR", checkouts.Checkout{Path: "/a", Branch: "f", DefaultBranch: "main", PushState: checkouts.PushStatePushed, OrgRepo: "acme/repo", Forge: "github.com"}, "open draft PR"},
 	}
@@ -1175,7 +1178,7 @@ func TestLandingFooterDoesNotClaimEnterMoves(t *testing.T) {
 	m, v := landingTestVM(t, "web")
 	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
 		Checkouts: []checkouts.Checkout{
-			{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 1, OrgRepo: "acme/repo", Forge: "github.com"},
+			{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1, OrgRepo: "acme/repo", Forge: "github.com"},
 		},
 	}); err != nil {
 		t.Fatalf("seed checkouts: %v", err)
@@ -1275,7 +1278,7 @@ func TestLandingRescanKey(t *testing.T) {
 	m.landing.scanning = true
 	_ = m.handleLandRefresh(landRefreshMsg{scope: v.scope, vm: v.Name, vc: checkouts.VMCheckouts{
 		SweptAt:   swept,
-		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 4, OrgRepo: "acme/repo", Forge: "github.com"}},
+		Checkouts: []checkouts.Checkout{{Path: "/a", Branch: "f", PushState: checkouts.PushStateUnpushed, Ahead: 4, LocalOnly: 4, OrgRepo: "acme/repo", Forge: "github.com"}},
 	}})
 	_ = swept
 	if m.landing.scanning {
@@ -2181,4 +2184,301 @@ func TestLandingPublishFlowOutranksAPendingConfirmation(t *testing.T) {
 	if next.(model).confirm == nil {
 		t.Error("a keystroke meant for the issue prompt answered the reset confirmation")
 	}
+}
+
+// TestAtRiskLabelUsesLocalOnly pins the Landing pane's at-risk row against the
+// rebase case, and against the row it must NOT render: "↑0 unpushed", which
+// would be alarming and false at once.
+func TestAtRiskLabelUsesLocalOnly(t *testing.T) {
+	cases := []struct {
+		name string
+		c    checkouts.Checkout
+		want string
+	}{
+		{
+			name: "a rebased branch names its own work, not the trunk it landed on",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5},
+			want: "↑5 unpushed",
+		},
+		{
+			name: "with uncommitted work alongside",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5, Dirty: 2},
+			want: "↑5 unpushed + 2 uncommitted",
+		},
+		{
+			name: "nothing local: named as divergence, never as ↑0",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 12, LocalOnly: 0},
+			want: "diverged from its pushed copy",
+		},
+		{
+			name: "nothing local but a dirty tree",
+			c:    checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 12, LocalOnly: 0, Dirty: 3},
+			want: "diverged from its pushed copy + 3 uncommitted",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := atRiskLabel(tc.c); got != tc.want {
+				t.Errorf("atRiskLabel = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- the clean review verb ---
+
+// landingWithOneCheckout seeds a pane holding a single reviewable checkout,
+// which is all the clean-review verb's tests need.
+func landingWithOneCheckout(t *testing.T) (model, boardVM) {
+	t.Helper()
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "feature", PushState: checkouts.PushStateNever},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+	m.landing.ghChecked = true
+	m.landing.cursor = 0
+	return m, v
+}
+
+// TestLandingFooterOffersCleanReviewAndStillFits guards the two ways a new
+// footer entry goes wrong. It must be OFFERED — a verb the footer never names
+// is a verb nobody finds — and the footer must still fit the 80-column
+// terminal this project budgets for, because a footer that wraps costs the
+// pane a row it never reserved and pushes content off the bottom.
+func TestLandingFooterOffersCleanReviewAndStillFits(t *testing.T) {
+	m, _ := landingWithOneCheckout(t)
+
+	var found bool
+	for _, b := range m.landingHelp() {
+		if b.Enabled() && b.Help().Key == "V" {
+			found = true
+			if b.Help().Desc == "" {
+				t.Error("the clean-review verb is in the footer with no description")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the footer does not offer V; a verb it never names is one nobody finds")
+	}
+
+	// At 80 columns, against the LONGEST footer this pane can produce. The
+	// act binding's help is the row's own verb, so the worst case is the
+	// longest of those ("publish to drupal.org", 17 columns more than
+	// "push"). The footer is CLIPPED rather than wrapped, so overflow does
+	// not announce itself — it silently drops whatever sits at the end of the
+	// line, which is exactly where a newly added verb goes.
+	for _, tc := range []struct {
+		name string
+		seed func(*testing.T) (model, boardVM)
+	}{
+		{name: "an ordinary push row", seed: landingWithActionableCheckout},
+		{name: "the longest verb there is", seed: landingWithPublishCheckout},
+		// While a review runs, v's help grows to "cancel review" — paid for
+		// by V dropping out, since there is nothing to start over yet.
+		{name: "while that row is being reviewed", seed: landingWithPublishCheckoutUnderReview},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wide, _ := tc.seed(t)
+			sized, _ := wide.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m80 := sized.(model)
+
+			footer := landingFooterLine(ansi.Strip(m80.landingView()))
+			if footer == "" {
+				t.Fatal("no footer line found in the rendered pane")
+			}
+			if w := len([]rune(footer)); w > 80 {
+				t.Errorf("the footer is %d columns at an 80-column terminal:\n%q", w, footer)
+			}
+			// The review key is there either way; which verb it names is
+			// the subject of TestLandingReviewKeyHelpSaysCancelWhileReviewing.
+			for _, want := range []string{"v ", "esc back"} {
+				if !strings.Contains(footer, want) {
+					t.Errorf("the footer lost %q at 80 columns — it was clipped off the end:\n%q", want, footer)
+				}
+			}
+		})
+	}
+}
+
+// landingWithPublishCheckout seeds the row whose act verb is the longest the
+// pane has ("publish to drupal.org"), which is the footer's worst case.
+func landingWithPublishCheckout(t *testing.T) (model, boardVM) {
+	t.Helper()
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{
+				Path: "/home/user/mod", Kind: checkouts.KindRepo, Branch: "1.0.x",
+				PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3,
+				OrgRepo: "project/module", Forge: "git.drupalcode.org",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.drupalOrgActions = &fakeDrupalOrgActions{tokenAvailable: true}
+	m.openLandingPane(v)
+	m.landing.ghChecked = true
+	m.landing.cursor = 0
+	return m, v
+}
+
+// landingWithActionableCheckout seeds a pane whose row carries a real action,
+// so the act binding contributes its longest help text to the footer.
+func landingWithActionableCheckout(t *testing.T) (model, boardVM) {
+	t.Helper()
+	m, v := landingTestVM(t, "web")
+	if err := m.checkouts.Set(v.scope, v.Name, checkouts.VMCheckouts{
+		Checkouts: []checkouts.Checkout{
+			{
+				Path: "/home/user/repo", Kind: checkouts.KindRepo, Branch: "feature",
+				PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2,
+				OrgRepo: "acme/repo", Forge: "github.com",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed checkouts: %v", err)
+	}
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+	m.landing.ghChecked = true
+	m.landing.cursor = 0
+	return m, v
+}
+
+// landingFooterLine picks the footer out of a rendered pane: the line naming
+// the move key, which every footer on this pane starts with.
+//
+// It deliberately anchors on the FIRST key rather than the last. A footer too
+// wide for the terminal wraps, and the wrapped remainder still ends in "esc
+// back" — so a helper that searched for the end would happily return the
+// second line and report a comfortable 28 columns for a footer that had just
+// eaten a row of the pane.
+func landingFooterLine(rendered string) string {
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "move") {
+			return strings.TrimRight(line, " ")
+		}
+	}
+	return ""
+}
+
+// TestLandingCleanReviewConfirmsBeforeDiscarding pins the guard. review.xml is the
+// ONLY copy of comments the user wrote — they live in the browser page until
+// submitted and nothing else in the system holds them — so the key must not
+// destroy it on a single press.
+func TestLandingCleanReviewConfirmsBeforeDiscarding(t *testing.T) {
+	m, _ := landingWithOneCheckout(t)
+
+	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'V', Text: "V"})
+	got := next.(model)
+	if got.confirm == nil {
+		t.Fatal("V discarded a saved review with no confirmation")
+	}
+	if !strings.Contains(got.confirm.prompt, "/home/user/repo") {
+		t.Errorf("prompt = %q, want it to name the checkout being started over", got.confirm.prompt)
+	}
+	if !strings.Contains(got.confirm.prompt, "discarded") {
+		t.Errorf("prompt = %q, want it to say the saved review is discarded", got.confirm.prompt)
+	}
+	if cmd != nil {
+		t.Error("V started work before the confirmation was answered")
+	}
+
+	// Cancelling leaves nothing running and nothing removed.
+	next, _ = got.updateConfirm(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if cancelled := next.(model); cancelled.confirm != nil || cancelled.review.path != "" {
+		t.Error("cancelling the clean-review prompt still started a review")
+	}
+}
+
+// TestLandingCleanReviewStartsACleanSession is the assertion that reaches past the
+// model: confirming must produce a session with Clean set, because that flag
+// is the only thing that removes the old review — the pane deliberately does
+// not remove it separately (see landreview.Session.Clean).
+func TestLandingCleanReviewStartsACleanSession(t *testing.T) {
+	m, _ := landingWithOneCheckout(t)
+
+	var gotClean, ran bool
+	m.reviewRun = func(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error) {
+		ran = true
+		gotClean = sess.Clean
+		return "", nil
+	}
+
+	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'V', Text: "V"})
+	m = next.(model)
+	next, cmd = m.updateConfirm(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("confirming the clean-review prompt produced no command")
+	}
+	// The confirmation dispatches a message; Update turns that into the run.
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			msg = c()
+			break
+		}
+	}
+	fresh, ok := msg.(landReviewCleanMsg)
+	if !ok {
+		t.Fatalf("confirming produced %T, want landReviewCleanMsg", msg)
+	}
+	runCmd := m.handleLandReviewClean(fresh)
+	if runCmd == nil {
+		t.Fatal("handleLandReviewClean produced no command for the pane it was raised on")
+	}
+	drainCmd(runCmd)
+
+	if !ran {
+		t.Fatal("no review session was started")
+	}
+	if !gotClean {
+		t.Error("the session was started with Clean unset, so the old review would have been resumed")
+	}
+}
+
+// TestLandingCleanReviewIgnoresAnAnswerForAnotherRow covers the stale-answer case
+// the message carries identity for: a confirmation answered after the cursor
+// moved must not start a review of whatever happens to be under it now.
+func TestLandingCleanReviewIgnoresAnAnswerForAnotherRow(t *testing.T) {
+	m, v := landingWithOneCheckout(t)
+	if got := m.handleLandReviewClean(landReviewCleanMsg{
+		scope: v.scope, vm: v.Name, path: "/some/other/checkout",
+	}); got != nil {
+		t.Error("an answer about a different checkout started a review anyway")
+	}
+}
+
+// drainCmd runs a tea.Cmd and any batch it produces, so a test can reach the
+// work a command was going to do.
+func drainCmd(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c != nil {
+				c()
+			}
+		}
+	}
+}
+
+// landingWithPublishCheckoutUnderReview is the worst-case footer row with a
+// review of it already in flight, which is when v's help is at its longest.
+func landingWithPublishCheckoutUnderReview(t *testing.T) (model, boardVM) {
+	t.Helper()
+	m, v := landingWithPublishCheckout(t)
+	m.review = activeReview{scope: v.scope, vm: v.Name, path: m.landing.rows[0].Checkout.Path}
+	return m, v
 }
