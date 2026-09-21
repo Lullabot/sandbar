@@ -64,12 +64,11 @@ for the one-time host setup.
 
 ## Reviewing what Claude wrote
 
-Before any of it is pushed anywhere, `sand land NAME PATH --review` (or `v` in
-the TUI's Landing pane) opens the real diff of an uncommitted or unpushed
-checkout in your browser and writes your comments back into the VM. The review
-UI is served from inside the VM and reached over a loopback-only forward, so
-unfinished work never leaves it. See
-[Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
+Use `sand land NAME PATH --review` (or `v` in the TUI's Landing pane) to
+review uncommitted or unpushed changes in your browser. The review server
+runs inside the VM, sends the diff to your browser through a loopback
+connection, and saves your comments in the checkout for the agent to read.
+See [Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
 
 ## Development
 
