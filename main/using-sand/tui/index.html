@@ -1751,11 +1751,19 @@ footer row naming git work that has not yet reached a PR:</p>
   branch of its own, so a PR is one <code>l</code> (Land) away. A checkout sitting on its
   repo's default branch doesn't count: a fresh clone is "pushed" in the literal
   sense but has nothing to turn into a PR, so it never lights the badge.</li>
-<li><strong>At-risk</strong> (<code>↑N</code>, <code>unpushed</code>, and/or <code>dirty</code>, in dim chrome) — commits or
-  uncommitted changes that exist only in the VM: <code>↑N</code> is the number of
-  commits ahead of the remote-tracking branch, <code>unpushed</code> marks a branch
-  that's never been pushed at all, and <code>dirty</code> marks uncommitted changes.
-  This is exactly the work the delete guard (below) calls out.</li>
+<li>
+<p><strong>At-risk</strong> (<code>↑N</code>, <code>unpushed</code>, and/or <code>dirty</code>, in dim chrome) — commits or
+  uncommitted changes that exist only in the VM: <code>↑N</code> counts the commits that
+  are reachable from <strong>no remote-tracking ref at all</strong>, <code>unpushed</code> marks a
+  branch that's never been pushed, and <code>dirty</code> marks uncommitted changes.
+  This is exactly the work the delete guard (below) calls out.</p>
+<p><code>↑N</code> is deliberately not "commits ahead of the remote-tracking branch".
+That number compares your branch to one possibly-stale copy of itself by
+commit hash, so rebasing onto a trunk that has moved inflates it without
+a byte of work becoming at risk — a five-commit branch rebased onto a
+trunk 4,404 commits ahead reports 4,409. <code>↑N</code> counts what would actually
+be lost if the VM went away, so in that case it says 5.</p>
+</li>
 </ul>
 <p>The badge shows nothing for a VM that has never been swept, is stopped, or
 whose last sweep is stale — it never guesses.</p>
