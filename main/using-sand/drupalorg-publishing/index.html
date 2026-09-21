@@ -1069,16 +1069,27 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-things-youll-otherwise-learn-the-hard-way" class="md-nav__link">
+  <a href="#five-things-youll-otherwise-learn-the-hard-way" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four things you'll otherwise learn the hard way
+        Five things you'll otherwise learn the hard way
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Four things you&#39;ll otherwise learn the hard way">
+    <nav class="md-nav" aria-label="Five things you&#39;ll otherwise learn the hard way">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rebase-onto-the-base-branch-dont-merge-it-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebase onto the base branch — don't merge it in
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#replay-not-squash-your-local-history-is-what-lands" class="md-nav__link">
@@ -1107,6 +1118,17 @@
     <span class="md-ellipsis">
       
         There is no force push — the fork branch only ever grows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sand-publish-refuses-a-branch-it-cannot-line-up-with" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand publish refuses a branch it cannot line up with
       
     </span>
   </a>
@@ -1558,16 +1580,27 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-things-youll-otherwise-learn-the-hard-way" class="md-nav__link">
+  <a href="#five-things-youll-otherwise-learn-the-hard-way" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four things you'll otherwise learn the hard way
+        Five things you'll otherwise learn the hard way
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Four things you&#39;ll otherwise learn the hard way">
+    <nav class="md-nav" aria-label="Five things you&#39;ll otherwise learn the hard way">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rebase-onto-the-base-branch-dont-merge-it-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebase onto the base branch — don't merge it in
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#replay-not-squash-your-local-history-is-what-lands" class="md-nav__link">
@@ -1596,6 +1629,17 @@
     <span class="md-ellipsis">
       
         There is no force push — the fork branch only ever grows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sand-publish-refuses-a-branch-it-cannot-line-up-with" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sand publish refuses a branch it cannot line up with
       
     </span>
   </a>
@@ -1711,16 +1755,9 @@ you a narrower one.</p>
 <p>For a checkout <code>PATH</code>, publication:</p>
 <ol>
 <li>Reads the checkout's origin remote and upstream branch to work out which
-   module it belongs to, <strong>which issue it belongs to</strong> (see
-   <a href="#where-the-issue-number-comes-from">Where the issue number comes from</a>),
-   and how many local commits are ahead.</li>
-<li>Collects those commits — in order, oldest first — as an inert list of
-   commit messages, authors, and file actions (create/update/delete/move,
-   with resulting content). <strong>Merge commits are skipped</strong>: a merge carries
-   no file changes of its own, and the destination API this uses has no way
-   to express a second parent — the changes a merge brought in still travel,
-   as the ordinary commits that made them.</li>
-<li>Resolves where those commits go: the drupal.org <strong>issue fork</strong> for the
+   module it belongs to and <strong>which issue it belongs to</strong> (see
+   <a href="#where-the-issue-number-comes-from">Where the issue number comes from</a>).</li>
+<li>Resolves where the commits will go: the drupal.org <strong>issue fork</strong> for the
    issue number (<code>issue/&lt;module&gt;-&lt;nid&gt;</code>), read anonymously, with
    its canonical parent project (e.g. <code>project/&lt;module&gt;</code>) derived from that
    fork's own <code>forked_from_project</code> — never guessed, and never something the
@@ -1730,6 +1767,15 @@ you a narrower one.</p>
    --allow-outside-issue-namespace</code>) is available but is not the normal
    path, and its own guard rail exists for exactly the reason this whole
    design does.</li>
+<li>Collects <strong>your</strong> commits — in order, oldest first — as an inert list of
+   commit messages, authors, and file actions (create/update/delete/move,
+   with resulting content). "Yours" means reachable from the checkout's
+   <code>HEAD</code> but from <em>neither</em> what the fork branch already holds <em>nor</em> what
+   the canonical project's base branch already carries. Both exclusions
+   matter: see
+   <a href="#rebase-onto-the-base-branch-dont-merge-it-in">Rebase onto the base branch — don't merge it in</a>.
+   A range containing a <strong>merge commit is refused outright</strong>, with the merge
+   named, rather than published with the merge silently dropped.</li>
 <li>Shows you a <strong>confirmation</strong>: the destination and branch, the merge
    request's target and <strong>title</strong> (see
    <a href="#how-the-merge-request-is-titled">How the merge request is titled</a>), and
@@ -1874,7 +1920,41 @@ past; if anything changed while you were deciding, the reset refuses instead.</p
 <p>Note that this only ever moves you <strong>onto</strong> the fork. The fork branch can
 only grow (see <a href="#there-is-no-force-push-the-fork-branch-only-ever-grows">There is no force push</a>),
 so there is no version of this that rewrites drupal.org to match you.</p>
-<h2 id="four-things-youll-otherwise-learn-the-hard-way">Four things you'll otherwise learn the hard way</h2>
+<h2 id="five-things-youll-otherwise-learn-the-hard-way">Five things you'll otherwise learn the hard way</h2>
+<h3 id="rebase-onto-the-base-branch-dont-merge-it-in">Rebase onto the base branch — don't merge it in</h3>
+<p>When your issue branch falls behind the project's development branch, <strong>rebase
+onto it</strong>. Do not merge it into your branch:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>git<span class="w"> </span>fetch<span class="w"> </span>https://git.drupalcode.org/project/&lt;module&gt;.git<span class="w"> </span><span class="m">2</span>.x
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="gp">$ </span>git<span class="w"> </span>rebase<span class="w"> </span>FETCH_HEAD
+</code></pre></div>
+<p>Merging the destination branch back into your own is a normal enough habit
+elsewhere, and on a forge that takes a <code>git push</code> it costs you nothing. Here
+it cannot work, for a reason that is structural rather than fussy: a merge
+commit's entire content is <em>"these two histories join here"</em>, and publication
+lands one commit at a time through an API that takes a list of file actions
+and has no field for a second parent. There is nothing for the merge to
+become. <code>sand</code> therefore <strong>refuses</strong> a range containing one, names the merge
+commit, and publishes nothing — rather than dropping the merge and publishing
+whatever is left, which is what produced merge requests full of other
+people's commits.</p>
+<p>The other half of the same rule is invisible until it bites: publication
+collects the commits reachable from your <code>HEAD</code> that are on <strong>neither</strong> the
+fork branch <strong>nor the canonical project's base branch</strong>. That second
+exclusion is why a rebase is safe. Without it, every base-branch commit your
+rebase moved you onto would look like unpublished work of yours and be
+replayed onto the merge request under your account.</p>
+<p>That exclusion is read from the <strong>canonical project</strong> (<code>project/&lt;module&gt;</code>),
+never from your issue fork's own copy of the base branch. A fork's base
+branch is not auto-synced and in practice nobody syncs it by hand, so it
+names whatever commit the branch sat at when the fork was created — which
+would put every base-branch commit since then back in scope.</p>
+<p>One consequence worth knowing: your checkout has to actually <em>have</em> the
+canonical project's base-branch tip as a local object, which the <code>git fetch</code>
+above is what gives you. If it doesn't, publication stops and says so rather
+than guessing.</p>
+<p>Rebasing is the right move <strong>before your first publish</strong>. Once commits are
+public on the fork, rewriting local history has its own problems — see
+<a href="#there-is-no-force-push-the-fork-branch-only-ever-grows">There is no force push</a>.</p>
 <h3 id="replay-not-squash-your-local-history-is-what-lands">Replay, not squash — your local history is what lands</h3>
 <p>A publish does not squash your work into one commit and does not push a ref
 the way <code>git push</code> would. It <strong>replays each local commit as its own,
@@ -1929,15 +2009,42 @@ different ways depending on what you rewrote:</p>
 Once commits are public on the fork, treat that history as fixed and add to
 it rather than rewriting it.</p>
 <p>If you genuinely need published history changed — a secret committed by
-mistake, a series too tangled to live with — that is out-of-band work this
-tool deliberately does not do for you. Do it from your workstation with your
-own git and credentials (<code>git push --force</code> to the issue fork), or close the
-merge request and delete the branch through drupal.org's web UI. The branch
-is derived from the issue rather than from your local state, so a later
-<code>sand publish</code> targets the same <code>&lt;module&gt;-&lt;nid&gt;</code> branch on
-<code>issue/&lt;module&gt;-&lt;nid&gt;</code> either way. A fresh publish onto a branch you deleted
-recreates it from the fork's default branch and replays your change set from
-scratch, which is the one clean way back to a history you chose.</p>
+mistake, a commit that does not belong on the branch, a series too tangled to
+live with — that is out-of-band work this tool deliberately does not do for
+you. There are two ways back, and the first is almost always the one you
+want:</p>
+<ul>
+<li>
+<p><strong>Force-push from your workstation</strong>, with your own git and credentials.
+  You can move the branch back past a bad commit without having the rest of
+  the series to hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>git<span class="w"> </span>push<span class="w"> </span>--force<span class="w"> </span>&lt;fork-remote&gt;<span class="w"> </span>&lt;good-sha&gt;:refs/heads/&lt;module&gt;-&lt;nid&gt;
+</code></pre></div>
+<p>This keeps the merge request and everything said on it.</p>
+</li>
+<li>
+<p><strong>Delete the branch through drupal.org's web UI and publish again.</strong> The
+  branch is derived from the issue rather than from your local state, so a
+  later <code>sand publish</code> targets the same <code>&lt;module&gt;-&lt;nid&gt;</code> branch either way,
+  recreating it from the <strong>canonical project's</strong> base branch and replaying
+  your change set from scratch. The cost is the merge request: deleting its
+  source branch closes it, and <code>sand</code> opens a <em>new</em> one rather than reviving
+  the old, so any review discussion is left behind.</p>
+</li>
+</ul>
+<h3 id="sand-publish-refuses-a-branch-it-cannot-line-up-with"><code>sand publish</code> refuses a branch it cannot line up with</h3>
+<p>Publication resumes by matching your change set against the <strong>end</strong> of the
+fork branch (see <a href="#replay-not-squash-your-local-history-is-what-lands">Replay, not squash</a>).
+If the branch holds commits from your change set but does not <em>end</em> with
+them — most often because something that is not yours sits on top — there is
+no way to resume, and replaying would duplicate commits the branch already
+has. <code>sand</code> stops before sending anything and names the commit in the way:</p>
+<blockquote>
+<p>the fork branch's newest commit ("…") is not part of this change set, but
+3 of its commits are already on the branch.</p>
+</blockquote>
+<p>Fix it with one of the two recoveries above. Nothing was written, so there is
+nothing to undo.</p>
 <h3 id="commits-published-this-way-are-not-gpg-signed">Commits published this way are not GPG-signed</h3>
 <p><code>git push</code> can carry a GPG-signed commit end to end. Publishing through the
 content API cannot: a commit created this way is <strong>not signed</strong>, regardless

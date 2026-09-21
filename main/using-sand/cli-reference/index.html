@@ -2883,8 +2883,16 @@ published commits. That offer is a <strong>separate</strong> question from <code
 confirms only the publish; without a terminal the command to run is printed
 instead. See
 <a href="../drupalorg-publishing/#your-checkout-after-a-publish">Your checkout after a publish</a>.</p>
-<p>If <code>PATH</code> has no local commits ahead of its upstream branch, <code>sand publish</code>
-says so and exits cleanly without prompting for anything.</p>
+<p>If <code>PATH</code> has no commits beyond what the fork branch already holds and what
+the canonical project's base branch already carries, <code>sand publish</code> says so
+and exits cleanly without prompting for anything. Resolving the destination
+is what tells it which base branch that is, so this answer now costs one
+anonymous drupal.org read rather than coming straight off the guest.</p>
+<p>If the range to publish contains a <strong>merge commit</strong>, <code>sand publish</code> refuses
+it outright, names the merge, and publishes nothing — a merge cannot be
+expressed through the content API. Rebase onto the project's base branch
+instead of merging that branch into yours; see
+<a href="../drupalorg-publishing/#rebase-onto-the-base-branch-dont-merge-it-in">Rebase onto the base branch</a>.</p>
 <p>The printed report lists every change-set commit in order — its status
 (<code>landed</code>, <code>already-present</code>, <code>failed</code>, or <code>not-attempted</code>) and its SHA on
 the fork where it has one — followed by the merge request's URL (opened, or
