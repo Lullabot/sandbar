@@ -424,7 +424,7 @@ If your router creates DNS records from DHCP hostnames, a `sand` VM can
 appear as `<name>.<your domain>`.
 
 The base template has no hostname, so a clone's first DHCP request does not
-announce the base image's name. Cloud-init then sets the VM's Proxmox name,
+announce the base image's name. `cloud-init` then sets the VM's Proxmox name,
 the playbook applies its configured hostname, and `sand` requests a DHCP
 renewal to send that name to the server.
 
