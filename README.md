@@ -64,7 +64,7 @@ for the one-time host setup.
 
 ## Reviewing what Claude wrote
 
-Use `sand land NAME PATH --review` (or `v` in the TUI's Landing pane) to
+Use `sand land NAME PATH --review` (or the Landing pane, `l`, then `v`) to
 review uncommitted or unpushed changes in your browser. The review server
 runs inside the VM, sends the diff to your browser through a loopback
 connection, and saves your comments in the checkout for the agent to read.
