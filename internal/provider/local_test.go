@@ -164,3 +164,19 @@ func TestLocalProviderAttachArgv(t *testing.T) {
 	// The provider must NOT run limactl to build the argv (it is pure).
 	// (No fakeRunner call is asserted because AttachArgv performs no exec.)
 }
+
+// TestLocalProviderForwardArgvReturnsNil proves local Lima's forwarding seam
+// returns nil — the nil-means-already-reachable contract (Provider.ForwardArgv)
+// — because Lima itself already forwards a guest loopback port to the SAME
+// port number on the LOCAL host's own loopback, and for local Lima that host
+// IS this machine, so there is nothing for a caller to start. This is the one
+// fact the whole self-review forwarding seam rests on: the local provider
+// never spawns an ssh child at all.
+func TestLocalProviderForwardArgvReturnsNil(t *testing.T) {
+	p := newLocal(&fakeRunner{outputs: map[string][]byte{}})
+	got := p.ForwardArgv(vm.VM{Name: "web"}, 8080, 3000)
+	t.Logf("local ForwardArgv(web, 8080, 3000) = %#v", got)
+	if got != nil {
+		t.Fatalf("local ForwardArgv = %v, want nil (Lima already auto-forwards to the same port on this host)", got)
+	}
+}
