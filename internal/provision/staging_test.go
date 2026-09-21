@@ -161,7 +161,7 @@ func TestStageOut(t *testing.T) {
 
 	want := [][]string{
 		{"shell", "claude", "sudo", "sh", "-c", "command -v zstd"},
-		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "--owner=andrew", "--group=andrew", "-I", "zstd -T0 -3", "-cf", "-", ".claude", ".claude.json"},
+		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "--owner=andrew", "--group=andrew", "--exclude=.cache", "--exclude=*/.cache", "-I", "zstd -T0 -3", "-cf", "-", ".claude", ".claude.json"},
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("StageOut argv = %v, want %v", f.calls, want)
@@ -188,7 +188,7 @@ func TestStageOutFallsBackToGzipWithoutZstd(t *testing.T) {
 		t.Fatalf("StageOut: %v", err)
 	}
 
-	want := []string{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "--owner=andrew", "--group=andrew", "-z", "-cf", "-", ".claude"}
+	want := []string{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "--ignore-failed-read", "--owner=andrew", "--group=andrew", "--exclude=.cache", "--exclude=*/.cache", "-z", "-cf", "-", ".claude"}
 	if got := f.calls[len(f.calls)-1]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StageOut argv = %v, want %v", got, want)
 	}

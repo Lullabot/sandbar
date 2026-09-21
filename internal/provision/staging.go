@@ -223,9 +223,12 @@ func (g *StageGuard) Done() {
 }
 
 // StageOut streams guestPaths (relative to home) out of a running VM into the
-// host archive file using `tar` over `limactl shell` as root. --ignore-failed-read
-// keeps a missing optional path (e.g. ~/.claude.json) from aborting the archive;
-// tar preserves the original modes inside the tarball.
+// host archive file using `tar` over `limactl shell` as root. Directories named
+// .cache are deliberately excluded wherever they occur in a preserved tree:
+// XDG_CACHE_HOME defaults to ~/.cache, and cache data is disposable state that
+// should be rebuilt after a reset. --ignore-failed-read keeps a missing optional
+// path (e.g. ~/.claude.json) from aborting the archive; tar preserves the
+// original modes inside the tarball.
 //
 // OWNERSHIP IS NORMALISED HERE, at creation, rather than repaired after the
 // restore. Every member is recorded as belonging to user, so the root-run
@@ -265,7 +268,12 @@ func StageOut(ctx context.Context, cli guestRunner, name, home, user string, gue
 	meter := newStageMeter(out, "Backing up", "Backed up", label, 0)
 	defer meter.stop()
 
-	argv := []string{"sudo", "tar", "-C", home, "--ignore-failed-read", "--owner=" + user, "--group=" + user}
+	argv := []string{
+		"sudo", "tar", "-C", home,
+		"--ignore-failed-read",
+		"--owner=" + user, "--group=" + user,
+		"--exclude=.cache", "--exclude=*/.cache",
+	}
 	for _, ex := range excludes {
 		argv = append(argv, "--exclude="+ex)
 	}

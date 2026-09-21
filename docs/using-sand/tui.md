@@ -166,7 +166,8 @@ enter to toggle the focused option; its help text describes what it copies.
   its configuration files. It includes the options below, which appear
   checked and locked while this option is on. It copies the most data and
   excludes `~/.ssh/authorized_keys`, so the rebuilt VM keeps its new access
-  key.
+  key. Directories named `.cache` are also left behind and rebuilt in the new
+  VM.
 - **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`,
   including your login and history.
 - **Preserve ~/&lt;host&gt;/&lt;org&gt;** keeps the organisation directory for
@@ -192,3 +193,6 @@ include credentials and files written by an agent. See
 
 Only directories inside the guest home can be preserved. Paths outside it,
 such as `/srv` or `/opt`, are rejected before the VM is deleted.
+Directories named `.cache` are excluded from every preserved tree. This covers
+the standard cache directory name used by the default `XDG_CACHE_HOME`; a
+custom cache path with another name is preserved.
