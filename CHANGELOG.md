@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.11.0](https://github.com/Lullabot/sandbar/compare/v0.10.1...v0.11.0) (2026-09-21)
+
+
+### Features
+
+* **cli:** sand reset, and CLI/TUI parity for the host secrets store ([614d3b0](https://github.com/Lullabot/sandbar/commit/614d3b08c9b7f2c546147d7c797b19aaf79b5ba6))
+* **create:** check a VM name against the backend before building ([d1c0487](https://github.com/Lullabot/sandbar/commit/d1c0487dc28158648a911bf83fc414634e57783e))
+* **land:** review a VM checkout in a browser, from the CLI ([d192b73](https://github.com/Lullabot/sandbar/commit/d192b733a570deaca52597800c3669a1ff440778))
+* **provider:** add a ForwardArgv seam for reaching a guest loopback port ([a5be60d](https://github.com/Lullabot/sandbar/commit/a5be60dde33c15b2cc7f30e30a51f61fc3ab51f8))
+* **provision:** install the browser review tool in the base image ([9fc3b95](https://github.com/Lullabot/sandbar/commit/9fc3b95ab04238695661ffe1ca651466d8113f49))
+* **proxmox:** keep a VM's MAC address across a rebuild ([#193](https://github.com/Lullabot/sandbar/issues/193)) ([9e922c7](https://github.com/Lullabot/sandbar/commit/9e922c7a7d0d57059e01d810fef4d40ced502ef7))
+* **reset:** preserve any checkout, or the whole home directory ([c459e25](https://github.com/Lullabot/sandbar/commit/c459e25a12e999f56d41432cdbbaeefa96cc6500))
+* **reset:** report progress while preserved data is copied ([2e909f8](https://github.com/Lullabot/sandbar/commit/2e909f8216bbbe34db2d7abb82390ae8e3ce0106))
+* **ui:** lock the preserve rows a whole-home reset already covers ([f90bd43](https://github.com/Lullabot/sandbar/commit/f90bd43de66e0fa0b11dad20854fd2727ce0ca3f))
+* **ui:** review a VM checkout from the Landing pane ([773cc2f](https://github.com/Lullabot/sandbar/commit/773cc2f9440c82ffd84ce6d083db6e59526c874e))
+
+
+### Bug Fixes
+
+* **drupalorg:** collect against the canonical base branch, refuse merges ([8688b7c](https://github.com/Lullabot/sandbar/commit/8688b7cda7cea256efb9cd20b222638eae504fb1))
+* **drupalorg:** refuse a diverged fork, create branches from the parent ([3021327](https://github.com/Lullabot/sandbar/commit/3021327ef870aa2a4a6966355227118362658a49))
+* **land:** count only commits that exist nowhere but the VM ([06a8e2f](https://github.com/Lullabot/sandbar/commit/06a8e2fa1e957ef0070c492b778e2f09d9c702dc))
+* **lima,provision:** a clone provisions from THIS run's playbook, not the base's ([#173](https://github.com/Lullabot/sandbar/issues/173)) ([16906a0](https://github.com/Lullabot/sandbar/commit/16906a00049577bd1f946d4e7023e98ba8bebe15))
+* **provision:** a reset preserves what the GUEST actually holds ([#174](https://github.com/Lullabot/sandbar/issues/174)) ([ff3dbf5](https://github.com/Lullabot/sandbar/commit/ff3dbf5bbafd393cedcba13514428acceedd5369))
+* **provision:** drop a reset's staging dir while the source VM is still intact ([#175](https://github.com/Lullabot/sandbar/issues/175)) ([e4cf60a](https://github.com/Lullabot/sandbar/commit/e4cf60ac9098d2dfc80cfc87c0070a55091e33ea))
+* **proxmox,ansible:** keep a rebuilt VM's lease, and stop clones claiming the base's name ([60f73cd](https://github.com/Lullabot/sandbar/commit/60f73cdca0fa6b0b2366e3e0b0e1cb5fb702e001))
+* **registry,secrets:** serialize the host state files behind an advisory lock ([#172](https://github.com/Lullabot/sandbar/issues/172)) ([9527238](https://github.com/Lullabot/sandbar/commit/95272387b3f9596b75b08a312261279120471f1d))
+* **reset:** the preserve row counts work that exists nowhere else ([dbe0b62](https://github.com/Lullabot/sandbar/commit/dbe0b623fbe16adffd2c0885037fc017e4d0ba50))
+* **sand:** `--recreate` rebuilds the VM it was pointed at, not a default one ([#176](https://github.com/Lullabot/sandbar/issues/176)) ([b5d75c9](https://github.com/Lullabot/sandbar/commit/b5d75c9a67e16275f4187ea5e1ea25249be619e8))
+* **ui,drupalorg:** wrap publish errors, shorten the merge refusal ([0838f96](https://github.com/Lullabot/sandbar/commit/0838f96503de7cf17ca0b1b4710a70d41f282307))
+* **ui:** a reset cannot change the VM's repo ([#177](https://github.com/Lullabot/sandbar/issues/177)) ([9dd75a1](https://github.com/Lullabot/sandbar/commit/9dd75a13e01ba5a2d7ab683378d69c872dab7b4a))
+
+
+### Performance Improvements
+
+* **reset:** compress preserved data with zstd instead of gzip ([21cd054](https://github.com/Lullabot/sandbar/commit/21cd05407f7b433fa151c89c005af4974dfb303e))
+* **reset:** cut the guest IO a preserved copy has to pay ([992b145](https://github.com/Lullabot/sandbar/commit/992b1458d71836d005b24ba7c8ae2fb30468cdbd))
+
+
+### Reverts
+
+* **lima,profiles:** drop the Windows support added in [#168](https://github.com/Lullabot/sandbar/issues/168) and [#170](https://github.com/Lullabot/sandbar/issues/170) ([#181](https://github.com/Lullabot/sandbar/issues/181)) ([43f4484](https://github.com/Lullabot/sandbar/commit/43f44842de2ebcaf00c61ba6396ddc29c3793736))
+
 ## [0.10.1](https://github.com/Lullabot/sandbar/compare/v0.10.0...v0.10.1) (2026-09-17)
 
 
