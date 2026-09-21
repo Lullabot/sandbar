@@ -11,6 +11,74 @@
     group: root
     mode: "0644"
 
+- name: Ensure the networkd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/networkd.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# A guest's DHCP client identity must follow its MAC address, not its
+# machine-id. systemd-networkd's default DUID is derived from /etc/machine-id
+# (DUIDType=vendor), and the Proxmox template build deliberately empties that
+# file so each clone mints a fresh one — which means a rebuild that carefully
+# restores the VM's previous MAC still presents a brand-new identity to the
+# DHCP server and is handed a different address, losing the lease, and any DNS
+# name attached to it, that preserving the MAC was meant to keep.
+# DUIDType=link-layer moves the identity onto the MAC instead, which is
+# distinct per clone AND preserved across a rebuild: both properties at once.
+#
+# This is the global networkd setting rather than the per-interface
+# ClientIdentifier=mac because cloud-init owns the .network file and names it
+# differently from image to image, and only the first matching one applies;
+# networkd.conf.d/ needs no such guess. It is read at boot, so no restart is
+# needed — and none is wanted while the provisioning ssh session is riding on
+# that very interface.
+#
+# Ungated by phase for the reason ~/.tmux.conf is: a clone taken from a base
+# built before this existed would otherwise never get it, and it is one small
+# file. On a host not running networkd the file is simply inert.
+- name: Derive the DHCP client identity from the MAC address
+  ansible.builtin.copy:
+    content: |
+      # Managed by sand.
+      [DHCPv4]
+      DUIDType=link-layer
+    dest: /etc/systemd/networkd.conf.d/10-sand-dhcp-identity.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+# Renaming a guest does not tell its DHCP server, so a server that publishes
+# DNS from the hostname option keeps answering for whatever name the lease was
+# taken under — nothing, for a clone, whose template ships no /etc/hostname
+# (see generalizeScript). networkd picks the new name up on its own, but only
+# sends it with the next REQUEST, which is otherwise T1: half a lease away.
+# Asking for that renew now closes the window to seconds.
+#
+# `networkctl renew` and not `reconfigure`: renew keeps the address, and the
+# provisioning ssh session is on it. Everything here is best-effort — the worst
+# case is a name that corrects itself at T1 — so no failure may fail the run,
+# and a host with no networkd or no default route just exits.
+#
+# `cmd:` and not shell's free-form form: the awk braces below read as an
+# unbalanced Jinja block to Ansible's argument splitter, which fails the play
+# at parse time (`ansible-playbook --syntax-check` catches it).
+- name: Announce the hostname to the DHCP server
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      systemctl is-active --quiet systemd-networkd || exit 0
+      iface=$(ip route show default | awk '{print $5; exit}')
+      [ -n "$iface" ] || exit 0
+      # networkd learns the new hostname through its own watch on the kernel's;
+      # give that a moment to land before asking for the renew that carries it.
+      sleep 1
+      networkctl renew "$iface"
+  changed_when: false
+  failed_when: false
+
 # A base image can sit unused for weeks; when it is older than the 30-day
 # threshold (internal/provision/provision.go's baseMaxAge), the create that
 # notices starts it, runs this once, in place, under the base lock, and

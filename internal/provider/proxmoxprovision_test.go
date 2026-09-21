@@ -1498,3 +1498,45 @@ func TestRunPlaybookScriptIsValidShell(t *testing.T) {
 		t.Fatalf("runPlaybookScript is not valid shell: %v\n%s\n--- script ---\n%s", err, out, runPlaybookScript)
 	}
 }
+
+// TestProxmoxBaseBuildClearsTheTemplateHostname pins the second half of the
+// generalize step. The base phase runs the playbook with base_hostname = the
+// base's own name, so the template's disk says "sandbar-base"; a clone's very
+// first DHCP request carries that as option 12, long before cloud-init or the
+// finalize playbook rename the guest, and a DHCP server that publishes DNS
+// from that option then answers the clone's address with the BASE's name.
+// Observed on a real segment as four distinct addresses all reverse-resolving
+// to sandbar-base.lan. Like the machine-id reset this must run in the base
+// guest after its playbook — a hostname cleared before the playbook is simply
+// written again by it.
+func TestProxmoxBaseBuildClearsTheTemplateHostname(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+	stubProvisioning(t)
+	shortAgentPolling(t, 5*time.Second)
+	p := newProxmoxForTest(t, m)
+	argvs := recordSSH(p)
+
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	playbook, truncate := -1, -1
+	for i, argv := range *argvs {
+		joined := strings.Join(argv, " ")
+		if playbook == -1 && strings.Contains(joined, "ansible-playbook") {
+			playbook = i // the BASE phase: the first playbook run of the build
+		}
+		if strings.Contains(joined, "truncate -s 0 /etc/hostname") {
+			truncate = i
+		}
+	}
+	if truncate == -1 {
+		t.Fatalf("no ssh command cleared /etc/hostname — every clone of this template announces itself to the DHCP server as %q on its first request; commands: %v",
+			webConfig().BaseName, *argvs)
+	}
+	if playbook == -1 || truncate < playbook {
+		t.Errorf("hostname reset ran at ssh command %d, before the base playbook at %d — the playbook writes the base's name back", truncate, playbook)
+	}
+}

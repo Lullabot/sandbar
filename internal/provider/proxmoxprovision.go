@@ -408,8 +408,8 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 		return err
 	}
 	// LAST guest-side step, deliberately after everything that runs inside the
-	// VM: strip the machine identity the build's own boot committed, so every
-	// clone generates its own (see generalizeScript).
+	// VM: strip the machine identity and the name the build's own boot and
+	// playbook committed, so every clone gets its own (see generalizeScript).
 	if err := p.generalizeBase(ctx, cfg.BaseName, out); err != nil {
 		return err
 	}
@@ -433,14 +433,16 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 }
 
 // generalizeScript strips the base VM's per-machine identity as the last
-// in-guest step before it becomes a template, and it exists because of a field
-// failure, reproduced against a real pool: two clones of one template inherit
-// its /etc/machine-id, systemd-networkd derives its DHCP client identifier
-// from that id (RFC 4361 — the MAC plays no part), and a DHCP server keyed on
-// client identity therefore hands EVERY clone the SAME lease. Two clones with
-// distinct MACs both reported one address; the guests fought over it at the
-// ARP layer, every ssh reached whichever guest had won most recently, and the
-// board's guest probes killed each other's in-guest loops in an endless
+// in-guest step before it becomes a template. It empties two files, each for
+// its own field failure.
+//
+// /etc/machine-id, because two clones of one template inherit it,
+// systemd-networkd derives its DHCP client identifier from that id (RFC 4361 —
+// the MAC plays no part), and a DHCP server keyed on client identity therefore
+// hands EVERY clone the SAME lease. Reproduced against a real pool: two clones
+// with distinct MACs both reported one address; the guests fought over it at
+// the ARP layer, every ssh reached whichever guest had won most recently, and
+// the board's guest probes killed each other's in-guest loops in an endless
 // "lost the guest connection; retrying" cycle.
 //
 // Truncating (never deleting) /etc/machine-id returns the disk to the pristine
@@ -449,8 +451,24 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 // address. Debian ships /var/lib/dbus/machine-id as a symlink to it, which
 // follows along; the guard re-links it only on an image that ships it as a
 // REGULAR file, which would otherwise resurrect the cloned identity for D-Bus.
+//
+// /etc/hostname, because the base phase runs the playbook with
+// base_hostname = the base's own name, so the template's disk says
+// "sandbar-base" — and a clone's very first DHCP request carries that as
+// option 12, before anything has had the chance to rename the guest. The clone
+// IS renamed twice afterwards (cloud-init from the PVE VM name, then the
+// finalize playbook), but both happen after the lease exists, so a DHCP server
+// that publishes DNS from that option answers the clone's own address with
+// "sandbar-base" until the lease is re-requested. Found on a real segment as
+// four distinct addresses all reverse-resolving to sandbar-base.lan, one of
+// them a VM that had carried a different name for hours. Emptying the file
+// leaves systemd's compiled-in fallback hostname, "localhost", which networkd
+// refuses to send at all — so a clone's first lease carries no name, which is
+// a gap rather than a lie, and roles/base announces the real one as soon as it
+// has set it.
 const generalizeScript = `set -eu
 truncate -s 0 /etc/machine-id
+truncate -s 0 /etc/hostname
 if [ -e /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
   rm -f /var/lib/dbus/machine-id
   ln -s /etc/machine-id /var/lib/dbus/machine-id
@@ -460,7 +478,7 @@ fi
 // generalizeBase runs generalizeScript in the base guest — the last thing the
 // build does inside the VM, so nothing after it can re-commit an identity.
 func (p *proxmoxProvider) generalizeBase(ctx context.Context, name string, out io.Writer) error {
-	progress(out, "Resetting %s's machine identity so every clone gets its own DHCP lease\n", name)
+	progress(out, "Resetting %s's machine identity and hostname so every clone gets its own DHCP lease and name\n", name)
 	if err := p.Shell(ctx, name, nil, out, "sudo", "bash", "-c", generalizeScript); err != nil {
 		return fmt.Errorf("proxmox: resetting %s's machine identity: %w", name, err)
 	}
@@ -469,12 +487,12 @@ func (p *proxmoxProvider) generalizeBase(ctx context.Context, name string, out i
 
 // templateGeneration versions the PROVIDER-SIDE template preparation — the
 // steps buildBaseTemplate performs around the playbook itself (today: the
-// machine-identity reset above). It is folded into the base version stamp
+// machine-identity and hostname reset above). It is folded into the base version stamp
 // (templateVersion) because staleness is judged by the stamp alone: a template
 // built before the identity reset hands every clone a duplicated DHCP identity,
 // and no playbook change would ever rebuild it away. Bump this whenever the
 // preparation changes in a way existing templates must not survive.
-const templateGeneration = ":template-gen2"
+const templateGeneration = ":template-gen3"
 
 // templateVersion is the version stamp a base template is judged against: the
 // shared playbook content hash (provision.PlaybookVersion, identical across
