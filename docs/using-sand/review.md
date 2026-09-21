@@ -38,10 +38,11 @@ row `reviewing…` and adds the URL when the server is ready.
 A review does not require a pushed branch, a configured remote, or `gh`.
 
 1. `sand` chooses the diff's base commit. It uses the parent of the oldest
-   commit absent from all remote-tracking branches in the guest. If there
-   are no such commits, it uses the nearest common ancestor with `main`,
-   `master`, or a remote's default branch. The diff also includes uncommitted
-   and untracked files.
+   commit absent from all remote-tracking branches in the guest. If it
+   cannot use that parent, it tries the nearest common ancestor with `main`,
+   `master`, or the checkout's recorded default branch. If neither method
+   finds a base, the review server uses its default range. The diff also
+   includes uncommitted and untracked files.
 
     Before starting the server, `sand` prints the base commit, its date,
     and the number of commits and files to review. For example:
@@ -138,6 +139,8 @@ Press `v` in the Landing pane to review and edit those comments, then run:
 
     If the repository already tracks its own `.agents/skills/self-review-*`
     files in Git, `sand` leaves those skills unchanged.
+
+<a id="none-of-it-shows-up-in-git-status"></a>
 
 ### Keeping review files out of commits
 
