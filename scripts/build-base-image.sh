@@ -539,6 +539,71 @@ rm -f "$MOUNT"/home/*/.bash_history
 rm -f "$MOUNT/etc/dpkg/dpkg.cfg.d/99-sand-base-speed"
 
 # ---------------------------------------------------------------------------
+# Trim safe, measurably large, functionally unused content. The base role's
+# /etc/dpkg/dpkg.cfg.d/99-sand-nodoc (path-exclude for /usr/share/doc and
+# /usr/share/man) only stops dpkg unpacking NEW files during THIS playbook's
+# own installs. The upstream Debian genericcloud image this build starts
+# from already has bash, systemd, sudo, cloud-init, the kernel, grub,
+# openssl, man-db and friends unpacked before that dpkg config file is ever
+# written, so their docs and man pages are pre-existing files on disk, not
+# something a path-exclude can retroactively remove. That pre-existing
+# content, not any package installed by this playbook, is the ~45M that
+# leaked through (confirmed by inspecting a built image: every top
+# contributor under /usr/share/doc was a base-image package, none of them
+# ours). An explicit purge here, once, after every install is done, is more
+# robust than trying to make the exclusion retroactive.
+echo "==> Trimming unused doc/man/locale/i18n bulk" >&2
+rm -rf "$MOUNT"/usr/share/doc/*
+rm -rf "$MOUNT"/usr/share/man/*
+
+# /usr/share/locale ships translations for every locale dpkg has ever seen;
+# roles/base only configures en_CA.UTF-8 (base_locale), and en_US is kept as
+# the universal fallback several tools assume exists. Every other language
+# directory is dead weight. This is safe to do at generalization time
+# because it only touches compiled message catalogs, not the locale itself.
+find "$MOUNT/usr/share/locale" -mindepth 1 -maxdepth 1 -type d ! -name 'en*' -exec rm -rf {} +
+
+# /usr/share/i18n holds the locale *source* definitions consumed by
+# locale-gen (roles/base runs it above, in the base role, well before this
+# generalization step). Once the compiled locale exists under
+# /usr/lib/locale, the sources are redundant — removing them here (after
+# locale-gen, not before) cannot affect locale -a below.
+rm -rf "$MOUNT"/usr/share/i18n
+
+# ieee-data ships the OUI/MAC vendor database; nothing in this image's tool
+# set (node, go, java, docker, ddev, glab, gh, uv, claude, codex, drupalorg,
+# mkcert, cloudflared) consults it.
+chroot "$MOUNT" apt-get -y purge ieee-data >/dev/null 2>&1 || rm -rf "$MOUNT"/usr/share/ieee-data
+
+# Go's own test suite and API-history snapshots are development-time
+# artifacts of the Go toolchain itself, not something `go build`/`go run`
+# ever reads. Go's `src` tree (the actual standard library, compiled from
+# source on demand since Go 1.20) is explicitly NOT touched here.
+rm -rf "$MOUNT"/usr/share/go-1.24/test
+rm -rf "$MOUNT"/usr/share/go-1.24/api
+
+# gnupg-l10n and groff-base's remaining, non-English payload. Their message
+# catalogs under /usr/share/locale are already gone via the locale trim
+# above; what is left is gnupg's own translated help text (not under
+# /usr/share/locale) and groff's man-formatting macros, now unused because
+# /usr/share/man is gone. NOT purged via apt: dependency-checked with
+# `apt-get remove --dry-run` first, and removing either package cascades to
+# remove cloud-init, gnupg, locales, or man-db — all load-bearing — so this
+# is a targeted file removal, the same strategy already used for doc/man
+# above, not a package removal.
+find "$MOUNT/usr/share/gnupg" -maxdepth 1 -name 'help.*.txt' ! -name 'help.txt' -delete 2>/dev/null || true
+rm -rf "$MOUNT"/usr/share/groff "$MOUNT"/usr/lib/groff
+
+# NOTE: qemu-utils and the GCC sanitizer runtimes (libasan8, libtsan2,
+# libhwasan0, libgprofng0) were investigated and deliberately left alone —
+# see the task 15 report for why: qemu-utils is pulled in by the manually
+# installed cloud-initramfs-growroot (via cloud-utils -> cloud-image-utils),
+# which grows the root filesystem on first boot, and the sanitizer runtimes
+# are `libgcc-14-dev`/`gcc-14` dependencies — `apt-get remove --dry-run`
+# confirmed removing either chain cascades into removing gcc/build-essential
+# or cloud-init, both hard constraints.
+
+# ---------------------------------------------------------------------------
 # Sparsify while still mounted. ext4 does NOT zero a block's content when a
 # file is deleted — only its allocation metadata changes — so every rm -rf
 # above (apt lists/cache, logs, docs/man exclusions during the transaction,
@@ -569,12 +634,34 @@ teardown
 # Compress. zstd gives a materially better ratio than qcow2's zlib default
 # and is read transparently by both QEMU/Lima and PVE. The sparsify step
 # above is what makes convert's own zero-detection actually pay off here.
+# compression_type=zstd needs a qemu-img built with libzstd (qemu >= 5.2);
+# probe for it directly with a throwaway 1M image rather than parsing
+# version strings, and fall back to qcow2's zlib default with a clear
+# warning so this script stays usable on an older host instead of failing
+# the whole build over a compression preference.
 # ---------------------------------------------------------------------------
+# The `compression_type` option itself (not just the zstd value) is a newer
+# qemu-img addition — an older qemu-img may reject the option outright, not
+# just the zstd value, so the fallback omits -o entirely rather than passing
+# compression_type=zlib.
+COMPRESS_LABEL="zstd"
+CONVERT_OPTS=(-o compression_type=zstd)
+PROBE_QCOW2="$WORKDIR/zstd-probe.qcow2"
+if ! qemu-img create -f qcow2 -o compression_type=zstd "$PROBE_QCOW2" 1M >/dev/null 2>&1; then
+  echo "warning: this host's qemu-img does not support compression_type=zstd;" >&2
+  echo "         falling back to qcow2's zlib default. The published image" >&2
+  echo "         will be materially larger than a zstd build. Upgrade qemu-img" >&2
+  echo "         (qemu >= 5.2 built with libzstd) to fix this." >&2
+  COMPRESS_LABEL="zlib (default)"
+  CONVERT_OPTS=()
+fi
+rm -f "$PROBE_QCOW2"
+
 mkdir -p "$(dirname "$OUT")"
 OUT_TMP="$OUT.partial"
 rm -f "$OUT_TMP"
-echo "==> Compressing to $OUT_TMP (qcow2, zstd)" >&2
-qemu-img convert -O qcow2 -c -o compression_type=zstd "$WORK_QCOW2" "$OUT_TMP"
+echo "==> Compressing to $OUT_TMP (qcow2, $COMPRESS_LABEL)" >&2
+qemu-img convert -O qcow2 -c "${CONVERT_OPTS[@]}" "$WORK_QCOW2" "$OUT_TMP"
 mv "$OUT_TMP" "$OUT"
 
 size_bytes="$(stat -c%s "$OUT")"
