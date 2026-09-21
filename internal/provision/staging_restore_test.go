@@ -40,9 +40,11 @@ func TestAncestorDirs(t *testing.T) {
 // TestStageInCreatesParentsAsTheUser pins the ordering that keeps a restored
 // project reachable: the org directory's PARENT is created (or repaired) as the
 // user BEFORE the root-run extract, because tar would otherwise create it
-// root-owned and the chown that follows only reaches the restored paths
-// themselves. Without it, a preserve-project reset left ~/github.com as
-// root:root — on a VM where a plain create leaves it owned by the user — and the
+// root-owned. The parent is the one thing the archive's own ownership cannot
+// speak for — it is not a member of the archive at all (`tar -C home
+// github.com/octocat` stores "github.com/octocat/" and below, never
+// "github.com/") — so without this a preserve-project reset left ~/github.com as
+// root:root on a VM where a plain create leaves it owned by the user, and the
 // next clone into a sibling org directory failed with "Permission denied".
 func TestStageInCreatesParentsAsTheUser(t *testing.T) {
 	f := &stagingFakeRunner{}
@@ -52,17 +54,13 @@ func TestStageInCreatesParentsAsTheUser(t *testing.T) {
 		t.Fatalf("seed archive: %v", err)
 	}
 
-	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", []string{"github.com/octocat"}, archive); err != nil {
+	if err := StageIn(context.Background(), cli, "claude", "/home/andrew", "andrew", []string{"github.com/octocat"}, archive, "project tree", io.Discard); err != nil {
 		t.Fatalf("StageIn: %v", err)
 	}
 
 	want := [][]string{
 		{"shell", "claude", "sudo", "install", "-d", "-o", "andrew", "-g", "andrew", "-m", "755", "/home/andrew/github.com"},
 		{"shell", "claude", "sudo", "tar", "-C", "/home/andrew", "-z", "-xf", "-"},
-		// The chown covers only what the extract actually produced, so each path
-		// is probed first (see StageIn).
-		{"shell", "claude", "sudo", "test", "-e", "/home/andrew/github.com/octocat"},
-		{"shell", "claude", "sudo", "chown", "-R", "andrew:andrew", "/home/andrew/github.com/octocat"},
 	}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("StageIn argv = %v, want %v", f.calls, want)
@@ -140,14 +138,20 @@ func TestAllowDirenvApprovesWhatIsThere(t *testing.T) {
 	}
 }
 
-// TestStageInSkipsTheChownForAPathThatWasNeverThere is the regression test for
-// a reset that failed at its very last step with nothing wrong. StageOut's
-// --ignore-failed-read drops a top-level path that is absent in the SOURCE VM,
-// so it is absent from the archive too — and `chown -R` on a path that is not
-// there fails, taking the whole call with it. Any VM whose user had never
-// launched Claude Code has no ~/.claude.json, so a preserve-Claude reset of one
-// reported a failure over a VM that was entirely fine.
-func TestStageInSkipsTheChownForAPathThatWasNeverThere(t *testing.T) {
+// TestStageInTouchesNothingBeyondTheExtract is the regression test for a reset
+// that failed at its very last step with nothing wrong, kept as a test of the
+// structure that now makes that failure impossible.
+//
+// StageOut's --ignore-failed-read drops a top-level path that is absent in the
+// SOURCE VM, so it is absent from the archive too — and the `chown -R` that used
+// to follow the extract fails on a path that is not there, taking the whole call
+// with it. Any VM whose user had never launched Claude Code has no
+// ~/.claude.json, so a preserve-Claude reset of one reported a failure over a VM
+// that was entirely fine. The fix was not a better probe but removing the pass:
+// the archive names the owner, so there is nothing to run afterwards and nothing
+// left to trip over. This asserts exactly that — the extract is the last thing
+// StageIn does, and a missing path costs neither a probe nor a command.
+func TestStageInTouchesNothingBeyondTheExtract(t *testing.T) {
 	home := "/home/andrew"
 	f := &direnvFakeRunner{exists: map[string]bool{home + "/.claude": true}}
 	cli := lima.New(f)
@@ -156,13 +160,12 @@ func TestStageInSkipsTheChownForAPathThatWasNeverThere(t *testing.T) {
 		t.Fatalf("seed archive: %v", err)
 	}
 
-	if err := StageIn(context.Background(), cli, "claude", home, "andrew", []string{".claude", ".claude.json"}, archive); err != nil {
-		t.Fatalf("StageIn: %v", err)
+	if err := StageIn(context.Background(), cli, "claude", home, "andrew", []string{".claude", ".claude.json"}, archive, "Claude data", io.Discard); err != nil {
+		t.Fatalf("StageIn with a path that was never there: %v", err)
 	}
 
-	last := f.calls[len(f.calls)-1]
-	want := []string{"shell", "claude", "sudo", "chown", "-R", "andrew:andrew", home + "/.claude"}
-	if !reflect.DeepEqual(last, want) {
-		t.Fatalf("chown = %v, want only the path the extract produced: %v", last, want)
+	want := [][]string{{"shell", "claude", "sudo", "tar", "-C", home, "-xf", "-"}}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("StageIn argv = %v, want just the extract %v", f.calls, want)
 	}
 }

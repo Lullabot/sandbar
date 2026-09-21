@@ -1526,27 +1526,31 @@ func TestReset_BothPreserve(t *testing.T) {
 		return c[0] == "start" && hasTok(c, "claude")
 	})
 
-	// Claude restore (extract + chown) BEFORE finalize.
+	// Claude restore BEFORE finalize. There is no ownership step after the
+	// extract any more: both archives were created with the user stamped on
+	// every member, so the root-run extract lands the tree already owned by them
+	// (see StageOut).
 	inClaude := findCall(t, calls, startClone+1, "stage-in claude (tar -xf)", func(c []string) bool {
 		return isTarIn(c)
 	})
-	chownClaude := findCall(t, calls, inClaude+1, "chown claude", func(c []string) bool {
-		return hasTok(c, "chown") && hasTok(c, "/home/andrew/.claude")
-	})
-	finalize := findCall(t, calls, chownClaude+1, "finalize (bash -c)", func(c []string) bool {
+	finalize := findCall(t, calls, inClaude+1, "finalize (bash -c)", func(c []string) bool {
 		return hasTok(c, "bash") && hasTok(c, "-c")
 	})
 
-	// Project restore AFTER finalize: extract + chown + direnv allow.
+	// Project restore AFTER finalize: extract + direnv allow.
 	inProject := findCall(t, calls, finalize+1, "stage-in project (tar -xf)", func(c []string) bool {
 		return isTarIn(c)
 	})
-	chownProject := findCall(t, calls, inProject+1, "chown project", func(c []string) bool {
-		return hasTok(c, "chown") && hasTok(c, "/home/andrew/github.com/lullabot")
-	})
-	direnv := findCall(t, calls, chownProject+1, "direnv allow", func(c []string) bool {
+	direnv := findCall(t, calls, inProject+1, "direnv allow", func(c []string) bool {
 		return hasTok(c, "direnv") && hasTok(c, "allow")
 	})
+
+	// And no reset does an ownership pass over a restored tree at all: it is the
+	// archive that carries the ownership, so a `chown -R` here would be a full
+	// re-walk of every inode the extract just wrote, for nothing.
+	if n := countCalls(calls, func(c []string) bool { return hasTok(c, "chown") }); n != 0 {
+		t.Errorf("the restore ran %d chown pass(es) over the restored tree; ownership belongs in the archive", n)
+	}
 
 	// Bounce: stop -> start.
 	stop := findCall(t, calls, direnv+1, "stop", func(c []string) bool { return c[0] == "stop" })

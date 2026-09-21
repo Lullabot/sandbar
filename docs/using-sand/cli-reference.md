@@ -367,6 +367,35 @@ Anything you do not name is gone with the disk: other forges, `~/.ssh`,
 `~/.config/gh`, shell history, and everything under `/srv` (which is outside
 the home directory and so cannot be preserved at all).
 
+### Watching a copy run
+
+A preserved home of a few gigabytes — a `node_modules`, a Go build cache, a
+year of agent logs — takes minutes to copy out and minutes to put back, so both
+halves report themselves every couple of seconds, in the TUI's progress log and
+on the building tile as well as on `sand reset`'s own output:
+
+```
+==> Backing up home…
+==> Backing up home: 910 MB, 76 MB/s
+==> Backed up home: 1.6 GB in 24s, 68 MB/s
+…
+==> Restoring home: 59% of 1.6 GB, 82 MB/s
+==> Restored home: 1.6 GB in 21s, 78 MB/s
+```
+
+The restore can show a percentage because the archive's size is known before it
+starts; a backup cannot, because how far a tree compresses is not known until
+the copy ends, so it reports the bytes and the rate instead. A copy that
+finishes in under one reporting interval says nothing at all.
+
+The rate is worth a glance the first time. The archive is compressed **inside
+the VM**, with `zstd` where the guest has it and `gzip` where it does not — and
+gzip is several times slower on a large tree. `zstd` joined the image's package
+list after some existing VMs were built, and a reset does not install packages,
+so a VM cloned from an older base keeps falling back to gzip every time; the
+copy says so when it happens. `sand create --rebuild` refreshes the base image
+so new VMs get it.
+
 ### Flags
 
 | Flag | Type | Default | Description |

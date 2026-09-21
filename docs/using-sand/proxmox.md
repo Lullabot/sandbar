@@ -142,7 +142,7 @@ failures — so, for the record, why each of the less-obvious ones is here:
 
 | Privilege | Why `sand` needs it |
 | --- | --- |
-| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need `virtio-scsi-pci`, not the PVE default. |
+| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of `lsi` — `sand` uses `virtio-scsi-single` (see [How `sand` configures a VM's disk](#how-sand-configures-a-vms-disk)). |
 | `VM.Config.Options` | Setting `agent`, `name`, and `ostype`. |
 | `VM.Config.Disk` | Covers disk devices **and** the `boot` order. |
 | `VM.Config.Cloudinit` | Injecting the SSH key, user, and network config. |
@@ -421,6 +421,40 @@ naming what it could not keep.
 
 If you actually *want* a fresh MAC, delete the VM and create it again: that is
 the verb that means "a different machine".
+
+## How `sand` configures a VM's disk
+
+Proxmox's own defaults are tuned for a general-purpose server. A `sand` VM is a
+development sandbox, where nearly everything that feels slow — a build, a test
+run, and above all a reset copying a preserved home in and out — is bound by the
+cost of touching *many small files* rather than by throughput. `sand` sets four
+options on `scsi0` for that, and one controller type to make the first of them
+possible:
+
+| Setting | Why |
+|---|---|
+| `scsihw=virtio-scsi-single` | The controller variant Proxmox accepts `iothread` on. |
+| `iothread=1` | Gives the disk its own IO thread instead of sharing the QEMU main thread with every other device, so a queue of small reads stops serialising behind unrelated work. |
+| `cache=writeback` | Proxmox's default is no host cache at all, so every read the *guest's* cache misses goes to the storage backend. Writeback lets the Proxmox host's page cache serve them. |
+| `discard=on` | Passes the guest's TRIM through, so deleting files actually returns space to a thin volume, a ZFS dataset or a Ceph image. Without it a disposable VM's storage only ever grows. |
+| `ssd=1` | Advertises the disk as non-rotational, which is what makes the guest's weekly `fstrim` meaningful and stops its IO scheduler optimising for seeks that do not exist. |
+
+`cache=writeback` is the only one with a trade, and it is a bounded one: the
+guest's flushes are still honoured, so its filesystem journal stays consistent,
+but writes it has not yet flushed can be lost if the **host** loses power. That
+is the same exposure a physical workstation has, on machines that are explicitly
+disposable. If your VMs hold work you would not want to lose to a host power
+cut, land it (`sand land`) rather than relying on the disk.
+
+The guest side is set up to match: its root filesystem is mounted `noatime` (so
+reading a file does not write its inode back, which a `tar` of a home directory
+full of small files would otherwise do hundreds of thousands of times), and
+`fstrim.timer` is enabled so `discard=on` has something to pass along.
+
+**These apply to VMs created from here on.** Disk options live in a VM's config
+and clones inherit them from the template, so an existing VM keeps whatever it
+was created with. Run `sand create --rebuild` to rebuild the base template, then
+recreate or reset a VM to put it on the new settings.
 
 ## A separate pool for automated tests
 

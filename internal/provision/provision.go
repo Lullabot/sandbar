@@ -1024,7 +1024,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		if stage, err = NewStageGuard(); err != nil {
 			return err
 		}
-		if plan, err = StagePreserve(ctx, p.Lima, cfg.Name, home, cfg.CloneURL, opts, stage, out); err != nil {
+		if plan, err = StagePreserve(ctx, p.Lima, cfg.Name, home, cfg.User, cfg.CloneURL, opts, stage, out); err != nil {
 			return stage.Fail(err)
 		}
 	}
@@ -1060,7 +1060,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	}
 
 	// 4. Restore what the playbook must land on top of, BEFORE finalize.
-	if err := RestoreBeforeFinalize(ctx, p.Lima, cfg.Name, home, cfg.User, plan, stage); err != nil {
+	if err := RestoreBeforeFinalize(ctx, p.Lima, cfg.Name, home, cfg.User, plan, stage, out); err != nil {
 		return stage.Fail(err)
 	}
 

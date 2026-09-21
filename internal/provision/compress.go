@@ -49,10 +49,20 @@ var (
 // correct for the only cost of being wrong (a slower archive), and a transport
 // that is genuinely broken will fail the tar a moment later with an error about
 // the transport rather than one about a compressor.
-func tarCompressFlags(ctx context.Context, cli guestRunner, name string) []string {
+func tarCompressFlags(ctx context.Context, cli guestRunner, name string, out io.Writer) []string {
 	if _, err := cli.ShellOut(ctx, name, "sudo", "sh", "-c", "command -v zstd"); err == nil {
 		return []string{"-I", zstdCompressProgram}
 	}
+	// The fallback is SAID OUT LOUD, because the difference it makes is the
+	// difference between a reset a user waits through and one they think has
+	// hung — and because nothing else about the run would ever reveal it. zstd
+	// joined the image's package list after this VM's base image was built, and
+	// the finalize phase deliberately installs no packages (see
+	// roles/base/tasks/main.yml), so an existing VM cannot pick it up by being
+	// reset: it is the BASE that has to be refreshed. A user staring at a slow
+	// copy has no way to deduce any of that from silence, and the remedy is one
+	// command.
+	note(out, "Note: %q has no zstd, so this copy is compressed with gzip — several times slower on a large tree. `sand create --rebuild` refreshes the base image so new VMs get it.", name)
 	return []string{"-z"}
 }
 
