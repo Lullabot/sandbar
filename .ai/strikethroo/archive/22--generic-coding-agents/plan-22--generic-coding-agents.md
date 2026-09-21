@@ -156,3 +156,24 @@ Parent independently ran the core Go suite with `-count=1` (vm, agentprefs, prov
 ### Phase 2 verification
 
 Parent independently ran the complete Go suite with `-race -covermode=atomic -coverpkg=./internal/... -count=1`: all packages pass, with 90.3% internal coverage (CI floor raised from 87% to 90%). Fresh `go vet ./...`, `go build ./cmd/sand`, `gofmt -l .`, and `git diff --check` pass. The limae2e-tagged suite compiles with `-run '^$'`; no live VM was started. The strict MkDocs build passes. Ansible syntax and all three actual Ansible fixture tests pass (78.805s); the preserved-settings test additionally verifies private mode 0600 survives role reapplication. Reviewed create/reset/error snapshots fit 80x24. The new terminal persistence/reset and async generation tests pass five repeated race-enabled runs. Added CI checks cover all four executables in clones, no agent executables in the base, and remembered selections on the next create.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-21
+
+### Results
+
+Claude Code, Codex, OpenCode, and Pi are independent per-VM selections with shared CLI/TUI preferences, including an explicitly empty selection. Selected agents install current releases during full/finalize provisioning, not base creation. Legacy base-agent installs are removed during base convergence. Existing Claude/Codex configuration migrates without losing false values. Reset replays recorded VM choices and one checkbox preserves the state of all four agents through private archives. Updated documentation, real Ansible fixtures, terminal/provider-boundary tests, and CI smoke checks cover the new behavior. Implementation commits: `c548448` and `5b1adc3`.
+
+### Noteworthy Events
+
+- Official installation verification found Pi's package had moved to `@earendil-works/pi-coding-agent`; the old package is deprecated. Temporary-prefix installation/version checks succeeded for OpenCode and Pi; temporary downloads were removed afterward.
+- A regression test exposed Proxmox's template-generation suffix in old base stamps masking the final tool name. The parser now separates that metadata, preserving Codex-only migration.
+- Server maintenance restarted the app and changed sandbox permissions. Worktree and commits remained intact. The parent resumed verification and completed a worker's blocked final patch after full access was restored; no work was lost.
+- Reviewed snapshots keep create/reset help and warnings visible at 80x24. Preserved settings retain their bytes and mode 0600.
+- Final Go race coverage is 90.3%; the CI floor is now 90%. The original main worktree remains clean.
+
+### Necessary follow-ups
+
+Run the added Lima CI smoke checks on a PR or an explicitly requested workflow dispatch. This environment has no usable Lima/QEMU installation, so real VM boot, installation, and reset were not exercised locally; the tagged e2e tests only compiled. No branch was pushed and no PR or external CI run was created by this workflow.
