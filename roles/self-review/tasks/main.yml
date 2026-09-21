@@ -1,0 +1,216 @@
+---
+# Base-phase by construction: site.yml runs this whole role only when
+# provision_phase is not 'finalize', so the package is in the clone's /etc
+# before it first boots and no per-VM re-run is needed.
+#
+# Adding it changes the playbook hash, so every existing base image goes stale
+# and installs it on the next `sand create` — the same path that already
+# delivers the review tool itself, and the reason neither needs a flag.
+- name: Install the review workflow's apt packages
+  ansible.builtin.apt:
+    name: "{{ selfreview_packages }}"
+    state: present
+    update_cache: false # roles/base already refreshed the lists this run
+
+- name: Create the self-review install directory
+  ansible.builtin.file:
+    path: "{{ selfreview_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# The manifest is a TEMPLATE rather than a copied file so the pinned version
+# lives in one place (defaults/main.yml) and so its `changed` result is what
+# gates the install below — a version bump rewrites this file, and that is the
+# signal to re-run npm. Nothing else re-runs it, which is what keeps a
+# converge at changed=0.
+#
+# The `overrides` entry in that template is the load-bearing part, and it is
+# worth understanding before touching it. @self-review/serve declares
+# @self-review/react as a RUNTIME dependency, but it is not one: the browser
+# client ships prebuilt in the package's own dist/client, and the only thing
+# that ever needed React was the vite build that produced it upstream. Nothing
+# in dist/cli.js's import graph reaches it — the server's only non-builtin
+# import is @self-review/core.
+#
+# Installing it anyway is not a rounding error. Measured against 1.45.0:
+# 320 packages and 310MB with it, 17 packages and 17MB without — the
+# difference being mermaid (84MB), lucide-react (45MB), @emoji-mart (27MB),
+# @base-ui (21MB) and es-toolkit (18MB), every one of them reached ONLY
+# through that one dependency. Deleting the directory afterwards would not
+# help, because npm hoists those transitive packages to the top level where
+# they are no longer identifiable as react's.
+#
+# So the dependency is replaced, by npm itself, with @self-review/types — a
+# real package, already in the tree, small — and its subtree is therefore
+# never fetched at all. The verification task at the bottom of this file is
+# what keeps the substitution honest.
+#
+# The upstream fix is to move @self-review/react to devDependencies in
+# packages/serve/package.json. If that lands, this override simply stops
+# having anything to substitute.
+- name: Write the pinned self-review install manifest
+  ansible.builtin.template:
+    src: package.json.j2
+    dest: "{{ selfreview_install_dir }}/package.json"
+    owner: root
+    group: root
+    mode: "0644"
+  register: selfreview_manifest
+
+- name: Check whether the review tool is already installed
+  ansible.builtin.stat:
+    path: "{{ selfreview_install_dir }}/node_modules/.bin/self-review-serve"
+  register: selfreview_bin
+
+- name: Install the pinned @self-review/serve release
+  ansible.builtin.command:
+    cmd: npm install --no-audit --no-fund --omit=dev
+    chdir: "{{ selfreview_install_dir }}"
+  when: selfreview_manifest.changed or not selfreview_bin.stat.exists
+  changed_when: true
+
+# A link rather than an install into a global npm prefix: the install above is
+# self-contained in one directory, so the only thing that has to be global is
+# the entry point. internal/landreview invokes it by bare name, so all this
+# has to guarantee is that the name resolves on a default PATH.
+- name: Link the review tool onto PATH
+  ansible.builtin.file:
+    src: "{{ selfreview_install_dir }}/node_modules/.bin/self-review-serve"
+    dest: "{{ selfreview_bin_dir }}/self-review-serve"
+    state: link
+    owner: root
+    group: root
+
+# The install above substitutes one of upstream's declared dependencies, so
+# this play does not get to ASSUME the result runs — it has to demonstrate it.
+# `--version` is enough to do that despite doing so little, because ES module
+# imports are hoisted: reaching the version branch at all means the entire
+# server import graph resolved. A release that genuinely started importing
+# @self-review/react at runtime would fail here with MODULE_NOT_FOUND, turning
+# the override into a red base build instead of a VM whose review command is
+# quietly broken.
+#
+# It checks the VERSION, not just the exit status, so a stale binary left by a
+# failed upgrade cannot pass as a successful install.
+#
+# What this does NOT prove is that the server serves; that needs a listening
+# socket and an HTTP request, which is the `sand land --review` end-to-end
+# step in .github/workflows/test.yml.
+- name: Verify the review tool runs and is the pinned release
+  ansible.builtin.command:
+    cmd: self-review-serve --version
+  register: selfreview_check
+  changed_when: false
+  failed_when: >-
+    selfreview_check.rc != 0
+    or selfreview_version not in (selfreview_check.stdout | default('') ~ selfreview_check.stderr | default(''))
+
+# --- the assistant skills -------------------------------------------------
+#
+# Fetched from upstream's git tag rather than vendored into this repository,
+# so they move with selfreview_version and Renovate's existing pin bumps all
+# of it at once. A vendored copy would be a fork of someone else's prose that
+# nothing bumps and nothing notices going stale.
+#
+# The whole repository tarball is 8.1MB to extract 99KB, which is the one
+# unattractive part and is accepted deliberately: fetching the files
+# individually means enumerating each skill's assets/ directory (three XSD
+# schema versions today, an unknown number tomorrow), and that enumeration is
+# exactly the thing that rots silently when upstream adds a file. The tarball
+# cannot miss one. It is paid once per BASE build, next to an npm install that
+# already pulls more.
+- name: Check whether the pinned skills are already staged
+  ansible.builtin.stat:
+    path: "{{ selfreview_skills_dir }}/.sandbar-{{ selfreview_version }}"
+  register: selfreview_skills_stamp
+
+# Removed and recreated rather than extracted over: a version bump that
+# DELETED a file upstream would otherwise leave it behind forever, and a
+# half-extracted directory from an interrupted run would look complete.
+- name: Reset the skills staging directory
+  ansible.builtin.file:
+    path: "{{ selfreview_skills_dir }}"
+    state: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [absent, directory]
+  when: not selfreview_skills_stamp.stat.exists
+
+- name: Fetch the pinned assistant skills
+  ansible.builtin.unarchive:
+    src: "https://codeload.github.com/e0ipso/self-review/tar.gz/refs/tags/v{{ selfreview_version }}"
+    dest: "{{ selfreview_skills_dir }}"
+    remote_src: true
+    owner: root
+    group: root
+    extra_opts:
+      - --wildcards
+      - --strip-components=3
+      - "*/.agents/skills/self-review-*"
+  when: not selfreview_skills_stamp.stat.exists
+
+# The wildcard above matching nothing would leave an empty directory and no
+# error at all, so the result is asserted rather than assumed — the same
+# reason the npm install is made to prove itself by running.
+- name: Verify every pinned skill was staged
+  ansible.builtin.stat:
+    path: "{{ selfreview_skills_dir }}/{{ item }}/SKILL.md"
+  register: selfreview_skill_files
+  loop: "{{ selfreview_skills }}"
+  failed_when: not selfreview_skill_files.stat.exists
+
+- name: Stamp the staged skills with their version
+  ansible.builtin.copy:
+    content: "{{ selfreview_version }}\n"
+    dest: "{{ selfreview_skills_dir }}/.sandbar-{{ selfreview_version }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- keeping a review out of the user's project ---------------------------
+#
+# A review writes review.xml into the checkout and sand copies three skill
+# directories in beside it, so without this every reviewed repository grows
+# five entries of untracked noise that `git status` reports and a careless
+# `git add -A` commits.
+#
+# The USER'S global excludes file is the right home for that, not the
+# project's .gitignore: sand must not write a tracked file into someone
+# else's repository to tidy up after itself. git reads
+# ~/.config/git/ignore with no core.excludesFile set at all, so this needs no
+# `git config` and cannot fight a value the user set themselves.
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    selfreview_user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+- name: Create the user's git config directory
+  ansible.builtin.file:
+    path: "{{ selfreview_user_home }}/.config/git"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+# blockinfile, not copy or template: the file is the user's, it may already
+# hold their own patterns, and a review's entries must be removable as a unit
+# without taking anything else with them.
+- name: Ignore review output and installed skills globally
+  ansible.builtin.blockinfile:
+    path: "{{ selfreview_user_home }}/.config/git/ignore"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+    marker: "# {mark} sand: self-review"
+    block: |
+      {% for pattern in selfreview_ignore_patterns %}
+      {{ pattern }}
+      {% endfor %}

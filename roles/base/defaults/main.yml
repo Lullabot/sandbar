@@ -93,7 +93,7 @@ base_packages:
 # play-wide, and keeping one home for the selections is what stops them drifting
 # apart.
 #
-# toolset_codex is the first opt-in selection: it defaults to false, so an
+# toolset_codex is the only opt-in selection: it defaults to false, so an
 # unconfigured run does not install it. Like claude, it gates the whole codex
 # role from site.yml and installs no apt packages, so it also has nothing to
 # fold into toolset_packages below.
