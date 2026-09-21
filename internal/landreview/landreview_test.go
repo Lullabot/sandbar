@@ -1016,19 +1016,19 @@ func TestRunResumesFromAnExistingReview(t *testing.T) {
 		}
 	})
 
-	t.Run("Fresh removes the review and starts from scratch", func(t *testing.T) {
+	t.Run("Clean removes the review and starts from scratch", func(t *testing.T) {
 		p := &stubProvider{t: t, baseReport: report}
-		s := &Session{Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"}, Fresh: true}
+		s := &Session{Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"}, Clean: true}
 		var out strings.Builder
 		_, _ = s.Run(context.Background(), &out)
 
 		if argv := p.serverArgv(); argvHas(argv, "--resume-from", "/home/u/repo/review.xml") {
-			t.Errorf("server argv = %q, want no --resume-from when Fresh is set", argv)
+			t.Errorf("server argv = %q, want no --resume-from when Clean is set", argv)
 		}
 		// The removal is the other half of the same decision: without it the
 		// NEXT review would resume from the comments just abandoned.
 		if !p.ranScript(removeOutputScript) {
-			t.Error("Fresh did not remove the existing review from the checkout")
+			t.Error("Clean did not remove the existing review from the checkout")
 		}
 	})
 

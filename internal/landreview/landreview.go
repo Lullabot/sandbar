@@ -218,7 +218,7 @@ const (
 	// short enough that a wedged guest costs a review its skills rather than
 	// the review itself — installSkills treats every failure as non-fatal.
 	installSkillsTimeout = 20 * time.Second
-	// removeOutputTimeout bounds the two `rm -f`s behind "review afresh".
+	// removeOutputTimeout bounds the two `rm -f`s behind "clean review".
 	// Unlike the install, this one's failure IS fatal to the action it serves:
 	// starting a fresh review over a review.xml that is still there would
 	// resume from the comments the user asked to discard.
@@ -276,7 +276,7 @@ type Session struct {
 	// MaxDiffFiles caps how many changed files a review may cover before Run
 	// refuses to start it; zero means maxDiffFiles.
 	MaxDiffFiles int
-	// Fresh starts the review over: any previous review.xml (and its
+	// Clean starts the review over: any previous review.xml (and its
 	// walkthrough sidecar) is REMOVED from the checkout before the server
 	// starts, and nothing is carried in.
 	//
@@ -284,7 +284,7 @@ type Session struct {
 	// halves are one decision. A caller that deleted the file itself and left
 	// this false would race its own probe; a caller that set this without
 	// deleting would leave a review.xml the NEXT run silently resumes from.
-	Fresh bool
+	Clean bool
 }
 
 // errServerGone reports that the guest command exited while the session was
@@ -349,7 +349,7 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// report. Fatal on failure — a "fresh" review that quietly resumed from
 	// the comments the user asked to discard is the one outcome this verb
 	// exists to prevent.
-	if s.Fresh {
+	if s.Clean {
 		if err := s.removeOutput(ctx); err != nil {
 			return "", err
 		}
@@ -364,10 +364,10 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 			return "", diffTooLargeError(base, limit)
 		}
 	}
-	// The Fresh arm above already removed the file, so the probe cannot have
+	// The Clean arm above already removed the file, so the probe cannot have
 	// reported one; the second half of this condition is belt and braces
 	// against a probe that somehow saw it anyway.
-	resuming := base.Resume && !s.Fresh
+	resuming := base.Resume && !s.Clean
 
 	// Flags first, then the range. That order is for the reader rather than
 	// the parser: upstream scans the whole argv and treats everything it does
@@ -911,7 +911,7 @@ func countSkillReport(out string) (installed, skipped int) {
 // resumed by the next run.
 //
 // Unexported on purpose. Removing the file and not resuming are two halves of
-// one decision, so the only way to ask for either is Session.Fresh — there is
+// one decision, so the only way to ask for either is Session.Clean — there is
 // no way for a caller to do one and forget the other.
 func (s *Session) removeOutput(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, removeOutputTimeout)

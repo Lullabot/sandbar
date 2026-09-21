@@ -2225,10 +2225,10 @@ func TestAtRiskLabelUsesLocalOnly(t *testing.T) {
 	}
 }
 
-// --- the afresh review verb ---
+// --- the clean review verb ---
 
 // landingWithOneCheckout seeds a pane holding a single reviewable checkout,
-// which is all the afresh verb's tests need.
+// which is all the clean-review verb's tests need.
 func landingWithOneCheckout(t *testing.T) (model, boardVM) {
 	t.Helper()
 	m, v := landingTestVM(t, "web")
@@ -2246,12 +2246,12 @@ func landingWithOneCheckout(t *testing.T) (model, boardVM) {
 	return m, v
 }
 
-// TestLandingFooterOffersTheAfreshVerbAndStillFits guards the two ways a new
+// TestLandingFooterOffersCleanReviewAndStillFits guards the two ways a new
 // footer entry goes wrong. It must be OFFERED — a verb the footer never names
 // is a verb nobody finds — and the footer must still fit the 80-column
 // terminal this project budgets for, because a footer that wraps costs the
 // pane a row it never reserved and pushes content off the bottom.
-func TestLandingFooterOffersTheAfreshVerbAndStillFits(t *testing.T) {
+func TestLandingFooterOffersCleanReviewAndStillFits(t *testing.T) {
 	m, _ := landingWithOneCheckout(t)
 
 	var found bool
@@ -2259,7 +2259,7 @@ func TestLandingFooterOffersTheAfreshVerbAndStillFits(t *testing.T) {
 		if b.Enabled() && b.Help().Key == "V" {
 			found = true
 			if b.Help().Desc == "" {
-				t.Error("the afresh verb is in the footer with no description")
+				t.Error("the clean-review verb is in the footer with no description")
 			}
 		}
 	}
@@ -2279,6 +2279,9 @@ func TestLandingFooterOffersTheAfreshVerbAndStillFits(t *testing.T) {
 	}{
 		{name: "an ordinary push row", seed: landingWithActionableCheckout},
 		{name: "the longest verb there is", seed: landingWithPublishCheckout},
+		// While a review runs, v's help grows to "cancel review" — paid for
+		// by V dropping out, since there is nothing to start over yet.
+		{name: "while that row is being reviewed", seed: landingWithPublishCheckoutUnderReview},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			wide, _ := tc.seed(t)
@@ -2292,7 +2295,9 @@ func TestLandingFooterOffersTheAfreshVerbAndStillFits(t *testing.T) {
 			if w := len([]rune(footer)); w > 80 {
 				t.Errorf("the footer is %d columns at an 80-column terminal:\n%q", w, footer)
 			}
-			for _, want := range []string{"v review", "V review afresh", "esc back"} {
+			// The review key is there either way; which verb it names is
+			// the subject of TestLandingReviewKeyHelpSaysCancelWhileReviewing.
+			for _, want := range []string{"v ", "esc back"} {
 				if !strings.Contains(footer, want) {
 					t.Errorf("the footer lost %q at 80 columns — it was clipped off the end:\n%q", want, footer)
 				}
@@ -2365,11 +2370,11 @@ func landingFooterLine(rendered string) string {
 	return ""
 }
 
-// TestLandingAfreshConfirmsBeforeDiscarding pins the guard. review.xml is the
+// TestLandingCleanReviewConfirmsBeforeDiscarding pins the guard. review.xml is the
 // ONLY copy of comments the user wrote — they live in the browser page until
 // submitted and nothing else in the system holds them — so the key must not
 // destroy it on a single press.
-func TestLandingAfreshConfirmsBeforeDiscarding(t *testing.T) {
+func TestLandingCleanReviewConfirmsBeforeDiscarding(t *testing.T) {
 	m, _ := landingWithOneCheckout(t)
 
 	next, cmd := m.updateLanding(tea.KeyPressMsg{Code: 'V', Text: "V"})
@@ -2390,21 +2395,21 @@ func TestLandingAfreshConfirmsBeforeDiscarding(t *testing.T) {
 	// Cancelling leaves nothing running and nothing removed.
 	next, _ = got.updateConfirm(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cancelled := next.(model); cancelled.confirm != nil || cancelled.review.path != "" {
-		t.Error("cancelling the afresh prompt still started a review")
+		t.Error("cancelling the clean-review prompt still started a review")
 	}
 }
 
-// TestLandingAfreshStartsAFreshSession is the assertion that reaches past the
-// model: confirming must produce a session with Fresh set, because that flag
+// TestLandingCleanReviewStartsACleanSession is the assertion that reaches past the
+// model: confirming must produce a session with Clean set, because that flag
 // is the only thing that removes the old review — the pane deliberately does
-// not remove it separately (see landreview.Session.Fresh).
-func TestLandingAfreshStartsAFreshSession(t *testing.T) {
+// not remove it separately (see landreview.Session.Clean).
+func TestLandingCleanReviewStartsACleanSession(t *testing.T) {
 	m, _ := landingWithOneCheckout(t)
 
-	var gotFresh, ran bool
+	var gotClean, ran bool
 	m.reviewRun = func(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error) {
 		ran = true
-		gotFresh = sess.Fresh
+		gotClean = sess.Clean
 		return "", nil
 	}
 
@@ -2413,7 +2418,7 @@ func TestLandingAfreshStartsAFreshSession(t *testing.T) {
 	next, cmd = m.updateConfirm(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("confirming the afresh prompt produced no command")
+		t.Fatal("confirming the clean-review prompt produced no command")
 	}
 	// The confirmation dispatches a message; Update turns that into the run.
 	msg := cmd()
@@ -2423,30 +2428,30 @@ func TestLandingAfreshStartsAFreshSession(t *testing.T) {
 			break
 		}
 	}
-	fresh, ok := msg.(landReviewFreshMsg)
+	fresh, ok := msg.(landReviewCleanMsg)
 	if !ok {
-		t.Fatalf("confirming produced %T, want landReviewFreshMsg", msg)
+		t.Fatalf("confirming produced %T, want landReviewCleanMsg", msg)
 	}
-	runCmd := m.handleLandReviewFresh(fresh)
+	runCmd := m.handleLandReviewClean(fresh)
 	if runCmd == nil {
-		t.Fatal("handleLandReviewFresh produced no command for the pane it was raised on")
+		t.Fatal("handleLandReviewClean produced no command for the pane it was raised on")
 	}
 	drainCmd(runCmd)
 
 	if !ran {
 		t.Fatal("no review session was started")
 	}
-	if !gotFresh {
-		t.Error("the session was started with Fresh unset, so the old review would have been resumed")
+	if !gotClean {
+		t.Error("the session was started with Clean unset, so the old review would have been resumed")
 	}
 }
 
-// TestLandingAfreshIgnoresAnAnswerForAnotherRow covers the stale-answer case
+// TestLandingCleanReviewIgnoresAnAnswerForAnotherRow covers the stale-answer case
 // the message carries identity for: a confirmation answered after the cursor
 // moved must not start a review of whatever happens to be under it now.
-func TestLandingAfreshIgnoresAnAnswerForAnotherRow(t *testing.T) {
+func TestLandingCleanReviewIgnoresAnAnswerForAnotherRow(t *testing.T) {
 	m, v := landingWithOneCheckout(t)
-	if got := m.handleLandReviewFresh(landReviewFreshMsg{
+	if got := m.handleLandReviewClean(landReviewCleanMsg{
 		scope: v.scope, vm: v.Name, path: "/some/other/checkout",
 	}); got != nil {
 		t.Error("an answer about a different checkout started a review anyway")
@@ -2467,4 +2472,13 @@ func drainCmd(cmd tea.Cmd) {
 			}
 		}
 	}
+}
+
+// landingWithPublishCheckoutUnderReview is the worst-case footer row with a
+// review of it already in flight, which is when v's help is at its longest.
+func landingWithPublishCheckoutUnderReview(t *testing.T) (model, boardVM) {
+	t.Helper()
+	m, v := landingWithPublishCheckout(t)
+	m.review = activeReview{scope: v.scope, vm: v.Name, path: m.landing.rows[0].Checkout.Path}
+	return m, v
 }

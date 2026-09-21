@@ -644,7 +644,7 @@ This is the same detection and the same `gh` actions the TUI's `l` (Land)
 key uses — see [Landing](files-and-shells.md#landing).
 
 ```
-Usage: sand land NAME [PATH] [--pr | --web | --review [--fresh]] [--profile <name>]
+Usage: sand land NAME [PATH] [--pr | --web | --review [--clean]] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
@@ -652,7 +652,7 @@ List NAME's git checkouts and their branch/push/PR state, or act on one:
   sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
   sand land NAME PATH --web     open PATH's branch (or PR) in a browser
   sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
-  sand land NAME PATH --review --fresh
+  sand land NAME PATH --review --clean
                                 the same, discarding any review already saved there
 
 --pr uses the workstation's own 'gh' (never the guest's token). Without gh
@@ -670,7 +670,7 @@ next 'sand create'.
 
 A review.xml already in PATH is carried into the new review, so comments you
 wrote earlier are there to keep, edit or drop. Nothing ever removes that file
-on its own, so --fresh is how you start over: it deletes the saved review and
+on its own, so --clean is how you start over: it deletes the saved review and
 its walkthrough sidecar first. The review tool's assistant skills are
 installed into PATH/.agents/skills as the review starts, and the guest's
 global git excludes keep all of it out of 'git status'.
@@ -690,7 +690,7 @@ matches its own pushed copy — the usual result of a rebase — reads `diverged
 rather than `unpushed (+0)`: there is nothing there to lose.
 
 `--pr PATH`, `--web PATH` and `--review PATH` require a `PATH` from that
-listing, and are mutually exclusive. `--fresh` modifies `--review`: it
+listing, and are mutually exclusive. `--clean` modifies `--review`: it
 discards any review already saved in that checkout before starting, and is
 refused (rather than ignored) alongside any other action.
 

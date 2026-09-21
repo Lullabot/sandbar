@@ -1067,8 +1067,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleLandReviewURL(msg)
 		return m, nil
 
-	case landReviewFreshMsg:
-		return m, m.handleLandReviewFresh(msg)
+	case landReviewCleanMsg:
+		return m, m.handleLandReviewClean(msg)
 	case landReviewDoneMsg:
 		// A Landing-pane review session finished, failed, or was cancelled
 		// (landing.go's runLandingReview). Purely a model-state fold plus a

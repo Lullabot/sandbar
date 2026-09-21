@@ -71,10 +71,10 @@ URL is printed and the review stays up. Open it by hand.
 
 Two `sand land --review` commands, against checkouts on the same VM or on
 different ones, can run at the same time: each server picks its own port, so
-they don't collide. The **TUI runs one review at a time** — pressing `v`
-while another is still in flight (including one you just cancelled, which
-takes a moment to tear down) says so in the session log and does nothing
-else.
+they don't collide. The **TUI runs one review at a time** — pressing `v` on
+a *different* checkout while one is still in flight (including one you just
+cancelled, which takes a moment to tear down) says so in the session log and
+does nothing else.
 
 ## Finishing a review
 
@@ -90,8 +90,19 @@ review written to /home/claude/checkouts/my-repo/review.xml in myvm
 
 Closing the browser tab does **not** finish the review — nothing tells the
 server you left, and your comments live only in that page until you submit
-them. Ctrl-C (or leaving the TUI's Landing pane) tears the session down and
-discards them, which is the same trade the upstream tool makes.
+them. Ctrl-C on the CLI tears the session down and discards them, which is
+the same trade the upstream tool makes.
+
+In the TUI, **leaving the Landing pane does not end the review**. Press `esc`
+and go open a shell (`S`), look at another VM, do whatever you need — the
+review stays up and the browser tab keeps working. Come back to the pane and
+the row still reads `reviewing…` with its URL.
+
+To end it deliberately, press `v` on the row being reviewed: the same key
+that started it stops it, and the footer says `v cancel review` while it is
+running. Quitting `sand` also ends it — and because a live review is easy to
+forget once it is off screen, `q` asks first when one is open, naming the
+checkout.
 
 ## Picking up where you left off
 
@@ -116,8 +127,8 @@ To **start over instead**, discarding what was saved:
 
 | Where | How |
 | ----- | --- |
-| TUI's Landing pane | `V` (shift-V) on the checkout's row |
-| CLI | `sand land NAME PATH --review --fresh` |
+| TUI's Landing pane | `V` (shift-V) on the checkout's row — the footer calls it `clean review` |
+| CLI | `sand land NAME PATH --review --clean` |
 
 Both delete `review.xml` and its `review.guide.xml` sidecar before the server
 starts. `V` asks first — those comments exist nowhere else, and it asks

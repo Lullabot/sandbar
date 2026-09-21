@@ -934,7 +934,7 @@ var landingRefreshKey = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "res
 // 'r' ("rescan") collides with the board's 'r' ("restart") the same way.
 var landingReviewKey = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review"))
 
-// landingReviewFreshKey starts the selected checkout's review OVER: it
+// landingCleanReviewKey starts the selected checkout's review OVER: it
 // removes any review.xml sitting there (and its walkthrough sidecar) and
 // opens a review that carries nothing in.
 //
@@ -949,7 +949,7 @@ var landingReviewKey = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "revi
 // It raises a confirmation, because the file it removes is the only copy of
 // comments the user wrote: they live in the browser page until submitted, and
 // nothing else in the system has them.
-var landingReviewFreshKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "review afresh"))
+var landingCleanReviewKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "clean review"))
 
 // landingMoveKey describes the pane's row cursor in the footer. It is a
 // pane-local binding rather than the shared form keys (m.keys.Up/Down) for two
@@ -1053,15 +1053,23 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, m.keys.Back):
-		if m.review.isFor(m.landing.scope, m.landing.vmName) && m.review.cancel != nil {
-			// Leaving the pane must not orphan the review's guest server and
-			// forwarder child — see activeReview.cancel's doc. The state is
-			// deliberately NOT cleared here: the landReviewDoneMsg this
-			// produces is what clears it, and only once the session's own
-			// teardown has actually finished, so a quit in the interval still
-			// finds the handles it needs to wait on (reviewTeardownQuitCmd).
-			m.review.cancel()
-		}
+		// Leaving the pane deliberately does NOT cancel the review.
+		//
+		// This used to cancel, and the cost was found the way these things
+		// are: a reviewer reading a diff wanted a shell in the guest to go
+		// look at something, and `S` lives on the BOARD — so the only route
+		// to it was esc, which silently killed the review they were in the
+		// middle of. Stepping away from a pane is not a decision to throw
+		// away work; a review runs for as long as a human takes to read, and
+		// wanting to look at something else during it is the normal case.
+		//
+		// Nothing is orphaned by staying alive. activeReview lives on the
+		// MODEL rather than on this pane precisely so its cancel func and
+		// done channel outlive the pane value (see its doc), quit still tears
+		// the session down through reviewTeardownQuitCmd, and requestQuit now
+		// treats a live review as work in flight so quitting asks first.
+		// Cancelling is now something the user does on purpose, with the
+		// review key on the row being reviewed.
 		m.view = viewBoard
 		return m, nil
 	case key.Matches(msg, landingActKey):
@@ -1074,10 +1082,17 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.landing.scanning = true
 		return m, landRefreshCmd(m.sweeps, m.landing.scope, m.landing.vmName)
 	case key.Matches(msg, landingReviewKey):
+		// The same key both starts and stops, decided by whether the row
+		// under the cursor is the one being reviewed — which is the row that
+		// says "reviewing…", so the footer and the row agree about what v
+		// will do.
+		if m.cancelFocusedReview() {
+			return m, nil
+		}
 		cmd := m.runLandingReview()
 		return m, cmd
-	case key.Matches(msg, landingReviewFreshKey):
-		m.confirmFreshReview()
+	case key.Matches(msg, landingCleanReviewKey):
+		m.confirmCleanReview()
 		return m, nil
 	}
 	return m, nil
@@ -1098,8 +1113,8 @@ func (m model) landingHelp() []key.Binding {
 		landingMoveKey,
 		m.landing.landingActBinding(),
 		landingRefreshKey,
-		landingReviewKey,
-		landingReviewFreshKey,
+		m.landingReviewBinding(),
+		m.landingCleanReviewBinding(),
 		m.keys.Back,
 	}
 }
@@ -2123,7 +2138,66 @@ func (m *model) runLandingReview() tea.Cmd {
 	return m.startLandingReview(false)
 }
 
-// confirmFreshReview raises the confirmation behind the afresh verb.
+// cancelFocusedReview cancels the in-flight review when the cursor sits on
+// the checkout being reviewed, reporting whether it did anything.
+//
+// The review state is deliberately NOT cleared here. The landReviewDoneMsg
+// the cancellation produces is what clears it, and only once the session's
+// own teardown has actually finished — so a quit in the interval still finds
+// the handles it needs to wait on (reviewTeardownQuitCmd).
+func (m *model) cancelFocusedReview() bool {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return false
+	}
+	co := m.landing.rows[m.landing.cursor].Checkout
+	if !m.reviewingRow(co.Path) || m.review.cancel == nil {
+		return false
+	}
+	m.logMsg("cancelling the review of " + co.Path)
+	m.review.cancel()
+	return true
+}
+
+// reviewingRow reports whether the in-flight review is this pane's, for this
+// checkout. Both halves matter: a review of another VM is still "in flight"
+// and must not be cancelled by a key pressed here.
+func (m model) reviewingRow(path string) bool {
+	return m.review.isFor(m.landing.scope, m.landing.vmName) && m.review.path == path
+}
+
+// focusedRowUnderReview reports whether the row under the cursor is the one
+// being reviewed — what both review bindings' help text turns on.
+func (m model) focusedRowUnderReview() bool {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return false
+	}
+	return m.reviewingRow(m.landing.rows[m.landing.cursor].Checkout.Path)
+}
+
+// landingReviewBinding is the review key's help, which changes with the row:
+// on the checkout being reviewed, v stops the review rather than starting one.
+// A static "v review" there would name the opposite of what the key does.
+func (m model) landingReviewBinding() key.Binding {
+	if m.focusedRowUnderReview() {
+		return key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "cancel review"))
+	}
+	return landingReviewKey
+}
+
+// landingCleanReviewBinding disables the clean-review verb on a row whose review is
+// already running: there is nothing to start over until the current one ends,
+// and the footer must not offer a key that would only report a refusal. It
+// also buys back the columns "v cancel review" spends.
+func (m model) landingCleanReviewBinding() key.Binding {
+	if m.focusedRowUnderReview() {
+		b := landingCleanReviewKey
+		b.SetEnabled(false)
+		return b
+	}
+	return landingCleanReviewKey
+}
+
+// confirmCleanReview raises the confirmation behind the clean-review verb.
 //
 // It confirms whether or not a review.xml is actually there, which is a
 // deliberate choice over checking first. Knowing would cost a guest round
@@ -2131,7 +2205,7 @@ func (m *model) runLandingReview() tea.Cmd {
 // — so it states what the action does rather than what it found. The cost of
 // a needless "y" is one keystroke; the cost of a missing prompt is somebody's
 // review comments.
-func (m *model) confirmFreshReview() {
+func (m *model) confirmCleanReview() {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return // empty sweep: nothing under the cursor to review
 	}
@@ -2152,24 +2226,24 @@ func (m *model) confirmFreshReview() {
 		// model to mutate. Update owns the mutation, as it does for every
 		// other asynchronous action on this pane.
 		run: func() tea.Msg {
-			return landReviewFreshMsg{scope: scope, vm: vmName, path: co.Path}
+			return landReviewCleanMsg{scope: scope, vm: vmName, path: co.Path}
 		},
 	}
 }
 
-// landReviewFreshMsg asks Update to start an afresh review, once the user has
+// landReviewCleanMsg asks Update to start an clean review, once the user has
 // confirmed discarding whatever was already saved. It carries the identity
 // the confirmation was raised for, so a confirmation answered after the pane
 // moved on cannot start a review of the wrong checkout.
-type landReviewFreshMsg struct {
+type landReviewCleanMsg struct {
 	scope registry.Scope
 	vm    string
 	path  string
 }
 
-// handleLandReviewFresh starts the confirmed afresh review, having first
+// handleLandReviewClean starts the confirmed clean review, having first
 // checked that the pane is still showing what the user answered about.
-func (m *model) handleLandReviewFresh(msg landReviewFreshMsg) tea.Cmd {
+func (m *model) handleLandReviewClean(msg landReviewCleanMsg) tea.Cmd {
 	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
 		return nil // the pane moved on between the prompt and the answer
 	}
@@ -2182,7 +2256,7 @@ func (m *model) handleLandReviewFresh(msg landReviewFreshMsg) tea.Cmd {
 
 // startLandingReview is the body both review verbs share. fresh discards any
 // review already saved in the checkout and carries nothing in; see
-// landreview.Session.Fresh.
+// landreview.Session.Clean.
 func (m *model) startLandingReview(fresh bool) tea.Cmd {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return nil // empty sweep: nothing under the cursor to review
@@ -2231,7 +2305,7 @@ func (m *model) startLandingReview(fresh bool) tea.Cmd {
 		VM:       m.landing.vm,
 		Checkout: co,
 		Open:     m.ghActions.OpenInBrowser,
-		Fresh:    fresh,
+		Clean:    fresh,
 	}
 	run := m.reviewRun
 	// urls carries the review UI's URL out of Session.Run's writer and back

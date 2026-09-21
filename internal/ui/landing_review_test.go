@@ -313,12 +313,17 @@ func TestLandingHelpIncludesReviewKey(t *testing.T) {
 	}
 }
 
-// TestUpdateLandingBackCancelsInFlightReview is the cancellation-on-leave
-// acceptance requirement: navigating back to the board while a review is
-// open must cancel its context so Session.Run's own teardown runs, rather
-// than leaving the goroutine (and the guest server it is supervising)
-// orphaned with no reachable cancel func once the pane's state is reset.
-func TestUpdateLandingBackCancelsInFlightReview(t *testing.T) {
+// TestUpdateLandingBackLeavesTheReviewRunning pins the behaviour that
+// replaced cancellation-on-leave, and the reason is worth keeping: this used
+// to cancel, so a reviewer who wanted a shell in the guest to look something
+// up had to kill their own review to get one — `S` is a BOARD verb, and esc
+// was the only way to reach the board.
+//
+// Leaving a pane is not a decision to discard work. Nothing is orphaned by
+// staying alive either: activeReview lives on the model, so the cancel func
+// and done channel survive the pane, quit still tears the session down, and
+// cancelling is now something the user does on purpose.
+func TestUpdateLandingBackLeavesTheReviewRunning(t *testing.T) {
 	m, v := landingTestVM(t, "web")
 	seedOneCheckout(t, m, v, "/home/user/repo")
 	m.ghActions = &fakeGhActions{}
@@ -349,10 +354,62 @@ func TestUpdateLandingBackCancelsInFlightReview(t *testing.T) {
 	if m3.view != viewBoard {
 		t.Fatalf("view after Back = %v, want viewBoard (Back must still navigate)", m3.view)
 	}
+	// The assertion that matters: the session is still running, and its
+	// handles are still reachable for a later cancel or for quit.
+	select {
+	case <-ctx.Done():
+		t.Fatal("Back cancelled the review; leaving the pane must not discard it")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if m3.review.path != "/home/user/repo" || m3.review.cancel == nil {
+		t.Fatalf("review handles lost on leaving the pane: %+v", m3.review)
+	}
+
+	// And the deliberate cancel still works, from the row being reviewed.
+	m3.view = viewLanding
+	next3, _ := m3.updateLanding(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	m4 := next3.(model)
 	select {
 	case <-ctx.Done():
 	case <-time.After(2 * time.Second):
-		t.Fatal("Back did not cancel the in-flight review's context")
+		t.Fatal("v on the checkout under review did not cancel it")
+	}
+	// Not cleared here: landReviewDoneMsg clears it once teardown finishes,
+	// so a quit in the interval still finds the handles it must wait on.
+	if m4.review.path == "" {
+		t.Error("the review state was cleared by the cancel rather than by its completion")
+	}
+}
+
+// TestLandingReviewKeyHelpSaysCancelWhileReviewing pins the footer half of the
+// same key: v both starts and stops, so on the row that says "reviewing…" the
+// footer must say what it will actually do.
+func TestLandingReviewKeyHelpSaysCancelWhileReviewing(t *testing.T) {
+	m, v := landingTestVM(t, "web")
+	seedOneCheckout(t, m, v, "/home/user/repo")
+	m.ghActions = &fakeGhActions{}
+	m.openLandingPane(v)
+	m.landing.cursor = 0
+	m.review = activeReview{scope: v.scope, vm: v.Name, path: "/home/user/repo"}
+
+	var reviewDesc string
+	var cleanOffered bool
+	for _, b := range m.landingHelp() {
+		if b.Help().Key == "v" {
+			reviewDesc = b.Help().Desc
+		}
+		if b.Help().Key == "V" && b.Enabled() {
+			cleanOffered = true
+		}
+	}
+	if reviewDesc != "cancel review" {
+		t.Errorf("review key help while reviewing = %q, want %q", reviewDesc, "cancel review")
+	}
+	// Starting a clean review is impossible while one runs, so the footer must
+	// not offer a key that could only report a refusal — and the columns it
+	// gives back are what "v cancel review" spends.
+	if cleanOffered {
+		t.Error("the footer offers V while a review of that row is already running")
 	}
 }
 
