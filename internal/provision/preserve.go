@@ -31,7 +31,7 @@ import (
 // the path StageGuard.Fail names. A plain ".tar" is honest for both, because GNU
 // tar detects the compression itself when it is reading a file it can seek.
 const (
-	claudeArchive  = "claude.tar"
+	agentsArchive  = "agents.tar"
 	projectArchive = "project.tar"
 	homeArchive    = "home.tar"
 	extrasArchive  = "extras.tar"
@@ -42,15 +42,15 @@ const (
 // rendered inside a tile barely wider than it is — and they are words rather
 // than file names because "home.tar" is not what a user is waiting for.
 const (
-	claudeLabel  = "Claude data"
+	agentsLabel  = "agent data"
 	projectLabel = "project tree"
 	homeLabel    = "home"
 	extrasLabel  = "checkouts"
 )
 
-// claudePaths are the two home-relative paths "preserve Claude" keeps: the
-// Claude Code state directory and the login/history file beside it.
-var claudePaths = []string{".claude", ".claude.json"}
+// AgentStatePaths are the home-relative settings, credentials, sessions and
+// files preserved together for all supported coding agents.
+var AgentStatePaths = []string{".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".local/state/opencode", ".pi/agent"}
 
 // homeExcludes is everything a whole-home preserve deliberately leaves behind,
 // spelled as tar member names (the archive is created with `-C <home> .`, so
@@ -70,12 +70,12 @@ var homeExcludes = []string{"./.ssh/authorized_keys"}
 // is still alive; RestoreBeforeFinalize and RestoreAfterFinalize put it back.
 type PreservePlan struct {
 	// WholeHome reports that homeArchive holds the entire guest home. It is
-	// exclusive with every other field but Project: anything Claude, Extras or a
+	// exclusive with every other field but Project: anything Agents, Extras or a
 	// project tree would have preserved is already inside that one archive.
 	WholeHome bool
 
-	// Claude reports that claudeArchive holds ~/.claude and ~/.claude.json.
-	Claude bool
+	// Agents reports that agentsArchive holds AgentStatePaths.
+	Agents bool
 
 	// Project is what the reset decided about the repo this VM was created from.
 	// Its RestoresCheckout is consulted even under WholeHome (see probeProject);
@@ -95,7 +95,7 @@ type PreservePlan struct {
 // copy.
 //
 // The whole-home case short-circuits the rest by construction rather than by
-// convention. One archive of ~ contains the Claude login, the project tree and
+// convention. One archive of ~ contains agent state, the project tree and
 // every checkout the user could have picked individually, so staging any of them
 // a second time would double the copy, double the time, and give the restore two
 // versions of the same file to disagree about.
@@ -123,11 +123,11 @@ func StagePreserve(ctx context.Context, cli guestRunner, name, home, user, clone
 		return plan, nil
 	}
 
-	if opts.PreserveClaude {
-		if err := StageOut(ctx, cli, name, home, user, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
+	if opts.PreserveAgents {
+		if err := StageOut(ctx, cli, name, home, user, AgentStatePaths, stage.Path(agentsArchive), agentsLabel, out); err != nil {
 			return plan, err
 		}
-		plan.Claude = true
+		plan.Agents = true
 	}
 
 	if opts.PreserveProject {
@@ -279,9 +279,9 @@ func pruneCovered(rels, covered []string) []string {
 // finalize playbook runs, so the playbook lands on top of it.
 //
 // Which things those are follows from what the playbook does to them. It
-// re-writes ~/.claude/settings.json, so the Claude login and history have to be
-// there first or the settings would be layered onto nothing and the restore
-// would then overwrite them. A whole home is the same argument at full size, and
+// installs agents and creates default settings, so preserved state has to be
+// there first or the restore could overwrite freshly generated files. A whole
+// home is the same argument at full size, and
 // it is the entire point of preserving one: rebuilding a VM to pick up playbook
 // changes is only useful if the playbook gets the last word over the files it
 // owns.
@@ -291,9 +291,9 @@ func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, use
 		if err := StageIn(ctx, cli, name, home, user, []string{"."}, stage.Path(homeArchive), homeLabel, out); err != nil {
 			return fmt.Errorf("restore the home directory into %q: %w", name, err)
 		}
-	case plan.Claude:
-		if err := StageIn(ctx, cli, name, home, user, claudePaths, stage.Path(claudeArchive), claudeLabel, out); err != nil {
-			return fmt.Errorf("restore Claude into %q: %w", name, err)
+	case plan.Agents:
+		if err := StageIn(ctx, cli, name, home, user, AgentStatePaths, stage.Path(agentsArchive), agentsLabel, out); err != nil {
+			return fmt.Errorf("restore agent state into %q: %w", name, err)
 		}
 	}
 	return nil

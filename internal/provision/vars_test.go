@@ -81,11 +81,9 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 	// tools are installed — as real bools, unconditionally (the samba_enabled
 	// precedent), not gated on being non-default like the docker-proxy vars.
 	for key, want := range map[string]bool{
-		"toolset_claude": true,
-		"toolset_ddev":   true,
-		"toolset_go":     true,
-		"toolset_java":   true,
-		"toolset_codex":  false,
+		"toolset_ddev": true,
+		"toolset_go":   true,
+		"toolset_java": true,
 	} {
 		v, ok := m[key]
 		if !ok {
@@ -112,8 +110,8 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 	if v, ok := m["toolset_java"].(bool); !ok || v {
 		t.Errorf("toolset_java = %v, want false", m["toolset_java"])
 	}
-	if v, ok := m["toolset_claude"].(bool); !ok || !v {
-		t.Errorf("toolset_claude = %v, want true", m["toolset_claude"])
+	if _, ok := m["toolset_claude"]; ok {
+		t.Errorf("base must not emit coding-agent selections")
 	}
 	if v, ok := m["toolset_ddev"].(bool); !ok || !v {
 		t.Errorf("toolset_ddev = %v, want true", m["toolset_ddev"])
@@ -130,7 +128,7 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithClaude = false
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -139,8 +137,8 @@ func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 	if v, ok := m["toolset_claude"].(bool); !ok || v {
 		t.Errorf("toolset_claude = %v, want false", m["toolset_claude"])
 	}
-	if v, ok := m["toolset_ddev"].(bool); !ok || !v {
-		t.Errorf("toolset_ddev = %v, want true", m["toolset_ddev"])
+	if v, ok := m["toolset_opencode"].(bool); !ok || v {
+		t.Errorf("toolset_opencode = %v, want false", m["toolset_opencode"])
 	}
 }
 
@@ -155,7 +153,7 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
 	m := parseVars(t, data)
-	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java", "toolset_codex"} {
+	for _, k := range []string{"toolset_ddev", "toolset_go", "toolset_java"} {
 		if _, ok := m[k]; ok {
 			t.Errorf("finalize phase unexpectedly emitted %q", k)
 		}
@@ -169,7 +167,7 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithCodex = true
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}

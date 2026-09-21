@@ -1,0 +1,34 @@
+---
+# Migration of an existing reusable base, never a user's full/finalize run.
+# Remove only artifacts installed by sand's previous Claude/Codex roles.
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+- name: Remove legacy coding agents from the reusable base
+  ansible.builtin.file:
+    path: "{{ user_home }}/{{ item }}"
+    state: absent
+  loop:
+    - .local/bin/claude
+    - .local/share/claude
+    - .local/state/claude
+    - .cache/claude
+    - .claude
+    - .claude.json
+    - .claude.json.backup
+    - .config/sandbar/.claude-first-run-notice
+    - .local/bin/codex
+    - .local/bin/codex-code-mode-host
+    - .codex
+
+- name: Remove any per-VM Claude launcher from a reusable base
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Claude Code"
+    state: absent

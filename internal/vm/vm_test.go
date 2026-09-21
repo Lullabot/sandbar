@@ -156,14 +156,11 @@ func TestDefaultCreateConfig(t *testing.T) {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
 	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
-		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (an unconfigured `sand create` installs the full default tool-set)",
+		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want the initial Claude choice and base dependencies enabled",
 			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
 	}
-	// Codex is the deliberate exception: opt-IN, so it must default false even
-	// though the others default true — an unconfigured `sand create` must NOT
-	// start installing a tool that heavy without being asked.
-	if c.WithCodex {
-		t.Errorf("WithCodex = true, want false (codex is the one opt-in tool)")
+	if c.WithCodex || c.WithOpenCode || c.WithPi {
+		t.Errorf("opt-in agent defaults = codex:%v opencode:%v pi:%v, want all false", c.WithCodex, c.WithOpenCode, c.WithPi)
 	}
 }
 
@@ -172,44 +169,35 @@ func TestDefaultCreateConfig(t *testing.T) {
 // hardcode until this key replaced it.
 func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() = %q, want %q", got, want)
 	}
 }
 
-// TestToolsetKey_WithCodex proves codex slots alphabetically into the key
-// when enabled (between claude and ddev), and that leaving it off keeps it
-// out of the stamp entirely.
+// TestToolsetKey_WithCodex proves agent selection does not alter the base key.
 func TestToolsetKey_WithCodex(t *testing.T) {
 	c := DefaultCreateConfig()
-	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() with codex omitted = %q, want %q (unchanged stamp for existing users)", got, want)
 	}
 
 	c.WithCodex = true
-	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java"; got != want {
+	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Errorf("ToolsetKey() with codex enabled = %q, want %q", got, want)
 	}
 }
 
-// TestApplyToolset_RoundTripsCodex proves ApplyToolset (how `sand create`
-// adopts an existing base's recorded selection) correctly assigns codex both
-// on and off, the same as any other tool.
+// TestApplyToolset_RoundTripsCodex proves applying base dependencies leaves
+// per-VM agent selections alone.
 func TestApplyToolset_RoundTripsCodex(t *testing.T) {
 	var c CreateConfig
-	c.ApplyToolset(map[string]bool{"claude": true, "codex": true, "ddev": true, "go": true, "java": true})
-	if got, want := c.ToolsetKey(), "claude+codex+ddev+go+java"; got != want {
+	c.WithCodex = true
+	c.ApplyToolset(map[string]bool{"ddev": true, "go": true, "java": true})
+	if got, want := c.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Errorf("after ApplyToolset with codex=true, ToolsetKey() = %q, want %q", got, want)
 	}
 	if !c.WithCodex {
-		t.Errorf("WithCodex = false after ApplyToolset with codex=true in the set")
-	}
-
-	// Names absent from the set are turned OFF, not left alone — assert codex
-	// follows that same rule as the other four.
-	c.ApplyToolset(map[string]bool{"claude": true})
-	if c.WithCodex {
-		t.Errorf("WithCodex = true after ApplyToolset with codex absent from the set, want false")
+		t.Errorf("WithCodex = false after applying base dependencies")
 	}
 }
 

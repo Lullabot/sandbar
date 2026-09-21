@@ -256,7 +256,7 @@ func (g *StageGuard) Done() {
 // compressed stream, and the later StageIn extract then aborts with exit
 // status 2.
 func StageOut(ctx context.Context, cli guestRunner, name, home, user string, guestPaths []string, hostArchive, label string, out io.Writer, excludes ...string) error {
-	file, err := os.Create(hostArchive)
+	file, err := os.OpenFile(hostArchive, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create archive %s: %w", hostArchive, err)
 	}

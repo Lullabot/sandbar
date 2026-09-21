@@ -822,7 +822,7 @@ func TestProxmoxResetPreservesStateOverSSH(t *testing.T) {
 
 	cfg := webConfig()
 	cfg.CloneURL = "https://github.com/acme/web"
-	if err := p.Reset(context.Background(), cfg, provision.ResetOptions{PreserveClaude: true, PreserveProject: true}, nil); err != nil {
+	if err := p.Reset(context.Background(), cfg, provision.ResetOptions{PreserveAgents: true, PreserveProject: true}, nil); err != nil {
 		t.Fatalf("Reset: %v", err)
 	}
 

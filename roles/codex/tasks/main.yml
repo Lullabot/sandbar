@@ -20,6 +20,7 @@
   ansible.builtin.template:
     src: codex-config.toml.j2
     dest: "{{ user_home }}/.codex/config.toml"
+    force: false
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
@@ -30,8 +31,9 @@
     executable: /bin/bash
   become: true
   become_user: "{{ user_name }}"
-  args:
-    creates: "{{ user_home }}/.local/bin/codex"
+  environment:
+    HOME: "{{ user_home }}"
+    CODEX_NON_INTERACTIVE: "true"
 
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:

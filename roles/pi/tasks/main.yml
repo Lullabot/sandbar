@@ -1,0 +1,29 @@
+---
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+# Pi moved to @earendil-works in May 2026. The former @mariozechner package
+# is deprecated and no longer receives releases. Settings remain ~/.pi/agent.
+- name: Install the latest Pi release
+  ansible.builtin.command:
+    argv: [npm, install, --global, --prefix, "{{ user_home }}/.local", "@earendil-works/pi-coding-agent@latest"]
+  become: true
+  become_user: "{{ user_name }}"
+  environment:
+    HOME: "{{ user_home }}"
+
+- name: Add ~/.local/bin to PATH in ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    line: 'export PATH="$HOME/.local/bin:$PATH"'
+    regexp: '(^|^export )PATH=.*\.local/bin'
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"

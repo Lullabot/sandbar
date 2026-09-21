@@ -4,5 +4,5 @@
 #
 # WHETHER it runs is a tool-set selection, toolset_codex (sand create
 # --with-codex), which gates the role from site.yml. That default lives with
-# the other toolset_* selections in roles/base/defaults/main.yml. Unlike its
-# siblings, toolset_codex defaults to false: codex is the first opt-in tool.
+# the other toolset_* selections in roles/base/defaults/main.yml. Like OpenCode
+# and Pi, toolset_codex defaults to false.

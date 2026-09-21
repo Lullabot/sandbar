@@ -87,19 +87,9 @@ type CreateConfig struct {
 	CloneURL         string
 	CloneToken       string
 
-	// WithClaude, WithDDEV, WithGo, WithJava and WithCodex select the
-	// configurable base-image tool-set (sand create --with-claude/--with-ddev/
-	// --with-go/--with-java/--with-codex). They configure the shared BASE
-	// image, not the individual clone — there is still exactly one base per
-	// user, its contents just differ by selection. The first four default to
-	// true (see DefaultCreateConfig), so an unconfigured `sand create` installs
-	// everything today's base does; those flags are opt-OUT. Claude Code is one
-	// selection among the tools rather than a fixture of the image, so a user
-	// can bring their own agent instead.
-	//
-	// WithCodex is the deliberate exception: it defaults to FALSE (opt-IN), so
-	// existing users' bases keep the exact tool-set (and stamp) they already
-	// have unless they explicitly ask for Codex too.
+	// DDEV, Go and Java configure shared base dependencies. Coding agents are
+	// installed per VM during finalize. Existing Claude/Codex field names retain
+	// registry JSON compatibility, including explicit false selections.
 	//
 	// The browser review UI is deliberately NOT here. A tool earns a selection
 	// by being expensive enough that someone would want it gone — Go and Java
@@ -107,11 +97,13 @@ type CreateConfig struct {
 	// a pinned 17MB npm package with no build step that runs only when `sand
 	// land --review` invokes it, so it is simply part of the image
 	// (roles/self-review, unconditional in site.yml).
-	WithClaude bool
-	WithDDEV   bool
-	WithGo     bool
-	WithJava   bool
-	WithCodex  bool
+	WithClaude   bool
+	WithDDEV     bool
+	WithGo       bool
+	WithJava     bool
+	WithCodex    bool
+	WithOpenCode bool
+	WithPi       bool
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
@@ -141,12 +133,11 @@ func DefaultCreateConfig() CreateConfig {
 		WithDDEV:   true,
 		WithGo:     true,
 		WithJava:   true,
-		// WithCodex is deliberately omitted: its zero value (false) IS the
-		// default — it is the one opt-in tool.
+		// Codex, OpenCode and Pi are opt-in; Claude is the initial default.
 	}
 }
 
-// ToolPtrs maps each tool's canonical name — the name that appears in the base
+// ToolPtrs maps each dependency's canonical name — the name that appears in the base
 // image's version stamp, and in the --with-<name> flag — to the field holding
 // its selection. It is the ONE place the tool names live: ToolsetKey renders
 // from it, ApplyToolset assigns through it, and `sand create` adopts the base's
@@ -154,12 +145,15 @@ func DefaultCreateConfig() CreateConfig {
 // here, and its flag; nothing else has to learn the name.
 func (c *CreateConfig) ToolPtrs() map[string]*bool {
 	return map[string]*bool{
-		"claude": &c.WithClaude,
-		"ddev":   &c.WithDDEV,
-		"go":     &c.WithGo,
-		"java":   &c.WithJava,
-		"codex":  &c.WithCodex,
+		"ddev": &c.WithDDEV,
+		"go":   &c.WithGo,
+		"java": &c.WithJava,
 	}
+}
+
+// AgentPtrs maps the per-VM agent names used by flags, preferences and Ansible.
+func (c *CreateConfig) AgentPtrs() map[string]*bool {
+	return map[string]*bool{"claude": &c.WithClaude, "codex": &c.WithCodex, "opencode": &c.WithOpenCode, "pi": &c.WithPi}
 }
 
 // ApplyToolset overwrites the selection with the given set of enabled tool

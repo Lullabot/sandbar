@@ -197,7 +197,7 @@ func seedLegacyBase(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(stamp), 0o755); err != nil {
 		t.Fatalf("mkdir _sand: %v", err)
 	}
-	if err := os.WriteFile(stamp, []byte("v2:deadbeef:go+java\n2026-01-01T00:00:00Z\n"), 0o644); err != nil {
+	if err := os.WriteFile(stamp, []byte("v3:deadbeef:go+java\n2026-01-01T00:00:00Z\n"), 0o644); err != nil {
 		t.Fatalf("write legacy stamp: %v", err)
 	}
 }
@@ -728,7 +728,7 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 func TestCreateVM_ShrinkingToolsetPrintsAdvisoryOnReapply(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-	stubBaseVersion(t, "v2:deadbeef:ddev+go", nil, map[string]string{"sandbar-base": "v2:deadbeef:ddev+go+java"})
+	stubBaseVersion(t, "v3:deadbeef:ddev+go", nil, map[string]string{"sandbar-base": "v3:deadbeef:ddev+go+java"})
 	stubConvergeableBase(t, "/playbook")
 
 	cfg := testConfig()
@@ -762,7 +762,7 @@ func TestCreateVM_ShrinkingToolsetPrintsAdvisoryOnReapply(t *testing.T) {
 func TestCreateVM_GrowingToolsetPrintsNoAdvisory(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-	stubBaseVersion(t, "v2:deadbeef:ddev+go+java", nil, map[string]string{"sandbar-base": "v2:deadbeef:ddev+go"})
+	stubBaseVersion(t, "v3:deadbeef:ddev+go+java", nil, map[string]string{"sandbar-base": "v3:deadbeef:ddev+go"})
 	stubConvergeableBase(t, "/playbook")
 
 	var out bytes.Buffer
@@ -1499,7 +1499,7 @@ func TestReset_BothPreserve(t *testing.T) {
 	cfg := testConfig()
 	cfg.User = "andrew"
 	cfg.CloneURL = "https://github.com/lullabot/sandbar"
-	opts := ResetOptions{PreserveClaude: true, PreserveProject: true}
+	opts := ResetOptions{PreserveAgents: true, PreserveProject: true}
 
 	if err := p.Reset(context.Background(), cfg, opts, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)
@@ -1621,7 +1621,7 @@ func TestReset_ClaudeOnly(t *testing.T) {
 	cfg := testConfig()
 	cfg.CloneURL = "https://github.com/lullabot/sandbar"
 
-	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard); err != nil {
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveAgents: true}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)
 	}
 
@@ -1763,7 +1763,7 @@ func TestReset_StageOutFailureAbortsWithoutDelete(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard)
+	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveAgents: true}, io.Discard)
 	if err == nil {
 		t.Fatal("Reset should fail when stage-out fails")
 	}
@@ -1794,7 +1794,7 @@ func TestReset_KeepsStagingOnceTheVMIsGone(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard)
+	err := p.Reset(context.Background(), cfg, ResetOptions{PreserveAgents: true}, io.Discard)
 	if err == nil {
 		t.Fatal("Reset should fail when the re-clone fails")
 	}
@@ -1819,7 +1819,7 @@ func TestReset_StartsStoppedSourceForStaging(t *testing.T) {
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
-	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveClaude: true}, io.Discard); err != nil {
+	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveAgents: true}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)
 	}
 
