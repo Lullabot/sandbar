@@ -5,13 +5,13 @@ There are eight entry points:
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand reset NAME`](#sand-reset-name) — rebuild an existing VM from its base
-  image, optionally keeping the Claude login or the project.
+  image, optionally preserving selected directories or the whole guest home.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
 - [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
   host clipboard on a running VM's guest clipboard.
 - [`sand land NAME`](#sand-land-name) — list a VM's git checkouts, or open a
-  draft PR / browser / [browser-based review](review.md) for one of them.
+  draft PR, a branch page, or a [browser review](review.md).
 - [`sand publish NAME PATH [ISSUE]`](#sand-publish-name-path-issue) — publish
   a checkout's local commits to a drupal.org issue fork.
 - [`sand version`](#sand-version-sand-version) / `sand --version` — print
@@ -19,10 +19,10 @@ There are eight entry points:
 
 Any other first argument is an unknown subcommand and exits `2`.
 
-Each headless command is the same verb as a TUI key, under the same name and
-sharing the same implementation: `sand create` is the form behind `n`, `sand
-reset` is `R`, `sand shell` is `S`, `sand land` is `l`, `sand publish` is the
-Landing pane's publish action, `sand paste-image` is `v`. Whichever you reach for, the gates, defaults and bookkeeping are the same.
+The CLI commands also have TUI actions: `n` creates a VM, `R` resets it,
+`S` opens a shell, `l` opens Landing, and `v` pastes an image from the board.
+The Landing pane also offers publishing to drupal.org. The CLI and TUI share
+the checks and operations behind these actions.
 
 ## `sand`
 
@@ -72,7 +72,7 @@ not a prompt.
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | `true` | Install Claude Code in the base image. |
-| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image — one of two **opt-in** toolset flags. |
+| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image. Disabled by default. |
 | `--with-ddev` | bool | `true` | Install DDEV in the base image. |
 | `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
 | `--with-java` | bool | `true` | Install a headless JDK in the base image. |
@@ -84,33 +84,24 @@ selection once; passing a flag explicitly always wins.
 
 ### VM names
 
-A VM's name has to be acceptable to whichever backend the VM is created on,
-and **the backends do not agree about what that means**:
+Lima and Proxmox accept different VM names:
 
 | Name | Lima (local or remote) | Proxmox |
 |---|---|---|
-| `dev-box` | ✅ | ✅ |
-| `test_vm` | ✅ | ❌ — Proxmox requires a DNS name, which has no underscores |
-| `web--1` | ❌ — Lima allows no doubled separator | ✅ |
-| `-web`, `web-` | ❌ | ❌ |
-| `my vm` | ❌ | ❌ |
+| `dev-box` | Allowed | Allowed |
+| `test_vm` | Allowed | Rejected: underscores are not allowed in DNS names. |
+| `web--1` | Rejected: separators must be single characters. | Allowed |
+| `-web`, `web-` | Rejected | Rejected |
+| `my vm` | Rejected | Rejected |
 
-`dev-box` — letters and digits separated by single hyphens, starting and
-ending with a letter or digit, 63 characters or fewer — is accepted
-everywhere, and is the shape to reach for if you ever move a VM between
-profiles.
+For a name accepted by both, use ASCII letters and digits separated by
+single hyphens, with a letter or digit at each end and no more than 63
+characters. For example: `dev-box`.
 
-`sand create` and the TUI's create form both check the name against the
-target backend's rule **before** anything is built, and refuse with a message
-naming the offending character. Without that check the rejection arrives from
-inside the clone, minutes in, by which point the TUI has a tile for a VM that
-does not exist — and the cleanup delete then fails in its own right, against
-an instance that was never created.
-
-The check applies to **new** VMs only. `sand create --recreate`, `sand reset`
-and the TUI's Reset all skip it: they target a VM that already exists, whose
-name the backend accepted when it was made, so applying today's rule could
-only strand a VM you already have with no way to rebuild it.
+`sand create` and the TUI create form check the name before building and
+explain any invalid character or format. Reset operations keep the existing
+name and skip this check, so a VM created under older naming rules can
+still be rebuilt.
 
 ### There is no `--ref` flag
 
@@ -195,38 +186,23 @@ These sound similar and do different things to different objects:
   pick up a playbook or dependency change that a VM cloned from it right now
   is not going to get, or if the base image is corrupted. It is independent of
   `--recreate` and the two may be combined.
-- **`--recreate`** deletes and re-clones **this VM** (`--name`) from the
-  (possibly still-old) base image. It is the older spelling of
-  [`sand reset NAME`](#sand-reset-name) and does exactly what that command does
-  with neither preserve flag: the same managed-VM gate, the same recorded
-  settings, the same bookkeeping. Prefer `sand reset` in new scripts — it is the
-  same verb the TUI calls Reset, and it is the only spelling that can keep
-  anything from inside the guest.
+- **`--recreate`** deletes and re-clones **this VM** (`--name`). It uses the
+  VM's recorded settings for flags you omit, including its base image,
+  resources, hostname, Git identity, and clone URL. Explicit flags override
+  those settings; for example, `--recreate --disk 200GiB` changes the disk
+  size. The target must already be managed by `sand`.
 
-  A recreate rebuilds a VM `sand` already knows, so **every flag you leave off
-  comes from that VM's own recorded settings** — its base image, sizing,
-  hostname, git identity and clone URL — rather than from this command's
-  defaults. That makes `sand create --recreate --name mybox` mean "give me this
-  VM back", not "give me a default VM with this name". A flag you *do* pass
-  still wins, so `--recreate --disk 200GiB` remains the way to resize one.
+  Prefer [`sand reset NAME`](#sand-reset-name) in new scripts. It performs
+  the same rebuild and also lets you preserve guest data. `--recreate`
+  always deletes everything on the guest disk.
 
-  `--clone-url` is the exception: `--recreate --clone-url ...` is **refused**.
-  A rebuild keeps the VM's project, and asking to change it in the same breath
-  used to leave the old checkout stranded beside a freshly cloned different
-  repo. Rebuild the VM as it is with `sand reset mybox`, or create another VM
-  for the other repo. (The TUI's reset form locks the same field.)
+  You cannot pass `--clone-url` with `--recreate`: a rebuild keeps the
+  recorded project URL. Create another VM to work on a different repository.
 
-  The one thing that is *not* remembered is `--clone-token`: tokens are never
-  written to the managed index (see [credential
-  handling](#-clone-token-is-a-credential)). If the recorded `--clone-url`
-  points at a private repo, pass `--clone-token` again or the clone inside the
-  VM will fail; `sand` warns when it reuses a recorded URL with no token.
-
-  What a recreate does **not** do is preserve anything inside the guest: the
-  disk is deleted. To keep the Claude Code login or the project checkout across
-  a rebuild, use [`sand reset`](#sand-reset-name)'s `--preserve-claude` /
-  `--preserve-project`, or the TUI's equivalent toggles ([The
-  TUI](tui.md#resetting-a-vm)).
+  Tokens are never recorded in the managed index. If the recorded clone URL
+  points to a private repository, pass `--clone-token` again. Without it,
+  `sand` warns that the clone may fail. See
+  [credential handling](#-clone-token-is-a-credential).
 
 ### Disk sizing
 
@@ -342,67 +318,60 @@ above.)
 
 ## `sand reset NAME`
 
-Delete a sand-managed VM and clone it fresh from its base image, keeping its
-name, its project, and every setting it was built with. This is the headless
-spelling of the TUI's `R` ([Resetting a VM](tui.md#resetting-a-vm)) — same
-gate, same defaults, same preserve options.
+Rebuild a VM managed by `sand` from its base image. The name, project URL,
+and recorded settings are kept; **guest files are deleted unless you choose
+a preserve option**. This is the CLI equivalent of `R` in the TUI
+([Resetting a VM](tui.md#resetting-a-vm)).
 
 ```sh
 sand reset web                                    # clean rebuild, same settings
 sand reset web --preserve-claude                  # keep the Claude Code login
 sand reset web --preserve-claude --preserve-project
-sand reset web --preserve ~/src/app --preserve ~/scratch/spike
-sand reset web --preserve-home                    # keep everything in ~
-sand reset web --cpus 8 --memory 16GiB            # rebuild bigger
+sand reset web --preserve '~/src/app' --preserve '~/scratch/spike'
+sand reset web --preserve-home                    # keep the guest home
+sand reset web --cpus 8 --memory 16GiB            # change CPU and memory
 ```
 
-It is **gated**: `sand` refuses a target that is not a sand-managed VM, since a
-reset clones from a sandbar base image and would otherwise replace whatever
-instance it was pointed at. Ownership is resolved from the VM's provenance
-marker first, then the managed index — the same resolution `sand shell` uses,
-so a VM created by another controller on the same host is still resettable.
-
-Everything inside the guest is destroyed unless you ask for it back:
+`sand` refuses to reset a VM it does not manage. It checks the VM's ownership
+marker first, then the managed index. You can reset a VM created by another
+`sand` controller on the same host.
 
 | Flag | What survives |
 |---|---|
-| `--preserve-claude` | `~/.claude` and `~/.claude.json` — the Claude Code login and its history. |
-| `--preserve-project` | The cloned project's per-org directory: the checkout, its uncommitted work, and the `.env` beside it. Also **skips the re-clone**, so a private repo needs no token. |
-| `--preserve PATH` | One more directory inside the guest home — **any** git checkout or linked worktree, whether `sand` cloned it or you made it yourself. Repeatable. |
-| `--preserve-home` | The **entire** home directory. Implies every flag above. |
+| `--preserve-claude` | `~/.claude` and `~/.claude.json`: the Claude Code login and history. |
+| `--preserve-project` | The project's organisation directory, including the checkout, uncommitted work, and `.env`. Skips cloning again if the checkout is present, so a private repository needs no clone token. |
+| `--preserve PATH` | A directory inside the guest home, including a Git checkout or linked worktree. Repeat for more directories. |
+| `--preserve-home` | The guest home, including everything above, except `~/.ssh/authorized_keys`. |
 
-`--preserve` takes an absolute guest path (`/home/you/src/app`), a tilde path
-(`~/src/app`) or a home-relative one (`src/app`). Run
-[`sand land NAME`](#sand-land-name) to see the checkouts a VM actually holds —
-that is the same sweep the TUI's reset form builds its list from. A path
-**outside** the guest home is refused before the VM is touched, so a mistake
-costs you a retyped command, not a rebuilt VM.
+`--preserve` accepts an absolute guest path (`/home/you/src/app`), a quoted
+tilde path (`'~/src/app'`), or a home-relative path (`src/app`). Quote `~`
+so your workstation's shell does not expand it to your host home directory.
+Run [`sand land NAME`](#sand-land-name) to list cached checkout paths. Paths
+outside the guest home are rejected before the VM is deleted.
 
-`--preserve-home` is the option for the ordinary reason to rebuild a VM that is
-working perfectly well: picking up playbook changes. The whole home is copied
-out, the VM is rebuilt from a current base image, the home is copied back, and
-*then* the playbook runs on top of it — so the files Ansible owns are freshly
-rendered while everything else is exactly as you left it. It is also the
-slowest and largest thing a reset can do, and `~/.ssh/authorized_keys` is the
-one file it deliberately leaves behind (the rebuilt VM needs the key Lima just
-installed, not the old VM's).
+Use `--preserve-home` to keep your files while updating a working VM. The
+home is copied back before the provisioning playbook runs, so Ansible can
+update the files it manages. The rebuilt VM keeps its new
+`~/.ssh/authorized_keys` so `sand` can still connect. Preserving the whole
+home copies more data than preserving individual directories.
 
-All of these copy that data out of the VM to a private (`0700`) host directory
-and restore it into the rebuilt VM, then delete the copy. **Do not preserve
-anything from a VM you believe is compromised** — you would be copying its
-Claude Code login and its project token onto your workstation. See
-[Security Model](../reference/security-model.md).
+Preserved data passes through a private (`0700`) directory on your
+workstation. After a successful reset, `sand` removes that copy. If the
+reset fails before attempting to delete the VM, it also removes the copy:
+the original VM still has the data. If deletion has been attempted, `sand`
+keeps the archives and prints their path for recovery.
 
-Anything you do not name is gone with the disk: other forges, `~/.ssh`,
-`~/.config/gh`, shell history, and everything under `/srv` (which is outside
-the home directory and so cannot be preserved at all).
+**Do not preserve data from a VM you suspect is compromised.** The copy can
+include credentials and anything an agent wrote in the selected directories.
+See [Security Model](../reference/security-model.md).
+
+Files outside the directories you preserve are deleted. Nothing outside the
+guest home, such as `/srv` or `/opt`, can be preserved by these options.
 
 ### Watching a copy run
 
-A preserved home of a few gigabytes — a `node_modules`, a Go build cache, a
-year of agent logs — takes minutes to copy out and minutes to put back, so both
-halves report themselves every couple of seconds, in the TUI's progress log and
-on the building tile as well as on `sand reset`'s own output:
+Large directories can take several minutes to back up and restore. `sand`
+reports progress in the CLI output, the TUI progress log, and the VM tile:
 
 ```
 ==> Backing up home…
@@ -413,18 +382,15 @@ on the building tile as well as on `sand reset`'s own output:
 ==> Restored home: 1.6 GB in 21s, 78 MB/s
 ```
 
-The restore can show a percentage because the archive's size is known before it
-starts; a backup cannot, because how far a tree compresses is not known until
-the copy ends, so it reports the bytes and the rate instead. A copy that
-finishes in under one reporting interval says nothing at all.
+Backup progress shows bytes copied and transfer rate. Restore progress also
+shows a percentage, because the completed archive's size is known. Copies
+that finish before the first reporting interval have no progress updates.
 
-The rate is worth a glance the first time. The archive is compressed **inside
-the VM**, with `zstd` where the guest has it and `gzip` where it does not — and
-gzip is several times slower on a large tree. `zstd` joined the image's package
-list after some existing VMs were built, and a reset does not install packages,
-so a VM cloned from an older base keeps falling back to gzip every time; the
-copy says so when it happens. `sand create --rebuild` refreshes the base image
-so new VMs get it.
+Archives are compressed inside the source VM using `zstd` when available,
+or the slower `gzip` otherwise. `sand` reports when it falls back to gzip.
+An older source VM may lack zstd; refreshing the base image affects future
+clones, not the VM being backed up. `sand create --rebuild` rebuilds the base
+before creating a VM.
 
 ### Flags
 
@@ -450,25 +416,20 @@ so new VMs get it.
 `NAME` is required (exactly one positional argument), and flags may appear
 before or after it.
 
-**A flag you omit means "whatever this VM already was"**, taken from its own
-recorded settings rather than from any default — which is what makes `sand
-reset web` mean "give me this VM back". A flag you pass wins, and the result is
-recorded, so the *next* reset defaults to what this one produced.
+Omitted flags use the VM's recorded settings. Explicit flags override them,
+and the new settings become the defaults for the next reset.
 
 ### There is no `--clone-url`
 
-A reset rebuilds the VM it is pointed at, project included. Pointing it at a
-different repo would make it a different VM: the preserve option is named for
-the org directory the VM *has*, so a changed URL means asking to keep a tree
-and having the old one discarded, and even without preserving you would get the
-new repo cloned beside a stranded old checkout. To work on another repo, make
-another VM with `sand create`. `sand create --recreate --clone-url ...` is
-refused for the same reason, and the TUI's reset form locks the same field.
+A reset keeps the VM's recorded project URL. This ensures the project named
+by a preserve option is the project restored after the rebuild. To work on
+another repository, create another VM with `sand create`.
+`sand create --recreate --clone-url ...` is also rejected, and the TUI locks
+the repository URL during a reset.
 
-There is no `--base-name` either (the base comes from the VM's own provenance
-record — resetting onto a different base is a create), and no `--rebuild`: that
-one acts on the **shared** base image every other VM clones from, so it stays on
-`sand create` where it cannot be a side effect of rebuilding one VM.
+There is no `--base-name`: a reset uses the VM's recorded base image. There
+is also no `--rebuild`, which replaces the shared base image and belongs to
+`sand create`.
 
 ### Secrets are re-applied
 
