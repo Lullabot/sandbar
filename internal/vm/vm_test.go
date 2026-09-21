@@ -156,19 +156,20 @@ func TestDefaultCreateConfig(t *testing.T) {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
 	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
-		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (backwards compatibility: an unconfigured `sand create` must install everything today's base does)", c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
+		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want all true (an unconfigured `sand create` installs the full default tool-set)",
+			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
 	}
 	// Codex is the deliberate exception: opt-IN, so it must default false even
-	// though the other four default true — an unconfigured `sand create` must
-	// NOT start installing a tool no existing base has.
+	// though the others default true — an unconfigured `sand create` must NOT
+	// start installing a tool that heavy without being asked.
 	if c.WithCodex {
-		t.Errorf("WithCodex = true, want false (codex is opt-in, unlike the other four tools)")
+		t.Errorf("WithCodex = true, want false (codex is the one opt-in tool)")
 	}
 }
 
 // TestToolsetKey_DefaultIsEveryTool locks the canonical rendering of the
-// default (everything-on) selection, which baseversion.go's
-// toolsetPlaceholder used to hardcode until this key replaced it.
+// default selection, which baseversion.go's toolsetPlaceholder used to
+// hardcode until this key replaced it.
 func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 	c := DefaultCreateConfig()
 	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {
@@ -177,11 +178,8 @@ func TestToolsetKey_DefaultIsEveryTool(t *testing.T) {
 }
 
 // TestToolsetKey_WithCodex proves codex slots alphabetically into the key
-// when enabled (between claude and ddev), and — the load-bearing half of this
-// test — that a default (codex-off) config still renders the exact
-// byte-identical stamp `claude+ddev+go+java` that existed before codex was
-// added. If the default key changed at all, every existing base would look
-// stale against its own recorded stamp and needlessly re-converge.
+// when enabled (between claude and ddev), and that leaving it off keeps it
+// out of the stamp entirely.
 func TestToolsetKey_WithCodex(t *testing.T) {
 	c := DefaultCreateConfig()
 	if got, want := c.ToolsetKey(), "claude+ddev+go+java"; got != want {

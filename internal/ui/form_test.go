@@ -310,7 +310,8 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 		t.Fatalf("WithClaude = true after flipping the Claude Code toggle off, want false")
 	}
 	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
-		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v", cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
+		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v",
+			cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
 	}
 	if got, want := cfg.ToolsetKey(), "ddev+go+java"; got != want {
 		t.Fatalf("ToolsetKey() = %q, want %q", got, want)
