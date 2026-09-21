@@ -20,6 +20,7 @@ created: 2026-09-12
 | Removing the tool-selection checkboxes changes existing saved configs. How should that break be handled? | **Migrate with warning.** Old `toolset_*` / `With*` fields are detected, a one-time notice explains that every image now ships all tools, and the config is rewritten without them. Existing VMs keep running untouched. |
 | The work order lists four image targets (lima/macos-arm, lima/linux-amd64, lima/linux-arm64, proxmox/amd64). Is that the real artifact count? | **No — two.** The artifact is a *guest* image, and the guest is Debian 13 either way, so the host OS is irrelevant: Lima on macOS/arm64 and Lima on Linux/arm64 consume the *same* arm64 qcow2. Proxmox/amd64 and Lima/amd64 share the amd64 one. The matrix is `{amd64, arm64}`. Confirming that one image boots under both Lima and PVE is an explicit task, not an assumption. |
 | Is "free storage in GitHub Releases without issue" actually true? | **In aggregate yes, per-file no.** GitHub documents no limit on total release size and no bandwidth limit, and allows up to 1000 assets per release — but **each individual file must be under 2 GiB**. See the dedicated question below; this was raised as a possible blocker and is not one. |
+| Does "one image with all tools" mean the AI CLIs are baked in too? | **No — Claude Code and Codex install on first use.** They are the two largest items in the image (Codex 318 MB, Claude 214 MB — 532 MB combined, more than the JDK), and they release far more often than images are rebuilt. Baking them in means every VM ships a stale binary that immediately updates itself, so users would pay ~532 MB of download for content with no shelf life. Each gets a small shim that installs the real tool on first invocation; all of their *configuration* (settings, onboarding seed, `config.toml`, the clipboard shims) stays baked in. This is a refinement of the "one image with all tools" goal, not an exception to it: the tools are still there and still require no user choice — only the binary fetch is deferred to the moment of first use. _(User decision: "install it on first use. We should do the same with claude code. They update so often that whatever we ship will be stale.")_ |
 | Could the 2 GiB per-asset limit block the plan outright? | **No.** Estimated compressed size for an all-tools image is ~1.2-1.6 GiB (from ~3.2-4.0 GiB of installed content), so it likely fits — but without comfortable margin, which is why it is measured early and gated in CI rather than assumed. If it does not fit, four independent fallbacks exist, none of which change the plan's architecture: (1) zstd rather than qcow2's default zlib compression; (2) trimming large droppable content such as `golang-doc` and Go's bundled `src`; (3) splitting into parts reassembled inside sand's own acquisition layer, invisible to both providers; (4) publishing to **GHCR** as an OCI artifact, which is free for public packages and has no comparable per-file ceiling. The constraint shapes one component; it is not a premise the plan rests on. |
 
 ## Executive Summary
@@ -305,9 +306,11 @@ graph TD
     T02[02: Baseline measurement]
     T03 --> T04[04: Image hygiene assertions]
     T03 --> T15[15: Reduce image size]
+    T03 --> T16[16: Lazy-install AI CLIs]
     T03 --> T05[05: Workflow matrix + publish]
     T04 --> T05
     T15 --> T05
+    T16 --> T05
     T05 --> T06[06: Dual-consumption verification]
     T05 --> T07[07: Manifest + acquisition]
     T07 --> T08[08: Lima wiring]
@@ -352,9 +355,23 @@ Final artifact: **1,230,045,184 bytes**, SHA-256 `67d8a5e1aff2137304162a584ffd0e
 One additional playbook change beyond Task 01's: `roles/user/tasks/main.yml` now creates `/var/lib/systemd/linger/` before touching the per-user linger file. On a never-booted genericcloud image that directory does not exist (logind creates it lazily), so the offline-equivalent task failed with `ENOENT`. This was the only playbook task that failed under chroot across all four runs, and it was fixed by extending the `sand_image_build` guard rather than working around it in the script.
 
 ### Phase 3: The Gate and the Size Work
-**Sequential Tasks** (both perform image builds and contend for `qemu-nbd` devices and disk — they must NOT run concurrently):
+**Sequential Tasks** (all perform image builds and contend for `qemu-nbd` devices, RAM and disk — they must NOT run concurrently):
 - Task 15: Reduce the published image size with safe trims and zstd compression (depends on: 03)
+- Task 16: Install Claude Code and Codex on first use instead of baking them in (depends on: 03)
 - Task 04: Assert the built image is safe to distribute (depends on: 03)
+
+**Size reduction ledger** (measured unless marked estimate):
+
+| Stage | Compressed size | % of 2 GiB |
+| --- | --- | --- |
+| Task 03 as built | 1172.7 MiB | 57.3% |
+| + zstd compression | **1098.1 MiB** (measured) | 53.6% |
+| + safe trims | ~1078 MiB (est.) | ~53% |
+| + lazy AI CLIs | ~865 MiB (est.) | ~42% |
+
+zstd bought 74.6 MiB (6.4%) — less than the 10-20% initially projected, because the image is dominated by already-compressed vendor binaries that zstd cannot improve on much. The lazy-install change is by far the largest single lever.
+
+**Build-host hazard discovered during execution:** `/tmp` on the development host is a **tmpfs**, so multi-gigabyte image outputs written there are held in RAM and triggered an OOM kill of a background process. Builds must write outputs to a disk-backed path (`/var/tmp`), and intermediate images must be deleted once their size and digest are recorded. **Task 05 must apply the same rule in CI** — hosted runners also have constrained RAM and a small `/tmp`.
 
 ### Phase 4: Publication
 **Parallel Tasks:**
@@ -394,7 +411,7 @@ _Task 06 is a gate whose failure redirects Phase 6; it runs in parallel with 07 
 
 ### Execution Summary
 - Total Phases: 9
-- Total Tasks: 15
+- Total Tasks: 16
 
 ### ✅ Phase 2: The Build — Results
 

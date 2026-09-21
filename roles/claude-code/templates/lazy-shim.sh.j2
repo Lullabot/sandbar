@@ -1,0 +1,92 @@
+#!/bin/sh
+# sandbar lazy-install shim for {{ shim_tool }}.
+#
+# SANDBAR_LAZY_SHIM_MARKER — this exact string is how the shim recognises
+# itself. Do not remove it: the recursion guard below greps for it.
+#
+# Why this exists: {{ shim_tool }} releases far more often than sandbar
+# rebuilds its base image, so a binary baked into a monthly image is stale on
+# arrival and would immediately replace itself anyway. Shipping a shim instead
+# keeps ~hundreds of MB out of the image AND guarantees the user gets the
+# current release the first time they actually run the tool.
+#
+# The vendor installer writes to this same path, so a successful install
+# replaces this file with the real binary and the shim disappears for good.
+set -u
+
+TOOL="{{ shim_tool }}"
+TARGET="$HOME/.local/bin/$TOOL"
+LOCKDIR="$HOME/.local/state/sand/$TOOL-install.lock"
+
+# Is the file at TARGET still this shim (as opposed to the installed binary)?
+# grep -q on a binary is silent and simply fails to match, which is what we
+# want. Returns 0 when TARGET is still a shim.
+still_shim() {
+    grep -q SANDBAR_LAZY_SHIM_MARKER "$TARGET" 2>/dev/null
+}
+
+# Recursion guard. If we already ran the installer once in this process tree
+# and still ended up here, the install did not produce a working binary and
+# re-running would loop forever.
+if [ "${SAND_LAZY_INSTALLED:-}" = "$TOOL" ]; then
+    echo "$TOOL: install completed but did not produce a working binary at $TARGET." >&2
+    exit 1
+fi
+
+mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || true
+
+# Serialise concurrent first runs. sandbar's tmux-backed multi-shell makes it
+# entirely plausible for two shells to invoke this at the same moment, and two
+# installers writing the same path would race. mkdir is atomic on POSIX
+# filesystems, so it is the lock primitive here.
+waited=0
+while ! mkdir "$LOCKDIR" 2>/dev/null; do
+    # The other shell may have finished while we were waiting.
+    if ! still_shim; then
+        exec "$TARGET" "$@"
+    fi
+    if [ "$waited" -eq 0 ]; then
+        echo "$TOOL: another shell is installing it; waiting..." >&2
+    fi
+    sleep 2
+    waited=$((waited + 2))
+    if [ "$waited" -ge 300 ]; then
+        echo "$TOOL: timed out waiting for a concurrent install." >&2
+        echo "$TOOL: if no other install is running, remove $LOCKDIR and try again." >&2
+        exit 1
+    fi
+done
+
+# From here on the lock is ours. Release it on any non-exec exit path; the
+# successful path removes it explicitly before exec, because exec replaces the
+# process and would otherwise never run this trap.
+trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+
+# Re-check under the lock: another shell may have installed while we queued.
+if ! still_shim; then
+    rmdir "$LOCKDIR" 2>/dev/null || true
+    trap - EXIT INT TERM
+    exec "$TARGET" "$@"
+fi
+
+echo "$TOOL: installing on first use (this happens once)..." >&2
+
+# Send installer chatter to stderr so it cannot corrupt a caller that is
+# parsing this tool's stdout.
+if ! {{ shim_installer }} >&2; then
+    echo "$TOOL: install failed. Check network access, then run '$TOOL' again to retry." >&2
+    exit 1
+fi
+
+# A zero exit from the installer is not proof it replaced the shim.
+if still_shim; then
+    echo "$TOOL: installer reported success but did not replace $TARGET." >&2
+    exit 1
+fi
+
+rmdir "$LOCKDIR" 2>/dev/null || true
+trap - EXIT INT TERM
+
+SAND_LAZY_INSTALLED="$TOOL"
+export SAND_LAZY_INSTALLED
+exec "$TARGET" "$@"
