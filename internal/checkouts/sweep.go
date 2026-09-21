@@ -26,6 +26,30 @@
 // loudly on a delimiter mismatch instead of silently interleaving stats and
 // checkout records.
 //
+// # Two commit counts, and why the obvious one is the wrong one
+//
+// The sweep reads ahead/behind against the branch's OWN remote-tracking ref
+// AND, separately, `rev-list --count HEAD --not --remotes`. They answer
+// different questions and only one of them belongs on an at-risk surface.
+//
+// Ahead compares HEAD to a single ref by COMMIT IDENTITY, so a rebase
+// inflates it without a byte of work becoming at risk: rebase a 5-commit
+// branch onto a trunk that has advanced 4,404 commits and `rev-list
+// origin/<branch>..HEAD` reports 4,409, because every rewritten commit has a
+// new hash and every trunk commit swept up by the rebase is absent from the
+// stale pushed copy. Displaying that as "↑4409 unpushed" is arithmetically
+// correct and tells the user nothing true — 4,404 of those commits are the
+// project's own published history, in no danger whatsoever.
+//
+// `--not --remotes` asks what the badge, the Landing pane and the delete
+// guard actually mean: which commits exist nowhere but this VM. It is immune
+// to rebases (a rewritten commit is local until pushed, which is exactly
+// right) and to which remote is stale, because it excludes ALL of them. That
+// is Checkout.LocalOnly, and it is the count every "what would I lose"
+// surface reads. Ahead and Behind stay, because the push-state
+// classification and the Landing pane's push flow still need "how does this
+// branch relate to its own pushed copy".
+//
 // # No network, ever
 //
 // Every git read here is local: `symbolic-ref`, `config --get`, `remote`,
@@ -128,8 +152,9 @@ const (
 //     "$dir"`) reads: the checked-out branch, the branch's configured remote
 //     (falling back to the first configured remote — never assuming
 //     "origin"), that remote's URL, whether a remote-tracking ref exists for
-//     (remote, branch) and, if so, the ahead/behind counts against it, and
-//     the dirty (uncommitted) file count. A worktree's `.git` FILE is `cat`
+//     (remote, branch) and, if so, the ahead/behind counts against it, the
+//     count of commits reachable from HEAD but from NO remote-tracking ref,
+//     and the dirty (uncommitted) file count. A worktree's `.git` FILE is `cat`
 //     and its `gitdir: ` pointer passed through raw — Go, not the shell,
 //     resolves the parent repo path from it (see parentFromGitdirPointer),
 //     which is what makes that logic unit-testable against synthetic text.
@@ -207,9 +232,13 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
     defbranch=$(g symbolic-ref --short "refs/remotes/$remote/HEAD")
     defbranch=${defbranch#"$remote/"}
   fi
+  localonly=0
+  if [ -n "$(g rev-list -n 1 --remotes)" ]; then
+    localonly=$(g rev-list --count HEAD --not --remotes)
+  fi
   dirty=$(g status --porcelain | grep -c .)
-  printf 'path=%s\nkind=%s\ngitdirptr=%s\nbranch=%s\nremote=%s\nurl=%s\ntracking=%s\nahead=%s\nbehind=%s\ndirty=%s\ndefbranch=%s\n__DELIM__\n' \
-    "$dir" "$kind" "$gitdirptr" "$branch" "$remote" "$url" "$tracking" "$ahead" "$behind" "$dirty" "$defbranch"
+  printf 'path=%s\nkind=%s\ngitdirptr=%s\nbranch=%s\nremote=%s\nurl=%s\ntracking=%s\nahead=%s\nbehind=%s\nlocalonly=%s\ndirty=%s\ndefbranch=%s\n__DELIM__\n' \
+    "$dir" "$kind" "$gitdirptr" "$branch" "$remote" "$url" "$tracking" "$ahead" "$behind" "$localonly" "$dirty" "$defbranch"
 done
 `
 
@@ -238,7 +267,7 @@ func BuildSweepCommand() string {
 var sweepFieldKeys = map[string]bool{
 	"path": true, "kind": true, "gitdirptr": true, "branch": true,
 	"remote": true, "url": true, "tracking": true, "ahead": true,
-	"behind": true, "dirty": true, "defbranch": true,
+	"behind": true, "localonly": true, "dirty": true, "defbranch": true,
 }
 
 // ParseSweep converts one sweep's raw guest output into a VMCheckouts: one
@@ -332,6 +361,7 @@ func checkoutFromRecord(rec map[string]string, now time.Time) Checkout {
 		PushState:     state,
 		Ahead:         ahead,
 		Behind:        behind,
+		LocalOnly:     atoiOr(rec["localonly"], 0),
 		Dirty:         atoiOr(rec["dirty"], 0),
 		DefaultBranch: rec["defbranch"],
 		LastSeen:      now,

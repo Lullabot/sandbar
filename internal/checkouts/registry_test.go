@@ -617,3 +617,38 @@ func TestNilCheckoutsRoundTrip(t *testing.T) {
 		t.Fatalf("expected no checkouts after reload, got %+v", got2.Checkouts)
 	}
 }
+
+// TestLoadFromMigratesV1LocalOnly pins the direction a missing LocalOnly must
+// err in. A v1 file predates the field, so every row decodes with zero — and
+// zero means "nothing here is at risk", which the delete guard would state as
+// fact over a VM holding unpushed work. Seeding from Ahead restores exactly
+// the answer the v1 build gave, and the next sweep corrects it downward.
+func TestLoadFromMigratesV1LocalOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "checkout-registry.json")
+	const v1 = `{"version":1,"vms":[{"provider":"lima","name":"box","checkouts":[
+		{"Path":"/home/u/repo","Branch":"wip","PushState":"unpushed","Ahead":4409,"Behind":4,"Dirty":0},
+		{"Path":"/home/u/clean","Branch":"main","PushState":"pushed","Ahead":0,"Behind":0,"Dirty":0}
+	],"swept_at":"2026-09-18T00:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom a v1 file: %v", err)
+	}
+	vc, ok := r.Get(registry.Scope{Provider: "lima"}, "box")
+	if !ok {
+		t.Fatal("the v1 file's VM did not survive the load")
+	}
+	if len(vc.Checkouts) != 2 {
+		t.Fatalf("checkouts = %d, want 2", len(vc.Checkouts))
+	}
+	if got := vc.Checkouts[0].LocalOnly; got != 4409 {
+		t.Errorf("LocalOnly = %d, want 4409 seeded from Ahead — a zero here tells the delete guard there is nothing to lose", got)
+	}
+	if got := vc.Checkouts[1].LocalOnly; got != 0 {
+		t.Errorf("LocalOnly on a clean pushed row = %d, want 0", got)
+	}
+}

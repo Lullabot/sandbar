@@ -42,7 +42,7 @@ func TestComputeCheckoutBadge(t *testing.T) {
 		},
 		{
 			name:    "at-risk: unpushed commits",
-			vc:      checkouts.VMCheckouts{SweptAt: fresh, Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 3}}},
+			vc:      checkouts.VMCheckouts{SweptAt: fresh, Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3}}},
 			known:   true,
 			running: true,
 			want:    checkoutBadge{AtRisk: true, Ahead: 3},
@@ -65,7 +65,7 @@ func TestComputeCheckoutBadge(t *testing.T) {
 			name: "both at once: one pushed checkout, one at-risk checkout",
 			vc: checkouts.VMCheckouts{SweptAt: fresh, Checkouts: []checkouts.Checkout{
 				{PushState: checkouts.PushStatePushed},
-				{PushState: checkouts.PushStateUnpushed, Ahead: 1, Dirty: 1},
+				{PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1, Dirty: 1},
 			}},
 			known:   true,
 			running: true,
@@ -274,5 +274,42 @@ func TestCheckoutBadgeIgnoresPristineClones(t *testing.T) {
 	}
 	if !computeCheckoutBadge(dirtyMain, true, true, now).AtRisk {
 		t.Error("uncommitted changes on the default branch must still be at risk")
+	}
+}
+
+// TestComputeCheckoutBadgeCountsOnlyWorkThatExistsNowhereElse pins the badge
+// against the rebase case. Ahead is deliberately absurd and LocalOnly small:
+// the marker must show the small one, because it claims work is at risk and
+// only LocalOnly counts work that is.
+func TestComputeCheckoutBadgeCountsOnlyWorkThatExistsNowhereElse(t *testing.T) {
+	fresh := time.Now()
+	rebased := checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5}
+
+	got := computeCheckoutBadge(checkouts.VMCheckouts{SweptAt: fresh, Checkouts: []checkouts.Checkout{rebased}}, true, true, fresh)
+	if got.Ahead != 5 {
+		t.Errorf("Ahead = %d, want 5 — the commits that exist nowhere else, not the 4409 a rebase put between HEAD and a stale ref", got.Ahead)
+	}
+	if !got.AtRisk {
+		t.Error("AtRisk = false, want true — five commits really are only in this VM")
+	}
+	if text := renderCheckoutBadge(got); !strings.Contains(text, "↑5") {
+		t.Errorf("badge = %q, want it to name ↑5", text)
+	}
+}
+
+// TestComputeCheckoutBadgeIgnoresAnUnpushedBranchWithNothingLocal covers the
+// other side: "unpushed" describes a branch's relationship to ONE ref, and a
+// branch can hold that relationship while every commit in it is published
+// somewhere. Nothing is at risk, so nothing is marked.
+func TestComputeCheckoutBadgeIgnoresAnUnpushedBranchWithNothingLocal(t *testing.T) {
+	fresh := time.Now()
+	c := checkouts.Checkout{PushState: checkouts.PushStateUnpushed, Ahead: 12, LocalOnly: 0}
+
+	got := computeCheckoutBadge(checkouts.VMCheckouts{SweptAt: fresh, Checkouts: []checkouts.Checkout{c}}, true, true, fresh)
+	if got.AtRisk || got.Ahead != 0 {
+		t.Errorf("badge = %+v, want nothing at risk — every commit on this branch exists on some remote", got)
+	}
+	if text := renderCheckoutBadge(got); text != "" {
+		t.Errorf("badge text = %q, want empty", text)
 	}
 }

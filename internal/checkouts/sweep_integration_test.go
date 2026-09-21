@@ -475,3 +475,105 @@ func TestSweepAgainstRealGitWorktreeListedOnce(t *testing.T) {
 			deleted, seen[deleted])
 	}
 }
+
+// TestSweepAgainstRealGitRebaseInflatesAheadButNotLocalOnly is the reason
+// Checkout.LocalOnly exists, pinned against real git rather than assumed.
+//
+// The shape is the ordinary one: branch, push, let the trunk move on, rebase
+// onto it. Every commit the rebase replays gets a new hash and every trunk
+// commit it lands on top of is absent from the pushed copy, so `rev-list
+// origin/<branch>..HEAD` counts BOTH — it reports eight commits "unpushed"
+// when two commits of work exist. In the field, against a repository whose
+// trunk had moved 4,404 commits, that badge read "↑4409 unpushed" on a branch
+// holding five commits, and the number was useless precisely when a user was
+// deciding whether a VM was safe to delete.
+//
+// The ratio here is deliberately lopsided (8 against 2) so neither count can
+// be mistaken for the other, and Behind is asserted too: the pre-rebase
+// commits are still on the remote, which is the tell that a rebase — not new
+// work — is what moved the numbers.
+func TestSweepAgainstRealGitRebaseInflatesAheadButNotLocalOnly(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	remote := filepath.Join(home, "remote.git")
+	work := filepath.Join(home, "work")
+	runGit(t, home, home, "init", "-q", "--bare", "-b", "main", remote)
+	runGit(t, home, home, "init", "-q", "-b", "main", work)
+	runGit(t, work, home, "remote", "add", "origin", remote)
+
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(work, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("a.txt", "base\n")
+	runGit(t, work, home, "add", "a.txt")
+	runGit(t, work, home, "commit", "-qm", "base")
+	runGit(t, work, home, "push", "-q", "-u", "origin", "main")
+
+	// Two commits of real work, pushed.
+	runGit(t, work, home, "checkout", "-q", "-b", "feature")
+	write("mine.txt", "one\n")
+	runGit(t, work, home, "add", "mine.txt")
+	runGit(t, work, home, "commit", "-qm", "mine one")
+	write("mine.txt", "one\ntwo\n")
+	runGit(t, work, home, "commit", "-qam", "mine two")
+	runGit(t, work, home, "push", "-q", "-u", "origin", "feature")
+
+	// The trunk moves a long way without them.
+	runGit(t, work, home, "checkout", "-q", "main")
+	for _, n := range []string{"1", "2", "3", "4", "5", "6"} {
+		write("trunk.txt", "trunk "+n+"\n")
+		runGit(t, work, home, "add", "trunk.txt")
+		runGit(t, work, home, "commit", "-qm", "trunk "+n)
+	}
+	runGit(t, work, home, "push", "-q", "origin", "main")
+
+	// The rebase: nothing new is written, yet every count moves.
+	runGit(t, work, home, "checkout", "-q", "feature")
+	runGit(t, work, home, "rebase", "-q", "main")
+
+	got := findCheckout(t, runSweep(t, home), work)
+	if got.PushState != PushStateUnpushed {
+		t.Errorf("PushState = %q, want %q — the pushed copy is no longer HEAD", got.PushState, PushStateUnpushed)
+	}
+	if got.Ahead != 8 {
+		t.Errorf("Ahead = %d, want 8 — six trunk commits plus two rewritten ones, which is exactly the inflation LocalOnly exists to sidestep", got.Ahead)
+	}
+	if got.Behind != 2 {
+		t.Errorf("Behind = %d, want 2 — the pre-rebase commits the remote still holds", got.Behind)
+	}
+	if got.LocalOnly != 2 {
+		t.Fatalf("LocalOnly = %d, want 2: the work that exists nowhere but here. This is the number every at-risk surface prints", got.LocalOnly)
+	}
+}
+
+// TestSweepAgainstRealGitLocalOnlyIsZeroWithoutRemotes pins the field's other
+// half of the contract. With no remote-tracking refs at all, `--not --remotes`
+// excludes nothing and would count the entire history as at risk — a number
+// that says "everything", which is no more useful than saying nothing. The
+// script suppresses it, and the never-pushed wording carries that case
+// instead.
+func TestSweepAgainstRealGitLocalOnlyIsZeroWithoutRemotes(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	solo := filepath.Join(home, "solo")
+	runGit(t, home, home, "init", "-q", "-b", "main", solo)
+	if err := os.WriteFile(filepath.Join(solo, "a.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, solo, home, "add", "a.txt")
+	runGit(t, solo, home, "commit", "-qm", "only commit")
+
+	got := findCheckout(t, runSweep(t, home), solo)
+	if got.PushState != PushStateNever {
+		t.Errorf("PushState = %q, want %q", got.PushState, PushStateNever)
+	}
+	if got.LocalOnly != 0 {
+		t.Errorf("LocalOnly = %d, want 0 — with no remotes there is no honest count, only the whole history", got.LocalOnly)
+	}
+}

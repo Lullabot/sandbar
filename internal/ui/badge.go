@@ -60,12 +60,16 @@ type checkoutBadge struct {
 	// delete guard (deleteguard.go) keys on.
 	AtRisk bool
 
-	// Ahead is the total unpushed-commit count across every checkout whose
-	// PushState is PushStateUnpushed — the number the "↑N" marker names. A
-	// "never pushed" checkout (PushStateNever) contributes to AtRisk but not
-	// to this count: Checkout.Ahead is defined to be 0 for PushStateNever
-	// (there is no tracking ref to diff against), so there is no honest
-	// count to add.
+	// Ahead is the total count of commits that exist nowhere but this VM,
+	// summed over every checkout whose PushState is PushStateUnpushed — the
+	// number the "↑N" marker names. It sums Checkout.LocalOnly, NOT
+	// Checkout.Ahead, because the marker claims work is at risk and only
+	// LocalOnly is a count of work that is: see checkouts.Checkout.LocalOnly
+	// for how a rebase turns the other one into a four-figure fiction.
+	//
+	// A "never pushed" checkout (PushStateNever) contributes to AtRisk but
+	// not to this count — it is named in words instead, since "never pushed"
+	// already says everything a number would.
 	Ahead int
 
 	// Dirty is true when at least one checkout has uncommitted changes.
@@ -107,8 +111,15 @@ func computeCheckoutBadge(vc checkouts.VMCheckouts, known, running bool, now tim
 				b.Actionable = true
 			}
 		case checkouts.PushStateUnpushed:
-			b.AtRisk = true
-			b.Ahead += c.Ahead
+			// Gated on LocalOnly, not on the state alone. A branch can be
+			// "unpushed" relative to its own stale remote copy while every
+			// commit it holds exists on some OTHER remote-tracking ref — a
+			// rebase onto a moved trunk does exactly that — and then there is
+			// no work at risk and nothing to mark.
+			if c.LocalOnly > 0 {
+				b.AtRisk = true
+				b.Ahead += c.LocalOnly
+			}
 		case checkouts.PushStateNever:
 			b.AtRisk = true
 		}

@@ -32,7 +32,7 @@ func TestDeleteGuardExtraNothingWhenEmpty(t *testing.T) {
 
 func TestDeleteGuardExtraUnpushedOnly(t *testing.T) {
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-		{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3},
+		{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3},
 	}}
 	got := deleteGuardExtra(vc, true)
 	want := "3 unpushed commits (only in this VM — lost on delete)."
@@ -43,7 +43,7 @@ func TestDeleteGuardExtraUnpushedOnly(t *testing.T) {
 
 func TestDeleteGuardExtraSingleUnpushedCommitIsSingular(t *testing.T) {
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-		{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1},
+		{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1},
 	}}
 	got := deleteGuardExtra(vc, true)
 	want := "1 unpushed commit (only in this VM — lost on delete)."
@@ -98,7 +98,7 @@ func TestDeleteGuardExtraBoth(t *testing.T) {
 	// invisible to the guard and only its dirtiness showed. The fixture pairs
 	// the two states precisely because that pairing is what hid the miscount.
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-		{Path: "/home/user/repo-a", PushState: checkouts.PushStateUnpushed, Ahead: 3},
+		{Path: "/home/user/repo-a", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3},
 		{Path: "/home/user/repo-b", PushState: checkouts.PushStateNever, Dirty: 1},
 	}}
 	got := deleteGuardExtra(vc, true)
@@ -133,7 +133,7 @@ func TestDeleteGuardExtraMultiplePushedIsPlural(t *testing.T) {
 
 func TestDeleteGuardExtraLostAndSafeTogether(t *testing.T) {
 	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-		{Path: "/home/user/repo-a", PushState: checkouts.PushStateUnpushed, Ahead: 3, Dirty: 1},
+		{Path: "/home/user/repo-a", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, Dirty: 1},
 		{Path: "/home/user/repo-b", PushState: checkouts.PushStatePushed},
 	}}
 	got := deleteGuardExtra(vc, true)
@@ -155,7 +155,7 @@ func TestDeleteGuardPromptUnchangedWhenNothingNotable(t *testing.T) {
 
 func TestDeleteGuardPromptRunningVMHasNoAsOfLabel(t *testing.T) {
 	vc := checkouts.VMCheckouts{
-		Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 1}},
+		Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1}},
 		SweptAt:   time.Now().Add(-2 * time.Hour),
 	}
 	got := deleteGuardPrompt("claude", vc, true, true /* running */, time.Now())
@@ -167,7 +167,7 @@ func TestDeleteGuardPromptRunningVMHasNoAsOfLabel(t *testing.T) {
 func TestDeleteGuardPromptStoppedVMLabelsAsOfLastSeen(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	vc := checkouts.VMCheckouts{
-		Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 1}},
+		Checkouts: []checkouts.Checkout{{PushState: checkouts.PushStateUnpushed, Ahead: 1, LocalOnly: 1}},
 		SweptAt:   now.Add(-2 * time.Hour),
 	}
 	got := deleteGuardPrompt("claude", vc, true, false /* stopped */, now)
@@ -225,7 +225,7 @@ func TestDeleteGuardRefreshesARunningVM(t *testing.T) {
 
 	if err := m.checkouts.Set(registry.LocalScope, "claude", checkouts.VMCheckouts{
 		Checkouts: []checkouts.Checkout{
-			{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, Dirty: 1},
+			{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3, Dirty: 1},
 		},
 	}); err != nil {
 		t.Fatalf("seed checkout registry: %v", err)
@@ -286,7 +286,7 @@ func TestDeleteGuardRefreshFolds(t *testing.T) {
 	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{
 		scope: registry.LocalScope, vm: "claude",
 		vc: checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-			{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, Dirty: 5},
+			{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 2, LocalOnly: 2, Dirty: 5},
 		}},
 	})
 	if m.confirm.checking {
@@ -339,7 +339,7 @@ func TestDeleteGuardRefreshIgnoresStaleResults(t *testing.T) {
 	m.handleDeleteGuardRefresh(deleteGuardRefreshMsg{
 		scope: registry.LocalScope, vm: "some-other-vm",
 		vc: checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
-			{Path: "/x", PushState: checkouts.PushStateUnpushed, Ahead: 99},
+			{Path: "/x", PushState: checkouts.PushStateUnpushed, Ahead: 99, LocalOnly: 99},
 		}},
 	})
 	if m.confirm.prompt != before {
@@ -463,7 +463,7 @@ func TestDeleteGuardExtraNeverPushedCountsBranches(t *testing.T) {
 
 	mixed := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
 		{Path: "/a", PushState: checkouts.PushStateNever},
-		{Path: "/b", PushState: checkouts.PushStateUnpushed, Ahead: 3},
+		{Path: "/b", PushState: checkouts.PushStateUnpushed, Ahead: 3, LocalOnly: 3},
 	}}
 	got := deleteGuardExtra(mixed, true)
 	if !strings.Contains(got, "3 unpushed commits") {
@@ -471,5 +471,23 @@ func TestDeleteGuardExtraNeverPushedCountsBranches(t *testing.T) {
 	}
 	if !strings.Contains(got, "1 never-pushed branch") {
 		t.Fatalf("guard = %q, want the never-pushed branch named alongside it", got)
+	}
+}
+
+// TestDeleteGuardExtraCountsOnlyWorkThatExistsNowhereElse pins the guard
+// against the rebase case. This prompt exists to be READ before an
+// irreversible action, and a guard that announces thousands of commits over a
+// handful is one people learn to click through — which costs exactly the work
+// it was built to protect.
+func TestDeleteGuardExtraCountsOnlyWorkThatExistsNowhereElse(t *testing.T) {
+	vc := checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{
+		{Path: "/home/user/repo", PushState: checkouts.PushStateUnpushed, Ahead: 4409, LocalOnly: 5},
+	}}
+	got := deleteGuardExtra(vc, true)
+	if !strings.Contains(got, "5 unpushed commits") {
+		t.Errorf("guard = %q, want it to name the 5 commits that exist nowhere else", got)
+	}
+	if strings.Contains(got, "4409") {
+		t.Errorf("guard = %q, want it NOT to name 4409 — those commits are published upstream", got)
 	}
 }

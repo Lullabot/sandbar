@@ -139,6 +139,23 @@ type Checkout struct {
 	// branch does not (0 if PushState is PushStateNever).
 	Behind int
 
+	// LocalOnly is how many commits reachable from HEAD are reachable from NO
+	// remote-tracking ref: work that exists nowhere but this VM.
+	//
+	// This — not Ahead — is the count every at-risk surface shows, and the
+	// distinction is not academic. Ahead compares HEAD against ONE ref, the
+	// branch's own refs/remotes/<remote>/<branch>, by commit identity, so a
+	// rebase inflates it without anything becoming at risk: rebasing a
+	// 5-commit branch onto a trunk that had advanced 4,404 commits reports
+	// 4,409 "unpushed" commits, 4,404 of which are the project's own
+	// published history. LocalOnly answers "what would I lose if this VM went
+	// away" and says 5. See sweep.go's "Two commit counts" section.
+	//
+	// It is 0 when the checkout has no remote-tracking refs at all, because
+	// "every commit is local" is not a useful number — that case is already
+	// named in words ("never pushed") by every consumer.
+	LocalOnly int
+
 	// Dirty is the count of uncommitted changes (tracked modifications plus
 	// untracked files) `git status --porcelain` reports for the checkout.
 	Dirty int
@@ -264,12 +281,12 @@ func Load() (*Registry, error) {
 	return LoadFrom(defaultPath())
 }
 
-// currentVersion is the schema version this build writes. There is no
-// migration to perform yet (this is the format's first version), but the
-// field is carried from day one — mirroring registry.go and secrets.go — so
-// a later format change has a version to branch on instead of needing to
-// invent one retroactively.
-const currentVersion = 1
+// currentVersion is the schema version this build writes.
+//
+// v2 added Checkout.LocalOnly. A v1 file is migrated on read rather than
+// refused — see migrateLocalOnly for why the missing value must not be left
+// at its zero.
+const currentVersion = 2
 
 // diskEntry is one VM's on-disk record: a JSON array element that
 // self-describes its own connection scope and name (an array, rather than a
@@ -338,13 +355,35 @@ func LoadFrom(path string) (*Registry, error) {
 	}
 	for _, de := range parsed.VMs {
 		scope := registry.Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}
+		cs := cloneCheckouts(de.Checkouts)
+		if probe.Version < 2 {
+			migrateLocalOnly(cs)
+		}
 		r.vms[vmHandle{scope: scope, name: de.Name}] = VMCheckouts{
-			Checkouts: cloneCheckouts(de.Checkouts),
+			Checkouts: cs,
 			Truncated: de.Truncated,
 			SweptAt:   de.SweptAt,
 		}
 	}
 	return r, nil
+}
+
+// migrateLocalOnly fills the v2 LocalOnly field on rows a v1 build wrote,
+// which never recorded it.
+//
+// Leaving it at zero is the one thing this must not do. A pre-upgrade row
+// would then report NO work at risk until that VM's next sweep, and the
+// delete guard reads exactly this field — a user who upgraded sand and
+// immediately deleted a stopped VM (which never re-sweeps; see the guard's
+// no-guest-contact rule) would be told there was nothing to lose. Seeding
+// from Ahead reproduces the over-counting answer the v1 build itself would
+// have given, so the first sweep after upgrade corrects it DOWNWARD. Erring
+// toward "you have work here" is the safe direction; erring toward silence
+// is not.
+func migrateLocalOnly(cs []Checkout) {
+	for i := range cs {
+		cs[i].LocalOnly = cs[i].Ahead
+	}
 }
 
 // cloneCheckouts returns a fresh copy of in's backing slice. Checkout has no
