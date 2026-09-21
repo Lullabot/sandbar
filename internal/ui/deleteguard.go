@@ -66,7 +66,12 @@ func deleteGuardExtra(vc checkouts.VMCheckouts, found bool) string {
 	for _, c := range vc.Checkouts {
 		switch c.PushState {
 		case checkouts.PushStateUnpushed:
-			unpushedCommits += c.Ahead
+			// LocalOnly, not Ahead. This guard states what deleting the VM
+			// destroys, and Ahead counts commits against ONE stale ref by
+			// hash — after a rebase it names thousands of commits that are
+			// safely published upstream. A guard that cries "4409 unpushed
+			// commits" over five is a guard people learn to click through.
+			unpushedCommits += c.LocalOnly
 		case checkouts.PushStateNever:
 			// Counted as BRANCHES, not commits, and deliberately separately
 			// from the unpushed case above. Checkout.Ahead is defined 0 for a
