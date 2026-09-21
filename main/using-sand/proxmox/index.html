@@ -962,6 +962,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#vm-names-in-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM names in DNS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#how-sand-configures-a-vms-disk" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1556,6 +1567,17 @@
     <span class="md-ellipsis">
       
         MAC addresses survive a rebuild
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vm-names-in-dns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM names in DNS
       
     </span>
   </a>
@@ -2419,6 +2441,16 @@ none of what it keys lives anywhere <code>sand</code> could restore afterwards:<
 <p>Each NIC keeps the rest of its configuration exactly as Proxmox cloned it —
 bridge, VLAN tag, firewall flag, MTU — with only the address substituted, so a
 tagged NIC does not quietly land on the wrong VLAN.</p>
+<p>For the <em>lease</em> to come back with it, the VM's DHCP client identity has to
+follow the MAC too. By default <code>systemd-networkd</code> derives that identity from
+<code>/etc/machine-id</code> — not from the MAC at all — and the template build empties
+<code>/etc/machine-id</code> on purpose, so that every clone mints its own and no two VMs
+collide on one lease. Left there, a rebuild would restore the MAC faithfully
+and still introduce itself to your DHCP server as a stranger. So <code>sand</code>
+configures every guest with <code>DUIDType=link-layer</code>
+(<code>/etc/systemd/networkd.conf.d/10-sand-dhcp-identity.conf</code>), which puts the
+identity back on the MAC: distinct per clone, because Proxmox gives each clone
+a distinct MAC, and unchanged across a rebuild, because <code>sand</code> restores it.</p>
 <p>It needs no extra privilege: <code>VM.Config.Network</code> is already in the role above,
 because <code>sand</code> sets <code>net0</code> when it creates a VM in the first place. If the read
 or the write fails, the rebuild carries on and says so — a VM with a new MAC is
@@ -2427,6 +2459,26 @@ succeeded) over one would be worse. You'll see a warning in the build output
 naming what it could not keep.</p>
 <p>If you actually <em>want</em> a fresh MAC, delete the VM and create it again: that is
 the verb that means "a different machine".</p>
+<h2 id="vm-names-in-dns">VM names in DNS</h2>
+<p>Many routers publish DNS from the hostname a client sends in its DHCP request,
+so a <code>sand</code> VM usually shows up on your network as <code>&lt;name&gt;.&lt;your domain&gt;</code>.</p>
+<p>The name a VM sends is fixed up over its first minute of life, and the ordering
+matters if you are watching. The base template deliberately ships <strong>no</strong>
+hostname, so a clone's first DHCP request carries none either — better a
+nameless lease than one registered under the base image's name, which is what
+used to happen and left several addresses on the segment all claiming to be
+<code>sandbar-base</code>. Cloud-init then applies the VM's Proxmox name, the provisioning
+playbook confirms it, and <code>sand</code> asks for a DHCP renew so the name reaches your
+server immediately rather than at the next lease renewal.</p>
+<p>Two things this does not do:</p>
+<ul>
+<li><strong>It does not remove a record that is already wrong.</strong> A stale entry from a
+  VM you deleted, or from before the fix above, lives in your DHCP server's
+  lease database until that lease expires. Clear it there if it is in the way.</li>
+<li><strong>It does not register anything on a network whose DNS ignores the DHCP
+  hostname option.</strong> That is a router setting, not something <code>sand</code> can
+  arrange.</li>
+</ul>
 <h2 id="how-sand-configures-a-vms-disk">How <code>sand</code> configures a VM's disk</h2>
 <p>Proxmox's own defaults are tuned for a general-purpose server. A <code>sand</code> VM is a
 development sandbox, where nearly everything that feels slow — a build, a test
