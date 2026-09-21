@@ -245,6 +245,8 @@ Note that this only ever moves you **onto** the fork. The fork branch can
 only grow (see [There is no force push](#there-is-no-force-push-the-fork-branch-only-ever-grows)),
 so there is no version of this that rewrites drupal.org to match you.
 
+<a id="five-things-youll-otherwise-learn-the-hard-way"></a>
+
 ## Publication limits and recovery
 
 ### Rebase onto the base branch — don't merge it in
