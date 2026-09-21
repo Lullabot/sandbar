@@ -952,6 +952,30 @@ provider's `resetInstance`) drive it rather than restating the rules.
   lock that exists only as an ANSI code is invisible in a monochrome terminal
   and to every golden, which are ANSI-stripped.
 
+- **A guest's DHCP identity and its preserved MAC are ONE feature in two
+  files, and neither half survives the other's removal.** `generalizeScript`
+  empties `/etc/machine-id` so clones stop colliding on one lease; but
+  systemd-networkd's default DUID is derived from exactly that file, so the
+  emptying also means a rebuild presents a brand-new client identity and is
+  handed a different address — silently undoing the MAC restoration
+  (`proxmoxmac.go`) whose entire purpose is that the network sees the same
+  machine. `roles/base`'s `DUIDType=link-layer` drop-in is what reconciles
+  them, by moving the identity onto the MAC: distinct per clone (PVE gives
+  each a distinct MAC) and stable across a rebuild. Deleting it as an
+  unexplained one-line config file reopens the address churn, and deleting
+  the MAC restoration makes it pointless. The same two files decide what a VM
+  is CALLED on the network: `generalizeScript` also empties `/etc/hostname`,
+  because the base phase writes the base's own name there and a clone's first
+  DHCP request would otherwise announce every VM as `sandbar-base` — observed
+  as four addresses on one segment all reverse-resolving to it. An emptied
+  file leaves systemd's `localhost` fallback, which networkd refuses to send,
+  so the first lease is nameless rather than wrong, and roles/base's
+  `networkctl renew` announces the real name once it is set. That renew is
+  deliberately NOT a handler on the hostname task: on the common path
+  cloud-init has already applied the right name, Ansible reports no change,
+  and a handler would never fire. It is also `renew` and never `reconfigure`
+  — reconfigure drops the address the provisioning ssh session is riding on.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**

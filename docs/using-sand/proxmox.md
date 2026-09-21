@@ -412,6 +412,17 @@ Each NIC keeps the rest of its configuration exactly as Proxmox cloned it —
 bridge, VLAN tag, firewall flag, MTU — with only the address substituted, so a
 tagged NIC does not quietly land on the wrong VLAN.
 
+For the *lease* to come back with it, the VM's DHCP client identity has to
+follow the MAC too. By default `systemd-networkd` derives that identity from
+`/etc/machine-id` — not from the MAC at all — and the template build empties
+`/etc/machine-id` on purpose, so that every clone mints its own and no two VMs
+collide on one lease. Left there, a rebuild would restore the MAC faithfully
+and still introduce itself to your DHCP server as a stranger. So `sand`
+configures every guest with `DUIDType=link-layer`
+(`/etc/systemd/networkd.conf.d/10-sand-dhcp-identity.conf`), which puts the
+identity back on the MAC: distinct per clone, because Proxmox gives each clone
+a distinct MAC, and unchanged across a rebuild, because `sand` restores it.
+
 It needs no extra privilege: `VM.Config.Network` is already in the role above,
 because `sand` sets `net0` when it creates a VM in the first place. If the read
 or the write fails, the rebuild carries on and says so — a VM with a new MAC is
@@ -421,6 +432,29 @@ naming what it could not keep.
 
 If you actually *want* a fresh MAC, delete the VM and create it again: that is
 the verb that means "a different machine".
+
+## VM names in DNS
+
+Many routers publish DNS from the hostname a client sends in its DHCP request,
+so a `sand` VM usually shows up on your network as `<name>.<your domain>`.
+
+The name a VM sends is fixed up over its first minute of life, and the ordering
+matters if you are watching. The base template deliberately ships **no**
+hostname, so a clone's first DHCP request carries none either — better a
+nameless lease than one registered under the base image's name, which is what
+used to happen and left several addresses on the segment all claiming to be
+`sandbar-base`. Cloud-init then applies the VM's Proxmox name, the provisioning
+playbook confirms it, and `sand` asks for a DHCP renew so the name reaches your
+server immediately rather than at the next lease renewal.
+
+Two things this does not do:
+
+- **It does not remove a record that is already wrong.** A stale entry from a
+  VM you deleted, or from before the fix above, lives in your DHCP server's
+  lease database until that lease expires. Clear it there if it is in the way.
+- **It does not register anything on a network whose DNS ignores the DHCP
+  hostname option.** That is a router setting, not something `sand` can
+  arrange.
 
 ## How `sand` configures a VM's disk
 
