@@ -1255,6 +1255,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reviewing changes in a browser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../drupalorg-publishing/" class="md-nav__link">
         
   
@@ -1932,7 +1960,7 @@
 <li><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
   host clipboard on a running VM's guest clipboard.</li>
 <li><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
-  draft PR / browser for one of them.</li>
+  draft PR / browser / <a href="../review/">browser-based review</a> for one of them.</li>
 <li><a href="#sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></a> — publish
   a checkout's local commits to a drupal.org issue fork.</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
@@ -2091,7 +2119,7 @@ not a prompt.</p>
 <td><code>--with-codex</code></td>
 <td>bool</td>
 <td><code>false</code></td>
-<td>Install OpenAI Codex in the base image — the one <strong>opt-in</strong> toolset flag.</td>
+<td>Install OpenAI Codex in the base image — one of two <strong>opt-in</strong> toolset flags.</td>
 </tr>
 <tr>
 <td><code>--with-ddev</code></td>
@@ -2709,33 +2737,56 @@ you mean using the same logic described above under <code>sand shell</code>'s
 <p>List <code>NAME</code>'s git checkouts and their branch/push/PR state, or act on one.
 This is the same detection and the same <code>gh</code> actions the TUI's <code>l</code> (Land)
 key uses — see <a href="../files-and-shells/#landing">Landing</a>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Usage: sand land NAME [PATH] [--pr | --web] [--profile &lt;name&gt;]
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Usage: sand land NAME [PATH] [--pr | --web | --review [--clean]] [--profile &lt;name&gt;]
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>List NAME's git checkouts and their branch/push/PR state, or act on one:
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>  sand land NAME                list checkouts + branch/push/PR state
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>--pr uses the workstation's own 'gh' (never the guest's token). Without gh
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>an existing PR for the branch on its own.
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>The named VM must already exist and be running (see 'sand' to list
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>instances, or 'sand create' to make one). If NAME is managed under more than
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>one connection profile, --profile picks which one to act on.
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>  sand land NAME PATH --review --clean
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>                                the same, discarding any review already saved there
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>--pr uses the workstation's own 'gh' (never the guest's token). Without gh
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>it prints the compare URL and, on a terminal, offers to open it; piped or
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>scripted, it exits non-zero with the URL on stderr so automation can react.
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>--web never needs gh: it opens a constructed GitHub URL, which redirects to
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>an existing PR for the branch on its own.
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>--review needs no pushed branch, no remote and no gh at all: it runs a review
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>server inside the VM against PATH, opens it in a browser on this machine, and
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>blocks until you finish the review — which writes review.xml into PATH inside
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>the VM, where the agent can read it. Nothing leaves the VM. The review tool is
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>part of every base image; a base older than the tool itself picks it up on the
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>next 'sand create'.
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>A review.xml already in PATH is carried into the new review, so comments you
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>wrote earlier are there to keep, edit or drop. Nothing ever removes that file
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>on its own, so --clean is how you start over: it deletes the saved review and
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>its walkthrough sidecar first. The review tool's assistant skills are
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>installed into PATH/.agents/skills as the review starts, and the guest's
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a>global git excludes keep all of it out of 'git status'.
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a>
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a>instances, or 'sand create' to make one). If NAME is managed under more than
+<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a>one connection profile, --profile picks which one to act on.
 </code></pre></div>
 <p>With no <code>PATH</code> or flags, <code>sand land NAME</code> prints a table (<code>PATH KIND BRANCH
-PUSH PR</code>) of every checkout the sweep found, including an ahead count for an
-unpushed branch (<code>unpushed (+3)</code>) and the PR's number/state when one exists
-(<code>#42 open (draft)</code>).</p>
-<p><code>--pr PATH</code> and <code>--web PATH</code> require a <code>PATH</code> from that listing, and are
-mutually exclusive. Both refuse a checkout that isn't pushed or has no
-recognized remote — there's nothing to open a PR or browser page against
-yet.</p>
+PUSH PR</code>) of every checkout the sweep found, including a count of the commits
+that exist nowhere but the VM for an unpushed branch (<code>unpushed (+3)</code>) and the
+PR's number/state when one exists (<code>#42 open (draft)</code>).</p>
+<p>A branch whose commits are all published somewhere, but which no longer
+matches its own pushed copy — the usual result of a rebase — reads <code>diverged</code>
+rather than <code>unpushed (+0)</code>: there is nothing there to lose.</p>
+<p><code>--pr PATH</code>, <code>--web PATH</code> and <code>--review PATH</code> require a <code>PATH</code> from that
+listing, and are mutually exclusive. <code>--clean</code> modifies <code>--review</code>: it
+discards any review already saved in that checkout before starting, and is
+refused (rather than ignored) alongside any other action.</p>
 <ul>
+<li><strong><code>--pr</code></strong> and <strong><code>--web</code></strong> both refuse a checkout that isn't pushed or has
+  no recognized remote — there's nothing to open a PR or browser page
+  against yet.</li>
 <li><strong><code>--pr</code></strong> opens a one-shot <strong>draft PR</strong> via the workstation's own <code>gh</code>.
   Without <code>gh</code> installed, it instead prints the branch's compare URL: on a
   real terminal it offers to open that URL in a browser (<code>y</code>/<code>N</code> prompt); in
@@ -2745,10 +2796,24 @@ yet.</p>
 <li><strong><code>--web</code></strong> is <strong>gh-free by construction</strong>: it never calls <code>gh</code> at all. It
   opens a constructed GitHub compare URL in a browser, which GitHub's own
   routing redirects to an existing open PR for that branch when one exists.</li>
+<li><strong><code>--review</code></strong> has no pushed-branch or remote precondition at all —
+  reviewing uncommitted or unpushed work is the point. See
+  <a href="../review/">Reviewing changes in a browser</a> for the full workflow.</li>
 </ul>
-<p><code>sand land</code> never pushes, commits, or otherwise touches the checkout's
-working state — it only reads what the guest already has and, for <code>--pr</code>,
-calls <code>gh</code> on the workstation.</p>
+<p><code>sand land</code> never pushes or commits — it only reads what the guest already
+has and, for <code>--pr</code>, calls <code>gh</code> on the workstation. No code is copied out of
+the VM by any of the three actions: with <code>--review</code> the diff is rendered by a
+server running <em>inside</em> the VM, and only a browser tab on your workstation
+talks to it over its own loopback (see
+<a href="../review/#reachability">Reachability</a>).</p>
+<p><code>--review</code> is the one action that <strong>writes</strong> to the checkout: submitting a
+review saves <code>review.xml</code> into the checkout root (or wherever a project's
+<code>.self-review.yaml</code> points <code>outputFile</code>), which is the whole delivery
+mechanism — that file is what you hand to the agent. It is untracked, and it
+is deliberately excluded from any subsequent review's own diff, but nothing
+adds it to your <code>.gitignore</code>. If an agent in that VM runs <code>git add -A</code>, it
+will commit your review comments along with everything else, so add
+<code>review.xml</code> to the repository's ignore rules if that matters to you.</p>
 <h2 id="sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></h2>
 <p>Publish <code>PATH</code>'s local commits (inside the VM named <code>NAME</code>) to the
 drupal.org issue fork for issue <code>ISSUE</code>, using the workstation's own

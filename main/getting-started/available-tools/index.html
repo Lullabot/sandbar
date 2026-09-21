@@ -989,6 +989,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../using-sand/review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reviewing changes in a browser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../using-sand/drupalorg-publishing/" class="md-nav__link">
         
   
@@ -1417,7 +1445,21 @@ covers how to reach it from your browser — locally and on a remote profile.</p
 <li>The <a href="https://chatgpt.com/codex">OpenAI Codex CLI</a> — <strong>opt-in</strong>: pass
   <code>--with-codex</code> to <code>sand create</code> (or enable the toggle in the TUI create
   form). Codex is not provisioned by default; only include it if you want to
-  use it alongside Claude Code.</li>
+  use it alongside Claude Code.
+Like every <code>--with-*</code> flag, these configure the <strong>shared base image</strong>:
+toggling one from what the base was last built with invalidates it, so the
+next <code>sand create</code> reprovisions the base before cloning — see
+<a href="../../using-sand/cli-reference/#sand-create"><code>--with-*</code> flags</a> in the CLI
+reference.</li>
+</ul>
+<p>Not a selection, and always present:</p>
+<ul>
+<li>A <strong>browser review UI</strong> (<a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>).
+  <code>sand land NAME PATH --review</code> opens a browser-based review of a checkout's
+  diff, served from inside the VM, and writes your comments back into the
+  checkout where the agent can read them. It is a pinned 17 MB npm package
+  with no build step that runs only when you ask for a review, so there is no
+  flag for it. See <a href="../../using-sand/review/">Reviewing changes in a browser</a>.</li>
 </ul>
 <h2 id="shell-utilities">Shell &amp; utilities</h2>
 <ul>
