@@ -169,10 +169,13 @@ The token survives a reset because it is saved in the host secrets store.
 Both the TUI and [`sand reset`](cli-reference.md#sand-reset-name) apply it
 to the rebuilt guest. See [Files and State](../reference/files-and-state.md).
 
-Cloning happens **before** saved secrets are applied. To reset a VM with a
-private project, enter the clone token again in the form's `GitHub token`
-field or pass `sand reset NAME --clone-token …`. If you preserve the existing
-project checkout, the reset skips cloning and needs no clone token. See
+Cloning happens **before** saved secrets are applied. As a current limitation,
+a reset does not reuse the saved `GH_TOKEN` for that clone. To reset a VM with
+a private project, enter the same token again in the form's `GitHub token`
+field or pass `sand reset NAME --clone-token …`. This does not create another
+saved secret: it supplies the token during provisioning, then updates the
+existing `GH_TOKEN` after the VM is ready. If you preserve the project
+checkout, the reset skips cloning and needs no clone token. See
 [Resetting a VM](tui.md#resetting-a-vm).
 
 ## drupal.org: a notable exception
