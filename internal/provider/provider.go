@@ -198,6 +198,20 @@ type Provider interface {
 	// limactl is installed and new enough to support `limactl clone`).
 	Preflight() error
 
+	// ValidateName reports whether this backend will accept name for a new VM,
+	// without contacting it. Lima and Proxmox disagree about this in both
+	// directions — Lima takes `a_b` and refuses `a--b`, Proxmox the reverse — so
+	// there is no single rule sand could apply on their behalf, and guessing one
+	// would either admit a name the backend rejects (the failure this exists to
+	// prevent) or refuse a name it would have taken, which for Lima would mean
+	// VMs that already exist could no longer be reset or recreated.
+	//
+	// It is called at the point a name is TYPED — the create form, `sand create`
+	// — so the answer arrives while the user can still edit it. A name that gets
+	// past the backend's own check is out of scope here; this is the cheap gate,
+	// not a second implementation of the backend's parser.
+	ValidateName(name string) error
+
 	// --- Host access ---
 
 	// HostFiles returns the host-access handle this provider's base-image

@@ -53,7 +53,7 @@ not a prompt.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--name` | string | `claude` | VM name. |
+| `--name` | string | `claude` | VM name. Checked against the target backend's own naming rule before anything is built — see [VM names](#vm-names). |
 | `--base-name` | string | `sandbar-base` | Base image instance name; clones are made from this shared, long-lived image. |
 | `--hostname` | string | same as `--name` | VM hostname. Empty means `EffectiveHostname()` falls back to `--name`. |
 | `--user` | string | the **host username** (`id -un`, then `$USER`, then `claude`) | Primary VM user. A guest user matching the host username is created for you, so this mirrors that — it is never sent empty, since an empty `user_name` would override the Ansible user role's own default and break in-guest user creation. |
@@ -81,6 +81,36 @@ The `--with-*` flags configure the **shared base image**, not the individual
 VM. A flag you don't pass adopts whatever the existing base was actually
 built with (read back from its version stamp), so you only need to state a
 selection once; passing a flag explicitly always wins.
+
+### VM names
+
+A VM's name has to be acceptable to whichever backend the VM is created on,
+and **the backends do not agree about what that means**:
+
+| Name | Lima (local or remote) | Proxmox |
+|---|---|---|
+| `dev-box` | ✅ | ✅ |
+| `test_vm` | ✅ | ❌ — Proxmox requires a DNS name, which has no underscores |
+| `web--1` | ❌ — Lima allows no doubled separator | ✅ |
+| `-web`, `web-` | ❌ | ❌ |
+| `my vm` | ❌ | ❌ |
+
+`dev-box` — letters and digits separated by single hyphens, starting and
+ending with a letter or digit, 63 characters or fewer — is accepted
+everywhere, and is the shape to reach for if you ever move a VM between
+profiles.
+
+`sand create` and the TUI's create form both check the name against the
+target backend's rule **before** anything is built, and refuse with a message
+naming the offending character. Without that check the rejection arrives from
+inside the clone, minutes in, by which point the TUI has a tile for a VM that
+does not exist — and the cleanup delete then fails in its own right, against
+an instance that was never created.
+
+The check applies to **new** VMs only. `sand create --recreate`, `sand reset`
+and the TUI's Reset all skip it: they target a VM that already exists, whose
+name the backend accepted when it was made, so applying today's rule could
+only strand a VM you already have with no way to rebuild it.
 
 ### There is no `--ref` flag
 

@@ -245,6 +245,10 @@ Flags:
 		return fmt.Errorf("sand create: %w", err)
 	}
 
+	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
+		return fmt.Errorf("sand create: %w", err)
+	}
+
 	reg, loadErr := registry.Load()
 	if reg == nil {
 		reg = registry.NewEmpty()
@@ -435,6 +439,27 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	if !explicit["timezone"] && rec.Timezone != "" {
 		cfg.Timezone, cfg.TimezoneExplicit = rec.Timezone, rec.TimezoneExplicit
 	}
+}
+
+// checkBackendName asks the backend whether it will accept name for a NEW VM,
+// before anything is built. Proxmox rejects a name that is not DNS-shaped and
+// Lima one that is not a valid identifier; without this the rejection arrives
+// from inside the clone, minutes in, after sand has already announced the VM —
+// and is then followed by a cleanup delete that fails in its own right, because
+// the instance the failure is about was never created. See
+// provider.Provider.ValidateName.
+//
+// recreate is exempt, and that is the whole reason this is a function rather
+// than an inline call: --recreate targets a VM that ALREADY EXISTS, whose name
+// the backend accepted when it was made. Applying a naming rule to it would
+// leave any VM that predates the rule (or was made by some other tool) with no
+// way to be rebuilt — a check that strands what it is meant to protect. The
+// TUI's Reset skips it for the same reason; see submitReset.
+func checkBackendName(p provider.Provider, name string, recreate bool) error {
+	if recreate {
+		return nil
+	}
+	return p.ValidateName(name)
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs

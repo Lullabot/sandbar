@@ -180,6 +180,11 @@ func (p *limaProvider) GuestPath(name, path string) string { return lima.GuestPa
 
 func (p *limaProvider) Preflight() error { return p.core.Preflight() }
 
+// ValidateName applies limactl's own instance-name rule. Inherited unchanged by
+// the remote provider: the name is handed to a limactl on the far side of an ssh
+// hop, which parses it exactly as the local one does. See Provider.ValidateName.
+func (p *limaProvider) ValidateName(name string) error { return lima.ValidateInstanceName(name) }
+
 // --- Host access ---
 
 // HostFiles returns the local filesystem: local Lima IS the host limactl runs
