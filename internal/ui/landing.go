@@ -43,11 +43,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/drupalorg"
 	"github.com/lullabot/sandbar/internal/landgh"
+	"github.com/lullabot/sandbar/internal/landreview"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -68,6 +70,26 @@ type ghActions interface {
 	PRState(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	CreateDraftPR(ctx context.Context, orgRepo, branch string) (*landgh.PR, error)
 	OpenInBrowser(ctx context.Context, target string) error
+}
+
+// reviewRunFunc is the seam over internal/landreview's orchestration
+// (task 5's Session.Run) that the review key dispatches through, injected on
+// the model exactly like ghActions above (model.New defaults it to
+// defaultReviewRun). A test replaces it to fake a whole review session's
+// outcome — instant success, instant failure, or one that blocks until its
+// context is cancelled — without picking a real workstation port, probing a
+// real HTTP server, or spawning a real ssh/limactl forwarder child, which is
+// what a real Session.Run would do (see runLandingReview's tests).
+type reviewRunFunc func(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error)
+
+// defaultReviewRun is reviewRunFunc's production body: task 5's own
+// Session.Run, called unmodified. This indirection — and not a reimplemented
+// port-pick/launch/forward/readiness/teardown sequence here — is what the
+// task requires: internal/landreview already owns all of that (see its
+// package doc), and this pane's only job is to build the Session and hand it
+// off.
+func defaultReviewRun(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error) {
+	return sess.Run(ctx, w)
 }
 
 // landRowKind is the row-state half of the pane's state/action table: the
@@ -353,7 +375,7 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAv
 // changes, or both.
 func atRiskLabel(c checkouts.Checkout) string {
 	// A never-pushed branch has no honest ahead count to show (there is no
-	// tracking ref to count against — Checkout.Ahead is defined 0 for it), so
+	// tracking ref to count against — Checkout.LocalOnly is 0 for it), so
 	// it is named in words rather than with a fabricated "↑0". It gets its own
 	// arms rather than falling through to the dirty-only default, which used
 	// to render a clean never-pushed branch as "0 uncommitted" — a label that
@@ -363,10 +385,19 @@ func atRiskLabel(c checkouts.Checkout) string {
 		return fmt.Sprintf("never pushed + %d uncommitted", c.Dirty)
 	case c.PushState == checkouts.PushStateNever:
 		return "never pushed"
+	// An unpushed branch holding nothing that is only local — every commit
+	// reachable on some other remote-tracking ref, which is what a rebase
+	// onto a moved trunk leaves behind — has no at-risk count to show. It
+	// gets its own arms rather than rendering "↑0 unpushed", a label that
+	// would be both wrong and alarming.
+	case c.PushState == checkouts.PushStateUnpushed && c.LocalOnly == 0 && c.Dirty > 0:
+		return fmt.Sprintf("diverged from its pushed copy + %d uncommitted", c.Dirty)
+	case c.PushState == checkouts.PushStateUnpushed && c.LocalOnly == 0:
+		return "diverged from its pushed copy"
 	case c.PushState == checkouts.PushStateUnpushed && c.Dirty > 0:
-		return fmt.Sprintf("↑%d unpushed + %d uncommitted", c.Ahead, c.Dirty)
+		return fmt.Sprintf("↑%d unpushed + %d uncommitted", c.LocalOnly, c.Dirty)
 	case c.PushState == checkouts.PushStateUnpushed:
-		return fmt.Sprintf("↑%d unpushed", c.Ahead)
+		return fmt.Sprintf("↑%d unpushed", c.LocalOnly)
 	default:
 		return fmt.Sprintf("%d uncommitted", c.Dirty)
 	}
@@ -512,6 +543,78 @@ type landingPane struct {
 	// would reset to zero on every reopen — exactly the collision
 	// model.landingPublishEpoch's doc comment describes avoiding.
 	publish *landingPublish
+	// A review started from this pane is NOT tracked here: its teardown state
+	// lives on the model as model.review (activeReview), because a review
+	// session outlives the pane struct that started it. See activeReview's
+	// doc for the orphaned guest servers that taught us this.
+}
+
+// activeReview is the single in-flight review session's identity and teardown
+// state. It lives on the MODEL rather than on landingPane, and that placement
+// is the whole point of the type.
+//
+// A review session routinely outlives the landingPane value that started it.
+// landingPane is replaced wholesale — not mutated — every time openLandingPane
+// runs, which happens whenever the Landing pane is reopened for any VM; and
+// leaving the pane (Back) does not end the session synchronously, because
+// Session.Run still has up to landreview's guestStopTimeout of guest-side
+// teardown to do after its context is cancelled. Holding the cancel func and
+// the done channel on the pane therefore meant a perfectly ordinary sequence —
+// review a checkout, press enter on another row (which switches to the
+// progress view), come back, reopen Landing — silently dropped both handles
+// with no cancel ever called. The quit path then read nil for both and let `sand`
+// exit immediately, leaving the guest `node` server listening inside the VM
+// and, on the remote-Lima and Proxmox backends, an `ssh -N -L` child still
+// holding the workstation port. That is precisely the orphan the CLI path's
+// lima-e2e assertion checks for and the TUI path had no equivalent guard
+// against.
+//
+// Only one review may be in flight at a time (runLandingReview's guard), so
+// one value suffices; path == "" means none.
+type activeReview struct {
+	// scope and vm identify the pane the review was started from, so a
+	// completion message can be matched against the review that is actually
+	// running rather than against whatever pane happens to be open now.
+	scope registry.Scope
+	vm    string
+	// path is the checkout under review, and doubles as the "a review is in
+	// flight" flag. It is part of the identity a landReviewDoneMsg is matched
+	// on: without it, an older review's completion clears the handles of a
+	// newer, still-running one.
+	path string
+	// url is the review UI's workstation URL once Session.Run has reported it,
+	// or "" before that. Kept so the row can show it and the session log can
+	// carry it — the browser-open is best-effort and fails outright on a
+	// headless workstation, where this is the only way to reach the session.
+	url string
+	// cancel cancels the in-flight review's context. It MUST be called before
+	// this value is cleared — leaving the pane (Back), or quitting (quit) —
+	// or Session.Run's own deferred teardown (which kills the guest server and
+	// its forwarder child; see internal/landreview's package doc) never runs,
+	// orphaning both. nil whenever path is "".
+	cancel context.CancelFunc
+	// done is closed by the in-flight review's own goroutine once m.reviewRun
+	// has actually RETURNED — i.e. after Session.Run's deferred teardown has
+	// finished killing the guest server and its forwarder child, not merely
+	// after cancel has been called.
+	//
+	// This is load-bearing, proven wrong the naive way first: on a real Lima
+	// VM, calling cancel() from the quit path and then immediately returning
+	// tea.Quit() let the whole `sand` PROCESS exit (main() returns right after
+	// Run() does) while the goroutine doing the actual guest-side kill was
+	// still mid-flight, orphaning the guest `node` server. Cancelling a
+	// context only asks a goroutine to stop; it is not a wait. That Cmd blocks
+	// on this channel (with its own bound) so the program does not exit until
+	// teardown has actually happened, or has been given a fair chance to. nil
+	// whenever path is "".
+	done chan struct{}
+}
+
+// isFor reports whether the in-flight review (if any) was started from the
+// pane identified by scope/vm — the guard every pane-local use of the review
+// state needs, now that the state outlives any one pane.
+func (a activeReview) isFor(scope registry.Scope, vm string) bool {
+	return a.path != "" && a.scope == scope && a.vm == vm
 }
 
 // landingAvailableMsg carries the result of the lazy host-gh-availability
@@ -817,6 +920,37 @@ var landingActKey = key.NewBinding(key.WithKeys("enter", "o"), key.WithHelp("ent
 // confidently out of date. This is the way to close it without waiting.
 var landingRefreshKey = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rescan"))
 
+// landingReviewKey opens the selected checkout's diff in a browser-based
+// review UI served from inside the VM (internal/landreview), reaching this
+// pane parity with `sand land NAME PATH --review`. It has NO precondition on
+// the row's Kind/Action the way the act key does — reviewing uncommitted or
+// unpushed work, with no remote at all, is the primary use case (see the
+// plan's Component 4 note) — so runLandingReview fires for any selected row.
+//
+// 'v' ("view"/"review") is free on this pane: the act key owns enter/o, the
+// refresh key owns r, and the cursor owns up/down. It collides with the
+// BOARD's own 'v' ("paste image", commandreg.go) — deliberately left as is,
+// since the two screens are disjoint key namespaces already: this pane's own
+// 'r' ("rescan") collides with the board's 'r' ("restart") the same way.
+var landingReviewKey = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "review"))
+
+// landingCleanReviewKey starts the selected checkout's review OVER: it
+// removes any review.xml sitting there (and its walkthrough sidecar) and
+// opens a review that carries nothing in.
+//
+// It is the shift-pair of the review key because it is the same verb with one
+// thing changed, and because the plain key's new behaviour makes it
+// necessary: 'v' now resumes from a review already in the checkout, and
+// upstream has no notion of a review being finished with — no "done" state,
+// no cleanup, nothing that ever removes the file. Without this, the only way
+// to stop resuming a review you had moved on from was to delete review.xml by
+// hand in a guest shell.
+//
+// It raises a confirmation, because the file it removes is the only copy of
+// comments the user wrote: they live in the browser page until submitted, and
+// nothing else in the system has them.
+var landingCleanReviewKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "clean review"))
+
 // landingMoveKey describes the pane's row cursor in the footer. It is a
 // pane-local binding rather than the shared form keys (m.keys.Up/Down) for two
 // reasons: those are labelled "prev field"/"next field", which is the wrong
@@ -850,7 +984,13 @@ func actionVerb(row landRow) string {
 	case landActionOpenInBrowser:
 		return "open in browser"
 	case landActionPublish:
-		return "publish to drupal.org"
+		// "publish", not "publish to drupal.org": the ROW one line above
+		// already says where it publishes to, and the footer is a key legend
+		// rather than a sentence. The long form cost 14 columns that an
+		// 80-column terminal does not have — with it, the footer wrapped to a
+		// second line, taking a row the pane never budgeted for and pushing
+		// content off the bottom.
+		return "publish"
 	default:
 		return ""
 	}
@@ -913,6 +1053,23 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, m.keys.Back):
+		// Leaving the pane deliberately does NOT cancel the review.
+		//
+		// This used to cancel, and the cost was found the way these things
+		// are: a reviewer reading a diff wanted a shell in the guest to go
+		// look at something, and `S` lives on the BOARD — so the only route
+		// to it was esc, which silently killed the review they were in the
+		// middle of. Stepping away from a pane is not a decision to throw
+		// away work; a review runs for as long as a human takes to read, and
+		// wanting to look at something else during it is the normal case.
+		//
+		// Nothing is orphaned by staying alive. activeReview lives on the
+		// MODEL rather than on this pane precisely so its cancel func and
+		// done channel outlive the pane value (see its doc), quit still tears
+		// the session down through reviewTeardownQuitCmd, and requestQuit now
+		// treats a live review as work in flight so quitting asks first.
+		// Cancelling is now something the user does on purpose, with the
+		// review key on the row being reviewed.
 		m.view = viewBoard
 		return m, nil
 	case key.Matches(msg, landingActKey):
@@ -924,6 +1081,19 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.landing.scanning = true
 		return m, landRefreshCmd(m.sweeps, m.landing.scope, m.landing.vmName)
+	case key.Matches(msg, landingReviewKey):
+		// The same key both starts and stops, decided by whether the row
+		// under the cursor is the one being reviewed — which is the row that
+		// says "reviewing…", so the footer and the row agree about what v
+		// will do.
+		if m.cancelFocusedReview() {
+			return m, nil
+		}
+		cmd := m.runLandingReview()
+		return m, cmd
+	case key.Matches(msg, landingCleanReviewKey):
+		m.confirmCleanReview()
+		return m, nil
 	}
 	return m, nil
 }
@@ -943,6 +1113,8 @@ func (m model) landingHelp() []key.Binding {
 		landingMoveKey,
 		m.landing.landingActBinding(),
 		landingRefreshKey,
+		m.landingReviewBinding(),
+		m.landingCleanReviewBinding(),
 		m.keys.Back,
 	}
 }
@@ -1064,7 +1236,26 @@ func (m model) landingView() string {
 		if branch == "" {
 			branch = "(detached)"
 		}
-		line := fmt.Sprintf("%s%s%s (%s) — %s", cursor, prefix, row.Checkout.Path, branch, row.Label)
+		label := row.Label
+		if row.Checkout.Path != "" && row.Checkout.Path == m.review.path &&
+			m.review.isFor(m.landing.scope, m.landing.vmName) {
+			// Overlaid at RENDER time rather than folded into classifyLandRow:
+			// review-in-progress is session state (see activeReview's doc), not
+			// a property of the checkout classifyLandRow's pure mapping reasons
+			// about, and every row kind can be under review — even one
+			// classifyLandRow would otherwise label "nothing to land".
+			//
+			// The URL is shown once known rather than claiming "browser open":
+			// Session.Run's browser-open is best-effort and simply fails on a
+			// headless workstation, so promising a browser that never appeared
+			// — with no URL anywhere — left the session unreachable.
+			if m.review.url != "" {
+				label = "reviewing… " + m.review.url
+			} else {
+				label = "reviewing…"
+			}
+		}
+		line := fmt.Sprintf("%s%s%s (%s) — %s", cursor, prefix, row.Checkout.Path, branch, label)
 		b.WriteString(m.clipLine(styleForLandRow(row.Kind).Render(line)))
 		b.WriteString("\n")
 	}
@@ -1931,6 +2122,362 @@ func (m *model) handleLandCommitPushDone(msg landCommitPushDoneMsg) tea.Cmd {
 	delete(m.landing.resolved, msg.path)
 	m.landing.scanning = true
 	return landRefreshCmd(m.sweeps, msg.scope, msg.vm)
+}
+
+// runLandingReview dispatches the review key for the row under the cursor:
+// nil when there is no row (an empty sweep) or a review is already in flight
+// from this pane, otherwise a tea.Cmd that runs task 5's orchestration
+// (internal/landreview.Session.Run, via m.reviewRun) in the background and
+// reports back with landReviewDoneMsg.
+//
+// It is a tea.Cmd rather than inline work for the reason every asynchronous
+// action on this pane is: Session.Run BLOCKS for as long as the human is
+// reviewing — potentially many minutes — and Update must never block the
+// board's event loop waiting for it.
+func (m *model) runLandingReview() tea.Cmd {
+	return m.startLandingReview(false)
+}
+
+// cancelFocusedReview cancels the in-flight review when the cursor sits on
+// the checkout being reviewed, reporting whether it did anything.
+//
+// The review state is deliberately NOT cleared here. The landReviewDoneMsg
+// the cancellation produces is what clears it, and only once the session's
+// own teardown has actually finished — so a quit in the interval still finds
+// the handles it needs to wait on (reviewTeardownQuitCmd).
+func (m *model) cancelFocusedReview() bool {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return false
+	}
+	co := m.landing.rows[m.landing.cursor].Checkout
+	if !m.reviewingRow(co.Path) || m.review.cancel == nil {
+		return false
+	}
+	m.logMsg("cancelling the review of " + co.Path)
+	m.review.cancel()
+	return true
+}
+
+// reviewingRow reports whether the in-flight review is this pane's, for this
+// checkout. Both halves matter: a review of another VM is still "in flight"
+// and must not be cancelled by a key pressed here.
+func (m model) reviewingRow(path string) bool {
+	return m.review.isFor(m.landing.scope, m.landing.vmName) && m.review.path == path
+}
+
+// focusedRowUnderReview reports whether the row under the cursor is the one
+// being reviewed — what both review bindings' help text turns on.
+func (m model) focusedRowUnderReview() bool {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return false
+	}
+	return m.reviewingRow(m.landing.rows[m.landing.cursor].Checkout.Path)
+}
+
+// landingReviewBinding is the review key's help, which changes with the row:
+// on the checkout being reviewed, v stops the review rather than starting one.
+// A static "v review" there would name the opposite of what the key does.
+func (m model) landingReviewBinding() key.Binding {
+	if m.focusedRowUnderReview() {
+		return key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "cancel review"))
+	}
+	return landingReviewKey
+}
+
+// landingCleanReviewBinding disables the clean-review verb on a row whose review is
+// already running: there is nothing to start over until the current one ends,
+// and the footer must not offer a key that would only report a refusal. It
+// also buys back the columns "v cancel review" spends.
+func (m model) landingCleanReviewBinding() key.Binding {
+	if m.focusedRowUnderReview() {
+		b := landingCleanReviewKey
+		b.SetEnabled(false)
+		return b
+	}
+	return landingCleanReviewKey
+}
+
+// confirmCleanReview raises the confirmation behind the clean-review verb.
+//
+// It confirms whether or not a review.xml is actually there, which is a
+// deliberate choice over checking first. Knowing would cost a guest round
+// trip on a keypress, and the prompt has to be truthful in both cases anyway
+// — so it states what the action does rather than what it found. The cost of
+// a needless "y" is one keystroke; the cost of a missing prompt is somebody's
+// review comments.
+func (m *model) confirmCleanReview() {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return // empty sweep: nothing under the cursor to review
+	}
+	if m.review.path != "" {
+		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+		return
+	}
+	co := m.landing.rows[m.landing.cursor].Checkout
+	scope, vmName := m.landing.scope, m.landing.vmName
+	m.confirm = &confirmState{
+		prompt:  "Start a fresh review of " + co.Path + "? Any review already saved there is discarded.",
+		scope:   scope,
+		vmName:  vmName,
+		working: "starting a fresh review of " + co.Path,
+		// A message rather than the review command itself: starting a review
+		// MUTATES the model (m.review holds the session's cancel func and its
+		// done channel), and a confirmState.run is a bare tea.Cmd with no
+		// model to mutate. Update owns the mutation, as it does for every
+		// other asynchronous action on this pane.
+		run: func() tea.Msg {
+			return landReviewCleanMsg{scope: scope, vm: vmName, path: co.Path}
+		},
+	}
+}
+
+// landReviewCleanMsg asks Update to start an clean review, once the user has
+// confirmed discarding whatever was already saved. It carries the identity
+// the confirmation was raised for, so a confirmation answered after the pane
+// moved on cannot start a review of the wrong checkout.
+type landReviewCleanMsg struct {
+	scope registry.Scope
+	vm    string
+	path  string
+}
+
+// handleLandReviewClean starts the confirmed clean review, having first
+// checked that the pane is still showing what the user answered about.
+func (m *model) handleLandReviewClean(msg landReviewCleanMsg) tea.Cmd {
+	if m.landing.scope != msg.scope || m.landing.vmName != msg.vm {
+		return nil // the pane moved on between the prompt and the answer
+	}
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) ||
+		m.landing.rows[m.landing.cursor].Checkout.Path != msg.path {
+		return nil // the cursor moved between the prompt and the answer
+	}
+	return m.startLandingReview(true)
+}
+
+// startLandingReview is the body both review verbs share. fresh discards any
+// review already saved in the checkout and carries nothing in; see
+// landreview.Session.Clean.
+func (m *model) startLandingReview(fresh bool) tea.Cmd {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return nil // empty sweep: nothing under the cursor to review
+	}
+	if m.review.path != "" {
+		// One review already in flight; a second would leak the first's cancel
+		// func. It is said out loud rather than dropped, because the state
+		// outlives the pane (see activeReview) — a review cancelled by Back a
+		// moment ago is still tearing down, and its row is no longer on screen
+		// to explain why 'v' now does nothing at all.
+		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+		return nil
+	}
+	p := m.provFor(m.landing.scope)
+	if p == nil {
+		return nil // the pane's VM has no live member/provider to run the guest command through
+	}
+	co := m.landing.rows[m.landing.cursor].Checkout
+
+	// A context this session OWNS, not context.Background() handed to the
+	// Session bare: the cancel func is retained on m.review precisely so
+	// leaving this pane or quitting the whole program can reach in and
+	// cancel it, driving Session.Run's own deferred teardown (killing the
+	// guest server and its forwarder child) instead of orphaning them. This
+	// is "how the pane's existing async actions obtain their context" one
+	// level up from beginStream's per-job context.WithCancel(Background()) —
+	// beginStream's cancel lives on the job registry and is reachable via
+	// ctrl+c on the progress screen; this one lives on the model because a
+	// review is not run through the job registry at all (see activeReview).
+	ctx, cancel := context.WithCancel(context.Background())
+	// done is closed only once run() below has actually RETURNED — see
+	// activeReview.done's doc for why this, and not the cancel func alone, is
+	// what the quit path needs to avoid orphaning the guest server.
+	done := make(chan struct{})
+	scope, vmName := m.landing.scope, m.landing.vmName
+	m.review = activeReview{
+		scope:  scope,
+		vm:     vmName,
+		path:   co.Path,
+		cancel: cancel,
+		done:   done,
+	}
+
+	sess := &landreview.Session{
+		Provider: p,
+		VM:       m.landing.vm,
+		Checkout: co,
+		Open:     m.ghActions.OpenInBrowser,
+		Clean:    fresh,
+	}
+	run := m.reviewRun
+	// urls carries the review UI's URL out of Session.Run's writer and back
+	// into the pane. Run prints it, then prints a "could not open a browser
+	// automatically" line if Open failed — and Open DOES fail on a headless
+	// ssh session or a locked-down desktop, which is exactly when knowing the
+	// URL matters, because the port was picked at random and cannot be
+	// guessed. Discarding the writer (as this did) left such a user with a row
+	// claiming "browser open" and no way to reach the session but to cancel
+	// it. Buffered so the writer never blocks the session on a UI that is not
+	// reading yet.
+	urls := make(chan string, 1)
+	runCmd := func() tea.Msg {
+		defer close(done)
+		defer close(urls)
+		written, err := run(ctx, sess, &reviewURLWriter{urls: urls})
+		return landReviewDoneMsg{scope: scope, vm: vmName, path: co.Path, written: written, err: err}
+	}
+	// Two commands, not one: the URL arrives while Run is still blocking on
+	// the human, so it cannot ride home on the completion message.
+	return tea.Batch(runCmd, awaitReviewURLCmd(scope, vmName, co.Path, urls))
+}
+
+// reviewURLWriter is the io.Writer handed to Session.Run: it scans the
+// session's progress output for the review UI's URL and publishes the first
+// one it sees, discarding everything else. A writer rather than a dedicated
+// seam on Session because the URL is already written there for the CLI's
+// benefit, and a second reporting path would be one more thing to keep in
+// step with it.
+type reviewURLWriter struct {
+	urls chan<- string
+	once sync.Once
+}
+
+// reviewURLPattern matches the URL Session.Run reports ("review UI ready at
+// http://127.0.0.1:<port>"). Anchored on the loopback host the session always
+// binds, so no other URL in the output could match.
+var reviewURLPattern = regexp.MustCompile(`http://127\.0\.0\.1:\d+`)
+
+func (w *reviewURLWriter) Write(p []byte) (int, error) {
+	if u := reviewURLPattern.Find(p); u != nil {
+		// Once: Run prints the URL once, but a short write or a retry must
+		// never send twice — the channel holds exactly one.
+		w.once.Do(func() { w.urls <- string(u) })
+	}
+	return len(p), nil
+}
+
+// awaitReviewURLCmd waits for the review UI's URL and folds it back into the
+// pane. Returns nil (no message) if the session ends before reporting one,
+// which is what closing the channel signals — a failed session has nothing to
+// show and its error arrives on landReviewDoneMsg instead.
+func awaitReviewURLCmd(scope registry.Scope, vm, path string, urls <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		u, ok := <-urls
+		if !ok {
+			return nil
+		}
+		return landReviewURLMsg{scope: scope, vm: vm, path: path, url: u}
+	}
+}
+
+// landReviewURLMsg carries the review UI's URL back to the pane once the
+// session has reported it.
+type landReviewURLMsg struct {
+	scope registry.Scope
+	vm    string
+	path  string
+	url   string
+}
+
+// handleLandReviewURL records the URL and logs it. Logging it unconditionally
+// (not only when the browser failed to open) is deliberate: Session.Run's
+// browser-open is best-effort and its failure message goes to the same writer
+// this pane cannot display, so the pane cannot tell the two cases apart — and
+// a URL in the session log is harmless when the browser did open.
+func (m *model) handleLandReviewURL(msg landReviewURLMsg) {
+	if msg.scope != m.review.scope || msg.vm != m.review.vm || msg.path != m.review.path {
+		return // stale: this URL belongs to a review that is no longer the live one
+	}
+	m.review.url = msg.url
+	m.logMsg("review of " + msg.path + " open at " + msg.url)
+}
+
+// landReviewDoneMsg carries a review session's completion — success, failure,
+// or cancellation — back to the Landing pane. Scoped by (scope, vm) so a
+// result that lands after the pane has moved on (closed, reopened for this
+// VM or another) is recognized as stale, the same discipline every other
+// async completion message on this pane follows (landCommitPushDoneMsg,
+// landingPRStateMsg, landRefreshMsg).
+type landReviewDoneMsg struct {
+	scope   registry.Scope
+	vm      string
+	path    string
+	written string
+	err     error
+}
+
+// handleLandReviewDone folds a finished (or failed, or cancelled) review back
+// into the pane: clears the in-progress marker so the row stops rendering
+// "reviewing…", and surfaces an error in the pane's session log rather than
+// dropping it — a review is the one landing action whose only other visible
+// trace is a browser tab that may already be closed, so a failure that is
+// silently swallowed here would simply vanish.
+func (m *model) handleLandReviewDone(msg landReviewDoneMsg) {
+	// Matched against the LIVE review, not against the open pane. Comparing
+	// only (scope, vm) — as this did — let a previous review's completion
+	// clear the teardown handles of a newer, still-running one started for the
+	// same VM, after which quitting cancelled nothing and the guest server and
+	// its forwarder child both outlived `sand`. path is what distinguishes
+	// them, so it is part of the identity.
+	if msg.scope != m.review.scope || msg.vm != m.review.vm || msg.path != m.review.path {
+		return // stale: an older review's result, or none is running
+	}
+	m.review = activeReview{}
+	if msg.err != nil {
+		m.logMsg("review of " + msg.path + " did not complete: " + msg.err.Error())
+		return
+	}
+	m.logMsg("review of " + msg.path + " finished — written to " + msg.written)
+}
+
+// quitTeardownTimeout bounds how long the quit path will hold the program open
+// waiting for an in-flight review's guest-side teardown. It is set above
+// landreview's own guestStopTimeout (10s): that is the budget Session.Run
+// gives ITSELF to reach into the guest and kill the server, so waiting any
+// less here would routinely cut that attempt off before it could even report
+// back. Past this, it gives up and lets the program exit anyway — a
+// user holding ctrl-c down must eventually get their terminal back, even if
+// the guest is somehow wedged past all reasonable expectation.
+//
+// A var, not a const: a test shrinks it to prove the give-up path fires
+// without a real 15-second sleep.
+var quitTeardownTimeout = 15 * time.Second
+
+// reviewTeardownQuitCmd wraps tea.Quit so that quitting the whole program also tears down
+// any review the Landing pane left running, rather than orphaning its guest
+// server and forwarder child. It is called by board.go's quit(), which is the
+// ONE exit path this package has — the unconditional ctrl+c quit, 'q' with
+// nothing else in flight, and the confirmed "abandon work in flight" quit all
+// route through quit(), so all three tear the review down. quit() sets
+// model.quitting; this func must not, and does not, duplicate that. It does NOT touch m.jobs: a build or transfer left
+// running past quit is the pre-existing, accepted "abandon work in flight"
+// behaviour (see requestQuit's doc); only the review session — which this
+// pane, not the job registry, owns the teardown for — needs this extra step.
+//
+// Cancelling the context is NOT enough by itself, and that is measured, not
+// assumed: on a real Lima VM, calling m.review.cancel and returning tea.Quit()
+// immediately let the whole `sand` process exit — main() returns the instant
+// tea.Program.Run() does — while the goroutine actually killing the guest
+// server was still mid-flight (waiting on a `limactl shell` round trip),
+// orphaning it every time. So this BLOCKS on m.review.done (bounded by
+// quitTeardownTimeout) before returning the QuitMsg, which is safe to do
+// here specifically: this func runs as its own tea.Cmd goroutine, off the
+// Update goroutine that renders the board, so holding it does not freeze the
+// UI — it only delays the moment the program actually exits, which is
+// exactly the tradeoff "do not orphan a guest process" requires.
+func (m *model) reviewTeardownQuitCmd() tea.Cmd {
+	cancel := m.review.cancel
+	done := m.review.done
+	return func() tea.Msg {
+		if cancel != nil {
+			cancel()
+		}
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(quitTeardownTimeout):
+			}
+		}
+		return tea.Quit()
+	}
 }
 
 // landRefreshCmd re-sweeps the VM the pane is showing. Same one-shot read the
