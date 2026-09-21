@@ -217,3 +217,40 @@ func TestShortenGuestPath(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckoutPreserveHelpCountsOnlyWorkThatExistsNowhereElse pins the
+// preserve row's help against the rebase case. The row is telling the user
+// what a rebuild destroys if they leave the toggle off, so the number has to
+// be work that would actually be lost — a rebased branch whose trunk moved
+// 4,404 commits has five commits at stake, not 4,409.
+func TestCheckoutPreserveHelpCountsOnlyWorkThatExistsNowhereElse(t *testing.T) {
+	var zero time.Time
+	c := checkouts.Checkout{
+		Path:      "/home/u/repo",
+		Branch:    "feature",
+		PushState: checkouts.PushStateUnpushed,
+		Ahead:     4409,
+		LocalOnly: 5,
+	}
+
+	got := checkoutPreserveHelp(c, zero, zero)
+	if !strings.Contains(got, "5 unpushed commit(s)") {
+		t.Errorf("help = %q, want it to name the 5 commits that exist nowhere else", got)
+	}
+	if strings.Contains(got, "4409") {
+		t.Errorf("help = %q, want it NOT to name 4409 — those commits are published upstream", got)
+	}
+
+	// With a dirty tree the combined arm must carry the same number.
+	c.Dirty = 2
+	got = checkoutPreserveHelp(c, zero, zero)
+	if !strings.Contains(got, "2 uncommitted file(s) and 5 unpushed commit(s)") {
+		t.Errorf("help = %q, want both counts, with the unpushed one from LocalOnly", got)
+	}
+
+	// Nothing local: the branch is named, but no commit count is claimed.
+	c.Dirty, c.LocalOnly = 0, 0
+	if got := checkoutPreserveHelp(c, zero, zero); strings.Contains(got, "unpushed commit") {
+		t.Errorf("help = %q, want no unpushed-commit claim when nothing is local", got)
+	}
+}
