@@ -1014,10 +1014,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#none-of-it-shows-up-in-git-status" class="md-nav__link">
+  <a href="#keeping-review-files-out-of-commits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        None of it shows up in git status
+        Keeping review files out of commits
       
     </span>
   </a>
@@ -1487,10 +1487,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#none-of-it-shows-up-in-git-status" class="md-nav__link">
+  <a href="#keeping-review-files-out-of-commits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        None of it shows up in git status
+        Keeping review files out of commits
       
     </span>
   </a>
@@ -1573,102 +1573,78 @@
 
 
 <h1 id="reviewing-changes-in-a-browser">Reviewing changes in a browser</h1>
-<p>Claude Code can write a lot of code in a VM before you've looked at any of
-it. Reviewing it the usual way means pushing a branch and opening a PR —
-fine once the work is done, but awkward for a mid-flight look at
-uncommitted or unpushed changes. <code>sand land NAME PATH --review</code> skips all of
-that: it opens the real diff of that checkout in a browser, running entirely
-against what's on disk in the VM right now.</p>
-<p>Under the hood this is <a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>, the browser front end
-of the <a href="https://github.com/e0ipso/self-review">self-review</a> project, installed in the VM and pointed at
-one checkout. <code>sand</code> supplies the plumbing — starting it, bridging its port,
-opening your browser, cleaning up after it — and nothing else.</p>
+<p>Use <code>sand land NAME PATH --review</code> to review a checkout's diff in your
+browser, including uncommitted and unpushed changes. The review server runs
+inside the VM. Your browser displays the diff, and your comments are saved
+back into the checkout for the agent to read.</p>
+<p>The browser interface comes from <a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>, part of the
+<a href="https://github.com/e0ipso/self-review">self-review</a> project. <code>sand</code> starts the server, forwards its port,
+opens your browser, and stops the session when you finish.</p>
 <h2 id="getting-a-vm-that-has-it">Getting a VM that has it</h2>
-<p>Nothing. It's part of every base image — not a <code>--with-*</code> selection, because
-a pinned 17 MB npm package with no build step, which runs only when you ask
-for a review, isn't worth a knob. (The tools that do have knobs are the ones
-that cost hundreds of megabytes: Go, Java, Codex.)</p>
-<p>If your base predates the tool, the next <code>sand create</code> picks it up on its own:
-adding it changed the playbook, and a base built from an older playbook is
-brought up to date in place before the VM is cloned from it. One slower
-create, then back to normal.</p>
+<p>The review tool is included in every base image and runs only when you open
+a review. There is no installation flag to enable.</p>
+<p>If your base image predates the tool, the next <code>sand create</code> updates the base
+before cloning a new VM. Existing VMs need to be reset from an updated base
+or replaced to get it.</p>
 <h2 id="opening-a-review">Opening a review</h2>
-<p>From the command line, against a checkout <code>sand land</code> already knows about
-(run <code>sand land NAME</code> with no path to list them):</p>
+<p>The VM must be running. Run <code>sand land NAME</code> to list its known checkouts,
+then use a path from that list:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sand<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review
 </code></pre></div>
-<p>or, in the TUI, press <code>l</code> on a VM's tile to open the <a href="../files-and-shells/#landing">Landing pane</a>,
-select a checkout row, and press <code>v</code>. Either entry point runs the same code
-underneath, so the two are equivalent — the CLI blocks the terminal while a
-review is open, and the row shows <code>reviewing…</code> (followed by the URL, once the
-server has reported one) while the TUI one is.</p>
-<p><code>--review</code> has none of <code>--pr</code>'s or <code>--web</code>'s preconditions: no pushed
-branch, no configured remote, no <code>gh</code>. Reviewing uncommitted or unpushed
-work is the point.</p>
-<p>What happens next:</p>
+<p>In the TUI, press <code>l</code> on the VM's tile to open the
+<a href="../files-and-shells/#landing">Landing pane</a>, select a checkout, and press <code>v</code>.
+The CLI keeps the terminal occupied until the review ends. The TUI marks the
+row <code>reviewing…</code> and adds the URL when the server is ready.</p>
+<p>A review does not require a pushed branch, a configured remote, or <code>gh</code>.</p>
 <ol>
 <li>
-<p><code>sand</code> starts the review server inside the VM, in that checkout. The diff
-   it reviews starts at the point your own work begins: the parent of the
-   oldest commit that exists on no remote, which is what the change would
-   land as, uncommitted and untracked files included. When every commit is
-   already published, it falls back to the nearest merge base with a trunk
-   branch (<code>main</code>, <code>master</code>, or the remote's own default).</p>
-<p>sand prints the base it chose, its age and its size before the server
-starts — <code>everything since 6ac1f20b1e77 (2026-09-18, 5 commits, 12
-files)</code> — so an unexpected range is visible immediately rather than after
-a browser tab opens onto it. A range so large the review tool cannot load
-it is refused outright, with that same line naming the commit to check.
-2. The server picks a free port inside the VM and prints the URL it's on.
-   <code>sand</code> reads that port back, makes it reachable from your workstation
-   (see <a href="#reachability">Reachability</a>), waits for it to answer, and opens it
-   in your default browser.
-3. The page renders the checkout's file tree and diff.</p>
+<p><code>sand</code> chooses the diff's base commit. It uses the parent of the oldest
+   commit absent from all remote-tracking branches in the guest. If it
+   cannot use that parent, it tries the nearest common ancestor with <code>main</code>,
+   <code>master</code>, or the checkout's recorded default branch. If neither method
+   finds a base, the review server uses its default range. The diff also
+   includes uncommitted and untracked files.</p>
+<p>Before starting the server, <code>sand</code> prints the base commit, its date,
+and the number of commits and files to review. For example:
+<code>everything since 6ac1f20b1e77 (2026-09-18, 5 commits, 12 files)</code>.
+If the range is too large for the review tool, <code>sand</code> stops and names
+the base commit so you can check it.
+2. <code>sand</code> starts the server in the checkout. The server chooses a free port
+   inside the VM. <code>sand</code> makes that port reachable from your workstation
+   (see <a href="#reachability">Reachability</a>), waits for a response, and opens your
+   default browser.
+3. The browser displays the checkout's file tree and diff.</p>
 </li>
 </ol>
-<p>If no browser opens — a headless SSH session, a locked-down desktop — the
-URL is printed and the review stays up. Open it by hand.</p>
-<p>Two <code>sand land --review</code> commands, against checkouts on the same VM or on
-different ones, can run at the same time: each server picks its own port, so
-they don't collide. The <strong>TUI runs one review at a time</strong> — pressing <code>v</code> on
-a <em>different</em> checkout while one is still in flight (including one you just
-cancelled, which takes a moment to tear down) says so in the session log and
-does nothing else.</p>
+<p>If no browser opens, open the printed URL yourself. The review stays running.</p>
+<p>You can run multiple CLI reviews at once, on the same VM or different VMs.
+The <strong>TUI runs one review at a time</strong>. Trying to review another checkout
+while a session is running or still shutting down leaves a message in the
+session log.</p>
 <h2 id="finishing-a-review">Finishing a review</h2>
-<p>Leave comments in the browser as usual, then click <strong>Finish Review</strong>. The
-server writes <code>review.xml</code> into that checkout, <em>inside the VM</em>, and exits.
-The command that opened the review notices the exit, reports where the file
-landed, and returns control of your terminal (or, in the TUI, clears the
-row's <code>reviewing…</code> state):</p>
+<p>Leave comments in the browser, then click <strong>Finish Review</strong>. The server
+writes <code>review.xml</code> into the checkout inside the VM and exits. The CLI
+reports the path and returns control of your terminal; the TUI clears the
+row's <code>reviewing…</code> state.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>review written to /home/claude/checkouts/my-repo/review.xml in myvm
 </code></pre></div>
-<p>Closing the browser tab does <strong>not</strong> finish the review — nothing tells the
-server you left, and your comments live only in that page until you submit
-them. Ctrl-C on the CLI tears the session down and discards them, which is
-the same trade the upstream tool makes.</p>
-<p>In the TUI, <strong>leaving the Landing pane does not end the review</strong>. Press <code>esc</code>
-and go open a shell (<code>S</code>), look at another VM, do whatever you need — the
-review stays up and the browser tab keeps working. Come back to the pane and
-the row still reads <code>reviewing…</code> with its URL.</p>
-<p>To end it deliberately, press <code>v</code> on the row being reviewed: the same key
-that started it stops it, and the footer says <code>v cancel review</code> while it is
-running. Quitting <code>sand</code> also ends it — and because a live review is easy to
-forget once it is off screen, <code>q</code> asks first when one is open, naming the
-checkout.</p>
+<p>Closing the browser tab does <strong>not</strong> finish the review or save your comments.
+Comments stay in the page until you submit them. Pressing Ctrl-C in the CLI
+stops the session without saving them.</p>
+<p>In the TUI, <strong>leaving the Landing pane does not end the review</strong>. You can
+press <code>esc</code>, open a shell with <code>S</code>, or visit another VM while the browser
+review stays open. To cancel, return to the checkout's row and press <code>v</code>;
+the footer reads <code>v cancel review</code>. Quitting <code>sand</code> also stops the review,
+with a confirmation naming the checkout.</p>
 <h2 id="picking-up-where-you-left-off">Picking up where you left off</h2>
-<p>Nothing ever deletes <code>review.xml</code>. Upstream has no notion of a review being
-"done" — finishing one writes the file and stops the process, and that is the
-whole lifecycle. So a checkout you have reviewed before still has that file
-in it the next time you look.</p>
-<p><code>sand</code> carries it in. Start a review on a checkout that already holds a
-<code>review.xml</code> and its comments are loaded, along with which files you had
-marked as viewed:</p>
+<p>A finished review leaves <code>review.xml</code> in the checkout. When you open another
+review there, <code>sand</code> loads the saved comments and viewed-file markers:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>carrying in the comments already in review.xml
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>[serve] Resumed 7 comments and 4 viewed files from /home/claude/…/review.xml
 </code></pre></div>
-<p>You can then keep them, edit them, or delete them in the browser, and
-<strong>Finish Review</strong> writes the result back over the same file.</p>
-<p>To <strong>start over instead</strong>, discarding what was saved:</p>
+<p>You can keep, edit, or delete the comments. <strong>Finish Review</strong> overwrites the
+same file with the result.</p>
+<p>To discard the saved review and start over:</p>
 <table>
 <thead>
 <tr>
@@ -1679,21 +1655,20 @@ marked as viewed:</p>
 <tbody>
 <tr>
 <td>TUI's Landing pane</td>
-<td><code>V</code> (shift-V) on the checkout's row — the footer calls it <code>clean review</code></td>
+<td>Press <code>V</code> (shift-V) on the checkout's row, labelled <code>clean review</code> in the footer.</td>
 </tr>
 <tr>
 <td>CLI</td>
-<td><code>sand land NAME PATH --review --clean</code></td>
+<td>Run <code>sand land NAME PATH --review --clean</code>.</td>
 </tr>
 </tbody>
 </table>
-<p>Both delete <code>review.xml</code> and its <code>review.guide.xml</code> sidecar before the server
-starts. <code>V</code> asks first — those comments exist nowhere else, and it asks
-whether or not a file is actually there, because checking would cost a round
-trip into the VM on a keypress.</p>
+<p>Both delete <code>review.xml</code> and the accompanying <code>review.guide.xml</code> before
+starting the server. The TUI asks for confirmation, even if neither file
+exists. The CLI deletes them without a prompt.</p>
 <h2 id="the-assistant-skills">The assistant skills</h2>
-<p>Upstream ships three skills that bracket a review, and <code>sand</code> installs them
-into the checkout as the review starts:</p>
+<p><code>sand</code> installs three self-review skills into the checkout when a review
+starts:</p>
 <table>
 <thead>
 <tr>
@@ -1704,111 +1679,85 @@ into the checkout as the review starts:</p>
 <tbody>
 <tr>
 <td><code>self-review-critique</code></td>
-<td>Pre-generates a review for you to curate, rather than starting from a blank page</td>
+<td>Drafts review comments for you to check and edit.</td>
 </tr>
 <tr>
 <td><code>self-review-guide</code></td>
-<td>Writes the <code>review.guide.xml</code> walkthrough sidecar that turns the file tree into ordered reading groups</td>
+<td>Writes a <code>review.guide.xml</code> walkthrough that groups files in reading order.</td>
 </tr>
 <tr>
 <td><code>self-review-apply</code></td>
-<td>Reads a finished <code>review.xml</code>, prioritises the comments, and makes the changes</td>
+<td>Reads a finished <code>review.xml</code>, prioritises the comments, and makes the changes.</td>
 </tr>
 </tbody>
 </table>
-<p>They land in <code>.agents/skills/</code> inside the checkout — upstream's own
-vendor-neutral layout, which Claude Code, Codex and OpenCode all read. That
-is per-checkout rather than installed once per VM because
-<a href="https://github.com/e0ipso/self-review/issues/162">upstream issue #162</a> is
-still open, and because the skills reference their own schema files by a
-checkout-relative path, so a copy anywhere else would break their
-instructions.</p>
-<p>The version is pinned to the same release as the review server, and the whole
-set is baked into the base image, so installing costs no network at review
-time.</p>
-<p>A typical loop, all inside the guest:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>/self-review-critique --staged     # in the agent: pre-generate a review
+<p>The skills go in <code>.agents/skills/</code> inside the checkout. Their instructions
+refer to schema files at that location. They are included in the base image
+and match the review server's version, so copying them needs no network
+access.</p>
+<p>A typical workflow inside the guest:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>/self-review-critique --staged     # in the agent: draft a review
 </code></pre></div>
-<p>then <code>v</code> in the Landing pane to curate what it wrote, and afterwards:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-apply review.xml      # in the agent: act on what you kept
+<p>Press <code>v</code> in the Landing pane to review and edit those comments, then run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-apply review.xml      # in the agent: apply the saved feedback
 </code></pre></div>
 <div class="admonition note">
-<p class="admonition-title">A copy your project tracks is never touched</p>
-<p>If the repository already has its own <code>.agents/skills/self-review-*</code>
-under version control, <code>sand</code> leaves it exactly as it is. Overwriting a
-tracked file would put an edit you never asked for into your working
-tree.</p>
+<p class="admonition-title">Skills tracked by your project are kept</p>
+<p>If the repository already tracks its own <code>.agents/skills/self-review-*</code>
+files in Git, <code>sand</code> leaves those skills unchanged.</p>
 </div>
-<h3 id="none-of-it-shows-up-in-git-status">None of it shows up in <code>git status</code></h3>
-<p><code>review.xml</code>, <code>review.guide.xml</code> and the three installed skill directories
-are added to the <strong>guest user's global git excludes</strong>
-(<code>~/.config/git/ignore</code>), not to any project's <code>.gitignore</code> — <code>sand</code> does not
-write a tracked file into your repository to tidy up after itself.</p>
-<p>Git reads that file with no <code>core.excludesFile</code> set at all, so nothing
-conflicts with a value you have configured yourself.</p>
+<p><a id="none-of-it-shows-up-in-git-status"></a></p>
+<h3 id="keeping-review-files-out-of-commits">Keeping review files out of commits</h3>
+<p>The base image adds <code>review.xml</code>, <code>review.guide.xml</code>, and the three skill
+directories to the guest user's global Git ignore file,
+<code>~/.config/git/ignore</code>. It does not change your project's <code>.gitignore</code>.</p>
+<p>If you have set <code>core.excludesFile</code> or use a different Git configuration
+location, add the patterns to that ignore file too. Ignore rules do not
+hide files that Git already tracks.</p>
 <h2 id="feeding-it-back-to-the-agent">Feeding it back to the agent</h2>
-<p><code>review.xml</code> lands in the checkout it reviewed, inside the VM — the same
-place Claude Code is already working. Point the agent at it (<code>cat
-review.xml</code> in the guest shell, or just tell it the file exists) and it can
-read your comments directly from the working tree it's sitting in. Nothing
-is copied to your workstation; the round trip stays entirely inside the VM
-except for the browser tab rendering it.</p>
+<p>Tell the agent to read <code>review.xml</code> in the checkout, or use
+<code>/self-review-apply review.xml</code>. The saved feedback is already inside the VM,
+where the agent is working. You do not need to download or copy it.</p>
 <h2 id="reachability">Reachability</h2>
-<p>The server inside the VM always binds <code>127.0.0.1</code> — never a VM-wide
-address — so a review is never reachable from anything on the VM's network.
-It also refuses any request that doesn't name a loopback host, which is what
-stops a web page you happen to be visiting from reaching it. How the
-connection gets there depends on where the VM lives:</p>
+<p>The server listens on the VM's loopback address, <code>127.0.0.1</code>. <code>sand</code> makes
+it reachable at a loopback address on your workstation:</p>
 <ul>
-<li><strong>Local Lima</strong> needs nothing extra: Lima already forwards every guest
-  loopback port to the same port on your machine's own loopback (the same
-  mechanism <a href="../web-servers/">Web Servers and Ports</a> describes), so the
-  server is reachable the moment it starts listening.</li>
-<li><strong>Remote Lima and Proxmox</strong> each start a short-lived <code>ssh -L</code> process for
-  the duration of the review, bridging a free port on your workstation's
-  loopback to the remote host's (where Lima has already landed the guest
-  port) or straight to the guest (Proxmox). It's torn down — along with the
-  guest server — when the review ends or you cancel with Ctrl-C.</li>
+<li><strong>Local Lima</strong> automatically forwards the guest port to the same port
+  on your workstation. See <a href="../web-servers/">Web Servers and Ports</a>.</li>
+<li><strong>Remote Lima</strong> uses a temporary SSH tunnel from your workstation to the
+  remote host's loopback port, where Lima has forwarded the guest port.</li>
+<li><strong>Proxmox</strong> uses a temporary SSH tunnel directly to the guest's loopback
+  port.</li>
 </ul>
-<p>The reviewed code itself never crosses that boundary: only the rendered diff
-and your comments do, over a connection that terminates on your own machine's
-loopback.</p>
+<p>The guest server and any SSH tunnel stop when you finish or cancel the
+review. The diff and your comments travel between the VM and your browser.
+<code>sand</code> does not copy a checkout onto your workstation or push it to a forge.</p>
 <div class="admonition warning">
-<p class="admonition-title">On a shared remote Lima host, the review is readable by that host's other users</p>
-<p>The local-Lima case really is workstation-only. Remote Lima is not, and
-the difference is worth knowing before you review sensitive work.</p>
-<p>Lima's automatic forwarding runs on the machine the VM lives on. On a
-remote host it therefore publishes the guest's port to <em>that host's</em>
-<code>127.0.0.1</code> — which is where sandbar's <code>ssh -L</code> then connects. For as long
-as the review is open, anyone else logged into that remote host can reach
-it: <code>curl http://127.0.0.1:&lt;port&gt;/api/diff</code> returns the full diff,
-including your uncommitted work, with no authentication. The review server
-has no notion of accounts.</p>
-<p>This does not apply to local Lima (the "remote host" is your own machine)
-and does not apply to Proxmox, where the tunnel runs straight to the
-guest's own sshd with no intermediate loopback publication. If you share a
-remote Lima host with people who should not read the work in progress,
-review it from a VM on a host you do not share.</p>
+<p class="admonition-title">Other users of a shared remote Lima host can read the review</p>
+<p>Lima forwards the review port to <code>127.0.0.1</code> on the host running the VM.
+Anyone logged into that host can access the review while it is open,
+including the full diff and uncommitted work. The server does not require
+authentication.</p>
+<p>For local Lima, that host is your workstation. Proxmox connects directly
+to the guest, with no review port on the Proxmox host. If other users of
+a remote Lima host should not see your work, review it on a host you do
+not share.</p>
 </div>
 <h3 id="if-the-review-never-becomes-reachable">If the review never becomes reachable</h3>
-<p>On <strong>local Lima</strong> the guest and host port numbers are necessarily the same,
-because that's how Lima's forwarding works — and the guest picks that number
-itself, from whatever was free <em>in the VM</em>. If something on your own machine
-already holds it, Lima can't bind the forward and the review times out
-waiting to answer. <code>sand</code> says so, and names the port. Running the review
-again picks a different one; there's nothing to configure, because the
-upstream server offers no way to request a particular port.</p>
+<p>Local Lima must use the same port number on the guest and workstation. If
+another application on your workstation already uses the port the guest
+selected, forwarding fails and the review times out. <code>sand</code> reports the
+port. Run the review again to select another port; the review server has no
+option to request a specific one.</p>
 <h2 id="limits">Limits</h2>
-<p>Resuming is looked up by the <strong>default</strong> output path only. A project that
-redirects <code>output-file</code> in its <code>.self-review.yaml</code> (or you, in your own
-<code>~/.config/self-review/config.yaml</code>) has a path that only upstream's config
-precedence can resolve, so <code>sand</code> leaves that review alone rather than
-guessing at it and loading the wrong one.</p>
-<p>Everything else the browser UI does — expanding context around a hunk, image
-and attachment previews, applying a suggestion, and walkthrough guides picked
-up from a <code>review.guide.xml</code> sitting next to the output path — is upstream's
-and works here, because this is upstream's own server rather than a
-re-implementation of it.</p>
+<p>Automatic resumption uses only the default <code>review.xml</code> path. If you set
+<code>output-file</code> in <code>.self-review.yaml</code> or
+<code>~/.config/self-review/config.yaml</code>, <code>sand</code> does not load the saved review
+automatically. A clean review also deletes only the default <code>review.xml</code>
+and <code>review.guide.xml</code> files.</p>
+<p>The browser uses self-review's interface, including extra context around
+changes, image and attachment previews, suggestions, and walkthroughs from
+<code>review.guide.xml</code> beside the output file.</p>
 
 
 

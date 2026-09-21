@@ -682,6 +682,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#browser-reviews" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browser reviews
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#shell-utilities" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1386,6 +1397,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#browser-reviews" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browser reviews
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#shell-utilities" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1445,22 +1467,17 @@ covers how to reach it from your browser — locally and on a remote profile.</p
 <li>The <a href="https://chatgpt.com/codex">OpenAI Codex CLI</a> — <strong>opt-in</strong>: pass
   <code>--with-codex</code> to <code>sand create</code> (or enable the toggle in the TUI create
   form). Codex is not provisioned by default; only include it if you want to
-  use it alongside Claude Code.
-Like every <code>--with-*</code> flag, these configure the <strong>shared base image</strong>:
-toggling one from what the base was last built with invalidates it, so the
-next <code>sand create</code> reprovisions the base before cloning — see
-<a href="../../using-sand/cli-reference/#sand-create"><code>--with-*</code> flags</a> in the CLI
-reference.</li>
+  use it alongside Claude Code.</li>
 </ul>
-<p>Not a selection, and always present:</p>
-<ul>
-<li>A <strong>browser review UI</strong> (<a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>).
-  <code>sand land NAME PATH --review</code> opens a browser-based review of a checkout's
-  diff, served from inside the VM, and writes your comments back into the
-  checkout where the agent can read them. It is a pinned 17 MB npm package
-  with no build step that runs only when you ask for a review, so there is no
-  flag for it. See <a href="../../using-sand/review/">Reviewing changes in a browser</a>.</li>
-</ul>
+<p>The <code>--with-*</code> flags configure the <strong>shared base image</strong>. Changing a tool
+selection makes the next <code>sand create</code> update the base before cloning a VM.
+See the <a href="../../using-sand/cli-reference/#sand-create">CLI reference</a>.</p>
+<h2 id="browser-reviews">Browser reviews</h2>
+<p>Every base image includes <a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>.
+Run <code>sand land NAME PATH --review</code> to review a checkout's diff in your browser
+and save comments where the agent can read them. The server runs inside the
+VM and starts only when you open a review. See
+<a href="../../using-sand/review/">Reviewing changes in a browser</a>.</p>
 <h2 id="shell-utilities">Shell &amp; utilities</h2>
 <ul>
 <li><code>tmux</code>, <code>direnv</code>, <code>jq</code>, <code>htop</code>, and other common CLI tools</li>

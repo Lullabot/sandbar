@@ -1459,8 +1459,8 @@ out; every other page links here instead of restating them.</p>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json.lock</code>, <code>…/secrets.json.lock</code></td>
-<td>Empty advisory lock files, one per state file above. Every write takes its file's lock, re-reads the file, applies the change and writes it back, so two <code>sand</code> processes (a TUI you left open and a <code>sand create</code> in another terminal) cannot overwrite each other's entries. They hold no data.</td>
-<td>Yes — they are re-created on the next write. Deleting one while <code>sand</code> is running just means that write is unserialized.</td>
+<td>Empty files used to coordinate writes to the managed index and secrets store. Before changing either store, <code>sand</code> locks it and re-reads its current contents so concurrent processes keep each other's updates. If the lock is unavailable or the wait times out, the write proceeds without it.</td>
+<td>Delete only when no <code>sand</code> process is running. They contain no data and are re-created when needed, but deleting an active lock can allow conflicting writes.</td>
 </tr>
 <tr>
 <td><code>${LIMA_HOME:-~/.lima}</code></td>

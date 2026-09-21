@@ -1630,9 +1630,10 @@ refuse the ambiguous address, naming both VMs, instead of silently connecting
 to a coin flip.</p>
 <p><strong>Fix:</strong> the template build now strips the machine identity before
 templatizing, and the old template is recognized as stale automatically — the
-next <code>sand create</code> rebuilds it. Existing VMs keep their cloned identity,
-though, so either rebuild them from the rebuilt base (<code>sand reset NAME</code>, or <code>R</code>
-on the tile), or fix each one in place:</p>
+next <code>sand create</code> rebuilds it. Existing VMs keep the old identity. Reset them from the updated base with
+<code>sand reset NAME</code> or <code>R</code> on the tile. A reset deletes guest files unless you
+<a href="../../using-sand/tui/#choosing-what-survives">choose what to preserve</a>.
+Alternatively, fix each VM in place:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>truncate<span class="w"> </span>-s<span class="w"> </span><span class="m">0</span><span class="w"> </span>/etc/machine-id<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sudo<span class="w"> </span>reboot
 </code></pre></div>
 <p>On its next boot the guest generates a fresh identity and gets its own lease.</p>

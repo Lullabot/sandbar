@@ -1976,23 +1976,23 @@
 <li><a href="#sand"><code>sand</code></a> — no arguments — launches the interactive TUI.</li>
 <li><a href="#sand-create"><code>sand create</code></a> — headless, non-interactive VM provisioning.</li>
 <li><a href="#sand-reset-name"><code>sand reset NAME</code></a> — rebuild an existing VM from its base
-  image, optionally keeping the Claude login or the project.</li>
+  image, optionally preserving selected directories or the whole guest home.</li>
 <li><a href="#sand-shell-name"><code>sand shell NAME</code></a> — attach to a running VM's persistent
   tmux session.</li>
 <li><a href="#sand-paste-image-name"><code>sand paste-image NAME</code></a> — stage an image from the
   host clipboard on a running VM's guest clipboard.</li>
 <li><a href="#sand-land-name"><code>sand land NAME</code></a> — list a VM's git checkouts, or open a
-  draft PR / browser / <a href="../review/">browser-based review</a> for one of them.</li>
+  draft PR, a branch page, or a <a href="../review/">browser review</a>.</li>
 <li><a href="#sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></a> — publish
   a checkout's local commits to a drupal.org issue fork.</li>
 <li><a href="#sand-version-sand-version"><code>sand version</code></a> / <code>sand --version</code> — print
   the build identity.</li>
 </ul>
 <p>Any other first argument is an unknown subcommand and exits <code>2</code>.</p>
-<p>Each headless command is the same verb as a TUI key, under the same name and
-sharing the same implementation: <code>sand create</code> is the form behind <code>n</code>, <code>sand
-reset</code> is <code>R</code>, <code>sand shell</code> is <code>S</code>, <code>sand land</code> is <code>l</code>, <code>sand publish</code> is the
-Landing pane's publish action, <code>sand paste-image</code> is <code>v</code>. Whichever you reach for, the gates, defaults and bookkeeping are the same.</p>
+<p>The CLI commands also have TUI actions: <code>n</code> creates a VM, <code>R</code> resets it,
+<code>S</code> opens a shell, <code>l</code> opens Landing, and <code>v</code> pastes an image from the board.
+The Landing pane also offers publishing to drupal.org. The CLI and TUI share
+the checks and operations behind these actions.</p>
 <h2 id="sand"><code>sand</code></h2>
 <p>Run with no arguments, <code>sand</code> launches the interactive TUI: it lists
 instances, streams a build's progress, and drives the same create/reset/
@@ -2141,7 +2141,7 @@ not a prompt.</p>
 <td><code>--with-codex</code></td>
 <td>bool</td>
 <td><code>false</code></td>
-<td>Install OpenAI Codex in the base image — one of two <strong>opt-in</strong> toolset flags.</td>
+<td>Install OpenAI Codex in the base image. Disabled by default.</td>
 </tr>
 <tr>
 <td><code>--with-ddev</code></td>
@@ -2168,8 +2168,7 @@ VM. A flag you don't pass adopts whatever the existing base was actually
 built with (read back from its version stamp), so you only need to state a
 selection once; passing a flag explicitly always wins.</p>
 <h3 id="vm-names">VM names</h3>
-<p>A VM's name has to be acceptable to whichever backend the VM is created on,
-and <strong>the backends do not agree about what that means</strong>:</p>
+<p>Lima and Proxmox accept different VM names:</p>
 <table>
 <thead>
 <tr>
@@ -2181,45 +2180,38 @@ and <strong>the backends do not agree about what that means</strong>:</p>
 <tbody>
 <tr>
 <td><code>dev-box</code></td>
-<td>✅</td>
-<td>✅</td>
+<td>Allowed</td>
+<td>Allowed</td>
 </tr>
 <tr>
 <td><code>test_vm</code></td>
-<td>✅</td>
-<td>❌ — Proxmox requires a DNS name, which has no underscores</td>
+<td>Allowed</td>
+<td>Rejected: underscores are not allowed in DNS names.</td>
 </tr>
 <tr>
 <td><code>web--1</code></td>
-<td>❌ — Lima allows no doubled separator</td>
-<td>✅</td>
+<td>Rejected: separators must be single characters.</td>
+<td>Allowed</td>
 </tr>
 <tr>
 <td><code>-web</code>, <code>web-</code></td>
-<td>❌</td>
-<td>❌</td>
+<td>Rejected</td>
+<td>Rejected</td>
 </tr>
 <tr>
 <td><code>my vm</code></td>
-<td>❌</td>
-<td>❌</td>
+<td>Rejected</td>
+<td>Rejected</td>
 </tr>
 </tbody>
 </table>
-<p><code>dev-box</code> — letters and digits separated by single hyphens, starting and
-ending with a letter or digit, 63 characters or fewer — is accepted
-everywhere, and is the shape to reach for if you ever move a VM between
-profiles.</p>
-<p><code>sand create</code> and the TUI's create form both check the name against the
-target backend's rule <strong>before</strong> anything is built, and refuse with a message
-naming the offending character. Without that check the rejection arrives from
-inside the clone, minutes in, by which point the TUI has a tile for a VM that
-does not exist — and the cleanup delete then fails in its own right, against
-an instance that was never created.</p>
-<p>The check applies to <strong>new</strong> VMs only. <code>sand create --recreate</code>, <code>sand reset</code>
-and the TUI's Reset all skip it: they target a VM that already exists, whose
-name the backend accepted when it was made, so applying today's rule could
-only strand a VM you already have with no way to rebuild it.</p>
+<p>For a name accepted by both, use ASCII letters and digits separated by
+single hyphens, with a letter or digit at each end and no more than 63
+characters. For example: <code>dev-box</code>.</p>
+<p><code>sand create</code> and the TUI create form check the name before building and
+explain any invalid character or format. Reset operations keep the existing
+name and skip this check, so a VM created under older naming rules can
+still be rebuilt.</p>
 <h3 id="there-is-no-ref-flag">There is no <code>--ref</code> flag</h3>
 <p>If you go looking for one — the original bash provisioner had <code>--ref</code> to pin
 the git ref of a checked-out playbook — it does not exist here, deliberately.
@@ -2288,35 +2280,21 @@ VM's persistent disk and never appears in a process listing.</p>
   pick up a playbook or dependency change that a VM cloned from it right now
   is not going to get, or if the base image is corrupted. It is independent of
   <code>--recreate</code> and the two may be combined.</li>
-<li><strong><code>--recreate</code></strong> deletes and re-clones <strong>this VM</strong> (<code>--name</code>) from the
-  (possibly still-old) base image. It is the older spelling of
-  <a href="#sand-reset-name"><code>sand reset NAME</code></a> and does exactly what that command does
-  with neither preserve flag: the same managed-VM gate, the same recorded
-  settings, the same bookkeeping. Prefer <code>sand reset</code> in new scripts — it is the
-  same verb the TUI calls Reset, and it is the only spelling that can keep
-  anything from inside the guest.</li>
+<li><strong><code>--recreate</code></strong> deletes and re-clones <strong>this VM</strong> (<code>--name</code>). It uses the
+  VM's recorded settings for flags you omit, including its base image,
+  resources, hostname, Git identity, and clone URL. Explicit flags override
+  those settings; for example, <code>--recreate --disk 200GiB</code> changes the disk
+  size. The target must already be managed by <code>sand</code>.</li>
 </ul>
-<p>A recreate rebuilds a VM <code>sand</code> already knows, so <strong>every flag you leave off
-  comes from that VM's own recorded settings</strong> — its base image, sizing,
-  hostname, git identity and clone URL — rather than from this command's
-  defaults. That makes <code>sand create --recreate --name mybox</code> mean "give me this
-  VM back", not "give me a default VM with this name". A flag you <em>do</em> pass
-  still wins, so <code>--recreate --disk 200GiB</code> remains the way to resize one.</p>
-<p><code>--clone-url</code> is the exception: <code>--recreate --clone-url ...</code> is <strong>refused</strong>.
-  A rebuild keeps the VM's project, and asking to change it in the same breath
-  used to leave the old checkout stranded beside a freshly cloned different
-  repo. Rebuild the VM as it is with <code>sand reset mybox</code>, or create another VM
-  for the other repo. (The TUI's reset form locks the same field.)</p>
-<p>The one thing that is <em>not</em> remembered is <code>--clone-token</code>: tokens are never
-  written to the managed index (see <a href="#-clone-token-is-a-credential">credential
-  handling</a>). If the recorded <code>--clone-url</code>
-  points at a private repo, pass <code>--clone-token</code> again or the clone inside the
-  VM will fail; <code>sand</code> warns when it reuses a recorded URL with no token.</p>
-<p>What a recreate does <strong>not</strong> do is preserve anything inside the guest: the
-  disk is deleted. To keep the Claude Code login or the project checkout across
-  a rebuild, use <a href="#sand-reset-name"><code>sand reset</code></a>'s <code>--preserve-claude</code> /
-  <code>--preserve-project</code>, or the TUI's equivalent toggles (<a href="../tui/#resetting-a-vm">The
-  TUI</a>).</p>
+<p>Prefer <a href="#sand-reset-name"><code>sand reset NAME</code></a> in new scripts. It performs
+  the same rebuild and also lets you preserve guest data. <code>--recreate</code>
+  always deletes everything on the guest disk.</p>
+<p>You cannot pass <code>--clone-url</code> with <code>--recreate</code>: a rebuild keeps the
+  recorded project URL. Create another VM to work on a different repository.</p>
+<p>Tokens are never recorded in the managed index. If the recorded clone URL
+  points to a private repository, pass <code>--clone-token</code> again. Without it,
+  <code>sand</code> warns that the clone may fail. See
+  <a href="#-clone-token-is-a-credential">credential handling</a>.</p>
 <h3 id="disk-sizing">Disk sizing</h3>
 <p>The base image is always built at a fixed <strong>20GiB floor</strong>
 (<code>vm.BaseDiskFloor</code>), regardless of <code>--disk</code> — <code>--disk</code> sizes the <em>clone</em>, not
@@ -2418,23 +2396,20 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <em>after</em> flags are parsed, not at registration time — see the flags table
 above.)</p>
 <h2 id="sand-reset-name"><code>sand reset NAME</code></h2>
-<p>Delete a sand-managed VM and clone it fresh from its base image, keeping its
-name, its project, and every setting it was built with. This is the headless
-spelling of the TUI's <code>R</code> (<a href="../tui/#resetting-a-vm">Resetting a VM</a>) — same
-gate, same defaults, same preserve options.</p>
+<p>Rebuild a VM managed by <code>sand</code> from its base image. The name, project URL,
+and recorded settings are kept; <strong>guest files are deleted unless you choose
+a preserve option</strong>. This is the CLI equivalent of <code>R</code> in the TUI
+(<a href="../tui/#resetting-a-vm">Resetting a VM</a>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w">                                    </span><span class="c1"># clean rebuild, same settings</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-claude<span class="w">                  </span><span class="c1"># keep the Claude Code login</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-claude<span class="w"> </span>--preserve-project
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve<span class="w"> </span>~/src/app<span class="w"> </span>--preserve<span class="w"> </span>~/scratch/spike
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-home<span class="w">                    </span><span class="c1"># keep everything in ~</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB<span class="w">            </span><span class="c1"># rebuild bigger</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve<span class="w"> </span><span class="s1">'~/src/app'</span><span class="w"> </span>--preserve<span class="w"> </span><span class="s1">'~/scratch/spike'</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-home<span class="w">                    </span><span class="c1"># keep the guest home</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>sand<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB<span class="w">            </span><span class="c1"># change CPU and memory</span>
 </code></pre></div>
-<p>It is <strong>gated</strong>: <code>sand</code> refuses a target that is not a sand-managed VM, since a
-reset clones from a sandbar base image and would otherwise replace whatever
-instance it was pointed at. Ownership is resolved from the VM's provenance
-marker first, then the managed index — the same resolution <code>sand shell</code> uses,
-so a VM created by another controller on the same host is still resettable.</p>
-<p>Everything inside the guest is destroyed unless you ask for it back:</p>
+<p><code>sand</code> refuses to reset a VM it does not manage. It checks the VM's ownership
+marker first, then the managed index. You can reset a VM created by another
+<code>sand</code> controller on the same host.</p>
 <table>
 <thead>
 <tr>
@@ -2445,49 +2420,45 @@ so a VM created by another controller on the same host is still resettable.</p>
 <tbody>
 <tr>
 <td><code>--preserve-claude</code></td>
-<td><code>~/.claude</code> and <code>~/.claude.json</code> — the Claude Code login and its history.</td>
+<td><code>~/.claude</code> and <code>~/.claude.json</code>: the Claude Code login and history.</td>
 </tr>
 <tr>
 <td><code>--preserve-project</code></td>
-<td>The cloned project's per-org directory: the checkout, its uncommitted work, and the <code>.env</code> beside it. Also <strong>skips the re-clone</strong>, so a private repo needs no token.</td>
+<td>The project's organisation directory, including the checkout, uncommitted work, and <code>.env</code>. Skips cloning again if the checkout is present, so a private repository needs no clone token.</td>
 </tr>
 <tr>
 <td><code>--preserve PATH</code></td>
-<td>One more directory inside the guest home — <strong>any</strong> git checkout or linked worktree, whether <code>sand</code> cloned it or you made it yourself. Repeatable.</td>
+<td>A directory inside the guest home, including a Git checkout or linked worktree. Repeat for more directories.</td>
 </tr>
 <tr>
 <td><code>--preserve-home</code></td>
-<td>The <strong>entire</strong> home directory. Implies every flag above.</td>
+<td>The guest home, including everything above, except <code>~/.ssh/authorized_keys</code>.</td>
 </tr>
 </tbody>
 </table>
-<p><code>--preserve</code> takes an absolute guest path (<code>/home/you/src/app</code>), a tilde path
-(<code>~/src/app</code>) or a home-relative one (<code>src/app</code>). Run
-<a href="#sand-land-name"><code>sand land NAME</code></a> to see the checkouts a VM actually holds —
-that is the same sweep the TUI's reset form builds its list from. A path
-<strong>outside</strong> the guest home is refused before the VM is touched, so a mistake
-costs you a retyped command, not a rebuilt VM.</p>
-<p><code>--preserve-home</code> is the option for the ordinary reason to rebuild a VM that is
-working perfectly well: picking up playbook changes. The whole home is copied
-out, the VM is rebuilt from a current base image, the home is copied back, and
-<em>then</em> the playbook runs on top of it — so the files Ansible owns are freshly
-rendered while everything else is exactly as you left it. It is also the
-slowest and largest thing a reset can do, and <code>~/.ssh/authorized_keys</code> is the
-one file it deliberately leaves behind (the rebuilt VM needs the key Lima just
-installed, not the old VM's).</p>
-<p>All of these copy that data out of the VM to a private (<code>0700</code>) host directory
-and restore it into the rebuilt VM, then delete the copy. <strong>Do not preserve
-anything from a VM you believe is compromised</strong> — you would be copying its
-Claude Code login and its project token onto your workstation. See
-<a href="../../reference/security-model/">Security Model</a>.</p>
-<p>Anything you do not name is gone with the disk: other forges, <code>~/.ssh</code>,
-<code>~/.config/gh</code>, shell history, and everything under <code>/srv</code> (which is outside
-the home directory and so cannot be preserved at all).</p>
+<p><code>--preserve</code> accepts an absolute guest path (<code>/home/you/src/app</code>), a quoted
+tilde path (<code>'~/src/app'</code>), or a home-relative path (<code>src/app</code>). Quote <code>~</code>
+so your workstation's shell does not expand it to your host home directory.
+Run <a href="#sand-land-name"><code>sand land NAME</code></a> to list cached checkout paths. Paths
+outside the guest home are rejected before the VM is deleted.</p>
+<p>Use <code>--preserve-home</code> to keep your files while updating a working VM. The
+home is copied back before the provisioning playbook runs, so Ansible can
+update the files it manages. The rebuilt VM keeps its new
+<code>~/.ssh/authorized_keys</code> so <code>sand</code> can still connect. Preserving the whole
+home copies more data than preserving individual directories.</p>
+<p>Preserved data passes through a private (<code>0700</code>) directory on your
+workstation. After a successful reset, <code>sand</code> removes that copy. If the
+reset fails before attempting to delete the VM, it also removes the copy:
+the original VM still has the data. If deletion has been attempted, <code>sand</code>
+keeps the archives and prints their path for recovery.</p>
+<p><strong>Do not preserve data from a VM you suspect is compromised.</strong> The copy can
+include credentials and anything an agent wrote in the selected directories.
+See <a href="../../reference/security-model/">Security Model</a>.</p>
+<p>Files outside the directories you preserve are deleted. Nothing outside the
+guest home, such as <code>/srv</code> or <code>/opt</code>, can be preserved by these options.</p>
 <h3 id="watching-a-copy-run">Watching a copy run</h3>
-<p>A preserved home of a few gigabytes — a <code>node_modules</code>, a Go build cache, a
-year of agent logs — takes minutes to copy out and minutes to put back, so both
-halves report themselves every couple of seconds, in the TUI's progress log and
-on the building tile as well as on <code>sand reset</code>'s own output:</p>
+<p>Large directories can take several minutes to back up and restore. <code>sand</code>
+reports progress in the CLI output, the TUI progress log, and the VM tile:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>==&gt; Backing up home…
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>==&gt; Backing up home: 910 MB, 76 MB/s
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>==&gt; Backed up home: 1.6 GB in 24s, 68 MB/s
@@ -2495,17 +2466,14 @@ on the building tile as well as on <code>sand reset</code>'s own output:</p>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>==&gt; Restoring home: 59% of 1.6 GB, 82 MB/s
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>==&gt; Restored home: 1.6 GB in 21s, 78 MB/s
 </code></pre></div>
-<p>The restore can show a percentage because the archive's size is known before it
-starts; a backup cannot, because how far a tree compresses is not known until
-the copy ends, so it reports the bytes and the rate instead. A copy that
-finishes in under one reporting interval says nothing at all.</p>
-<p>The rate is worth a glance the first time. The archive is compressed <strong>inside
-the VM</strong>, with <code>zstd</code> where the guest has it and <code>gzip</code> where it does not — and
-gzip is several times slower on a large tree. <code>zstd</code> joined the image's package
-list after some existing VMs were built, and a reset does not install packages,
-so a VM cloned from an older base keeps falling back to gzip every time; the
-copy says so when it happens. <code>sand create --rebuild</code> refreshes the base image
-so new VMs get it.</p>
+<p>Backup progress shows bytes copied and transfer rate. Restore progress also
+shows a percentage, because the completed archive's size is known. Copies
+that finish before the first reporting interval have no progress updates.</p>
+<p>Archives are compressed inside the source VM using <code>zstd</code> when available,
+or the slower <code>gzip</code> otherwise. <code>sand</code> reports when it falls back to gzip.
+An older source VM may lack zstd; refreshing the base image affects future
+clones, not the VM being backed up. <code>sand create --rebuild</code> rebuilds the base
+before creating a VM.</p>
 <h3 id="flags_1">Flags</h3>
 <table>
 <thead>
@@ -2617,22 +2585,17 @@ so new VMs get it.</p>
 </table>
 <p><code>NAME</code> is required (exactly one positional argument), and flags may appear
 before or after it.</p>
-<p><strong>A flag you omit means "whatever this VM already was"</strong>, taken from its own
-recorded settings rather than from any default — which is what makes <code>sand
-reset web</code> mean "give me this VM back". A flag you pass wins, and the result is
-recorded, so the <em>next</em> reset defaults to what this one produced.</p>
+<p>Omitted flags use the VM's recorded settings. Explicit flags override them,
+and the new settings become the defaults for the next reset.</p>
 <h3 id="there-is-no-clone-url">There is no <code>--clone-url</code></h3>
-<p>A reset rebuilds the VM it is pointed at, project included. Pointing it at a
-different repo would make it a different VM: the preserve option is named for
-the org directory the VM <em>has</em>, so a changed URL means asking to keep a tree
-and having the old one discarded, and even without preserving you would get the
-new repo cloned beside a stranded old checkout. To work on another repo, make
-another VM with <code>sand create</code>. <code>sand create --recreate --clone-url ...</code> is
-refused for the same reason, and the TUI's reset form locks the same field.</p>
-<p>There is no <code>--base-name</code> either (the base comes from the VM's own provenance
-record — resetting onto a different base is a create), and no <code>--rebuild</code>: that
-one acts on the <strong>shared</strong> base image every other VM clones from, so it stays on
-<code>sand create</code> where it cannot be a side effect of rebuilding one VM.</p>
+<p>A reset keeps the VM's recorded project URL. This ensures the project named
+by a preserve option is the project restored after the rebuild. To work on
+another repository, create another VM with <code>sand create</code>.
+<code>sand create --recreate --clone-url ...</code> is also rejected, and the TUI locks
+the repository URL during a reset.</p>
+<p>There is no <code>--base-name</code>: a reset uses the VM's recorded base image. There
+is also no <code>--rebuild</code>, which replaces the shared base image and belongs to
+<code>sand create</code>.</p>
 <h3 id="secrets-are-re-applied">Secrets are re-applied</h3>
 <p>A reset ends by writing the VM's host-stored <a href="../secrets/">secrets</a> into the
 rebuilt guest, so the VM comes back with the environment it had. <code>sand create</code>
@@ -2875,20 +2838,17 @@ refused (rather than ignored) alongside any other action.</p>
   reviewing uncommitted or unpushed work is the point. See
   <a href="../review/">Reviewing changes in a browser</a> for the full workflow.</li>
 </ul>
-<p><code>sand land</code> never pushes or commits — it only reads what the guest already
-has and, for <code>--pr</code>, calls <code>gh</code> on the workstation. No code is copied out of
-the VM by any of the three actions: with <code>--review</code> the diff is rendered by a
-server running <em>inside</em> the VM, and only a browser tab on your workstation
-talks to it over its own loopback (see
-<a href="../review/#reachability">Reachability</a>).</p>
-<p><code>--review</code> is the one action that <strong>writes</strong> to the checkout: submitting a
-review saves <code>review.xml</code> into the checkout root (or wherever a project's
-<code>.self-review.yaml</code> points <code>outputFile</code>), which is the whole delivery
-mechanism — that file is what you hand to the agent. It is untracked, and it
-is deliberately excluded from any subsequent review's own diff, but nothing
-adds it to your <code>.gitignore</code>. If an agent in that VM runs <code>git add -A</code>, it
-will commit your review comments along with everything else, so add
-<code>review.xml</code> to the repository's ignore rules if that matters to you.</p>
+<p><code>sand land</code> does not commit or push. With <code>--pr</code>, it reads the guest's
+metadata and calls <code>gh</code> on the workstation. With <code>--review</code>, the server runs
+inside the VM and sends the diff to your browser over a loopback connection.
+It does not copy a checkout onto your workstation. See
+<a href="../review/#reachability">Reachability</a>.</p>
+<p>Submitting a review saves <code>review.xml</code> in the guest checkout, or at the
+<code>output-file</code> path configured for self-review. The agent can read that file
+directly. The base image adds the default review files and installed skills
+to the guest user's global Git ignore file. See
+<a href="../review/#keeping-review-files-out-of-commits">Keeping review files out of commits</a>
+if you use a custom ignore file or already track those files.</p>
 <h2 id="sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></h2>
 <p>Publish <code>PATH</code>'s local commits (inside the VM named <code>NAME</code>) to the
 drupal.org issue fork for issue <code>ISSUE</code>, using the workstation's own
@@ -2930,8 +2890,8 @@ there is nothing to derive and <code>sand publish</code> says so rather than gue
 <p><code>sand publish</code> refuses immediately, before touching the VM or drupal.org at
 all, if no workstation drupal.org PAT is on file — see
 <a href="../drupalorg-publishing/#setup">Setup</a> for where that file goes. Given a
-running VM and a PAT, it collects <code>PATH</code>'s change set, resolves the
-destination, prints the full confirmation (every commit, author, and file
+running VM and a PAT, it resolves the destination, collects <code>PATH</code>'s change
+set, prints the full confirmation (every commit, author, and file
 change — never a summary), and then requires an explicit human act before
 publishing anything:</p>
 <ul>
@@ -2958,15 +2918,13 @@ published commits. That offer is a <strong>separate</strong> question from <code
 confirms only the publish; without a terminal the command to run is printed
 instead. See
 <a href="../drupalorg-publishing/#your-checkout-after-a-publish">Your checkout after a publish</a>.</p>
-<p>If <code>PATH</code> has no commits beyond what the fork branch already holds and what
-the canonical project's base branch already carries, <code>sand publish</code> says so
-and exits cleanly without prompting for anything. Resolving the destination
-is what tells it which base branch that is, so this answer now costs one
-anonymous drupal.org read rather than coming straight off the guest.</p>
-<p>If the range to publish contains a <strong>merge commit</strong>, <code>sand publish</code> refuses
-it outright, names the merge, and publishes nothing — a merge cannot be
-expressed through the content API. Rebase onto the project's base branch
-instead of merging that branch into yours; see
+<p>If every local commit is already in the checkout's upstream branch or the
+canonical project's base branch, <code>sand publish</code> reports nothing to publish
+and exits without prompting. It first reads the destination anonymously
+from drupal.org to identify that base branch.</p>
+<p>If the range contains a <strong>merge commit</strong>, <code>sand publish</code> names it and stops
+without publishing anything. Rebase onto the project's base branch before
+your first publish. See
 <a href="../drupalorg-publishing/#rebase-onto-the-base-branch-dont-merge-it-in">Rebase onto the base branch</a>.</p>
 <p>The printed report lists every change-set commit in order — its status
 (<code>landed</code>, <code>already-present</code>, <code>failed</code>, or <code>not-attempted</code>) and its SHA on
