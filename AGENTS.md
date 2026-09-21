@@ -1041,6 +1041,50 @@ provider's `resetInstance`) drive it rather than restating the rules.
   and a handler would never fire. It is also `renew` and never `reconfigure`
   — reconfigure drops the address the provisioning ssh session is riding on.
 
+## VM naming is a BACKEND rule, checked only on the way IN (read before touching `Provider.ValidateName`)
+
+- **There is no single naming rule, and there must not be one.** Lima accepts
+  `test_vm` and refuses `test--vm`; Proxmox does the exact opposite, because its
+  API declares the VM `name` parameter as a `dns-name`. Neither set contains the
+  other. `Provider.ValidateName` is therefore per-backend
+  (`lima.ValidateInstanceName`, `pve.ValidateVMName`), and the rule cannot move
+  into `vm.CreateConfig.Validate` — that is a pure per-value check that knows
+  nothing about where the VM is going, so it would have to pick one backend's
+  rule and be wrong for the other in one of two directions: refusing a name Lima
+  would have taken, or admitting one Proxmox will reject, which is the failure
+  the check exists to prevent.
+- **Lima's rule is transcribed from limactl's own error message, not from
+  documentation — because there is none.** `TestValidateInstanceNameAgainstRealLimactl`
+  (internal/lima) is the standing guard that the transcription still holds: it
+  asks a real `limactl` about each name using a deliberately incomplete stdin
+  template, so a name limactl accepts gets as far as complaining about the
+  template and one it refuses never does. No VM is booted and nothing is created.
+  It skips when limactl is absent, the same bargain the other real-limactl guards
+  strike. **Length is deliberately excluded from that comparison**: limactl's
+  ceiling is whatever keeps `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` under
+  `UNIX_PATH_MAX`, so it moves with the length of the Lima home and is not a
+  constant to assert against. `lima.MaxInstanceNameLen` is a fixed, stricter cap.
+- **The check runs where the name is still EDITABLE, and nowhere else.** The
+  create form (`submitForm`) and `sand create` (`checkBackendName`) ask it; the
+  TUI's Reset (`submitReset`), `sand reset` and `sand create --recreate` all
+  deliberately do not. Those three target a VM that ALREADY EXISTS, whose name
+  the backend accepted when it was made and which no form field can change — so a
+  rule it now failed would be an error with nothing to act on, and would strand a
+  VM predating the rule with no way to be rebuilt. This is the same reasoning
+  `checkNotBusy` is placed by, and it is why `checkBackendName` is a named
+  function rather than an inline call: the exemption is the part worth testing.
+- **It must stay free of I/O.** It runs on a keystroke, on the submit path of a
+  form the user is still editing, so it may not reach the Proxmox API or spawn a
+  `limactl` — an unreachable endpoint would hang the TUI on enter. Reachability
+  is `Preflight`'s job. `TestValidateNameMakesNoCalls` pins this.
+- **The error text IS the feature.** It names the offending character and the
+  backend that objects, because the alternative is what the backends themselves
+  say: PVE's `400 Parameter verification failed. (name: invalid format - value
+  does not look like a valid DNS name)`, arriving from inside a clone task, and
+  limactl's raw regexp. The Proxmox arm returns pve's error UNWRAPPED for the
+  same reason — a `proxmox: ` prefix in front of "Proxmox requires a DNS name"
+  spends a line of the create form's budgeted help area saying it twice.
+
 ## Conventions
 
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**

@@ -72,7 +72,7 @@ var fieldLabels = []string{
 // create a fine-grained token and the recommended (deliberately limited)
 // permissions.
 var fieldInfo = []string{
-	"Required. The VM's name — also the name you'll pass to `sand shell`. Must differ from the base image.",
+	"Required. The VM's name, and the name you'll pass to `sand shell`. Letters, digits and '-'; must differ from the base image.",
 	"VM hostname inside the guest. Blank → same as the instance name.",
 	"Primary VM user. Blank → your host username (a matching user is created in the guest).",
 	"Required. git user.name written into the VM's git config.",
@@ -994,6 +994,27 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = err
 		return m, nil
 	}
+	// Resolve the provider NOW and capture it by value: the run closure executes
+	// on beginStream's goroutine, so it must not read m.members (which the Update
+	// goroutine mutates). The provider itself is immutable for the session.
+	prov := m.formProvider()
+	if prov == nil {
+		m.formErr = fmt.Errorf("this connection profile is not available")
+		return m, nil
+	}
+	// Ask the BACKEND about the name before anything is started, for the same
+	// reason checkNotBusy sits here: this is the last moment the name is still an
+	// editable field rather than a running job. A name the backend refuses used
+	// to be found out at clone time — far enough in that the VM already had a
+	// tile, which then stayed red for the rest of the session while the cleanup
+	// delete failed in its own turn against an instance that never existed.
+	// cfg.Validate cannot make this check: the rule belongs to whichever backend
+	// the selected profile points at, and the backends disagree (see
+	// provider.Provider.ValidateName).
+	if err := prov.ValidateName(cfg.Name); err != nil {
+		m.formErr = err
+		return m, nil
+	}
 	if err := m.checkNotBusy(cfg.Name); err != nil {
 		m.formErr = err
 		return m, nil
@@ -1004,14 +1025,6 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// under the base lock inside CreateVMWithOptions, not as a pre-lock delete
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
-	// Resolve the provider NOW and capture it by value: the run closure executes
-	// on beginStream's goroutine, so it must not read m.members (which the Update
-	// goroutine mutates). The provider itself is immutable for the session.
-	prov := m.formProvider()
-	if prov == nil {
-		m.formErr = fmt.Errorf("this connection profile is not available")
-		return m, nil
-	}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		return prov.Create(ctx, c, opts, out)
 	}
@@ -1057,6 +1070,11 @@ func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 // not shrink.
 func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	cfg = m.resetConfig(cfg)
+	// Deliberately NOT name-checked the way submitForm is. A reset's name is the
+	// locked target's, not something the form can edit (see resetConfig), so a
+	// rule the name failed would be an error with no field to fix it in — and it
+	// would refuse the reset of a VM the backend itself was happy to create, e.g.
+	// an underscore-bearing Lima instance made before any of this existed.
 	if err := cfg.Validate(); err != nil {
 		// Validate now enforces the base-disk floor for every entrypoint (a clone
 		// cannot shrink below it), so the reset path no longer needs its own check.

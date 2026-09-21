@@ -1512,6 +1512,19 @@ func (p *proxmoxProvider) HostFiles() lima.HostFiles { return p.files }
 
 // --- preflight ------------------------------------------------------------------
 
+// ValidateName applies PVE's `dns-name` rule, the format its API declares for a
+// VM's name parameter. It is the same instinct as Preflight's local key read: the
+// cheapest check first, so a typo does not surface as a clone task failing on the
+// far side of the API. See Provider.ValidateName.
+//
+// Returned unwrapped, unlike Preflight's errors: this one is rendered under the
+// create form's Name field, where it has to fit, and pve's message already names
+// Proxmox as the party with the rule. A "proxmox: " prefix in front of "Proxmox
+// requires a DNS name" would cost a line of a budgeted help area to say it twice.
+func (p *proxmoxProvider) ValidateName(name string) error {
+	return pve.ValidateVMName(name)
+}
+
 // Preflight verifies everything a lifecycle operation will need, and names the
 // specific cause of each failure — the whole point being that an operator gets
 // "the token lacks Pool.Audit on /pool/sandbar" instead of a 403 surfacing

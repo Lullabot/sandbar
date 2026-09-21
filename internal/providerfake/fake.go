@@ -57,6 +57,7 @@ type Provider struct {
 	GuestPathFunc         func(name, path string) string
 
 	PreflightFunc     func() error
+	ValidateNameFunc  func(name string) error
 	HostResourcesFunc func() provider.HostResources
 	HostUserFunc      func() string
 	HostFilesFunc     func() lima.HostFiles
@@ -238,6 +239,17 @@ func (f *Provider) GuestPath(name, path string) string {
 func (f *Provider) Preflight() error {
 	if f.PreflightFunc != nil {
 		return f.PreflightFunc()
+	}
+	return nil
+}
+
+// ValidateName defaults to accepting every name: a consumer test that is not
+// about naming rules should never have its VM refused by the double, and the
+// backends themselves disagree about the rule anyway (see
+// provider.Provider.ValidateName), so there is no default a fake could borrow.
+func (f *Provider) ValidateName(name string) error {
+	if f.ValidateNameFunc != nil {
+		return f.ValidateNameFunc(name)
 	}
 	return nil
 }
