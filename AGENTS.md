@@ -30,19 +30,16 @@ it is not where prose belongs.
   then reuses the SSH transport for shells/copy, satisfies `HostFiles` with a
   local per-endpoint state dir (no "host where limactl runs" exists), and
   implements `Provenancer` via PVE tags + the description field rather than a
-  sidecar marker. `Provider.ForwardArgv(v, hostPort, guestPort)` returns the
-  argv of a long-running process that makes a guest loopback port reachable
-  on the workstation's loopback (the two port numbers are independent — the
-  guest's is chosen by the server there, the workstation's by sand), or
-  **nil when the backend already does so on its own** — local Lima returns nil (Lima auto-forwards
-  guest loopback to the SAME port on its own host's loopback, and for local
-  Lima that host IS the workstation); remote Lima and Proxmox both return an
-  `ssh -N -L` argv (remote Lima against the configured `SSHHost`, bridging to
-  where Lima already landed the port; Proxmox straight to the guest address).
-  Follows the `AttachArgv`/`RunArgv` idiom: pure, no I/O, so each backend's
-  argv is asserted exactly with no real ssh, network or VM. `internal/landreview`
-  is the caller: it execs a non-nil argv as a child and kills it when the
-  forward is no longer needed. There is no
+  sidecar marker. `Provider.ForwardArgv(v, hostPort, guestPort)` returns
+  arguments for a process that forwards a guest loopback port to workstation
+  loopback. The ports can differ. It returns nil when the backend already
+  forwards ports: local Lima uses the same port on guest and workstation.
+  Remote Lima returns `ssh -N -L` arguments targeting the configured
+  `SSHHost`, where Lima has already forwarded the guest port. Proxmox returns
+  SSH arguments targeting the guest directly. Like `AttachArgv` and
+  `RunArgv`, this method performs no I/O; tests check its arguments without
+  SSH, a network, or a VM. `internal/landreview` starts the returned command
+  and stops it when the review ends. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
@@ -112,84 +109,67 @@ it is not where prose belongs.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
-  not directly on `Provider`. Both backends' resets share `staging.go`'s
-  `PlanProject` (what the GUEST actually holds decides what is preserved, not
-  what the config implies) and `StageGuard`, which owns the one rule about the
-  host staging directory: the archives are a COPY until the guest is destroyed,
-  so a failure BEFORE the delete drops them (the original is still in the
-  untouched VM) and every failure after it keeps them and names the path.
-- `registry` — managed-VM index, now `(connection scope, name)`-keyed
-  (schema v3, auto-migrated on read). Each entry's connection `Scope` is
-  derived from which profile's provider created it (`LocalScope` for local
-  Lima, a remote identity like `user@host:port` for remote), so the same VM
-  name can exist independently under two different profiles and a remote
-  profile's VMs never mix with the local list. Every write goes through
-  `mutate`: take the file's `statelock`, RE-READ, apply, write. A whole-file
-  rewrite from a stale in-memory map is how a long-open TUI used to erase the
-  entry a concurrent `sand create` had just added, so `save` is called from
-  nowhere else — and `Reconcile` prunes only entries the caller already knew
-  about, since a VM another process created after this one's instance listing
-  is not evidence of a VM that went away.
-- `statelock` — the advisory file lock (`<path>.lock`, `syscall.Flock`) behind
-  `registry` and `secrets`' read-modify-write. Never fails hard: an unlockable
-  path or a holder past the wait budget proceeds unserialized, the same posture
-  `provision`'s base lock takes.
+  not directly on `Provider`. Both backends share `staging.go`'s
+  `PlanProject`, which checks what the guest actually holds before choosing
+  what to preserve. They also share `StageGuard`: before attempting to
+  delete the guest, a failure removes the staged copy because the original
+  data is still in the VM. Once deletion is attempted, every failure keeps
+  the archives and reports their path for recovery.
+- `registry` — managed-VM index keyed by connection scope and name (schema
+  v3, migrated on read). The creating provider determines the scope, such
+  as `LocalScope` for local Lima or `user@host:port` for remote Lima. This
+  keeps local and remote entries separate and lets scopes have VMs with the
+  same name. Every write must go through `mutate`: lock the file with `statelock`,
+  re-read it, apply the change, then save. Saving a stale in-memory map can
+  erase another process's updates. Call `save` only from `mutate`.
+  `Reconcile` must prune only entries the caller already knew about; a VM
+  created after the caller's listing is not evidence of a deleted VM.
+- `statelock` — advisory file locks (`<path>.lock`, `syscall.Flock`) for
+  `registry` and `secrets` read-modify-write operations. If the lock cannot
+  be acquired within the wait budget, the write proceeds without it, as
+  with the provisioner's base lock.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
-- `landreview` — orchestrates ONE browser review session against ONE guest
-  checkout by driving upstream's `self-review-serve` (`ServeBinary`) in the
-  guest. **The ordering is upstream's, and it is the opposite of the obvious
-  one:** `@self-review/serve` binds an EPHEMERAL port and offers no flag to
-  request a particular one, so sand cannot choose a port and then connect. It
-  starts the server first, parses the port out of the `[serve] Review ready
-  at http://127.0.0.1:<port>/` line the server prints (`serveReadyRe`), and
-  only then builds the bridge — reserving a workstation port and starting
-  `Provider.ForwardArgv`'s child when that returns non-nil, or, on local
-  Lima, browsing the guest's own port because Lima already forwards it to the
-  same number. Readiness is an HTTP probe of `/api/config`, whose JSON
-  identifies the responder: a bare `/` would be satisfied by whatever else
-  happens to hold a colliding port, which would open the reviewer's browser
-  onto an unrelated application and then block forever. The server writing
-  `review.xml` and exiting is the completion signal. Lives here rather than
-  under `cmd/sand` because both `sand land NAME PATH --review` and the TUI's
-  Landing pane (`internal/ui`, which cannot import a `main` package) need it
-  — one orchestration, two entry points.
+- `landreview` — runs a browser review for one guest checkout using
+  `self-review-serve` (`ServeBinary`). Start the server before choosing the
+  forward: it selects a free port and has no flag for a fixed one. Parse its
+  `[serve] Review ready at http://127.0.0.1:<port>/` message with
+  `serveReadyRe`, then reserve a workstation port and run `ForwardArgv`'s
+  command. Local Lima instead uses the guest port directly. Probe
+  `/api/config` and check its JSON to identify the server; probing `/` could
+  accept an unrelated application on a colliding port. The server writes
+  `review.xml` and exits to signal completion. Keep this shared operation
+  here so both the CLI and TUI can use it; the TUI cannot import `cmd/sand`.
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
   now also keyed by connection scope — distinct from its pre-existing
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
 
-Entrypoint: `cmd/sand/main.go`. **Every headless subcommand is a TUI verb under
-the same name, and the pair shares one implementation**: `sand create` is the
-form behind `n`, `sand reset` is `R` (`cmd/sand/reset.go`), `sand shell` is `S`,
-`sand land` is `l`, `sand paste-image` is `v`. A verb that exists in only one of
-the two entrypoints is one users have to discover twice, and the drift is not
-hypothetical — `sand reset` exists because the TUI could preserve a Claude login
-or a project tree across a rebuild and the CLI's `sand create --recreate` could
-not, so the docs' own answer to a CLI user was "open the TUI".
+Entrypoint: `cmd/sand/main.go`. Keep CLI operations consistent with their
+TUI equivalents: `sand create` is `n`, `sand reset` is `R`, `sand shell` is
+`S`, `sand land` is `l`, and `sand paste-image` is `v`. Publishing is also
+available from the Landing pane. The CLI previously lacked the TUI's reset
+preserve options; shared operations prevent this kind of drift.
 
-Keep them from drifting by SHARING, not by copying: the create/reset gates and
-bookkeeping are `internal/manage` (`RecreateBase`, `RecordSuccess`,
-`Reconcile`), the host-secrets follow-up after any build is
-`cmd/sand/secrets.go`'s `settleSecrets` mirroring the TUI's `provisionDoneMsg`
-handler, and both shell entrypoints construct their guest-attach command
-exclusively via `provider.AttachArgv()` — the one place in sand that knows tmux
-exists (for local Lima) or SSH (for remote). The create/TUI paths construct
-their provider(s) via `provider.BuildFleet` over the `profiles` store's enabled
-profiles (a headless command binds only the one profile it targets; the TUI
-binds every enabled one), while a command acting on an EXISTING VM (`sand
-reset`/`shell`/`land`/`paste-image`) resolves the owning profile from the VM
-itself via `resolveVMProfile` (marker, then registry, then a live listing)
-rather than from a default.
+Create/reset checks and bookkeeping belong in `internal/manage`
+(`RecreateBase`, `RecordSuccess`, `Reconcile`). After a build,
+`cmd/sand/secrets.go`'s `settleSecrets` must match the TUI's
+`provisionDoneMsg` handling. Both shell entrypoints must use
+`provider.AttachArgv()` to construct their guest attach command.
 
-**A reset never changes which VM it is resetting.** Its name, base image and
-clone URL come from the target's own record, not from the form/flags: the TUI
-renders the name and repo as locked rows (`fieldLocked`, `internal/ui/form.go`),
-`sand reset` has no `--clone-url` at all, and `sand create --recreate
---clone-url` is refused. An editable URL made one form mean two things — the
-preserve toggle is labelled from the org the VM HAS while the clone used the
-edited URL — so "keep my project" could discard the tree it named. A different
-repo is a different VM; `n` / `sand create` makes one.
+Create and the TUI build providers through `provider.BuildFleet` from the
+enabled profiles. A CLI create binds only its target profile; the TUI binds
+all enabled profiles. Commands acting on an existing VM
+(`reset`, `shell`, `land`, `paste-image`) use `resolveVMProfile` to find its
+owning profile through the marker, registry, then live listing.
+
+**A reset keeps the target VM's identity and project.** Its name, base image,
+and clone URL come from its recorded configuration. The TUI locks the name
+and repository rows (`fieldLocked` in `internal/ui/form.go`); `sand reset`
+has no `--clone-url`; `sand create --recreate --clone-url` is rejected.
+Allowing the URL to change could make a preserve option name the old
+project while cloning a different one. Create another VM for a different
+repository.
 
 ## Build, run, format
 
@@ -622,79 +602,50 @@ every bullet, not the constraint itself.
   `internal/drupalorg/publish.go`'s file doc comment for why a failed
   replay leaves earlier commits public with no rollback, and why a re-run
   is the only recovery.
-- **A change set is collected against TWO exclusions, and the second one is
-  the canonical project's — never the fork's
-  (`internal/drupalorg/collect.go`).** `BuildCollectCommand` takes
-  `forkBase` (the checkout's upstream tracking ref) *and* `projectBase` (the
-  tip of `ForkedFromProject`'s default branch, read host-side by
-  `Client.BranchTip`), and the guest lists `HEAD --not "$forkBase"
-  "$projectBase"`. Excluding only the fork branch answers "what has not
-  reached the fork", which stops being the same set as "what this
-  contributor wrote" the moment the base branch enters `HEAD`'s ancestry —
-  a back-merge or a rebase — and the replay then lands other people's
-  already-public commits on the merge request under the PAT owner's name.
-  That shipped, and produced a real merge request; `collect_integration_test.go`
-  reproduces both shapes against real git repositories and is the guard, so
-  do not "simplify" the range back to `"<base>..HEAD"`. The second exclusion
-  must come from the canonical parent: an issue fork's own copy of the base
-  branch is not auto-synced and in practice never synced by hand, so it
-  names whatever commit the branch sat at when the fork was created.
-  Because `projectBase` is host-resolved and nothing in this flow fetches,
-  the guest may not hold that object — the script probes with `cat-file -e`
-  first and refuses with an actionable message rather than letting
-  `rev-list` die on "bad object".
-  This is also why **destination resolution now runs BEFORE collection** in
-  both surfaces (`cmd/sand/publish.go`'s `doPublish`, `internal/ui/landing.go`'s
-  `handleLandingFork` → `collectCmd`): the parent project is not known any
-  earlier. The cost is that "nothing to publish" now takes one anonymous
-  drupal.org read to discover; that is deliberate, and
-  `TestDoPublishNothingToPublishSkipsConfirmation` documents it.
-- **A missing issue branch is created from the CANONICAL PARENT, not the
-  fork's default branch (`publish.go`'s `startBranch`/`startProject`).** This
-  is the same defect as the collection one above, one layer over, and it
-  shipped for the same reason: GitLab pins a new fork's `default_branch` at
-  the commit it was forked from and never moves it, and nothing on
-  drupal.org syncs an issue fork's base branch. Measured while fixing it:
-  `issue/dubbot-3622063`'s `2.x` was at 2026-08-27 while `project/dubbot`'s
-  `2.x` was at 2026-09-17. Creating the branch from that snapshot and then
-  replaying commits collected against the CURRENT base writes today's
-  content onto a three-week-old tree, reverting the upstream delta in every
-  file both touched — a wrong merge request that looks right. An absent
-  `ParentBranch` is refused rather than falling back. Note the test fixture
-  had `forkDefault` and `parentBranch` set to the same string, so no test
-  could tell the two apart; they are now deliberately different ("10.x" vs
-  "11.x") and must stay so.
-- **A diverged fork branch is refused before the first write
-  (`checkForkDiverged`/`ForkDivergedError`).** `alreadyLandedCount` anchors
-  its ordered match at the branch TIP, so ONE foreign commit there defeats
-  the match at every length, resumption reports nothing landed, and the
-  replay restarts from commit 1 — which fails on `create` for a file the
-  branch already has ("A file with this name already exists"). Observed in
-  production on `issue/dubbot-3622063`, where all four commits were already
-  public. The guard fires on `present == 0` AND some change-set identity
-  already on the branch; `present == 0` alone is an ordinary first publish
-  onto a branch carrying other work and must NOT refuse. The comparison
-  window is whatever `branchCommits` fetched (`len(cs.Commits)`), which is
-  what keeps an old coincidence deep in the fork's history out of it. Do not
-  "improve" resumption by switching `alreadyLandedCount` to set membership —
-  its doc comment explains what the tip anchoring buys.
-- **A merge commit in the range is refused, never skipped
-  (`MergeCommitsError`).** The content API lands one commit per call from a
-  list of file actions and has no field for a second parent, so a merge is
-  not something publication can reproduce. `--no-merges` alone used to drop
-  it silently and publish whatever remained. The guest now emits `merge=`
-  lines and stops; `ParseCollect` turns them into a `*MergeCommitsError`
-  naming the SHAs and telling the developer to rebase. Keep that decision in
-  Go — the guest reports, the host decides — and keep the refusal, because
-  "publish a history that never existed" is the failure it exists to prevent.
-  A second, unrelated follow-up surfaced while investigating the withheld
-  escape hatch above: a linked git worktree silently inherits its main
-  clone's `GH_TOKEN`, because git matches `includeIf "gitdir:…"` against
-  `$GIT_DIR` — which for a worktree is
-  `<main-clone>/.git/worktrees/<name>`, not the worktree's own path — so no
-  per-worktree token is expressible through the mechanism
-  `internal/provision/gitcred.go` uses. Left unchanged by this work; see
-  "Known limitation" in `docs/using-sand/secrets.md`.
+- **Collect commits using both the fork upstream and canonical project
+  base** (`internal/drupalorg/collect.go`). `BuildCollectCommand` takes
+  `forkBase` (the checkout's upstream tracking ref) and `projectBase` (the
+  tip of `ForkedFromProject`'s default branch, read by `Client.BranchTip`
+  on the host). The guest lists `HEAD --not "$forkBase" "$projectBase"`.
+  Excluding only the fork branch can replay upstream commits introduced by
+  a merge or rebase under the PAT owner's name. The integration tests cover
+  both cases with real Git repositories; do not reduce the range to
+  `"<base>..HEAD"`. Use the canonical parent's base, because the fork's copy
+  may still point to the commit from when it was created.
+  The guest may lack the host-resolved `projectBase` object. Probe with
+  `cat-file -e` and report how to fix a missing object; collection does not
+  fetch. Resolve the destination before collection in both the CLI
+  (`doPublish`) and TUI (`handleLandingFork` → `collectCmd`), so the parent
+  is known. Even a "nothing to publish" result therefore requires anonymous
+  destination reads. `TestDoPublishNothingToPublishSkipsConfirmation`
+  checks this sequence.
+- **Create a missing issue branch from the canonical parent**
+  (`publish.go`'s `startBranch`/`startProject`). The fork's base may be old;
+  replaying changes onto it can revert upstream changes in touched files.
+  Reject a missing `ParentBranch` rather than falling back to the fork.
+  Test fixtures must use different `forkDefault` and `parentBranch` values
+  (currently `10.x` and `11.x`) so they detect use of the wrong source.
+- **Reject a diverged fork before writing**
+  (`checkForkDiverged`/`ForkDivergedError`). `alreadyLandedCount` matches
+  commits at the branch tip. An unrelated commit at that tip can prevent
+  resumption and cause replay to duplicate earlier commits or fail when
+  creating an existing file. Reject when `present == 0` and a change-set
+  identity already appears within the commits returned by `branchCommits`
+  (`len(cs.Commits)`). Do not reject `present == 0` alone: it also occurs
+  on a valid first publish. Do not replace the ordered match with set
+  membership; `alreadyLandedCount`'s comment explains why order matters.
+- **Reject merge commits in the collected range; never skip them**
+  (`MergeCommitsError`). The content API has no second-parent field, so it
+  cannot reproduce a merge. The guest emits `merge=` lines and stops;
+  `ParseCollect` produces a `*MergeCommitsError` naming the SHAs and asking
+  the developer to rebase. Keep the decision in Go and retain the refusal:
+  silently omitting merges would publish a different history.
+- **Linked worktrees inherit their main clone's directory-scoped token.**
+  Git matches `includeIf "gitdir:…"` against `$GIT_DIR`, which for a linked
+  worktree is `<main-clone>/.git/worktrees/<name>`. The mechanism in
+  `internal/provision/gitcred.go` therefore cannot assign a separate token
+  by the worktree's checkout path. See "Known limitation" in
+  `docs/using-sand/secrets.md`.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 
@@ -828,35 +779,25 @@ comment at `roles/claude-code/tasks/main.yml`.
   (`TestGuestSyncCopiesOnlyThePlaybook`) guards the stamp's correctness as
   well. Add a file to one and forget the other two, and either the guest gets
   content the stamp never sees, or the stamp churns on content the guest
-  never gets. **Keep `roles/` a single blanket embed.** An earlier version of
-  the review feature vendored a Node web app under `roles/`, which forced
-  `playbook_embed.go` to enumerate every role individually so a contributor's
-  gitignored `node_modules/` could not be swept into the binary (measured:
-  16.7 MB → 288.7 MB) and rsynced into every guest. Installing upstream's
-  published package instead removed the whole problem. Do not reintroduce a
-  role whose `files/` carry a package manager's output.
-- **The browser review UI is upstream's published package, not vendored
-  source** (`roles/self-review`). The role templates a tiny `package.json`
-  pinning `@self-review/serve` (`selfreview_version`, tracked by a
-  `renovate.json` regex manager) into one guest directory, runs `npm install`
-  there, links the CLI onto PATH, and then RUNS it to prove the install
-  works. There is no build step and no committed lockfile.
-  The one subtle part is the npm `overrides` entry, and it is load-bearing:
-  `@self-review/serve` declares `@self-review/react` as a runtime dependency
-  but does not use one — its browser client ships prebuilt in the package's
-  own `dist/client`, and `dist/cli.js`'s only non-builtin import is
-  `@self-review/core`. Left alone that unused dependency costs **310MB and
-  320 packages** against **17MB and 17**, the difference being mermaid,
-  lucide-react, @emoji-mart and @base-ui. Deleting the directory afterwards
-  does not help, because npm hoists those transitive packages to the top
-  level. So the override substitutes `@self-review/types` (a real package,
-  already in the tree, tiny) and the subtree is never fetched. The
-  verification task at the end of the role, plus the size and resolution
-  assertions in `lima-e2e`, are what keep that substitution honest — if a
-  release ever does need React at runtime, the base build fails rather than
-  every review. The upstream fix is to move that dependency to
-  `devDependencies`; when it lands, the override stops having anything to
-  substitute and can go.
+  never gets. **Keep `roles/` as a single embed entry.** Vendoring a Node
+  app there previously required listing roles individually to exclude a
+  contributor's `node_modules/`, which otherwise enlarged the binary and
+  was copied into every VM. Installing the published package avoids that.
+  Do not add package-manager output under a role's `files/` directory.
+- **Install the published browser review package** (`roles/self-review`).
+  The role creates a small `package.json` pinned by `selfreview_version`,
+  runs `npm install`, links the CLI onto PATH, and verifies it runs.
+  Renovate tracks the version. There is no build step or committed lockfile.
+  Keep the npm override until the unused dependency is removed upstream:
+  `@self-review/serve` declares `@self-review/react` at runtime, but serves
+  a prebuilt client and imports only `@self-review/core` outside Node's
+  built-ins. Replacing React with `@self-review/types` avoids its unused
+  dependency tree. For the measured release, this reduced the installation
+  from 310 MB/320 packages to 17 MB/17 packages. Deleting React afterwards
+  would leave dependencies npm installed at the top level. The role's
+  verification and `lima-e2e` size and resolution checks must stay: if a new
+  release needs React at runtime, the base build must fail. Remove the
+  override when upstream moves React to `devDependencies`.
 - **Every base mutation belongs inside the base lock held by
   `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
   refresh, and `--rebuild`'s destroy are all reached through
@@ -893,18 +834,14 @@ comment at `roles/claude-code/tasks/main.yml`.
   side of that trade. `TestTmuxConfDeployedInEveryPhase` guards it, the way
   `molecule/base` guards the same property for the timezone tasks.
 
-- **A reset's staging transfers are metered ON THE HOST, and a stage-out has no
-  percentage on purpose** (`internal/provision/stageprogress.go`). The count
-  comes from the archive file sand itself is writing (stage-out) or reading
-  (stage-in), so it needs nothing installed in the guest, works identically on
-  both backends, and cannot report bytes that did not cross. The missing
-  stage-out percentage is the part that invites a "fix": the only way to get a
-  denominator is a second full walk of the same tree (`du -sb` over hundreds of
-  thousands of files), which spends a slice of the very cost being measured on a
-  number the compressor then invalidates. Report bytes and a rate, never an
-  estimated fraction. The lines are short and lead with the numbers because the
-  TUI renders the latest `==>` banner inside a tile with as little as 36 columns
-  of content, and prose there gets ellipsised exactly where the digits are.
+- **Measure reset transfers on the host; show no backup percentage**
+  (`internal/provision/stageprogress.go`). Count bytes in the archive being
+  written during backup or read during restore. This works on both backends
+  without guest tools. Report backup bytes and rate, not an estimated total:
+  another directory scan would add work and still would not predict the
+  compressed size. Restore can use the completed archive's size. Keep
+  progress lines short and put numbers first; the tile may have only 36
+  columns and truncates the latest `==>` message.
 
 - **A provisioning failure must say WHICH LAYER failed.** Each phase runs as one
   ssh session to the guest, so an `exit status 255` from it is ssh's own status —
@@ -925,165 +862,97 @@ comment at `roles/claude-code/tasks/main.yml`.
 
 ## What a reset preserves (read before touching `internal/provision/preserve.go`)
 
-A reset destroys a VM and clones it back, so everything it keeps is copied to
-the HOST and copied in again. `preserve.go` is the single place that decides
-what is staged and, more importantly, WHEN each piece is restored; both
-backends' resets (`internal/provision`'s Lima `Reset` and the Proxmox
-provider's `resetInstance`) drive it rather than restating the rules.
+A reset copies preserved data to the host before deleting the VM, then
+restores it to the new clone. `preserve.go` decides what to copy and when to
+restore it. Both Lima's `Reset` and Proxmox's `resetInstance` must use these
+shared rules.
 
-- **Restore order is decided by what the finalize playbook does to the thing.**
-  Anything the playbook should get the LAST word over goes back BEFORE finalize
-  (the Claude login, whose `settings.json` the playbook re-renders; a whole
-  home, where getting an up-to-date build is the entire point). Anything the
-  playbook must not touch goes back AFTER (the project tree, the user's
-  hand-picked checkouts), with the finalize pass omitting `project_clone_url`
-  whenever a checkout is genuinely coming back. Getting this backwards does not
-  fail: it silently produces a VM with stale dotfiles, or a cloned-over
-  checkout.
-- **`PreserveHome` subsumes every other option by CONSTRUCTION, not
-  convention.** One archive of `~` already holds the Claude login, the project
-  and every selectable checkout, so `StagePreserve` returns early rather than
-  staging any of them again. It still PROBES for the project checkout, because
-  the playbook must be told to skip its clone — that probe is why `PlanProject`
-  was split into `probeProject` plus an archive.
-- **A preserve path must stay inside the guest home, and that check is a
-  security control.** `PreservePaths` values come from a sweep of the GUEST —
-  the lowest-trust source in the system — and end up in `tar -C <home> <rel>`
-  and, on the way back, `chown -R <user> <home>/<rel>` run as root. A `..` that
-  survived to the restore would hand a recursive chown to `/`.
-  `preservePathRel` is the only gate, it runs BEFORE the VM is deleted (so a
-  refusal costs a retyped path, not a VM), and a path that merely no longer
-  EXISTS is a note rather than a failure — the list comes from a cache.
-- **`tar`'s exit status 1 is tolerated on stage-out; every other status is
-  not.** GNU tar reserves 1 for "file changed as we read it", and the source VM
-  is running while its data is copied out, so an agent writing a log is enough
-  to produce it. Failing on it would mean "preserve my home" only ever worked
-  on an idle VM. Do not widen this to other statuses — 2 is a real failure.
-- **The archives are compressed with zstd where the guest has it, and the format
-  is read back off the archive, never remembered.** Compression runs inside the
-  guest on the critical path of a reset, so the compressor is the reset's speed:
-  on a 1.3 GB tree gzip took 54s where `zstd -T0 -3` took 2.5s and produced a
-  slightly smaller archive (`internal/provision/compress.go`). Two halves of that
-  are load-bearing. It is PROBED, not assumed — the archive is written by the
-  SOURCE VM, which may predate zstd being in the base image, and a reset that
-  refused to run there would refuse while holding the only copy of the user's
-  work, so a guest without zstd falls back to gzip. And the extract flag comes
-  from `tarDecompressFlag` sniffing the archive's magic bytes rather than from
-  anything the stage-out wrote down, because the two halves are separated by the
-  guest being destroyed and rebuilt, and bookkeeping carried across that gap is a
-  chance for the restore to disagree with the file it is restoring. The flag is
-  not optional for zstd the way it is for gzip: GNU tar auto-detects only when it
-  can seek, and a stage-in arrives on stdin. The staged files are named `.tar`,
-  not `.tgz`, for the same reason — the name must not claim a format the file may
-  not have, least of all to someone recovering data by hand from the path
-  `StageGuard.Fail` printed.
-- **The staging directory is deliberately NOT in `/tmp`.** `/tmp` is a tmpfs on
-  current Debian, and a staged archive is the only copy of the user's work
-  between the destroy and the restore; a whole home is routinely gigabytes.
-  `stageBaseDir` puts it under `XDG_STATE_HOME`, honouring an explicit `TMPDIR`
-  ahead of that — which is also how every test in this repo keeps its archives
-  off the developer's host state. A test that drives a reset with a preserve
-  option MUST set `TMPDIR`.
-- **`~/.ssh/authorized_keys` is the one thing a whole-home preserve leaves
-  behind** (`homeExcludes`). The rebuilt VM is reached over ssh with the key
-  Lima just installed; restoring the old VM's file is at best a no-op and at
-  worst a VM nobody can log into, discovered halfway through its own reset.
-- **The reset form's checkout list is read from the host-side registry
-  (`internal/checkouts`), never from a fresh sweep** — see
-  `internal/ui/resetpreserve.go`. The form opens on a key press and the VM may
-  be stopped, so contacting a guest there is not an option; the rows are as
-  stale as the last sweep and each row's help says so. The row carries the
-  ABSOLUTE guest path the sweep recorded, and that is what is acted on; the
-  `~/…` label is shortened against a GUESS at the guest home (`/home/<user>`)
-  and must never be what reaches `ResetOptions`.
-- **Reset-mode toggle indices are not stable, and tests must not assume they
-  are.** The list is whole-home, Claude, the project (only when there is one),
-  then one row per checkout. Whole-home is FIRST because it is the only row
-  that changes the rows below it, and turning it on must not REMOVE them — a row
-  that vanishes takes the focus ring's meaning with it, and a user who turns it
-  back off must find their earlier picks where they left them.
-- **Whole-home LOCKS the rows it subsumes; it does not annotate them, and it
-  does not write to them** (`formToggle.locked`, `internal/ui/form.go`). They
-  render checked — that is what the reset will actually do, whether or not the
-  row was ever ticked — and the focus walk steps over them
-  (`nextOperableToggle`), because a row the ring can land on but no key will
-  change is the "advertise it, then silently do nothing" pattern the command
-  registry exists to keep out of this UI. Two things follow. The underlying
-  model fields are left ALONE rather than forced true, so the user's own picks
-  are still there when whole-home goes back off — the display is what changed,
-  not their answer. And the lock carries `lockedToggleSuffix` (" (locked)", the
-  same word the locked Name/repo fields use) rather than relying on its dimmer
-  colour: colour is never the only carrier of meaning here (styles.go), and a
-  lock that exists only as an ANSI code is invisible in a monochrome terminal
-  and to every golden, which are ANSI-stripped.
+- **Restore before or after finalize according to what Ansible should
+  update.** Restore the Claude login and whole home before finalize so
+  Ansible can update its configuration files. Restore the project and
+  individually selected checkouts after finalize to avoid overwriting them.
+  Omit `project_clone_url` when a checkout will be restored. Reversing this
+  order can leave stale configuration or overwrite a preserved checkout.
+- **Whole-home preservation includes all other options.** `StagePreserve`
+  returns early after staging the home to avoid duplicate archives. It
+  still calls `probeProject` so finalize knows whether to skip cloning.
+- **Validate preserve paths before deleting the VM.** Guest-supplied
+  `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
+  during restore. `preservePathRel` must reject paths outside the guest home
+  to prevent traversal such as `..` reaching `/`. A missing path is only a
+  notice: checkout paths come from a cache and may no longer exist.
+- **Allow tar exit status 1 during backup, but no other nonzero status.**
+  Files can change while a running guest is being copied; GNU tar reports
+  that as status 1. Status 2 indicates a failure and must remain fatal.
+- **Probe compression support in the source guest.** Use zstd when
+  available and fall back to gzip for older guests. In the recorded
+  benchmark, a 1.3 GB tree took 54 seconds with gzip and 2.5 seconds with
+  `zstd -T0 -3`. During restore, `tarDecompressFlag` must read the archive's
+  magic bytes to select the format. Do not depend on state saved before
+  the guest was deleted. Streaming through stdin requires an explicit
+  zstd flag because tar cannot seek to detect it. Name archives `.tar`,
+  since `.tgz` would incorrectly imply gzip.
+- **Stage archives under `XDG_STATE_HOME` by default.** `/tmp` may use RAM,
+  and a large archive may be the only copy after VM deletion. `stageBaseDir`
+  honours an explicit `TMPDIR` first and falls back to the system temporary
+  directory if the state directory is unavailable. Every test that resets
+  with a preserve option must set `TMPDIR` to isolate host state.
+- **Exclude `~/.ssh/authorized_keys` from whole-home preservation**
+  (`homeExcludes`). Restoring the old file could remove the key needed to
+  connect to the rebuilt VM halfway through its reset.
+- **Read the reset form's checkouts from the cached registry**
+  (`internal/ui/resetpreserve.go`), without contacting the guest. The VM
+  may be stopped, and the form must open immediately. Show the cached age
+  in each row's help. Pass the recorded absolute path to `ResetOptions`;
+  the shortened `~/…` label uses an estimated home and is display-only.
+- **Do not assume fixed reset-toggle indices in tests.** The order is
+  whole home, Claude settings, project when configured, then checkouts.
+  Enabling whole-home preservation must keep the other rows visible so
+  the focus and previous choices stay predictable.
+- **Whole-home preservation locks included rows without changing their
+  saved values** (`formToggle.locked`). Display them checked, skip them in
+  `nextOperableToggle`, and restore the user's earlier choices when the
+  whole-home option is turned off. Show `lockedToggleSuffix` (` (locked)`)
+  as well as dimming the row; colour alone is invisible in monochrome
+  terminals and ANSI-stripped golden tests.
+- **Keep MAC restoration and DHCP identity configuration together.**
+  `generalizeScript` clears `/etc/machine-id` so new clones have distinct
+  identities. `roles/base` sets `DUIDType=link-layer` so DHCP identity
+  follows the MAC that `proxmoxmac.go` preserves during reset. Removing
+  either part can change the lease after a rebuild. The template also
+  clears `/etc/hostname` to avoid clones initially announcing
+  `sandbar-base`. After the real name is set, use `networkctl renew` to
+  announce it. This must not be a hostname-change handler: cloud-init may
+  already have set the name, leaving no Ansible change to trigger it. Do
+  not use `reconfigure`, which can drop the provisioning SSH connection's
+  address.
 
-- **A guest's DHCP identity and its preserved MAC are ONE feature in two
-  files, and neither half survives the other's removal.** `generalizeScript`
-  empties `/etc/machine-id` so clones stop colliding on one lease; but
-  systemd-networkd's default DUID is derived from exactly that file, so the
-  emptying also means a rebuild presents a brand-new client identity and is
-  handed a different address — silently undoing the MAC restoration
-  (`proxmoxmac.go`) whose entire purpose is that the network sees the same
-  machine. `roles/base`'s `DUIDType=link-layer` drop-in is what reconciles
-  them, by moving the identity onto the MAC: distinct per clone (PVE gives
-  each a distinct MAC) and stable across a rebuild. Deleting it as an
-  unexplained one-line config file reopens the address churn, and deleting
-  the MAC restoration makes it pointless. The same two files decide what a VM
-  is CALLED on the network: `generalizeScript` also empties `/etc/hostname`,
-  because the base phase writes the base's own name there and a clone's first
-  DHCP request would otherwise announce every VM as `sandbar-base` — observed
-  as four addresses on one segment all reverse-resolving to it. An emptied
-  file leaves systemd's `localhost` fallback, which networkd refuses to send,
-  so the first lease is nameless rather than wrong, and roles/base's
-  `networkctl renew` announces the real name once it is set. That renew is
-  deliberately NOT a handler on the hostname task: on the common path
-  cloud-init has already applied the right name, Ansible reports no change,
-  and a handler would never fire. It is also `renew` and never `reconfigure`
-  — reconfigure drops the address the provisioning ssh session is riding on.
+## VM naming (read before touching `Provider.ValidateName`)
 
-## VM naming is a BACKEND rule, checked only on the way IN (read before touching `Provider.ValidateName`)
-
-- **There is no single naming rule, and there must not be one.** Lima accepts
-  `test_vm` and refuses `test--vm`; Proxmox does the exact opposite, because its
-  API declares the VM `name` parameter as a `dns-name`. Neither set contains the
-  other. `Provider.ValidateName` is therefore per-backend
-  (`lima.ValidateInstanceName`, `pve.ValidateVMName`), and the rule cannot move
-  into `vm.CreateConfig.Validate` — that is a pure per-value check that knows
-  nothing about where the VM is going, so it would have to pick one backend's
-  rule and be wrong for the other in one of two directions: refusing a name Lima
-  would have taken, or admitting one Proxmox will reject, which is the failure
-  the check exists to prevent.
-- **Lima's rule is transcribed from limactl's own error message, not from
-  documentation — because there is none.** `TestValidateInstanceNameAgainstRealLimactl`
-  (internal/lima) is the standing guard that the transcription still holds: it
-  asks a real `limactl` about each name using a deliberately incomplete stdin
-  template, so a name limactl accepts gets as far as complaining about the
-  template and one it refuses never does. No VM is booted and nothing is created.
-  It skips when limactl is absent, the same bargain the other real-limactl guards
-  strike. **Length is deliberately excluded from that comparison**: limactl's
-  ceiling is whatever keeps `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` under
-  `UNIX_PATH_MAX`, so it moves with the length of the Lima home and is not a
-  constant to assert against. `lima.MaxInstanceNameLen` is a fixed, stricter cap.
-- **The check runs where the name is still EDITABLE, and nowhere else.** The
-  create form (`submitForm`) and `sand create` (`checkBackendName`) ask it; the
-  TUI's Reset (`submitReset`), `sand reset` and `sand create --recreate` all
-  deliberately do not. Those three target a VM that ALREADY EXISTS, whose name
-  the backend accepted when it was made and which no form field can change — so a
-  rule it now failed would be an error with nothing to act on, and would strand a
-  VM predating the rule with no way to be rebuilt. This is the same reasoning
-  `checkNotBusy` is placed by, and it is why `checkBackendName` is a named
-  function rather than an inline call: the exemption is the part worth testing.
-- **It must stay free of I/O.** It runs on a keystroke, on the submit path of a
-  form the user is still editing, so it may not reach the Proxmox API or spawn a
-  `limactl` — an unreachable endpoint would hang the TUI on enter. Reachability
-  is `Preflight`'s job. `TestValidateNameMakesNoCalls` pins this.
-- **The error text IS the feature.** It names the offending character and the
-  backend that objects, because the alternative is what the backends themselves
-  say: PVE's `400 Parameter verification failed. (name: invalid format - value
-  does not look like a valid DNS name)`, arriving from inside a clone task, and
-  limactl's raw regexp. The Proxmox arm returns pve's error UNWRAPPED for the
-  same reason — a `proxmox: ` prefix in front of "Proxmox requires a DNS name"
-  spends a line of the create form's budgeted help area saying it twice.
+- **Keep naming rules in each backend.** Lima accepts `test_vm` and rejects
+  `test--vm`; Proxmox does the reverse. `Provider.ValidateName` delegates to
+  `lima.ValidateInstanceName` or `pve.ValidateVMName`. Do not move it into
+  `vm.CreateConfig.Validate`, which has no backend context.
+- **Check Lima's rule against the real binary.** The rule comes from
+  limactl's error message. `TestValidateInstanceNameAgainstRealLimactl`
+  supplies an incomplete template: valid names reach template validation,
+  while invalid names fail earlier. It creates no VM and skips if limactl
+  is absent. Exclude length from that comparison: limactl's limit depends
+  on the length of `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` relative to
+  `UNIX_PATH_MAX`. `lima.MaxInstanceNameLen` provides a fixed cap in sand.
+- **Validate only new VM names.** `submitForm` and `sand create`'s
+  `checkBackendName` run the check. `submitReset`, `sand reset`, and
+  `sand create --recreate` skip it because the VM exists and its name
+  cannot be edited. Rechecking would prevent rebuilding older VMs whose
+  names no longer pass. Keep `checkBackendName` separately testable so
+  tests cover this exception.
+- **Keep validation free of I/O.** It runs while submitting the create
+  form. API calls or limactl processes could block the TUI. Connectivity
+  belongs in `Preflight`; `TestValidateNameMakesNoCalls` enforces this.
+- **Explain the invalid character or format and name the backend.** A
+  generic API error or raw regular expression is hard to act on. Return
+  Proxmox's validation error without another `proxmox:` prefix, since it
+  already names Proxmox and the form has limited room for help text.
 
 ## Conventions
 
