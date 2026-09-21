@@ -1,0 +1,21 @@
+                                                                              
+   New VM                                                                     
+                                                                              
+  Memory:            > 8GiB                                                   
+  Disk:              > 100GiB                                                 
+  Docker proxy host: >                                                        
+  GitHub repo URL:   >                                                        
+  GitHub token:      >                                                        
+                                                                              
+  [x] Install Claude Code                                                     
+  [ ] Install OpenAI Codex                                                    
+  [ ] Install OpenCode                                                        
+  [ ] Install Pi                                                              
+  [x] Install DDEV                                                            
+  [x] Install Go                                                              
+  [x] Install Java                                                            
+  [ ] Rebuild base image                                                      
+  │ Install the current Pi release when this VM is created. Remembers your    
+  │ last submitted choices.                                                   
+  ↑ prev field • ↓/enter next field • ctrl+s create • esc back                
+                                                                              

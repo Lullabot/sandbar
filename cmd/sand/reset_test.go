@@ -167,7 +167,7 @@ func TestDoResetRecordsSuccess(t *testing.T) {
 	cfg.Disk = "400GiB"
 
 	stub := &stubResetter{}
-	opts := provision.ResetOptions{PreserveClaude: true}
+	opts := provision.ResetOptions{PreserveAgents: true}
 	if err := doReset(context.Background(), reg, stub, cfg, registry.LocalScope, opts, io.Discard); err != nil {
 		t.Fatalf("doReset: %v", err)
 	}
@@ -205,13 +205,13 @@ func TestDoResetFailureIsNotRecorded(t *testing.T) {
 
 // TestReorderFlagsPutsFlagsBeforeTheName covers the parse plumbing that makes
 // the natural spelling work. flag.FlagSet stops at the first non-flag token, so
-// without this `sand reset web --preserve-claude` would silently drop the
+// without this `sand reset web --preserve-agents` would silently drop the
 // preserve flag — a reset that discards the data the user asked to keep.
 func TestReorderFlagsPutsFlagsBeforeTheName(t *testing.T) {
 	newSet := func() *flag.FlagSet {
 		fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
-		fs.Bool("preserve-claude", false, "")
+		fs.Bool("preserve-agents", false, "")
 		fs.String("disk", "", "")
 		fs.String("profile", "", "")
 		return fs
@@ -222,10 +222,10 @@ func TestReorderFlagsPutsFlagsBeforeTheName(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{"flags after the name", []string{"web", "--preserve-claude", "--disk", "200GiB"},
-			[]string{"--preserve-claude", "--disk", "200GiB", "web"}},
-		{"a bool flag does not swallow the name", []string{"--preserve-claude", "web"},
-			[]string{"--preserve-claude", "web"}},
+		{"flags after the name", []string{"web", "--preserve-agents", "--disk", "200GiB"},
+			[]string{"--preserve-agents", "--disk", "200GiB", "web"}},
+		{"a bool flag does not swallow the name", []string{"--preserve-agents", "web"},
+			[]string{"--preserve-agents", "web"}},
 		{"inline values", []string{"web", "--disk=200GiB"}, []string{"--disk=200GiB", "web"}},
 		{"single dash", []string{"web", "-profile", "work"}, []string{"-profile", "work", "web"}},
 		{"already in order", []string{"--disk", "200GiB", "web"}, []string{"--disk", "200GiB", "web"}},
@@ -241,13 +241,13 @@ func TestReorderFlagsPutsFlagsBeforeTheName(t *testing.T) {
 
 	// End to end through the flag package: the value must actually arrive.
 	fs := newSet()
-	if err := fs.Parse(reorderFlags(fs, []string{"web", "--preserve-claude", "--disk", "200GiB"})); err != nil {
+	if err := fs.Parse(reorderFlags(fs, []string{"web", "--preserve-agents", "--disk", "200GiB"})); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if fs.NArg() != 1 || fs.Arg(0) != "web" {
 		t.Errorf("positional = %v, want [web]", fs.Args())
 	}
-	if fs.Lookup("preserve-claude").Value.String() != "true" || fs.Lookup("disk").Value.String() != "200GiB" {
+	if fs.Lookup("preserve-agents").Value.String() != "true" || fs.Lookup("disk").Value.String() != "200GiB" {
 		t.Errorf("flags did not reach the set: %v", fs.Args())
 	}
 }
@@ -265,7 +265,7 @@ func TestResetPreserveFlagsReachTheOptions(t *testing.T) {
 	fs := newResetFlagSet(&o)
 	fs.SetOutput(io.Discard)
 
-	args := []string{"web", "--preserve", "~/src/app", "--preserve", "/home/dev/scratch", "--preserve-claude"}
+	args := []string{"web", "--preserve", "~/src/app", "--preserve", "/home/dev/scratch", "--preserve-agents"}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -276,8 +276,8 @@ func TestResetPreserveFlagsReachTheOptions(t *testing.T) {
 	if !reflect.DeepEqual([]string(o.preservePaths), want) {
 		t.Errorf("--preserve collected %v, want %v", o.preservePaths, want)
 	}
-	if !o.preserveClaude {
-		t.Error("--preserve-claude did not survive the repeated --preserve flags")
+	if !o.preserveAgents {
+		t.Error("--preserve-agents did not survive the repeated --preserve flags")
 	}
 	if o.preserveHome {
 		t.Error("--preserve-home was set without being passed")

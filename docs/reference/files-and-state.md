@@ -52,6 +52,44 @@ already exists, the migration is skipped.
 
 Source: `internal/registry/registry.go:68`-`internal/registry/registry.go:90` (`migrateLegacyIndex`), called from `Load` at `internal/registry/registry.go:95`.
 
+## Coding-agent preferences and migration
+
+`${XDG_DATA_HOME:-~/.local/share}/sandbar/agent-preferences.json` stores the
+last submitted agent selections in a version 1, secret-free JSON file.
+It is global across connection profiles. Explicit saved choices, including
+all four agents off, override initial defaults (Claude Code on; Codex,
+OpenCode, and Pi off). Deleting it forgets those preferences without changing
+existing VMs.
+
+If that file is absent, an older version 2 base stamp can seed Claude Code
+and Codex preferences once. Modern version 3 base stamps record shared
+dependencies rather than agent selections. Existing VM records keep their
+Claude Code and Codex boolean values, including explicit `false`; absent
+OpenCode and Pi selections mean off. Reset uses the VM's recorded selection,
+not whichever agents were chosen most recently for a different VM.
+
+## Preserved agent state
+
+The reset form's single **Preserve agent settings and files** checkbox
+preserves these paths relative to the guest user's home:
+
+| Agent | Paths |
+| --- | --- |
+| Claude Code | `~/.claude`, `~/.claude.json` |
+| Codex | `~/.codex` |
+| OpenCode | `~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode` |
+| Pi | `~/.pi/agent` |
+
+Missing paths are skipped. Custom state locations outside this list are not
+covered. Directories named `.cache` are excluded consistently with every other
+reset preserve mode. These paths can contain credentials, session history, and
+extensions; preservation includes all four agents regardless of
+the VM's recorded selections, including manual installs. The data passes through a private
+host temporary directory during reset. See [Security Model](security-model.md)
+before preserving state from a VM you do not trust.
+
+Source: `internal/provision/staging.go` (`AgentStatePaths`).
+
 ## Guest paths
 
 | Path | What it holds |

@@ -32,8 +32,8 @@ list.
 
 The very first VM you create builds a shared base image (`sandbar-base`),
 which can take a while. Every VM you
-create after that clones the base image instead of reinstalling everything,
-so it's fast. See [How Provisioning Works](how-it-works.md) for why it's
+create after that clones the shared development tools and installs current
+releases of your selected agents. See [How Provisioning Works](how-it-works.md) for why it's
 built this way.
 
 ## Putting the VM somewhere else
@@ -47,7 +47,7 @@ Run](../using-sand/connection-profiles.md).
 
 ## Logging into Claude Code
 
-`sand` installs the Claude Code CLI but does **not** provision a credential
+When selected, `sand` installs the Claude Code CLI but does **not** provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (`S`
 on its tile, or `sand shell NAME`) and run `claude`: the first time, it
 walks you through an interactive sign-in, then starts the session. Later

@@ -145,6 +145,11 @@ new VM is created on without leaving the TUI. See
 
 ## Resetting a VM
 
+The create form has independent **Install Claude Code**, **Install OpenAI Codex**,
+**Install OpenCode**, and **Install Pi** checkboxes. New VMs start with your last
+submitted choices (initially Claude Code only); reset starts with the choices
+recorded for that VM and does not change global preferences.
+
 Press `R` on a managed VM's tile to open the *Reset VM* form, filled with
 its recorded settings. Change resources or settings as needed, then press
 `ctrl+s` to delete and rebuild the VM. The next reset uses the new settings.
@@ -168,8 +173,11 @@ enter to toggle the focused option; its help text describes what it copies.
   excludes `~/.ssh/authorized_keys`, so the rebuilt VM keeps its new access
   key. Directories named `.cache` are also left behind and rebuilt in the new
   VM.
-- **Preserve Claude Code settings** keeps `~/.claude` and `~/.claude.json`,
-  including your login and history.
+- **Preserve agent settings and files** keeps settings, credentials, sessions,
+  and history for Claude Code, Codex, OpenCode, and Pi together, including
+  state from manual installs. Selected agents are installed fresh; restored
+  configuration files are retained. See the
+  [preserved paths](../reference/files-and-state.md#preserved-agent-state).
 - **Preserve ~/&lt;host&gt;/&lt;org&gt;** keeps the organisation directory for
   the VM's cloned project, including the checkout, uncommitted work, and the
   `.env` beside it. If the checkout is present, the reset skips cloning it

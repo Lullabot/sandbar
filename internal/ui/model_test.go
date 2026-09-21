@@ -497,9 +497,9 @@ func toggleLabels(m model) []string {
 func TestResetToggleFlipsAndWarns(t *testing.T) {
 	m := openReset(t, resetConfig())
 
-	m = tabToToggle(t, m, "Preserve Claude Code settings")
-	if m.preserveClaude {
-		t.Fatalf("preserveClaude should start false")
+	m = tabToToggle(t, m, "Preserve agent settings and files")
+	if m.preserveAgents {
+		t.Fatalf("preserveAgents should start false")
 	}
 	if strings.Contains(m.formView(), "compromised") {
 		t.Fatalf("the warning must not show before any toggle is on")
@@ -507,8 +507,8 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
-	if !m.preserveClaude {
-		t.Fatalf("space on the Claude toggle should enable preserveClaude")
+	if !m.preserveAgents {
+		t.Fatalf("space on the agent toggle should enable preserveAgents")
 	}
 	if !strings.Contains(m.formView(), "compromised") {
 		t.Fatalf("the compromise warning should appear once a toggle is on")
@@ -554,7 +554,7 @@ func TestResetWholeHomeToggle(t *testing.T) {
 	}
 	view := ansi.Strip(m.formView())
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "Preserve Claude Code settings") {
+		if strings.Contains(line, "Preserve agent settings and files") {
 			if !strings.HasPrefix(strings.TrimSpace(line), "[x]") {
 				t.Errorf("a subsumed row renders unchecked while whole-home is on: %q", line)
 			}
@@ -574,17 +574,17 @@ func TestResetWholeHomeToggle(t *testing.T) {
 func TestResetWholeHomeLockKeepsUnderlyingPicks(t *testing.T) {
 	m := openReset(t, resetConfig())
 
-	m = tabToToggle(t, m, "Preserve Claude Code settings")
+	m = tabToToggle(t, m, "Preserve agent settings and files")
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
-	if !m.preserveClaude {
-		t.Fatal("preserveClaude should be on after space")
+	if !m.preserveAgents {
+		t.Fatal("preserveAgents should be on after space")
 	}
 
 	m = tabToToggle(t, m, "Preserve the entire home directory")
 	sp, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
-	if !m.preserveClaude {
+	if !m.preserveAgents {
 		t.Error("turning whole-home on cleared an earlier pick")
 	}
 
@@ -594,7 +594,7 @@ func TestResetWholeHomeLockKeepsUnderlyingPicks(t *testing.T) {
 	if m.preserveHome {
 		t.Fatal("space should have turned whole-home back off")
 	}
-	if !m.preserveClaude {
+	if !m.preserveAgents {
 		t.Error("the earlier pick did not survive the whole-home round trip")
 	}
 	for i, tg := range m.toggles() {
@@ -998,7 +998,7 @@ func TestResetFocusSkipsLockedNameAndWrapsToggles(t *testing.T) {
 }
 
 // When the project toggle is disabled (no CloneURL), tab navigation reaches the
-// Claude toggle but never the disabled project toggle, and the Claude toggle still
+// agent-state toggle but never the disabled project toggle, and that toggle still
 // flips.
 func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
 	cfg := resetConfig()
@@ -1008,12 +1008,12 @@ func TestResetDisabledProjectToggleSkippedInNav(t *testing.T) {
 	if i := toggleIndexByLabel(m, "Preserve ~/"); i >= 0 {
 		t.Fatalf("the project toggle is still in the list at %d; labels=%v", i, toggleLabels(m))
 	}
-	// Space still flips the Claude toggle even with the project toggle disabled.
-	m = tabToToggle(t, m, "Preserve Claude Code settings")
+	// Space still flips the agent-state toggle even with the project toggle disabled.
+	m = tabToToggle(t, m, "Preserve agent settings and files")
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	m = sp.(model)
-	if !m.preserveClaude {
-		t.Fatalf("space on the Claude toggle should enable preserveClaude")
+	if !m.preserveAgents {
+		t.Fatalf("space on the agent-state toggle should enable preserveAgents")
 	}
 }
 

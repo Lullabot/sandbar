@@ -69,18 +69,19 @@ values:
 
 | Phase | What runs | When |
 |---|---|---|
-| `base` | Heavy setup: `base`, (conditionally) `samba`, `dev-tools`, `claude-code` | Building the shared base image once, before any clone exists |
-| `finalize` | Light, per-VM identity: `base`, `user`, `project` | Against each clone of the base image |
+| `base` | Shared setup: `base`, `user`, `agent-cleanup`, (conditionally) `samba`, `dev-tools` | Building or maintaining the shared base before cloning; cleanup removes legacy agent installs |
+| `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `project` | Against each clone; agents install current releases here |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
 This split is what lets `sand` build one expensive base image and clone it
-cheaply for every subsequent VM, running only the light identity-specific
-work (hostname, git identity, optional project clone) against each clone.
+cheaply for every subsequent VM, installing current agent releases alongside
+identity-specific work against each clone.
 
-## The six roles
+## Roles
 
-`roles/` has six roles: `base`, `user`, `samba`, `dev-tools`, `claude-code`,
-and `project`. `site.yml` runs them in that order, gated by
+`roles/` contains `base`, `user`, `agent-cleanup`, `samba`, `dev-tools`,
+`claude-code`, `codex`, `opencode`, `pi`, and `project`.
+`site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
 `internal/provision/vars.go` sets `samba_enabled: false` on every `sand`
 run (files move with `limactl copy` or `scp` instead of a Samba share),

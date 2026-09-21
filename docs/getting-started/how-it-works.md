@@ -11,15 +11,15 @@ graph TD
     C --> D[Stop the base image]
     B -- yes --> D
     D --> E[Clone the base → grow disk]
-    E --> F[Finalize: hostname, git identity, apt upgrade, optional repo clone]
-    F --> G[Restart → ready]
+    E --> F[Finalize: selected agents, hostname, git identity, optional repo clone]
+    F --> G[Ready: restart only if required]
 ```
 
 ## The base image
 
 The first time you create a VM, `sand` runs a heavy install into a stopped
-VM named `sandbar-base`. This installs the dev tools, Claude Code, and
-everything else that every VM needs. See [Available
+VM named `sandbar-base`. This installs development tools and shared
+runtimes. Coding agents are excluded from the base. See [Available
 Tools](available-tools.md) for the full toolchain.
 
 Because the base image carries no identity or secrets, it's safe to keep
@@ -41,10 +41,17 @@ reinstalling the whole stack, which is what makes each new VM fast.
 ## Finalize
 
 A clone isn't ready to use yet — it's still an anonymous copy of the base
-image. A light finalize pass sets the VM's hostname, writes your git
-identity into it, runs `apt upgrade`, and optionally clones a project
-repository into it. The VM restarts once at the end of finalize and is then
-ready to use.
+image. Finalize installs current releases of the selected agents, sets the
+VM's hostname, writes your git identity, and optionally clones a project
+repository. OS upgrades happen during base maintenance; the VM restarts
+only when the guest reports a reboot is required.
+
+Reset repeats the per-VM installs using that VM's recorded selections.
+The optional [agent preservation checkbox](../using-sand/tui.md#resetting-a-vm)
+keeps settings and files across reset; executable releases are installed fresh.
+When upgrading from an older sand, base maintenance removes legacy agent
+installs before cloning. Changing agent choices alone does not invalidate
+the base's dependency stamp.
 
 ## Why the split
 

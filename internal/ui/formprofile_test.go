@@ -193,6 +193,7 @@ func TestCreateRoutesToSelectedProfileScopeAndPersistsLastUsed(t *testing.T) {
 	m.inputs[fGitEmail].SetValue("ada@example.com")
 
 	l := newTeaLoop(t, m)
+	deliverToolsetLoad(t, &l.m, l.m.kickFormToolsetLoad())
 	l.send(ctrlKey('s'))
 
 	if !l.m.jobs.isRunning(mem.scope, "remote-web") {

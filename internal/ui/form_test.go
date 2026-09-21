@@ -7,11 +7,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+func TestAgentChoicesSurviveLateBaseRead(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.focusIdx = fCloneToken
+	m.focusNext()
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = next.(model)
+	next, _ = m.Update(toolsetLoadedMsg{scope: m.formScope, agents: agentprefs.Selection{Claude: true, Codex: true}})
+	m = next.(model)
+	if m.toolClaude || !m.toolCodex {
+		t.Fatal("late read overwrote edited agents")
+	}
+}
 
 // staleDisabledToggleLabel is the old (now-removed) disabled-toggle
 // annotation toggleRow used to render ("(no project" + " cloned)"). Built by
@@ -58,7 +73,7 @@ func walkResetFocusPrev(m *model, n int) []int {
 
 // lastToggle is the index of the final toggle in the current mode's list — what
 // focus must wrap through, and never past. The reset form's toggle COUNT now
-// varies with the VM (a whole-home row, a Claude row, a project row only when
+// varies with the VM (a whole-home row, an agent row, a project row only when
 // there is a project, and one row per checkout the sweep found), so these tests
 // pin the invariant — focus visits every toggle exactly once and then wraps —
 // rather than literal indices, which would have to be rewritten every time a
@@ -212,6 +227,7 @@ func TestFormViewProjectToggleLabel(t *testing.T) {
 
 	m2 := newTestModel(t)
 	m2.openResetForm(registry.LocalScope, "vm2", vm.CreateConfig{Name: "vm2", CloneURL: "https://github.com/lullabot/sandbar"})
+	m2.toggleFocus = 1
 	view2 := m2.formView()
 	if !strings.Contains(view2, "Preserve ~/github.com/lullabot") {
 		t.Fatalf("formView for https://github.com/lullabot/sandbar missing %q; got:\n%s", "Preserve ~/github.com/lullabot", view2)
@@ -256,12 +272,12 @@ func TestCreateFormJavaToggleOff(t *testing.T) {
 	// Walk from the last text input onto the toggles: Claude (0), Codex (1),
 	// DDEV (2), Go (3), Java (4).
 	m.focusIdx = fCloneToken
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 7; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 4 {
-		t.Fatalf("expected focus on the Java toggle (index 4), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 6 {
+		t.Fatalf("expected focus on the Java toggle (index 6), got toggleFocus=%d", m.toggleFocus)
 	}
 
 	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
@@ -386,12 +402,12 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 	m.openForm()
 	m.focusIdx = fCloneToken
 
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 8; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 5 {
-		t.Fatalf("expected focus on the Rebuild toggle (index 5), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 7 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 7), got toggleFocus=%d", m.toggleFocus)
 	}
 	if m.toolRebuild {
 		t.Fatalf("rebuild should default off")
@@ -481,7 +497,7 @@ func deliverToolsetLoad(t *testing.T, m *model, cmd tea.Cmd) {
 // was actually created with --with-codex has WithCodex=true RECORDED, and the
 // reset form (which shows no tool toggles) must still submit true — not fall
 // back to the opt-in default — or the reset silently de-selects Codex and
-// marks the shared base stale against its stamp.
+// omits Codex from the replacement VM.
 func TestResetReplaysARecordedCodexSelection(t *testing.T) {
 	m := newTestModel(t)
 	recorded := vm.CreateConfig{

@@ -110,9 +110,8 @@ to make it easier (and faster!) to use.
 
 - **Setup happens once.** One base image carries the full toolchain
   (Docker, ddev, Node, Go, Python, a JDK, `gh`, tmux, direnv). Every VM
-  after the first is a clone of it plus a light finalize pass for
-  hostname, git identity, and an optional repo clone, so new
-  environments come up in seconds. See
+  after the first is a clone of it plus a finalize pass for current agent
+  releases, hostname, git identity, and an optional repo clone. See
   [How Provisioning Works](getting-started/how-it-works.md).
 - **Your laptop isn't the only place to run one.** The same board and
   the same commands create a VM on this machine, on another machine
@@ -253,5 +252,5 @@ commands and the same board — see
 
 That took three backends behind one seam, and the seam is what the rest
 of the roadmap builds on: more places to run a VM, and more agents
-behind the same disposable-VM workflow. Claude Code and Codex are the
+behind the same disposable-VM workflow. Claude Code, Codex, OpenCode, and Pi are the
 agents supported today, not the definition of the tool.

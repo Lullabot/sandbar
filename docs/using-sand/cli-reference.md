@@ -36,7 +36,7 @@ delete/start/stop lifecycle as the headless commands below. See
 ```
 Usage: sand create [flags]
 
-Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
+Headlessly provision a coding-agent development VM: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `sand create`
 needs no flags. If neither the flags nor the host git config supply an
@@ -71,16 +71,24 @@ not a prompt.
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sand reset NAME`](#sand-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
-| `--with-claude` | bool | `true` | Install Claude Code in the base image. |
-| `--with-codex` | bool | `false` | Install OpenAI Codex in the base image. Disabled by default. |
+| `--with-claude` | bool | remembered, initially `true` | Install current Claude Code in this VM. |
+| `--with-codex` | bool | remembered, initially `false` | Install current Codex in this VM. |
+| `--with-opencode` | bool | remembered, initially `false` | Install current OpenCode in this VM. |
+| `--with-pi` | bool | remembered, initially `false` | Install current Pi in this VM. |
 | `--with-ddev` | bool | `true` | Install DDEV in the base image. |
 | `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
 | `--with-java` | bool | `true` | Install a headless JDK in the base image. |
 
-The `--with-*` flags configure the **shared base image**, not the individual
-VM. A flag you don't pass adopts whatever the existing base was actually
-built with (read back from its version stamp), so you only need to state a
-selection once; passing a flag explicitly always wins.
+Agent flags configure the individual VM. Omitted flags use the last submitted
+agent selections, shared across profiles; explicit flags (including `=false`)
+win. All four may be off. See [preference migration](../reference/files-and-state.md#coding-agent-preferences-and-migration)
+for existing installations. Reset uses the selections recorded for that VM.
+Likewise `--recreate` adopts that VM's recorded agents unless explicit agent
+flags override them. Reset and recreate do not change the global preferences.
+
+The dependency flags `--with-ddev`, `--with-go`, and `--with-java` configure
+the shared base image. Omitted dependency flags adopt its version stamp;
+explicit flags override it. Changing agents alone does not rebuild the base.
 
 ### VM names
 
@@ -250,7 +258,7 @@ sand create --profile work
 $ sand create --help
 Usage: sand create [flags]
 
-Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
+Headlessly provision a coding-agent development VM: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `sand create`
 needs no flags. If neither the flags nor the host git config supply an
@@ -301,15 +309,19 @@ Flags:
   -user string
     	Primary VM user
   -with-claude
-    	Install Claude Code in the base image (default true)
+        Install Claude Code when creating this VM (default: last submitted selection) (default true)
   -with-codex
-    	Install OpenAI Codex in the base image
+        Install OpenAI Codex when creating this VM (default: last submitted selection)
   -with-ddev
     	Install DDEV in the base image (default true)
   -with-go
     	Install the Go toolchain in the base image (default true)
   -with-java
     	Install a headless JDK in the base image (default true)
+  -with-opencode
+        Install OpenCode when creating this VM (default: last submitted selection)
+  -with-pi
+        Install Pi when creating this VM (default: last submitted selection)
 ```
 
 (`--user` has no printed default because it is resolved to the host username
@@ -325,8 +337,8 @@ a preserve option**. This is the CLI equivalent of `R` in the TUI
 
 ```sh
 sand reset web                                    # clean rebuild, same settings
-sand reset web --preserve-claude                  # keep the Claude Code login
-sand reset web --preserve-claude --preserve-project
+sand reset web --preserve-agents                  # keep coding-agent state
+sand reset web --preserve-agents --preserve-project
 sand reset web --preserve '~/src/app' --preserve '~/scratch/spike'
 sand reset web --preserve-home                    # keep the guest home
 sand reset web --cpus 8 --memory 16GiB            # change CPU and memory
@@ -338,7 +350,7 @@ marker first, then the managed index. You can reset a VM created by another
 
 | Flag | What survives |
 |---|---|
-| `--preserve-claude` | `~/.claude` and `~/.claude.json`: the Claude Code login and history. |
+| `--preserve-agents` | Settings and files for Claude Code, Codex, OpenCode, and Pi. |
 | `--preserve-project` | The project's organisation directory, including the checkout, uncommitted work, and `.env`. Skips cloning again if the checkout is present, so a private repository needs no clone token. |
 | `--preserve PATH` | A directory inside the guest home, including a Git checkout or linked worktree. Repeat for more directories. |
 | `--preserve-home` | The guest home, including everything above, except `~/.ssh/authorized_keys`. |
@@ -396,7 +408,7 @@ before creating a VM.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--preserve-claude` | bool | `false` | Keep the Claude Code login and history. |
+| `--preserve-agents` | bool | `false` | Keep settings and files for Claude Code, Codex, OpenCode, and Pi. |
 | `--preserve-project` | bool | `false` | Keep the project's per-org directory. |
 | `--preserve` | string (repeatable) | *(none)* | Keep one more directory inside the guest home. Pass it once per directory. |
 | `--preserve-home` | bool | `false` | Keep the entire guest home directory; implies the three flags above. |
@@ -451,8 +463,8 @@ spelling of the TUI's R (Reset).
 
 Everything inside the guest is lost unless you ask for it back:
 
-  --preserve-claude    keep ~/.claude and ~/.claude.json (the Claude Code login
-                       and its history)
+  --preserve-agents    keep settings, credentials, sessions, and history for
+                       Claude Code, Codex, OpenCode, and Pi
   --preserve-project   keep the cloned project's per-org directory (the checkout,
                        its uncommitted work, and the .env alongside it)
   --preserve PATH      keep one more directory inside the guest home — any git
@@ -477,8 +489,8 @@ work on a different repo, create another VM with 'sand create'.
 
 Examples:
   sand reset web                                  # clean rebuild, same settings
-  sand reset web --preserve-claude                # keep the Claude login
-  sand reset web --preserve-claude --preserve-project
+  sand reset web --preserve-agents                # keep coding-agent state
+  sand reset web --preserve-agents --preserve-project
   sand reset web --preserve ~/src/app --preserve ~/scratch/spike
   sand reset web --preserve-home                  # keep everything, rebuild the OS
   sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
@@ -506,8 +518,8 @@ Flags:
     	RAM, e.g. 8GiB (default: whatever this VM has)
   -preserve PATH
     	Keep one more directory PATH inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts
-  -preserve-claude
-    	Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild
+  -preserve-agents
+        Keep settings and files for Claude Code, Codex, OpenCode, and Pi across the rebuild
   -preserve-home
     	Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)
   -preserve-project

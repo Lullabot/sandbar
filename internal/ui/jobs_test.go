@@ -551,6 +551,7 @@ func TestSubmittingTheCreateFormLandsOnTheBoardNotTheLog(t *testing.T) {
 	} {
 		l.m.inputs[field].SetValue(value)
 	}
+	l.pump("agent preferences", func(m model) bool { return !m.agentsLoading })
 	l.send(ctrlKey('s'))
 
 	if !l.m.jobs.isRunning(registry.LocalScope, "web") {

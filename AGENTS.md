@@ -5,7 +5,7 @@ the project evolves.
 
 ## What this is
 
-`sand` is a tool for spinning up disposable Claude Code development VMs. It has
+`sand` is a tool for spinning up disposable coding-agent development VMs. It has
 two halves that share one repo:
 
 - **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that drives [Lima](https://lima-vm.io)
@@ -266,7 +266,8 @@ Conventions:
 
 Five jobs:
 
-- `lint` — Ansible syntax check.
+- `lint` — Ansible syntax and isolated agent lifecycle checks
+  (`PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s tests -p '*_test.py'`).
 - `unit` — `go vet ./...` and `go test ./... -race -covermode=atomic` (fast, no
   VM). It also enforces a **self-contained coverage gate**: coverage is measured
   over `./internal/...` only (the `cmd/sand` main glue is excluded so it doesn't
@@ -278,7 +279,9 @@ Five jobs:
 - `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
   QEMU+KVM on the hosted runner. Also runs the `cmd/sand` `limae2e` tests
   (headless create + `--recreate` gate) first, on max free disk. (It does not
-  run the fast Go suite — that's the `unit` job.)
+  run the fast Go suite — that's the `unit` job.) It checks all four agent
+  executables in a clone, their absence from the base, and remembered choices
+  in the next create.
 - `mutation` — **advisory** gremlins mutation testing over the core packages
   (`provision`, `registry`, `vm`, `lima`; `ui` is out of the initial scope).
   Non-blocking (`continue-on-error`).
@@ -756,6 +759,22 @@ For the security rationale, see the plan's Risk Considerations and the spec
 comment at `roles/claude-code/tasks/main.yml`.
 
 ## The base image / clone / finalize provisioner (read before touching `internal/provision`)
+
+- **Coding agents belong to individual VMs.** Claude Code, Codex, OpenCode,
+  and Pi install current releases during finalize/full, never base. The base
+  retains shared runtimes and removes legacy agent installs via
+  `agent-cleanup`. Agent selections must not invalidate the v3 dependency
+  stamp. The global, secret-free `agent-preferences.json` remembers submitted
+  choices across profiles; an absent file may be seeded once from a legacy
+  v2 base stamp. Saved all-off is a real preference. Existing VM records keep
+  their Claude/Codex booleans (including false); missing OpenCode/Pi means off.
+  Reset starts from those recorded VM choices, not global preferences.
+- **Reset has one agent-state preservation option.** Keep its path set in
+  `internal/provision/staging.go` (`AgentStatePaths`), covering all four
+  agents even when deselected. This includes credentials and sessions and
+  crosses the host staging boundary, so keep the warning accurate. Restore
+  settings without overwriting them with templates; freshly install selected
+  executables. Claude-only clipboard/session integrations remain Claude-only.
 
 - **Clones inherit the base image's `lima.yaml` — including its mounts.**
   `limactl clone` copies the base's entire instance directory. The only

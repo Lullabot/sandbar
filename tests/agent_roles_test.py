@@ -49,16 +49,19 @@ class AgentRolesTest(unittest.TestCase):
                     {"ansible.builtin.copy": {"content": role, "dest": str(directory / role)}}
                 ]))
             for phase in ("base", "finalize", "full"):
-                for enabled in (False, True):
-                    with self.subTest(phase=phase, enabled=enabled):
+                selections = [set(), set(AGENTS)]
+                if phase == "finalize":
+                    selections.extend({role} for role in AGENTS)
+                for selected in selections:
+                    with self.subTest(phase=phase, selected=sorted(selected)):
                         for role in (*AGENTS, "agent-cleanup"):
                             (directory / role).unlink(missing_ok=True)
                         variables = {"provision_phase": phase, **{
-                            "toolset_" + ("claude" if role == "claude-code" else role): enabled
+                            "toolset_" + ("claude" if role == "claude-code" else role): role in selected
                             for role in AGENTS}}
                         self.run_play(directory, play, variables)
                         for role in AGENTS:
-                            self.assertEqual((directory / role).exists(), enabled and phase != "base", role)
+                            self.assertEqual((directory / role).exists(), role in selected and phase != "base", role)
                         self.assertEqual((directory / "agent-cleanup").exists(), phase == "base")
 
     def test_preserved_settings_and_installer_refresh(self):
@@ -80,8 +83,10 @@ class AgentRolesTest(unittest.TestCase):
                 self.run_play(directory, play, variables)
                 self.assertTrue(target.read_text())
                 target.write_text("preserved custom settings\n")
+                target.chmod(0o600)
                 self.run_play(directory, play, variables)
                 self.assertEqual(target.read_text(), "preserved custom settings\n")
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
                 # Execute the real installer shell against a fake download
                 # boundary. A restored binary must not suppress release fetching.
                 installers = [task for task in tasks if "ansible.builtin.shell" in task]

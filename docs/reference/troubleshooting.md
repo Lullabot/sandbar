@@ -4,8 +4,8 @@ Common problems with `sand` and how to resolve them.
 
 ## A stale base image
 
-`sand` builds the heavy install (packages, Docker, Node,
-Claude Code, …) once into a stopped base image (`sandbar-base` by default),
+`sand` builds shared dependencies (packages, Docker, Node,
+and other development tools) into a stopped base image (`sandbar-base` by default),
 then clones every VM from it. Each base is stamped with the playbook version
 it was built from, and `sand` rebuilds it automatically the next time you
 create a VM if the current playbook has moved on — so most staleness is
@@ -23,13 +23,16 @@ sand create --rebuild
 `--rebuild` deletes and recreates the base image first, then makes the VM.
 It always rebuilds, regardless of the staleness check.
 
-## Proxmox: base provisioning hangs at "Install Claude Code"
+## Proxmox: provisioning hangs at "Install Claude Code"
 
-**Symptom:** on the Proxmox backend, building the base image runs the playbook
+**Symptom:** on the Proxmox backend, provisioning a VM runs the playbook
 fine until the `claude-code : Install Claude Code using the official installer`
 task, where it hangs indefinitely with no output. On the guest, the
 `claude … install` process sits pegged at ~100% CPU (state `R`) with no network
 sockets and making almost no syscalls.
+
+Current sand installs Claude Code during per-VM finalize; older versions
+ran this task while building the base.
 
 **Why:** it is not `sand`, apt, or the network — it is a Claude Code bug
 ([anthropics/claude-code#77208](https://github.com/anthropics/claude-code/issues/77208)).

@@ -131,11 +131,11 @@ graph TD
 - ✔️ Task 01: Separate agent configuration and migrate reset state — completed
 - ✔️ Task 02: Install selected agents during VM finalization — completed
 
-### Phase 2: User flows and documentation
-**Status:** pending
+### ✅ Phase 2: User flows and documentation
+**Status:** completed
 **Parallel Tasks:**
-- Task 03: Wire remembered agent checkboxes into create and reset (depends on: 01, 02)
-- Task 04: Update existing documentation for generic agents (depends on: 01, 02)
+- ✔️ Task 03: Wire remembered agent checkboxes into create and reset (depends on: 01, 02) — completed
+- ✔️ Task 04: Update existing documentation for generic agents (depends on: 01, 02) — completed
 
 ### Post-phase Actions
 
@@ -152,3 +152,7 @@ The workflow's Claude model labels and st-worker agents are unavailable in this 
 ### Phase 1 verification
 
 Parent independently ran the core Go suite with `-count=1` (vm, agentprefs, provision, provider, registry): all pass. Ansible syntax passes; the actual Ansible fixture suite passed all three tests in 58.569s (phase selection, preserved settings/installer refresh, base cleanup/bashrc migration). Formatting and diff whitespace checks pass. A temporary-prefix npm installation of the two new agents succeeded; isolated version commands returned OpenCode 1.18.32 and Pi 0.87.0. This does not establish real-VM boot/provisioning behavior.
+
+### Phase 2 verification
+
+Parent independently ran the complete Go suite with `-race -covermode=atomic -coverpkg=./internal/... -count=1`: all packages pass, with 90.3% internal coverage (CI floor raised from 87% to 90%). Fresh `go vet ./...`, `go build ./cmd/sand`, `gofmt -l .`, and `git diff --check` pass. The limae2e-tagged suite compiles with `-run '^$'`; no live VM was started. The strict MkDocs build passes. Ansible syntax and all three actual Ansible fixture tests pass (78.805s); the preserved-settings test additionally verifies private mode 0600 survives role reapplication. Reviewed create/reset/error snapshots fit 80x24. The new terminal persistence/reset and async generation tests pass five repeated race-enabled runs. Added CI checks cover all four executables in clones, no agent executables in the base, and remembered selections on the next create.

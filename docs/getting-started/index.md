@@ -1,12 +1,13 @@
 # About sand
 
-`sand` is a small Go CLI and terminal UI that manages disposable [Claude
-Code](https://www.anthropic.com/claude-code) development VMs. Run it with no
+`sand` is a small Go CLI and terminal UI that manages disposable coding-agent
+development VMs. Run it with no
 arguments for an interactive board of your VMs, or drive it headlessly
 (`sand create`, `sand shell`) from scripts and CI.
 
 Each VM is a fresh, isolated Debian environment with a specific, opinionated
-stack baked in: Claude Code, common dev tools, and your git identity. You
+stack: common dev tools, your git identity, and your choice of Claude Code,
+Codex, OpenCode, and Pi, installed fresh for each VM. You
 get a disposable place to point an agent at a repository without touching
 your host machine, and you throw the VM away — or recreate it — when you're
 done.
@@ -30,7 +31,7 @@ side by side. See [Where VMs Run](../using-sand/connection-profiles.md).
 
 `sand` is not a general-purpose VM manager. It doesn't manage arbitrary
 guest OSes, arbitrary provisioning recipes, or long-lived infrastructure. It
-manages one kind of thing — a Claude Code development VM — well, and leaves
+manages one kind of thing — a coding-agent development VM — well, and leaves
 everything else to the tools underneath it.
 
 `sand` is the Go successor to what used to be a shell script plus a

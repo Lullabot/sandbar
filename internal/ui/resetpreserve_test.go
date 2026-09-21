@@ -66,8 +66,9 @@ func TestResetFormOffersSweptCheckouts(t *testing.T) {
 		t.Fatalf("checkout rows = %v, want %v", labels, want)
 	}
 
-	view := m.formView()
 	for _, w := range want {
+		m.toggleFocus = toggleIndexByLabel(m, w)
+		view := m.formView()
 		if !strings.Contains(view, w) {
 			t.Errorf("the reset form does not offer %q; got:\n%s", w, view)
 		}
@@ -118,7 +119,7 @@ func TestResetFormCapsCheckoutRows(t *testing.T) {
 	if !strings.Contains(view, "3 more checkout(s)") {
 		t.Errorf("the form never said 3 checkouts were left out; got:\n%s", view)
 	}
-	if !strings.Contains(view, "entire home directory") {
+	if !strings.Contains(view, "Preserve the entire home") {
 		t.Errorf("the overflow note should point at the whole-home option; got:\n%s", view)
 	}
 }
@@ -185,8 +186,8 @@ func TestWholeHomeIsSentAlone(t *testing.T) {
 	seedCheckouts(t, m, cfg.Name, repoAt("/home/ada/src/app", "feature"))
 	m.openResetForm(registry.LocalScope, cfg.Name, cfg)
 
-	// Tick a checkout and the Claude toggle, then the whole-home toggle.
-	for _, label := range []string{"Preserve ~/src/app", "Preserve Claude Code settings", "Preserve the entire home directory"} {
+	// Tick a checkout and the agent toggle, then the whole-home toggle.
+	for _, label := range []string{"Preserve ~/src/app", "Preserve agent settings and files", "Preserve the entire home directory"} {
 		m = tabToToggle(t, m, label)
 		sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		m = sp.(model)
@@ -196,7 +197,7 @@ func TestWholeHomeIsSentAlone(t *testing.T) {
 	if !opts.PreserveHome {
 		t.Fatal("PreserveHome was not requested")
 	}
-	if opts.PreserveClaude || opts.PreserveProject || len(opts.PreservePaths) != 0 {
+	if opts.PreserveAgents || opts.PreserveProject || len(opts.PreservePaths) != 0 {
 		t.Errorf("a whole-home reset also sent the options it subsumes: %+v", opts)
 	}
 }

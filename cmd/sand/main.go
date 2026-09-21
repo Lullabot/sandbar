@@ -1,4 +1,4 @@
-// Command sand is the interactive TUI for managing Claude Code development
+// Command sand is the interactive TUI for managing coding-agent development
 // VMs: list/inspect instances, create new ones (streaming the provisioner), and
 // run lifecycle actions (start/stop/restart/delete/reset).
 //

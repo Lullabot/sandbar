@@ -281,7 +281,11 @@ func toolsetFromStamp(stamp string) string {
 	if i < 0 {
 		return ""
 	}
-	return rest[i+1:]
+	// Proxmox appends its template preparation generation after the toolset.
+	// Treating that metadata as part of the final tool name silently loses
+	// that selection, including a legacy Codex-only agent preference.
+	toolset, _, _ := strings.Cut(rest[i+1:], ":")
+	return toolset
 }
 
 // shrunk reports which tools are enabled in stamped but not in want — the

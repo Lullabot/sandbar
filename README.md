@@ -1,8 +1,8 @@
 # sandbar
 
-`sand` is a single Go binary that provisions disposable Claude Code
-development VMs. Spin up an isolated, fully provisioned VM in seconds, point
-Claude Code at a repository, and throw the VM away when you're done.
+`sand` is a single Go binary that provisions disposable coding-agent
+development VMs. Choose Claude Code, Codex, OpenCode, and Pi, point your
+agents at a repository, and throw the VM away when you're done.
 
 VMs can run **on your own machine**, **on another machine over SSH**, or **on
 a [Proxmox VE](https://www.proxmox.com/) host**. You pick per VM, and the

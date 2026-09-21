@@ -10,7 +10,7 @@ tenant or a determined attacker.
     Do not use `sand` to provision a machine that holds sensitive data, or
     one exposed to the public internet. It is designed for an isolated LAN
     or virtual network where the VM is treated as disposable — assume
-    anything Claude Code does inside it could be adversarial, and plan to
+    anything a coding agent does inside it could be adversarial, and plan to
     delete and rebuild the VM rather than trust it after the fact.
 
 ## What's true about a `sand` VM
@@ -58,11 +58,14 @@ tenant or a determined attacker.
   you provision the VM with `--with-codex`, Codex is installed with
   `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`, a
   deliberate choice because the ephemeral VM is the sandbox itself. Codex is
-  opt-in; if you don't pass `--with-codex` or enable it in the TUI, it is not
-  installed.
+  initially off; a remembered selection or an explicit flag/checkbox can enable it.
 - **No Codex credential is provisioned.** You log in to Codex inside the VM
   yourself with your ChatGPT account; no host-side token is copied in. See
   [Logging into Codex](../getting-started/first-vm.md#logging-into-codex).
+- **OpenCode and Pi also require credentials configured inside the VM.**
+  Selecting them installs the CLI, without importing host authentication.
+  The Claude-specific clipboard shims and session hooks do not imply the
+  same integration for other agents.
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in
@@ -73,8 +76,8 @@ tenant or a determined attacker.
   account's files can read every VM's secrets.
 - **Reset preserve options copy selected guest files to your workstation.**
   They are off by default and must be enabled for each reset. You can keep
-  the Claude Code login, the project's checkout and `.env`, selected
-  directories inside the guest home, or the whole home with
+  settings and files for all four coding agents, the project's checkout and
+  `.env`, selected directories inside the guest home, or the whole home with
   `--preserve-home`. The data passes through a private (`0700`) host
   directory and is restored into the rebuilt VM. After a successful reset,
   `sand` removes the temporary copy. If a reset fails after attempting to

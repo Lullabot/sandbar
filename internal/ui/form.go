@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -269,7 +270,7 @@ func (m *model) openForm() tea.Cmd {
 	m.hostDiskFree = freeDiskBytes()
 	m.resetMode = false // a create form is never in reset mode (even after a reset)
 	m.toggleFocus = -1  // openResetForm already did this; create mode now has toggles too
-	// The tool toggles START at the all-on default and are corrected
+	// The toggles START at initial defaults and are corrected
 	// asynchronously (kickFormToolsetLoad) once the shared base's recorded
 	// tool-set stamp comes back, via toolsetLoadedMsg (model.go). Reading it
 	// HERE, synchronously, used to be a blocking ssh round trip whenever the
@@ -279,6 +280,10 @@ func (m *model) openForm() tea.Cmd {
 	cfg := vm.DefaultCreateConfig()
 	m.toolClaude = cfg.WithClaude
 	m.toolCodex = cfg.WithCodex
+	m.toolOpenCode = cfg.WithOpenCode
+	m.toolPi = cfg.WithPi
+	m.agentsEdited = [4]bool{}
+	m.formGeneration++
 	m.toolDDEV = cfg.WithDDEV
 	m.toolGo = cfg.WithGo
 	m.toolJava = cfg.WithJava
@@ -297,9 +302,12 @@ func (m *model) openForm() tea.Cmd {
 // profile selector on to a different target can be told apart from one still
 // relevant — and ignored (see the handler in model.go's dispatch).
 type toolsetLoadedMsg struct {
-	scope   registry.Scope
-	toolset map[string]bool
-	ok      bool
+	generation uint64
+	agents     agentprefs.Selection
+	err        error
+	scope      registry.Scope
+	toolset    map[string]bool
+	ok         bool
 }
 
 // formToolsetCmd reads the shared base image's recorded tool-set stamp
@@ -310,8 +318,9 @@ type toolsetLoadedMsg struct {
 // go on mutating while this runs.
 func formToolsetCmd(scope registry.Scope, hf lima.HostFiles, baseName string) tea.Cmd {
 	return func() tea.Msg {
+		agents, err := agentprefs.LoadOrMigrate(hf, baseName)
 		base, ok := provision.BaseToolset(hf, baseName)
-		return toolsetLoadedMsg{scope: scope, toolset: base, ok: ok}
+		return toolsetLoadedMsg{scope: scope, toolset: base, ok: ok, agents: agents, err: err}
 	}
 }
 
@@ -323,13 +332,18 @@ func formToolsetCmd(scope registry.Scope, hf lima.HostFiles, baseName string) te
 // never a stale read left over from whichever profile was selected before.
 // The active member can, in a degenerate fleet, be an error binding with no
 // provider; there is then nothing to read, and the toggles simply keep
-// whatever they already show (the all-on default, from openForm).
+// whatever they already show (the initial defaults, from openForm).
 func (m *model) kickFormToolsetLoad() tea.Cmd {
+	m.formGeneration++
+	m.agentsLoading = false
 	p := m.formProvider()
 	if p == nil {
 		return nil
 	}
-	return formToolsetCmd(m.formScope, p.HostFiles(), vm.DefaultCreateConfig().BaseName)
+	cmd := formToolsetCmd(m.formScope, p.HostFiles(), vm.DefaultCreateConfig().BaseName)
+	m.agentsLoading = true
+	generation := m.formGeneration
+	return func() tea.Msg { msg := cmd().(toolsetLoadedMsg); msg.generation = generation; return msg }
 }
 
 // openResetForm initialises the create form in reset mode, pre-filled from the
@@ -369,10 +383,12 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetCloneURL = cfg.CloneURL
 	m.resetWithClaude = cfg.WithClaude
 	m.resetWithCodex = cfg.WithCodex
+	m.resetWithOpenCode = cfg.WithOpenCode
+	m.resetWithPi = cfg.WithPi
 	m.resetWithDDEV = cfg.WithDDEV
 	m.resetWithGo = cfg.WithGo
 	m.resetWithJava = cfg.WithJava
-	m.preserveClaude = false
+	m.preserveAgents = false
 	m.preserveProject = false
 	m.preserveHome = false
 	// The checkouts to offer come from the host-side registry the sweep fills, not
@@ -548,15 +564,27 @@ func (m model) createToggles() []formToggle {
 	return []formToggle{
 		{
 			label: "Install Claude Code",
-			help:  baseWideHelp("Claude Code"),
+			help:  "Install the current Claude Code release when this VM is created. Remembers your last submitted choices.",
 			get:   func(m *model) bool { return m.toolClaude },
-			set:   func(m *model, v bool) { m.toolClaude = v },
+			set:   func(m *model, v bool) { m.toolClaude = v; m.agentsEdited[0] = true },
 		},
 		{
 			label: "Install OpenAI Codex",
-			help:  baseWideHelp("OpenAI Codex"),
+			help:  "Install the current Codex release when this VM is created. Remembers your last submitted choices.",
 			get:   func(m *model) bool { return m.toolCodex },
-			set:   func(m *model, v bool) { m.toolCodex = v },
+			set:   func(m *model, v bool) { m.toolCodex = v; m.agentsEdited[1] = true },
+		},
+		{
+			label: "Install OpenCode",
+			help:  "Install the current OpenCode release when this VM is created. Remembers your last submitted choices.",
+			get:   func(m *model) bool { return m.toolOpenCode },
+			set:   func(m *model, v bool) { m.toolOpenCode = v; m.agentsEdited[2] = true },
+		},
+		{
+			label: "Install Pi",
+			help:  "Install the current Pi release when this VM is created. Remembers your last submitted choices.",
+			get:   func(m *model) bool { return m.toolPi },
+			set:   func(m *model, v bool) { m.toolPi = v; m.agentsEdited[3] = true },
 		},
 		{
 			label: "Install DDEV",
@@ -629,10 +657,10 @@ func (m model) resetToggles() []formToggle {
 			set: func(m *model, v bool) { m.preserveHome = v },
 		},
 		{
-			label:  "Preserve Claude Code settings",
-			help:   "Keeps ~/.claude and ~/.claude.json: the Claude Code login and its history.",
-			get:    func(m *model) bool { return m.preserveClaude },
-			set:    func(m *model, v bool) { m.preserveClaude = v },
+			label:  "Preserve agent settings and files",
+			help:   "Keeps settings, credentials, sessions, and history for Claude Code, Codex, OpenCode, and Pi.",
+			get:    func(m *model) bool { return m.preserveAgents },
+			set:    func(m *model, v bool) { m.preserveAgents = v },
 			locked: subsumed,
 		},
 	}
@@ -661,7 +689,7 @@ func (m model) resetToggles() []formToggle {
 // to survive the rebuild — what the copy-to-host warning and the options handed
 // to provision.Reset both hang off.
 func (m model) preserveRequested() bool {
-	if m.preserveHome || m.preserveClaude || (m.preserveProject && m.projectToggleEnabled) {
+	if m.preserveHome || m.preserveAgents || (m.preserveProject && m.projectToggleEnabled) {
 		return true
 	}
 	return len(m.selectedPreservePaths()) > 0
@@ -905,6 +933,8 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		// mentions them.
 		cfg.WithClaude = m.resetWithClaude
 		cfg.WithCodex = m.resetWithCodex
+		cfg.WithOpenCode = m.resetWithOpenCode
+		cfg.WithPi = m.resetWithPi
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
@@ -912,10 +942,12 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		// truth here, not the default. Its default-off only protects the ADD
 		// direction (an unconfigured create never installs it); a VM reset
 		// from a recorded WithCodex=true must still replay true, or the reset
-		// would silently de-select the tool and mark the shared base stale.
+		// would silently omit it from the replacement VM.
 	} else {
 		cfg.WithClaude = m.toolClaude
 		cfg.WithCodex = m.toolCodex
+		cfg.WithOpenCode = m.toolOpenCode
+		cfg.WithPi = m.toolPi
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava
@@ -1019,6 +1051,10 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = err
 		return m, nil
 	}
+	if m.agentsLoading {
+		m.formErr = fmt.Errorf("loading saved agent selections; submit again when ready")
+		return m, nil
+	}
 	m.formErr = nil
 	// toolRebuild carries the "Rebuild base image" toggle's intent through to
 	// the same code path `sand create --rebuild` uses: the rebuild happens
@@ -1026,6 +1062,12 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
+		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
+			return err
+		}
+		if err := agentprefs.Save(agentprefs.FromConfig(c)); err != nil {
+			return err
+		}
 		return prov.Create(ctx, c, opts, out)
 	}
 	cmd := m.beginProvision("Creating "+cfg.Name, run, cfg)
@@ -1095,7 +1137,7 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	// the next person's reading of it.
 	opts := provision.ResetOptions{PreserveHome: m.preserveHome}
 	if !m.preserveHome {
-		opts.PreserveClaude = m.preserveClaude
+		opts.PreserveAgents = m.preserveAgents
 		opts.PreserveProject = m.preserveProject && m.projectToggleEnabled
 		opts.PreservePaths = m.selectedPreservePaths()
 	}
@@ -1103,6 +1145,9 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	// beginStream's goroutine and must not read the mutable m.members slice.
 	prov := m.formProvider()
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
+		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
+			return err
+		}
 		return prov.Reset(ctx, c, opts, out)
 	}
 	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
@@ -1275,7 +1320,11 @@ func lockedFieldValue(v string) string {
 // 'q' is a text character in the form, so Quit is intentionally omitted (only
 // ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
 func (m model) formHelp() []key.Binding {
-	return []key.Binding{m.keys.Up, m.keys.Down, m.keys.Submit, m.keys.Back}
+	submit := m.keys.Submit
+	if m.resetMode {
+		submit.SetHelp(submit.Help().Key, "reset")
+	}
+	return []key.Binding{m.keys.Up, m.keys.Down, submit, m.keys.Back}
 }
 
 // formView renders the labelled inputs, validation error, and help. In reset mode
@@ -1289,6 +1338,8 @@ func (m model) formView() string {
 	}
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
+	header := b.String()
+	b.Reset()
 
 	// The profile selector: which connection profile's provider/scope
 	// this create targets. Reset mode has none — a reset always targets its own
@@ -1325,13 +1376,15 @@ func (m model) formView() string {
 			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i, t.locked) + "\n")
 		}
 	}
+	rows := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	b.Reset()
 	if m.resetMode {
 		if m.resetCheckoutsHidden > 0 {
 			b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fmt.Sprintf(
 				"%d more checkout(s) in this VM are not listed. Preserve the entire home directory to keep them all.", m.resetCheckoutsHidden)) + "\n")
 		}
 		if m.preserveRequested() {
-			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies data — your Claude login, the .env token, your working trees — out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
+			b.WriteString("\n" + errStyle.Width(cw).Render("Preserving copies data — agent settings and credentials, project tokens, working trees — out of the VM to your host. Do NOT preserve if you suspect this VM is compromised.") + "\n")
 		}
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render("Disk can only grow from the base floor (min "+vm.BaseDiskFloor+").") + "\n")
 	}
@@ -1352,14 +1405,34 @@ func (m model) formView() string {
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fieldInfo[m.focusIdx]) + "\n")
 	}
 
-	if m.formErr != nil {
-		b.WriteString("\n" + errStyle.Width(cw).Render("Error: "+m.formErr.Error()))
-	}
-
+	footer := m.footerView(m.formHelp())
 	if w := m.diskOverflowWarning(); w != "" {
-		b.WriteString("\n" + warnStyle.Width(cw).Render(w) + "\n")
+		footer = warnStyle.Width(cw).Render(w) + "\n" + footer
 	}
-
-	b.WriteString("\n" + m.footerView(m.formHelp()))
-	return appStyle.Render(b.String())
+	if m.formErr != nil {
+		footer = errStyle.Width(cw).Render("Error: "+m.formErr.Error()) + "\n" + footer
+	}
+	help := strings.TrimSpace(b.String())
+	helpLines := strings.Split(help, "\n")
+	helpBudget := max(0, min(8, m.layout.ContentHeight-lipgloss.Height(header)-lipgloss.Height(footer)-5))
+	if len(helpLines) > helpBudget {
+		helpLines = helpLines[:helpBudget]
+	}
+	help = strings.Join(helpLines, "\n")
+	budget := max(1, m.layout.ContentHeight-lipgloss.Height(header)-lipgloss.Height(footer)-lipgloss.Height(help)-2)
+	if len(rows) > budget {
+		focusLine := m.focusIdx
+		if !m.resetMode {
+			focusLine++
+		}
+		if m.toggleFocus >= 0 {
+			focusLine = 1 + len(m.inputs) + m.toggleFocus
+			if !m.resetMode {
+				focusLine++
+			}
+		}
+		start := max(0, min(focusLine-budget/2, len(rows)-budget))
+		rows = rows[start : start+budget]
+	}
+	return appStyle.Render(header + strings.Join(rows, "\n") + "\n" + help + "\n" + footer)
 }

@@ -1,0 +1,21 @@
+                                                                                
+   Reset VM                                                                     
+                                                                                
+  Memory:            > 8GiB                                                     
+  Disk:              > 100GiB                                                   
+  Docker proxy host: >                                                          
+  GitHub repo URL: (none) (locked)                                              
+  GitHub token:      >                                                          
+                                                                                
+  [ ] Preserve the entire home directory                                        
+  [x] Preserve agent settings and files                                         
+  Preserving copies data — agent settings and credentials, project tokens,      
+  working trees — out of the VM to your host. Do NOT preserve if you suspect    
+  this VM is compromised.                                                       
+                                                                                
+  │ Disk can only grow from the base floor (min 20GiB).                         
+                                                                                
+  │ Keeps settings, credentials, sessions, and history for Claude Code,         
+  │ Codex, OpenCode, and Pi.                                                    
+  ↑ prev field • ↓/enter next field • ctrl+s reset • esc back                   
+                                                                                

@@ -473,8 +473,10 @@ func TestToolsetFromStamp_ExtractsSuffix(t *testing.T) {
 		stamp string
 		want  string
 	}{
-		{"v2 with toolset", "v3:deadbeef:ddev+go+java", "ddev+go+java"},
-		{"v2 with none", "v3:deadbeef:none", "none"},
+		{"v3 with toolset", "v3:deadbeef:ddev+go+java", "ddev+go+java"},
+		{"v3 with none", "v3:deadbeef:none", "none"},
+		{"legacy Proxmox", "v2:deadbeef:codex:template-gen2", "codex"},
+		{"Proxmox dependencies", "v3:deadbeef:ddev+java:template-gen2", "ddev+java"},
 		{"v1-style bare hash", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", ""},
 		{"empty", "", ""},
 	}

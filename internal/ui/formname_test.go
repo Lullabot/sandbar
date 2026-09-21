@@ -33,8 +33,9 @@ func pickyNameProvider(created *int) *providerfake.Provider {
 
 // fillCreateForm types a name plus the git identity Validate insists on, so the
 // only thing a submission can fail on is the name.
-func fillCreateForm(m *model, name string) {
-	m.openForm()
+func fillCreateForm(t *testing.T, m *model, name string) {
+	t.Helper()
+	deliverToolsetLoad(t, m, m.openForm())
 	m.inputs[fName].SetValue(name)
 	m.inputs[fGitName].SetValue("Dev")
 	m.inputs[fGitEmail].SetValue("dev@example.com")
@@ -54,7 +55,7 @@ func TestCreateFormRefusesANameTheBackendWillNotTake(t *testing.T) {
 	isolateHostState(t)
 	created := 0
 	m := New(singleFleet(pickyNameProvider(&created), registry.LocalScope)).(model)
-	fillCreateForm(&m, "test_vm")
+	fillCreateForm(t, &m, "test_vm")
 
 	next, cmd := m.submitForm()
 	m = next.(model)
@@ -86,7 +87,7 @@ func TestCreateFormAcceptsAValidName(t *testing.T) {
 	isolateHostState(t)
 	created := 0
 	m := New(singleFleet(pickyNameProvider(&created), registry.LocalScope)).(model)
-	fillCreateForm(&m, "test-vm")
+	fillCreateForm(t, &m, "test-vm")
 
 	next, cmd := m.submitForm()
 	m = next.(model)
@@ -147,7 +148,7 @@ func TestProviderSeamIsWhatTheFormAsks(t *testing.T) {
 	var _ provider.Provider = prov
 
 	m := New(singleFleet(prov, registry.LocalScope)).(model)
-	fillCreateForm(&m, "web")
+	fillCreateForm(t, &m, "web")
 	m.submitForm()
 
 	if len(asked) != 1 || asked[0] != "web" {

@@ -59,7 +59,7 @@ func runReset(args []string) error {
 // about what exists — a test asserting "there is no --clone-url here" is only
 // worth something if it inspects the same set the command parses.
 type resetOptions struct {
-	preserveClaude  bool
+	preserveAgents  bool
 	preserveProject bool
 	preserveHome    bool
 	preservePaths   repeatedString
@@ -96,7 +96,7 @@ func (r *repeatedString) Set(v string) error {
 // rebuild the fleet's base — `sand create --rebuild` remains the way to ask).
 func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
-	fs.BoolVar(&o.preserveClaude, "preserve-claude", false, "Keep ~/.claude and ~/.claude.json (Claude Code login + history) across the rebuild")
+	fs.BoolVar(&o.preserveAgents, "preserve-agents", false, "Keep settings and files for Claude Code, Codex, OpenCode, and Pi across the rebuild")
 	fs.BoolVar(&o.preserveProject, "preserve-project", false, "Keep the cloned project's per-org directory (checkout + .env) across the rebuild")
 	fs.BoolVar(&o.preserveHome, "preserve-home", false, "Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)")
 	// The backquoted PATH is not decoration: flag.PrintDefaults takes the FIRST
@@ -125,8 +125,8 @@ spelling of the TUI's R (Reset).
 
 Everything inside the guest is lost unless you ask for it back:
 
-  --preserve-claude    keep ~/.claude and ~/.claude.json (the Claude Code login
-                       and its history)
+  --preserve-agents    keep settings, credentials, sessions, and history for
+                       Claude Code, Codex, OpenCode, and Pi
   --preserve-project   keep the cloned project's per-org directory (the checkout,
                        its uncommitted work, and the .env alongside it)
   --preserve PATH      keep one more directory inside the guest home — any git
@@ -151,8 +151,8 @@ work on a different repo, create another VM with 'sand create'.
 
 Examples:
   sand reset web                                  # clean rebuild, same settings
-  sand reset web --preserve-claude                # keep the Claude login
-  sand reset web --preserve-claude --preserve-project
+  sand reset web --preserve-agents                # keep coding-agent state
+  sand reset web --preserve-agents --preserve-project
   sand reset web --preserve ~/src/app --preserve ~/scratch/spike
   sand reset web --preserve-home                  # keep everything, rebuild the OS
   sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
@@ -239,7 +239,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	}
 
 	opts := provision.ResetOptions{
-		PreserveClaude:  o.preserveClaude,
+		PreserveAgents:  o.preserveAgents,
 		PreserveProject: o.preserveProject,
 		PreserveHome:    o.preserveHome,
 		PreservePaths:   o.preservePaths,
@@ -429,7 +429,7 @@ func doReset(ctx context.Context, reg *registry.Registry, p resetter, cfg vm.Cre
 // needs no change here. An unrecognised flag stays where it is and reaches
 // fs.Parse, which reports it exactly as it would have.
 func reorderFlags(fs *flag.FlagSet, args []string) []string {
-	// A bool flag consumes no following token ("--preserve-claude web" must
+	// A bool flag consumes no following token ("--preserve-agents web" must
 	// leave "web" a positional), so the two kinds have to be told apart. This is
 	// the same rule flag.FlagSet applies internally, asked of the set itself
 	// rather than restated as a list that would go stale.
