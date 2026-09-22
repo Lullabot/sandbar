@@ -179,6 +179,8 @@ type proxmoxProvider struct {
 }
 
 var _ Provider = (*proxmoxProvider)(nil)
+var _ MemoryReclaimer = (*proxmoxProvider)(nil)
+var _ VMHostMemoryProvider = (*proxmoxProvider)(nil)
 
 // NewProxmox builds the Proxmox provider for cfg. It performs NO network round
 // trip: BuildFleet constructs one provider per enabled profile on the TUI's
@@ -486,6 +488,21 @@ func (p *proxmoxProvider) resolve(ctx context.Context, name string) (int, pve.VM
 	}
 	p.setVMID(name, vmid)
 	return vmid, st, nil
+}
+
+// VMHostMemory returns PVE's host-side current-memory accounting for name. The
+// `mem` value comes from status/current and is intentionally kept distinct from
+// the guest's /proc/meminfo reading: they answer different questions and may be
+// sampled at different times.
+func (p *proxmoxProvider) VMHostMemory(ctx context.Context, name string) (int64, error) {
+	_, st, err := p.resolve(ctx, name)
+	if err != nil {
+		return 0, err
+	}
+	if st.Mem < 0 {
+		return 0, nil
+	}
+	return st.Mem, nil
 }
 
 // lookupVMID refreshes the index from the pool listing and returns name's id.
@@ -1227,6 +1244,21 @@ func (p *proxmoxProvider) ShellOut(ctx context.Context, name string, argv ...str
 		return stdout.Bytes(), foldStderr(transportError(err, h), stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
+}
+
+const reclaimMemoryScript = "sync && echo 3 > /proc/sys/vm/drop_caches"
+
+// ReclaimMemory asks the guest kernel to flush dirty data and discard its
+// reclaimable caches. Proxmox is the only backend that implements this optional
+// capability because this guest operation is known to reduce its host-side VM
+// footprint. It uses the same direct guest SSH and sudo pattern as other
+// privileged Proxmox guest operations; no PVE API or VM configuration changes
+// are involved.
+func (p *proxmoxProvider) ReclaimMemory(ctx context.Context, name string) error {
+	if err := p.Shell(ctx, name, nil, io.Discard, "sudo", "bash", "-c", reclaimMemoryScript); err != nil {
+		return fmt.Errorf("proxmox: reclaim memory for %s: %w", name, err)
+	}
+	return nil
 }
 
 // Copy transfers between the host and a guest with scp. Either endpoint may be
