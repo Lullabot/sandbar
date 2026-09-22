@@ -2802,13 +2802,14 @@ key uses — see <a href="../files-and-shells/#landing">Landing</a>.</p>
 <a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>A review.xml already in PATH is carried into the new review, so comments you
 <a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>wrote earlier are there to keep, edit or drop. Nothing ever removes that file
 <a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>on its own, so --clean is how you start over: it deletes the saved review and
-<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>its walkthrough sidecar first. The review tool's assistant skills are
-<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>installed into PATH/.agents/skills as the review starts, and the guest's
-<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a>global git excludes keep all of it out of 'git status'.
-<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a>
-<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>The named VM must already exist and be running (see 'sand' to list
-<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a>instances, or 'sand create' to make one). If NAME is managed under more than
-<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a>one connection profile, --profile picks which one to act on.
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a>its walkthrough sidecar first. A repository cloned during provisioning already
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>has the review tool's assistant skills. For a repository cloned later, run
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a>`self-review-install-skills PATH` inside the VM; it installs the skills and
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a>keeps them and the review files out of `git status`.
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a>
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a>The named VM must already exist and be running (see 'sand' to list
+<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a>instances, or 'sand create' to make one). If NAME is managed under more than
+<a id="__codelineno-8-35" name="__codelineno-8-35" href="#__codelineno-8-35"></a>one connection profile, --profile picks which one to act on.
 </code></pre></div>
 <p>With no <code>PATH</code> or flags, <code>sand land NAME</code> prints a table (<code>PATH KIND BRANCH
 PUSH PR</code>) of every checkout the sweep found, including a count of the commits
@@ -2845,10 +2846,10 @@ It does not copy a checkout onto your workstation. See
 <a href="../review/#reachability">Reachability</a>.</p>
 <p>Submitting a review saves <code>review.xml</code> in the guest checkout, or at the
 <code>output-file</code> path configured for self-review. The agent can read that file
-directly. The base image adds the default review files and installed skills
-to the guest user's global Git ignore file. See
+directly. <code>self-review-install-skills</code> adds the default review files and
+installed skills to the guest user's active global Git excludes file. See
 <a href="../review/#keeping-review-files-out-of-commits">Keeping review files out of commits</a>
-if you use a custom ignore file or already track those files.</p>
+if the repository already tracks those files.</p>
 <h2 id="sand-publish-name-path-issue"><code>sand publish NAME PATH [ISSUE]</code></h2>
 <p>Publish <code>PATH</code>'s local commits (inside the VM named <code>NAME</code>) to the
 drupal.org issue fork for issue <code>ISSUE</code>, using the workstation's own

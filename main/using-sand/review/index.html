@@ -1667,8 +1667,8 @@ same file with the result.</p>
 starting the server. The TUI asks for confirmation, even if neither file
 exists. The CLI deletes them without a prompt.</p>
 <h2 id="the-assistant-skills">The assistant skills</h2>
-<p><code>sand</code> installs three self-review skills into the checkout when a review
-starts:</p>
+<p>When provisioning includes an initial project clone, <code>sand</code> installs three
+self-review skills into that checkout before you start an agent session:</p>
 <table>
 <thead>
 <tr>
@@ -1695,11 +1695,17 @@ starts:</p>
 refer to schema files at that location. They are included in the base image
 and match the review server's version, so copying them needs no network
 access.</p>
+<p>For a repository you clone later, run the installer inside the VM:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>self-review-install-skills<span class="w"> </span>/path/to/repository
+</code></pre></div>
+<p>The command installs or refreshes the skills and adds the review artifacts
+and skill directories to your active global Git excludes file. It leaves a
+skill unchanged when the repository tracks its own copy.</p>
 <p>A typical workflow inside the guest:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>/self-review-critique --staged     # in the agent: draft a review
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-critique --staged     # in the agent: draft a review
 </code></pre></div>
 <p>Press <code>v</code> in the Landing pane to review and edit those comments, then run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-apply review.xml      # in the agent: apply the saved feedback
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/self-review-apply review.xml      # in the agent: apply the saved feedback
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Skills tracked by your project are kept</p>
@@ -1708,12 +1714,11 @@ files in Git, <code>sand</code> leaves those skills unchanged.</p>
 </div>
 <p><a id="none-of-it-shows-up-in-git-status"></a></p>
 <h3 id="keeping-review-files-out-of-commits">Keeping review files out of commits</h3>
-<p>The base image adds <code>review.xml</code>, <code>review.guide.xml</code>, and the three skill
-directories to the guest user's global Git ignore file,
-<code>~/.config/git/ignore</code>. It does not change your project's <code>.gitignore</code>.</p>
-<p>If you have set <code>core.excludesFile</code> or use a different Git configuration
-location, add the patterns to that ignore file too. Ignore rules do not
-hide files that Git already tracks.</p>
+<p><code>self-review-install-skills</code> adds <code>review.xml</code>, <code>review.guide.xml</code>, and the
+three skill directories to the guest user's active global Git excludes file.
+That is <code>~/.config/git/ignore</code> by default, or the path selected by
+<code>core.excludesFile</code>. It does not change your project's <code>.gitignore</code>.</p>
+<p>Ignore rules do not hide files that Git already tracks.</p>
 <h2 id="feeding-it-back-to-the-agent">Feeding it back to the agent</h2>
 <p>Tell the agent to read <code>review.xml</code> in the checkout, or use
 <code>/self-review-apply review.xml</code>. The saved feedback is already inside the VM,

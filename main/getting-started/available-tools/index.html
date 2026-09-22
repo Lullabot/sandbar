@@ -1478,6 +1478,9 @@ Run <code>sand land NAME PATH --review</code> to review a checkout's diff in you
 and save comments where the agent can read them. The server runs inside the
 VM and starts only when you open a review. See
 <a href="../../using-sand/review/">Reviewing changes in a browser</a>.</p>
+<p>An initial repository cloned during provisioning receives the matching agent
+skills automatically. For repositories cloned later, run
+<code>self-review-install-skills /path/to/repository</code> inside the VM.</p>
 <h2 id="shell-utilities">Shell &amp; utilities</h2>
 <ul>
 <li><code>tmux</code>, <code>direnv</code>, <code>jq</code>, <code>htop</code>, and other common CLI tools</li>
