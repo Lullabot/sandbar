@@ -155,12 +155,12 @@ func TestDefaultCreateConfig(t *testing.T) {
 	if c.CPUs != 2 {
 		t.Errorf("CPUs = %d, want %d", c.CPUs, 2)
 	}
-	if !c.WithClaude || !c.WithDDEV || !c.WithGo || !c.WithJava {
-		t.Errorf("WithClaude/WithDDEV/WithGo/WithJava = %v/%v/%v/%v, want the initial Claude choice and base dependencies enabled",
-			c.WithClaude, c.WithDDEV, c.WithGo, c.WithJava)
+	if !c.WithDDEV || !c.WithGo || !c.WithJava {
+		t.Errorf("WithDDEV/WithGo/WithJava = %v/%v/%v, want base dependencies enabled",
+			c.WithDDEV, c.WithGo, c.WithJava)
 	}
-	if c.WithCodex || c.WithOpenCode || c.WithPi {
-		t.Errorf("opt-in agent defaults = codex:%v opencode:%v pi:%v, want all false", c.WithCodex, c.WithOpenCode, c.WithPi)
+	if c.WithClaude || c.WithCodex || c.WithOpenCode || c.WithPi {
+		t.Errorf("opt-in agent defaults = claude:%v codex:%v opencode:%v pi:%v, want all false", c.WithClaude, c.WithCodex, c.WithOpenCode, c.WithPi)
 	}
 }
 

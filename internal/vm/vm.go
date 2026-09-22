@@ -127,13 +127,12 @@ func DefaultCreateConfig() CreateConfig {
 		// which is the same place --locale's host default (`$LANG`) and the git
 		// identity are resolved. Anything that skips both gets Etc/UTC, i.e.
 		// exactly the behaviour that predates this field.
-		Timezone:   FallbackTimezone,
-		CPUs:       2,
-		WithClaude: true,
-		WithDDEV:   true,
-		WithGo:     true,
-		WithJava:   true,
-		// Codex, OpenCode and Pi are opt-in; Claude is the initial default.
+		Timezone: FallbackTimezone,
+		CPUs:     2,
+		WithDDEV: true,
+		WithGo:   true,
+		WithJava: true,
+		// Every coding agent is opt-in. The submitted selection is remembered.
 	}
 }
 

@@ -72,7 +72,7 @@ func runCreateWithBinding(args []string, bind createBinder) error {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
 
-Headlessly provision a coding-agent development VM: no TUI, no prompts. Every
+Headlessly provision a development VM for coding agents: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `+"`sand create`"+`
 needs no flags. If neither the flags nor the host git config supply an

@@ -23,7 +23,7 @@ func TestAgentChoicesSurviveLateBaseRead(t *testing.T) {
 	m = next.(model)
 	next, _ = m.Update(toolsetLoadedMsg{scope: m.formScope, agents: agentprefs.Selection{Claude: true, Codex: true}})
 	m = next.(model)
-	if m.toolClaude || !m.toolCodex {
+	if !m.toolClaude || !m.toolCodex {
 		t.Fatal("late read overwrote edited agents")
 	}
 }
@@ -290,23 +290,22 @@ func TestCreateFormJavaToggleOff(t *testing.T) {
 	if cfg.WithJava {
 		t.Fatalf("WithJava = true after flipping the Java toggle off, want false")
 	}
-	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo {
-		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v", cfg.WithClaude, cfg.WithDDEV, cfg.WithGo)
+	if cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo {
+		t.Fatalf("untouched toggles should retain their defaults: WithClaude=%v WithDDEV=%v WithGo=%v", cfg.WithClaude, cfg.WithDDEV, cfg.WithGo)
 	}
 }
 
-// TestCreateFormClaudeToggleOff pins that Claude Code is a de-selectable tool
-// like any other — the point of making it optional is that a user can bring
-// their own agent — and that de-selecting it leaves the other tools alone.
-func TestCreateFormClaudeToggleOff(t *testing.T) {
+// TestCreateFormClaudeToggleOn pins that Claude Code is opt-in like every other
+// agent, and that selecting it leaves the base dependencies alone.
+func TestCreateFormClaudeToggleOn(t *testing.T) {
 	m := newTestModel(t)
 	m.openForm()
 	m.inputs[fName].SetValue("web")
 	m.inputs[fGitName].SetValue("Dev")
 	m.inputs[fGitEmail].SetValue("dev@example.com")
 
-	if !m.toolClaude {
-		t.Fatalf("Claude Code must default ON: an unconfigured create installs what it always did")
+	if m.toolClaude {
+		t.Fatalf("Claude Code must default OFF like every other agent")
 	}
 
 	m.focusIdx = fCloneToken
@@ -322,8 +321,8 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	if cfg.WithClaude {
-		t.Fatalf("WithClaude = true after flipping the Claude Code toggle off, want false")
+	if !cfg.WithClaude {
+		t.Fatalf("WithClaude = false after flipping the Claude Code toggle on, want true")
 	}
 	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
 		t.Fatalf("untouched toggles should stay at their default on: WithDDEV=%v WithGo=%v WithJava=%v",
@@ -335,7 +334,7 @@ func TestCreateFormClaudeToggleOff(t *testing.T) {
 }
 
 // TestCreateFormCodexToggleOn pins that OpenAI Codex is a de-selectable,
-// OPT-IN tool: it defaults off (unlike Claude Code) and the create form must
+// OPT-IN tool: it defaults off and the create form must
 // still surface it as a toggle, immediately after the Claude Code toggle, so
 // flipping it on produces WithCodex: true while leaving the other (default-on)
 // tools alone.
@@ -369,8 +368,8 @@ func TestCreateFormCodexToggleOn(t *testing.T) {
 	if !cfg.WithCodex {
 		t.Fatalf("WithCodex = false after flipping the OpenAI Codex toggle on, want true")
 	}
-	if !cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
-		t.Fatalf("untouched toggles should stay at their default on: WithClaude=%v WithDDEV=%v WithGo=%v WithJava=%v",
+	if cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
+		t.Fatalf("untouched toggles should retain their defaults: WithClaude=%v WithDDEV=%v WithGo=%v WithJava=%v",
 			cfg.WithClaude, cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
 	}
 }
@@ -579,13 +578,13 @@ func TestCreateFormSeedsTogglesFromAPartialToolset(t *testing.T) {
 	}
 }
 
-// With no base built yet there is nothing to adopt, so the form keeps its all-on
-// default — a first create still installs everything sand always has.
-func TestCreateFormWithNoBaseKeepsTheAllOnDefault(t *testing.T) {
+// With no base built yet there is nothing to adopt, so the form keeps the
+// dependency defaults while every agent remains opt-in.
+func TestCreateFormWithNoBaseKeepsDefaults(t *testing.T) {
 	m := newTestModel(t)
 	m.openForm()
-	if !m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
-		t.Errorf("with no base stamp the form must open all-on, got claude=%v ddev=%v go=%v java=%v",
+	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
+		t.Errorf("with no base stamp the form has wrong defaults: claude=%v ddev=%v go=%v java=%v",
 			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
 	}
 }

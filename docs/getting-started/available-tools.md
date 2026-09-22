@@ -26,8 +26,8 @@ covers how to reach it from your browser — locally and on a remote profile.
 
 The create form offers four independent checkboxes: **Install Claude Code**,
 **Install OpenAI Codex**, **Install OpenCode**, and **Install Pi**. Select any combination, including none.
-Initially only Claude Code is selected; after creating a VM, sand remembers
-your choices across connection profiles. See [Files and State](../reference/files-and-state.md#coding-agent-preferences-and-migration)
+All four start unselected; after creating a VM, sand remembers your choices
+across connection profiles. See [Files and State](../reference/files-and-state.md#coding-agent-preferences-and-migration)
 for persistence and migration details.
 
 Headless creation offers `--with-claude`, `--with-codex`, `--with-opencode`,

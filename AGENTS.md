@@ -5,7 +5,7 @@ the project evolves.
 
 ## What this is
 
-`sand` is a tool for spinning up disposable coding-agent development VMs. It has
+`sand` is a tool for spinning up disposable development VMs for coding agents. It has
 two halves that share one repo:
 
 - **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that drives [Lima](https://lima-vm.io)

@@ -36,7 +36,7 @@ delete/start/stop lifecycle as the headless commands below. See
 ```
 Usage: sand create [flags]
 
-Headlessly provision a coding-agent development VM: no TUI, no prompts. Every
+Headlessly provision a development VM for coding agents: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `sand create`
 needs no flags. If neither the flags nor the host git config supply an
@@ -71,7 +71,7 @@ not a prompt.
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sand reset NAME`](#sand-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
-| `--with-claude` | bool | remembered, initially `true` | Install current Claude Code in this VM. |
+| `--with-claude` | bool | remembered, initially `false` | Install current Claude Code in this VM. |
 | `--with-codex` | bool | remembered, initially `false` | Install current Codex in this VM. |
 | `--with-opencode` | bool | remembered, initially `false` | Install current OpenCode in this VM. |
 | `--with-pi` | bool | remembered, initially `false` | Install current Pi in this VM. |
@@ -258,7 +258,7 @@ sand create --profile work
 $ sand create --help
 Usage: sand create [flags]
 
-Headlessly provision a coding-agent development VM: no TUI, no prompts. Every
+Headlessly provision a development VM for coding agents: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `sand create`
 needs no flags. If neither the flags nor the host git config supply an
@@ -303,13 +303,13 @@ Flags:
   -rebuild
     	Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)
   -recreate
-    	Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild
+        Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory
   -timezone string
     	IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)
   -user string
     	Primary VM user
   -with-claude
-        Install Claude Code when creating this VM (default: last submitted selection) (default true)
+        Install Claude Code when creating this VM (default: last submitted selection)
   -with-codex
         Install OpenAI Codex when creating this VM (default: last submitted selection)
   -with-ddev

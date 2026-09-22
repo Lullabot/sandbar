@@ -122,9 +122,8 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 }
 
 // TestBuildExtraVars_ClaudeCanBeDeselected: toolset_claude=false is what gates
-// the claude-code role off in site.yml, so if this var stopped being emitted
-// the role would fall back to its default (true) and install Claude Code onto
-// the base of a user who explicitly asked for their own agent instead.
+// the claude-code role off in site.yml, so this value must keep reaching the
+// per-VM finalize pass even though the role default is also safely off.
 func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithClaude = false

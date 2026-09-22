@@ -64,6 +64,13 @@ class AgentRolesTest(unittest.TestCase):
                             self.assertEqual((directory / role).exists(), role in selected and phase != "base", role)
                         self.assertEqual((directory / "agent-cleanup").exists(), phase == "base")
 
+    def test_opencode_uses_current_official_npm_package(self):
+        tasks = yaml.safe_load((ROOT / "roles" / "opencode" / "tasks" / "main.yml").read_text())
+        install = next(task for task in tasks if task["name"] == "Install the latest OpenCode release")
+        argv = install["ansible.builtin.command"]["argv"]
+        self.assertIn("@opencode/cli@latest", argv)
+        self.assertNotIn("opencode-ai@latest", argv)
+
     def test_preserved_settings_and_installer_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

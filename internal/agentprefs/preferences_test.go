@@ -14,7 +14,7 @@ func TestMigrateLegacyAndRememberExplicitOptOut(t *testing.T) {
 		stamp         string
 		claude, codex bool
 	}{
-		{"v2:hash:none", false, false}, {"v2:hash:codex+go", false, true}, {"v3:hash:none", true, false},
+		{"v2:hash:none", false, false}, {"v2:hash:codex+go", false, true}, {"v3:hash:none", false, false},
 		{"v2:hash:codex:template-gen2", false, true},
 	} {
 		t.Run(tc.stamp, func(t *testing.T) {

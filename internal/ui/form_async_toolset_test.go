@@ -104,9 +104,9 @@ func TestToolsetLoadedMsgIgnoresStaleScopeOrClosedForm(t *testing.T) {
 		t.Fatal("openForm should return a command (focus + tool-set read)")
 	}
 
-	// The all-on default, before any async result lands.
-	if !m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
-		t.Fatal("openForm should start from the all-on default before any async result lands")
+	// Dependencies start on and every agent starts off before the async result.
+	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
+		t.Fatal("openForm should start with agents off and dependencies on before any async result lands")
 	}
 
 	// Simulate the user cycling to a DIFFERENT profile before the ORIGINAL
@@ -121,7 +121,7 @@ func TestToolsetLoadedMsgIgnoresStaleScopeOrClosedForm(t *testing.T) {
 	// every toggle, clobbering the newly-selected profile's state.
 	next, _ := m.Update(toolsetLoadedMsg{scope: staleScope, toolset: map[string]bool{}, ok: true})
 	m = next.(model)
-	if !m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
+	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
 		t.Fatal("a stale toolset result for a previously-selected scope must not clobber the currently-selected profile's toggles")
 	}
 

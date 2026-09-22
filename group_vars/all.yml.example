@@ -16,7 +16,7 @@ user_git_user_email: "you@example.com"
 #   finalize - per-clone pass (hostname, git identity, latest coding agents, repo)
 # provision_phase: full
 # Per-VM agents (installed during full/finalize, never in the base).
-# toolset_claude: true
+# toolset_claude: false
 # toolset_codex: false
 # toolset_opencode: false
 # toolset_pi: false

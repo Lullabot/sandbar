@@ -1,6 +1,9 @@
 ---
 # Migration of an existing reusable base, never a user's full/finalize run.
-# Remove only artifacts installed by sand's previous Claude/Codex roles.
+# Bases built by older sand releases already contain Claude and sometimes Codex;
+# merely moving those roles to finalize would leave the old binaries in every
+# future clone, including when their checkboxes are off. Remove only the exact
+# artifacts installed by sand's previous roles so the base becomes agent-free.
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
     database: passwd

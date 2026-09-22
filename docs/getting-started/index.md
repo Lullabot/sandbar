@@ -1,7 +1,7 @@
 # About sand
 
-`sand` is a small Go CLI and terminal UI that manages disposable coding-agent
-development VMs. Run it with no
+`sand` is a small Go CLI and terminal UI that manages disposable development
+VMs for coding agents. Run it with no
 arguments for an interactive board of your VMs, or drive it headlessly
 (`sand create`, `sand shell`) from scripts and CI.
 
@@ -31,7 +31,7 @@ side by side. See [Where VMs Run](../using-sand/connection-profiles.md).
 
 `sand` is not a general-purpose VM manager. It doesn't manage arbitrary
 guest OSes, arbitrary provisioning recipes, or long-lived infrastructure. It
-manages one kind of thing — a coding-agent development VM — well, and leaves
+manages one kind of thing — a development VM for coding agents — well, and leaves
 everything else to the tools underneath it.
 
 `sand` is the Go successor to what used to be a shell script plus a

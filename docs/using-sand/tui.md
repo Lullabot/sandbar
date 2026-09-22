@@ -147,7 +147,7 @@ new VM is created on without leaving the TUI. See
 
 The create form has independent **Install Claude Code**, **Install OpenAI Codex**,
 **Install OpenCode**, and **Install Pi** checkboxes. New VMs start with your last
-submitted choices (initially Claude Code only); reset starts with the choices
+submitted choices (initially all off); reset starts with the choices
 recorded for that VM and does not change global preferences.
 
 Press `R` on a managed VM's tile to open the *Reset VM* form, filled with

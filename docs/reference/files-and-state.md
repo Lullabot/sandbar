@@ -57,9 +57,8 @@ Source: `internal/registry/registry.go:68`-`internal/registry/registry.go:90` (`
 `${XDG_DATA_HOME:-~/.local/share}/sandbar/agent-preferences.json` stores the
 last submitted agent selections in a version 1, secret-free JSON file.
 It is global across connection profiles. Explicit saved choices, including
-all four agents off, override initial defaults (Claude Code on; Codex,
-OpenCode, and Pi off). Deleting it forgets those preferences without changing
-existing VMs.
+all four agents off, override the initial all-off selection. Deleting it
+forgets those preferences without changing existing VMs.
 
 If that file is absent, an older version 2 base stamp can seed Claude Code
 and Codex preferences once. Modern version 3 base stamps record shared

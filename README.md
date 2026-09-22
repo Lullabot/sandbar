@@ -1,7 +1,7 @@
 # sandbar
 
-`sand` is a single Go binary that provisions disposable coding-agent
-development VMs. Choose Claude Code, Codex, OpenCode, and Pi, point your
+`sand` is a single Go binary that provisions disposable development VMs for
+coding agents. Choose Claude Code, Codex, OpenCode, and Pi, point your
 agents at a repository, and throw the VM away when you're done.
 
 VMs can run **on your own machine**, **on another machine over SSH**, or **on
