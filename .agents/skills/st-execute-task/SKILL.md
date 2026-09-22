@@ -136,8 +136,9 @@ Preserve all other frontmatter fields exactly.
 
 ### 8. Execute the task
 
-Deploy an agent using your internal Task tool. The agent MUST perform these
-steps in order:
+Deploy an agent using the harness's subagent tool (the Task tool in Claude
+Code, or the spawn-agent equivalent in Codex), with the model and effort chosen
+by `PRE_TASK_ASSIGNMENT.md`. The agent MUST perform these steps in order:
 
 1. **Pre-flight validation**: Read and execute
    `<root>/config/hooks/PRE_TASK_EXECUTION.md` before starting any

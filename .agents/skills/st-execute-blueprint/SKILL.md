@@ -87,7 +87,10 @@ Read `<root>/config/hooks/PRE_PHASE.md` and execute its instructions before star
 #### 7b. Task dispatch
 Identify all tasks scheduled for this phase whose dependencies are fully satisfied. Read `<root>/config/hooks/PRE_TASK_ASSIGNMENT.md` and follow its instructions for agent selection before dispatching tasks.
 
-Deploy all selected agents simultaneously using your internal Task tool. Each agent MUST:
+Deploy all selected agents simultaneously using the harness's subagent tool
+(the Task tool in Claude Code, or the spawn-agent equivalent in Codex), with
+the provider model and effort chosen by `PRE_TASK_ASSIGNMENT.md`. Each agent
+MUST:
 
 1. Read and execute `<root>/config/hooks/PRE_TASK_EXECUTION.md` before starting any implementation work.
 2. Execute the task according to its requirements.
