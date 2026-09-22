@@ -344,3 +344,25 @@ Run the repository verification gate and post-phase hook after each phase.
 ### Execution Summary
 - Total Phases: 2
 - Total Tasks: 3
+
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-22
+
+### Results
+
+Added optional provider memory capabilities. Proxmox reclaims guest caches over SSH and supplies host-side VM memory. The TUI uses host-resident memory in VM gauges and fleet totals, patterns guest filesystem cache within the filled portion, offers a manual capability-gated Reclaim memory action, and refreshes both readings on completion. Updated user and agent documentation.
+
+### Noteworthy Events
+
+- Clarified that external Go provider API backward compatibility was not required.
+- Updated cache accounting to match Linux free-style buff/cache by subtracting Shmem, clamped at zero.
+- Aligned the fleet header with host-side memory; leaving its old guest sum would conflict with the new tile reading.
+- Fresh `go test -count=1 ./...`, targeted race tests, full race/coverage suite, `go vet ./...`, `gofmt -l .`, `git diff --check`, and strict MkDocs build passed. Coverage measured 90.9%; the committed floor is 90.5%.
+- Proxmox command behavior is proven with fake SSH and API boundaries. No live Proxmox VM was available for a hardware-level memory reduction measurement.
+
+### Necessary follow-ups
+
+None required for this work order.
