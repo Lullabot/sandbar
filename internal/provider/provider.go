@@ -225,6 +225,23 @@ type Provider interface {
 	HostFiles() lima.HostFiles
 }
 
+// MemoryReclaimer is the optional capability for a backend whose guest cache
+// drop is known to release memory from the host or hypervisor. Consumers detect
+// support with a type assertion; guest shell access alone is not sufficient.
+// In particular, Lima guests can drop Linux caches without reducing the VM's
+// macOS-side footprint, so the Lima providers deliberately do not implement it.
+type MemoryReclaimer interface {
+	ReclaimMemory(ctx context.Context, name string) error
+}
+
+// VMHostMemoryProvider is the optional source of one VM's host or hypervisor
+// resident-memory reading. It is deliberately separate from guest utilization:
+// a guest's MemAvailable arithmetic does not say how much physical host memory
+// its VM currently occupies. A zero reading means unknown.
+type VMHostMemoryProvider interface {
+	VMHostMemory(ctx context.Context, name string) (int64, error)
+}
+
 // HostResources is the limactl host's own capacity, used for the board
 // header's denominators AND (DiskTotalBytes) the low-capacity warning feature's
 // free% arithmetic (see Provider.HostResources). A zero field means "unknown"
