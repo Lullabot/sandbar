@@ -82,26 +82,22 @@ finishes, with no webhook or extra configuration required.
 
 If you created the VM with `--with-codex` (or enabled Codex in the TUI create
 form), the Codex CLI is provisioned but no credential is included. Shell into
-the VM and run `codex` once to start an interactive login.
+the VM and run `codex` with no arguments. On the first bare interactive run,
+`sand` asks whether you want to enable Codex remote-control support.
 
-Codex signs in with your ChatGPT account. Its default OAuth flow expects a
-browser callback on `localhost:1455` *inside the VM*, which won't work from a
-VM shell directly. The simplest path is the device-code flow, which needs no
-network plumbing at all — the CLI and your browser talk through OpenAI's
-servers:
+If you answer yes, the wrapper guides you through Codex's device-code login,
+sets up its persistent app server with remote control enabled, and runs the
+initial `codex remote-control pair` flow so you can pair another device with
+the ChatGPT app. You do not need to run those setup commands yourself. When
+setup finishes, the regular Codex interface opens.
+
+After setup, run `codex agents` to connect to the persistent app server
+locally. To connect another device later, run:
 
 ```bash
-codex login --device-auth
+codex remote-control pair
 ```
 
-Alternatives: forward the callback port when connecting over SSH
-(`ssh -L 1455:localhost:1455`, using the connection details from
-`limactl show-ssh NAME`), or copy an existing `~/.codex/auth.json` from a
-machine you've already signed in on — for a `sand` VM, use the TUI's Upload
-action to move the file in.
-
-**Important:** Codex offers **no CLI-reachable remote control or phone
-notifications** — those features require the Codex desktop app on macOS or
-Windows, which uses QR-code device pairing. If you're choosing between Claude
-Code and Codex, do not expect phone alerts for Codex sessions from the VM; use
-Claude Code if you need Claude app notifications.
+If you decline remote control, `sand` remembers that choice and opens Codex
+normally. Later bare runs, commands with arguments, and non-interactive uses
+continue directly to the ordinary Codex CLI without another onboarding prompt.

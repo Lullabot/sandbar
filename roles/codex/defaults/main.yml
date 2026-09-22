@@ -1,6 +1,9 @@
 ---
 # No tunable defaults: when this role runs, OpenAI Codex is installed and
 # configured for friction-free use (no approval prompts, full sandbox access).
+# Its shell wrapper offers one-time remote-control onboarding on the first bare
+# interactive launch, remembers either choice, and otherwise passes through to
+# the upstream CLI unchanged.
 #
 # WHETHER it runs is a tool-set selection, toolset_codex (sand create
 # --with-codex), which gates the role from site.yml. That default lives with

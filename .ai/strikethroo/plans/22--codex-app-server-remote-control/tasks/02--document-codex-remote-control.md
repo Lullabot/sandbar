@@ -2,7 +2,7 @@
 id: 2
 group: "codex-onboarding"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-09-22
 model: "haiku"
 effort: "low"

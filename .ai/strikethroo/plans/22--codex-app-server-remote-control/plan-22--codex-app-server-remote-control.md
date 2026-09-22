@@ -183,12 +183,12 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 1: Implement and test the Codex remote-control onboarding wrapper — `completed`
 
-### Phase 2: User documentation
+### ✅ Phase 2: User documentation
 
-**Status:** pending
+**Status:** completed
 
 **Parallel Tasks:**
-- Task 2: Document Codex remote-control setup and follow-up commands (depends on: 1)
+- ✔️ Task 2: Document Codex remote-control setup and follow-up commands (depends on: 1) — `completed`
 
 ### Post-phase Actions
 
