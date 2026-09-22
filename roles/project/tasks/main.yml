@@ -61,18 +61,46 @@
         - project_clone_token | length > 0
         - _clone_host == "github.com"
 
-    - name: Clone the project
-      ansible.builtin.git:
-        repo: "{{ project_clone_url }}"
-        dest: "{{ _clone_dest }}"
-        update: false
-      become: true
-      become_user: "{{ user_name }}"
-      environment:
-        HOME: "{{ user_home }}"
-        GH_TOKEN: "{{ project_clone_token if _clone_host == 'github.com' else '' }}"
-        GIT_TERMINAL_PROMPT: "0"
-      no_log: "{{ project_clone_token | length > 0 }}"
+    - name: Clone the project with a safe failure reason
+      block:
+        - name: Clone the project
+          ansible.builtin.git:
+            repo: "{{ project_clone_url }}"
+            dest: "{{ _clone_dest }}"
+            update: false
+          become: true
+          become_user: "{{ user_name }}"
+          environment:
+            HOME: "{{ user_home }}"
+            GH_TOKEN: "{{ project_clone_token if _clone_host == 'github.com' else '' }}"
+            GIT_TERMINAL_PROMPT: "0"
+          # Git can echo credentials in its error. Keep the raw result out of
+          # the log, then report only a fixed, credential-free reason below.
+          no_log: "{{ project_clone_token | length > 0 }}"
+      rescue:
+        - name: Classify the clone failure without logging Git output
+          ansible.builtin.set_fact:
+            _clone_failure: "{{ ((ansible_failed_result.msg | default('')) ~ ' ' ~ (ansible_failed_result.stderr | default(''))) | lower }}"
+          no_log: true
+
+        - name: Report rejected clone credentials
+          ansible.builtin.fail:
+            msg: "SAND_CLONE_ERROR_AUTH: Git authentication failed. Check the clone token and its repository access."
+          when: "'authentication failed' in _clone_failure or 'invalid username or password' in _clone_failure or 'bad credentials' in _clone_failure"
+
+        - name: Report a missing or inaccessible repository
+          ansible.builtin.fail:
+            msg: "SAND_CLONE_ERROR_REPO: Repository not found or inaccessible. Check the clone URL and token access."
+          when: "'repository not found' in _clone_failure or 'not found' in _clone_failure"
+
+        - name: Report a clone network failure
+          ansible.builtin.fail:
+            msg: "SAND_CLONE_ERROR_NETWORK: Cannot reach the repository host. Check the clone URL and network access."
+          when: "'could not resolve host' in _clone_failure or 'unable to access' in _clone_failure or 'could not resolve proxy' in _clone_failure"
+
+        - name: Report another clone failure
+          ansible.builtin.fail:
+            msg: "SAND_CLONE_ERROR_OTHER: Project clone failed. Check the clone URL, token access, and the VM log."
 
     # This happens before the user starts their first agent session, so the
     # skills are discoverable for a critique that precedes the browser review.

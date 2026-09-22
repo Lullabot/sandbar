@@ -320,6 +320,27 @@ func TestProvisionFailureSurfacedInMessages(t *testing.T) {
 	}
 }
 
+func TestCloneFailureShowsSafeReasonOnBoard(t *testing.T) {
+	m := resized(newTestModel(t), 120, 40)
+	l := newTeaLoop(t, m)
+	build := newFakeJob()
+	l.exec(l.m.beginProvision("Creating web", build.run, vm.CreateConfig{Name: "web", CloneToken: "secret-token"}))
+	build.write(l, provisionKey(registry.LocalScope, "web"), "fatal: secret-token\nmsg: SAND_CLONE_ERROR_REPO: Repository not found or inaccessible.\n")
+	build.done <- errAnsibleBoom
+	l.pump("the clone to fail", func(m model) bool { return !m.jobs.isRunning(registry.LocalScope, "web") })
+
+	if l.m.view != viewBoard {
+		t.Fatalf("failed clone moved away from board: %v", l.m.view)
+	}
+	got := l.m.lastMessage()
+	if !strings.Contains(got, "Repository not found or inaccessible") || !strings.Contains(got, "clone URL and token access") || !strings.Contains(got, "Open the VM log with l") {
+		t.Fatalf("clone reason missing from Messages: %q", got)
+	}
+	if strings.Contains(got, "secret-token") {
+		t.Fatalf("clone token leaked into Messages: %q", got)
+	}
+}
+
 // A user-canceled run is NOT a failure — its error is the kill we caused — so it
 // must stay out of the Messages log (it never reddens the tile either).
 func TestCanceledProvisionNotSurfacedInMessages(t *testing.T) {
