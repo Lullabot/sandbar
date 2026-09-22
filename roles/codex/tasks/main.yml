@@ -44,3 +44,29 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+
+- name: Ensure ~/.config/sandbar directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/sandbar"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0700"
+
+- name: Install Codex first-run remote-control wrapper
+  ansible.builtin.copy:
+    src: codex-shell-wrapper.sh
+    dest: "{{ user_home }}/.config/sandbar/codex-shell-wrapper.sh"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+
+- name: Load Codex first-run remote-control wrapper from ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    line: '. "$HOME/.config/sandbar/codex-shell-wrapper.sh"'
+    regexp: '^\. "\$HOME/\.config/sandbar/codex-shell-wrapper\.sh"$'
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"

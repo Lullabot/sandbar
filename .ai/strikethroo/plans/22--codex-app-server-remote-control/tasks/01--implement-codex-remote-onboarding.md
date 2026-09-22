@@ -2,7 +2,7 @@
 id: 1
 group: "codex-onboarding"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-09-22
 model: "sonnet"
 effort: "high"
@@ -22,15 +22,15 @@ Add a Codex-role shell wrapper that offers one-time remote-control onboarding on
 - `ansible`: install the wrapper only when the opt-in Codex role runs and keep provisioning idempotent.
 
 ## Acceptance Criteria
-- [ ] The first bare interactive `codex` invocation without an onboarding marker asks whether to enable remote-control support.
-- [ ] An affirmative answer runs `codex login --device-auth`, `codex app-server daemon bootstrap --remote-control`, and `codex remote-control pair` in order through the upstream executable.
-- [ ] The affirmative marker is created only after all setup steps succeed; any failed step returns failure, does not launch the TUI, and leaves onboarding retryable.
-- [ ] A decline is remembered and immediately launches the ordinary upstream Codex TUI.
-- [ ] Successful setup explains both `codex agents` for local access and `codex remote-control pair` for additional devices before launching the ordinary TUI.
-- [ ] Calls with arguments and calls without terminal stdin forward the original argv unchanged and do not prompt.
-- [ ] The wrapper is installed only by `roles/codex`, is idempotent under repeat provisioning, and never calls itself recursively.
-- [ ] A runnable focused test command exercises affirmative success, decline persistence, setup failure retryability, exact argument forwarding, and non-interactive behavior and exits 0.
-- [ ] `ansible-playbook --syntax-check -i localhost, -c local site.yml --extra-vars 'user_name=root toolset_codex=true'` exits 0.
+- [x] The first bare interactive `codex` invocation without an onboarding marker asks whether to enable remote-control support.
+- [x] An affirmative answer runs `codex login --device-auth`, `codex app-server daemon bootstrap --remote-control`, and `codex remote-control pair` in order through the upstream executable.
+- [x] The affirmative marker is created only after all setup steps succeed; any failed step returns failure, does not launch the TUI, and leaves onboarding retryable.
+- [x] A decline is remembered and immediately launches the ordinary upstream Codex TUI.
+- [x] Successful setup explains both `codex agents` for local access and `codex remote-control pair` for additional devices before launching the ordinary TUI.
+- [x] Calls with arguments and calls without terminal stdin forward the original argv unchanged and do not prompt.
+- [x] The wrapper is installed only by `roles/codex`, is idempotent under repeat provisioning, and never calls itself recursively.
+- [x] A runnable focused test command exercises affirmative success, decline persistence, setup failure retryability, exact argument forwarding, and non-interactive behavior and exits 0.
+- [x] `ansible-playbook --syntax-check -i localhost, -c local site.yml --extra-vars 'user_name=root toolset_codex=true'` exits 0.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -68,3 +68,10 @@ None. Use the existing `roles/codex` installation, the Bash wrapper convention i
 8. Run the focused tests and the Ansible syntax check, recording exact commands and results in the task before marking it completed.
 
 </details>
+
+## Execution Evidence
+
+- `bash roles/codex/tests/test-codex-shell-wrapper.sh` exited 0 with `PASS: Codex shell wrapper onboarding and pass-through behavior`.
+- `bash -n roles/codex/files/codex-shell-wrapper.sh roles/codex/tests/test-codex-shell-wrapper.sh` exited 0.
+- `ansible-playbook --syntax-check -i localhost, -c local site.yml --extra-vars 'user_name=root toolset_codex=true'` exited 0 with `playbook: site.yml`.
+- `git diff --check` exited 0.

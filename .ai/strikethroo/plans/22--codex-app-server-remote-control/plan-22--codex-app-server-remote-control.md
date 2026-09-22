@@ -176,12 +176,12 @@ graph TD
     T1 --> T2
 ```
 
-### Phase 1: Codex onboarding implementation
+### ✅ Phase 1: Codex onboarding implementation
 
-**Status:** pending
+**Status:** completed
 
 **Parallel Tasks:**
-- Task 1: Implement and test the Codex remote-control onboarding wrapper
+- ✔️ Task 1: Implement and test the Codex remote-control onboarding wrapper — `completed`
 
 ### Phase 2: User documentation
 
