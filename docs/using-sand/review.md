@@ -109,8 +109,8 @@ exists. The CLI deletes them without a prompt.
 
 ## The assistant skills
 
-`sand` installs three self-review skills into the checkout when a review
-starts:
+When provisioning includes an initial project clone, `sand` installs three
+self-review skills into that checkout before you start an agent session:
 
 | Skill | What it does |
 | ----- | ------------ |
@@ -122,6 +122,16 @@ The skills go in `.agents/skills/` inside the checkout. Their instructions
 refer to schema files at that location. They are included in the base image
 and match the review server's version, so copying them needs no network
 access.
+
+For a repository you clone later, run the installer inside the VM:
+
+```sh
+self-review-install-skills /path/to/repository
+```
+
+The command installs or refreshes the skills and adds the review artifacts
+and skill directories to your active global Git excludes file. It leaves a
+skill unchanged when the repository tracks its own copy.
 
 A typical workflow inside the guest:
 
@@ -144,13 +154,12 @@ Press `v` in the Landing pane to review and edit those comments, then run:
 
 ### Keeping review files out of commits
 
-The base image adds `review.xml`, `review.guide.xml`, and the three skill
-directories to the guest user's global Git ignore file,
-`~/.config/git/ignore`. It does not change your project's `.gitignore`.
+`self-review-install-skills` adds `review.xml`, `review.guide.xml`, and the
+three skill directories to the guest user's active global Git excludes file.
+That is `~/.config/git/ignore` by default, or the path selected by
+`core.excludesFile`. It does not change your project's `.gitignore`.
 
-If you have set `core.excludesFile` or use a different Git configuration
-location, add the patterns to that ignore file too. Ignore rules do not
-hide files that Git already tracks.
+Ignore rules do not hide files that Git already tracks.
 
 ## Feeding it back to the agent
 

@@ -73,3 +73,19 @@
         GH_TOKEN: "{{ project_clone_token if _clone_host == 'github.com' else '' }}"
         GIT_TERMINAL_PROMPT: "0"
       no_log: "{{ project_clone_token | length > 0 }}"
+
+    # This happens before the user starts their first agent session, so the
+    # skills are discoverable for a critique that precedes the browser review.
+    # The command also installs the global Git excludes and is left on PATH for
+    # any repositories the user clones later.
+    - name: Install the self-review skills into the project
+      ansible.builtin.command:
+        argv:
+          - self-review-install-skills
+          - "{{ _clone_dest }}"
+      become: true
+      become_user: "{{ user_name }}"
+      environment:
+        HOME: "{{ user_home }}"
+      register: project_review_skills
+      changed_when: "'installed=' in project_review_skills.stdout"

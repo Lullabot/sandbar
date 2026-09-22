@@ -662,9 +662,10 @@ next 'sand create'.
 A review.xml already in PATH is carried into the new review, so comments you
 wrote earlier are there to keep, edit or drop. Nothing ever removes that file
 on its own, so --clean is how you start over: it deletes the saved review and
-its walkthrough sidecar first. The review tool's assistant skills are
-installed into PATH/.agents/skills as the review starts, and the guest's
-global git excludes keep all of it out of 'git status'.
+its walkthrough sidecar first. A repository cloned during provisioning already
+has the review tool's assistant skills. For a repository cloned later, run
+`self-review-install-skills PATH` inside the VM; it installs the skills and
+keeps them and the review files out of `git status`.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than
@@ -709,10 +710,10 @@ It does not copy a checkout onto your workstation. See
 
 Submitting a review saves `review.xml` in the guest checkout, or at the
 `output-file` path configured for self-review. The agent can read that file
-directly. The base image adds the default review files and installed skills
-to the guest user's global Git ignore file. See
+directly. `self-review-install-skills` adds the default review files and
+installed skills to the guest user's active global Git excludes file. See
 [Keeping review files out of commits](review.md#keeping-review-files-out-of-commits)
-if you use a custom ignore file or already track those files.
+if the repository already tracks those files.
 
 ## `sand publish NAME PATH [ISSUE]`
 

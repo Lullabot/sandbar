@@ -83,67 +83,6 @@ cd "$d" || exit 1
 exec ` + ServeBinary + ` "$@"
 `
 
-// skillsStageDir is where roles/self-review stages the pinned assistant
-// skills in the BASE IMAGE: a root-owned, pristine copy that every checkout's
-// copy is made from. A guest whose base predates that role simply has no such
-// directory, and a review still runs — see installSkills.
-const skillsStageDir = "/opt/sandbar/self-review/skills"
-
-// skillsTargetDir is where they are installed INSIDE the checkout, relative
-// to its root. Per-checkout is not a preference: upstream issue #162 ("Allow
-// skills to be installed globally") is open, and the skills hard-code this
-// path in the commands they tell an assistant to run — `xmllint --schema
-// .agents/skills/self-review-apply/assets/self-review-v3.xsd` — so even the
-// one assistant that could find a guest-wide copy would be following
-// instructions that no longer resolve.
-//
-// roles/self-review adds this path, and the review output beside it, to the
-// guest user's global git excludes, so none of it surfaces as untracked work
-// in the project being reviewed.
-const skillsTargetDir = ".agents/skills"
-
-// installSkillsScript copies each staged skill into the checkout.
-//
-// It is a FIXED, LITERAL string taking the checkout and the staging directory
-// as positional arguments, for the reason every guest script in this package
-// is one: the checkout path comes from a sweep of the guest, the
-// lowest-trust source in the system.
-//
-// The rule with teeth here is the tracked-file check. Upstream's own install
-// instruction is `cp -r` into your project, so a project may legitimately
-// keep these skills under version control — and overwriting a tracked file
-// would drop an edit nobody asked for into someone's working tree, which the
-// global excludes cannot hide, because ignore rules do not apply to files git
-// already tracks. A skill git tracks is therefore left exactly as it is, and
-// only untracked copies (the ones sand itself put there) are refreshed.
-const installSkillsScript = `set -f
-d=$1
-src=$2
-[ -d "$src" ] || exit 0
-cd "$d" || exit 0
-# Pathname expansion is off everywhere else in this package precisely so a
-# guest-derived value can never be expanded — but this one loop needs it to
-# enumerate what the base staged, and its pattern has no guest-derived part:
-# $src is skillsStageDir, a compile-time constant. It goes back off as soon
-# as the loop ends, and every expansion inside the loop is quoted.
-set +f
-for s in "$src"/self-review-*; do
-  [ -d "$s" ] || continue
-  n=${s##*/}
-  dest=` + skillsTargetDir + `/$n
-  if git ls-files --error-unmatch "$dest" >/dev/null 2>&1; then
-    printf 'skipped=%s\n' "$n"
-    continue
-  fi
-  mkdir -p ` + skillsTargetDir + ` || exit 0
-  rm -rf "$dest"
-  cp -R "$s" "$dest" || continue
-  printf 'installed=%s\n' "$n"
-done
-set -f
-exit 0
-`
-
 // removeOutputScript deletes a finished review and its walkthrough sidecar
 // from the checkout, which is what "start this review over" has to mean:
 // upstream has no notion of a review being done or discarded and never
@@ -213,11 +152,6 @@ const (
 	// far below the ~37,000 a wrong base produced in the case this guard was
 	// written for, so it discriminates without ever needing to be tuned.
 	maxDiffFiles = 5000
-	// installSkillsTimeout bounds the one-shot skill install. It copies about
-	// 100KB inside the guest, so it is generous enough to be invisible and
-	// short enough that a wedged guest costs a review its skills rather than
-	// the review itself — installSkills treats every failure as non-fatal.
-	installSkillsTimeout = 20 * time.Second
 	// removeOutputTimeout bounds the two `rm -f`s behind "clean review".
 	// Unlike the install, this one's failure IS fatal to the action it serves:
 	// starting a fresh review over a review.xml that is still there would
@@ -379,10 +313,6 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		argv = append(argv, base.Commit)
 	}
 
-	// After the refusal above, deliberately: this WRITES into the checkout,
-	// and a review that is not going to start has no business leaving three
-	// skill directories behind in someone's repository.
-	s.installSkills(ctx, w)
 	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
 	if resuming {
 		fmt.Fprintf(w, "carrying in the comments already in %s\n", outputFile)
@@ -853,56 +783,6 @@ func (s *Session) diffBase(ctx context.Context) diffBaseInfo {
 		return diffBaseInfo{}
 	}
 	return parseDiffBase(string(out))
-}
-
-// installSkills copies the base image's staged assistant skills into the
-// checkout, so `/self-review-critique` before a review and
-// `/self-review-apply` after one both work in the guest with no setup.
-//
-// Every failure is reported and none is fatal. The skills bracket a review;
-// they are not part of serving one, and a guest whose base predates them (or
-// whose copy cannot be written) still has a perfectly good review to run. The
-// opposite choice — failing the review because an optional convenience could
-// not be installed — would trade the feature for its accessory.
-func (s *Session) installSkills(ctx context.Context, w io.Writer) {
-	ctx, cancel := context.WithTimeout(ctx, installSkillsTimeout)
-	defer cancel()
-
-	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", installSkillsScript, "sh", s.Checkout.Path, skillsStageDir)
-	if err != nil {
-		fmt.Fprintf(w, "could not install the review skills into %s: %v\n", s.Checkout.Path, err)
-		return
-	}
-
-	installed, skipped := countSkillReport(string(out))
-	switch {
-	case installed == 0 && skipped == 0:
-		// Nothing staged: a base image older than the skills. Said once, in
-		// the same shape as missingToolHint, because the next create fixes it
-		// on its own and there is no flag to pass.
-		fmt.Fprintf(w, "no review skills staged in this VM's base image; the next `sand create` brings them in\n")
-	case skipped > 0:
-		fmt.Fprintf(w, "review skills in %s/: %d installed, %d left alone (this repo tracks its own)\n",
-			skillsTargetDir, installed, skipped)
-	default:
-		fmt.Fprintf(w, "review skills installed in %s/ (%d)\n", skillsTargetDir, installed)
-	}
-}
-
-// countSkillReport tallies the install script's key=value lines. Anything
-// else on the stream — a login banner, a motd — is noise, the same tolerance
-// every other parser in this package extends to a real login shell.
-func countSkillReport(out string) (installed, skipped int) {
-	for _, line := range strings.Split(out, "\n") {
-		switch key, _, ok := strings.Cut(strings.TrimSpace(line), "="); {
-		case !ok:
-		case key == "installed":
-			installed++
-		case key == "skipped":
-			skipped++
-		}
-	}
-	return installed, skipped
 }
 
 // removeOutput deletes the checkout's review output and walkthrough sidecar

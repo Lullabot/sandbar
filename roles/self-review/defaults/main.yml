@@ -41,7 +41,9 @@ selfreview_packages:
   - libxml2-utils
 
 # The assistant skills that close the review loop, staged into the base image
-# here and copied into a checkout by internal/landreview when a review starts.
+# here and copied into a checkout by self-review-install-skills. The project
+# role calls that command for sand's initial clone; users can call it for any
+# repository they clone later.
 #
 #   self-review-critique  pre-generates a review to curate (and runs the
 #                         guide skill as its first step)
@@ -62,24 +64,18 @@ selfreview_skills:
 # has an intact one to install into the next.
 selfreview_skills_dir: /opt/sandbar/self-review/skills
 
-# The git ignore patterns written to the USER'S global excludes file in the
-# guest, so a review never shows up as untracked work in someone's project.
+# Where the reusable checkout installer is placed. It also updates the user's
+# active global excludes file, so installing into a later clone is the whole
+# setup operation rather than half of one.
+selfreview_skills_installer: /usr/local/bin/self-review-install-skills
+
+# The skills are per-checkout by necessity, not by preference. Upstream's own
+# issue #162, "Allow skills to be installed globally", is open, and the skills
+# themselves hard-code checkout-relative asset paths.
 #
-# The skills are per-checkout by necessity, not by preference: upstream's own
-# issue #162, "Allow skills to be installed globally", is open, and until it
-# lands every assistant that can read them wants them inside the project. The
-# skills themselves hard-code the checkout-relative path — `xmllint --schema
+# In particular, they use `xmllint --schema
 # .agents/skills/self-review-apply/assets/self-review-v3.xsd` — so a
-# guest-wide install would break their own instructions even for the one
-# assistant that could find it.
-#
-# Ignoring is therefore the mitigation for something sand is forced to do.
-selfreview_ignore_patterns:
-  - review.xml
-  - review.guide.xml
-  - .agents/skills/self-review-apply/
-  - .agents/skills/self-review-critique/
-  - .agents/skills/self-review-guide/
+# guest-wide install would break their own instructions.
 
 # Where the CLI is linked so every login shell finds it. internal/landreview
 # runs it by BARE NAME (landreview.ServeBinary), so what matters is that it is
