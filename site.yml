@@ -1,5 +1,5 @@
 ---
-- name: Provision coding agent development VM
+- name: Provision development VM for coding agents
   hosts: all
   become: true
   # provision_phase splits the run so a generic "base" VM can be built once and
@@ -28,7 +28,7 @@
     # Agent releases change frequently, so fetch them only after cloning.
     - role: claude-code
       when:
-        - toolset_claude | default(true) | bool
+        - toolset_claude | default(false) | bool
         - provision_phase | default('full') != 'base'
     - role: codex
       when:
