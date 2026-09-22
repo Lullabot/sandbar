@@ -173,6 +173,7 @@ jobs:
           set -o pipefail
           ./sand create --rebuild \
             --name claude-ci \
+            --clone-url https://github.com/Lullabot/sandbar.git \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee cold.log
 
@@ -241,6 +242,9 @@ jobs:
             [ "$name" = "@self-review/types" ] || {
               echo "::error::the dependency override is not in effect"; exit 1; }
           '
+          GUEST_HOME=$(limactl shell claude-ci bash -lc 'printf %s "$HOME"')
+          limactl shell claude-ci test -f "$GUEST_HOME/github.com/Lullabot/sandbar/.agents/skills/self-review-apply/SKILL.md" \
+            || { echo "::error::the project cloned during provisioning did not receive the assistant skills"; exit 1; }
           size=$(limactl shell claude-ci du -sm /opt/sandbar/self-review/node_modules | cut -f1)
           echo "review install size: ${size}MB"
           if [ "$size" -gt 100 ]; then
@@ -248,9 +252,9 @@ jobs:
             exit 1
           fi
 
-      # TWO checkouts, because "a VM may have multiple checkouts" is a stated
-      # requirement of this feature: the review must cover the checkout named
-      # on the command line and no other. Each gets work in all three states —
+      # TWO review fixtures, because "a VM may have multiple checkouts" is a
+      # stated requirement of this feature: the review must cover the checkout
+      # named on the command line and no other. Each gets work in all three states —
       # committed on the branch, uncommitted in the working tree, and untracked
       # — so one /api/diff response can be checked for all of them at once.
       # That combination is the point of the merge-base-to-worktree range:
@@ -273,6 +277,7 @@ jobs:
               git commit -q -am "committed work on the branch"
               printf "one\ntwo\nthree\nfour committed in %s\nfive uncommitted in %s\n" "$d" "$d" > README.md
               printf "untracked note for %s\n" "$d" > "NOTES-$d.md"
+              self-review-install-skills "$HOME/src/$d"
             done
           '
 
@@ -291,6 +296,12 @@ jobs:
           GUEST_HOME=$(limactl shell claude-ci bash -lc 'printf %s "$HOME"')
           REPO="$GUEST_HOME/src/alpha"
           echo "reviewing $REPO"
+
+          # The explicit installer above, not review startup, must install the
+          # skills in a repository cloned later. Assert this before launching
+          # `sand land --review` so the old late-install behaviour cannot pass.
+          limactl shell claude-ci test -f "$REPO/.agents/skills/self-review-apply/SKILL.md" \
+            || { echo "::error::the installer did not add the assistant skills to the later checkout"; exit 1; }
 
           ./sand land claude-ci "$REPO" --review > review.log 2>&1 &
           SAND_PID=$!
@@ -349,16 +360,12 @@ jobs:
             exit 1
           fi
 
-          # The assistant skills must actually have been installed...
-          limactl shell claude-ci test -f "$REPO/.agents/skills/self-review-apply/SKILL.md" \
-            || { echo "::error::the review did not install the assistant skills into the checkout"; exit 1; }
-
-          # ...and must NOT appear in the review it just opened. This pair is
-          # a positive and negative control, and the negative one is the point:
+          # The skills must NOT appear in the review. Together with the
+          # pre-launch assertion above this is a positive and negative control:
           # the skills are untracked files, and upstream lists untracked files
           # with `git ls-files --others --exclude-standard`, which honours the
           # guest's global excludes. So this asserts the excludes
-          # roles/self-review writes are really taking effect — without them
+          # the installer writes are really taking effect — without them
           # every review would open with seven files of sand's own tooling
           # sitting in the diff, and the check for their absence alone would
           # have passed vacuously on a VM where they were never installed.

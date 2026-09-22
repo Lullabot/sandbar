@@ -19,6 +19,7 @@ func TestEmbedPlaybookFSComplete(t *testing.T) {
 		"site.yml",
 		"ansible.cfg",
 		"inventory",
+		"roles/self-review/files/self-review-install-skills",
 	}
 	for _, f := range requiredFiles {
 		if _, err := sandbar.PlaybookFS.Open(f); err != nil {

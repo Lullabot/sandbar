@@ -1,0 +1,76 @@
+#!/bin/sh
+
+# Install sand's staged self-review skills into one Git checkout. Keeping this
+# as a guest command, rather than part of the browser-review operation, makes
+# the same setup available for repositories cloned after provisioning.
+set -eu
+set -f
+
+usage() {
+  echo "usage: self-review-install-skills REPOSITORY" >&2
+  exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+
+repo=$1
+skills_dir=${SAND_SELF_REVIEW_SKILLS_DIR:-/opt/sandbar/self-review/skills}
+
+top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || {
+  echo "self-review-install-skills: not a Git repository: $repo" >&2
+  exit 1
+}
+
+found=false
+set +f
+for src in "$skills_dir"/self-review-*; do
+  [ -d "$src" ] || continue
+  found=true
+  name=${src##*/}
+  rel=.agents/skills/$name
+  dest=$top/$rel
+
+  # A repository may deliberately carry its own version. Ignore rules cannot
+  # protect tracked files, so never overwrite them.
+  if git -C "$top" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+    printf 'skipped=%s\n' "$name"
+    continue
+  fi
+
+  if [ -d "$dest" ] && diff -qr "$src" "$dest" >/dev/null 2>&1; then
+    printf 'current=%s\n' "$name"
+    continue
+  fi
+
+  mkdir -p "$top/.agents/skills"
+  rm -rf "$dest"
+  cp -R "$src" "$dest"
+  printf 'installed=%s\n' "$name"
+done
+set -f
+
+if [ "$found" != true ]; then
+  echo "self-review-install-skills: no staged skills found in $skills_dir" >&2
+  exit 1
+fi
+
+# Respect the repository's effective core.excludesFile instead of writing to
+# Git's default file and then claiming the entries are active. `--path`
+# expands ~/.
+ignore=$(git -C "$top" config --path core.excludesFile 2>/dev/null || true)
+if [ -z "$ignore" ]; then
+  : "${HOME:?HOME is required to configure Git excludes}"
+  ignore=${XDG_CONFIG_HOME:-"$HOME/.config"}/git/ignore
+fi
+
+mkdir -p "$(dirname "$ignore")"
+touch "$ignore"
+for pattern in \
+  review.xml \
+  review.guide.xml \
+  .agents/skills/self-review-apply/ \
+  .agents/skills/self-review-critique/ \
+  .agents/skills/self-review-guide/
+do
+  grep -Fqx "$pattern" "$ignore" 2>/dev/null || printf '%s\n' "$pattern" >>"$ignore"
+done

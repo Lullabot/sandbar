@@ -140,6 +140,11 @@ it is not where prose belongs.
   accept an unrelated application on a colliding port. The server writes
   `review.xml` and exits to signal completion. Keep this shared operation
   here so both the CLI and TUI can use it; the TUI cannot import `cmd/sand`.
+  Assistant skills are installed before an agent starts: the `project` role
+  calls `self-review-install-skills` for the initial clone. Landing must not
+  install them as a review-start side effect. The same command accepts a repo
+  path for checkouts cloned later and also configures the user's active global
+  Git excludes file.
 - `secrets`, `manage`, `browse`, `vm` — host-side secrets store (schema v3,
   now also keyed by connection scope — distinct from its pre-existing
   per-directory scope, see `docs/reference/files-and-state.md`), shared

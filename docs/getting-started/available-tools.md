@@ -44,6 +44,10 @@ and save comments where the agent can read them. The server runs inside the
 VM and starts only when you open a review. See
 [Reviewing changes in a browser](../using-sand/review.md).
 
+An initial repository cloned during provisioning receives the matching agent
+skills automatically. For repositories cloned later, run
+`self-review-install-skills /path/to/repository` inside the VM.
+
 ## Shell & utilities
 
 - `tmux`, `direnv`, `jq`, `htop`, and other common CLI tools

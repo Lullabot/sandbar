@@ -170,47 +170,14 @@
     group: root
     mode: "0644"
 
-# --- keeping a review out of the user's project ---------------------------
-#
-# A review writes review.xml into the checkout and sand copies three skill
-# directories in beside it, so without this every reviewed repository grows
-# five entries of untracked noise that `git status` reports and a careless
-# `git add -A` commits.
-#
-# The USER'S global excludes file is the right home for that, not the
-# project's .gitignore: sand must not write a tracked file into someone
-# else's repository to tidy up after itself. git reads
-# ~/.config/git/ignore with no core.excludesFile set at all, so this needs no
-# `git config` and cannot fight a value the user set themselves.
-- name: Get home directory for {{ user_name }}
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ user_name }}"
-
-- name: Set user home directory fact
-  ansible.builtin.set_fact:
-    selfreview_user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
-
-- name: Create the user's git config directory
-  ansible.builtin.file:
-    path: "{{ selfreview_user_home }}/.config/git"
-    state: directory
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
+# The command owns both halves of checkout setup: copying the skills and adding
+# their paths plus the review artifacts to the user's active global Git
+# excludes file. The project role calls it for the initial clone, and keeping
+# it on PATH gives later hand-cloned repositories the identical operation.
+- name: Install the self-review skills command
+  ansible.builtin.copy:
+    src: self-review-install-skills
+    dest: "{{ selfreview_skills_installer }}"
+    owner: root
+    group: root
     mode: "0755"
-
-# blockinfile, not copy or template: the file is the user's, it may already
-# hold their own patterns, and a review's entries must be removable as a unit
-# without taking anything else with them.
-- name: Ignore review output and installed skills globally
-  ansible.builtin.blockinfile:
-    path: "{{ selfreview_user_home }}/.config/git/ignore"
-    create: true
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
-    marker: "# {mark} sand: self-review"
-    block: |
-      {% for pattern in selfreview_ignore_patterns %}
-      {{ pattern }}
-      {% endfor %}

@@ -131,9 +131,10 @@ next 'sand create'.
 A review.xml already in PATH is carried into the new review, so comments you
 wrote earlier are there to keep, edit or drop. Nothing ever removes that file
 on its own, so --clean is how you start over: it deletes the saved review and
-its walkthrough sidecar first. The review tool's assistant skills are
-installed into PATH/.agents/skills as the review starts, and the guest's
-global git excludes keep all of it out of 'git status'.
+its walkthrough sidecar first. A repository cloned during provisioning already
+has the review tool's assistant skills. For a repository cloned later, run
+'self-review-install-skills PATH' inside the VM; it installs the skills and
+keeps them and the review files out of 'git status'.
 
 The named VM must already exist and be running (see 'sand' to list
 instances, or 'sand create' to make one). If NAME is managed under more than

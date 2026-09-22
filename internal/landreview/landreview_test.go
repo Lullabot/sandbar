@@ -905,10 +905,9 @@ type stubProvider struct {
 	// noShell fails the test if the review server is started at all.
 	noShell bool
 
-	baseReport  string // answer to diffBaseScript
-	shellArgv   []string
-	shellOuts   [][]string
-	installCall bool
+	baseReport string // answer to diffBaseScript
+	shellArgv  []string
+	shellOuts  [][]string
 }
 
 func (p *stubProvider) Shell(_ context.Context, _ string, _ io.Reader, _ io.Writer, argv ...string) error {
@@ -931,9 +930,6 @@ func (p *stubProvider) ShellOut(_ context.Context, _ string, argv ...string) ([]
 	switch argv[2] {
 	case diffBaseScript:
 		return []byte(p.baseReport), nil
-	case installSkillsScript:
-		p.installCall = true
-		return []byte("installed=self-review-apply\n"), nil
 	}
 	return nil, nil
 }
@@ -1070,110 +1066,7 @@ func TestParseDiffBaseKeepsResumeWithoutABase(t *testing.T) {
 	}
 }
 
-func TestCountSkillReport(t *testing.T) {
-	installed, skipped := countSkillReport(
-		"Welcome to Debian\ninstalled=self-review-apply\nskipped=self-review-guide\ninstalled=self-review-critique\n")
-	if installed != 2 || skipped != 1 {
-		t.Errorf("countSkillReport = %d installed / %d skipped, want 2/1", installed, skipped)
-	}
-	if i, s := countSkillReport("Last login: today\n\n"); i != 0 || s != 0 {
-		t.Errorf("countSkillReport over pure noise = %d/%d, want 0/0", i, s)
-	}
-}
-
 // --- the guest scripts, against real git and a real shell ---
-
-// TestInstallSkillsScriptAgainstRealGit runs the REAL install script. The
-// case that matters is the last one: upstream tells people to `cp -r` these
-// skills into their project, so a repository may TRACK its own copy — and
-// overwriting a tracked file drops an edit nobody asked for into someone's
-// working tree, which the global git excludes cannot hide because ignore
-// rules do not apply to tracked files.
-func TestInstallSkillsScriptAgainstRealGit(t *testing.T) {
-	requireTools(t, "git", "sh")
-
-	home := t.TempDir()
-	stage := filepath.Join(home, "stage")
-	work := filepath.Join(home, "work")
-
-	// Three staged skills, as roles/self-review leaves them in the base.
-	for _, name := range []string{"self-review-apply", "self-review-critique", "self-review-guide"} {
-		dir := filepath.Join(stage, name, "assets")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, filepath.Join(stage, name, "SKILL.md"), "staged "+name+"\n")
-		writeFile(t, filepath.Join(dir, "schema.xsd"), "<xsd/>\n")
-	}
-	// Something that is not a self-review skill must be left where it is.
-	if err := os.MkdirAll(filepath.Join(stage, "unrelated-skill"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(stage, "unrelated-skill", "SKILL.md"), "not ours\n")
-
-	git(t, home, home, "init", "-q", "-b", "main", work)
-
-	// A copy the project tracks itself, with content of its own.
-	tracked := filepath.Join(work, ".agents", "skills", "self-review-critique")
-	if err := os.MkdirAll(tracked, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(tracked, "SKILL.md"), "the project's own copy\n")
-	git(t, work, home, "add", ".agents")
-	git(t, work, home, "commit", "-qm", "vendor our own review skill")
-
-	// A stale untracked copy sand itself left on a previous run.
-	stale := filepath.Join(work, ".agents", "skills", "self-review-apply")
-	if err := os.MkdirAll(stale, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(stale, "SKILL.md"), "an old version\n")
-
-	out := runScript(t, home, installSkillsScript, work, stage)
-	installed, skipped := countSkillReport(out)
-	if installed != 2 || skipped != 1 {
-		t.Fatalf("report = %d installed / %d skipped, want 2/1:\n%s", installed, skipped, out)
-	}
-
-	// The tracked copy is untouched, byte for byte.
-	if got := readFile(t, filepath.Join(tracked, "SKILL.md")); got != "the project's own copy\n" {
-		t.Errorf("the tracked skill was overwritten: %q", got)
-	}
-	// The stale untracked copy is refreshed, assets and all.
-	if got := readFile(t, filepath.Join(stale, "SKILL.md")); got != "staged self-review-apply\n" {
-		t.Errorf("the stale skill was not refreshed: %q", got)
-	}
-	if got := readFile(t, filepath.Join(stale, "assets", "schema.xsd")); got != "<xsd/>\n" {
-		t.Errorf("the skill's assets did not come with it: %q", got)
-	}
-	// And the one that was simply missing is there.
-	if got := readFile(t, filepath.Join(work, ".agents", "skills", "self-review-guide", "SKILL.md")); got != "staged self-review-guide\n" {
-		t.Errorf("a missing skill was not installed: %q", got)
-	}
-	// Nothing outside the self-review-* glob came along.
-	if _, err := os.Stat(filepath.Join(work, ".agents", "skills", "unrelated-skill")); err == nil {
-		t.Error("the script installed a skill that is not self-review's")
-	}
-}
-
-// TestInstallSkillsScriptWithNothingStaged covers the base image that
-// predates the skills: no staging directory, no output, and above all no
-// failure — installSkills treats this as a note, not an error.
-func TestInstallSkillsScriptWithNothingStaged(t *testing.T) {
-	requireTools(t, "git", "sh")
-
-	home := t.TempDir()
-	work := filepath.Join(home, "work")
-	git(t, home, home, "init", "-q", "-b", "main", work)
-
-	out := runScript(t, home, installSkillsScript, work, filepath.Join(home, "absent"))
-	if installed, skipped := countSkillReport(out); installed != 0 || skipped != 0 {
-		t.Errorf("report = %d/%d, want nothing at all:\n%s", installed, skipped, out)
-	}
-	if _, err := os.Stat(filepath.Join(work, ".agents")); err == nil {
-		t.Error("the script created .agents/ in the checkout with nothing to put in it")
-	}
-}
 
 // TestRemoveOutputScriptRemovesOnlyTheReview pins what "start over" deletes.
 // The script runs `rm -f` inside a directory swept from the guest, so the
