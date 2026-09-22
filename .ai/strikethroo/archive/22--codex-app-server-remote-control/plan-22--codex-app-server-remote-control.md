@@ -199,3 +199,30 @@ graph TD
 ### Execution Summary
 - Total Phases: 2
 - Total Tasks: 2
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-22
+
+### Results
+
+- Added a Codex-role-owned, sourceable Bash wrapper that offers remote-control onboarding once on the first bare interactive `codex` launch while forwarding commands, options, and non-interactive calls unchanged.
+- The affirmative flow runs device-code authentication, bootstraps durable app-server management with remote control enabled, pairs a ChatGPT device, records completion only after success, explains `codex agents` and repeat pairing, and then opens the ordinary Codex TUI.
+- A decline is remembered and opens the ordinary TUI; failed setup remains retryable without writing a completion marker or launching a misleading successful session.
+- Added pseudo-terminal integration coverage for affirmative setup, remembered decline, failure propagation and retry, interactive argument bypass, and exact non-interactive argv forwarding.
+- Updated first-VM documentation and Codex role commentary to match the new first-run workflow and removed the obsolete no-CLI-remote-control claim.
+- Verified `go vet ./...`, `go test ./...`, the focused wrapper suite, Bash syntax, Ansible syntax, strict MkDocs build, and whitespace checks successfully.
+- Converged the Codex role twice in an isolated Debian container with a recording fake upstream executable. The deployed wrapper was sourced from `.bashrc`, produced the required command order, created user-owned state with modes 0700/0644/0600, and all Codex role tasks were idempotent on the second converge.
+
+### Noteworthy Events
+
+- The feature-branch helper initially halted because Phase 1 and Phase 2 planning artifacts were uncommitted on `main`. The user explicitly authorized committing those generated files; the helper then created `feature/22--codex-app-server-remote-control` and execution continued.
+- Strikethroo's named `st-worker-high` and `st-worker-low` agents and its Sonnet/Haiku model aliases were unavailable in this harness. Both tasks used the documented general-purpose fallback with matching high/low reasoning tiers; the orchestrator independently re-ran every verification gate.
+- Official OpenAI documentation confirmed device-code authentication and app-server behavior, while the installed Codex CLI 0.155.1 help supplied the newer durable daemon and remote-control command contract used by the implementation.
+- The minimal Debian validation container lacked `sudo`, which Ansible requires for `become_user`; installing it in that disposable container resolved the environment prerequisite, after which convergence and idempotence checks passed. The container and temporary playbook were removed.
+- Material for MkDocs printed its standard informational notice about future MkDocs 2.0 changes; the strict build itself completed successfully with no site validation errors.
+
+### Necessary follow-ups
+
+None required for correctness.
