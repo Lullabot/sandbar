@@ -239,6 +239,79 @@ func TestRunningTileFullSampleDrawsBothGauges(t *testing.T) {
 	}
 }
 
+func TestMemoryGaugeUsesHostUsageAndPatternsGuestCache(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Memory: "34359738368"}
+	in.Sample = guestSample{
+		MemTotal:    32 << 30,
+		MemUsed:     9 << 30,
+		HostMemUsed: 30 << 30,
+		HasHostMem:  true,
+		Cache:       17 << 30,
+		HasCache:    true,
+	}
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "30 GiB/32 GiB") {
+		t.Fatalf("memory number must use host usage, got:\n%s", got)
+	}
+	if strings.Contains(got, "9 GiB/32 GiB") {
+		t.Fatalf("guest used memory must not be presented as host occupancy, got:\n%s", got)
+	}
+	if !strings.Contains(got, "▒") {
+		t.Fatalf("guest cache must have a distinct pattern inside the memory bar, got:\n%s", got)
+	}
+}
+
+func TestMemoryBarClampsCacheInsideHostUsage(t *testing.T) {
+	if got, want := tileMemoryBar(30, 17, true, 32, 32), strings.Repeat("█", 13)+strings.Repeat("▒", 17)+strings.Repeat("░", 2); got != want {
+		t.Fatalf("tileMemoryBar ordinary split = %q, want %q", got, want)
+	}
+	if got, want := tileMemoryBar(8, 99, true, 32, 16), strings.Repeat("▒", 4)+strings.Repeat("░", 12); got != want {
+		t.Fatalf("cache larger than host usage = %q, want cache clamped within used portion %q", got, want)
+	}
+	if got, want := tileMemoryBar(40, 8, true, 32, 16), strings.Repeat("█", 12)+strings.Repeat("▒", 4); got != want {
+		t.Fatalf("host usage larger than total = %q, want all segments clamped to width %q", got, want)
+	}
+	if got, want := tileMemoryBar(16, 0, false, 32, 16), strings.Repeat("█", 8)+strings.Repeat("░", 8); got != want {
+		t.Fatalf("missing cache = %q, want an ordinary host-used bar %q", got, want)
+	}
+}
+
+func TestMemoryGaugeWithoutHostUsageIsUnknown(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Memory: "34359738368"}
+	in.Sample = guestSample{MemTotal: 32 << 30, MemUsed: 9 << 30, Cache: 17 << 30, HasCache: true}
+	in.HasSample = true
+
+	lines := strings.Split(ansi.Strip(renderTile(in)), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "mem") {
+			if !strings.Contains(line, "—") {
+				t.Fatalf("unknown host usage must render no reading, got %q", line)
+			}
+			if strings.Contains(line, "9 GiB") {
+				t.Fatalf("guest used memory must not substitute for missing host usage, got %q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("running tile lost its fixed memory row:\n%s", strings.Join(lines, "\n"))
+}
+
+func TestMemoryGaugeClampsHostNumberToConfiguredTotal(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Memory: "34359738368"}
+	in.Sample = guestSample{HostMemUsed: 40 << 30, HasHostMem: true, Cache: 50 << 30, HasCache: true}
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "32 GiB/32 GiB") || strings.Contains(got, "40 GiB/32 GiB") {
+		t.Fatalf("racing provider/guest values must clamp to the configured total, got:\n%s", got)
+	}
+}
+
 // Disk is real data today and always renders, even for a stopped VM, even
 // when DiskUsed is unmeasurable ("" — never a fabricated zero).
 func TestDiskGaugeAlwaysRendersEvenUnmeasurable(t *testing.T) {
@@ -673,14 +746,14 @@ func TestTileGaugeRowUsesDisplayWidthNotByteLength(t *testing.T) {
 
 // --- Rules 3+4: a single VM's own mem/disk gauge warns below the low-free threshold (10%). ---
 
-// A running VM whose guest heartbeat reports less than 10% memory free (rule
-// 3) gets a "⚠ mem" label and its row rendered in warnStyle instead of the
+// A running VM whose provider reports less than 10% memory free (rule 3) gets
+// a "⚠ mem" label and its row rendered in warnStyle instead of the
 // ordinary chrome grey — while an otherwise-identical VM at or above the threshold
 // renders EXACTLY as today (no marker, no colour change).
 func TestTileMemGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 	low := baseTileInput()
 	low.VM = vm.VM{Name: "web", Status: "Running"}
-	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 970} // 3% free
+	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 970, HasHostMem: true} // 3% host free
 	low.HasSample = true
 	got := ansi.Strip(renderTile(low))
 	if !strings.Contains(got, "⚠ mem") {
@@ -689,7 +762,7 @@ func TestTileMemGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 
 	ok := baseTileInput()
 	ok.VM = vm.VM{Name: "web", Status: "Running"}
-	ok.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 900} // 10% free
+	ok.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 900, HasHostMem: true} // 10% host free
 	ok.HasSample = true
 	got2 := ansi.Strip(renderTile(ok))
 	if strings.Contains(got2, "⚠") {
@@ -752,8 +825,8 @@ func TestTileDiskAllocationRendersSizeWithoutBarOrWarning(t *testing.T) {
 // Both warnings can be active on the same tile simultaneously.
 func TestTileBothMemAndDiskWarningsSimultaneously(t *testing.T) {
 	in := baseTileInput()
-	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"} // 2% free
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}              // 2% free
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // 2% host free
 	in.HasSample = true
 
 	got := ansi.Strip(renderTile(in))
@@ -782,7 +855,7 @@ func TestTileWarningMarkerNeverOverflowsFixedWidth(t *testing.T) {
 	in := baseTileInput()
 	in.Width = 44
 	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true}
 	in.HasSample = true
 
 	got := renderTile(in)
@@ -803,8 +876,8 @@ func TestTileWarningMarkerNeverOverflowsFixedWidth(t *testing.T) {
 func TestTileWarningRenderingGolden(t *testing.T) {
 	in := baseTileInput()
 	in.Width = 44
-	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"} // 2% disk free
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980}              // 2% mem free
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% disk free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // 2% host mem free
 	in.HasSample = true
 	in.Now = time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 

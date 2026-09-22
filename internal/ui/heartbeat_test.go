@@ -1,13 +1,30 @@
 package ui
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/providerfake"
+	"github.com/lullabot/sandbar/internal/registry"
 )
+
+type heartbeatHostMemoryProvider struct {
+	providerfake.Provider
+	used  int64
+	err   error
+	names []string
+}
+
+func (p *heartbeatHostMemoryProvider) VMHostMemory(_ context.Context, name string) (int64, error) {
+	p.names = append(p.names, name)
+	return p.used, p.err
+}
 
 // The fixture is REAL text: the output of the REAL guestScript, run over a real
 // `limactl shell` against a live Lima guest (Debian 13, 2 vCPU, 2GiB) with one
@@ -94,6 +111,100 @@ func TestParseRealGuestStream(t *testing.T) {
 	memFreeUsed := uint64((2015488 - 1133248) * 1024)
 	if got[0].MemUsed == memFreeUsed {
 		t.Fatal("used was computed from MemFree — it must come from MemAvailable, or an idle VM's page cache reads as near-OOM")
+	}
+
+	// Match the cache users see in free's buff/cache column: filesystem buffers,
+	// page cache, and reclaimable slabs, excluding shared-memory pages that Linux
+	// also counts in Cached. This stays separate from MemUsed because the tile's
+	// primary memory amount comes from the host provider.
+	wantCache := uint64(13116+635336+14864-620) * 1024
+	if !got[0].HasCache || got[0].Cache != wantCache {
+		t.Fatalf("sample 1 cache = %d (has=%v), want free-like buff/cache %d", got[0].Cache, got[0].HasCache, wantCache)
+	}
+}
+
+func TestParserIncompleteCacheIsUnknownAndShmemCannotUnderflow(t *testing.T) {
+	stream := "MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		heartbeatDelim + "\n" +
+		"MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		"Cached:             10 kB\n" +
+		heartbeatDelim + "\n" +
+		"MemTotal:        1000 kB\n" +
+		"MemAvailable:     600 kB\n" +
+		"Buffers:             2 kB\n" +
+		"Cached:             10 kB\n" +
+		"SReclaimable:        3 kB\n" +
+		"Shmem:              20 kB\n" +
+		heartbeatDelim + "\n"
+
+	var p sampleParser
+	got := p.feed([]byte(stream))
+	if len(got) != 3 {
+		t.Fatalf("got %d samples, want 3", len(got))
+	}
+	if got[0].HasCache {
+		t.Fatalf("a record without Cached must report unknown cache, got %+v", got[0])
+	}
+	if got[1].HasCache {
+		t.Fatalf("a partial cache record must stay unknown, got cache=%d", got[1].Cache)
+	}
+	if !got[2].HasCache || got[2].Cache != 0 {
+		t.Fatalf("Shmem larger than cache inputs must clamp at zero, got cache=%d has=%v", got[2].Cache, got[2].HasCache)
+	}
+}
+
+func TestHeartbeatHostMemoryCommandUsesOptionalProviderCapability(t *testing.T) {
+	if cmd := heartbeatHostMemoryCmd(&providerfake.Provider{}, registry.LocalScope, "web", 7); cmd != nil {
+		t.Fatal("a provider without VMHostMemoryProvider must not invent a host reading")
+	}
+
+	p := &heartbeatHostMemoryProvider{used: 30 << 30}
+	msg, ok := heartbeatHostMemoryCmd(p, registry.LocalScope, "web", 7)().(heartbeatHostMemoryMsg)
+	if !ok {
+		t.Fatalf("host memory command returned %T, want heartbeatHostMemoryMsg", msg)
+	}
+	if !msg.ok || msg.used != 30<<30 || msg.vm != "web" || msg.epoch != 7 || msg.scope != registry.LocalScope {
+		t.Fatalf("host memory message = %+v, want scoped 30 GiB reading for epoch 7", msg)
+	}
+	if len(p.names) != 1 || p.names[0] != "web" {
+		t.Fatalf("VMHostMemory called for %v, want [web]", p.names)
+	}
+
+	p.err = errors.New("status unavailable")
+	msg = heartbeatHostMemoryCmd(p, registry.LocalScope, "web", 7)().(heartbeatHostMemoryMsg)
+	if msg.ok {
+		t.Fatalf("provider failure must report an unknown host reading, got %+v", msg)
+	}
+}
+
+func TestHeartbeatRegistryKeepsHostAndGuestMemorySeparate(t *testing.T) {
+	r := newHeartbeats(nil)
+	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
+	r.beats[key] = &heartbeat{epoch: 4, cancel: func() {}, ch: make(chan guestSample, 1)}
+
+	if !r.foldHost(registry.LocalScope, "web", 4, 30<<30, true) {
+		t.Fatal("live epoch rejected its host memory reading")
+	}
+	s, ok := r.latest(registry.LocalScope, "web")
+	if !ok || !s.HasHostMem || s.HostMemUsed != 30<<30 {
+		t.Fatalf("host-only latest sample = %+v, %v; want 30 GiB host reading", s, ok)
+	}
+
+	r.fold(registry.LocalScope, "web", 4, guestSample{MemTotal: 32 << 30, MemUsed: 9 << 30, Cache: 17 << 30, HasCache: true})
+	s, ok = r.latest(registry.LocalScope, "web")
+	if !ok || s.HostMemUsed != 30<<30 || s.MemUsed != 9<<30 || s.Cache != 17<<30 {
+		t.Fatalf("merged host and guest sample = %+v, %v", s, ok)
+	}
+
+	if r.foldHost(registry.LocalScope, "web", 3, 1, true) {
+		t.Fatal("stale epoch must not overwrite a newer heartbeat")
+	}
+	r.foldHost(registry.LocalScope, "web", 4, 0, false)
+	s, _ = r.latest(registry.LocalScope, "web")
+	if s.HasHostMem {
+		t.Fatalf("failed host refresh must clear the prior reading, got %+v", s)
 	}
 }
 

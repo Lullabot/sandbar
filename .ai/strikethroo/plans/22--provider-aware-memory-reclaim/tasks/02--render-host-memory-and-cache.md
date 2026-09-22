@@ -2,7 +2,7 @@
 id: 2
 group: "memory-ui"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-09-22
 models:
   anthropic: "sonnet"
@@ -26,10 +26,10 @@ bubble-tea; go-testing.
 
 ## Acceptance Criteria
 
-- [ ] The primary number and gauge fill use host VM memory, with unknown host usage rendered as no reading.
-- [ ] Guest cache is parsed from /proc/meminfo and patterned separately without changing gauge width.
-- [ ] Missing cache and accounting mismatch remain safe.
-- [ ] `go test ./internal/ui -run "Test.*(Mem|Tile|Heartbeat)"` exits 0.
+- [x] The primary number and gauge fill use host VM memory, with unknown host usage rendered as no reading.
+- [x] Guest cache is parsed from /proc/meminfo and patterned separately without changing gauge width.
+- [x] Missing cache and accounting mismatch remain safe.
+- [x] `go test ./internal/ui -run "Test.*(Mem|Tile|Heartbeat)"` exits 0.
 
 ## Technical Requirements
 
@@ -51,3 +51,7 @@ Heartbeat/cache model, tile rendering, focused tests.
 Read the relevant existing files and tests before editing. Write a few tests, mostly integration: verify custom logic, critical workflows, edge cases, and integration boundaries; do not test framework behavior, third-party libraries, trivial getters, or static configuration. Keep related test scenarios together. Run the acceptance command and inspect its output before marking this task completed. Do not add scope beyond the work order.
 
 </details>
+
+## Noteworthy Events
+
+- 2026-09-22: Kept guest utilization/cache and provider host occupancy as separate fields in the heartbeat registry. Both the per-VM gauge and fleet header now use provider host memory; guest cache uses free-like `Buffers + Cached + SReclaimable - Shmem` accounting and is clamped within the host-used bar segment. A cache reading remains unknown unless all four source fields are present.

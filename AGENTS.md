@@ -365,11 +365,12 @@ every bullet, not the constraint itself.
   virtualized scrolling beyond the simple row-scroll `board.go` already has,
   pagination) are deliberately absent. Do not add them speculatively.
 - **The header reports USE, not ALLOCATION**, and so do the tiles. Both read the
-  live guest heartbeat — the same and only source — so the two surfaces cannot
-  disagree. The header shows host vCPUs busy (each guest's `CPUPct` is a share of
-  ITS OWN vCPUs, so it is scaled by that VM's `CPUs` before being summed), the
-  memory the guests are actually holding, and free disk. It previously summed the
-  allocations; that number never moves and reads as a crisis on an idle machine.
+  same joined sample in the heartbeat registry: CPU comes from the guest, while
+  memory occupancy comes from the provider's optional host/hypervisor reading.
+  The header shows host vCPUs busy (each guest's `CPUPct` is a share of ITS OWN
+  vCPUs, so it is scaled by that VM's `CPUs` before being summed), host-resident
+  VM memory, and free disk. It previously summed allocations, and later guest
+  `MemAvailable` arithmetic; neither describes how much host RAM a VM occupies.
 - **A metric with no reading renders as an em dash, never as 0.** A running VM
   whose heartbeat has not reported yet — or whose heartbeat the idle gate tore
   down — has an UNKNOWN cpu, not an idle one. `tileGaugeNoReading` (tile.go) and
@@ -378,12 +379,12 @@ every bullet, not the constraint itself.
   Packing them from the top made disk slide up into a missing gauge's slot, so
   leaving the board and coming back appeared to lose data that was never lost.
 - **`CPUs` and `Memory` on `vm.VM` are allocations, not utilization.** They
-  are what Lima was told to give the guest, not what the guest is using.
-  Rendering one as a filled utilization gauge is a lie with a progress bar
-  around it. Live utilization comes only from the guest heartbeat
-  (`internal/ui/heartbeat.go`), and only for a running VM with an actual
-  sample (`guestSample.Has*`) — never a zeroed bar standing in for "no
-  reading yet".
+  are what the provider was told to give the guest. CPU utilization and guest
+  filesystem cache come from the guest heartbeat; primary memory occupancy
+  comes from `provider.VMHostMemoryProvider`. The cache is a separately stored,
+  free-like `Buffers + Cached + SReclaimable - Shmem` value and is clamped into
+  the host-used portion of the compact memory bar. A missing host reading renders
+  as unknown, never guest `MemAvailable` arithmetic or a zero bar.
 - **Lima reports only `Running` and `Stopped`.** A provisioning VM is
   `Running` to Lima — Lima has no concept of "being provisioned". `Building`
   and `Failed` are sand-side states derived from the job registry

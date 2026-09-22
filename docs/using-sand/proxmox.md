@@ -368,6 +368,14 @@ Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
 real CPU, memory, and storage usage, sampled from the API.
 
+Each running VM tile also uses Proxmox's host-side memory reading for its main
+memory number. A patterned portion of the gauge identifies Linux filesystem
+cache measured inside the guest. If that cache has grown large, focus the tile
+and press `m` (**Reclaim memory**). Sand syncs pending writes, asks the guest
+kernel to release its filesystem caches over the existing SSH connection, and
+then refreshes both readings. This needs no additional Proxmox API permission
+and does not change the VM's configured memory or balloon settings.
+
 !!! note "Why the default image is a project-built one, not stock Debian"
     `sand` learns a VM's IP address only from the QEMU guest agent (it is the
     only IP a pure-API client can read from PVE), and it needs that IP to SSH in

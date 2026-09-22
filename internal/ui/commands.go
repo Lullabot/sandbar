@@ -84,11 +84,12 @@ type (
 	// err staying nil is what tells the handler in model.go the action itself
 	// succeeded.
 	actionDoneMsg struct {
-		action string
-		name   string
-		scope  registry.Scope
-		err    error
-		warn   string
+		action         string
+		name           string
+		scope          registry.Scope
+		err            error
+		warn           string
+		refreshMetrics bool
 	}
 	// provisionOutputMsg is one chunk of streamed output from ONE job. It used to
 	// be a bare string — which is precisely why only one job could ever exist: a
@@ -284,6 +285,22 @@ func restartCmd(p provider.Provider, scope registry.Scope, name, user string, sc
 			warn = "secrets not applied: " + err.Error()
 		}
 		return actionDoneMsg{action: "restart", name: name, scope: scope, warn: warn}
+	}
+}
+
+// reclaimMemoryCmd runs the optional provider operation outside Update. Its
+// completion asks the model to replace the guest heartbeat so the next sample
+// cannot be a pre-reclaim cache reading; opening the replacement also samples
+// provider-side VM memory.
+func reclaimMemoryCmd(r provider.MemoryReclaimer, scope registry.Scope, name string) tea.Cmd {
+	return func() tea.Msg {
+		return actionDoneMsg{
+			action:         "reclaim memory",
+			name:           name,
+			scope:          scope,
+			err:            r.ReclaimMemory(context.Background(), name),
+			refreshMetrics: true,
+		}
 	}
 }
 

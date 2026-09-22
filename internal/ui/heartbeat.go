@@ -8,8 +8,10 @@ package ui
 // vm.VM carries CPUs and Memory. Those are ALLOCATIONS — what Lima was told to
 // give the guest — and drawing an allocation as a utilization bar would imply
 // telemetry sand does not have. A tile that says "4 CPUs" beside a bar filled to
-// 4/4 is not a gauge; it is a lie with a progress bar around it. The only honest
-// source of a utilization number is the guest itself.
+// 4/4 is not a gauge; it is a lie with a progress bar around it. CPU and cache
+// come from the guest; host-resident memory comes from the provider's optional
+// VMHostMemoryProvider capability. This file joins those asynchronously sampled
+// facts without treating one as a substitute for the other.
 //
 // # The shape
 //
@@ -82,6 +84,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 
 	tea "charm.land/bubbletea/v2"
@@ -169,8 +172,9 @@ func guestScript(every time.Duration) string {
 	}.script()
 }
 
-// guestSample is ONE utilization reading from inside a running guest, and it is the
-// type the tile renderer (tile.go) draws its gauges from.
+// guestSample is the joined live reading the tile renderer draws from. Most fields
+// come from inside the running guest; HostMemUsed is folded in separately from the
+// provider while retaining the same connection epoch.
 //
 // Every "Has" here earns its keep. A tile must be able to tell "this VM is idle"
 // from "sand does not know yet", because they look identical if the second one is
@@ -196,6 +200,19 @@ type guestSample struct {
 	// said 316 MB while MemAvailable said 1637 MB of 2015 MB.
 	MemUsed  uint64
 	MemTotal uint64
+
+	// Cache is the guest's free-like buff/cache amount in bytes: Buffers +
+	// Cached + SReclaimable - Shmem. It stays separate from both guest MemUsed
+	// and the provider's host-resident reading because those accounting domains
+	// can differ and are sampled at different times.
+	Cache    uint64
+	HasCache bool
+
+	// HostMemUsed is the provider or hypervisor's resident-memory reading. It is
+	// populated independently of the guest stream; HasHostMem distinguishes an
+	// unavailable reading from a VM that genuinely occupies zero bytes.
+	HostMemUsed uint64
+	HasHostMem  bool
 
 	// DiskUsed and DiskTotal are bytes on the GUEST's own root filesystem, read
 	// from its `df -kP /`. They are what the tile (tile.go) prefers over the
@@ -239,6 +256,10 @@ type sampleParser struct {
 		total, avail uint64
 		haveTotal    bool
 		haveAvail    bool
+	}
+	cache struct {
+		buffers, cached, reclaimable, shmem                     uint64
+		haveBuffers, haveCached, haveReclaimable, haveSharedMem bool
 	}
 	disk struct {
 		used, total uint64
@@ -311,6 +332,26 @@ func (p *sampleParser) line(line []byte) (guestSample, bool) {
 			p.mem.avail, p.mem.haveAvail = kb, true
 		}
 
+	case bytes.HasPrefix(line, []byte("Buffers:")):
+		if kb, ok := parseKB(line[len("Buffers:"):]); ok {
+			p.cache.buffers, p.cache.haveBuffers = kb, true
+		}
+
+	case bytes.HasPrefix(line, []byte("Cached:")):
+		if kb, ok := parseKB(line[len("Cached:"):]); ok {
+			p.cache.cached, p.cache.haveCached = kb, true
+		}
+
+	case bytes.HasPrefix(line, []byte("SReclaimable:")):
+		if kb, ok := parseKB(line[len("SReclaimable:"):]); ok {
+			p.cache.reclaimable, p.cache.haveReclaimable = kb, true
+		}
+
+	case bytes.HasPrefix(line, []byte("Shmem:")):
+		if kb, ok := parseKB(line[len("Shmem:"):]); ok {
+			p.cache.shmem, p.cache.haveSharedMem = kb, true
+		}
+
 	// The guest root filesystem's df line, prefixed by guestScript so it cannot
 	// be mistaken for ordinary command noise (a motd, a login banner) the way an
 	// unprefixed df line could be.
@@ -350,6 +391,13 @@ func (p *sampleParser) complete() (guestSample, bool) {
 		s.MemUsed = (p.mem.total - avail) * 1024
 	}
 
+	if p.cache.haveBuffers && p.cache.haveCached && p.cache.haveReclaimable && p.cache.haveSharedMem {
+		cacheKB := p.cache.buffers + p.cache.cached + p.cache.reclaimable
+		cacheKB -= min(cacheKB, p.cache.shmem)
+		s.Cache = cacheKB * 1024
+		s.HasCache = true
+	}
+
 	// The guest disk reading, like mem, is an absolute valid from the first
 	// record — but unlike mem it can legitimately be ABSENT (an old guest's
 	// stream predates the probe, or its df failed), so a zero total here means
@@ -363,7 +411,7 @@ func (p *sampleParser) complete() (guestSample, bool) {
 	// a guest with no /proc, say) is not a sample. Reporting it would put an
 	// empty tile's gauges through a pointless repaint and, worse, would look
 	// like a successful reading.
-	if !s.HasCPU && !s.HasMem() && !s.HasDisk() {
+	if !s.HasCPU && !s.HasMem() && !s.HasCache && !s.HasDisk() {
 		p.reset()
 		return guestSample{}, false
 	}
@@ -379,6 +427,10 @@ func (p *sampleParser) reset() {
 	p.cur = cpuTimes{}
 	p.mem.total, p.mem.avail = 0, 0
 	p.mem.haveTotal, p.mem.haveAvail = false, false
+	p.cache = struct {
+		buffers, cached, reclaimable, shmem                     uint64
+		haveBuffers, haveCached, haveReclaimable, haveSharedMem bool
+	}{}
 	p.disk.used, p.disk.total, p.disk.have = 0, 0, false
 }
 
@@ -770,11 +822,33 @@ func (r *heartbeatRegistry) fold(scope registry.Scope, name string, epoch uint64
 	if !ok || hb.epoch != epoch {
 		return nil
 	}
+	// Host memory is sampled through the provider on a separate command. A new
+	// guest record replaces the guest fields without discarding the latest host
+	// reading that may have arrived between records.
+	s.HostMemUsed, s.HasHostMem = hb.last.HostMemUsed, hb.last.HasHostMem
 	hb.last, hb.seen = s, true
 	// A reading arrived, so whatever run of failures preceded it is over: the
 	// next death starts the backoff from heartbeatRetry again.
 	delete(r.fails, vmHandle{Scope: scope, Name: name})
 	return hb.ch
+}
+
+// foldHost records the independently sampled host-resident memory for a live
+// heartbeat epoch. Provider failures deliberately clear a previous reading so
+// the tile reports unknown instead of presenting stale occupancy as current.
+func (r *heartbeatRegistry) foldHost(scope registry.Scope, name string, epoch uint64, used uint64, ok bool) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	hb, exists := r.beats[vmHandle{Scope: scope, Name: name}]
+	if !exists || hb.epoch != epoch {
+		return false
+	}
+	hb.last.HostMemUsed = used
+	hb.last.HasHostMem = ok
+	return true
 }
 
 // ended is what the closed channel means: the stream finished on its own. Against a
@@ -839,7 +913,7 @@ func (r *heartbeatRegistry) latest(scope registry.Scope, name string) (guestSamp
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	hb, ok := r.beats[vmHandle{Scope: scope, Name: name}]
-	if !ok || !hb.seen {
+	if !ok || (!hb.seen && !hb.last.HasHostMem) {
 		return guestSample{}, false
 	}
 	return hb.last, true
@@ -899,6 +973,34 @@ type heartbeatSampleMsg struct {
 	epoch  uint64
 	sample guestSample
 	ok     bool
+}
+
+// heartbeatHostMemoryMsg carries the provider's host-side reading separately
+// from heartbeatSampleMsg's guest data. The shared epoch prevents a delayed API
+// response from landing on a restarted heartbeat for the same VM.
+type heartbeatHostMemoryMsg struct {
+	scope registry.Scope
+	vm    string
+	epoch uint64
+	used  uint64
+	ok    bool
+}
+
+// heartbeatHostMemoryCmd samples the optional provider capability off the
+// Bubble Tea Update goroutine. A provider without the capability returns no
+// command; a failed or zero reading returns ok=false so stale usage is cleared.
+func heartbeatHostMemoryCmd(p provider.Provider, scope registry.Scope, name string, epoch uint64) tea.Cmd {
+	host, ok := p.(provider.VMHostMemoryProvider)
+	if !ok {
+		return nil
+	}
+	return func() tea.Msg {
+		used, err := host.VMHostMemory(context.Background(), name)
+		if err != nil || used <= 0 {
+			return heartbeatHostMemoryMsg{scope: scope, vm: name, epoch: epoch}
+		}
+		return heartbeatHostMemoryMsg{scope: scope, vm: name, epoch: epoch, used: uint64(used), ok: true}
+	}
 }
 
 // heartbeatReadCmd waits for one sample. It is the same shape as readNextCmd: the
@@ -1045,7 +1147,10 @@ func (m model) syncHeartbeats() tea.Cmd {
 		// be, being called on every message.
 		for name := range want {
 			if epoch, ch, ok := m.heartbeats.start(sc, name); ok {
-				cmds = append(cmds, heartbeatReadCmd(sc, name, epoch, ch))
+				cmds = append(cmds,
+					heartbeatReadCmd(sc, name, epoch, ch),
+					heartbeatHostMemoryCmd(m.provFor(sc), sc, name, epoch),
+				)
 			}
 		}
 		m.heartbeats.forget(sc, want)
