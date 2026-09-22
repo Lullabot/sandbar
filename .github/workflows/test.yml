@@ -229,6 +229,19 @@ jobs:
             pi --version
           '
 
+      # Codex reads the Linux clipboard through X11 directly (arboard), unlike
+      # agents that shell out to xclip/wl-paste. Prove the headless display is
+      # live and can round-trip image bytes through the same selection API.
+      - name: Smoke-test the headless image clipboard
+        run: |
+          limactl shell claude-ci bash -lc '
+            set -euo pipefail
+            printf "sand-image-probe" > /tmp/sand-image-probe
+            DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -i < /tmp/sand-image-probe
+            DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -o | cmp - /tmp/sand-image-probe
+            test "$(xclip -selection clipboard -t TARGETS -o)" = "image/png"
+          '
+
       - name: Assert coding agents are absent from the reusable base
         run: |
           limactl start sandbar-base

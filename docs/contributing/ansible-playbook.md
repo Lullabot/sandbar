@@ -69,7 +69,7 @@ values:
 
 | Phase | What runs | When |
 |---|---|---|
-| `base` | Shared setup: `base`, `user`, `agent-cleanup`, (conditionally) `samba`, `dev-tools` | Building or maintaining the shared base before cloning; cleanup removes legacy agent installs |
+| `base` | Shared setup: `base`, `user`, `agent-clipboard`, `agent-cleanup`, (conditionally) `samba`, `dev-tools` | Building or maintaining the shared base before cloning; clipboard support is common to every agent and cleanup removes legacy agent installs |
 | `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `project` | Against each clone; agents install current releases here |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
@@ -79,7 +79,7 @@ identity-specific work against each clone.
 
 ## Roles
 
-`roles/` contains `base`, `user`, `agent-cleanup`, `samba`, `dev-tools`,
+`roles/` contains `base`, `user`, `agent-clipboard`, `agent-cleanup`, `samba`, `dev-tools`,
 `claude-code`, `codex`, `opencode`, `pi`, and `project`.
 `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:

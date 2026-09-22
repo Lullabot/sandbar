@@ -71,6 +71,8 @@ base_packages:
   - unzip
   - vim
   - wget
+  - xclip
+  - xvfb
   - yq
   # A reset copies everything the user asked to keep out of the guest as a tar
   # stream, and the compressor runs HERE, in the guest, on the critical path. A

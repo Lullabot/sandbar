@@ -1,0 +1,66 @@
+---
+# Coding agents probe different clipboard APIs. Some invoke the command shims
+# below, while Codex reads the X11 clipboard directly through arboard. A tiny
+# headless X server gives both paths the same image-only slot.
+- name: Install the sand image-only xclip clipboard shim
+  ansible.builtin.copy:
+    src: sand-xclip
+    dest: /usr/local/bin/xclip
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the sand image-only wl-paste clipboard shim
+  ansible.builtin.copy:
+    src: sand-wl-paste
+    dest: /usr/local/bin/wl-paste
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Expose the headless image clipboard to interactive sessions
+  ansible.builtin.copy:
+    content: |
+      # sand's image-only guest clipboard; no host clipboard is mounted or exposed.
+      export DISPLAY=:99
+    dest: /etc/profile.d/sand-image-clipboard.sh
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Expose the headless image clipboard to SSH and tmux sessions
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: '^DISPLAY='
+    line: 'DISPLAY=:99'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the headless image clipboard service
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Sand image-only clipboard display
+      After=local-fs.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/Xvfb :99 -screen 0 1x1x24 -nolisten tcp -ac
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/sand-image-clipboard.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: _sand_clipboard_service
+
+- name: Start the headless image clipboard service
+  ansible.builtin.systemd_service:
+    name: sand-image-clipboard.service
+    daemon_reload: true
+    enabled: true
+    state: "{{ 'restarted' if _sand_clipboard_service is changed else 'started' }}"

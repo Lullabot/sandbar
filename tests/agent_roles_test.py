@@ -54,7 +54,7 @@ class AgentRolesTest(unittest.TestCase):
                     selections.extend({role} for role in AGENTS)
                 for selected in selections:
                     with self.subTest(phase=phase, selected=sorted(selected)):
-                        for role in (*AGENTS, "agent-cleanup"):
+                        for role in (*AGENTS, "agent-cleanup", "agent-clipboard"):
                             (directory / role).unlink(missing_ok=True)
                         variables = {"provision_phase": phase, **{
                             "toolset_" + ("claude" if role == "claude-code" else role): role in selected
@@ -63,6 +63,7 @@ class AgentRolesTest(unittest.TestCase):
                         for role in AGENTS:
                             self.assertEqual((directory / role).exists(), role in selected and phase != "base", role)
                         self.assertEqual((directory / "agent-cleanup").exists(), phase == "base")
+                        self.assertEqual((directory / "agent-clipboard").exists(), phase != "finalize")
 
     def test_opencode_uses_current_official_npm_package(self):
         tasks = yaml.safe_load((ROOT / "roles" / "opencode" / "tasks" / "main.yml").read_text())
@@ -70,6 +71,33 @@ class AgentRolesTest(unittest.TestCase):
         argv = install["ansible.builtin.command"]["argv"]
         self.assertIn("@opencode/cli@latest", argv)
         self.assertNotIn("opencode-ai@latest", argv)
+
+    def test_agent_clipboard_shims_are_image_only(self):
+        role = ROOT / "roles" / "agent-clipboard"
+        tasks_text = (role / "tasks" / "main.yml").read_text()
+        self.assertIn("Xvfb :99", tasks_text)
+        self.assertIn("-nolisten tcp", tasks_text)
+        self.assertIn("DISPLAY=:99", tasks_text)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            slot = home / ".sand" / "clip" / "latest.png"
+            slot.parent.mkdir(parents=True)
+            slot.write_bytes(b"png-image-bytes")
+            env = {**os.environ, "HOME": str(home)}
+
+            def shim(name, *args):
+                return subprocess.run(
+                    ["/bin/sh", str(role / "files" / name), *args],
+                    env=env, check=True, capture_output=True,
+                ).stdout
+
+            self.assertEqual(shim("sand-xclip", "-t", "TARGETS", "-o"), b"image/png\n")
+            self.assertEqual(shim("sand-xclip", "-t", "image/png", "-o"), b"png-image-bytes")
+            self.assertEqual(shim("sand-xclip", "-t", "text/plain", "-o"), b"")
+            self.assertEqual(shim("sand-wl-paste", "--list-types"), b"image/png\n")
+            self.assertEqual(shim("sand-wl-paste", "--type", "image/png"), b"png-image-bytes")
+            self.assertEqual(shim("sand-wl-paste", "--type", "text/plain"), b"")
 
     def test_preserved_settings_and_installer_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:

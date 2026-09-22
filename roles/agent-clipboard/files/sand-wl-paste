@@ -1,0 +1,50 @@
+#!/bin/sh
+# sand image-only clipboard shim (wl-paste-compatible).
+#
+# Serves the single-slot PNG at ~/.sand/clip/latest.png to agents that shell
+# out to wl-paste. Image-only by construction: no write path and no text/plain
+# branch. Reads never consume the slot, so detection and fetch can be separate.
+set -eu
+
+slot="${HOME}/.sand/clip/latest.png"
+list=0
+want=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -l | --list-types)
+      list=1
+      shift
+      ;;
+    --type)
+      want="$2"
+      shift 2
+      ;;
+    --type=*)
+      want="${1#--type=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+[ -f "$slot" ] || exit 0
+
+if [ "$list" -eq 1 ]; then
+  printf 'image/png\n'
+  exit 0
+fi
+
+case "$want" in
+  image/*)
+    cat "$slot"
+    ;;
+  *)
+    :
+    ;;
+esac
+
+exit 0
+
