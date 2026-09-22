@@ -1518,7 +1518,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// session Messages log too, matching the CLI, which prints the same error
 		// to stderr. (Canceled runs returned just above, so this is a real failure.)
 		if msg.err != nil {
-			m.logWarn(jobFailedLabel(msg.job, job) + " failed: " + msg.err.Error())
+			detail := msg.err.Error()
+			if msg.job.kind == kindProvision {
+				if cloneReason := cloneFailureReason(job.Output); cloneReason != "" {
+					detail = cloneReason + " Open the VM log with l."
+				}
+			}
+			m.logWarn(jobFailedLabel(msg.job, job) + " failed: " + detail)
 		}
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
