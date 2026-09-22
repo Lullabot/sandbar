@@ -133,6 +133,15 @@ func TestPasteImageStagesOverStdinToAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestWriteScriptDetachesX11SelectionOwner(t *testing.T) {
+	if !strings.Contains(writeScript, "nohup /usr/bin/xclip") {
+		t.Fatal("writeScript must detach xclip so the guest transport can return")
+	}
+	if !strings.Contains(writeScript, ">/dev/null 2>&1 &") {
+		t.Fatal("writeScript must close xclip output descriptors before backgrounding it")
+	}
+}
+
 func TestPasteImagePropagatesOtherClipboardErrors(t *testing.T) {
 	orig := readClipboardImage
 	defer func() { readClipboardImage = orig }()
