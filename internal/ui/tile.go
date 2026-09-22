@@ -10,8 +10,9 @@ package ui
 //     show a build in flight as a healthy idle VM, and a FAILED provision as
 //     a reassuring green "Running" tile.
 //   - The cpu/mem gauges render only for the DERIVED running state, and only
-//     when the heartbeat actually produced a reading (guestSample's Has*
-//     fields) — never a zeroed bar standing in for "no reading yet".
+//     when their own source produced a reading (guestSample's Has* fields) —
+//     guest CPU and provider host memory are independent, and neither becomes a
+//     zeroed bar standing in for "no reading yet".
 //   - The architecture and base-image badges surface only when the fleet
 //     actually disagrees about them, via a genuine equality test
 //     (computeFleetUniformity) over every VM's value — not a hardcoded field
@@ -168,14 +169,15 @@ func renderTile(in tileInput) string {
 			} else {
 				lines[2] = tileGaugeNoReading(cpuLabel(in.VM), width)
 			}
-			if in.HasSample && in.Sample.HasMem() {
-				frac := memFraction(in.Sample)
-				value := humanizeBytes(strconv.FormatUint(in.Sample.MemUsed, 10)) + "/" +
-					humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10))
+			if total, ok := memoryTotal(in.VM, in.Sample); in.HasSample && in.Sample.HasHostMem && ok {
+				used := min(in.Sample.HostMemUsed, total)
+				frac := float64(used) / float64(total)
+				value := humanizeBytes(strconv.FormatUint(used, 10)) + "/" +
+					humanizeBytes(strconv.FormatUint(total, 10))
 				if frac > 1-lowFreeThreshold {
-					lines[3] = tileWarnGaugeLine("mem", frac, value, width)
+					lines[3] = tileMemoryGaugeLine("mem", used, total, in.Sample.Cache, in.Sample.HasCache, value, width, true)
 				} else {
-					lines[3] = tileGaugeLine("mem", frac, value, width)
+					lines[3] = tileMemoryGaugeLine("mem", used, total, in.Sample.Cache, in.Sample.HasCache, value, width, false)
 				}
 			} else {
 				lines[3] = tileGaugeNoReading("mem", width)
@@ -548,13 +550,52 @@ func tileGaugeBar(frac float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
-// memFraction is the mem gauge's fill, guarding the same zero-total edge case
-// ansibleProgress.Fraction() guards for the build bar.
-func memFraction(s guestSample) float64 {
-	if s.MemTotal == 0 {
-		return 0
+// tileMemoryGaugeLine keeps the memory gauge's existing row width while
+// splitting its used portion into application/other memory and guest cache.
+func tileMemoryGaugeLine(label string, used, total, cache uint64, hasCache bool, value string, width int, warn bool) string {
+	style := tileChromeStyle
+	if warn {
+		style = warnStyle
+		label = "⚠ " + label
 	}
-	return float64(s.MemUsed) / float64(s.MemTotal)
+	return tileGaugeRowStyled(style, label, value, width, func(barWidth int) string {
+		return tileMemoryBar(used, cache, hasCache, total, barWidth)
+	})
+}
+
+// tileMemoryBar draws cache as a subset of the host-resident used portion.
+// Provider and guest samples can race, so both quantities are clamped before
+// converting them into cells and every segment is capped to the fixed width.
+func tileMemoryBar(used, cache uint64, hasCache bool, total uint64, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	if total == 0 {
+		return strings.Repeat("░", width)
+	}
+	used = min(used, total)
+	usedCells := int(float64(used)/float64(total)*float64(width) + 0.5)
+	usedCells = min(usedCells, width)
+	if !hasCache {
+		return strings.Repeat("█", usedCells) + strings.Repeat("░", width-usedCells)
+	}
+	cache = min(cache, used)
+	cacheCells := int(float64(cache)/float64(total)*float64(width) + 0.5)
+	cacheCells = min(cacheCells, usedCells)
+	return strings.Repeat("█", usedCells-cacheCells) +
+		strings.Repeat("▒", cacheCells) +
+		strings.Repeat("░", width-usedCells)
+}
+
+// memoryTotal prefers the VM's configured maximum, which is the denominator
+// for a host-side occupancy reading. The guest's MemTotal is a safe fallback
+// for backends whose listing omitted it.
+func memoryTotal(v vm.VM, sample guestSample) (uint64, bool) {
+	total, err := strconv.ParseUint(v.Memory, 10, 64)
+	if err == nil && total > 0 {
+		return total, true
+	}
+	return sample.MemTotal, sample.MemTotal > 0
 }
 
 // tileDiskLine renders the always-on disk gauge, GUEST-FIRST, HOST-FALLBACK.

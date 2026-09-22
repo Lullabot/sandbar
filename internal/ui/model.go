@@ -337,9 +337,9 @@ type model struct {
 	// rather than six times. Session-only on purpose — see that file's header.
 	ccHintShown bool
 
-	// acting is true while a quick lifecycle action (start/stop/restart/delete) is
-	// in flight. It drives the spinner beside the status line so these blocking
-	// limactl calls show live feedback, and is cleared by the matching
+	// acting is true while a quick provider action (start/stop/restart/delete or
+	// memory reclaim) is in flight. It drives the spinner beside the status line
+	// so these blocking calls show live feedback, and is cleared by the matching
 	// actionDoneMsg.
 	acting bool
 
@@ -987,7 +987,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// which ends that stale read loop rather than letting it double up on the live
 		// one. Routed by the sample's own scope, so a fleet's same-named VMs never
 		// cross streams.
-		return m, heartbeatReadCmd(msg.scope, msg.vm, msg.epoch, m.heartbeats.fold(msg.scope, msg.vm, msg.epoch, msg.sample))
+		return m, tea.Batch(
+			heartbeatReadCmd(msg.scope, msg.vm, msg.epoch, m.heartbeats.fold(msg.scope, msg.vm, msg.epoch, msg.sample)),
+			heartbeatHostMemoryCmd(m.provFor(msg.scope), msg.scope, msg.vm, msg.epoch),
+		)
+
+	case heartbeatHostMemoryMsg:
+		// A delayed provider response belongs only to the heartbeat epoch that
+		// requested it. foldHost rejects a result from a stream that reclaim (or
+		// any other lifecycle change) has since replaced.
+		m.heartbeats.foldHost(msg.scope, msg.vm, msg.epoch, msg.used, msg.ok)
+		return m, nil
 
 	case sweepResultMsg:
 		// The channel closed: this VM's sweep stream ended — most commonly a
@@ -1383,6 +1393,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sc := msg.scope
 		if sc == (registry.Scope{}) {
 			sc = m.activeScope()
+		}
+		// Reclaim needs a reading taken after the cache drop, not whichever guest
+		// sample happened to be latest when it finished. Stopping is deliberate:
+		// Update's final syncHeartbeats immediately opens a new stream for this
+		// still-running VM, and the start path samples host memory alongside
+		// it. Do this even on an error because the provider operation may have
+		// partially completed before returning one.
+		if msg.refreshMetrics {
+			m.heartbeats.stop(sc, msg.name)
 		}
 		label := msg.action + " " + msg.name
 		var text string // built below, then logged ONCE at the end (see the warn append)

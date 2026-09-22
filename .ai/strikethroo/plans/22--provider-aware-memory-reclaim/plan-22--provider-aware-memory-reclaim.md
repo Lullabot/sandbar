@@ -331,11 +331,11 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 1: Provider memory capability, operation, and host measurement
 
-### Phase 2: TUI integration
+### ✅ Phase 2: TUI integration
 
 **Parallel Tasks:**
-- Task 2: Host memory and cache gauge (depends on: 1)
-- Task 3: Reclaim action and docs (depends on: 1)
+- ✔️ Task 2: Host memory and cache gauge (depends on: 1)
+- ✔️ Task 3: Reclaim action and docs (depends on: 1)
 
 ### Post-phase Actions
 

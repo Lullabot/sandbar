@@ -12,10 +12,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// seedSample plants a heartbeat reading for a VM, as if its guest had just
-// reported one. The header and the tiles read live usage from exactly one place —
-// the heartbeat registry — so this is the only thing a test has to fake to drive
-// either of them.
+// seedSample plants the guest and provider readings for a VM. The header and
+// tiles read both from the heartbeat registry, so this is the only state a test
+// has to seed to drive either surface.
 func seedSample(m *model, name string, s guestSample) {
 	if m.heartbeats.beats == nil {
 		m.heartbeats.beats = map[vmHandle]*heartbeat{}
@@ -35,21 +34,20 @@ func pinHostForHeader(t *testing.T) {
 	pinHostCapacity(t, 16<<30, 60<<30) // 16 cores (pinned in the helper), 16GiB RAM, 60GiB free
 }
 
-// THE HEADER REPORTS USE, NOT ALLOCATION. A VM is GIVEN 8 vCPUs and 8GiB and may
-// be using almost none of it; summing what it was given answers a question nobody
-// asked and reads as a crisis on an idle machine. The numbers here come from the
-// guest heartbeat — the same source the tiles' gauges read — so the two surfaces
-// cannot contradict each other.
+// THE HEADER REPORTS HOST-RESIDENT USE, NOT ALLOCATION OR GUEST MemAvailable
+// arithmetic. The CPU rate still comes from the guest heartbeat; memory comes
+// from the provider and is stored beside it so the header and tiles agree.
 func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	pinHostForHeader(t)
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
-	// Allocated 8 vCPUs and 8GiB, but barely working: 25% of its own 8 cores is 2
-	// host vCPUs busy, and it is holding 2GiB of the 8 it was handed.
+	// Allocated 8 vCPUs and 8GiB. Guest arithmetic says 2GiB while the provider
+	// says the VM occupies 6GiB on the host; the latter must be displayed.
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 8, Memory: "8589934592"})
 	seedSample(&m, "web", guestSample{
 		CPUPct: 25, HasCPU: true,
 		MemUsed: 2 << 30, MemTotal: 8 << 30,
+		HostMemUsed: 6 << 30, HasHostMem: true,
 	})
 
 	counts := m.headerCounts(m.layout.ContentWidth)
@@ -59,15 +57,12 @@ func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	if !strings.Contains(counts, "cpu 12%") { // 12.5% rounds to 12
 		t.Fatalf("header = %q, want the live cpu load as a share of the host (2.0 of 16 cores)", counts)
 	}
-	if !strings.Contains(counts, "mem 2 GiB/16 GiB") {
-		t.Fatalf("header = %q, want the memory the guest is actually USING (2 GiB), not its 8 GiB allocation", counts)
+	if !strings.Contains(counts, "mem 6 GiB/16 GiB") {
+		t.Fatalf("header = %q, want provider-reported host occupancy (6 GiB), not guest used memory (2 GiB)", counts)
 	}
 	// The allocation must not appear at all: "8 vCPU" was the old readout.
 	if strings.Contains(counts, "8 vCPU") {
 		t.Fatalf("header = %q, must not report the ALLOCATION", counts)
-	}
-	if !strings.Contains(counts, "mem 2 GiB/16 GiB") {
-		t.Fatalf("header = %q, want the memory the guest is actually USING (2 GiB), not its 8 GiB allocation", counts)
 	}
 	if !strings.Contains(counts, "disk free") {
 		t.Fatalf("header = %q, want free disk kept", counts)
@@ -135,7 +130,7 @@ func TestHeaderReadoutSurvivesAt80x24(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 80, 24)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 4, Memory: "4294967296"})
-	seedSample(&m, "web", guestSample{CPUPct: 50, HasCPU: true, MemUsed: 1 << 30, MemTotal: 4 << 30})
+	seedSample(&m, "web", guestSample{CPUPct: 50, HasCPU: true, MemUsed: 1 << 30, MemTotal: 4 << 30, HostMemUsed: 3 << 30, HasHostMem: true})
 
 	view := ansi.Strip(m.boardView())
 	if !strings.Contains(view, "cpu 12%") { // 50% of 4 vCPUs = 2.0 busy of 16 cores
@@ -151,7 +146,7 @@ func TestHeaderAndTileAgreeOnTheSameSample(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
 	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 4, Memory: "4294967296"})
-	seedSample(&m, "web", guestSample{CPUPct: 75, HasCPU: true, MemUsed: 3 << 30, MemTotal: 4 << 30})
+	seedSample(&m, "web", guestSample{CPUPct: 75, HasCPU: true, MemUsed: 1 << 30, MemTotal: 4 << 30, HostMemUsed: 3 << 30, HasHostMem: true})
 
 	view := ansi.Strip(m.boardView())
 	// ONE sample, TWO honest scales: the tile says 75% (of this VM's 4 vCPUs), the
@@ -162,6 +157,9 @@ func TestHeaderAndTileAgreeOnTheSameSample(t *testing.T) {
 	}
 	if !strings.Contains(view, "75%") { // the tile's own cpu gauge, same sample
 		t.Fatalf("the tile should show the same reading on ITS scale (75%%), got:\n%s", view)
+	}
+	if strings.Count(view, "3 GiB/4 GiB") < 1 || !strings.Contains(view, "mem 3 GiB/16 GiB") {
+		t.Fatalf("header and tile must both use the provider's 3 GiB host reading, got:\n%s", view)
 	}
 }
 

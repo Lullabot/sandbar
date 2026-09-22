@@ -35,6 +35,19 @@ profile is enabled, so a single-profile setup's tiles look unchanged.
 
 Note: the paste-image verb (`v`) is only shown on running VMs.
 
+### Reading memory on a tile
+
+A running VM's memory number is the amount the provider reports as resident on
+the host or hypervisor, followed by the VM's configured total. For example,
+`30 GiB/32 GiB` means the VM currently occupies about 30 GiB from the host's
+point of view. It is not Linux's guest-side `used` calculation.
+
+The filled memory bar separates the guest's filesystem cache with a patterned
+segment. That segment is part of the host-resident total, not an amount added
+to it. The two readings are sampled independently, so sand clamps the cache
+segment when they momentarily disagree. If either reading is unavailable, the
+tile leaves that part unknown instead of displaying a guessed zero.
+
 ### Scrolling
 
 The board only draws as many tile rows as the window is tall enough for —
@@ -80,6 +93,7 @@ require the VM to be running.
 | `s` | Start | Boot the VM. Its host-stored secrets are written into the guest as it comes up. |
 | `x` | Stop | Shut the VM down cleanly. Its disk and its secrets are kept. |
 | `r` | Restart | Stop the VM and start it again, applying any secrets you've changed since it booted. |
+| `m` | Reclaim memory | Flush writes and release the guest filesystem cache. Offered only on a running VM whose provider can return that cache memory to its host; currently this means Proxmox. The tile refreshes its guest cache and host-resident memory readings when the action finishes. |
 | `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sand created. |
 | `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](files-and-shells.md). |
 | `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent. |
@@ -93,6 +107,12 @@ require the VM to be running.
 `d` is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does **not** use
 `d`; it's bound to `g` instead.
+
+Reclaiming memory is explicit and does not resize or reboot the VM, stop its
+services, or promise an exact number of bytes. Linux can retain mapped pages,
+shared memory, and kernel allocations that are still in use. Lima does not
+offer the action because dropping cache inside its Linux guest does not reduce
+the VM footprint reported by macOS.
 
 ### The unlanded-work badge
 

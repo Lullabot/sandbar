@@ -182,6 +182,25 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		binding: key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "reclaim memory")),
+		about:   "Flush writes and release the guest filesystem cache when the provider can return that memory to its host.",
+		enabledFor: func(m model, v boardVM) bool {
+			if !notBuilding(m, v) || v.Status != limaRunning {
+				return false
+			}
+			_, ok := m.provFor(v.scope).(provider.MemoryReclaimer)
+			return ok
+		},
+		action: func(m *model, v boardVM) tea.Cmd {
+			r, ok := m.provFor(v.scope).(provider.MemoryReclaimer)
+			if !ok {
+				return nil
+			}
+			m.logMsg("reclaiming memory from " + v.Name + "…")
+			return m.beginAction(reclaimMemoryCmd(r, v.scope, v.Name))
+		},
+	},
+	{
 		binding: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "reset")),
 		about: "Delete this VM and clone it fresh from its base image, keeping its name and its project. Everything inside the guest is lost unless you preserve it; the form opens pre-filled so you can change the sizing first. " +
 			"The name and repo are fixed — a reset gives you THIS VM again; a different repo is a new VM (n).",

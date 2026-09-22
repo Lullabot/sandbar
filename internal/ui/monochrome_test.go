@@ -27,7 +27,7 @@ func TestBoardSurfacesAreMonochromeSafe(t *testing.T) {
 		{Name: "sandbar-base", Status: "Stopped"}, // no tile: the board is managed-clones-only
 	}})
 	m = loaded.(model)
-	seedSample(&m, "web", guestSample{CPUPct: 25, HasCPU: true, MemUsed: 2 << 30, MemTotal: 8 << 30})
+	seedSample(&m, "web", guestSample{CPUPct: 25, HasCPU: true, MemUsed: 2 << 30, MemTotal: 8 << 30, HostMemUsed: 6 << 30, HasHostMem: true})
 	m.logMsg("stopping web…") // exercises the messages strip's TEXT, not just its colour
 
 	colored := m.boardView()

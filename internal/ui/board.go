@@ -584,9 +584,9 @@ func summarizeNames(names []string, width int) string {
 	return b.String()
 }
 
-// beginAction marks a quick lifecycle action (start/stop/restart/delete) as in
-// flight and batches its command with the spinner tick, so the screen shows a
-// live spinner beside the status line until the matching actionDoneMsg clears it.
+// beginAction marks a quick provider action as in flight and batches its command
+// with the spinner tick, so the screen shows a live spinner beside the status line
+// until the matching actionDoneMsg clears it.
 // tickSpinner is what keeps a second key press — or a build already running on
 // another VM — from stacking tick loops and spinning the animation at double
 // speed.

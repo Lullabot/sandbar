@@ -7,9 +7,9 @@ package ui
 // It reports USE, not ALLOCATION. The allocations (vm.VM's CPUs and Memory) are
 // what each VM was handed at create time: they never move, they cannot answer
 // "what is my machine doing", and summed across an idle fleet they read as a
-// crisis that is not happening. The live numbers come from the guest heartbeat,
-// the same and only source the tiles' gauges use — so the header and the tiles
-// can never disagree, and neither invents a number it does not have.
+// crisis that is not happening. CPU comes from the guest heartbeat; memory comes
+// from each provider's host-side VM reading. Both are joined in the heartbeat
+// registry, which is also what tiles read, so the two surfaces cannot disagree.
 
 import (
 	"fmt"
@@ -133,8 +133,9 @@ func (m model) fleetCountsText() string {
 // used to sum vm.VM's CPUs and Memory, which are what each VM was GIVEN — a
 // number that never moves, cannot answer "what is my machine doing", and reads
 // alarmingly (three idle VMs "using" 24GiB of a 15GiB host) precisely when
-// nothing is happening. The live numbers come from the guest heartbeat
-// (heartbeat.go), the same and only source the tiles' gauges use.
+// nothing is happening. CPU comes from the guest heartbeat and memory from the
+// provider's host-side VM accounting; heartbeat.go stores both for the tiles and
+// header to consume together.
 //
 // The heartbeat only runs for running VMs, and only while the board is the
 // visible screen (the idle gate). So a reading can be genuinely absent, and when
@@ -173,8 +174,8 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 			cpusUsed += s.CPUPct / 100 * float64(v.CPUs)
 			haveCPU = true
 		}
-		if s.HasMem() {
-			memUsed += int64(s.MemUsed)
+		if s.HasHostMem {
+			memUsed += int64(s.HostMemUsed)
 			haveMem = true
 		}
 	}
