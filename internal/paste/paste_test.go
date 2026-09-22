@@ -112,7 +112,7 @@ func TestPasteImageStagesOverStdinToAbsolutePath(t *testing.T) {
 	}
 	wantArgv := []string{
 		"shell", "web", "sh", "-c",
-		`mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"; if [ -x /usr/bin/xclip ]; then DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -i < "$2" >/dev/null 2>&1 || :; fi`,
+		`mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"; if [ -x /usr/bin/xclip ]; then DISPLAY=:99 nohup /usr/bin/xclip -selection clipboard -t image/png -i < "$2" >/dev/null 2>&1 & fi`,
 		"sand", "/home/u.guest/.sand/clip", wantPath,
 	}
 	if strings.Contains(r.calls[0][4], "text/") {

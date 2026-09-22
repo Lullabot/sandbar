@@ -237,9 +237,11 @@ jobs:
           limactl shell claude-ci bash -lc '
             set -euo pipefail
             printf "sand-image-probe" > /tmp/sand-image-probe
-            DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -i < /tmp/sand-image-probe
-            DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -o | cmp - /tmp/sand-image-probe
-            test "$(xclip -selection clipboard -t TARGETS -o)" = "image/png"
+            DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -i < /tmp/sand-image-probe >/dev/null 2>&1 &
+            owner_pid=$!
+            trap "kill $owner_pid 2>/dev/null || :" EXIT
+            timeout 10 bash -c "until DISPLAY=:99 /usr/bin/xclip -selection clipboard -t image/png -o 2>/dev/null | cmp - /tmp/sand-image-probe; do sleep 0.1; done"
+            test "$(timeout 10 xclip -selection clipboard -t TARGETS -o)" = "image/png"
           '
 
       - name: Assert coding agents are absent from the reusable base
