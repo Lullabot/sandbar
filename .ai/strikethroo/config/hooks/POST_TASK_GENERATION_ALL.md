@@ -15,8 +15,8 @@ Target: every task should be completable with 1-2 skills and have clear acceptan
 ## 2. Assign Model and Effort
 
 Read `.ai/strikethroo/config/shared/model-effort-rubric.md`. For **every** task,
-determine the right-sized `model` and `effort` and write both into the task's
-YAML frontmatter (they are required fields in `TASK_TEMPLATE.md`).
+determine the right-sized provider models and effort and write them into the
+task's YAML frontmatter (they are required fields in `TASK_TEMPLATE.md`).
 
 For each task:
 
@@ -25,14 +25,16 @@ For each task:
    assignment table.
 2. Apply the rubric guardrails — especially the **risk floor** (security, data
    migration, auth, money, concurrency, or verification-gate tasks never go
-   below `sonnet` + `high`) and **default to `sonnet` + `medium`** when unsure.
-3. Set `model` (`haiku` | `sonnet` | `opus`) and `effort`
-   (`low` | `medium` | `high` | `xhigh`) in the frontmatter. Never leave either
-   unset.
+   below `sonnet` / `gpt-5.6-sol` + `high`) and **default to `sonnet` /
+   `gpt-5.6-terra` + `medium`** when unsure.
+3. Set both `models.anthropic` (`haiku` | `sonnet` | `opus`) and
+   `models.openai` (`gpt-5.6-luna` | `gpt-5.6-terra` | `gpt-5.6-sol` |
+   `gpt-6-astra`), plus `effort` (`low` | `medium` | `high` | `xhigh`). Never
+   leave any of them unset.
 
 Bias toward the cheapest tier that can plausibly complete the task correctly —
-cost is a first-class constraint. Reserve `opus`/`xhigh` for tasks that
-genuinely need the reasoning.
+cost is a first-class constraint. Reserve `opus` / `gpt-6-astra` + `xhigh` for
+tasks that genuinely need the reasoning.
 
 ## 3. Update Plan with Blueprint
 

@@ -4,8 +4,10 @@ group: "user-authentication"
 dependencies: []  # List of task IDs, e.g., [2, 3]
 status: "[STATUS]"  # pending | in-progress | completed | needs-clarification
 created: [YYYY-MM-DD]
-model: "[MODEL]"    # haiku | sonnet | opus — capability tier for this task's subagent (see config/shared/model-effort-rubric.md)
-effort: "[EFFORT]"  # low | medium | high | xhigh — reasoning tier; selects the st-worker-<effort> subagent
+models: # Provider-specific model IDs; dispatchers use only their current provider
+  anthropic: "[ANTHROPIC-MODEL]" # haiku | sonnet | opus
+  openai: "[OPENAI-MODEL]" # gpt-5.6-luna | gpt-5.6-terra | gpt-5.6-sol | gpt-6-astra
+effort: "[EFFORT]"  # low | medium | high | xhigh — shared reasoning tier
 skills: # Technical skills required for this task
   - [SKILL-1]
   - [SKILL-2]

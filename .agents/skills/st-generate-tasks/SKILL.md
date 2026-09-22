@@ -186,6 +186,9 @@ including required frontmatter fields:
 - `dependencies` (array of task IDs, possibly empty)
 - `status` — `pending` for new tasks
 - `created` (YYYY-MM-DD)
+- `models` (`anthropic` and `openai` model IDs assigned by the post-generation
+  rubric)
+- `effort` (`low`, `medium`, `high`, or `xhigh`)
 - `skills` (array of 1–2 kebab-case skills)
 
 Optional frontmatter for high-complexity or decomposed tasks:
