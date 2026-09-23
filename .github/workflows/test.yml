@@ -74,7 +74,7 @@ jobs:
       # Bump COVERAGE_FLOOR by hand in a PR as coverage rises.
       - name: Go tests (race) + coverage gate
         env:
-          COVERAGE_FLOOR: "90.5"
+          COVERAGE_FLOOR: "90.8"
         run: |
           go test ./... -race -covermode=atomic \
             -coverpkg=./internal/... -coverprofile=coverage.out

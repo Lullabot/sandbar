@@ -366,11 +366,12 @@ every bullet, not the constraint itself.
   pagination) are deliberately absent. Do not add them speculatively.
 - **The header reports USE, not ALLOCATION**, and so do the tiles. Both read the
   same joined sample in the heartbeat registry: CPU comes from the guest, while
-  memory occupancy comes from the provider's optional host/hypervisor reading.
+  memory occupancy prefers the provider's optional host/hypervisor reading.
   The header shows host vCPUs busy (each guest's `CPUPct` is a share of ITS OWN
   vCPUs, so it is scaled by that VM's `CPUs` before being summed), host-resident
-  VM memory, and free disk. It previously summed allocations, and later guest
-  `MemAvailable` arithmetic; neither describes how much host RAM a VM occupies.
+  VM memory, and free disk. When a host measurement is unavailable, preserve
+  the guest reading with an explicit `guest mem` label. Never sum guest use as
+  though it were host-resident memory.
 - **A metric with no reading renders as an em dash, never as 0.** A running VM
   whose heartbeat has not reported yet — or whose heartbeat the idle gate tore
   down — has an UNKNOWN cpu, not an idle one. `tileGaugeNoReading` (tile.go) and
@@ -381,10 +382,13 @@ every bullet, not the constraint itself.
 - **`CPUs` and `Memory` on `vm.VM` are allocations, not utilization.** They
   are what the provider was told to give the guest. CPU utilization and guest
   filesystem cache come from the guest heartbeat; primary memory occupancy
-  comes from `provider.VMHostMemoryProvider`. The cache is a separately stored,
-  free-like `Buffers + Cached + SReclaimable - Shmem` value and is clamped into
-  the host-used portion of the compact memory bar. A missing host reading renders
-  as unknown, never guest `MemAvailable` arithmetic or a zero bar.
+  comes from `provider.VMHostMemoryProvider`. Lima implements that optional
+  source using host process RSS: `qemu.pid` for QEMU, or the macOS VZ worker
+  identified by its open VM disk, never `vz.pid`'s host-agent RSS. The cache is
+  a separately stored, free-like `Buffers + Cached + SReclaimable - Shmem` value and is clamped into
+  the host-used portion of the compact memory bar. A missing host reading falls
+  back to a labeled guest gauge without a cache pattern; missing both readings
+  renders as unknown, never a zero bar.
 - **Lima reports only `Running` and `Stopped`.** A provisioning VM is
   `Running` to Lima — Lima has no concept of "being provisioned". `Building`
   and `Failed` are sand-side states derived from the job registry

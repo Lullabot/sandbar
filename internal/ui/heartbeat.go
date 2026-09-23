@@ -11,7 +11,8 @@ package ui
 // 4/4 is not a gauge; it is a lie with a progress bar around it. CPU and cache
 // come from the guest; host-resident memory comes from the provider's optional
 // VMHostMemoryProvider capability. This file joins those asynchronously sampled
-// facts without treating one as a substitute for the other.
+// facts with their sources intact, so the renderer can label guest memory
+// explicitly when a provider's host reading is unavailable.
 //
 // # The shape
 //

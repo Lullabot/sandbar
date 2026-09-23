@@ -24,6 +24,17 @@ type Client struct{ r Runner }
 // New wraps a Runner in a Client.
 func New(r Runner) *Client { return &Client{r: r} }
 
+// HostOutput runs a read-only host probe through the runner associated with
+// this Lima client. A test runner without host-command support returns an
+// error instead of accidentally inspecting the developer's machine.
+func (c *Client) HostOutput(ctx context.Context, argv ...string) ([]byte, error) {
+	host, ok := c.r.(HostCommandRunner)
+	if !ok {
+		return nil, errors.New("lima: host commands unavailable")
+	}
+	return host.HostOutput(ctx, argv...)
+}
+
 // listEntry mirrors the documented `limactl list --format json` object. Lima
 // emits one such object per line. Unknown fields are ignored and missing fields
 // decode to their zero value, so the parser is tolerant of Lima version drift.

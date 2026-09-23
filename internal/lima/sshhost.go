@@ -577,6 +577,22 @@ func (h *SSHHost) Output(ctx context.Context, args ...string) ([]byte, error) {
 	return stdout.Bytes(), err
 }
 
+// HostOutput runs a host process probe on the machine that owns this Lima
+// instance. Arguments use sshCommandMux's per-argument shell quoting, so an
+// instance directory is never interpreted as shell source on the remote host.
+func (h *SSHHost) HostOutput(ctx context.Context, argv ...string) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("lima: empty host command")
+	}
+	stdout, stderr, err := h.runRemote(ctx, nil, argv...)
+	if err != nil {
+		if msg := strings.TrimSpace(string(stderr)); msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
+		}
+	}
+	return stdout, err
+}
+
 // Stream runs `ssh … limactl args…`, piping stdin to the REMOTE limactl (so the
 // provision vars keep arriving over stdin, never argv — a finalize token must
 // never land in the remote process listing) and merging stdout+stderr into out

@@ -509,6 +509,20 @@ func TestSSHOutputSeparatesStdoutAndStderr(t *testing.T) {
 	}
 }
 
+func TestSSHHostOutputRunsHostProbeWithoutLimactlOrGuestShell(t *testing.T) {
+	rec := &recordingExec{stub: func(ctx context.Context, _ []string) *exec.Cmd {
+		return sh(ctx, "printf '7248256 /System/Library/com.apple.Virtualization.VirtualMachine\\n'")
+	}}
+	h := hostWith(testCfg, rec)
+	out, err := h.HostOutput(context.Background(), "ps", "-p", "56040", "-o", "rss=", "-o", "comm=")
+	if err != nil || !strings.HasPrefix(string(out), "7248256 ") {
+		t.Fatalf("HostOutput = %q, %v", out, err)
+	}
+	if len(rec.calls) != 1 || !reflect.DeepEqual(rec.calls[0], sshArgv(h, nil, "dev@example.com", "ps", "-p", "56040", "-o", "rss=", "-o", "comm=")) {
+		t.Fatalf("host process probe must travel over SSH without limactl or a guest shell: %v", rec.calls)
+	}
+}
+
 // TestSSHListRaceSentinelStillFires: the remote limactl fails the SAME way local
 // limactl does while an instance is mid-clone (lima#5236). Its stderr is folded
 // into the error by Output, so ErrListRacedInstanceDir must still recognise it —
