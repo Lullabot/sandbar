@@ -785,6 +785,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#reading-memory-on-a-tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading memory on a tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#scrolling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1471,6 +1482,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#reading-memory-on-a-tile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading memory on a tile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#scrolling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1615,7 +1637,7 @@ tile under the focus ring.</p>
 <h2 id="the-header">The header</h2>
 <p>The header shows a live readout of the <strong>host(s)</strong> you're connected to, not
 the VMs: one band per active <a href="../connection-profiles/">Connection Profile</a>,
-each with CPU and memory currently in use (fed by a guest heartbeat), free
+each with CPU and memory currently in use, free
 disk on the volume that holds that profile's VMs, and the build's version.
 Out of the box that's one band, for the permanent Local profile. Add a
 remote or Proxmox profile and a second band appears for it; a profile that's
@@ -1634,6 +1656,23 @@ profile that VM runs on — useful since the same VM name can exist under two
 different profiles at once. The label is omitted while only the Local
 profile is enabled, so a single-profile setup's tiles look unchanged.</p>
 <p>Note: the paste-image verb (<code>v</code>) is only shown on running VMs.</p>
+<h3 id="reading-memory-on-a-tile">Reading memory on a tile</h3>
+<p>A running VM's memory number prefers the amount the provider reports as resident on
+the host or hypervisor, followed by the VM's configured total. For example,
+<code>30 GiB/32 GiB</code> means the VM currently occupies about 30 GiB from the host's
+point of view. It is not Linux's guest-side <code>used</code> calculation.</p>
+<p>For Lima, sand samples the host process backing each VM: QEMU's process or the
+macOS Virtualization worker that has the VM's disk open. This is a process RSS
+estimate, which can include virtualization overhead. If that host measurement
+cannot be obtained, the existing guest memory reading remains visible as
+<code>guest mem</code> on the tile and in the host summary, so it is not mistaken for
+physical host RAM used by the VM.</p>
+<p>The filled memory bar separates the guest's filesystem cache with a patterned
+segment. That segment is part of the host-resident total, not an amount added
+to it. The two readings are sampled independently, so sand clamps the cache
+segment when they momentarily disagree. A guest-only gauge has no cache
+pattern because Linux's guest <code>used</code> figure excludes cache. If neither memory
+reading is available, the tile shows an unknown value instead of a guessed zero.</p>
 <h3 id="scrolling">Scrolling</h3>
 <p>The board only draws as many tile rows as the window is tall enough for —
 in a short terminal that can be a single row. When there are more tiles than
@@ -1722,6 +1761,11 @@ require the VM to be running.</p>
 <td>Stop the VM and start it again, applying any secrets you've changed since it booted.</td>
 </tr>
 <tr>
+<td><code>m</code></td>
+<td>Reclaim memory</td>
+<td>Flush writes and release the guest filesystem cache. Offered only on a running VM whose provider can return that cache memory to its host; currently this means Proxmox. The tile refreshes its guest cache and host-resident memory readings when the action finishes.</td>
+</tr>
+<tr>
 <td><code>R</code></td>
 <td>Reset</td>
 <td>Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sand created.</td>
@@ -1771,6 +1815,11 @@ require the VM to be running.</p>
 <p><code>d</code> is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does <strong>not</strong> use
 <code>d</code>; it's bound to <code>g</code> instead.</p>
+<p>Reclaiming memory is explicit and does not resize or reboot the VM, stop its
+services, or promise an exact number of bytes. Linux can retain mapped pages,
+shared memory, and kernel allocations that are still in use. Lima does not
+offer the action because dropping cache inside its Linux guest does not reduce
+the VM footprint reported by macOS.</p>
 <h3 id="the-unlanded-work-badge">The unlanded-work badge</h3>
 <p>A tile whose checkouts have been swept recently carries a small badge on its
 footer row naming git work that has not yet reached a PR:</p>

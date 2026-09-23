@@ -2403,6 +2403,13 @@ create a VM (this takes a few minutes — it downloads the image, runs the same
 Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
 real CPU, memory, and storage usage, sampled from the API.</p>
+<p>Each running VM tile also uses Proxmox's host-side memory reading for its main
+memory number. A patterned portion of the gauge identifies Linux filesystem
+cache measured inside the guest. If that cache has grown large, focus the tile
+and press <code>m</code> (<strong>Reclaim memory</strong>). Sand syncs pending writes, asks the guest
+kernel to release its filesystem caches over the existing SSH connection, and
+then refreshes both readings. This needs no additional Proxmox API permission
+and does not change the VM's configured memory or balloon settings.</p>
 <div class="admonition note">
 <p class="admonition-title">Why the default image is a project-built one, not stock Debian</p>
 <p><code>sand</code> learns a VM's IP address only from the QEMU guest agent (it is the
