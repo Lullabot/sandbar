@@ -50,7 +50,12 @@ const (
 
 // AgentStatePaths are the home-relative settings, credentials, sessions and
 // files preserved together for all supported coding agents.
-var AgentStatePaths = []string{".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".local/state/opencode", ".pi/agent"}
+var AgentStatePaths = []string{
+	".claude", ".claude.json",
+	".codex", ".config/sandbar/codex-remote-control-onboarding-complete",
+	".config/opencode", ".local/share/opencode", ".local/state/opencode",
+	".pi/agent",
+}
 
 // homeExcludes is everything a whole-home preserve deliberately leaves behind,
 // spelled as tar member names (the archive is created with `-C <home> .`, so
