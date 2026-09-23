@@ -109,3 +109,24 @@ toolset_java: true
 toolset_packages: >-
   {{ (['golang'] if toolset_go | bool else [])
    + (['default-jdk-headless'] if toolset_java | bool else []) }}
+
+# Whether this run is Ansible operating inside a `chroot` over a MOUNTED,
+# OFFLINE disk image (task 03's CI build pipeline: `chroot /mnt/img
+# ansible-playbook ...`) rather than a live, booted guest. A chroot like that
+# has no running init, no D-Bus, and no populated /run — so anything that
+# needs a live systemd (systemctl start/enable/reload, hostnamectl, loginctl)
+# either hangs or fails outright — but the network works normally (a chroot
+# shares the host's network namespace), so apt/curl/get_url tasks are
+# unaffected and this is NOT a reason to design around an offline network.
+#
+# Every task in this fileset that cannot run under those conditions consults
+# this flag and runs an offline equivalent instead (typically: write the file
+# a live command would have produced, and let task 03's build script finish
+# unit enablement from OUTSIDE the chroot via `systemctl --root=`). See
+# docs/contributing/image-build-audit.md for the full audit and the exact
+# interface task 03's build script must provide.
+#
+# Defaults to false, which is what every existing in-guest sand run passes
+# (explicitly or via this default) — so this flag is purely additive: the
+# in-guest path is byte-identical to before this flag existed.
+sand_image_build: false

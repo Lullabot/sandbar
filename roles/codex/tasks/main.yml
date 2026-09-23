@@ -24,6 +24,32 @@
     group: "{{ user_name }}"
     mode: "0644"
 
+# Codex is NOT installed here during an image build — same reasoning as the
+# claude-code role. It is the single largest item that would be baked in
+# (~318 MB: a 251 MB binary plus a 67 MB helper) and it releases frequently,
+# so the image would ship a stale copy that replaces itself on first use. The
+# shim installs the current release when the user first runs `codex`. On a
+# normal in-guest run (sand_image_build false) we install eagerly as before.
+- name: Ensure ~/.local/bin exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.local/bin"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+- name: Install the Codex lazy-install shim (image build)
+  ansible.builtin.template:
+    src: lazy-shim.sh.j2
+    dest: "{{ user_home }}/.local/bin/codex"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+  vars:
+    shim_tool: codex
+    shim_installer: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+  when: sand_image_build
+
 - name: Install OpenAI Codex using the official installer
   ansible.builtin.shell:
     cmd: set -o pipefail && curl -fsSL https://chatgpt.com/codex/install.sh | sh
@@ -32,6 +58,7 @@
   become_user: "{{ user_name }}"
   args:
     creates: "{{ user_home }}/.local/bin/codex"
+  when: not sand_image_build
 
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:

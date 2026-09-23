@@ -52,6 +52,34 @@
     group: "{{ user_name }}"
     mode: "0600"
 
+# Claude Code is NOT installed here during an image build. It releases far
+# more often than the base image is rebuilt, so a baked-in binary (~214 MB)
+# would be stale on arrival and would replace itself on first use anyway. The
+# shim below installs the current release the first time the user actually
+# runs `claude`, and the vendor installer overwrites the shim with the real
+# binary, so it costs nothing thereafter. On a normal in-guest run
+# (sand_image_build false) we keep installing eagerly, so behaviour for
+# existing VMs is unchanged.
+- name: Ensure ~/.local/bin exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.local/bin"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+- name: Install the Claude Code lazy-install shim (image build)
+  ansible.builtin.template:
+    src: lazy-shim.sh.j2
+    dest: "{{ user_home }}/.local/bin/claude"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+  vars:
+    shim_tool: claude
+    shim_installer: "curl -fsSL https://claude.ai/install.sh | bash"
+  when: sand_image_build
+
 - name: Install Claude Code using the official installer
   ansible.builtin.shell:
     cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash
@@ -60,6 +88,7 @@
   become_user: "{{ user_name }}"
   args:
     creates: "{{ user_home }}/.local/bin/claude"
+  when: not sand_image_build
 
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:

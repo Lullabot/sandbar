@@ -30,7 +30,42 @@
     cmd: loginctl enable-linger {{ user_name }}
   args:
     creates: /var/lib/systemd/linger/{{ user_name }}
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - not sand_image_build
+
+# Offline equivalent of the task above, for a chroot image build
+# (sand_image_build: true). loginctl talks to systemd-logind over D-Bus,
+# which is not running in a chroot over an offline image root. But linger has
+# no other state: logind's own enable-linger implementation IS just creating
+# this file — it never reads the content, only checks for existence (see
+# logind(8)) — which is exactly what the `creates:` argument above already
+# relies on for idempotency. Writing it directly reaches the identical end
+# state with no live system required.
+#
+# The parent directory must be created first: on a genericcloud image that has
+# never booted, /var/lib/systemd/linger/ does not exist yet (logind normally
+# creates it lazily on its own first use), so the touch below fails with
+# ENOENT without this. On a live system this is already a harmless no-op.
+- name: Ensure /var/lib/systemd/linger directory exists (offline equivalent for a chroot image build)
+  ansible.builtin.file:
+    path: /var/lib/systemd/linger
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - sand_image_build
+
+- name: Enable systemd linger for {{ user_name }} (offline equivalent for a chroot image build)
+  ansible.builtin.file:
+    path: /var/lib/systemd/linger/{{ user_name }}
+    state: touch
+    mode: "0644"
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - sand_image_build
 
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
