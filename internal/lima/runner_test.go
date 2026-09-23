@@ -35,6 +35,18 @@ func TestExecRunnerStreamOutKeepsStderrSeparate(t *testing.T) {
 	}
 }
 
+func TestExecRunnerHostOutputUsesHostArgvAndKeepsStderrSeparate(t *testing.T) {
+	r := &execRunner{bin: "not-a-real-limactl"}
+	out, err := r.HostOutput(context.Background(), "sh", "-c", "printf '42 host-process'; printf 'warning' >&2")
+	if err != nil || string(out) != "42 host-process" {
+		t.Fatalf("host output = %q, %v; want stdout from sh, not limactl or stderr", out, err)
+	}
+	_, err = r.HostOutput(context.Background(), "sh", "-c", "printf 'probe failed' >&2; exit 7")
+	if err == nil || !strings.Contains(err.Error(), "probe failed") {
+		t.Fatalf("failed host probe error = %v; want its stderr", err)
+	}
+}
+
 // Stream, by contrast, deliberately merges stderr into out for live display —
 // documenting the distinction so no one "simplifies" the two into one method.
 func TestExecRunnerStreamMergesStderr(t *testing.T) {

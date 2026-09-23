@@ -34,9 +34,9 @@ func pinHostForHeader(t *testing.T) {
 	pinHostCapacity(t, 16<<30, 60<<30) // 16 cores (pinned in the helper), 16GiB RAM, 60GiB free
 }
 
-// THE HEADER REPORTS HOST-RESIDENT USE, NOT ALLOCATION OR GUEST MemAvailable
-// arithmetic. The CPU rate still comes from the guest heartbeat; memory comes
-// from the provider and is stored beside it so the header and tiles agree.
+// When a provider reading exists, the header reports host-resident use. The
+// CPU rate still comes from the guest heartbeat; both memory readings are
+// stored beside it so the header and tiles agree on the source.
 func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	pinHostForHeader(t)
 	m := newTestModel(t)
@@ -69,6 +69,22 @@ func TestHeaderReportsLiveUseNotAllocation(t *testing.T) {
 	}
 	if view := ansi.Strip(m.boardView()); !strings.Contains(view, "cpu 12%") {
 		t.Fatalf("the live readout must reach the rendered board, got:\n%s", view)
+	}
+}
+
+func TestHeaderKeepsLabeledGuestMemoryWhenHostReadingIsUnavailable(t *testing.T) {
+	pinHostForHeader(t)
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running", CPUs: 4, Memory: "8589934592"})
+	seedSample(&m, "web", guestSample{MemUsed: 462 << 20, MemTotal: 8 << 30})
+
+	view := ansi.Strip(m.boardView())
+	if !strings.Contains(view, "guest mem 462 MiB/16 GiB") {
+		t.Fatalf("header must preserve the local guest memory number and label its source, got:\n%s", view)
+	}
+	if !strings.Contains(view, "guest mem") || !strings.Contains(view, "462 MiB/8 GiB") {
+		t.Fatalf("tile must agree with the labeled guest reading, got:\n%s", view)
 	}
 }
 

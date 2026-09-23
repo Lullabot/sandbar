@@ -179,6 +179,20 @@ func renderTile(in tileInput) string {
 				} else {
 					lines[3] = tileMemoryGaugeLine("mem", used, total, in.Sample.Cache, in.Sample.HasCache, value, width, false)
 				}
+			} else if in.HasSample && in.Sample.HasMem() {
+				// Providers without a host-side VM reading still have the guest
+				// heartbeat. Keep that useful gauge, but name its source: Linux's
+				// MemTotal-MemAvailable is not the VM's host RAM footprint. Cache
+				// is not a subset of this guest-used number, so it has no pattern.
+				used := min(in.Sample.MemUsed, in.Sample.MemTotal)
+				frac := float64(used) / float64(in.Sample.MemTotal)
+				value := humanizeBytes(strconv.FormatUint(used, 10)) + "/" +
+					humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10))
+				if frac > 1-lowFreeThreshold {
+					lines[3] = tileWarnGaugeLine("guest mem", frac, value, width)
+				} else {
+					lines[3] = tileGaugeLine("guest mem", frac, value, width)
+				}
 			} else {
 				lines[3] = tileGaugeNoReading("mem", width)
 			}

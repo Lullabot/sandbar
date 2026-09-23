@@ -11,7 +11,7 @@ tile under the focus ring.
 
 The header shows a live readout of the **host(s)** you're connected to, not
 the VMs: one band per active [Connection Profile](connection-profiles.md),
-each with CPU and memory currently in use (fed by a guest heartbeat), free
+each with CPU and memory currently in use, free
 disk on the volume that holds that profile's VMs, and the build's version.
 Out of the box that's one band, for the permanent Local profile. Add a
 remote or Proxmox profile and a second band appears for it; a profile that's
@@ -37,16 +37,24 @@ Note: the paste-image verb (`v`) is only shown on running VMs.
 
 ### Reading memory on a tile
 
-A running VM's memory number is the amount the provider reports as resident on
+A running VM's memory number prefers the amount the provider reports as resident on
 the host or hypervisor, followed by the VM's configured total. For example,
 `30 GiB/32 GiB` means the VM currently occupies about 30 GiB from the host's
 point of view. It is not Linux's guest-side `used` calculation.
 
+For Lima, sand samples the host process backing each VM: QEMU's process or the
+macOS Virtualization worker that has the VM's disk open. This is a process RSS
+estimate, which can include virtualization overhead. If that host measurement
+cannot be obtained, the existing guest memory reading remains visible as
+`guest mem` on the tile and in the host summary, so it is not mistaken for
+physical host RAM used by the VM.
+
 The filled memory bar separates the guest's filesystem cache with a patterned
 segment. That segment is part of the host-resident total, not an amount added
 to it. The two readings are sampled independently, so sand clamps the cache
-segment when they momentarily disagree. If either reading is unavailable, the
-tile leaves that part unknown instead of displaying a guessed zero.
+segment when they momentarily disagree. A guest-only gauge has no cache
+pattern because Linux's guest `used` figure excludes cache. If neither memory
+reading is available, the tile shows an unknown value instead of a guessed zero.
 
 ### Scrolling
 

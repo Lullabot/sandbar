@@ -4,9 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/lima"
 )
 
 // TestMemoryCapabilities pins support to the concrete backend that can actually
@@ -17,8 +22,8 @@ func TestMemoryCapabilities(t *testing.T) {
 	if _, ok := any(&limaProvider{}).(MemoryReclaimer); ok {
 		t.Error("local Lima advertises memory reclaim; its host footprint does not shrink after a guest cache drop")
 	}
-	if _, ok := any(&limaProvider{}).(VMHostMemoryProvider); ok {
-		t.Error("local Lima advertises a host-side per-VM memory reading it does not have")
+	if _, ok := any(&limaProvider{}).(VMHostMemoryProvider); !ok {
+		t.Error("local Lima does not expose its host-side per-VM process memory reading")
 	}
 
 	m := newPVEMock(t)
@@ -28,6 +33,98 @@ func TestMemoryCapabilities(t *testing.T) {
 	}
 	if _, ok := any(p).(VMHostMemoryProvider); !ok {
 		t.Error("Proxmox does not advertise host-side per-VM memory measurement")
+	}
+}
+
+// hostMemoryRunner keeps both limactl discovery and the host process probes
+// behind test seams; these tests never run limactl, ps, or lsof on this machine.
+type hostMemoryRunner struct {
+	dir       string
+	hostCalls [][]string
+	responses map[string]string
+}
+
+func (r *hostMemoryRunner) Output(_ context.Context, _ ...string) ([]byte, error) {
+	return []byte(`{"name":"web","status":"Running","dir":"` + r.dir + `"}` + "\n"), nil
+}
+func (*hostMemoryRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error { return nil }
+func (*hostMemoryRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) error {
+	return nil
+}
+func (r *hostMemoryRunner) HostOutput(_ context.Context, argv ...string) ([]byte, error) {
+	r.hostCalls = append(r.hostCalls, append([]string(nil), argv...))
+	if out, ok := r.responses[strings.Join(argv, "\x00")]; ok {
+		return []byte(out), nil
+	}
+	return nil, errors.New("unexpected host command")
+}
+
+func TestLimaVZHostMemoryUsesVMWorkerOpeningItsDisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vz.pid"), []byte("123\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	disk := filepath.Join(dir, "disk")
+	r := &hostMemoryRunner{dir: dir, responses: map[string]string{
+		strings.Join([]string{"lsof", "-nP", "-t", disk}, "\x00"):                        "123\n56040\n",
+		strings.Join([]string{"ps", "-p", "123", "-o", "rss=", "-o", "comm="}, "\x00"):   "12000 /usr/local/bin/limactl\n",
+		strings.Join([]string{"ps", "-p", "56040", "-o", "rss=", "-o", "comm="}, "\x00"): "7248256 /System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine\n",
+	}}
+	p := NewLocalLima(lima.New(r), nil)
+	got, err := p.(VMHostMemoryProvider).VMHostMemory(context.Background(), "web")
+	if err != nil || got != 7248256*1024 {
+		t.Fatalf("VZ host memory = %d, %v; want worker RSS in bytes", got, err)
+	}
+	want := [][]string{{"lsof", "-nP", "-t", disk}, {"ps", "-p", "123", "-o", "rss=", "-o", "comm="}, {"ps", "-p", "56040", "-o", "rss=", "-o", "comm="}}
+	if !reflect.DeepEqual(r.hostCalls, want) {
+		t.Fatalf("host commands = %v, want %v", r.hostCalls, want)
+	}
+}
+
+func TestLimaQEMUHostMemoryUsesDriverPIDAndRejectsStalePID(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "qemu.pid"), []byte("1234\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ps := strings.Join([]string{"ps", "-p", "1234", "-o", "rss=", "-o", "comm="}, "\x00")
+	r := &hostMemoryRunner{dir: dir, responses: map[string]string{ps: "500000 /usr/bin/qemu-system-aarch64\n"}}
+	p := NewLocalLima(lima.New(r), nil)
+	got, err := p.(VMHostMemoryProvider).VMHostMemory(context.Background(), "web")
+	if err != nil || got != 500000*1024 {
+		t.Fatalf("QEMU host memory = %d, %v; want process RSS in bytes", got, err)
+	}
+	r.responses[ps] = "500000 /bin/bash\n"
+	if _, err := p.(VMHostMemoryProvider).VMHostMemory(context.Background(), "web"); err == nil {
+		t.Fatal("a reused qemu.pid belonging to another process must not report that process's memory")
+	}
+}
+
+func TestLimaVZHostMemoryFindsLegacyDiskAndRejectsWrongWorker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vz.pid"), []byte("123\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacyDisk := filepath.Join(dir, "diffdisk")
+	ps := strings.Join([]string{"ps", "-p", "56040", "-o", "rss=", "-o", "comm="}, "\x00")
+	r := &hostMemoryRunner{dir: dir, responses: map[string]string{
+		strings.Join([]string{"lsof", "-nP", "-t", legacyDisk}, "\x00"): "56040\n56040\n",
+		ps: "1024 /System/Library/com.apple.Virtualization.VirtualMachine\n",
+	}}
+	p := NewLocalLima(lima.New(r), nil).(VMHostMemoryProvider)
+	got, err := p.VMHostMemory(context.Background(), "web")
+	if err != nil || got != 1024*1024 {
+		t.Fatalf("legacy VZ disk memory = %d, %v; want one worker RSS", got, err)
+	}
+	if !reflect.DeepEqual(r.hostCalls, [][]string{
+		{"lsof", "-nP", "-t", filepath.Join(dir, "disk")},
+		{"lsof", "-nP", "-t", legacyDisk},
+		{"ps", "-p", "56040", "-o", "rss=", "-o", "comm="},
+	}) {
+		t.Fatalf("legacy disk probe = %v", r.hostCalls)
+	}
+	r.responses[ps] = "1024 /usr/local/bin/limactl\n"
+	if _, err := p.VMHostMemory(context.Background(), "web"); err == nil {
+		t.Fatal("a non-VM process opening the disk must not be reported as VM memory")
 	}
 }
 

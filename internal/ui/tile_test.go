@@ -279,7 +279,7 @@ func TestMemoryBarClampsCacheInsideHostUsage(t *testing.T) {
 	}
 }
 
-func TestMemoryGaugeWithoutHostUsageIsUnknown(t *testing.T) {
+func TestMemoryGaugeWithoutHostUsageShowsLabeledGuestReading(t *testing.T) {
 	in := baseTileInput()
 	in.VM = vm.VM{Name: "web", Status: "Running", Memory: "34359738368"}
 	in.Sample = guestSample{MemTotal: 32 << 30, MemUsed: 9 << 30, Cache: 17 << 30, HasCache: true}
@@ -288,16 +288,26 @@ func TestMemoryGaugeWithoutHostUsageIsUnknown(t *testing.T) {
 	lines := strings.Split(ansi.Strip(renderTile(in)), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, "mem") {
-			if !strings.Contains(line, "—") {
-				t.Fatalf("unknown host usage must render no reading, got %q", line)
+			if !strings.Contains(line, "guest mem") || !strings.Contains(line, "9 GiB/32 GiB") {
+				t.Fatalf("guest fallback must retain its number and identify its source, got %q", line)
 			}
-			if strings.Contains(line, "9 GiB") {
-				t.Fatalf("guest used memory must not substitute for missing host usage, got %q", line)
+			if strings.Contains(line, "▒") {
+				t.Fatalf("cache is not a subset of guest MemUsed and must not be patterned in its bar, got %q", line)
 			}
 			return
 		}
 	}
 	t.Fatalf("running tile lost its fixed memory row:\n%s", strings.Join(lines, "\n"))
+}
+
+func TestMemoryGaugeWithoutEitherReadingIsUnknown(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running", Memory: "34359738368"}
+	in.HasSample = true
+	got := ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "mem") || !strings.Contains(got, "—") || strings.Contains(got, "0 B/32 GiB") {
+		t.Fatalf("missing host and guest readings must stay unknown, got:\n%s", got)
+	}
 }
 
 func TestMemoryGaugeClampsHostNumberToConfiguredTotal(t *testing.T) {

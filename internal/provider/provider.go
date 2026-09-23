@@ -235,7 +235,9 @@ type MemoryReclaimer interface {
 }
 
 // VMHostMemoryProvider is the optional source of one VM's host or hypervisor
-// resident-memory reading. It is deliberately separate from guest utilization:
+// resident-memory reading. Proxmox reports its VM status metric; Lima samples
+// the host process backing a VM (an RSS approximation). It is deliberately
+// separate from guest utilization:
 // a guest's MemAvailable arithmetic does not say how much physical host memory
 // its VM currently occupies. A zero reading means unknown.
 type VMHostMemoryProvider interface {

@@ -7,9 +7,10 @@ package ui
 // It reports USE, not ALLOCATION. The allocations (vm.VM's CPUs and Memory) are
 // what each VM was handed at create time: they never move, they cannot answer
 // "what is my machine doing", and summed across an idle fleet they read as a
-// crisis that is not happening. CPU comes from the guest heartbeat; memory comes
-// from each provider's host-side VM reading. Both are joined in the heartbeat
-// registry, which is also what tiles read, so the two surfaces cannot disagree.
+// crisis that is not happening. CPU comes from the guest heartbeat; memory
+// prefers each provider's host-side VM reading. If a host reading is unavailable,
+// the guest reading remains visible with an explicit guest label. Both are
+// joined in the heartbeat registry, which is also what tiles read.
 
 import (
 	"fmt"
@@ -133,9 +134,9 @@ func (m model) fleetCountsText() string {
 // used to sum vm.VM's CPUs and Memory, which are what each VM was GIVEN — a
 // number that never moves, cannot answer "what is my machine doing", and reads
 // alarmingly (three idle VMs "using" 24GiB of a 15GiB host) precisely when
-// nothing is happening. CPU comes from the guest heartbeat and memory from the
-// provider's host-side VM accounting; heartbeat.go stores both for the tiles and
-// header to consume together.
+// nothing is happening. CPU comes from the guest heartbeat and memory prefers
+// the provider's host-side VM accounting. Guest memory remains a labeled
+// fallback when the host probe is unavailable.
 //
 // The heartbeat only runs for running VMs, and only while the board is the
 // visible screen (the idle gate). So a reading can be genuinely absent, and when
@@ -158,9 +159,9 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 	// into host vCPUs busy — the only form in which they can be added together, or
 	// compared against the host's core count.
 	var cpusUsed float64
-	var memUsed int64
+	var hostMemUsed, guestMemUsed int64
 	active := 0
-	haveCPU, haveMem := false, false
+	haveCPU, haveHostMem, haveGuestMem := false, false, false
 	for _, v := range roster {
 		if v.scope != am.scope {
 			continue
@@ -175,8 +176,11 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 			haveCPU = true
 		}
 		if s.HasHostMem {
-			memUsed += int64(s.HostMemUsed)
-			haveMem = true
+			hostMemUsed += int64(s.HostMemUsed)
+			haveHostMem = true
+		} else if s.HasMem() {
+			guestMemUsed += int64(s.MemUsed)
+			haveGuestMem = true
 		}
 	}
 	// An EMPTY board is not an absent reading, it is a known zero: no sandboxes are
@@ -185,7 +189,7 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 	// free disk is precisely what a user wants to see in the moment BEFORE they
 	// create their first VM.
 	if active == 0 {
-		haveCPU, haveMem = true, true
+		haveCPU, haveHostMem = true, true
 	}
 
 	// NO PROBING HERE. These are sampled in New (once, at startup) and re-sampled by
@@ -222,8 +226,13 @@ func (m model) hostCapacityTextFor(am fleetMember) string {
 	}
 	if hostMem > 0 {
 		var clause string
-		if haveMem {
-			clause = fmt.Sprintf("mem %s/%s", humanizeInt(memUsed), humanizeInt(hostMem))
+		if haveHostMem {
+			clause = fmt.Sprintf("mem %s/%s", humanizeInt(hostMemUsed), humanizeInt(hostMem))
+		} else if haveGuestMem {
+			// A provider without host-side VM accounting can still report
+			// live guest usage. Label the fallback so it is never mistaken
+			// for physical RAM occupied on the host.
+			clause = fmt.Sprintf("guest mem %s/%s", humanizeInt(guestMemUsed), humanizeInt(hostMem))
 		} else {
 			clause = fmt.Sprintf("mem —/%s", humanizeInt(hostMem))
 		}

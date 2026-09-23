@@ -33,6 +33,13 @@ type Runner interface {
 	StreamOut(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error
 }
 
+// HostCommandRunner is the optional host-side counterpart to Runner.Output.
+// It runs an argv on the machine where limactl runs, without a guest shell.
+// The local and SSH hosts implement it for host process memory sampling.
+type HostCommandRunner interface {
+	HostOutput(ctx context.Context, argv ...string) ([]byte, error)
+}
+
 // waitDelay bounds how long a cancelled Stream/StreamOut may wait on its child's
 // I/O pipes before it gives up on them, closes them, and returns.
 //
@@ -104,6 +111,22 @@ func (r *execRunner) Output(ctx context.Context, args ...string) ([]byte, error)
 		}
 	}
 	return stdout.Bytes(), err
+}
+
+func (r *execRunner) HostOutput(ctx context.Context, argv ...string) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("lima: empty host command")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
+	}
+	return stdout.Bytes(), nil
 }
 
 func (r *execRunner) Stream(ctx context.Context, stdin io.Reader, out io.Writer, args ...string) error {
