@@ -18,6 +18,7 @@ codex() {
     y|Y)
       command codex login --device-auth || return $?
       command codex app-server daemon bootstrap --remote-control || return $?
+      command systemctl --user enable sandbar-codex-app-server.service || return $?
       command codex remote-control pair || return $?
 
       mkdir -p -- "$sandbar_codex_state_dir" || return $?

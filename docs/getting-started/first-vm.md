@@ -89,7 +89,8 @@ If you answer yes, the wrapper guides you through Codex's device-code login,
 sets up its persistent app server with remote control enabled, and runs the
 initial `codex remote-control pair` flow so you can pair another device with
 the ChatGPT app. You do not need to run those setup commands yourself. When
-setup finishes, the regular Codex interface opens.
+setup finishes, the regular Codex interface opens. The app server starts again
+when the VM boots, even before you open a shell.
 
 After setup, run `codex agents` to connect to the persistent app server
 locally. To connect another device later, run:

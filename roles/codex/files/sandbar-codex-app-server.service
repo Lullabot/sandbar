@@ -1,0 +1,12 @@
+[Unit]
+Description=Start the Codex app-server daemon after boot
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/codex app-server daemon start
+
+[Install]
+WantedBy=default.target

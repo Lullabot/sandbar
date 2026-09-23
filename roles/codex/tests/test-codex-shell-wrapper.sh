@@ -25,6 +25,22 @@ fi
 EOF
 chmod +x "$fake_bin/codex"
 
+cat >"$fake_bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+{
+  printf 'systemctl'
+  for arg in "$@"; do
+    printf ' %q' "$arg"
+  done
+  printf '\n'
+} >>"$CODEX_TEST_LOG"
+
+if [[ -n ${SYSTEMCTL_TEST_FAIL_ON:-} && $SYSTEMCTL_TEST_FAIL_ON == "$*" ]]; then
+  exit 43
+fi
+EOF
+chmod +x "$fake_bin/systemctl"
+
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
   exit 1
@@ -90,7 +106,7 @@ marker_path() {
 # the ordinary TUI.
 new_case affirmative
 run_interactive y
-assert_file_equals $'call login --device-auth\ncall app-server daemon bootstrap --remote-control\ncall remote-control pair\ncall' "$CASE_LOG"
+assert_file_equals $'call login --device-auth\ncall app-server daemon bootstrap --remote-control\nsystemctl --user enable sandbar-codex-app-server.service\ncall remote-control pair\ncall' "$CASE_LOG"
 [[ -f $(marker_path) ]] || fail "affirmative onboarding did not create its marker"
 assert_contains "codex agents" "$CASE_OUTPUT"
 assert_contains "codex remote-control pair" "$CASE_OUTPUT"
@@ -122,7 +138,20 @@ unset CODEX_TEST_FAIL_ON
 : >"$CASE_OUTPUT"
 run_interactive y
 assert_contains "Enable Codex remote control" "$CASE_OUTPUT"
-assert_file_equals $'call login --device-auth\ncall app-server daemon bootstrap --remote-control\ncall login --device-auth\ncall app-server daemon bootstrap --remote-control\ncall remote-control pair\ncall' "$CASE_LOG"
+assert_file_equals $'call login --device-auth\ncall app-server daemon bootstrap --remote-control\ncall login --device-auth\ncall app-server daemon bootstrap --remote-control\nsystemctl --user enable sandbar-codex-app-server.service\ncall remote-control pair\ncall' "$CASE_LOG"
+
+# If boot registration fails, onboarding must not claim completion or open the
+# TUI; the user can retry when the user systemd manager is available.
+new_case boot_registration_failure
+export SYSTEMCTL_TEST_FAIL_ON='--user enable sandbar-codex-app-server.service'
+set +e
+run_interactive y
+status=$?
+set -e
+[[ $status -eq 43 ]] || fail "boot registration failure returned $status, want 43"
+assert_file_equals $'call login --device-auth\ncall app-server daemon bootstrap --remote-control\nsystemctl --user enable sandbar-codex-app-server.service' "$CASE_LOG"
+[[ ! -e $(marker_path) ]] || fail "boot registration failure created its marker"
+unset SYSTEMCTL_TEST_FAIL_ON
 
 # Invocations with arguments bypass onboarding even on a terminal.
 new_case interactive_args
