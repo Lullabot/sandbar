@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1448,12 +1448,12 @@ own machine, on a remote host, or on Proxmox.</p>
     C --&gt; D[Stop the base image]
     B -- yes --&gt; D
     D --&gt; E[Clone the base → grow disk]
-    E --&gt; F[Finalize: hostname, git identity, apt upgrade, optional repo clone]
-    F --&gt; G[Restart → ready]</code></pre>
+    E --&gt; F[Finalize: selected agents, hostname, git identity, optional repo clone]
+    F --&gt; G[Ready: restart only if required]</code></pre>
 <h2 id="the-base-image">The base image</h2>
 <p>The first time you create a VM, <code>sand</code> runs a heavy install into a stopped
-VM named <code>sandbar-base</code>. This installs the dev tools, Claude Code, and
-everything else that every VM needs. See <a href="../available-tools/">Available
+VM named <code>sandbar-base</code>. This installs development tools and shared
+runtimes. Coding agents are excluded from the base. See <a href="../available-tools/">Available
 Tools</a> for the full toolchain.</p>
 <p>Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — <code>sand</code> rebuilds it automatically if the
@@ -1469,10 +1469,16 @@ disk size you asked for. Copying a stopped VM is far cheaper than
 reinstalling the whole stack, which is what makes each new VM fast.</p>
 <h2 id="finalize">Finalize</h2>
 <p>A clone isn't ready to use yet — it's still an anonymous copy of the base
-image. A light finalize pass sets the VM's hostname, writes your git
-identity into it, runs <code>apt upgrade</code>, and optionally clones a project
-repository into it. The VM restarts once at the end of finalize and is then
-ready to use.</p>
+image. Finalize installs current releases of the selected agents, sets the
+VM's hostname, writes your git identity, and optionally clones a project
+repository. OS upgrades happen during base maintenance; the VM restarts
+only when the guest reports a reboot is required.</p>
+<p>Reset repeats the per-VM installs using that VM's recorded selections.
+The optional <a href="../../using-sand/tui/#resetting-a-vm">agent preservation checkbox</a>
+keeps settings and files across reset; executable releases are installed fresh.
+When upgrading from an older sand, base maintenance removes legacy agent
+installs before cloning. Changing agent choices alone does not invalidate
+the base's dependency stamp.</p>
 <h2 id="why-the-split">Why the split</h2>
 <p>Doing the heavy install once and sharing it across every VM keeps VM
 creation fast without compromising isolation: identity is applied per-VM at

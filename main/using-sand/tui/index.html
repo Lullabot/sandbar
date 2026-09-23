@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1734,7 +1734,7 @@ require the VM to be running.</p>
 <tr>
 <td><code>v</code></td>
 <td>Paste Image</td>
-<td>Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside Claude Code in the guest.</td>
+<td>Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent.</td>
 </tr>
 <tr>
 <td><code>d</code></td>
@@ -1814,6 +1814,10 @@ selector when more than one profile is enabled, so you pick which profile a
 new VM is created on without leaving the TUI. See
 <a href="../connection-profiles/">Connection Profiles</a> for the full model.</p>
 <h2 id="resetting-a-vm">Resetting a VM</h2>
+<p>The create form has independent <strong>Install Claude Code</strong>, <strong>Install OpenAI Codex</strong>,
+<strong>Install OpenCode</strong>, and <strong>Install Pi</strong> checkboxes. New VMs start with your last
+submitted choices (initially all off); reset starts with the choices
+recorded for that VM and does not change global preferences.</p>
 <p>Press <code>R</code> on a managed VM's tile to open the <em>Reset VM</em> form, filled with
 its recorded settings. Change resources or settings as needed, then press
 <code>ctrl+s</code> to delete and rebuild the VM. The next reset uses the new settings.</p>
@@ -1833,8 +1837,11 @@ enter to toggle the focused option; its help text describes what it copies.</p>
   excludes <code>~/.ssh/authorized_keys</code>, so the rebuilt VM keeps its new access
   key. Directories named <code>.cache</code> are also left behind and rebuilt in the new
   VM.</li>
-<li><strong>Preserve Claude Code settings</strong> keeps <code>~/.claude</code> and <code>~/.claude.json</code>,
-  including your login and history.</li>
+<li><strong>Preserve agent settings and files</strong> keeps settings, credentials, sessions,
+  and history for Claude Code, Codex, OpenCode, and Pi together, including
+  state from manual installs. Selected agents are installed fresh; restored
+  configuration files are retained. See the
+  <a href="../../reference/files-and-state/#preserved-agent-state">preserved paths</a>.</li>
 <li><strong>Preserve ~/&lt;host&gt;/&lt;org&gt;</strong> keeps the organisation directory for
   the VM's cloned project, including the checkout, uncommitted work, and the
   <code>.env</code> beside it. If the checkout is present, the reset skips cloning it

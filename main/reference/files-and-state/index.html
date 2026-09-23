@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1110,6 +1110,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#coding-agent-preferences-and-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coding-agent preferences and migration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preserved-agent-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preserved agent state
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#guest-paths" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1398,6 +1420,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#coding-agent-preferences-and-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coding-agent preferences and migration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preserved-agent-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preserved agent state
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#guest-paths" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1513,6 +1557,55 @@ ends up empty. <strong>Your VMs are not lost</strong>; they are simply indexed u
 new path from then on. This runs at most once: if <code>sandbar/managed-vms.json</code>
 already exists, the migration is skipped.</p>
 <p>Source: <code>internal/registry/registry.go:68</code>-<code>internal/registry/registry.go:90</code> (<code>migrateLegacyIndex</code>), called from <code>Load</code> at <code>internal/registry/registry.go:95</code>.</p>
+<h2 id="coding-agent-preferences-and-migration">Coding-agent preferences and migration</h2>
+<p><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/agent-preferences.json</code> stores the
+last submitted agent selections in a version 1, secret-free JSON file.
+It is global across connection profiles. Explicit saved choices, including
+all four agents off, override the initial all-off selection. Deleting it
+forgets those preferences without changing existing VMs.</p>
+<p>If that file is absent, an older version 2 base stamp can seed Claude Code
+and Codex preferences once. Modern version 3 base stamps record shared
+dependencies rather than agent selections. Existing VM records keep their
+Claude Code and Codex boolean values, including explicit <code>false</code>; absent
+OpenCode and Pi selections mean off. Reset uses the VM's recorded selection,
+not whichever agents were chosen most recently for a different VM.</p>
+<h2 id="preserved-agent-state">Preserved agent state</h2>
+<p>The reset form's single <strong>Preserve agent settings and files</strong> checkbox
+preserves these paths relative to the guest user's home:</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Paths</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>~/.claude</code>, <code>~/.claude.json</code></td>
+</tr>
+<tr>
+<td>Codex</td>
+<td><code>~/.codex</code></td>
+</tr>
+<tr>
+<td>OpenCode</td>
+<td><code>~/.config/opencode</code>, <code>~/.local/share/opencode</code>, <code>~/.local/state/opencode</code></td>
+</tr>
+<tr>
+<td>Pi</td>
+<td><code>~/.pi/agent</code></td>
+</tr>
+</tbody>
+</table>
+<p>Missing paths are skipped. Custom state locations outside this list are not
+covered. Directories named <code>.cache</code> are excluded consistently with every other
+reset preserve mode. These paths can contain credentials, session history, and
+extensions; preservation includes all four agents regardless of
+the VM's recorded selections, including manual installs. The data passes through a private
+host temporary directory during reset. See <a href="../security-model/">Security Model</a>
+before preserving state from a VM you do not trust.</p>
+<p>Source: <code>internal/provision/staging.go</code> (<code>AgentStatePaths</code>).</p>
 <h2 id="guest-paths">Guest paths</h2>
 <table>
 <thead>

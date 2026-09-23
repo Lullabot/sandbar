@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1919,7 +1919,8 @@ reaching a web server listening inside the guest, see
 <h2 id="pasting-images">Pasting Images</h2>
 <p><code>v</code> (paste image) on a running VM's tile, and <code>sand paste-image NAME</code> from
 the command line, both stage the host clipboard's image on the guest so you
-can press Ctrl-V inside Claude Code in the guest to attach it to your message.</p>
+can press Ctrl-V inside Claude Code, Codex, OpenCode, or Pi to attach it to
+your message.</p>
 <h3 id="the-workflow">The workflow</h3>
 <ol>
 <li>Copy an image on your host (screenshot, photo, graphic, etc.).</li>
@@ -1927,8 +1928,8 @@ can press Ctrl-V inside Claude Code in the guest to attach it to your message.</
    <code>sand paste-image NAME</code> (where <code>NAME</code> is the VM's name).</li>
 <li>You'll see a status message: <strong>"staged image on NAME — press Ctrl-V in the
    guest"</strong>.</li>
-<li>In Claude Code inside the guest, press Ctrl-V to attach the image to your
-   message.</li>
+<li>In your coding agent inside the guest, press Ctrl-V to attach the image to
+   your message.</li>
 </ol>
 <p>The image is held in a single-slot clipboard on the guest, persisting until
 you run <code>sand paste-image</code> again (overwriting it with a new image).</p>
@@ -1937,8 +1938,10 @@ you run <code>sand paste-image</code> again (overwriting it with a new image).</
 guest. sand reads the clipboard <strong>image-only</strong> on your workstation, verifying
 an image type is advertised before fetching any bytes. If you have text on
 your clipboard instead, the command reports "no image on clipboard" and
-nothing is staged. Inside the guest, the shims that serve the image to
-Claude Code have no text-serving path at all — image-only by construction.</p>
+nothing is staged. Inside the guest, read-only command shims serve the image
+to agents that probe <code>xclip</code>/<code>wl-paste</code>; a private headless X display serves
+agents such as Codex that use the X11 API directly. Neither path exposes
+clipboard text.</p>
 <p>The image is read on the machine running <code>sand</code> (your workstation), never on
 the machine the VM runs on. Only the image bytes themselves are sent across
 the network.</p>

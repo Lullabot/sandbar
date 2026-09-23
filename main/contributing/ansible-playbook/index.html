@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1283,10 +1283,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-six-roles" class="md-nav__link">
+  <a href="#roles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The six roles
+        Roles
       
     </span>
   </a>
@@ -1430,10 +1430,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-six-roles" class="md-nav__link">
+  <a href="#roles" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The six roles
+        Roles
       
     </span>
   </a>
@@ -1552,13 +1552,13 @@ values:</p>
 <tbody>
 <tr>
 <td><code>base</code></td>
-<td>Heavy setup: <code>base</code>, (conditionally) <code>samba</code>, <code>dev-tools</code>, <code>claude-code</code></td>
-<td>Building the shared base image once, before any clone exists</td>
+<td>Shared setup: <code>base</code>, <code>user</code>, <code>agent-clipboard</code>, <code>agent-cleanup</code>, (conditionally) <code>samba</code>, <code>dev-tools</code></td>
+<td>Building or maintaining the shared base before cloning; clipboard support is common to every agent and cleanup removes legacy agent installs</td>
 </tr>
 <tr>
 <td><code>finalize</code></td>
-<td>Light, per-VM identity: <code>base</code>, <code>user</code>, <code>project</code></td>
-<td>Against each clone of the base image</td>
+<td>Per-VM setup: <code>base</code>, <code>user</code>, selected agent roles, <code>project</code></td>
+<td>Against each clone; agents install current releases here</td>
 </tr>
 <tr>
 <td><code>full</code></td>
@@ -1568,11 +1568,12 @@ values:</p>
 </tbody>
 </table>
 <p>This split is what lets <code>sand</code> build one expensive base image and clone it
-cheaply for every subsequent VM, running only the light identity-specific
-work (hostname, git identity, optional project clone) against each clone.</p>
-<h2 id="the-six-roles">The six roles</h2>
-<p><code>roles/</code> has six roles: <code>base</code>, <code>user</code>, <code>samba</code>, <code>dev-tools</code>, <code>claude-code</code>,
-and <code>project</code>. <code>site.yml</code> runs them in that order, gated by
+cheaply for every subsequent VM, installing current agent releases alongside
+identity-specific work against each clone.</p>
+<h2 id="roles">Roles</h2>
+<p><code>roles/</code> contains <code>base</code>, <code>user</code>, <code>agent-clipboard</code>, <code>agent-cleanup</code>, <code>samba</code>, <code>dev-tools</code>,
+<code>claude-code</code>, <code>codex</code>, <code>opencode</code>, <code>pi</code>, and <code>project</code>.
+<code>site.yml</code> runs them in that order, gated by
 <code>provision_phase</code> as above. <code>samba</code> is worth calling out specifically:
 <code>internal/provision/vars.go</code> sets <code>samba_enabled: false</code> on every <code>sand</code>
 run (files move with <code>limactl copy</code> or <code>scp</code> instead of a Samba share),

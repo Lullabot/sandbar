@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1395,12 +1395,13 @@
 
 
 <h1 id="about-sand">About sand</h1>
-<p><code>sand</code> is a small Go CLI and terminal UI that manages disposable <a href="https://www.anthropic.com/claude-code">Claude
-Code</a> development VMs. Run it with no
+<p><code>sand</code> is a small Go CLI and terminal UI that manages disposable development
+VMs for coding agents. Run it with no
 arguments for an interactive board of your VMs, or drive it headlessly
 (<code>sand create</code>, <code>sand shell</code>) from scripts and CI.</p>
 <p>Each VM is a fresh, isolated Debian environment with a specific, opinionated
-stack baked in: Claude Code, common dev tools, and your git identity. You
+stack: common dev tools, your git identity, and your choice of Claude Code,
+Codex, OpenCode, and Pi, installed fresh for each VM. You
 get a disposable place to point an agent at a repository without touching
 your host machine, and you throw the VM away — or recreate it — when you're
 done.</p>
@@ -1439,7 +1440,7 @@ side by side. See <a href="../using-sand/connection-profiles/">Where VMs Run</a>
 <h2 id="what-it-is-not">What it is not</h2>
 <p><code>sand</code> is not a general-purpose VM manager. It doesn't manage arbitrary
 guest OSes, arbitrary provisioning recipes, or long-lived infrastructure. It
-manages one kind of thing — a Claude Code development VM — well, and leaves
+manages one kind of thing — a development VM for coding agents — well, and leaves
 everything else to the tools underneath it.</p>
 <p><code>sand</code> is the Go successor to what used to be a shell script plus a
 standalone Ansible playbook.</p>

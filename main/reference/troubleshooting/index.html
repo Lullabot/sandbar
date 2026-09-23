@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Disposable Claude Code development VMs, on your own machine or on a server.">
+        <meta name="description" content="Disposable development VMs for coding agents, on your own machine or on a server.">
       
       
       
@@ -1110,10 +1110,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#proxmox-base-provisioning-hangs-at-install-claude-code" class="md-nav__link">
+  <a href="#proxmox-provisioning-hangs-at-install-claude-code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxmox: base provisioning hangs at "Install Claude Code"
+        Proxmox: provisioning hangs at "Install Claude Code"
       
     </span>
   </a>
@@ -1419,10 +1419,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#proxmox-base-provisioning-hangs-at-install-claude-code" class="md-nav__link">
+  <a href="#proxmox-provisioning-hangs-at-install-claude-code" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Proxmox: base provisioning hangs at "Install Claude Code"
+        Proxmox: provisioning hangs at "Install Claude Code"
       
     </span>
   </a>
@@ -1529,8 +1529,8 @@
 <h1 id="troubleshooting">Troubleshooting</h1>
 <p>Common problems with <code>sand</code> and how to resolve them.</p>
 <h2 id="a-stale-base-image">A stale base image</h2>
-<p><code>sand</code> builds the heavy install (packages, Docker, Node,
-Claude Code, …) once into a stopped base image (<code>sandbar-base</code> by default),
+<p><code>sand</code> builds shared dependencies (packages, Docker, Node,
+and other development tools) into a stopped base image (<code>sandbar-base</code> by default),
 then clones every VM from it. Each base is stamped with the playbook version
 it was built from, and <code>sand</code> rebuilds it automatically the next time you
 create a VM if the current playbook has moved on — so most staleness is
@@ -1543,12 +1543,14 @@ pass <code>--rebuild</code> to force the rebuild-then-create in one step:</p>
 </code></pre></div>
 <p><code>--rebuild</code> deletes and recreates the base image first, then makes the VM.
 It always rebuilds, regardless of the staleness check.</p>
-<h2 id="proxmox-base-provisioning-hangs-at-install-claude-code">Proxmox: base provisioning hangs at "Install Claude Code"</h2>
-<p><strong>Symptom:</strong> on the Proxmox backend, building the base image runs the playbook
+<h2 id="proxmox-provisioning-hangs-at-install-claude-code">Proxmox: provisioning hangs at "Install Claude Code"</h2>
+<p><strong>Symptom:</strong> on the Proxmox backend, provisioning a VM runs the playbook
 fine until the <code>claude-code : Install Claude Code using the official installer</code>
 task, where it hangs indefinitely with no output. On the guest, the
 <code>claude … install</code> process sits pegged at ~100% CPU (state <code>R</code>) with no network
 sockets and making almost no syscalls.</p>
+<p>Current sand installs Claude Code during per-VM finalize; older versions
+ran this task while building the base.</p>
 <p><strong>Why:</strong> it is not <code>sand</code>, apt, or the network — it is a Claude Code bug
 (<a href="https://github.com/anthropics/claude-code/issues/77208">anthropics/claude-code#77208</a>).
 Proxmox's default CPU model, <code>kvm64</code>, masks modern x86-64 instruction
