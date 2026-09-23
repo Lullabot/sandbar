@@ -89,7 +89,7 @@ func resolveBasePackages(t *testing.T, extraVars map[string]string) []string {
 func TestBaseToolsetPackages_DefaultSelectionMatchesToday(t *testing.T) {
 	pkgs := resolveBasePackages(t, nil)
 
-	for _, want := range []string{"ddev", "golang", "default-jdk-headless"} {
+	for _, want := range []string{"ddev", "golang", "default-jdk-headless", "xclip", "xvfb"} {
 		if !slices.Contains(pkgs, want) {
 			t.Errorf("resolved package list missing %q with the default (all-on) tool-set — backwards compatibility broken: %v", want, pkgs)
 		}

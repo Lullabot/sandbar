@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/clipboard"
@@ -111,8 +112,11 @@ func TestPasteImageStagesOverStdinToAbsolutePath(t *testing.T) {
 	}
 	wantArgv := []string{
 		"shell", "web", "sh", "-c",
-		`mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"`,
+		`mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"; if [ -x /usr/bin/xclip ]; then DISPLAY=:99 nohup /usr/bin/xclip -selection clipboard -t image/png -i < "$2" >/dev/null 2>&1 & fi`,
 		"sand", "/home/u.guest/.sand/clip", wantPath,
+	}
+	if strings.Contains(r.calls[0][4], "text/") {
+		t.Fatalf("guest write path must not expose clipboard text: %q", r.calls[0][4])
 	}
 	if !reflect.DeepEqual(r.calls[0], wantArgv) {
 		t.Fatalf("argv = %v, want %v", r.calls[0], wantArgv)
@@ -126,6 +130,15 @@ func TestPasteImageStagesOverStdinToAbsolutePath(t *testing.T) {
 		if a == string(png) {
 			t.Fatalf("image bytes leaked into argv: %v", r.calls[0])
 		}
+	}
+}
+
+func TestWriteScriptDetachesX11SelectionOwner(t *testing.T) {
+	if !strings.Contains(writeScript, "nohup /usr/bin/xclip") {
+		t.Fatal("writeScript must detach xclip so the guest transport can return")
+	}
+	if !strings.Contains(writeScript, ">/dev/null 2>&1 &") {
+		t.Fatal("writeScript must close xclip output descriptors before backgrounding it")
 	}
 }
 

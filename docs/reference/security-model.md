@@ -64,8 +64,8 @@ tenant or a determined attacker.
   [Logging into Codex](../getting-started/first-vm.md#logging-into-codex).
 - **OpenCode and Pi also require credentials configured inside the VM.**
   Selecting them installs the CLI, without importing host authentication.
-  The Claude-specific clipboard shims and session hooks do not imply the
-  same integration for other agents.
+  Claude's session hooks remain Claude-specific; the image-only clipboard
+  integration is shared by all four agents.
 - **Credentials never touch argv.** A `--clone-token` and every secret value
   are streamed into the guest over stdin into tmpfs and removed via an exit
   trap — never passed as a command-line argument — so they cannot appear in

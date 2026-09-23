@@ -724,15 +724,15 @@ with embedded newlines survives intact (see `internal/lima/sshhost.go`'s `ReadIn
 ## The `sand paste-image` feature: IMAGE-ONLY invariant (read before extending clipboard handling)
 
 The `sand paste-image` command and TUI verb (`v`) stage a host clipboard
-image on a guest's single-slot file (`~/.sand/clip/latest.png`) so Claude
-Code's native Ctrl-V paste works. **This feature is IMAGE-ONLY by contract
+image on a guest's single-slot file (`~/.sand/clip/latest.png`) so supported
+agents' native Ctrl-V paste works. **This feature is IMAGE-ONLY by contract
 and by construction.** Do not weaken or remove this guarantee:
 
 - **Host-side read (`internal/clipboard`)** gates on an advertised `image/*`
   type before fetching any bytes. A clipboard with no image type yields a
   sentinel and **fetches zero bytes**. Tests assert that a text-only
   clipboard produces the sentinel, never image bytes.
-- **Guest-side shims** (`roles/claude-code` `sand-xclip` and `sand-wl-paste`)
+- **Guest-side shims** (`roles/agent-clipboard` `sand-xclip` and `sand-wl-paste`)
   have no write path, no `text/*` branch, and no fallback for non-image
   targets — they refuse anything that is not an image. This is **independent**
   of the host read; the shim cannot be tricked into serving text even if the
@@ -742,6 +742,11 @@ and by construction.** Do not weaken or remove this guarantee:
   clipboard bridge unacceptable is the exact surface this feature closes.
   Text is never sent. If a user wants to paste text into a guest, they attach
   to the shell with `S` and use `cat` or the shell itself.
+
+Codex reads the X11 selection through arboard instead of invoking a command.
+`roles/agent-clipboard` therefore runs a private, TCP-disabled Xvfb display;
+the guest write path publishes only the already-gated PNG to that selection
+through `/usr/bin/xclip`. `/usr/local/bin/xclip` remains the read-only shim.
 
 The clipboard read is one-shot and runs on the machine executing `sand`, not
 the remote host (for remote-Lima deployments). Only the image bytes cross
@@ -756,7 +761,7 @@ above. The password-leak surface is a host clipboard the guest can read at
 will; a copy the user performs inside the guest is neither.
 
 For the security rationale, see the plan's Risk Considerations and the spec
-comment at `roles/claude-code/tasks/main.yml`.
+comment at `roles/agent-clipboard/tasks/main.yml`.
 
 ## The base image / clone / finalize provisioner (read before touching `internal/provision`)
 
@@ -774,7 +779,8 @@ comment at `roles/claude-code/tasks/main.yml`.
   agents even when deselected. This includes credentials and sessions and
   crosses the host staging boundary, so keep the warning accurate. Restore
   settings without overwriting them with templates; freshly install selected
-  executables. Claude-only clipboard/session integrations remain Claude-only.
+  executables. Claude session hooks remain Claude-only; image clipboard support
+  is shared by all four agents.
 
 - **Clones inherit the base image's `lima.yaml` — including its mounts.**
   `limactl clone` copies the base's entire instance directory. The only

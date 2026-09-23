@@ -1,0 +1,40 @@
+#!/bin/sh
+# sand image-only clipboard shim (xclip-compatible).
+#
+# Serves the single-slot PNG at ~/.sand/clip/latest.png to agents that shell
+# out to xclip. The real X11 writer is /usr/bin/xclip; this read-only shim in
+# /usr/local/bin deliberately shadows it on PATH. Image-only by construction:
+# no -i/write path, no text/plain branch.
+set -eu
+
+slot="${HOME}/.sand/clip/latest.png"
+want=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -t)
+      want="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+[ -f "$slot" ] || exit 0
+
+case "$want" in
+  TARGETS)
+    printf 'image/png\n'
+    ;;
+  image/*)
+    cat "$slot"
+    ;;
+  *)
+    :
+    ;;
+esac
+
+exit 0
+

@@ -600,7 +600,7 @@ which one you mean like this:
 ## `sand paste-image NAME`
 
 Stage the host clipboard's image on a running VM's guest clipboard, ready for
-Ctrl-V inside Claude Code in the guest.
+Ctrl-V inside Claude Code, Codex, OpenCode, or Pi in the guest.
 
 ```
 Usage: sand paste-image NAME [--profile <name>]
@@ -626,8 +626,9 @@ and exits with a non-zero status.
 When you run `sand paste-image`, sand reads the clipboard **image only** on
 the machine running `sand` (your workstation), verifying an image type is
 advertised before fetching any bytes. The image is then written into the guest
-at a single-slot path in one step, where a pair of lightweight shims named
-`xclip` and `wl-paste` serve it to Claude Code's native paste probe.
+at a single-slot path in one step. Read-only `xclip` and `wl-paste` shims serve
+agents that invoke clipboard commands; a private headless X display serves
+agents such as Codex that use the X11 clipboard API directly.
 
 **Security:** The feature is structured to prevent clipboard **text** from
 leaking into the guest. It never reads clipboard text; it gates the clipboard

@@ -58,9 +58,17 @@ const (
 
 // writeScript is run in the guest as `sh -c writeScript sand <dir> <file>`. It
 // creates the single-slot directory, writes the image from stdin, and locks
-// both down — one round trip, positional args so neither path ever needs
-// shell-quoting. Mirrors internal/lima/sshhost.go's WriteFile.
-const writeScript = `mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"`
+// both down. When the generic clipboard role is present it also makes the PNG
+// the selection on sand's private Xvfb display, which is how Codex's direct
+// arboard integration reads it. /usr/bin/xclip is named explicitly because
+// /usr/local/bin/xclip is the image-only read shim used by shell-probing agents.
+// xclip must remain alive because an X11 selection is owned by a process, so it
+// is deliberately detached with every descriptor closed; otherwise the guest
+// shell (and its host-side SSH transport) waits forever for the selection owner.
+// Failure to refresh X11 is non-fatal: the file-backed shims still work, and an
+// older VM can pick up the display support on its next reset. This remains one
+// round trip, with positional args so neither path needs shell-quoting.
+const writeScript = `mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2"; if [ -x /usr/bin/xclip ]; then DISPLAY=:99 nohup /usr/bin/xclip -selection clipboard -t image/png -i < "$2" >/dev/null 2>&1 & fi`
 
 // guestWriter is the narrow surface PasteImage needs from a backend: writing
 // bytes into a guest over one round trip, and resolving that guest's absolute

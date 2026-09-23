@@ -192,7 +192,8 @@ reaching a web server listening inside the guest, see
 
 `v` (paste image) on a running VM's tile, and `sand paste-image NAME` from
 the command line, both stage the host clipboard's image on the guest so you
-can press Ctrl-V inside Claude Code in the guest to attach it to your message.
+can press Ctrl-V inside Claude Code, Codex, OpenCode, or Pi to attach it to
+your message.
 
 ### The workflow
 
@@ -201,8 +202,8 @@ can press Ctrl-V inside Claude Code in the guest to attach it to your message.
    `sand paste-image NAME` (where `NAME` is the VM's name).
 3. You'll see a status message: **"staged image on NAME — press Ctrl-V in the
    guest"**.
-4. In Claude Code inside the guest, press Ctrl-V to attach the image to your
-   message.
+4. In your coding agent inside the guest, press Ctrl-V to attach the image to
+   your message.
 
 The image is held in a single-slot clipboard on the guest, persisting until
 you run `sand paste-image` again (overwriting it with a new image).
@@ -213,8 +214,10 @@ The feature is designed to prevent clipboard **text** from leaking into the
 guest. sand reads the clipboard **image-only** on your workstation, verifying
 an image type is advertised before fetching any bytes. If you have text on
 your clipboard instead, the command reports "no image on clipboard" and
-nothing is staged. Inside the guest, the shims that serve the image to
-Claude Code have no text-serving path at all — image-only by construction.
+nothing is staged. Inside the guest, read-only command shims serve the image
+to agents that probe `xclip`/`wl-paste`; a private headless X display serves
+agents such as Codex that use the X11 API directly. Neither path exposes
+clipboard text.
 
 The image is read on the machine running `sand` (your workstation), never on
 the machine the VM runs on. Only the image bytes themselves are sent across
