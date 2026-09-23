@@ -1,5 +1,5 @@
 ---
-- name: Provision Claude Code development VM
+- name: Provision development VM for coding agents
   hosts: all
   become: true
   # provision_phase splits the run so a generic "base" VM can be built once and
@@ -10,11 +10,13 @@
   #              upgrade: that is paid once on the base by its 30-day
   #              self-refresh (base_apt_upgrade), not re-paid by every clone.
   # Tasks gate on this with `when:`; fact-gathering stays ungated so both phases
-  # see it. dev-tools/claude-code are heavy (skip in finalize); project is
-  # per-clone (skip in base).
+  # see it. Runtimes and browser review stay in the base; coding agents and the
+  # project are per-clone.
   roles:
     - base
     - user
+    - role: agent-cleanup
+      when: provision_phase | default('full') == 'base'
     # Samba is for non-Lima / remote-host deployments. The Lima flow sets
     # samba_enabled=false (use a bind mount or `limactl copy` instead).
     - role: samba
@@ -23,21 +25,23 @@
         - provision_phase | default('full') != 'finalize'
     - role: dev-tools
       when: provision_phase | default('full') != 'finalize'
-    # Claude Code is part of the configurable base tool-set (sand create
-    # --with-claude), not a fixture of the image: a user can de-select it and
-    # install their own agent instead.
+    # Agent releases change frequently, so fetch them only after cloning.
     - role: claude-code
       when:
-        - toolset_claude | default(true) | bool
-        - provision_phase | default('full') != 'finalize'
-    # OpenAI Codex is also part of the configurable base tool-set (sand create
-    # --with-codex), but unlike its opt-out siblings above it is opt-in:
-    # toolset_codex defaults to false, so an unconfigured run does not install
-    # it.
+        - toolset_claude | default(false) | bool
+        - provision_phase | default('full') != 'base'
     - role: codex
       when:
         - toolset_codex | default(false) | bool
-        - provision_phase | default('full') != 'finalize'
+        - provision_phase | default('full') != 'base'
+    - role: opencode
+      when:
+        - toolset_opencode | default(false) | bool
+        - provision_phase | default('full') != 'base'
+    - role: pi
+      when:
+        - toolset_pi | default(false) | bool
+        - provision_phase | default('full') != 'base'
     # The browser review UI is NOT a tool-set selection: it is a pinned 17MB
     # npm install with no build step that runs only when `sand land --review`
     # invokes it, so it is simply part of the image. Making it a selection

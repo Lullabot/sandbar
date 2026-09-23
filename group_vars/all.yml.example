@@ -13,5 +13,10 @@ user_git_user_email: "you@example.com"
 # Provisioning phase, used by `sand`'s base-image + clone flow:
 #   full     - run everything in one pass (default; direct/non-clone runs)
 #   base     - heavy, identity-free install baked into a reusable base image
-#   finalize - light per-clone pass (hostname, git identity, apt upgrade, repo)
+#   finalize - per-clone pass (hostname, git identity, latest coding agents, repo)
 # provision_phase: full
+# Per-VM agents (installed during full/finalize, never in the base).
+# toolset_claude: false
+# toolset_codex: false
+# toolset_opencode: false
+# toolset_pi: false

@@ -10,7 +10,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -58,13 +60,19 @@ func (a providerProvisioner) RecreateWithOptions(ctx context.Context, cfg vm.Cre
 // managed-registry bookkeeping shared with the TUI. It never prompts; missing
 // required fields are a validation error.
 func runCreate(args []string) error {
+	return runCreateWithBinding(args, bindingForProfileName)
+}
+
+type createBinder func(*profiles.Store, string) (provider.Provider, registry.Scope, profiles.Profile, error)
+
+func runCreateWithBinding(args []string, bind createBinder) error {
 	cfg := vm.DefaultCreateConfig()
 
 	fs := flag.NewFlagSet("create", flag.ContinueOnError)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
 
-Headlessly provision a Claude Code development VM: no TUI, no prompts. Every
+Headlessly provision a development VM for coding agents: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
 (user.name/user.email), so on a machine with git configured `+"`sand create`"+`
 needs no flags. If neither the flags nor the host git config supply an
@@ -110,15 +118,15 @@ Flags:
 	// All four default true, so these are opt-OUT flags: an unconfigured `sand
 	// create` installs everything today's base does. They configure the SHARED
 	// base image, not this individual clone.
-	fs.BoolVar(&cfg.WithClaude, "with-claude", cfg.WithClaude, "Install Claude Code in the base image")
 	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
 	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
 	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
-	// --with-codex is the one opt-IN flag (cfg.WithCodex defaults false): an
-	// unconfigured `sand create` must not start installing a tool that heavy
-	// without being asked.
-	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex in the base image")
-	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve the Claude login or the project across the rebuild")
+	// Agents belong to individual VMs; omitted flags adopt the remembered selection.
+	fs.BoolVar(&cfg.WithClaude, "with-claude", cfg.WithClaude, "Install Claude Code when creating this VM (default: last submitted selection)")
+	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex when creating this VM (default: last submitted selection)")
+	fs.BoolVar(&cfg.WithOpenCode, "with-opencode", cfg.WithOpenCode, "Install OpenCode when creating this VM (default: last submitted selection)")
+	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
+	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
@@ -188,7 +196,7 @@ Flags:
 	// (default: the store's last-used profile, else "local"); only that
 	// profile is built and preflighted — see bindingForProfileName.
 	store := loadStore()
-	p, scope, profile, err := bindingForProfileName(store, *profileFlag)
+	p, scope, profile, err := bind(store, *profileFlag)
 	if err != nil {
 		return fmt.Errorf("sand create: %w", err)
 	}
@@ -331,6 +339,45 @@ Flags:
 	// call falls back to the registry-only behavior.
 	provenancer, _ := p.(provider.Provenancer)
 
+	// A VM's durable marker takes precedence over the host cache. Preserve its
+	// recorded agent choices on recreate, with explicit flags still winning.
+	previous, recorded := reg.ConfigInScope(cfg.Name, scope)
+	if *recreate && provenancer != nil {
+		marker, found, err := provenancer.ProvenanceOf(ctx, cfg.Name)
+		if err != nil {
+			return fmt.Errorf("read VM configuration: %w", err)
+		}
+		if found {
+			previous, recorded = marker.Config, true
+			if marker.Base != "" {
+				previous.BaseName = marker.Base
+			}
+		}
+	}
+	migrationBase := cfg.BaseName
+	if *recreate && recorded && previous.BaseName != "" {
+		migrationBase = previous.BaseName
+	}
+	selection, err := agentprefs.LoadOrMigrate(p.HostFiles(), migrationBase)
+	if err != nil {
+		return fmt.Errorf("load agent preferences: %w", err)
+	}
+	defaults := vm.DefaultCreateConfig()
+	selection.Apply(&defaults)
+	if *recreate && recorded {
+		defaults = previous
+	}
+	for agent, selected := range cfg.AgentPtrs() {
+		if !explicit["with-"+agent] {
+			*selected = *defaults.AgentPtrs()[agent]
+		}
+	}
+	if !*recreate {
+		if err := agentprefs.Save(agentprefs.FromConfig(cfg)); err != nil {
+			return fmt.Errorf("save agent preferences: %w", err)
+		}
+	}
+
 	// One-time (per process, per target) migration: stamp provenance markers
 	// onto VMs this registry already recorded as managed but that predate
 	// provenance — see manage.AdoptOnce. `live` is the same listing Reconcile
@@ -472,7 +519,7 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 // --rebuild force-rebuilds the base image regardless of staleness detection,
 // independent of --recreate (which targets the clone, not the base); both may
 // be combined. --recreate is gated on the target already being a sand-managed
-// VM — recreate clones from a Claude base image and would replace ANY
+// VM — recreate clones from the shared base image and would replace ANY
 // instance it is pointed at, so it must never be offered for a VM sand did
 // not create.
 //

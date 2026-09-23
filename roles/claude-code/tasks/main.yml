@@ -30,6 +30,7 @@
   ansible.builtin.template:
     src: claude-settings.json.j2
     dest: "{{ user_home }}/.claude/settings.json"
+    force: false
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
@@ -54,12 +55,12 @@
 
 - name: Install Claude Code using the official installer
   ansible.builtin.shell:
-    cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash
+    cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash -s -- latest
     executable: /bin/bash
   become: true
   become_user: "{{ user_name }}"
-  args:
-    creates: "{{ user_home }}/.local/bin/claude"
+  environment:
+    HOME: "{{ user_home }}"
 
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:
@@ -70,6 +71,44 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+
+- name: Configure the Claude Code interactive launcher
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Claude Code"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+    block: |
+      # Launch Claude Code with bypass permissions, signing in first if needed.
+      # Real subcommands pass through untouched.
+      claude() {
+        case "$1" in
+          agents|auth|auto-mode|config|doctor|gateway|install|mcp|plugin|plugins|project|setup-token|ultrareview|update|upgrade)
+            command claude "$@"; return $? ;;
+        esac
+        # The first session after login can require a relaunch for bypass mode.
+        # Skip this interactive notice for scripts and print-only sessions.
+        sand_notice="$HOME/.config/sandbar/.claude-first-run-notice"
+        if [ ! -f "$sand_notice" ] && [ -t 0 ]; then
+          echo ""
+          echo "  ⚠ Heads up: the first time you sign in to Claude Code,"
+          echo "  --dangerously-skip-permissions and /remote-control may not be"
+          echo "  active yet — and Claude may prompt once about its full-screen"
+          echo "  renderer. If you land in manual mode, just quit ('/exit' or"
+          echo "  Ctrl+C twice) and run 'claude' again. You'll only see this once."
+          echo ""
+          printf "  Press Enter to continue… "
+          read -r sand_reply
+          mkdir -p "$(dirname "$sand_notice")" && : > "$sand_notice"
+        fi
+        if ! command claude auth status >/dev/null 2>&1; then
+          echo "Not signed in to Claude Code — starting sign-in…"
+          command claude auth login || return $?
+        fi
+        command claude --dangerously-skip-permissions "$@"
+      }
 
 # Guest clipboard shims for the sand paste-image feature:
 #

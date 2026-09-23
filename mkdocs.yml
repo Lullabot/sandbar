@@ -1,7 +1,7 @@
 site_name: sandbar
 site_url: https://lullabot.github.io/sandbar/
 repo_url: https://github.com/lullabot/sandbar
-site_description: Disposable Claude Code development VMs, on your own machine or on a server.
+site_description: Disposable development VMs for coding agents, on your own machine or on a server.
 docs_dir: docs
 site_dir: site
 

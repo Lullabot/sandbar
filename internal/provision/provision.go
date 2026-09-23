@@ -944,7 +944,7 @@ func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool 
 // ResetOptions selects which of a VM's local state survives a reset. The zero
 // value rebuilds the VM cleanly from the base image, keeping nothing.
 type ResetOptions struct {
-	PreserveClaude  bool // keep ~/.claude and ~/.claude.json (login + history)
+	PreserveAgents  bool // keep all supported coding-agent settings and files
 	PreserveProject bool // keep the per-org checkout + restored .env
 
 	// PreserveHome keeps the ENTIRE guest home directory, and is the option for
@@ -976,7 +976,7 @@ type ResetOptions struct {
 // rebuild — the gate on starting the source VM and creating a staging
 // directory.
 func (o ResetOptions) Any() bool {
-	return o.PreserveClaude || o.PreserveProject || o.PreserveHome || len(o.PreservePaths) > 0
+	return o.PreserveAgents || o.PreserveProject || o.PreserveHome || len(o.PreservePaths) > 0
 }
 
 // Reset recreates a managed VM from a (possibly edited) config, optionally
@@ -986,7 +986,7 @@ func (o ResetOptions) Any() bool {
 //
 // Ordering is load-bearing, and it is StagePreserve/RestoreBeforeFinalize/
 // RestoreAfterFinalize that own it (see preserve.go): anything the playbook
-// should get the last word over — the Claude login, a whole home — goes back
+// should get the last word over — agent state, a whole home — goes back
 // BEFORE finalize, and anything it must not touch — the project tree, the user's
 // hand-picked checkouts — goes back AFTER, with the finalize pass omitting
 // project_clone_url (CloneURL cleared) so the project role's clone step does not

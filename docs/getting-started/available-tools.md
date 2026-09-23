@@ -1,7 +1,8 @@
 # Available Tools
 
-Every sand VM is provisioned from the same base image, so a freshly cloned
-VM comes with the tools you normally use.
+Every sand VM clones a shared base containing development tools and runtimes.
+The selected coding agents are then installed at their current releases
+inside that individual VM, including on reset.
 
 ## Container & local dev
 
@@ -21,16 +22,25 @@ covers how to reach it from your browser — locally and on a remote profile.
 - Python 3 (with [`uv`](https://github.com/astral-sh/uv))
 - A headless JDK
 
-## Claude Code & git
+## Coding agents
 
-- The Claude Code CLI
+The create form offers four independent checkboxes: **Install Claude Code**,
+**Install OpenAI Codex**, **Install OpenCode**, and **Install Pi**. Select any combination, including none.
+All four start unselected; after creating a VM, sand remembers your choices
+across connection profiles. See [Files and State](../reference/files-and-state.md#coding-agent-preferences-and-migration)
+for persistence and migration details.
+
+Headless creation offers `--with-claude`, `--with-codex`, `--with-opencode`,
+and `--with-pi`; use `=false` to explicitly deselect an agent. Omitted agent
+flags use the remembered selection. Changing agents does not rebuild the
+shared base. Reset retains that VM's recorded selections, independently of
+the defaults for new VMs.
+
+## Git
+
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git
   credential helper for HTTPS authentication
 - The [GitLab CLI (`glab`)](https://gitlab.com/gitlab-org/cli)
-- The [OpenAI Codex CLI](https://chatgpt.com/codex) — **opt-in**: pass
-  `--with-codex` to `sand create` (or enable the toggle in the TUI create
-  form). Codex is not provisioned by default; only include it if you want to
-  use it alongside Claude Code.
 
 The `--with-*` flags configure the **shared base image**. Changing a tool
 selection makes the next `sand create` update the base before cloning a VM.

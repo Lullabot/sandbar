@@ -132,7 +132,7 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 }
 
 // TestHeadlessRecreateRefusedForUnmanagedVM is the CLI half of the recreate
-// gate in internal/manage: recreate clones from a Claude base image and would
+// gate in internal/manage: recreate clones from the shared base image and would
 // replace ANY instance it is pointed at, so --recreate must be refused for a
 // VM sand did not create — and refused BEFORE the provisioner is ever
 // touched, not just reported as an error after a clone already ran.

@@ -76,22 +76,13 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 		)
 	}
 
-	// The tool-set booleans are emitted only for the base phase — that is where
-	// Claude Code/DDEV/Go/Java are installed (the claude-code role, and
-	// roles/base/tasks/main.yml's single consolidated apt transaction) — and
-	// unconditionally, like samba_enabled above, so the base always receives the
-	// actual selection rather than falling back to a role default that may
-	// disagree with it.
+	// Shared dependencies belong to the base; coding-agent selections belong
+	// to each VM and are emitted for finalize/full, including explicit false.
 	if phase == "base" {
 		items = append(items,
-			varItem{"toolset_claude", cfg.WithClaude},
 			varItem{"toolset_ddev", cfg.WithDDEV},
 			varItem{"toolset_go", cfg.WithGo},
 			varItem{"toolset_java", cfg.WithJava},
-			// Codex defaults false (opt-in), unlike the four above, but is
-			// still emitted unconditionally so the base always receives the
-			// actual selection rather than falling back to a role default.
-			varItem{"toolset_codex", cfg.WithCodex},
 		)
 		if aptUpgrade {
 			items = append(items, varItem{"base_apt_upgrade", true})
@@ -100,6 +91,10 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 
 	if phase != "base" {
 		items = append(items,
+			varItem{"toolset_claude", cfg.WithClaude},
+			varItem{"toolset_codex", cfg.WithCodex},
+			varItem{"toolset_opencode", cfg.WithOpenCode},
+			varItem{"toolset_pi", cfg.WithPi},
 			varItem{"user_git_user_name", cfg.GitName},
 			varItem{"user_git_user_email", cfg.GitEmail},
 		)

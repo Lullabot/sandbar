@@ -48,12 +48,11 @@ var (
 	readBaseBuiltAtFn  = readBaseBuiltAt
 )
 
-// playbookVersionPrefix marks a stamp as produced by the content-hash scheme.
-// baseStale treats any stamp lacking this prefix — including every stamp the
-// old git-HEAD scheme ever wrote — as stale, so an upgrading user converges
-// onto the new scheme once rather than silently trusting a base a different
-// versioning scheme vouched for.
-const playbookVersionPrefix = "v2:"
+// Version 3 records only base dependencies. Version 2 also recorded agents,
+// so it must converge once to remove those installs from the shared base.
+// The prefix also distinguishes a legacy all-off agent choice from a modern
+// stamp, which contains no information about agent preferences.
+const playbookVersionPrefix = "v3:"
 
 // playbookFileset lists the top-level entries that constitute the playbook —
 // the fs.FS spelling of the go:embed directives in playbook_embed.go and the
@@ -268,21 +267,25 @@ func parseToolset(s string) map[string]bool {
 	return out
 }
 
-// toolsetFromStamp extracts the toolset suffix a v2-scheme stamp carries
-// ("v2:<hash>:<toolset>"). It returns "" for anything that isn't a
-// recognizable v2 stamp with a toolset suffix — an older-scheme stamp, an
+// toolsetFromStamp extracts the toolset suffix a v2/v3 stamp carries
+// ("v3:<hash>:<toolset>"). It returns "" for anything that isn't a
+// recognizable stamp with a toolset suffix — an older-scheme stamp, an
 // empty/missing one, or a malformed one — which parseToolset then reads as
 // "no toolset information", not as an empty selection.
 func toolsetFromStamp(stamp string) string {
-	if !strings.HasPrefix(stamp, playbookVersionPrefix) {
+	if !strings.HasPrefix(stamp, playbookVersionPrefix) && !strings.HasPrefix(stamp, "v2:") {
 		return ""
 	}
-	rest := strings.TrimPrefix(stamp, playbookVersionPrefix)
+	rest := stamp[3:]
 	i := strings.Index(rest, ":") // the hash is fixed-length hex; it never contains ':'
 	if i < 0 {
 		return ""
 	}
-	return rest[i+1:]
+	// Proxmox appends its template preparation generation after the toolset.
+	// Treating that metadata as part of the final tool name silently loses
+	// that selection, including a legacy Codex-only agent preference.
+	toolset, _, _ := strings.Cut(rest[i+1:], ":")
+	return toolset
 }
 
 // shrunk reports which tools are enabled in stamped but not in want — the
@@ -307,6 +310,8 @@ func shrunk(stamped, want map[string]bool) []string {
 // that case by converging or rebuilding regardless.
 func shrunkTools(haveStamp, want string) []string {
 	stamped := parseToolset(toolsetFromStamp(haveStamp))
+	delete(stamped, "claude")
+	delete(stamped, "codex")
 	if len(stamped) == 0 {
 		return nil
 	}
@@ -341,8 +346,21 @@ func BaseToolset(hf lima.HostFiles, baseName string) (map[string]bool, bool) {
 	return parseToolset(suffix), true
 }
 
-// hashFromStamp extracts the playbook content hash from a v2 stamp
-// ("v2:<hash>:<toolset>"), or "" for anything that is not one.
+// LegacyBaseToolset exposes agent-bearing v2 stamps, including explicit none.
+func LegacyBaseToolset(hf lima.HostFiles, baseName string) (map[string]bool, bool) {
+	stamp := readBaseVersionFn(hf, baseName)
+	if !strings.HasPrefix(stamp, "v2:") {
+		return nil, false
+	}
+	suffix := toolsetFromStamp(stamp)
+	if suffix == "" {
+		return nil, false
+	}
+	return parseToolset(suffix), true
+}
+
+// hashFromStamp extracts the playbook content hash from a current stamp
+// ("v3:<hash>:<toolset>"), or "" for anything that is not one.
 func hashFromStamp(stamp string) string {
 	if !strings.HasPrefix(stamp, playbookVersionPrefix) {
 		return ""
@@ -394,9 +412,9 @@ func toolsetKey(set map[string]bool) string {
 // A from-scratch build does not go through here: buildBase stamps exactly the
 // requested selection, because a fresh base really does contain only that.
 func mergeToolsetVersion(want, have string) string {
-	// Only a v2 stamp has a toolset suffix to merge. Anything else — "" from a
+	// Only a current stamp is a valid merge target. Anything else — "" from a
 	// version-lookup error, or a version in some other scheme — is passed through
-	// untouched rather than being re-spelled as a v2 stamp with an invented empty
+	// untouched rather than being re-spelled as a current stamp with an invented empty
 	// hash, which would make the base perpetually stale against a version it never
 	// claimed to have.
 	if !strings.HasPrefix(want, playbookVersionPrefix) {
@@ -404,7 +422,7 @@ func mergeToolsetVersion(want, have string) string {
 	}
 	merged := parseToolset(toolsetFromStamp(want))
 	for tool, enabled := range parseToolset(toolsetFromStamp(have)) {
-		if enabled {
+		if enabled && tool != "claude" && tool != "codex" {
 			merged[tool] = true
 		}
 	}

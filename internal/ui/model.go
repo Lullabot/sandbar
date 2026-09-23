@@ -395,10 +395,12 @@ type model struct {
 	// installing a Go toolchain and a JDK the user had explicitly opted out of.
 	resetWithClaude      bool
 	resetWithCodex       bool
+	resetWithOpenCode    bool
+	resetWithPi          bool
 	resetWithDDEV        bool
 	resetWithGo          bool
 	resetWithJava        bool
-	preserveClaude       bool
+	preserveAgents       bool
 	preserveProject      bool
 	projectToggleEnabled bool   // false when OrgRelDir(cfg.CloneURL) has no org segment (nothing to preserve)
 	projectToggleLabel   string // "Preserve ~/<org-rel-dir>", computed once in openResetForm
@@ -416,20 +418,20 @@ type model struct {
 	resetCheckoutsHidden int
 	toggleFocus          int // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
-	// Create-mode tool-set + rebuild toggles (defaults set in openForm). The
-	// tool toggles configure the SHARED base image, not this one VM — see
-	// createToggles' help text. toolRebuild carries the same intent as
-	// `sand create --rebuild` (provision.CreateOptions.Rebuild), the only way to
-	// actually remove a de-selected tool (Ansible cannot uninstall).
-	// toolClaude is Claude Code: a tool-set selection like the rest, so a user
-	// can de-select it and install their own agent. Not to be confused with
-	// preserveClaude above, which is reset mode's keep-my-~/.claude toggle.
-	toolClaude  bool
-	toolCodex   bool
-	toolDDEV    bool
-	toolGo      bool
-	toolJava    bool
-	toolRebuild bool
+	// Agent choices belong to individual VMs; DDEV/Go/Java configure the base.
+	// toolRebuild carries the same intent as `sand create --rebuild`.
+	// preserveAgents above instead controls keeping all agents' user state.
+	toolClaude     bool
+	toolCodex      bool
+	toolOpenCode   bool
+	toolPi         bool
+	agentsEdited   [4]bool
+	agentsLoading  bool
+	formGeneration uint64
+	toolDDEV       bool
+	toolGo         bool
+	toolJava       bool
+	toolRebuild    bool
 
 	// Progress / streaming. Everything that used to be a single job's state on the
 	// model — its title, back view, output buffer, running flag, error, reader,
@@ -1621,23 +1623,32 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// result stale. Applying it anyway would clobber the CURRENTLY selected
 		// profile's toggles with a read that belongs to a profile the user has
 		// since left.
-		if m.view != viewForm || m.resetMode || m.formScope != msg.scope {
+		if m.view != viewForm || m.resetMode || m.formScope != msg.scope || (msg.generation != 0 && msg.generation != m.formGeneration) {
 			return m, nil
+		}
+		m.agentsLoading = false
+		if msg.err != nil {
+			m.formErr = msg.err
+			return m, nil
+		}
+		if !m.agentsEdited[0] {
+			m.toolClaude = msg.agents.Claude
+		}
+		if !m.agentsEdited[1] {
+			m.toolCodex = msg.agents.Codex
+		}
+		if !m.agentsEdited[2] {
+			m.toolOpenCode = msg.agents.OpenCode
+		}
+		if !m.agentsEdited[3] {
+			m.toolPi = msg.agents.Pi
 		}
 		if msg.ok {
 			cfg := vm.DefaultCreateConfig()
 			cfg.ApplyToolset(msg.toolset)
-			m.toolClaude = cfg.WithClaude
 			m.toolDDEV = cfg.WithDDEV
 			m.toolGo = cfg.WithGo
 			m.toolJava = cfg.WithJava
-			// Codex must be refreshed too, or the probed base's state is
-			// silently dropped: the checkbox stays at openForm's default
-			// (false) while the base was built WITH the tool, and submitting
-			// reconverges the shared base without it (the silent de-select
-			// form.go's reset path guards against, reintroduced here for the
-			// create/probe path).
-			m.toolCodex = cfg.WithCodex
 		}
 		return m, nil
 
