@@ -112,7 +112,25 @@ func RecreateBase(reg *registry.Registry, name string, scope registry.Scope, pro
 // loudly to report it (today, a printed warning — the VM itself is already
 // up either way).
 func RecordSuccess(reg *registry.Registry, cfg vm.CreateConfig, scope registry.Scope, prov ...provider.Provenancer) error {
-	if err := reg.AddScoped(cfg, scope); err != nil {
+	return RecordSuccessWithTemplate(reg, cfg, scope, "", prov...)
+}
+
+// RecordSuccessWithTemplate is RecordSuccess for a VM cloned from a golden
+// template: it records templateSource as the entry's template provenance (see
+// registry.AddScopedWithTemplate) so a later --recreate re-clones from that
+// same template rather than falling back to the base image.
+//
+// The provenance-marker half is IDENTICAL to RecordSuccess's — a
+// template-cloned VM is just as invisible to other controllers without a
+// marker as any other, so the two paths must not diverge on it. That shared
+// tail is why this is one function with a template argument rather than a
+// parallel implementation; templateSource == "" is exactly RecordSuccess.
+func RecordSuccessWithTemplate(reg *registry.Registry, cfg vm.CreateConfig, scope registry.Scope, templateSource string, prov ...provider.Provenancer) error {
+	if templateSource != "" {
+		if err := reg.AddScopedWithTemplate(cfg, scope, templateSource); err != nil {
+			return err
+		}
+	} else if err := reg.AddScoped(cfg, scope); err != nil {
 		return err
 	}
 

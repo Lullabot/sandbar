@@ -1,16 +1,10 @@
 package provider
 
-// proxmoxtemplate.go implements the golden-template operations PR #70 (golden VM
-// templates) adds to the Provider seam: SnapshotTemplate, DeleteTemplate, and
-// TemplateDiskBytes. It is kept in its own file, isolated from proxmox.go and
-// proxmoxprovision.go, so the eventual merge with #70 is a small additive change
-// rather than a conflict with this backend's existing lifecycle code.
-//
-// As of this writing #70 has not landed on main (the Provider interface carries
-// none of these three methods), so they are implemented here on *proxmoxProvider
-// only, NOT added to the interface — that keeps this change purely additive.
-// Whoever lands #70 later adds three lines to provider.go; nothing here needs to
-// move.
+// proxmoxtemplate.go implements the Provider seam's golden-template operations:
+// SnapshotTemplate, DeleteTemplate, and TemplateDiskBytes. It stays isolated
+// from the ordinary Proxmox lifecycle because PVE templates have their own
+// safety rules, especially the delete-time check that the target is truly a
+// template.
 //
 // A PVE template already *is* the primitive golden templates want (an
 // un-bootable, clone-only VM), so there is no emulation layer: SnapshotTemplate is
@@ -24,6 +18,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
 )
 
@@ -38,10 +33,10 @@ import (
 // (or that a cancelled context leaves stopped) is worse than a failed snapshot.
 // That is why the restart is a defer using context.WithoutCancel — a cancelled
 // ctx must not skip it.
-func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, templateName string, out io.Writer) error {
+func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, templateName string, out io.Writer) (provision.SnapshotResult, error) {
 	vmid, st, err := p.resolve(ctx, source)
 	if err != nil {
-		return fmt.Errorf("proxmox: resolving snapshot source %s: %w", source, err)
+		return provision.SnapshotResult{}, fmt.Errorf("proxmox: resolving snapshot source %s: %w", source, err)
 	}
 
 	wasRunning := st.Status == pveRunning
@@ -56,17 +51,18 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		// convert.
 		upid, err := p.client.ShutdownVM(ctx, vmid)
 		if err != nil {
-			return fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
-		}
-		if err := p.client.WaitTask(ctx, upid.Raw); err != nil {
-			return fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
+			return provision.SnapshotResult{}, fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
 		}
 		// Restore the source's power state no matter how we leave: a snapshot
 		// that silently leaves the user's VM stopped is worse than a failed
-		// snapshot. context.WithoutCancel is load-bearing — if the caller
-		// cancelled, the restart must still run, or cancelling a snapshot
-		// leaves the VM off.
+		// snapshot. Register this BEFORE waiting for shutdown: cancellation can
+		// make WaitTask return after PVE has already accepted (or completed) the
+		// shutdown. context.WithoutCancel is load-bearing — if the caller
+		// cancelled, the restart must still run.
 		defer func() { _ = p.restart(context.WithoutCancel(ctx), source) }()
+		if err := p.client.WaitTask(ctx, upid.Raw); err != nil {
+			return provision.SnapshotResult{}, fmt.Errorf("proxmox: shutting %s down before snapshotting it: %w", source, err)
+		}
 	}
 
 	// CloneVMWithNextID retries the "already exists" collision with a fresh id
@@ -87,14 +83,14 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		Storage: p.storage,
 	})
 	if err != nil {
-		return fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
+		return provision.SnapshotResult{}, fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
 	}
 	p.setVMID(templateName, newid)
 	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
 		// The clone TASK started under newid and failed, so that partial VM is
 		// ours to purge (a synchronous collision never reaches here).
 		p.cleanupVM(ctx, newid, templateName, out)
-		return fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
+		return provision.SnapshotResult{}, fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
 	}
 
 	progress(out, "Converting %s to a template\n", templateName)
@@ -104,15 +100,38 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		// partial clone rather than leave a non-template VM occupying the VMID
 		// under the name the caller asked for a template.
 		p.cleanupVM(ctx, newid, templateName, out)
-		return fmt.Errorf("proxmox: converting %s to a template: %w", templateName, err)
+		return provision.SnapshotResult{}, fmt.Errorf("proxmox: converting %s to a template: %w", templateName, err)
 	}
 	if err := p.client.WaitTask(ctx, tUPID.Raw); err != nil {
 		p.cleanupVM(ctx, newid, templateName, out)
-		return fmt.Errorf("proxmox: converting %s to a template: %w", templateName, err)
+		return provision.SnapshotResult{}, fmt.Errorf("proxmox: converting %s to a template: %w", templateName, err)
 	}
 
 	progress(out, "%s is ready\n", templateName)
-	return nil
+	metaCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), apiTimeout)
+	defer cancel()
+	return p.snapshotResult(metaCtx, source), nil
+}
+
+// snapshotResult records the same staleness inputs the Lima implementation
+// returns. Proxmox stores the source configuration in its provider-side
+// provenance marker, so the toolset comes from the VM actually captured; the
+// playbook hash comes from this build. Missing metadata degrades to an empty
+// result, which callers render as an unknown template.
+func (p *proxmoxProvider) snapshotResult(ctx context.Context, source string) provision.SnapshotResult {
+	marker, ok, err := p.ProvenanceOf(ctx, source)
+	if err != nil || !ok {
+		return provision.SnapshotResult{}
+	}
+	result := provision.SnapshotResult{ToolsetKey: marker.Config.ToolsetKey()}
+	dir, err := locatePlaybookFn()
+	if err != nil {
+		return result
+	}
+	if version, err := provision.PlaybookVersion(os.DirFS(dir), result.ToolsetKey); err == nil {
+		result.PlaybookVersion = version
+	}
+	return result
 }
 
 // restart starts name back up, bounded by powerTimeout rather than ctx's own
@@ -123,14 +142,28 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 func (p *proxmoxProvider) restart(ctx context.Context, name string) error {
 	cctx, cancel := context.WithTimeout(ctx, powerTimeout)
 	defer cancel()
-	return p.start(cctx, name, nil)
+	vmid, st, err := p.resolve(cctx, name)
+	if err != nil {
+		return err
+	}
+	if st.Status == pveRunning {
+		return nil
+	}
+	upid, err := p.client.StartVM(cctx, vmid)
+	if err != nil {
+		return fmt.Errorf("proxmox: restoring %s's running state: %w", name, err)
+	}
+	if err := p.client.WaitTask(cctx, upid.Raw); err != nil {
+		return fmt.Errorf("proxmox: restoring %s's running state: %w", name, err)
+	}
+	return nil
 }
 
 // DeleteTemplate removes a PVE template, but only after confirming the target
 // actually IS a template (template:1 in its config). That guard is the entire
 // reason this is not just an alias for Delete: without it, a mistyped or stale
 // templateName could destroy a live, in-use VM instead of a template.
-func (p *proxmoxProvider) DeleteTemplate(ctx context.Context, templateName string) error {
+func (p *proxmoxProvider) DeleteTemplate(ctx context.Context, templateName string, out io.Writer) error {
 	vmid, _, err := p.resolve(ctx, templateName)
 	if err != nil {
 		return fmt.Errorf("proxmox: resolving template %s: %w", templateName, err)
@@ -144,6 +177,7 @@ func (p *proxmoxProvider) DeleteTemplate(ctx context.Context, templateName strin
 		return fmt.Errorf("proxmox: %s (VMID %d) is not a template; refusing to delete it as one", templateName, vmid)
 	}
 
+	progress(out, "Deleting template %s\n", templateName)
 	upid, err := p.client.DeleteVM(ctx, vmid, true)
 	if err != nil {
 		return fmt.Errorf("proxmox: deleting template %s: %w", templateName, err)
