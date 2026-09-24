@@ -310,6 +310,11 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	// (the `return err` above exits on failure), so a failed run never harvests
 	// a half-populated cache.
 	_ = timer.time("apt cache harvest", func() error { return p.harvestAptCache(ctx, cfg.BaseName, out) })
+	if err := timer.time("base identity reset", func() error {
+		return p.Lima.Shell(ctx, cfg.BaseName, nil, out, "sudo", "bash", "-c", GeneralizeScript)
+	}); err != nil {
+		return fmt.Errorf("reset base image %q machine identity: %w", cfg.BaseName, err)
+	}
 	// Keep the base stopped: it is never used directly, only cloned — and a clone
 	// needs an idle source disk.
 	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
@@ -832,6 +837,11 @@ func (p *Provisioner) reapplyBase(ctx context.Context, cfg vm.CreateConfig, vers
 	// Best-effort, same as buildBase: harvest for the next rebuild. Only reached
 	// once the base playbook above has actually succeeded.
 	_ = timer.time("apt cache harvest", func() error { return p.harvestAptCache(ctx, cfg.BaseName, out) })
+	if err := timer.time("base identity reset", func() error {
+		return p.Lima.Shell(ctx, cfg.BaseName, nil, out, "sudo", "bash", "-c", GeneralizeScript)
+	}); err != nil {
+		return fmt.Errorf("reset base image %q machine identity: %w", cfg.BaseName, err)
+	}
 
 	// Converged. Stamp it before the stop: the stamp describes the base's CONTENT,
 	// which is now correct whatever the stop does next. A write failure is not fatal

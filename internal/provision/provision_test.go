@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -507,6 +508,7 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 		{"shell", "sandbar-base"}, // BuildBase: base provision
 		{"shell", "sandbar-base"}, // BuildBase: harvest step 1 - clear apt lock/partial before the copy
 		{"copy", "-v"},            // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"shell", "sandbar-base"}, // BuildBase: reset identity before stopping the base
 		{"stop", "sandbar-base"},  // BuildBase: stop base
 		{"clone", "sandbar-base"}, // Clone
 		{"edit", "--set"},         // Configure clone sizes
@@ -518,6 +520,21 @@ func TestCreateVM_BuildsBaseWhenAbsent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CreateVM(absent base) sequence mismatch:\n got %v\nwant %v", got, want)
+	}
+	generalizeAt, stopAt := -1, -1
+	for i, argv := range f.calls {
+		if slices.Contains(argv, GeneralizeScript) {
+			if generalizeAt >= 0 {
+				t.Fatal("base generalization ran more than once")
+			}
+			generalizeAt = i
+		}
+		if len(argv) >= 2 && argv[0] == "stop" && argv[1] == "sandbar-base" {
+			stopAt = i
+		}
+	}
+	if generalizeAt < 0 || stopAt < 0 || generalizeAt >= stopAt {
+		t.Fatalf("shared generalization script must run once before stopping the base; calls: %v", f.calls)
 	}
 
 	// Two provisions ran: base (no identity) then finalize (with identity).
@@ -674,6 +691,7 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 		{"shell", "sandbar-base"}, // re-apply: re-run the base playbook against it
 		{"shell", "sandbar-base"}, // re-apply: harvest step 1 - clear apt lock/partial before the copy
 		{"copy", "-v"},            // re-apply: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"shell", "sandbar-base"}, // re-apply: reset identity before stopping the base
 		{"stop", "sandbar-base"},  // re-apply: stop it again for cloning
 		{"clone", "sandbar-base"}, // Clone
 		{"edit", "--set"},         // Configure clone sizes
@@ -859,6 +877,7 @@ func TestCreateVM_StaleBaseWithAnUnconvergeableOverlayRebuilds(t *testing.T) {
 				{"shell", "sandbar-base"},  // BuildBase: base provision
 				{"shell", "sandbar-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
 				{"copy", "-v"},             // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+				{"shell", "sandbar-base"},  // BuildBase: reset identity before stopping the base
 				{"stop", "sandbar-base"},   // BuildBase: stop base
 				{"clone", "sandbar-base"},  // Clone
 				{"edit", "--set"},          // Configure clone sizes
@@ -907,6 +926,7 @@ func TestCreateVM_RebuildDestroysEvenAnUpToDateBase(t *testing.T) {
 		{"shell", "sandbar-base"},  // BuildBase: base provision
 		{"shell", "sandbar-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
 		{"copy", "-v"},             // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"shell", "sandbar-base"},  // BuildBase: reset identity before stopping the base
 		{"stop", "sandbar-base"},   // BuildBase: stop base
 		{"clone", "sandbar-base"},  // Clone
 		{"edit", "--set"},          // Configure clone sizes
@@ -1133,6 +1153,7 @@ func TestCreateVM_AgedBaseIsRefreshedInPlace(t *testing.T) {
 		{"shell", "sandbar-base"}, // refresh: run the base playbook (apt upgrade) against it
 		{"shell", "sandbar-base"}, // refresh: harvest step 1 - clear apt lock/partial before the copy
 		{"copy", "-v"},            // refresh: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"shell", "sandbar-base"}, // refresh: reset identity before stopping the base
 		{"stop", "sandbar-base"},  // refresh: stop it again for cloning
 		{"clone", "sandbar-base"}, // Clone
 		{"edit", "--set"},         // Configure clone sizes
@@ -1197,6 +1218,7 @@ func TestCreateVM_AgedUnconvergeableBaseRebuilds(t *testing.T) {
 		{"shell", "sandbar-base"},  // BuildBase: base provision
 		{"shell", "sandbar-base"},  // BuildBase: harvest step 1 - clear apt lock/partial before the copy
 		{"copy", "-v"},             // BuildBase: harvest step 2 - copy the archives out (seed is a no-op: nothing cached yet)
+		{"shell", "sandbar-base"},  // BuildBase: reset identity before stopping the base
 		{"stop", "sandbar-base"},   // BuildBase: stop base
 		{"clone", "sandbar-base"},  // Clone
 		{"edit", "--set"},          // Configure clone sizes

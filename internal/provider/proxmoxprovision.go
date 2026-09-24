@@ -466,20 +466,11 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 // refuses to send at all — so a clone's first lease carries no name, which is
 // a gap rather than a lie, and roles/base announces the real one as soon as it
 // has set it.
-const generalizeScript = `set -eu
-truncate -s 0 /etc/machine-id
-truncate -s 0 /etc/hostname
-if [ -e /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
-  rm -f /var/lib/dbus/machine-id
-  ln -s /etc/machine-id /var/lib/dbus/machine-id
-fi
-`
-
 // generalizeBase runs generalizeScript in the base guest — the last thing the
 // build does inside the VM, so nothing after it can re-commit an identity.
 func (p *proxmoxProvider) generalizeBase(ctx context.Context, name string, out io.Writer) error {
 	progress(out, "Resetting %s's machine identity and hostname so every clone gets its own DHCP lease and name\n", name)
-	if err := p.Shell(ctx, name, nil, out, "sudo", "bash", "-c", generalizeScript); err != nil {
+	if err := p.Shell(ctx, name, nil, out, "sudo", "bash", "-c", provision.GeneralizeScript); err != nil {
 		return fmt.Errorf("proxmox: resetting %s's machine identity: %w", name, err)
 	}
 	return nil

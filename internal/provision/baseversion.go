@@ -54,6 +54,11 @@ var (
 // stamp, which contains no information about agent preferences.
 const playbookVersionPrefix = "v3:"
 
+// basePreparationGeneration versions provider-independent steps that run after
+// the playbook while preparing a base for cloning. Bump it when those steps
+// change so an already stamped base is rebuilt.
+const basePreparationGeneration = "identity-reset-v1"
+
 // playbookFileset lists the top-level entries that constitute the playbook —
 // the fs.FS spelling of the go:embed directives in playbook_embed.go and the
 // rsync filter in provision.go's inGuestScript. TestGuestSyncCopiesOnlyThePlaybook
@@ -115,14 +120,17 @@ func playbookContentHash(fsys fs.FS) (string, error) {
 }
 
 // PlaybookVersion is the base image's version stamp: a content hash of the
-// playbook fileset in fsys, combined with a canonical rendering of the
-// tool-set selection so changing the selection also invalidates the base.
+// playbook fileset and base preparation generation, combined with a canonical
+// rendering of the tool-set selection so either change invalidates the base.
 func PlaybookVersion(fsys fs.FS, toolset string) (string, error) {
 	h, err := playbookContentHash(fsys)
 	if err != nil {
 		return "", err
 	}
-	return playbookVersionPrefix + h + ":" + toolset, nil
+	// Fold preparation into the content hash while preserving the stamp format
+	// and its toolset parsing/merge behavior.
+	prepared := sha256.Sum256([]byte(h + ":" + basePreparationGeneration))
+	return playbookVersionPrefix + hex.EncodeToString(prepared[:]) + ":" + toolset, nil
 }
 
 // contentPlaybookVersion computes the base version stamp for the playbook
