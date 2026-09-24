@@ -1,0 +1,10 @@
+                                                                                                  
+   Snapshot claude into a template                                                                
+                                                                                                  
+  Template name:     > e.g. golden                                                                
+                                                                                                  
+  │ Stops claude if it is running, clones it into a reusable golden template, then restores it    
+  │ to how it was. claude itself is left untouched.                                               
+                                                                                                  
+  ctrl+s snapshot • esc back                                                                      
+                                                                                                  
