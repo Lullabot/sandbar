@@ -530,7 +530,14 @@ jobs:
       # base + one clone at a time, same footprint as before this task, rather
       # than base + two clones at once.
       - name: Delete the cold clone (base image survives — it must, for reuse below)
-        run: limactl delete -f claude-ci
+        run: |
+          cold_id=$(limactl shell claude-ci cat /etc/machine-id | tr -d '\r\n')
+          if [[ ! "$cold_id" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "::error::cold clone has no valid machine-id"
+            exit 1
+          fi
+          printf '%s' "$cold_id" > cold-machine-id.txt
+          limactl delete -f claude-ci
 
       # Change the playbook's actual byte content (a `touch` would not move the
       # content hash that decides staleness — see baseversion.go's
@@ -553,6 +560,18 @@ jobs:
             --name claude-ci-warm \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee warm.log
+
+      - name: Assert Lima clones have distinct machine identities
+        run: |
+          warm_id=$(limactl shell claude-ci-warm cat /etc/machine-id | tr -d '\r\n')
+          if [[ ! "$warm_id" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "::error::warm clone has no valid machine-id"
+            exit 1
+          fi
+          if [[ "$warm_id" == "$(cat cold-machine-id.txt)" ]]; then
+            echo "::error::Lima clones inherited the same machine-id from the base"
+            exit 1
+          fi
 
       - name: Assert the next create remembered all four agents
         run: |
