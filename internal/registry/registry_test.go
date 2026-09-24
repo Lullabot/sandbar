@@ -736,3 +736,41 @@ func TestDependentsOfTemplate(t *testing.T) {
 		t.Fatalf("DependentsOfTemplate(remote, golden) = %v, want [a]", got)
 	}
 }
+
+func TestTemplateListingAndRemovalRespectScopeAndMisses(t *testing.T) {
+	r, err := LoadFrom(filepath.Join(t.TempDir(), "managed-vms.json"))
+	if err != nil {
+		t.Fatalf("load isolated registry: %v", err)
+	}
+	remote := Scope{Provider: "lima-ssh", RemoteTarget: "user@host:22"}
+	for _, tmpl := range []Template{
+		{Name: "zeta", Scope: LocalScope},
+		{Name: "alpha", Scope: LocalScope},
+		{Name: "remote", Scope: remote},
+	} {
+		if err := r.AddTemplate(tmpl); err != nil {
+			t.Fatalf("seed %q: %v", tmpl.Name, err)
+		}
+	}
+
+	if got := r.TemplatesInScope(remote); len(got) != 1 || got[0].Name != "remote" {
+		t.Fatalf("TemplatesInScope(remote) = %+v, want only the remote template", got)
+	}
+	local := r.TemplatesInScope(LocalScope)
+	if len(local) != 2 || local[0].Name != "alpha" || local[1].Name != "zeta" {
+		t.Fatalf("TemplatesInScope(local) = %+v, want [alpha zeta] in name order", local)
+	}
+	if got := r.TemplatesInScope(Scope{Provider: "missing"}); len(got) != 0 {
+		t.Fatalf("TemplatesInScope(empty scope) = %+v, want no templates", got)
+	}
+
+	if r.RemoveTemplateScoped(remote, "alpha") {
+		t.Fatal("removing a same-named template from the wrong scope unexpectedly succeeded")
+	}
+	if !r.RemoveTemplateScoped(LocalScope, "alpha") {
+		t.Fatal("removing an existing local template returned false")
+	}
+	if r.RemoveTemplateScoped(LocalScope, "alpha") {
+		t.Fatal("removing an already-removed template unexpectedly succeeded")
+	}
+}

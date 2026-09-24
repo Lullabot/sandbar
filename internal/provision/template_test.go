@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -189,6 +190,79 @@ func TestSnapshotTemplate_StatusFailureDoesNotMutateSource(t *testing.T) {
 	if callIndex(calls, "stop", "claude") != -1 || callIndex(calls, "clone", "claude", "sandbar-tmpl-golden") != -1 {
 		t.Fatalf("status failure mutated the source; calls=%v", calls)
 	}
+}
+
+func TestSnapshotTemplate_ReportsBestEffortRecoveryWarnings(t *testing.T) {
+	t.Run("failed stop still attempts restart", func(t *testing.T) {
+		f := &fakeRunner{
+			status:  map[string][]byte{"claude": []byte("Running\n")},
+			failOn:  func(args []string) bool { return len(args) > 0 && args[0] == "stop" },
+			failErr: errors.New("stop failed"),
+		}
+		p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+		var out bytes.Buffer
+
+		if _, err := p.SnapshotTemplate(context.Background(), "claude", "sandbar-tmpl-golden", &out); err == nil {
+			t.Fatal("SnapshotTemplate succeeded despite a failed stop")
+		}
+		calls := f.snapshot()
+		if callIndex(calls, "start", "claude") == -1 {
+			t.Fatalf("source was not restarted after the failed stop; calls=%v", calls)
+		}
+		if callIndex(calls, "clone", "claude", "sandbar-tmpl-golden") != -1 {
+			t.Fatalf("cloned a source whose stop failed; calls=%v", calls)
+		}
+	})
+
+	t.Run("version failure leaves a usable but stale template", func(t *testing.T) {
+		f := &fakeRunner{status: map[string][]byte{"claude": []byte("Stopped\n")}}
+		p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+		origVersion, origRead := playbookVersionFn, readBaseVersionFn
+		playbookVersionFn = func(string, string) (string, error) { return "", errors.New("hash failed") }
+		readBaseVersionFn = func(lima.HostFiles, string) string { return "" }
+		t.Cleanup(func() { playbookVersionFn, readBaseVersionFn = origVersion, origRead })
+		var out bytes.Buffer
+
+		res, err := p.SnapshotTemplate(context.Background(), "claude", "sandbar-tmpl-golden", &out)
+		if err != nil {
+			t.Fatalf("SnapshotTemplate should keep a successfully cloned template usable: %v", err)
+		}
+		if res.PlaybookVersion != "" || !bytes.Contains(out.Bytes(), []byte("show as stale")) {
+			t.Errorf("result/log = %#v / %q; want no version and a stale warning", res, out.String())
+		}
+	})
+
+	t.Run("stamp and restart failures are warnings after clone success", func(t *testing.T) {
+		f := &fakeRunner{
+			status:  map[string][]byte{"claude": []byte("Running\n")},
+			failOn:  func(args []string) bool { return len(args) > 0 && args[0] == "start" },
+			failErr: errors.New("restart failed"),
+		}
+		p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
+		origVersion, origRead, origWrite := playbookVersionFn, readBaseVersionFn, writeBaseVersionFn
+		playbookVersionFn = func(string, string) (string, error) { return "v3:hash", nil }
+		readBaseVersionFn = func(lima.HostFiles, string) string { return "" }
+		writeBaseVersionFn = func(lima.HostFiles, string, string, time.Time) error {
+			return errors.New("stamp failed")
+		}
+		t.Cleanup(func() {
+			playbookVersionFn, readBaseVersionFn, writeBaseVersionFn = origVersion, origRead, origWrite
+		})
+		var out bytes.Buffer
+
+		res, err := p.SnapshotTemplate(context.Background(), "claude", "sandbar-tmpl-golden", &out)
+		if err != nil {
+			t.Fatalf("SnapshotTemplate should report post-clone persistence/restart issues as warnings: %v", err)
+		}
+		if res.PlaybookVersion != "v3:hash" {
+			t.Errorf("PlaybookVersion = %q, want captured version", res.PlaybookVersion)
+		}
+		for _, want := range []string{"could not record", "could not restart"} {
+			if !bytes.Contains(out.Bytes(), []byte(want)) {
+				t.Errorf("log %q does not contain warning %q", out.String(), want)
+			}
+		}
+	})
 }
 
 // TestDeleteTemplate proves the locked delete reaches limactl with force.
