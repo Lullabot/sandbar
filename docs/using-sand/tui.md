@@ -103,6 +103,7 @@ require the VM to be running.
 | `r` | Restart | Stop the VM and start it again, applying any secrets you've changed since it booted. |
 | `m` | Reclaim memory | Flush writes and release the guest filesystem cache. Offered only on a running VM whose provider can return that cache memory to its host; currently this means Proxmox. The tile refreshes its guest cache and host-resident memory readings when the action finishes. |
 | `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sand created. |
+| `t` | Snapshot → template | Capture this managed VM as a reusable [golden template](golden-templates.md). A running source is stopped briefly and restored afterward. |
 | `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](files-and-shells.md). |
 | `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent. |
 | `d` | Delete | Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it. **Irreversible.** |
@@ -111,6 +112,10 @@ require the VM to be running.
 | `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |
 | `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR, the branch's page in a browser, or — for a checkout on a drupal.org remote (`git.drupalcode.org` or `git.drupal.org`) — publish its local commits to drupal.org. See [Landing](files-and-shells.md#landing) and [Publishing to drupal.org](drupalorg-publishing.md). |
 | `L` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
+
+The create form includes a clone-source row. Choose the shared base or a
+template in the selected profile; template rows show their size, age, and
+staleness. A template-sourced reset keeps using that same template.
 
 `d` is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does **not** use
