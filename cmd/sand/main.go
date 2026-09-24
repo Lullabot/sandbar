@@ -62,6 +62,8 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "template":
+			os.Exit(runTemplate(os.Args[2:]))
 		case "land":
 			if err := runLand(os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -75,7 +77,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand reset NAME   rebuild a VM from its base image (see 'sand reset -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand land NAME    list/land a VM's git checkouts (see 'sand land -h')\n  sand publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sand publish -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand reset NAME   rebuild a VM from its base image (see 'sand reset -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand land NAME    list/land a VM's git checkouts (see 'sand land -h')\n  sand publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sand publish -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n  sand template ... manage golden VM templates (see 'sand template -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}

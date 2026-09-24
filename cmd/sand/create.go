@@ -128,6 +128,7 @@ Flags:
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
 	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
+	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sand template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
@@ -140,6 +141,9 @@ Flags:
 			return nil // usage was already printed; -h/--help is not a failure
 		}
 		return err // flag package already printed usage
+	}
+	if *recreate && *templateFlag != "" {
+		return fmt.Errorf("sand create: --template cannot be combined with --recreate; recreate uses the VM's recorded clone source")
 	}
 
 	// Which flags the user ACTUALLY passed. It decides two things: the refusal
@@ -249,20 +253,35 @@ Flags:
 		cfg.GitEmail = vm.HostGitConfig("user.email")
 	}
 
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("sand create: %w", err)
-	}
-
-	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
-		return fmt.Errorf("sand create: %w", err)
-	}
-
+	// The registry is loaded here — before Validate, not after — because
+	// --template's resolution (below) must set cfg.BaseName to the template's
+	// instance name BEFORE Validate runs its Name != BaseName check.
 	reg, loadErr := registry.Load()
 	if reg == nil {
 		reg = registry.NewEmpty()
 	}
 	if loadErr != nil {
 		fmt.Fprintln(os.Stderr, "warning:", loadErr)
+	}
+
+	// --template resolves to the template's reserved Lima instance name (see
+	// resolveTemplateCreate), which becomes both cfg.BaseName (so a later
+	// --recreate re-clones from the same template — see doHeadlessCreate) and
+	// provision.CreateOptions.TemplateSource (so THIS create clones from it
+	// instead of the shared base image).
+	templateInstance, err := resolveTemplateCreate(reg, scope, *templateFlag, *rebuild, explicit["base-name"])
+	if err != nil {
+		return fmt.Errorf("sand create: %w", err)
+	}
+	if templateInstance != "" {
+		cfg.BaseName = templateInstance
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("sand create: %w", err)
+	}
+	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
+		return fmt.Errorf("sand create: %w", err)
 	}
 
 	// Reconcile against the live instance list before acting, exactly like the
@@ -386,7 +405,7 @@ Flags:
 	// Provenancer).
 	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
 
-	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, os.Stdout, provenancer); err != nil {
+	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, *templateFlag, os.Stdout, provenancer); err != nil {
 		return err
 	}
 
@@ -532,7 +551,7 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 // inside ensureBaseStopped with the lock held and no clone in flight; this
 // function no longer has a lima client to delete anything with.
 // provenancer is an OPTIONAL trailing argument (Go variadic — see
-// manage.RecordSuccess) so every existing 8-arg call site (the unit/e2e
+// manage.RecordSuccess) so every existing 9-arg call site (the unit/e2e
 // tests in this package, which construct doHeadlessCreate directly with a
 // stub provisioner and no real provider) keeps compiling unchanged; only
 // runCreate, which has a real provider.Provider in hand, passes one. It is
@@ -541,8 +560,24 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 // be reset here) and the RecordSuccess call (the provenance write proper);
 // omitted (nil), both fall back to their pre-provenance, registry-only
 // behavior exactly as before.
-func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, out io.Writer, provenancer ...provider.Provenancer) error {
+// templateName is the user-facing golden-template name (see
+// internal/vm/template.go) this create should clone from instead of the
+// shared base image, or "" for an ordinary create. It is ignored when
+// recreate is true: a --recreate's clone source is instead driven by whatever
+// provenance is ALREADY recorded on the VM being recreated (see below) —
+// combining --recreate with --template on the same invocation is not a
+// supported combination.
+func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headlessProvisioner, cfg vm.CreateConfig, scope registry.Scope, recreate, rebuild bool, templateName string, out io.Writer, provenancer ...provider.Provenancer) error {
+	if recreate && templateName != "" {
+		return errors.New("--template cannot be combined with --recreate; recreate uses the VM's recorded clone source")
+	}
 	opts := provision.CreateOptions{Rebuild: rebuild}
+	if templateName != "" && !recreate {
+		// cfg.BaseName was already set to the template's own instance name by
+		// runCreate's resolveTemplateCreate call — reuse it here so the two
+		// never have a chance to disagree.
+		opts.TemplateSource = cfg.BaseName
+	}
 
 	if recreate {
 		base, ok := manage.RecreateBase(reg, cfg.Name, scope, provenancer...)
@@ -550,6 +585,14 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
 		cfg.BaseName = base
+		// If the VM being recreated was itself cloned from a golden template
+		// (recorded provenance, not this invocation's --template flag), re-clone
+		// from that SAME template instead of silently falling back to the base
+		// image — otherwise --recreate would quietly discard everything the
+		// template provisioned beyond the base.
+		if ts, ok := reg.TemplateSourceInScope(cfg.Name, scope); (ok && ts != "") || vm.IsTemplateInstanceName(base) {
+			opts.TemplateSource = base
+		}
 		if err := prov.RecreateWithOptions(ctx, cfg, opts, out); err != nil {
 			return err
 		}
@@ -563,7 +606,17 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 	// authoritative provenance marker — see manage.RecordSuccess's doc
 	// comment. A failure here (either write) is reported but does not fail
 	// the command: the VM itself is already up either way.
-	if err := manage.RecordSuccess(reg, cfg, scope, provenancer...); err != nil {
+	//
+	// A template-cloned VM (templateName set, not a recreate) records the
+	// template as its provenance so a later --recreate re-clones from it; both
+	// paths write the same marker, hence the one call.
+	templateSource := ""
+	if templateName != "" && !recreate {
+		templateSource = templateName
+	} else if recreate {
+		templateSource, _ = vm.TemplateNameFromInstance(cfg.BaseName)
+	}
+	if err := manage.RecordSuccessWithTemplate(reg, cfg, scope, templateSource, provenancer...); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
 	return nil
