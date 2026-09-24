@@ -951,10 +951,13 @@ shared rules.
   as well as dimming the row; colour alone is invisible in monochrome
   terminals and ANSI-stripped golden tests.
 - **Keep MAC restoration and DHCP identity configuration together.**
-  `generalizeScript` clears `/etc/machine-id` so new clones have distinct
+  `provision.GeneralizeScript` clears `/etc/machine-id` so new clones have distinct
   identities. `roles/base` sets `DUIDType=link-layer` so DHCP identity
-  follows the MAC that `proxmoxmac.go` preserves during reset. Removing
-  either part can change the lease after a rebuild. The template also
+  follows the MAC that `proxmoxmac.go` preserves during reset. The shared
+  script runs as the last guest-side base preparation step in both Lima and
+  Proxmox, and its generation participates in the base version stamp so old
+  bases rebuild. Removing either DHCP-related part can change the lease after
+  a rebuild. The template also
   clears `/etc/hostname` to avoid clones initially announcing
   `sandbar-base`. After the real name is set, use `networkctl renew` to
   announce it. This must not be a hostname-change handler: cloud-init may
