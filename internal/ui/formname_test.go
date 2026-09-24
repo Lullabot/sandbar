@@ -99,7 +99,16 @@ func TestCreateFormAcceptsAValidName(t *testing.T) {
 		t.Fatal("submitForm returned no command for a valid name; the create never started")
 	}
 	if !m.jobs.exists(provisionKey(registry.LocalScope, "test-vm")) {
-		t.Error("no provision job was registered for a valid name")
+		t.Fatal("no provision job was registered for a valid name")
+	}
+	// submitForm starts the create on a goroutine. Drain its stream before the
+	// test's isolated host directory is removed: the run saves agent preferences
+	// there before calling the provider.
+	if _, err := io.Copy(io.Discard, m.jobs.reader(provisionKey(registry.LocalScope, "test-vm")).r); err != nil {
+		t.Fatalf("create job failed: %v", err)
+	}
+	if created != 1 {
+		t.Errorf("provider.Create was called %d times; want 1", created)
 	}
 }
 
@@ -142,14 +151,17 @@ func TestProviderSeamIsWhatTheFormAsks(t *testing.T) {
 	prov := &providerfake.Provider{
 		ValidateNameFunc: func(name string) error {
 			asked = append(asked, name)
-			return nil
+			return errors.New("stop after validation")
 		},
 	}
 	var _ provider.Provider = prov
 
 	m := New(singleFleet(prov, registry.LocalScope)).(model)
 	fillCreateForm(t, &m, "web")
-	m.submitForm()
+	_, cmd := m.submitForm()
+	if cmd != nil {
+		t.Error("name validation failed, but submitForm started a create job")
+	}
 
 	if len(asked) != 1 || asked[0] != "web" {
 		t.Errorf("provider was asked about %v; want exactly [web]", asked)
