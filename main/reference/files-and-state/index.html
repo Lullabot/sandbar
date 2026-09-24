@@ -1586,7 +1586,7 @@ preserves these paths relative to the guest user's home:</p>
 </tr>
 <tr>
 <td>Codex</td>
-<td><code>~/.codex</code></td>
+<td><code>~/.codex</code>, <code>~/.config/sandbar/codex-remote-control-onboarding-complete</code></td>
 </tr>
 <tr>
 <td>OpenCode</td>
@@ -1605,7 +1605,10 @@ extensions; preservation includes all four agents regardless of
 the VM's recorded selections, including manual installs. The data passes through a private
 host temporary directory during reset. See <a href="../security-model/">Security Model</a>
 before preserving state from a VM you do not trust.</p>
-<p>Source: <code>internal/provision/staging.go</code> (<code>AgentStatePaths</code>).</p>
+<p>The Sandbar Codex marker remembers whether remote control onboarding was
+accepted or declined. When accepted, provisioning reinstalls and starts the
+user app-server service using the preserved Codex daemon settings.</p>
+<p>Source: <code>internal/provision/preserve.go</code> (<code>AgentStatePaths</code>).</p>
 <h2 id="guest-paths">Guest paths</h2>
 <table>
 <thead>

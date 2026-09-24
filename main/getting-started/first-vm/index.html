@@ -1519,24 +1519,21 @@ finishes, with no webhook or extra configuration required.</p>
 <h2 id="logging-into-codex">Logging into Codex</h2>
 <p>If you created the VM with <code>--with-codex</code> (or enabled Codex in the TUI create
 form), the Codex CLI is provisioned but no credential is included. Shell into
-the VM and run <code>codex</code> once to start an interactive login.</p>
-<p>Codex signs in with your ChatGPT account. Its default OAuth flow expects a
-browser callback on <code>localhost:1455</code> <em>inside the VM</em>, which won't work from a
-VM shell directly. The simplest path is the device-code flow, which needs no
-network plumbing at all — the CLI and your browser talk through OpenAI's
-servers:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>codex<span class="w"> </span>login<span class="w"> </span>--device-auth
+the VM and run <code>codex</code> with no arguments. On the first bare interactive run,
+<code>sand</code> asks whether you want to enable Codex remote-control support.</p>
+<p>If you answer yes, the wrapper guides you through Codex's device-code login,
+sets up its persistent app server with remote control enabled, and runs the
+initial <code>codex remote-control pair</code> flow so you can pair another device with
+the ChatGPT app. You do not need to run those setup commands yourself. When
+setup finishes, the regular Codex interface opens. The app server starts again
+when the VM boots, even before you open a shell.</p>
+<p>After setup, run <code>codex agents</code> to connect to the persistent app server
+locally. To connect another device later, run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>codex<span class="w"> </span>remote-control<span class="w"> </span>pair
 </code></pre></div>
-<p>Alternatives: forward the callback port when connecting over SSH
-(<code>ssh -L 1455:localhost:1455</code>, using the connection details from
-<code>limactl show-ssh NAME</code>), or copy an existing <code>~/.codex/auth.json</code> from a
-machine you've already signed in on — for a <code>sand</code> VM, use the TUI's Upload
-action to move the file in.</p>
-<p><strong>Important:</strong> Codex offers <strong>no CLI-reachable remote control or phone
-notifications</strong> — those features require the Codex desktop app on macOS or
-Windows, which uses QR-code device pairing. If you're choosing between Claude
-Code and Codex, do not expect phone alerts for Codex sessions from the VM; use
-Claude Code if you need Claude app notifications.</p>
+<p>If you decline remote control, <code>sand</code> remembers that choice and opens Codex
+normally. Later bare runs, commands with arguments, and non-interactive uses
+continue directly to the ordinary Codex CLI without another onboarding prompt.</p>
 
 
 
