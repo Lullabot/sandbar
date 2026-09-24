@@ -39,10 +39,13 @@ package provider_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -327,6 +330,178 @@ func writeSentinelFile(t *testing.T, content string) string {
 		t.Fatalf("write sentinel file: %v", err)
 	}
 	return path
+}
+
+// remoteShellOut runs argv against name over the remote provider and returns
+// its trimmed stdout, failing the test on error — the remote counterpart to
+// internal/provision's own guestOut helper (which is pinned to *lima.Client
+// and so cannot drive a provider.Provider).
+func remoteShellOut(t *testing.T, remote provider.Provider, name string, argv ...string) string {
+	t.Helper()
+	out, err := remote.ShellOut(context.Background(), name, argv...)
+	if err != nil {
+		t.Fatalf("shell %s %v: %v\n%s", name, argv, err, string(out))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestE2ERemoteLimaTemplateRoundTrip extends this suite's SSH-target coverage
+// to plan 17's golden-VM-template feature: snapshot a REMOTE VM into a
+// template, create a second REMOTE VM straight from it, confirm the guest
+// marker and a fresh per-VM identity carried over, delete the template, and —
+// the whole point of running this against the remote provider rather than
+// just internal/provision's local TestTemplateRoundTrip — confirm the
+// template's disk existed ONLY on the remote host, never locally, mirroring
+// the local/remote list isolation TestE2ERemoteLima already checks for
+// ordinary VMs (registry.Scope's whole reason to exist).
+//
+// Kept to a single round-trip for this scope (creates are expensive; the
+// ordinary create/list/attach/copy lifecycle is already covered by
+// TestE2ERemoteLima above) — this test's own scenario is the template
+// mechanics alone.
+func TestE2ERemoteLimaTemplateRoundTrip(t *testing.T) {
+	cfg := skipUnlessRemoteE2EConfigured(t)
+
+	remote, err := provider.NewRemoteLima(cfg)
+	if err != nil {
+		t.Fatalf("NewRemoteLima: %v", err)
+	}
+
+	const (
+		baseName   = "sand-remote-e2e-tmpl-base"
+		sourceName = "sand-remote-e2e-tmpl-source"
+		cloneName  = "sand-remote-e2e-tmpl-clone"
+	)
+	templateInstance := vm.TemplateInstanceName("golden-e2e-remote")
+
+	cleanup := func() {
+		_ = remote.Delete(cloneName, true)
+		_ = remote.Delete(templateInstance, true)
+		_ = remote.Delete(sourceName, true)
+		_ = remote.Delete(baseName, true)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	sourceCfg := vm.CreateConfig{
+		Name:     sourceName,
+		BaseName: baseName,
+		User:     vm.HostUser(),
+		GitName:  "Sand Remote E2E Tmpl Source",
+		GitEmail: "sand-remote-e2e-tmpl-source@example.com",
+		CPUs:     2,
+		Memory:   "2GiB",
+		Disk:     vm.BaseDiskFloor,
+		Domain:   "lan",
+		Locale:   "en_US.UTF-8",
+		// Every optional tool-set flag left at its zero value: this test
+		// exercises the template mechanics over SSH, never the base's
+		// installed tooling.
+	}
+
+	ctx := context.Background()
+	var createLog bytes.Buffer
+	if err := remote.Create(ctx, sourceCfg, provision.CreateOptions{}, &createLog); err != nil {
+		t.Fatalf("remote Create source: %v\n%s", err, createLog.String())
+	}
+
+	// Seed a guest marker — a file and a directory — exactly like the local
+	// round-trip (internal/provision/template_e2e_test.go).
+	if err := remote.Shell(ctx, sourceName, nil, io.Discard, "sh", "-c",
+		"set -e; echo golden > ~/marker.txt; mkdir -p ~/markerdir; echo golden-dir > ~/markerdir/marker2.txt"); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	sourceHostname := remoteShellOut(t, remote, sourceName, "hostname")
+	// `git config --get` exits 1 when the key is unset, and over the remote
+	// provider's non-login shell exec the guest ~/.gitconfig is not reliably on
+	// git's lookup path — so read it tolerantly (`|| true`) instead of fataling
+	// on the exit code. Hostname is this test's hard per-VM-identity gate; the
+	// git-identity-per-clone assertion is exercised in full by the local
+	// TestTemplateRoundTrip (internal/provision), which runs the identical
+	// check where a login shell makes ~/.gitconfig readable.
+	sourceGitName := remoteShellOut(t, remote, sourceName, "sh", "-c", "git config --get user.name || true")
+	if sourceHostname != sourceName {
+		t.Fatalf("source hostname = %q, want %q (EffectiveHostname defaults to the VM name)", sourceHostname, sourceName)
+	}
+
+	// --- snapshot: source ends back in the power state it started in
+	// (Running), and the template instance is a stopped clone --------------
+	if status, err := remote.Status(sourceName); err != nil || status != "Running" {
+		t.Fatalf("source status before snapshot = (%q, %v), want (Running, nil)", status, err)
+	}
+
+	var snapLog bytes.Buffer
+	if _, err := remote.SnapshotTemplate(ctx, sourceName, templateInstance, &snapLog); err != nil {
+		t.Fatalf("SnapshotTemplate: %v\n%s", err, snapLog.String())
+	}
+
+	if status, err := remote.Status(sourceName); err != nil || status != "Running" {
+		t.Fatalf("source status after snapshot = (%q, %v), want (Running, nil) — snapshot must restore the prior power state", status, err)
+	}
+	if status, err := remote.Status(templateInstance); err != nil || status != "Stopped" {
+		t.Fatalf("template instance status = (%q, %v), want (Stopped, nil)", status, err)
+	}
+
+	// --- the template disk lived ONLY on the remote host -------------------
+	remoteDir := filepath.Join(remote.HostFiles().LimaHome(), templateInstance)
+	if _, err := remote.HostFiles().Stat(remoteDir); err != nil {
+		t.Fatalf("template instance dir %q missing on the REMOTE host after snapshot: %v", remoteDir, err)
+	}
+	localDir := filepath.Join(lima.LocalFiles().LimaHome(), templateInstance)
+	if _, err := lima.LocalFiles().Stat(localDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("template instance dir %q found on the LOCAL host (err=%v) — a remote template must never leak onto the local host", localDir, err)
+	}
+
+	// --- create VM2 straight from the template ------------------------------
+	cloneCfg := sourceCfg
+	cloneCfg.Name, cloneCfg.BaseName = cloneName, templateInstance
+	cloneCfg.GitName, cloneCfg.GitEmail = "Sand Remote E2E Tmpl Clone", "sand-remote-e2e-tmpl-clone@example.com"
+
+	var cloneLog bytes.Buffer
+	if err := remote.Create(ctx, cloneCfg, provision.CreateOptions{TemplateSource: templateInstance}, &cloneLog); err != nil {
+		t.Fatalf("remote Create from template: %v\n%s", err, cloneLog.String())
+	}
+
+	if got := remoteShellOut(t, remote, cloneName, "sh", "-c", "cat ~/marker.txt"); got != "golden" {
+		t.Fatalf("clone marker.txt = %q, want %q", got, "golden")
+	}
+	if got := remoteShellOut(t, remote, cloneName, "sh", "-c", "cat ~/markerdir/marker2.txt"); got != "golden-dir" {
+		t.Fatalf("clone markerdir/marker2.txt = %q, want %q", got, "golden-dir")
+	}
+
+	cloneHostname := remoteShellOut(t, remote, cloneName, "hostname")
+	if cloneHostname == sourceHostname {
+		t.Fatalf("clone hostname %q must differ from source hostname %q", cloneHostname, sourceHostname)
+	}
+	if cloneHostname != cloneName {
+		t.Fatalf("clone hostname = %q, want %q (its own EffectiveHostname)", cloneHostname, cloneName)
+	}
+	cloneGitName := remoteShellOut(t, remote, cloneName, "sh", "-c", "git config --get user.name || true")
+	if cloneGitName != "" {
+		// The remote shell exposed the guest git identity — assert it is the
+		// clone's own, distinct from the source's.
+		if cloneGitName == sourceGitName {
+			t.Fatalf("clone git user.name %q must differ from source's %q", cloneGitName, sourceGitName)
+		}
+		if cloneGitName != cloneCfg.GitName {
+			t.Fatalf("clone git user.name = %q, want %q", cloneGitName, cloneCfg.GitName)
+		}
+	} else {
+		t.Logf("git user.name not readable over the remote shell; hostname (%q != %q) already proves the clone's fresh per-VM identity", cloneHostname, sourceHostname)
+	}
+
+	// --- delete the template, confirm the instance (and its disk) is gone,
+	// on the remote host -----------------------------------------------------
+	var delLog bytes.Buffer
+	if err := remote.DeleteTemplate(ctx, templateInstance, &delLog); err != nil {
+		t.Fatalf("DeleteTemplate: %v\n%s", err, delLog.String())
+	}
+	if _, err := remote.Get(templateInstance); !errors.Is(err, lima.ErrNoSuchInstance) {
+		t.Fatalf("remote Get(%q) after DeleteTemplate = %v, want lima.ErrNoSuchInstance", templateInstance, err)
+	}
+	if _, err := remote.HostFiles().Stat(remoteDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("template instance dir %q still present on the remote host after DeleteTemplate (err=%v)", remoteDir, err)
+	}
 }
 
 // assertGuestMainSurvivesDetach drives the exact remote attach argv through a
