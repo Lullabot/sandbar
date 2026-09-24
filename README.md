@@ -70,6 +70,15 @@ runs inside the VM, sends the diff to your browser through a loopback
 connection, and saves your comments in the checkout for the agent to read.
 See [Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
 
+`sand` also supports **golden templates** — named, reusable clone sources you
+can snapshot from an existing VM. Once you've set up a VM with project-specific
+or team-specific tools and configuration, press `t` on its tile to save it as a
+template, then create new VMs from that template with `sand create --template <name>`
+or via the TUI's Source selector. Every clone starts from your saved setup instead
+of rebuilding the shared base, then receives the normal finalize pass. See
+[Golden Templates](https://lullabot.github.io/sandbar/latest/using-sand/golden-templates/)
+for details.
+
 ## Development
 
 Building from a checkout, running tests, and how `sand` embeds and runs

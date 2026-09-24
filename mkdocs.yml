@@ -72,6 +72,7 @@ nav:
     - CLI Reference: using-sand/cli-reference.md
     - Where VMs Run: using-sand/connection-profiles.md
     - Proxmox VE Setup: using-sand/proxmox.md
+    - Golden Templates: using-sand/golden-templates.md
     - Secrets: using-sand/secrets.md
     - Shells and Files: using-sand/files-and-shells.md
     - Web Servers and Ports: using-sand/web-servers.md

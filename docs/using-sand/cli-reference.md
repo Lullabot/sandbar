@@ -1,11 +1,13 @@
 # CLI Reference
 
-There are eight entry points:
+There are nine entry points:
 
 - [`sand`](#sand) — no arguments — launches the interactive TUI.
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand reset NAME`](#sand-reset-name) — rebuild an existing VM from its base
   image, optionally preserving selected directories or the whole guest home.
+- [`sand template`](#sand-template) — snapshot, list, and delete golden VM
+  templates.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
   tmux session.
 - [`sand paste-image NAME`](#sand-paste-image-name) — stage an image from the
@@ -70,6 +72,7 @@ not a prompt.
 | `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sand reset NAME`](#sand-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
+| `--template` | string | *(empty)* | Clone from the named [golden template](golden-templates.md), bypassing the shared base. Mutually exclusive with `--rebuild`, `--recreate`, and an explicit `--base-name`. |
 | `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | remembered, initially `false` | Install current Claude Code in this VM. |
 | `--with-codex` | bool | remembered, initially `false` | Install current Codex in this VM. |
@@ -89,6 +92,10 @@ flags override them. Reset and recreate do not change the global preferences.
 The dependency flags `--with-ddev`, `--with-go`, and `--with-java` configure
 the shared base image. Omitted dependency flags adopt its version stamp;
 explicit flags override it. Changing agents alone does not rebuild the base.
+
+When `--template` is set, the saved template is the clone source and the
+shared base is not inspected or rebuilt. The new VM records that provenance,
+so `sand reset NAME` continues cloning from the same template.
 
 ### VM names
 
@@ -531,6 +538,26 @@ Flags:
   -user string
     	Primary VM user (default: whatever this VM has)
 ```
+
+## `sand template`
+
+Golden templates are named snapshots of managed VMs. They are scoped to a
+Connection Profile, just like VMs.
+
+```sh
+sand template snapshot dev golden
+sand template list
+sand create --name next --template golden
+sand template delete golden
+```
+
+`snapshot` briefly stops a running source so the clone is consistent, then
+restores its original power state. `list` reports size, source, creation date,
+and whether the recorded playbook version is current. `delete` warns about
+dependent VMs but does not delete them; those VMs keep running but cannot be
+reset from the removed template. All subcommands accept `--profile`.
+
+See [Golden Templates](golden-templates.md) for the complete workflow.
 
 ## `sand shell NAME`
 
