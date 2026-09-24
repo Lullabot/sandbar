@@ -25,16 +25,17 @@ For each task:
    assignment table.
 2. Apply the rubric guardrails — especially the **risk floor** (security, data
    migration, auth, money, concurrency, or verification-gate tasks never go
-   below `sonnet` / `gpt-5.6-sol` + `high`) and **default to `sonnet` /
-   `gpt-5.6-terra` + `medium`** when unsure.
-3. Set both `models.anthropic` (`haiku` | `sonnet` | `opus`) and
-   `models.openai` (`gpt-5.6-luna` | `gpt-5.6-terra` | `gpt-5.6-sol` |
-   `gpt-6-astra`), plus `effort` (`low` | `medium` | `high` | `xhigh`). Never
-   leave any of them unset.
+   below `claude-opus-5-5` / `gpt-6-sol` + `high`) and **default to
+   `claude-sonnet-5` / `gpt-6-sol` + `medium`** when unsure.
+3. Set both `models.anthropic` (`claude-haiku-4-5` | `claude-sonnet-5` |
+   `claude-opus-5-5`) and `models.openai` (`gpt-6-luna` | `gpt-6-sol`), plus
+   `effort` (`low` | `medium` | `high` | `xhigh`). Never leave any unset.
+   Never use Fable, Astra, or deprecated models; never assign `high` or
+   `xhigh` effort to an economy model.
 
-Bias toward the cheapest tier that can plausibly complete the task correctly —
-cost is a first-class constraint. Reserve `opus` / `gpt-6-astra` + `xhigh` for
-tasks that genuinely need the reasoning.
+Bias toward the least costly model that can plausibly complete the task
+correctly. Upgrade the model before increasing effort; do not compensate for
+an underpowered model with more effort.
 
 ## 3. Update Plan with Blueprint
 
