@@ -44,3 +44,83 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+
+- name: Ensure ~/.config/sandbar directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/sandbar"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0700"
+
+- name: Install Codex first-run remote-control wrapper
+  ansible.builtin.copy:
+    src: codex-shell-wrapper.sh
+    dest: "{{ user_home }}/.config/sandbar/codex-shell-wrapper.sh"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+
+- name: Ensure user systemd directory exists for Codex
+  ansible.builtin.file:
+    path: "{{ user_home }}/.config/systemd/user"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0755"
+
+- name: Install disabled Codex boot service
+  ansible.builtin.copy:
+    src: sandbar-codex-app-server.service
+    dest: "{{ user_home }}/.config/systemd/user/sandbar-codex-app-server.service"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"
+
+# VMs that completed onboarding before the boot service was introduced already
+# have the marker, so their wrapper will not run the opt-in path again.
+- name: Check for prior Codex remote-control onboarding
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/sandbar/codex-remote-control-onboarding-complete"
+  register: codex_onboarding_marker
+
+- name: Check Codex daemon settings
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.codex/app-server-daemon/settings.json"
+  register: codex_daemon_settings
+
+- name: Read existing Codex daemon settings
+  ansible.builtin.slurp:
+    src: "{{ user_home }}/.codex/app-server-daemon/settings.json"
+  register: codex_daemon_settings_content
+  when:
+    - codex_onboarding_marker.stat.exists
+    - codex_daemon_settings.stat.exists
+
+- name: Enable and start Codex boot service for existing opt-ins
+  ansible.builtin.systemd_service:
+    name: sandbar-codex-app-server.service
+    scope: user
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  become_user: "{{ user_name }}"
+  environment:
+    HOME: "{{ user_home }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[user_name][1] }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[user_name][1] }}/bus"
+  when:
+    - codex_onboarding_marker.stat.exists
+    - codex_daemon_settings.stat.exists
+    - (codex_daemon_settings_content.content | b64decode | from_json).remoteControlEnabled | default(false) | bool
+
+- name: Load Codex first-run remote-control wrapper from ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    line: '. "$HOME/.config/sandbar/codex-shell-wrapper.sh"'
+    regexp: '^\. "\$HOME/\.config/sandbar/codex-shell-wrapper\.sh"$'
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: "0644"

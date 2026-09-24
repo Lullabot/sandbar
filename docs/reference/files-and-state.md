@@ -75,7 +75,7 @@ preserves these paths relative to the guest user's home:
 | Agent | Paths |
 | --- | --- |
 | Claude Code | `~/.claude`, `~/.claude.json` |
-| Codex | `~/.codex` |
+| Codex | `~/.codex`, `~/.config/sandbar/codex-remote-control-onboarding-complete` |
 | OpenCode | `~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode` |
 | Pi | `~/.pi/agent` |
 
@@ -87,7 +87,11 @@ the VM's recorded selections, including manual installs. The data passes through
 host temporary directory during reset. See [Security Model](security-model.md)
 before preserving state from a VM you do not trust.
 
-Source: `internal/provision/staging.go` (`AgentStatePaths`).
+The Sandbar Codex marker remembers whether remote control onboarding was
+accepted or declined. When accepted, provisioning reinstalls and starts the
+user app-server service using the preserved Codex daemon settings.
+
+Source: `internal/provision/preserve.go` (`AgentStatePaths`).
 
 ## Guest paths
 

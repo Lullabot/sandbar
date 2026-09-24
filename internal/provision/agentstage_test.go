@@ -37,7 +37,7 @@ func (localArchiveGuest) ShellOut(ctx context.Context, _ string, args ...string)
 
 func TestAgentArchiveRoundTripWithMissingPaths(t *testing.T) {
 	source, dest := t.TempDir(), t.TempDir()
-	files := []string{".claude/settings.json", ".claude.json", ".codex/auth.json", ".config/opencode/opencode.json", ".local/share/opencode/auth.json", ".local/state/opencode/state.json", ".pi/agent/auth.json"}
+	files := []string{".claude/settings.json", ".claude.json", ".codex/auth.json", ".config/sandbar/codex-remote-control-onboarding-complete", ".config/opencode/opencode.json", ".local/share/opencode/auth.json", ".local/state/opencode/state.json", ".pi/agent/auth.json"}
 	for _, p := range files {
 		full := filepath.Join(source, p)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
