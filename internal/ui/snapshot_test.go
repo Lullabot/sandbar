@@ -12,6 +12,9 @@ package ui
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +22,8 @@ import (
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestSnapshotVerbStartsJob proves the signature behavior this task adds to
@@ -74,6 +79,191 @@ func TestSnapshotPromptRejectsInvalidName(t *testing.T) {
 	}
 	if m.snapshotErr == nil {
 		t.Fatal("expected a validation error to be surfaced")
+	}
+}
+
+func TestLaunchSnapshotRejectsCollisionsAndMissingProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, *model, registry.Scope)
+		scope func(registry.Scope) registry.Scope
+	}{
+		{
+			name: "existing template",
+			setup: func(t *testing.T, m *model, scope registry.Scope) {
+				t.Helper()
+				if err := m.reg.AddTemplate(registry.Template{Name: "golden", Scope: scope}); err != nil {
+					t.Fatalf("seed template: %v", err)
+				}
+			},
+			scope: func(scope registry.Scope) registry.Scope { return scope },
+		},
+		{
+			name: "managed VM",
+			setup: func(t *testing.T, m *model, scope registry.Scope) {
+				t.Helper()
+				if err := m.reg.AddScoped(vm.CreateConfig{Name: "golden"}, scope); err != nil {
+					t.Fatalf("seed VM: %v", err)
+				}
+			},
+			scope: func(scope registry.Scope) registry.Scope { return scope },
+		},
+		{
+			name:  "base image",
+			setup: func(t *testing.T, _ *model, _ registry.Scope) {},
+			scope: func(scope registry.Scope) registry.Scope { return scope },
+		},
+		{
+			name:  "missing provider",
+			setup: func(t *testing.T, _ *model, _ registry.Scope) {},
+			scope: func(registry.Scope) registry.Scope { return registry.Scope{Provider: "unavailable"} },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			scope := tc.scope(m.members[0].scope)
+			tc.setup(t, &m, scope)
+			m.openSnapshotPrompt(boardVM{VM: vm.VM{Name: "claude"}, scope: scope})
+			name := "golden"
+			if tc.name == "base image" {
+				name = vm.DefaultCreateConfig().BaseName
+			}
+			m.snapshotInput.SetValue(name)
+
+			next, cmd := m.launchSnapshot()
+			got := next.(model)
+			if cmd != nil {
+				t.Fatal("a conflicting name or missing provider started a snapshot")
+			}
+			if got.snapshotErr == nil {
+				t.Fatal("expected the rejected snapshot to explain why it could not start")
+			}
+		})
+	}
+}
+
+func TestSnapshotPromptEscapeReturnsToBoard(t *testing.T) {
+	m := newTestModel(t)
+	m.openSnapshotPrompt(boardVM{VM: vm.VM{Name: "claude"}, scope: m.members[0].scope})
+	next, cmd := pressDispatch(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatal("escape should not start a command")
+	}
+	if next.view != viewBoard {
+		t.Fatalf("escape left the snapshot prompt on view %v, want board", next.view)
+	}
+}
+
+func TestFinishSnapshotRecordsOnlySuccessfulSnapshots(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		canceled bool
+		err      error
+		wantSave bool
+	}{
+		{name: "success", wantSave: true},
+		{name: "canceled", canceled: true},
+		{name: "failed", err: io.ErrUnexpectedEOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			scope := m.members[0].scope
+			key := snapshotKey(scope, "claude")
+			created := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+			cfg := vm.CreateConfig{Name: "claude", BaseName: vm.TemplateInstanceName("golden")}
+			m.pendingSnapshots[key] = pendingSnapshot{
+				name: "golden", cfg: cfg, createdAt: created,
+				outcome: &provision.SnapshotResult{PlaybookVersion: "playbook-v1", ToolsetKey: "tools-v1"},
+			}
+
+			m.finishSnapshot(key, tc.canceled, tc.err)
+
+			if _, pending := m.pendingSnapshots[key]; pending {
+				t.Fatal("snapshot completion left pending metadata behind")
+			}
+			got, saved := m.reg.TemplateInScope("golden", scope)
+			if saved != tc.wantSave {
+				t.Fatalf("template saved = %v, want %v", saved, tc.wantSave)
+			}
+			if !tc.wantSave {
+				return
+			}
+			if got.Source != "claude" || got.Config != cfg || !got.CreatedAt.Equal(created) {
+				t.Errorf("saved template = %#v; source/config/created time were not preserved", got)
+			}
+			if got.PlaybookVersion != "playbook-v1" || got.ToolsetKey != "tools-v1" {
+				t.Errorf("saved template metadata = %#v; snapshot result was not preserved", got)
+			}
+		})
+	}
+}
+
+func TestFinishSnapshotIgnoresUnknownJob(t *testing.T) {
+	m := newTestModel(t)
+	m.finishSnapshot(snapshotKey(m.members[0].scope, "missing"), false, nil)
+	if got := m.reg.TemplatesInScope(m.members[0].scope); len(got) != 0 {
+		t.Fatalf("unknown snapshot job recorded templates: %+v", got)
+	}
+}
+
+func TestFinishSnapshotReportsRegistryPersistenceFailure(t *testing.T) {
+	m := newTestModel(t)
+	scope := m.members[0].scope
+	key := snapshotKey(scope, "claude")
+	m.pendingSnapshots[key] = pendingSnapshot{
+		name: "golden",
+		cfg:  vm.CreateConfig{Name: "claude"},
+		outcome: &provision.SnapshotResult{
+			PlaybookVersion: "playbook-v1",
+			ToolsetKey:      "tools-v1",
+		},
+	}
+
+	// XDG_DATA_HOME is a per-test temp dir from newTestModel/isolateHostState.
+	// Replace only that test's registry parent with a regular file so the atomic
+	// save fails safely without touching developer state.
+	registryDir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "sandbar")
+	if err := os.RemoveAll(registryDir); err != nil {
+		t.Fatalf("remove isolated registry directory: %v", err)
+	}
+	if err := os.WriteFile(registryDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("block isolated registry directory: %v", err)
+	}
+
+	m.finishSnapshot(key, false, nil)
+
+	if _, ok := m.reg.TemplateInScope("golden", scope); !ok {
+		t.Fatal("the successfully captured template should remain available in memory")
+	}
+	found := false
+	for _, log := range m.messages {
+		if strings.Contains(log.text, "could not be recorded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no user-visible warning about failed registry persistence in logs: %+v", m.messages)
+	}
+}
+
+func TestDeleteTemplateCommandReportsProviderResult(t *testing.T) {
+	scope := registry.LocalScope
+	called := false
+	p := &providerfake.Provider{DeleteTemplateFunc: func(_ context.Context, instance string, _ io.Writer) error {
+		called = true
+		if instance != vm.TemplateInstanceName("golden") {
+			t.Errorf("DeleteTemplate instance = %q, want template instance name", instance)
+		}
+		return nil
+	}}
+	msg := deleteTemplateCmd(p, scope, "golden", vm.TemplateInstanceName("golden"))()
+	done, ok := msg.(actionDoneMsg)
+	if !ok {
+		t.Fatalf("deleteTemplateCmd returned %T, want actionDoneMsg", msg)
+	}
+	if !called || done.action != "delete template" || done.name != "golden" || done.scope != scope || done.err != nil {
+		t.Fatalf("delete result = %#v, provider called=%v", done, called)
 	}
 }
 

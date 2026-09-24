@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // proxmoxtemplate_test.go exercises the golden-template methods
@@ -79,6 +80,87 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	if !m.sawPath("/nodes/pve1/qemu/900/template") {
 		t.Error("never converted the clone to a template")
 	}
+}
+
+func TestProxmoxSnapshotResultUsesProvenanceAndPlaybookVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		locateErr error
+		wantHash  bool
+	}{
+		{name: "playbook available", wantHash: true},
+		{name: "playbook unavailable", locateErr: fmt.Errorf("playbook not found")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, configs := newStatefulConfigMock(t, 100)
+			p := newProxmoxForTest(t, m)
+			p.setVMID("web", 100)
+			m.data("/nodes/pve1/qemu/100/status/current", "{\"vmid\":100,\"name\":\"web\",\"status\":\"stopped\"}")
+			pv := NewProvenance(vm.CreateConfig{Name: "web", BaseName: "base", WithClaude: true}, false)
+			if err := p.MarkManaged(context.Background(), "web", pv); err != nil {
+				t.Fatalf("MarkManaged: %v", err)
+			}
+			if configs.get(100)["description"] == "" {
+				t.Fatal("MarkManaged did not persist the provenance fixture")
+			}
+
+			oldLocate := locatePlaybookFn
+			locatePlaybookFn = func() (string, error) {
+				if tc.locateErr != nil {
+					return "", tc.locateErr
+				}
+				return t.TempDir(), nil // an empty fileset still has a deterministic version
+			}
+			t.Cleanup(func() { locatePlaybookFn = oldLocate })
+
+			got := p.snapshotResult(context.Background(), "web")
+			if got.ToolsetKey != pv.Config.ToolsetKey() {
+				t.Errorf("ToolsetKey = %q, want %q", got.ToolsetKey, pv.Config.ToolsetKey())
+			}
+			if (got.PlaybookVersion != "") != tc.wantHash {
+				t.Errorf("PlaybookVersion = %q, want present=%v", got.PlaybookVersion, tc.wantHash)
+			}
+		})
+	}
+}
+
+func TestProxmoxRestartReportsPowerFailuresAndSkipsRunningVM(t *testing.T) {
+	t.Run("already running", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "running")
+
+		if err := p.restart(context.Background(), "web"); err != nil {
+			t.Fatalf("restart of an already-running VM: %v", err)
+		}
+		if m.sawPath("/nodes/pve1/qemu/101/status/start") {
+			t.Fatal("restart sent a start request for a VM that was already running")
+		}
+	})
+
+	t.Run("start request rejected", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "stopped")
+		m.fail("/nodes/pve1/qemu/101/status/start", http.StatusInternalServerError, "start rejected")
+
+		if err := p.restart(context.Background(), "web"); err == nil || !strings.Contains(err.Error(), "start rejected") {
+			t.Fatalf("restart error = %v, want start rejection", err)
+		}
+	})
+
+	t.Run("start task failed", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "stopped")
+		upid := "UPID:pve1:0:0:0:qmstart:101:u:"
+		m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", upid))
+		m.failTask(upid, "start task failed")
+
+		if err := p.restart(context.Background(), "web"); err == nil || !strings.Contains(err.Error(), "start task failed") {
+			t.Fatalf("restart error = %v, want task failure", err)
+		}
+	})
 }
 
 // TestProxmoxSnapshotFromRunningSourceRestartsIt verifies the running case: the

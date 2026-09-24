@@ -15,15 +15,13 @@
   GitHub repo URL:   >                                                                            
   GitHub token:      >                                                                            
                                                                                                   
-  [x] Install Claude Code                                                                         
+  [ ] Install Claude Code                                                                         
   [ ] Install OpenAI Codex                                                                        
+  [ ] Install OpenCode                                                                            
+  [ ] Install Pi                                                                                  
   [x] Install DDEV                                                                                
-  [x] Install Go                                                                                  
-  [x] Install Java                                                                                
-                                                                                                  
   │ ←/→ to pick a clone source: the shared base image, or a saved golden template. Choosing a     
   │ template skips the base entirely and hides the rebuild toggle below. Press d to delete the    
   │ highlighted template.                                                                         
-                                                                                                  
   ↑ prev field • ↓/enter next field • ctrl+s create • esc back                                    
                                                                                                   

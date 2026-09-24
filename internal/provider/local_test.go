@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"reflect"
 	"testing"
@@ -163,6 +164,30 @@ func TestLocalProviderAttachArgv(t *testing.T) {
 	}
 	// The provider must NOT run limactl to build the argv (it is pure).
 	// (No fakeRunner call is asserted because AttachArgv performs no exec.)
+}
+
+func TestLocalProviderTemplateDelegationsAndControlAttach(t *testing.T) {
+	t.Setenv("LIMA_HOME", t.TempDir())
+	f := &fakeRunner{
+		outputs: map[string][]byte{},
+		err:     errors.New("injected limactl failure"),
+	}
+	p := newLocal(f)
+
+	if err := p.Recreate(context.Background(), vm.CreateConfig{Name: "web"}, provision.CreateOptions{}, io.Discard); err == nil {
+		t.Fatal("Recreate should report the injected delete failure")
+	}
+	if err := p.DeleteTemplate(context.Background(), "sandbar-tmpl-golden", io.Discard); err == nil {
+		t.Fatal("DeleteTemplate should report the injected delete failure")
+	}
+	if got := p.TemplateDiskBytes("sandbar-tmpl-golden"); got != -1 {
+		t.Errorf("TemplateDiskBytes = %d, want -1 when the template disk is absent", got)
+	}
+
+	argv := p.AttachArgvControl(vm.VM{Name: "web"})
+	if len(argv) < 5 || argv[0] != "limactl" || argv[1] != "shell" || argv[2] != "web" {
+		t.Fatalf("AttachArgvControl = %v, want a limactl shell command for web", argv)
+	}
 }
 
 // TestLocalProviderForwardArgvReturnsNil proves local Lima's forwarding seam
