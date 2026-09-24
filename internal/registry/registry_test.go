@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -197,10 +198,11 @@ func TestMigrateLegacyIndex(t *testing.T) {
 }
 
 // TestLoad_UnversionedFileMigrates: a legacy index with no "version" key must
-// load with zero data loss, be rewritten to the current schema (version 3,
-// the (scope,name)-keyed array) with its entry tagged as the local Lima
-// provider ON LOAD (not merely on the next save), and a subsequent save must
-// keep carrying the version and the preserved entry.
+// load with zero data loss, be rewritten to the current schema (version 4,
+// the (scope,name)-keyed array with the (empty) templates array) with its
+// entry tagged as the local Lima provider ON LOAD (not merely on the next
+// save), and a subsequent save must keep carrying the version and the
+// preserved entry.
 func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
@@ -226,14 +228,14 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 		t.Fatalf("old-vm config not preserved: %+v (ok=%v)", cfg, ok)
 	}
 
-	// LoadFrom itself must have already rewritten the file: version 3, and
+	// LoadFrom itself must have already rewritten the file: version 4, and
 	// old-vm tagged as the local Lima provider.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read index after load: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 3`) {
-		t.Fatalf("expected version 3 stamped in file immediately after LoadFrom:\n%s", raw)
+	if !containsStr(string(raw), `"version": 4`) {
+		t.Fatalf("expected version 4 stamped in file immediately after LoadFrom:\n%s", raw)
 	}
 	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
 		t.Fatalf("old-vm entry with CPUs 4 not preserved after migration:\n%s", raw)
@@ -250,8 +252,8 @@ func TestLoad_UnversionedFileMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 3`) {
-		t.Fatalf("expected version 3 stamped in file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 4`) {
+		t.Fatalf("expected version 4 stamped in file:\n%s", raw)
 	}
 	if !containsStr(string(raw), `"old-vm"`) || !containsStr(string(raw), `"CPUs": 4`) {
 		t.Fatalf("old-vm entry with CPUs 4 not preserved after save:\n%s", raw)
@@ -303,8 +305,8 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 	if containsStr(string(raw), "claude-base") {
 		t.Errorf("legacy base name still on disk after migration:\n%s", raw)
 	}
-	if !containsStr(string(raw), `"version": 3`) {
-		t.Errorf("expected version 3 stamped after migration:\n%s", raw)
+	if !containsStr(string(raw), `"version": 4`) {
+		t.Errorf("expected version 4 stamped after migration:\n%s", raw)
 	}
 }
 
@@ -313,9 +315,10 @@ func TestLoad_MigratesLegacyBaseName(t *testing.T) {
 // entries, loaded through the current code, must come back on disk
 // rewritten with BOTH entries tagged as the
 // local Lima provider and the schema version bumped to the current version
-// (3, which folds the v1->v2 provider/base-rename step and the v2->v3
-// (scope,name) re-keying into one load) — no data loss, and the rewrite
-// reuses save()'s existing atomic temp-file+rename path.
+// (4, which folds the v1->v2 provider/base-rename step, the v2->v3
+// (scope,name) re-keying, and the v3->v4 templates-array addition into one
+// load) — no data loss, and the rewrite reuses save()'s existing atomic
+// temp-file+rename path.
 func TestLoad_V1MigratesTwoEntriesToV2WithProviderTag(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	v1 := `{"version":1,"vms":{
@@ -351,15 +354,15 @@ func TestLoad_V1MigratesTwoEntriesToV2WithProviderTag(t *testing.T) {
 		}
 	}
 
-	// The on-disk file itself must be rewritten: version 3, both entries
+	// The on-disk file itself must be rewritten: version 4, both entries
 	// tagged "lima", nothing truncated or lost.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read migrated index: %v", err)
 	}
 	got := string(raw)
-	if !containsStr(got, `"version": 3`) {
-		t.Fatalf("expected version bumped to 3 on disk after migration:\n%s", got)
+	if !containsStr(got, `"version": 4`) {
+		t.Fatalf("expected version bumped to 4 on disk after migration:\n%s", got)
 	}
 	if n := strings.Count(got, `"provider": "lima"`); n != 2 {
 		t.Fatalf(`expected both entries tagged "provider": "lima" (found %d), got:\n%s`, n, got)
@@ -408,8 +411,8 @@ func TestSave_WritesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !containsStr(string(raw), `"version": 3`) {
-		t.Fatalf("expected version 3 in saved file:\n%s", raw)
+	if !containsStr(string(raw), `"version": 4`) {
+		t.Fatalf("expected version 4 in saved file:\n%s", raw)
 	}
 	if containsStr(string(raw), "SENTINEL_TOKEN_DO_NOT_PERSIST") {
 		t.Fatalf("clone token leaked into the index:\n%s", raw)
@@ -478,10 +481,12 @@ func TestScopedSameNameCoexistsAcrossScopes(t *testing.T) {
 }
 
 // TestLoad_V2FixtureMigratesToV3Array captures a v2 (object-keyed) fixture —
-// the on-disk shape every sand wrote before this task — and proves it loads
-// back intact as LocalScope with its config preserved, then gets rewritten on
-// disk as a v3 JSON ARRAY (not the old flat object, which cannot hold two
-// same-named entries) stamped with the new currentVersion.
+// an on-disk shape an old sand once wrote — and proves it loads back intact
+// as LocalScope with its config preserved, then gets rewritten on disk as a
+// JSON ARRAY (not the old flat object, which cannot hold two same-named
+// entries) stamped with the current version (4 — the v1/v2 legacy migration
+// always rewrites straight to currentVersion, not to the intermediate v3
+// shape).
 func TestLoad_V2FixtureMigratesToV3Array(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managed-vms.json")
 	v2 := `{"version":2,"vms":{
@@ -514,11 +519,11 @@ func TestLoad_V2FixtureMigratesToV3Array(t *testing.T) {
 		t.Fatalf("read migrated file: %v", err)
 	}
 	got := string(raw)
-	if !containsStr(got, `"version": 3`) {
-		t.Fatalf("expected version 3 stamped after v2->v3 migration:\n%s", got)
+	if !containsStr(got, `"version": 4`) {
+		t.Fatalf("expected version 4 stamped after v2->v4 migration:\n%s", got)
 	}
 	if !containsStr(got, `"vms": [`) {
-		t.Fatalf("expected v3 array shape for vms (not the old flat object):\n%s", got)
+		t.Fatalf("expected array shape for vms (not the old flat object):\n%s", got)
 	}
 }
 
@@ -554,5 +559,180 @@ func TestScopedAccessorsDoNotCrossProviders(t *testing.T) {
 	}
 	if cfg, ok := r.ConfigInScope("web", LocalScope); !ok || cfg.User != "localuser" {
 		t.Fatalf("ConfigInScope under LocalScope = (%+v, %v), want the local entry", cfg, ok)
+	}
+}
+
+// TestLoad_V3FixtureMigratesToV4 is the load-bearing migration proof this
+// task adds: a REAL v3 fixture — the on-disk shape every sand wrote before
+// this task, VMs present, no templates array at all — must load with every
+// existing VM entry preserved unchanged, yield an empty template set (not an
+// error, not dropped data), and get rewritten on disk as version 4. A reload
+// of that rewritten file must still report the same VMs. This is the
+// additive-migration guarantee the task's acceptance criteria call out
+// explicitly.
+func TestLoad_V3FixtureMigratesToV4(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	// A genuine v3 fixture: the array-of-entries shape, no "templates" key.
+	v3 := `{"version":3,"vms":[
+		{"name":"claude","provider":"lima","base":"sandbar-base","config":{"Name":"claude","BaseName":"sandbar-base","CPUs":8,"Memory":"32GiB"}},
+		{"name":"web","provider":"lima","base":"sandbar-base","config":{"Name":"web","BaseName":"sandbar-base","CPUs":2,"Memory":"8GiB"}}
+	]}`
+	if err := os.WriteFile(path, []byte(v3), 0o600); err != nil {
+		t.Fatalf("seed v3 file: %v", err)
+	}
+
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load v3 file: %v", err)
+	}
+
+	// Every existing VM entry survives, unchanged.
+	for _, tc := range []struct {
+		name string
+		cpus int
+	}{{"claude", 8}, {"web", 2}} {
+		if !r.IsManagedInScope(tc.name, LocalScope) {
+			t.Fatalf("%q should remain managed after v3->v4 migration", tc.name)
+		}
+		cfg, ok := r.ConfigInScope(tc.name, LocalScope)
+		if !ok || cfg.CPUs != tc.cpus {
+			t.Fatalf("%q config not preserved: %+v (ok=%v, want CPUs=%d)", tc.name, cfg, ok, tc.cpus)
+		}
+	}
+
+	// No templates existed in the v3 file: the template set must be empty,
+	// not an error and not repurposed data.
+	if got := r.TemplatesInScope(LocalScope); len(got) != 0 {
+		t.Fatalf("expected empty template set after v3->v4 migration, got %+v", got)
+	}
+
+	// LoadFrom must have already rewritten the file to v4 (best-effort
+	// persist), not merely produced a migrated in-memory registry.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migrated file: %v", err)
+	}
+	if !containsStr(string(raw), `"version": 4`) {
+		t.Fatalf("expected version 4 stamped on disk immediately after LoadFrom:\n%s", raw)
+	}
+
+	// Reload the rewritten file: both VMs are still intact, version is 4.
+	r2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload migrated file: %v", err)
+	}
+	if !r2.IsManagedInScope("claude", LocalScope) || !r2.IsManagedInScope("web", LocalScope) {
+		t.Fatal("VMs should still be managed after reloading the migrated v4 file")
+	}
+	raw2, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after reload: %v", err)
+	}
+	if !containsStr(string(raw2), `"version": 4`) {
+		t.Fatalf("expected version to remain 4 after reload:\n%s", raw2)
+	}
+}
+
+// TestTemplateRoundTrip proves the custom template persistence: AddTemplate
+// writes a template record that survives a fresh LoadFrom (a separate
+// process reading the same file), with every field intact, and it shows up
+// in TemplatesInScope for its owning scope.
+func TestTemplateRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managed-vms.json")
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	created := time.Date(2026, 7, 17, 12, 30, 0, 0, time.UTC)
+	instanceName := vm.TemplateInstanceName("golden")
+	tmpl := Template{
+		Name:            "golden",
+		Scope:           LocalScope,
+		Source:          "claude",
+		CreatedAt:       created,
+		PlaybookVersion: "v2:deadbeef:claude+ddev+go+java",
+		ToolsetKey:      "claude+ddev+go+java",
+		Config: vm.CreateConfig{
+			Name:     instanceName,
+			BaseName: instanceName,
+			CPUs:     4,
+			Memory:   "16GiB",
+			Hostname: "golden",
+		},
+	}
+	if err := r.AddTemplate(tmpl); err != nil {
+		t.Fatalf("add template: %v", err)
+	}
+
+	// Reload from a fresh Registry value backed by the same path — proves the
+	// record was actually persisted, not just held in memory.
+	r2, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got, ok := r2.TemplateInScope("golden", LocalScope)
+	if !ok {
+		t.Fatal("expected the template to round-trip through save/load")
+	}
+	if got.Name != tmpl.Name || got.Scope != tmpl.Scope || got.Source != tmpl.Source ||
+		got.PlaybookVersion != tmpl.PlaybookVersion || got.ToolsetKey != tmpl.ToolsetKey {
+		t.Fatalf("template fields not preserved:\ngot:  %+v\nwant: %+v", got, tmpl)
+	}
+	if !got.CreatedAt.Equal(tmpl.CreatedAt) {
+		t.Fatalf("CreatedAt = %v, want %v", got.CreatedAt, tmpl.CreatedAt)
+	}
+	if got.Config != tmpl.Config {
+		t.Fatalf("Config not preserved:\ngot:  %+v\nwant: %+v", got.Config, tmpl.Config)
+	}
+
+	all := r2.TemplatesInScope(LocalScope)
+	if len(all) != 1 || all[0].Name != "golden" {
+		t.Fatalf("TemplatesInScope(LocalScope) = %+v, want exactly one entry named golden", all)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !containsStr(string(raw), `"templates"`) {
+		t.Fatalf("expected a templates array in the persisted file:\n%s", raw)
+	}
+}
+
+// TestDependentsOfTemplate proves DependentsOfTemplate returns exactly the
+// managed VM names, in a given scope, whose TemplateSource matches the named
+// template — and does not leak a same-named dependent recorded under a
+// different scope. It constructs entries directly (white-box, same package)
+// because wiring TemplateSource into AddScoped's public signature belongs to
+// a later task that actually clones from a template.
+func TestDependentsOfTemplate(t *testing.T) {
+	r := NewEmpty()
+	r.vms[scopedKey{scope: LocalScope, name: "a"}] = entry{Base: "sandbar-tmpl-golden", TemplateSource: "golden"}
+	r.vms[scopedKey{scope: LocalScope, name: "b"}] = entry{Base: "sandbar-tmpl-golden", TemplateSource: "golden"}
+	r.vms[scopedKey{scope: LocalScope, name: "c"}] = entry{Base: "sandbar-tmpl-other", TemplateSource: "other"}
+	r.vms[scopedKey{scope: LocalScope, name: "d"}] = entry{Base: "sandbar-base"}
+
+	remote := Scope{Provider: "lima-ssh", RemoteTarget: "user@host:22"}
+	r.vms[scopedKey{scope: remote, name: "a"}] = entry{Base: "sandbar-tmpl-golden", TemplateSource: "golden"}
+
+	got := r.DependentsOfTemplate(LocalScope, "golden")
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("DependentsOfTemplate(LocalScope, %q) = %v, want [a b]", "golden", got)
+	}
+
+	if got := r.DependentsOfTemplate(LocalScope, "other"); len(got) != 1 || got[0] != "c" {
+		t.Fatalf("DependentsOfTemplate(LocalScope, %q) = %v, want [c]", "other", got)
+	}
+
+	if got := r.DependentsOfTemplate(LocalScope, "nonexistent"); len(got) != 0 {
+		t.Fatalf("DependentsOfTemplate for an unused template = %v, want none", got)
+	}
+
+	// The remote scope's same-named dependent must not leak into the local
+	// scope's result (already covered above: len==2, not 3), and must be
+	// visible under its OWN scope.
+	if got := r.DependentsOfTemplate(remote, "golden"); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("DependentsOfTemplate(remote, golden) = %v, want [a]", got)
 	}
 }
