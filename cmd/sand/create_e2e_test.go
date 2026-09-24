@@ -147,7 +147,7 @@ func TestE2EHeadlessCreateRecordsManaged(t *testing.T) {
 		t.Fatalf("LoadFrom(%s): %v", regPath, err)
 	}
 
-	if err := doHeadlessCreate(context.Background(), reg, prov, cfg, registry.LocalScope, false, false, io.Discard); err != nil {
+	if err := doHeadlessCreate(context.Background(), reg, prov, cfg, registry.LocalScope, false, false, "", io.Discard); err != nil {
 		t.Fatalf("doHeadlessCreate: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestE2ERecreateRoundTrip(t *testing.T) {
 		managedName, "Sand CmdE2E Recreate", "sand-cmde2e-recreate@example.com"
 
 	reg := registry.NewEmpty() // in-memory: disk persistence is proved by the other test
-	if err := doHeadlessCreate(context.Background(), reg, prov, managedCfg, registry.LocalScope, false, false, io.Discard); err != nil {
+	if err := doHeadlessCreate(context.Background(), reg, prov, managedCfg, registry.LocalScope, false, false, "", io.Discard); err != nil {
 		t.Fatalf("initial create: %v", err)
 	}
 	if !reg.IsManaged(managedName) {
@@ -221,7 +221,7 @@ func TestE2ERecreateRoundTrip(t *testing.T) {
 		t.Fatalf("plant pre-recreate sentinel: %v", err)
 	}
 
-	if err := doHeadlessCreate(context.Background(), reg, prov, managedCfg, registry.LocalScope, true, false, io.Discard); err != nil {
+	if err := doHeadlessCreate(context.Background(), reg, prov, managedCfg, registry.LocalScope, true, false, "", io.Discard); err != nil {
 		t.Fatalf("--recreate on a sand-managed VM should succeed, got: %v", err)
 	}
 
@@ -271,7 +271,7 @@ func TestE2ERecreateRoundTrip(t *testing.T) {
 	}
 
 	unmanagedReg := registry.NewEmpty() // no entry for unmanagedName: it is genuinely unmanaged
-	err = doHeadlessCreate(context.Background(), unmanagedReg, prov, unmanagedCfg, registry.LocalScope, true, false, io.Discard)
+	err = doHeadlessCreate(context.Background(), unmanagedReg, prov, unmanagedCfg, registry.LocalScope, true, false, "", io.Discard)
 	if err == nil {
 		t.Fatal("--recreate against an unmanaged VM should be refused, got a nil error")
 	}
