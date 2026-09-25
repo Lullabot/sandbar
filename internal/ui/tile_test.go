@@ -833,8 +833,8 @@ func TestTileDiskAllocationRendersSizeWithoutBarOrWarning(t *testing.T) {
 // Both warnings can be active on the same tile simultaneously.
 func TestTileBothMemAndDiskWarningsSimultaneously(t *testing.T) {
 	in := baseTileInput()
-	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% free
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // 2% host free
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% disk free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980, HostMemUsed: 980, HasHostMem: true} // 2% guest memory available
 	in.HasSample = true
 
 	got := ansi.Strip(renderTile(in))
