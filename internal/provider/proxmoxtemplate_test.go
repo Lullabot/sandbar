@@ -3,7 +3,6 @@ package provider
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // proxmoxtemplate_test.go exercises the golden-template methods
@@ -66,7 +66,7 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	m.data("/nodes/pve1/qemu/900/template", fmt.Sprintf("%q", tmplUPID))
 	m.okTask(tmplUPID)
 
-	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
+	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
 		t.Fatalf("SnapshotTemplate: %v", err)
 	}
 	// A stopped source must never be powered: no stop, and — crucially — no
@@ -80,6 +80,87 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	if !m.sawPath("/nodes/pve1/qemu/900/template") {
 		t.Error("never converted the clone to a template")
 	}
+}
+
+func TestProxmoxSnapshotResultUsesProvenanceAndPlaybookVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		locateErr error
+		wantHash  bool
+	}{
+		{name: "playbook available", wantHash: true},
+		{name: "playbook unavailable", locateErr: fmt.Errorf("playbook not found")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, configs := newStatefulConfigMock(t, 100)
+			p := newProxmoxForTest(t, m)
+			p.setVMID("web", 100)
+			m.data("/nodes/pve1/qemu/100/status/current", "{\"vmid\":100,\"name\":\"web\",\"status\":\"stopped\"}")
+			pv := NewProvenance(vm.CreateConfig{Name: "web", BaseName: "base", WithClaude: true}, false)
+			if err := p.MarkManaged(context.Background(), "web", pv); err != nil {
+				t.Fatalf("MarkManaged: %v", err)
+			}
+			if configs.get(100)["description"] == "" {
+				t.Fatal("MarkManaged did not persist the provenance fixture")
+			}
+
+			oldLocate := locatePlaybookFn
+			locatePlaybookFn = func() (string, error) {
+				if tc.locateErr != nil {
+					return "", tc.locateErr
+				}
+				return t.TempDir(), nil // an empty fileset still has a deterministic version
+			}
+			t.Cleanup(func() { locatePlaybookFn = oldLocate })
+
+			got := p.snapshotResult(context.Background(), "web")
+			if got.ToolsetKey != pv.Config.ToolsetKey() {
+				t.Errorf("ToolsetKey = %q, want %q", got.ToolsetKey, pv.Config.ToolsetKey())
+			}
+			if (got.PlaybookVersion != "") != tc.wantHash {
+				t.Errorf("PlaybookVersion = %q, want present=%v", got.PlaybookVersion, tc.wantHash)
+			}
+		})
+	}
+}
+
+func TestProxmoxRestartReportsPowerFailuresAndSkipsRunningVM(t *testing.T) {
+	t.Run("already running", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "running")
+
+		if err := p.restart(context.Background(), "web"); err != nil {
+			t.Fatalf("restart of an already-running VM: %v", err)
+		}
+		if m.sawPath("/nodes/pve1/qemu/101/status/start") {
+			t.Fatal("restart sent a start request for a VM that was already running")
+		}
+	})
+
+	t.Run("start request rejected", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "stopped")
+		m.fail("/nodes/pve1/qemu/101/status/start", http.StatusInternalServerError, "start rejected")
+
+		if err := p.restart(context.Background(), "web"); err == nil || !strings.Contains(err.Error(), "start rejected") {
+			t.Fatalf("restart error = %v, want start rejection", err)
+		}
+	})
+
+	t.Run("start task failed", func(t *testing.T) {
+		m := newPVEMock(t)
+		p := newProxmoxForTest(t, m)
+		primeName(m, p, "web", 101, "stopped")
+		upid := "UPID:pve1:0:0:0:qmstart:101:u:"
+		m.data("/nodes/pve1/qemu/101/status/start", fmt.Sprintf("%q", upid))
+		m.failTask(upid, "start task failed")
+
+		if err := p.restart(context.Background(), "web"); err == nil || !strings.Contains(err.Error(), "start task failed") {
+			t.Fatalf("restart error = %v, want task failure", err)
+		}
+	})
 }
 
 // TestProxmoxSnapshotFromRunningSourceRestartsIt verifies the running case: the
@@ -105,7 +186,7 @@ func TestProxmoxSnapshotFromRunningSourceRestartsIt(t *testing.T) {
 	m.data("/nodes/pve1/qemu/900/template", fmt.Sprintf("%q", tmplUPID))
 	m.okTask(tmplUPID)
 
-	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
+	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
 		t.Fatalf("SnapshotTemplate: %v", err)
 	}
 	if !m.sawPath("/nodes/pve1/qemu/101/status/shutdown") {
@@ -143,7 +224,7 @@ func TestProxmoxSnapshotFailurePreservesRunningSourceAndCleansUp(t *testing.T) {
 	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
 	m.okTask(delUPID)
 
-	err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard)
+	_, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard)
 	if err == nil {
 		t.Fatal("SnapshotTemplate succeeded despite a conversion failure")
 	}
@@ -177,7 +258,7 @@ func TestProxmoxSnapshotCancelledContextStillRestartsSource(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":"900"}`)
 	})
 
-	err := p.SnapshotTemplate(ctx, "web", "web-golden", io.Discard)
+	_, err := p.SnapshotTemplate(ctx, "web", "web-golden", io.Discard)
 	if err == nil {
 		t.Fatal("expected an error from a cancelled snapshot")
 	}
@@ -198,7 +279,7 @@ func TestProxmoxDeleteTemplateGuardsAgainstNonTemplate(t *testing.T) {
 	// The config says this is NOT a template.
 	m.data("/nodes/pve1/qemu/101/config", `{"name":"web","cores":2}`)
 
-	err := p.DeleteTemplate(context.Background(), "web")
+	err := p.DeleteTemplate(context.Background(), "web", io.Discard)
 	if err == nil {
 		t.Fatal("DeleteTemplate destroyed a non-template VM")
 	}
@@ -221,7 +302,7 @@ func TestProxmoxDeleteTemplateDeletesARealTemplate(t *testing.T) {
 	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
 	m.okTask(delUPID)
 
-	if err := p.DeleteTemplate(context.Background(), "web-golden"); err != nil {
+	if err := p.DeleteTemplate(context.Background(), "web-golden", io.Discard); err != nil {
 		t.Fatalf("DeleteTemplate: %v", err)
 	}
 	if !m.sawPath("/nodes/pve1/qemu/900") {
@@ -314,7 +395,7 @@ func TestProxmoxDeleteTemplateReportsResolveAndConfigErrors(t *testing.T) {
 		m := newPVEMock(t)
 		p := newProxmoxForTest(t, m)
 		m.data("/cluster/resources", `[]`)
-		if err := p.DeleteTemplate(context.Background(), "ghost"); err == nil {
+		if err := p.DeleteTemplate(context.Background(), "ghost", io.Discard); err == nil {
 			t.Fatal("DeleteTemplate(unresolvable) returned nil")
 		}
 	})
@@ -323,7 +404,7 @@ func TestProxmoxDeleteTemplateReportsResolveAndConfigErrors(t *testing.T) {
 		p := newProxmoxForTest(t, m)
 		primeName(m, p, "web-golden", 900, "stopped")
 		m.fail("/nodes/pve1/qemu/900/config", http.StatusInternalServerError, "boom")
-		if err := p.DeleteTemplate(context.Background(), "web-golden"); err == nil {
+		if err := p.DeleteTemplate(context.Background(), "web-golden", io.Discard); err == nil {
 			t.Fatal("DeleteTemplate(config error) returned nil")
 		}
 		if m.sawPath("/nodes/pve1/qemu/900") {
@@ -363,7 +444,7 @@ func TestProxmoxSnapshotCloneFailureCleansUpAndRestarts(t *testing.T) {
 	})
 	m.okTask("UPID:pve1:0:0:0:qmdestroy:900:u:")
 
-	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
 		t.Fatal("SnapshotTemplate succeeded despite a clone-task failure")
 	}
 	if !m.sawPath("/nodes/pve1/qemu/101/status/start") {
@@ -451,22 +532,6 @@ func TestProxmoxTemplateHelpers(t *testing.T) {
 	})
 }
 
-// TestProxmoxTemplateMethodsAreNotOnTheInterface documents that these methods
-// are deliberately NOT on Provider yet: PR #70 has not landed, so they live on
-// the concrete type only, keeping this change additive. If #70 lands and adds
-// them to the interface, this test is expected to be removed.
-func TestProxmoxTemplateMethodsAreNotOnTheInterface(t *testing.T) {
-	var p Provider = (*proxmoxProvider)(nil)
-	if _, ok := p.(interface {
-		DeleteTemplate(context.Context, string) error
-	}); ok {
-		// A concrete *proxmoxProvider DOES satisfy this — the point is only that
-		// the STATIC Provider interface does not require it. Nothing to assert
-		// beyond the compile: reference the type so the intent is recorded.
-		_ = errors.New("")
-	}
-}
-
 // failTask registers a task that finished unsuccessfully, along with the log
 // fetch taskFailedErr makes to explain it.
 func (m *pveMock) failTask(upid, exitStatus string) {
@@ -477,8 +542,9 @@ func (m *pveMock) failTask(upid, exitStatus string) {
 // TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone pins the two ways the
 // pre-clone shutdown can fail. Both must abort before any clone is attempted: a
 // source still running is a source whose disk would clone crash-consistent,
-// which is the one outcome stopping it first exists to prevent. Neither may
-// trigger the restart defer, which is only armed once the shutdown has landed.
+// which is the one outcome stopping it first exists to prevent. A rejected
+// shutdown cannot have changed power state; a failed asynchronous task gets a
+// best-effort restart because it may have powered off before reporting failure.
 func TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone(t *testing.T) {
 	t.Run("shutdown call rejected", func(t *testing.T) {
 		m := newPVEMock(t)
@@ -486,7 +552,7 @@ func TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone(t *testing.T) {
 		primeName(m, p, "web", 101, "running")
 		m.fail("/nodes/pve1/qemu/101/status/shutdown", http.StatusForbidden, "Permission check failed")
 
-		if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+		if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
 			t.Fatal("SnapshotTemplate: expected the shutdown failure to abort the snapshot")
 		}
 		if m.sawPath("/nodes/pve1/qemu/101/clone") {
@@ -502,7 +568,7 @@ func TestProxmoxSnapshotShutdownFailureLeavesTheSourceAlone(t *testing.T) {
 		m.data("/nodes/pve1/qemu/101/status/shutdown", fmt.Sprintf("%q", stopUPID))
 		m.failTask(stopUPID, "shutdown timed out")
 
-		err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard)
+		_, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard)
 		if err == nil {
 			t.Fatal("SnapshotTemplate: expected the failed shutdown task to abort the snapshot")
 		}
@@ -524,7 +590,7 @@ func TestProxmoxSnapshotResolveFailureIsReported(t *testing.T) {
 	m.data("/cluster/resources", `[]`)
 	p := newProxmoxForTest(t, m)
 
-	err := p.SnapshotTemplate(context.Background(), "ghost", "ghost-golden", io.Discard)
+	_, err := p.SnapshotTemplate(context.Background(), "ghost", "ghost-golden", io.Discard)
 	if err == nil {
 		t.Fatal("SnapshotTemplate(unresolvable): expected an error")
 	}
@@ -560,7 +626,7 @@ func TestProxmoxSnapshotConvertTaskFailureCleansUp(t *testing.T) {
 	m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
 	m.okTask(delUPID)
 
-	if err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
+	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err == nil {
 		t.Fatal("SnapshotTemplate: expected the failed conversion task to be reported")
 	}
 	if !m.sawPath("/nodes/pve1/qemu/900") {
@@ -585,7 +651,7 @@ func TestProxmoxDeleteTemplateReportsDeleteFailures(t *testing.T) {
 	t.Run("delete call rejected", func(t *testing.T) {
 		m, p := setup(t)
 		m.fail("/nodes/pve1/qemu/900", http.StatusForbidden, "Permission check failed")
-		if err := p.DeleteTemplate(context.Background(), "web-golden"); err == nil {
+		if err := p.DeleteTemplate(context.Background(), "web-golden", io.Discard); err == nil {
 			t.Fatal("DeleteTemplate: expected the rejected delete to be reported")
 		}
 	})
@@ -595,7 +661,7 @@ func TestProxmoxDeleteTemplateReportsDeleteFailures(t *testing.T) {
 		delUPID := "UPID:pve1:0:0:0:qmdestroy:900:u:"
 		m.data("/nodes/pve1/qemu/900", fmt.Sprintf("%q", delUPID))
 		m.failTask(delUPID, "storage is busy")
-		err := p.DeleteTemplate(context.Background(), "web-golden")
+		err := p.DeleteTemplate(context.Background(), "web-golden", io.Discard)
 		if err == nil {
 			t.Fatal("DeleteTemplate: expected the failed delete task to be reported")
 		}

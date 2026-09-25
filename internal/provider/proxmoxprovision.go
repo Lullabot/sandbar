@@ -216,22 +216,40 @@ func reportKeptVM(vmid int, name string, out io.Writer) {
 // follows runs OUTSIDE the lock, so concurrent creates still overlap on the part
 // concurrency was for.
 func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) (int, error) {
-	unlock := p.lockCloneSerial(cfg.BaseName)
+	cloneSource := cfg.BaseName
+	if opts.TemplateSource != "" {
+		cloneSource = opts.TemplateSource
+	}
+
+	unlock := p.lockCloneSerial(cloneSource)
 	defer unlock()
 
 	// Cross-process serialization on top of the in-process mutex: two `sand`
 	// processes on the same machine must not build or clone the same template at
 	// once either. Best-effort by contract (see provision.LockBase) — the mutex
 	// above is the guarantee, this is the cross-process add-on.
-	release, err := provision.LockBase(ctx, p.files, cfg.BaseName, out)
+	release, err := provision.LockBase(ctx, p.files, cloneSource, out)
 	if err != nil {
 		return 0, err // only a cancelled context reaches here
 	}
 	defer release()
 
-	templateVMID, err := p.ensureBaseTemplate(ctx, cfg, opts, out)
-	if err != nil {
-		return 0, err
+	var templateVMID int
+	if opts.TemplateSource != "" {
+		var exists bool
+		templateVMID, exists, err = p.lookupTemplate(ctx, cloneSource)
+		if err != nil {
+			return 0, err
+		}
+		if !exists {
+			return 0, fmt.Errorf("proxmox: template %q not found", cloneSource)
+		}
+		progress(out, "Reusing golden template %s (VMID %d)\n", cloneSource, templateVMID)
+	} else {
+		templateVMID, err = p.ensureBaseTemplate(ctx, cfg, opts, out)
+		if err != nil {
+			return 0, err
+		}
 	}
 	return p.cloneFromTemplate(ctx, templateVMID, cfg, out)
 }
@@ -907,9 +925,13 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 		return stage.Fail(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
 	}
 
-	// A reset never asks for a base rebuild (zero CreateOptions); it takes the
-	// template as the lock finds it.
-	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, provision.CreateOptions{}, out)
+	// A reset never asks for a base rebuild. A template-provenanced reset routes
+	// back to that same golden template; ordinary resets retain the base path.
+	cloneOpts := provision.CreateOptions{}
+	if opts.TemplateSource != "" {
+		cloneOpts.TemplateSource = cfg.BaseName
+	}
+	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, cloneOpts, out)
 	if err != nil {
 		return stage.Fail(err)
 	}

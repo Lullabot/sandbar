@@ -355,6 +355,40 @@ func TestProxmoxCreatePassesPoolOnBaseAndClone(t *testing.T) {
 	}
 }
 
+func TestProxmoxCreateFromGoldenTemplateSkipsBaseBuild(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{nextID: 100}
+	const templateName = "sandbar-tmpl-golden"
+
+	m.data("/cluster/resources", `[{"vmid":150,"name":"sandbar-tmpl-golden","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","template":1}]`)
+	m.data("/nodes/pve1/storage/local-lvm/content", `[]`)
+	m.on("/cluster/nextid", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":%q}`, strconv.Itoa(rec.nextVMID()))
+	})
+	m.on("/nodes/pve1/qemu/150/clone", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		newid, _ := strconv.Atoi(r.PostForm.Get("newid"))
+		rec.setName(newid, r.PostForm.Get("name"))
+		upidData(w, testUPID)
+	})
+	registerVM(m, rec, 101)
+	m.okTask(testUPID)
+
+	p := newCreateProvider(t, m)
+	cfg := webConfig()
+	cfg.BaseName = templateName
+	if err := p.Create(context.Background(), cfg, provision.CreateOptions{TemplateSource: templateName}, nil); err != nil {
+		t.Fatalf("Create from golden template: %v", err)
+	}
+	if !m.sawPath("/nodes/pve1/qemu/150/clone") {
+		t.Fatalf("golden template was not used as the clone source; requests: %v", m.seen())
+	}
+	if m.sawPath("/nodes/pve1/qemu") || m.sawPath("/nodes/pve1/storage/local/download-url") {
+		t.Fatalf("create from a golden template rebuilt the ordinary base; requests: %v", m.seen())
+	}
+}
+
 // TestProxmoxCreateRegeneratesCloudInitAfterWrite proves the load-bearing rule:
 // every cloud-init config write is followed by a regenerate, because a write
 // alone does not rebuild the cloud-init image.

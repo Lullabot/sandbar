@@ -115,11 +115,14 @@ it is not where prose belongs.
   delete the guest, a failure removes the staged copy because the original
   data is still in the VM. Once deletion is attempted, every failure keeps
   the archives and reports their path for recovery.
-- `registry` — managed-VM index keyed by connection scope and name (schema
-  v3, migrated on read). The creating provider determines the scope, such
+- `registry` — managed-VM and golden-template index keyed by connection scope
+  and name (schema v4, migrated on read). The creating provider determines the scope, such
   as `LocalScope` for local Lima or `user@host:port` for remote Lima. This
   keeps local and remote entries separate and lets scopes have VMs with the
-  same name. Every write must go through `mutate`: lock the file with `statelock`,
+  same name. Schema v4 adds scoped template records and an optional
+  `templateSource` on VM entries so resets retain their clone provenance and
+  deletion can warn about dependents. Every write must go through `mutate`:
+  lock the file with `statelock`,
   re-read it, apply the change, then save. Saving a stale in-memory map can
   erase another process's updates. Call `save` only from `mutate`.
   `Reconcile` must prune only entries the caller already knew about; a VM
@@ -152,7 +155,8 @@ it is not where prose belongs.
 
 Entrypoint: `cmd/sand/main.go`. Keep CLI operations consistent with their
 TUI equivalents: `sand create` is `n`, `sand reset` is `R`, `sand shell` is
-`S`, `sand land` is `l`, and `sand paste-image` is `v`. Publishing is also
+`S`, `sand template snapshot` is `t`, `sand land` is `l`, and
+`sand paste-image` is `v`. Publishing is also
 available from the Landing pane. The CLI previously lacked the TUI's reset
 preserve options; shared operations prevent this kind of drift.
 

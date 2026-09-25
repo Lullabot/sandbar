@@ -14,6 +14,7 @@ import (
 	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -53,6 +54,14 @@ const (
 // both. Reset mode never uses this value: a reset always targets its own VM's
 // already-fixed member, so it has no selector to focus.
 const fProfileSelector = -1
+
+// fSourceSelector is a second sentinel focus value, spliced into the same
+// backward detour as fProfileSelector: from fName, going backward once lands
+// here (the clone-SOURCE selector — "base" or a golden template) and going
+// backward again reaches fProfileSelector; going forward from either returns
+// toward fName. Reset mode never uses this — a reset always targets its own
+// VM's already-fixed base/template, never one the user picks fresh.
+const fSourceSelector = -2
 
 var fieldLabels = []string{
 	"Name",
@@ -289,6 +298,12 @@ func (m *model) openForm() tea.Cmd {
 	m.toolJava = cfg.WithJava
 	m.toolRebuild = false
 	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
+	// The clone source always reopens on "base" (formTemplateName == "") — a
+	// template picked in a previous form session must never silently carry
+	// forward into a new one — and its rows are recomputed for whichever
+	// profile setDefaultFormProfile just selected.
+	m.formTemplateName = ""
+	m.formSourceRows = m.computeFormSourceRows(m.formProvider(), m.formScope)
 	m.view = viewForm
 	return tea.Batch(m.inputs[0].Focus(), m.kickFormToolsetLoad())
 }
@@ -522,7 +537,164 @@ func (m *model) cycleFormProfile(delta int) tea.Cmd {
 	m.inputs[fCPUs].SetValue(strconv.Itoa(defaultCPUs(hs.cpus)))
 	m.inputs[fMemory].SetValue(defaultMemory(hs.mem))
 	m.inputs[fUser].SetValue(orDefault(hs.user, hostUser()))
+	// The source selector's rows belong to the profile just left; a template
+	// from that profile's scope may not even exist under the new one, so reset
+	// to "base" and recompute for the newly targeted profile — the same
+	// re-seed-on-switch treatment the cpu/memory/user fields just got above.
+	m.formTemplateName = ""
+	m.formSourceRows = m.computeFormSourceRows(m.formProvider(), m.formScope)
 	return m.kickFormToolsetLoad()
+}
+
+// templateRow is one row of the create form's source selector: a golden
+// template's user-facing name plus the fields the form shows inline — its
+// disk size, how long ago it was captured, and whether it predates the
+// playbook this binary carries.
+type templateRow struct {
+	Name      string
+	SizeBytes int64
+	Age       time.Duration
+	Stale     bool
+}
+
+// templateNowFn is time.Now, indirected (mirroring hostMemBytesFn and this
+// package's other test seams) so a golden test can pin "now" and get a
+// reproducible age string (formatAgo) instead of a duration computed against
+// the wall clock at the moment the test happened to run.
+var templateNowFn = time.Now
+
+// computeFormSourceRows builds the create form's template rows for scope,
+// through prov (nil-safe: an error-bound member reports zero-byte sizes
+// rather than panicking). Called once when the form opens or the profile
+// selector cycles — never on every render — because staleness re-hashes the
+// whole playbook fileset (provision.PlaybookVersion), and doing that on every
+// keystroke while the form sits open would be wasteful.
+func (m model) computeFormSourceRows(prov provider.Provider, scope registry.Scope) []templateRow {
+	templates := m.reg.TemplatesInScope(scope)
+	if len(templates) == 0 {
+		return nil
+	}
+	var curDir string
+	if dir, err := provision.LocatePlaybook(); err == nil {
+		curDir = dir
+	}
+	rows := make([]templateRow, len(templates))
+	for i, t := range templates {
+		var size int64
+		if prov != nil {
+			size = prov.TemplateDiskBytes(vm.TemplateInstanceName(t.Name))
+		}
+		// No playbook could be located to compare against: never claim a
+		// template is current when there is nothing to vouch for it.
+		stale := true
+		if curDir != "" {
+			if cur, err := provision.PlaybookVersion(os.DirFS(curDir), t.ToolsetKey); err == nil {
+				stale = cur != t.PlaybookVersion
+			}
+		}
+		rows[i] = templateRow{Name: t.Name, SizeBytes: size, Age: templateNowFn().Sub(t.CreatedAt), Stale: stale}
+	}
+	return rows
+}
+
+// cycleFormSource moves the source selector by delta (+/-1, wrapping) among
+// "base" (always first) plus the cached template rows (formSourceRows) for
+// the form's current profile — mirroring cycleFormProfile's own wrap.
+func (m *model) cycleFormSource(delta int) {
+	names := make([]string, 0, len(m.formSourceRows)+1)
+	names = append(names, "") // "" == base
+	for _, r := range m.formSourceRows {
+		names = append(names, r.Name)
+	}
+	n := len(names)
+	idx := 0
+	for i, name := range names {
+		if name == m.formTemplateName {
+			idx = i
+			break
+		}
+	}
+	m.formTemplateName = names[((idx+delta)%n+n)%n]
+}
+
+// currentFormSourceRow returns the selected template's cached row, and
+// whether one is actually selected ("base" reports false).
+func (m model) currentFormSourceRow() (templateRow, bool) {
+	if m.formTemplateName == "" {
+		return templateRow{}, false
+	}
+	for _, r := range m.formSourceRows {
+		if r.Name == m.formTemplateName {
+			return r, true
+		}
+	}
+	return templateRow{}, false
+}
+
+// sourceSelectorRow renders the create form's clone-source selector: "base"
+// plus every template in scope, with size/age/staleness inline for whichever
+// is currently selected — mirroring profileSelectorRow's cycle-hint styling.
+func (m model) sourceSelectorRow() string {
+	value := "base"
+	if row, ok := m.currentFormSourceRow(); ok {
+		value = row.Name + " · " + humanizeBytes(strconv.FormatInt(row.SizeBytes, 10)) + " · " + formatAgo(row.Age)
+		if row.Stale {
+			value += " · [stale]"
+		}
+	}
+	if len(m.formSourceRows) > 0 {
+		value = "< " + value + " >"
+	}
+	ls := labelStyle
+	if m.toggleFocus == -1 && m.focusIdx == fSourceSelector {
+		ls = focusedLabelStyle
+	}
+	return ls.Render("Source:") + " " + value
+}
+
+// templateSourced reports whether baseName names a golden template's
+// reserved Lima instance rather than an ordinary base image. This is the
+// NAMING CONVENTION (vm.TemplateInstanceName's namespace), not a registry
+// read — which is what lets Reset detect template provenance even after the
+// template's own registry record has since been deleted (RemoveTemplateScoped
+// is warn-and-allow: a dependent VM can outlive its template, and Reset must
+// still route into the "clone from this instance" branch so a truly-missing
+// instance fails with task 3's clear "template not found" error rather than
+// being silently treated as an ordinary, buildable base image).
+// vm.IsTemplateInstanceName owns the convention so this package does not
+// duplicate the reserved prefix or its validation rules.
+func templateSourced(baseName string) bool {
+	return vm.IsTemplateInstanceName(baseName)
+}
+
+// confirmDeleteFormSource raises the destructive-confirmation overlay for the
+// template currently highlighted in the source selector ('d' there, mirroring
+// the board's own delete verb). It is a no-op when "base" is selected
+// (nothing to delete) or the targeted profile has no live provider.
+func (m model) confirmDeleteFormSource() (tea.Model, tea.Cmd) {
+	row, ok := m.currentFormSourceRow()
+	if !ok {
+		return m, nil
+	}
+	prov := m.formProvider()
+	if prov == nil {
+		return m, nil
+	}
+	scope := m.formScope
+	name := row.Name
+	inst := vm.TemplateInstanceName(name)
+	deps := m.reg.DependentsOfTemplate(scope, name)
+	depsText := "none"
+	if len(deps) > 0 {
+		depsText = strings.Join(deps, ", ")
+	}
+	m.confirm = &confirmState{
+		prompt: fmt.Sprintf("Delete template %q (%s)? %d VM(s) were cloned from it: %s",
+			name, humanizeBytes(strconv.FormatInt(row.SizeBytes, 10)), len(deps), depsText),
+		run:     deleteTemplateCmd(prov, scope, name, inst),
+		working: "deleting template " + name + "…",
+	}
+	return m, nil
 }
 
 // formToggle is one checkbox in the form: a label, its per-field help, and
@@ -560,8 +732,14 @@ func baseWideHelp(tool string) string {
 // createToggles is create mode's toggle list: the base-image tool-set
 // (default on) and the rebuild intent (default off, wired to the same path
 // `sand create --rebuild` uses — see submitForm).
+//
+// "Rebuild base image" is OMITTED while a template is selected as the clone
+// source (m.formTemplateName != ""): a template create skips the base image
+// entirely (task 3's CreateOptions.TemplateSource branch), so rebuilding it
+// would have no effect on the VM about to be created — mirroring the headless
+// `sand create --template`/`--rebuild` mutual exclusion.
 func (m model) createToggles() []formToggle {
-	return []formToggle{
+	t := []formToggle{
 		{
 			label: "Install Claude Code",
 			help:  "Install the current Claude Code release when this VM is created. Remembers your last submitted choices.",
@@ -604,14 +782,17 @@ func (m model) createToggles() []formToggle {
 			get:   func(m *model) bool { return m.toolJava },
 			set:   func(m *model, v bool) { m.toolJava = v },
 		},
-		{
+	}
+	if m.formTemplateName == "" {
+		t = append(t, formToggle{
 			label: "Rebuild base image",
 			help: "Delete and rebuild the base image from scratch before creating. " +
 				"Needed to actually remove a de-selected tool.",
 			get: func(m *model) bool { return m.toolRebuild },
 			set: func(m *model, v bool) { m.toolRebuild = v },
-		},
+		})
 	}
+	return t
 }
 
 // lockedToggleSuffix marks a row the form is answering on the user's behalf.
@@ -728,7 +909,11 @@ func (m model) toggles() []formToggle {
 // is untouched, so it still lands a form freshly opened with 'n' — and a real
 // user typing right after — in the Name field. See fProfileSelector's doc.
 func (m *model) focusNext() tea.Cmd {
-	if m.toggleFocus == -1 && m.focusIdx == fProfileSelector {
+	switch {
+	case m.toggleFocus == -1 && m.focusIdx == fProfileSelector:
+		m.focusIdx = fSourceSelector
+		return nil
+	case m.toggleFocus == -1 && m.focusIdx == fSourceSelector:
 		m.focusIdx = fName
 		return m.inputs[fName].Focus()
 	}
@@ -740,9 +925,12 @@ func (m *model) focusPrev() tea.Cmd {
 	case m.toggleFocus == -1 && m.focusIdx == fProfileSelector:
 		// Already at the front of the ring; nothing further back.
 		return nil
+	case m.toggleFocus == -1 && m.focusIdx == fSourceSelector:
+		m.focusIdx = fProfileSelector
+		return nil
 	case m.toggleFocus == -1 && m.focusIdx == fName:
 		m.inputs[fName].Blur()
-		m.focusIdx = fProfileSelector
+		m.focusIdx = fSourceSelector
 		return nil
 	default:
 		return m.formFocusPrev(fName, fCloneToken)
@@ -951,6 +1139,21 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.WithDDEV = m.toolDDEV
 		cfg.WithGo = m.toolGo
 		cfg.WithJava = m.toolJava
+		// A template selected as the clone source overrides BaseName to the
+		// template's own reserved instance name (registry.Template's doc
+		// comment): submitForm reads it back off cfg.BaseName to build
+		// CreateOptions.TemplateSource, so the two can never disagree about
+		// which instance this create actually clones from. Re-validated here
+		// (not just trusted from formSourceRows) so a template deleted out from
+		// under an already-open form fails with a clear error instead of
+		// silently falling back to the base image.
+		if m.formTemplateName != "" {
+			t, ok := m.reg.TemplateInScope(m.formTemplateName, m.formScope)
+			if !ok {
+				return cfg, fmt.Errorf("template %q no longer exists", m.formTemplateName)
+			}
+			cfg.BaseName = t.Config.BaseName
+		}
 	}
 	return cfg, nil
 }
@@ -1061,6 +1264,15 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	// under the base lock inside CreateVMWithOptions, not as a pre-lock delete
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
+	if m.formTemplateName != "" {
+		// A template create skips the base image entirely (task 3's
+		// prepareBaseAndClone branch) — Rebuild has no meaning there (the
+		// toggle is hidden while a template is selected; see createToggles),
+		// so the request carries only the clone source. buildConfig already
+		// set cfg.BaseName to this same instance name, from the same
+		// TemplateInScope lookup, so the two cannot disagree about it.
+		opts = provision.CreateOptions{TemplateSource: cfg.BaseName}
+	}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
 			return err
@@ -1141,6 +1353,21 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		opts.PreserveProject = m.preserveProject && m.projectToggleEnabled
 		opts.PreservePaths = m.selectedPreservePaths()
 	}
+	// A VM whose registry entry carries golden-template provenance
+	// (registry.AddScopedWithTemplate — the create form's source selector, or
+	// `sand create --template`) must have its Reset re-clone from that
+	// template, not be treated as an ordinary base image to build/converge —
+	// this is what routes Reset into the same skip-base clone branch a
+	// template create takes (task 3's ResetOptions.TemplateSource; Reset only
+	// inspects it for emptiness, the actual clone source stays cfg.BaseName
+	// either way, which is already the template's own instance name — see
+	// RecreateBase/openResetForm). templateSourced is kept as a defensive
+	// fallback for an entry that predates AddScopedWithTemplate (recorded
+	// provenance-free by an older binary) but whose BaseName is still, by the
+	// naming convention alone, unmistakably a template instance.
+	if tname, ok := m.reg.TemplateSourceInScope(cfg.Name, m.formScope); (ok && tname != "") || templateSourced(cfg.BaseName) {
+		opts.TemplateSource = cfg.BaseName
+	}
 	// Capture the provider by value (see submitForm): the run closure runs on
 	// beginStream's goroutine and must not read the mutable m.members slice.
 	prov := m.formProvider()
@@ -1159,6 +1386,12 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 
 // updateForm handles keys while the create form is active.
 func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// A pending template-delete confirmation (raised from the source selector,
+	// see confirmDeleteFormSource) owns the keyboard first, exactly like the
+	// board and the progress screen.
+	if m.confirm != nil {
+		return m.updateConfirm(msg)
+	}
 	// Note: 'q' is a text character here, so only ctrl+c (handled globally) quits.
 	// Only esc (not the shared Back binding) leaves the form: Back also matches
 	// backspace, which here must edit the focused field, not navigate away.
@@ -1199,6 +1432,24 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// On the focused source selector, left/right cycles between "base" and
+	// every template in scope (the same carve-out as the profile selector
+	// above), and 'd' raises the delete-confirmation for whichever template is
+	// currently highlighted — mirroring the board's own delete verb, since a
+	// template has no tile of its own to hang one on.
+	if m.toggleFocus == -1 && m.focusIdx == fSourceSelector {
+		switch {
+		case msg.Code == tea.KeyLeft:
+			m.cycleFormSource(-1)
+			return m, nil
+		case msg.Code == tea.KeyRight:
+			m.cycleFormSource(1)
+			return m, nil
+		case msg.Text == "d":
+			return m.confirmDeleteFormSource()
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
 		return m, m.focusPrev()
@@ -1207,9 +1458,9 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.focusNext()
 	}
 
-	// Only forward edits while a text input is focused (toggles and the profile
-	// selector aren't inputs).
-	if m.toggleFocus != -1 || m.focusIdx == fProfileSelector {
+	// Only forward edits while a text input is focused (toggles and the
+	// profile/source selectors aren't inputs).
+	if m.toggleFocus != -1 || m.focusIdx == fProfileSelector || m.focusIdx == fSourceSelector {
 		return m, nil
 	}
 
@@ -1320,6 +1571,9 @@ func lockedFieldValue(v string) string {
 // 'q' is a text character in the form, so Quit is intentionally omitted (only
 // ctrl+c quits). Up/Down/enter move between fields; ctrl+s creates.
 func (m model) formHelp() []key.Binding {
+	if m.confirm != nil {
+		return []key.Binding{m.keys.Confirm, m.keys.Cancel}
+	}
 	submit := m.keys.Submit
 	if m.resetMode {
 		submit.SetHelp(submit.Help().Key, "reset")
@@ -1341,11 +1595,14 @@ func (m model) formView() string {
 	header := b.String()
 	b.Reset()
 
-	// The profile selector: which connection profile's provider/scope
-	// this create targets. Reset mode has none — a reset always targets its own
-	// VM's already-fixed member, never a place the user picks.
+	// The profile selector: which connection profile's provider/scope this
+	// create targets. The source selector follows it: "base" or a golden
+	// template to clone from instead. Reset mode has neither — a reset always
+	// targets its own VM's already-fixed member and base/template, never a
+	// place the user picks fresh.
 	if !m.resetMode {
 		b.WriteString(m.profileSelectorRow() + "\n")
+		b.WriteString(m.sourceSelectorRow() + "\n")
 	}
 
 	for i := range m.inputs {
@@ -1399,6 +1656,13 @@ func (m model) formView() string {
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(toggles[m.toggleFocus].help) + "\n")
 	case m.toggleFocus == -1 && m.focusIdx == fProfileSelector:
 		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render("←/→ to pick which connection profile creates this VM. The CPU/memory/user suggestions below scale to that profile's host.") + "\n")
+	case m.toggleFocus == -1 && m.focusIdx == fSourceSelector:
+		help := "←/→ to pick a clone source: the shared base image, or a saved golden template. " +
+			"Choosing a template skips the base entirely and hides the rebuild toggle below."
+		if _, ok := m.currentFormSourceRow(); ok {
+			help += " Press d to delete the highlighted template."
+		}
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(help) + "\n")
 	case m.toggleFocus == -1 && m.focusIdx >= 0 && m.focusIdx < len(fieldInfo):
 		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
 		// wrapped help still fits inside the content column.
@@ -1406,6 +1670,9 @@ func (m model) formView() string {
 	}
 
 	footer := m.footerView(m.formHelp())
+	if m.confirm != nil {
+		footer = m.confirmView() + "\n" + footer
+	}
 	if w := m.diskOverflowWarning(); w != "" {
 		footer = warnStyle.Width(cw).Render(w) + "\n" + footer
 	}
