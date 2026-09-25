@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/Lullabot/sandbar/compare/v0.11.1...v0.12.0) (2026-09-24)
+
+
+### Features
+
+* **codex:** add remote control onboarding ([#216](https://github.com/Lullabot/sandbar/issues/216)) ([7caf5b4](https://github.com/Lullabot/sandbar/commit/7caf5b42c0b1d869d973a90f4e4886dc70182073))
+* genericize coding agent support ([#209](https://github.com/Lullabot/sandbar/issues/209)) ([11501e5](https://github.com/Lullabot/sandbar/commit/11501e5629c9838ab5f0328f81601f12e9b5837b))
+* **lima:** report host-side VM memory use ([153d808](https://github.com/Lullabot/sandbar/commit/153d808cf5581a1c9c9ba4da67a0a504f6610246))
+* **provider:** expose Proxmox memory reclaim capability ([fbd1374](https://github.com/Lullabot/sandbar/commit/fbd1374984087eadb4b45b94fdce80b17af397ef))
+* **review:** install self-review skills during provisioning ([#211](https://github.com/Lullabot/sandbar/issues/211)) ([cf76e63](https://github.com/Lullabot/sandbar/commit/cf76e6348c74b92918d2c5bdd4f81d1392e33487))
+* support image paste across coding agents ([#212](https://github.com/Lullabot/sandbar/issues/212)) ([a8f040b](https://github.com/Lullabot/sandbar/commit/a8f040b0411dd305b1fbb5ca1d44bd1cbbd62a8d))
+* **ui:** show host memory and reclaim Proxmox cache ([7fd9e58](https://github.com/Lullabot/sandbar/commit/7fd9e586a2c8f1ed04288d9b9e8c3b651fb40df1))
+
+
+### Bug Fixes
+
+* **create:** show safe project clone failures ([68ae189](https://github.com/Lullabot/sandbar/commit/68ae18936d0c556bf9d91be915cca75e0e5d38af))
+* **deps:** update github.com/charmbracelet/x/exp/golden digest to 53e2afe ([#218](https://github.com/Lullabot/sandbar/issues/218)) ([a68b75f](https://github.com/Lullabot/sandbar/commit/a68b75f3cb73aa2565d327430172cb5f618bae7a))
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260920004010-53e2afe73ae5 ([#219](https://github.com/Lullabot/sandbar/issues/219)) ([0cead77](https://github.com/Lullabot/sandbar/commit/0cead771c5ad188a1bd2a851e950f3876959240a))
+* **provision:** generalize machine identity before cloning ([#221](https://github.com/Lullabot/sandbar/issues/221)) ([651703e](https://github.com/Lullabot/sandbar/commit/651703eba02d9b060875f923097ffeb90e27a033))
+
 ## [0.11.1](https://github.com/Lullabot/sandbar/compare/v0.11.0...v0.11.1) (2026-09-21)
 
 
