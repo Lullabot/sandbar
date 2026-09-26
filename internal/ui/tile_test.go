@@ -756,27 +756,25 @@ func TestTileGaugeRowUsesDisplayWidthNotByteLength(t *testing.T) {
 
 // --- Rules 3+4: a single VM's own mem/disk gauge warns below the low-free threshold (10%). ---
 
-// A running VM whose provider reports less than 10% memory free (rule 3) gets
-// a "⚠ mem" label and its row rendered in warnStyle instead of the
-// ordinary chrome grey — while an otherwise-identical VM at or above the threshold
-// renders EXACTLY as today (no marker, no colour change).
+// The host footprint is still the displayed memory value, but the warning uses
+// MemAvailable-derived guest usage so reclaimable cache does not trigger it.
 func TestTileMemGaugeWarnsBelowLowFreeThreshold(t *testing.T) {
 	low := baseTileInput()
-	low.VM = vm.VM{Name: "web", Status: "Running"}
-	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 970, HasHostMem: true} // 3% host free
+	low.VM = vm.VM{Name: "web", Status: "Running", Memory: "1000"}
+	low.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 920, HostMemUsed: 970, HasHostMem: true}
 	low.HasSample = true
 	got := ansi.Strip(renderTile(low))
 	if !strings.Contains(got, "⚠ mem") {
-		t.Fatalf("mem free below 5%% must show the ⚠ mem marker, got:\n%s", got)
+		t.Fatalf("application memory below 10%% free must show the ⚠ mem marker, got:\n%s", got)
 	}
 
 	ok := baseTileInput()
-	ok.VM = vm.VM{Name: "web", Status: "Running"}
-	ok.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 900, HasHostMem: true} // 10% host free
+	ok.VM = vm.VM{Name: "web", Status: "Running", Memory: "1000"}
+	ok.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true, Cache: 700, HasCache: true}
 	ok.HasSample = true
 	got2 := ansi.Strip(renderTile(ok))
 	if strings.Contains(got2, "⚠") {
-		t.Fatalf("mem free at 10%% must NOT show a warning marker, got:\n%s", got2)
+		t.Fatalf("large host usage from reclaimable cache must NOT show a memory warning, got:\n%s", got2)
 	}
 }
 
@@ -835,8 +833,8 @@ func TestTileDiskAllocationRendersSizeWithoutBarOrWarning(t *testing.T) {
 // Both warnings can be active on the same tile simultaneously.
 func TestTileBothMemAndDiskWarningsSimultaneously(t *testing.T) {
 	in := baseTileInput()
-	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% free
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // 2% host free
+	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% disk free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 980, HostMemUsed: 980, HasHostMem: true} // 2% guest memory available
 	in.HasSample = true
 
 	got := ansi.Strip(renderTile(in))
@@ -877,8 +875,8 @@ func TestTileWarningMarkerNeverOverflowsFixedWidth(t *testing.T) {
 	}
 }
 
-// TestTileWarningRenderingGolden pins the EXACT rendering of a tile with both
-// mem and disk below 5% free, at a fixed 44-column width — the low-capacity-
+// TestTileWarningRenderingGolden pins the EXACT rendering of a tile with ample
+// application memory availability and low disk space, at a fixed 44-column width — the low-capacity-
 // warning feature's one golden, extending this file's existing inline-golden
 // style (ansi.Strip + a literal expected string, as every other test above
 // already asserts against) rather than a new testdata/*.golden fixture: the
@@ -887,7 +885,7 @@ func TestTileWarningRenderingGolden(t *testing.T) {
 	in := baseTileInput()
 	in.Width = 44
 	in.VM = vm.VM{Name: "web", Status: "Running", Disk: "100000000000", DiskUsed: "98000000000"}                        // 2% disk free
-	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // 2% host mem free
+	in.Sample = guestSample{HasCPU: true, CPUPct: 10, MemTotal: 1000, MemUsed: 300, HostMemUsed: 980, HasHostMem: true} // host footprint high, application memory low
 	in.HasSample = true
 	in.Now = time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 
@@ -896,7 +894,7 @@ func TestTileWarningRenderingGolden(t *testing.T) {
 		"│ web                                      │",
 		"│ ● Running                                │",
 		"│ cpu      ███░░░░░░░░░░░░░░░░░░░░░░░░ 10% │",
-		"│ ⚠ mem    ██████████████████ 980 B/1000 B │",
+		"│ mem      ██████████████████ 980 B/1000 B │",
 		"│ ⚠ disk   █████████████ 91.3 GiB/93.1 GiB │",
 		"│ up                                       │",
 		"╰──────────────────────────────────────────╯",
@@ -904,7 +902,7 @@ func TestTileWarningRenderingGolden(t *testing.T) {
 
 	got := ansi.Strip(renderTile(in))
 	if got != want {
-		t.Fatalf("tile rendering with both mem and disk below 5%% free changed.\ngot:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("tile rendering with application memory available but low disk changed.\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 

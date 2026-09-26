@@ -171,10 +171,13 @@ func renderTile(in tileInput) string {
 			}
 			if total, ok := memoryTotal(in.VM, in.Sample); in.HasSample && in.Sample.HasHostMem && ok {
 				used := min(in.Sample.HostMemUsed, total)
-				frac := float64(used) / float64(total)
+				// The host reading drives the displayed bar, but it includes
+				// reclaimable guest cache. Use the guest's MemAvailable-based
+				// reading to decide whether application memory is actually tight.
+				warn := guestMemoryLowFree(in.Sample)
 				value := humanizeBytes(strconv.FormatUint(used, 10)) + "/" +
 					humanizeBytes(strconv.FormatUint(total, 10))
-				if frac > 1-lowFreeThreshold {
+				if warn {
 					lines[3] = tileMemoryGaugeLine("mem", used, total, in.Sample.Cache, in.Sample.HasCache, value, width, true)
 				} else {
 					lines[3] = tileMemoryGaugeLine("mem", used, total, in.Sample.Cache, in.Sample.HasCache, value, width, false)
@@ -188,7 +191,7 @@ func renderTile(in tileInput) string {
 				frac := float64(used) / float64(in.Sample.MemTotal)
 				value := humanizeBytes(strconv.FormatUint(used, 10)) + "/" +
 					humanizeBytes(strconv.FormatUint(in.Sample.MemTotal, 10))
-				if frac > 1-lowFreeThreshold {
+				if guestMemoryLowFree(in.Sample) {
 					lines[3] = tileWarnGaugeLine("guest mem", frac, value, width)
 				} else {
 					lines[3] = tileGaugeLine("guest mem", frac, value, width)
@@ -215,6 +218,17 @@ func renderTile(in tileInput) string {
 		style = tileFocusedFrameStyle
 	}
 	return style.Render(strings.Join(lines, "\n"))
+}
+
+// guestMemoryLowFree uses MemAvailable-derived guest usage for the warning
+// threshold. Host-resident usage is useful for the displayed gauge, but includes
+// filesystem cache that Linux can reclaim under memory pressure.
+func guestMemoryLowFree(sample guestSample) bool {
+	if !sample.HasMem() {
+		return false
+	}
+	used := min(sample.MemUsed, sample.MemTotal)
+	return float64(used)/float64(sample.MemTotal) > 1-lowFreeThreshold
 }
 
 // tileTitleLine folds the profile-provenance label into the title row
