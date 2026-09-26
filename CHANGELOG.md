@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/Lullabot/sandbar/compare/v0.12.0...v0.12.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ui:** warn on application memory pressure ([#227](https://github.com/Lullabot/sandbar/issues/227)) ([bf705b8](https://github.com/Lullabot/sandbar/commit/bf705b8d43f177638b3067218a49f7f03823805b))
+
 ## [0.12.0](https://github.com/Lullabot/sandbar/compare/v0.11.1...v0.12.0) (2026-09-24)
 
 
