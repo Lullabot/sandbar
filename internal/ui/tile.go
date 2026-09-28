@@ -71,6 +71,12 @@ type tileInput struct {
 	VM     vm.VM
 	Job    jobSnapshot
 	HasJob bool
+	// SnapshotJob is separate from Job because capturing a template is activity
+	// against a healthy existing VM, not a provision that changes its health.
+	// While it runs, the tile temporarily replaces gauges with the template-copy
+	// progress without letting a failed snapshot paint the source VM Failed.
+	SnapshotJob    jobSnapshot
+	HasSnapshotJob bool
 	// RemoteProvisioning is set when the VM carries an in-flight provenance
 	// marker but has no local build job — another controller is building it, and
 	// this tile must show Building, not Running. See deriveStatus.
@@ -123,12 +129,20 @@ type tileInput struct {
 func renderTile(in tileInput) string {
 	width := tileInnerWidth(in.Width)
 	status := deriveStatus(in.VM, in.Job, in.HasJob, in.RemoteProvisioning)
+	snapshotting := in.HasSnapshotJob && in.SnapshotJob.Running()
 
 	lines := make([]string, tileContentRows)
 	lines[0] = tileTitleLine(in.VM.Name, in.ProfileLabel, width)
-	lines[1] = tileStatusLine(status, in.Spinner, in.Traits, in.Uniform)
+	if snapshotting {
+		lines[1] = tileActivityStatusLine("Snapshotting", in.Spinner, in.Traits, in.Uniform)
+	} else {
+		lines[1] = tileStatusLine(status, in.Spinner, in.Traits, in.Uniform)
+	}
 
-	if status == statusBuilding {
+	if snapshotting {
+		lines[2] = tileProgressBarLine("template", in.SnapshotJob.Progress, width)
+		lines[3] = tileRoleLine(in.SnapshotJob.Progress, in.Now, width)
+	} else if status == statusBuilding {
 		// A building tile replaces ALL of its gauges with an in-place progress
 		// bar and the current Ansible role/task count — even if a live
 		// heartbeat sample exists (the VM is genuinely booted; Ansible is just
@@ -141,7 +155,7 @@ func renderTile(in tileInput) string {
 		if !in.HasJob {
 			prog = in.RemoteProgress
 		}
-		lines[2] = tileProgressBarLine(prog, width)
+		lines[2] = tileProgressBarLine("build", prog, width)
 		lines[3] = tileRoleLine(prog, in.Now, width)
 		// lines[4] and lines[5] stay blank: a building VM's own vm.VM record
 		// can be a zero value for the first minutes of a create (the clone
@@ -315,7 +329,18 @@ func tilePad(s string, width int) string {
 // should surface.
 func tileStatusLine(status derivedStatus, spinner string, t vmTraits, u fleetUniformity) string {
 	glyph := tileGlyph(status, spinner)
-	line := tileStyleFor(status).Render(glyph + " " + status.String())
+	return tileStatusWithBadges(tileStyleFor(status).Render(glyph+" "+status.String()), t, u)
+}
+
+// tileActivityStatusLine renders transient work that does not change the VM's
+// health. It borrows Building's animated glyph and colour while naming the
+// actual operation instead of claiming that an existing VM is being built.
+func tileActivityStatusLine(label, spinner string, t vmTraits, u fleetUniformity) string {
+	glyph := tileGlyph(statusBuilding, spinner)
+	return tileStatusWithBadges(tileBuildingStyle.Render(glyph+" "+label), t, u)
+}
+
+func tileStatusWithBadges(line string, t vmTraits, u fleetUniformity) string {
 	if badges := tileBadges(t, u); len(badges) > 0 {
 		line += "  " + tileChromeStyle.Render(strings.Join(badges, " · "))
 	}
@@ -687,11 +712,12 @@ func tileDiskLine(v vm.VM, status derivedStatus, sample guestSample, hasSample b
 	return tileGaugeLine("disk", 0, humanizeBytes(v.DiskUsed)+"/"+total, width)
 }
 
-// tileProgressBarLine is a building tile's gauge: the same bar renderer,
-// filled from the job's parsed Ansible progress.
-func tileProgressBarLine(p ansibleProgress, width int) string {
+// tileProgressBarLine is a long-running job's gauge, filled from the progress
+// parsed out of its stream (Ansible tasks for builds, PVE transfer percentage
+// for a Proxmox template snapshot).
+func tileProgressBarLine(label string, p ansibleProgress, width int) string {
 	frac := p.Fraction()
-	return tileGaugeLine("build", frac, fmt.Sprintf("%d%%", int(frac*100+0.5)), width)
+	return tileGaugeLine(label, frac, fmt.Sprintf("%d%%", int(frac*100+0.5)), width)
 }
 
 // taskTimerAfter is how long the CURRENT Ansible task must have been running

@@ -24,12 +24,22 @@ package ui
 // "Gathering Facts" = the 72 TASK banners the run actually printed.)
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
+
+// pveCloneProgressRE matches the progress lines emitted by Proxmox's QEMU
+// full-clone worker, for example:
+//
+//	transferred 16.0 GiB of 32.0 GiB (50.00%)
+//
+// PVE's task status endpoint carries only running/stopped; this task-log line is
+// the authoritative numeric progress signal exposed by the backend.
+var pveCloneProgressRE = regexp.MustCompile(`^transferred .+ \(([0-9]+(?:\.[0-9]+)?)%\)$`)
 
 // Line shapes the parser recognises, all anchored at the start of a line.
 const (
@@ -148,6 +158,18 @@ func (p *ansibleParser) line(l string) {
 	l = strings.TrimRight(ansi.Strip(l), " \t\r")
 
 	switch {
+	case pveCloneProgressRE.MatchString(l):
+		match := pveCloneProgressRE.FindStringSubmatch(l)
+		percent, err := strconv.ParseFloat(match[1], 64)
+		if err != nil {
+			return
+		}
+		percent = max(0, min(percent, 100))
+		p.progress.Index = int(percent + 0.5)
+		p.progress.Total = 100
+		p.progress.Role, p.progress.Task = "", ""
+		p.progress.TaskStarted = time.Time{}
+
 	case strings.HasPrefix(l, totalPrefix):
 		// A new playbook run begins here: reset the counter and the last run's task
 		// so the tile never shows the base phase's final task during finalize.
