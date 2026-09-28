@@ -1048,11 +1048,13 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		return renderGhostTile(m.layout.TileWidth, m.focusIsGhost())
 	}
 	v := vms[i]
-	// The tile reads the VM's BUILD — never "whatever run this VM happens to have".
-	// A file copy against a running VM is not a build and must not be able to become
-	// one by occupying the same slot (jobs.go). Keyed by the OWNING member's scope,
-	// so a same-named VM under another profile never lends this one its build/gauge.
+	// The tile reads the VM's BUILD and SNAPSHOT explicitly — never "whatever run
+	// this VM happens to have". A file copy against a running VM is not either one
+	// and must not be able to become one by occupying the same slot (jobs.go).
+	// Keyed by the OWNING member's scope, so a same-named VM under another profile
+	// never lends this one its progress gauge.
 	job, hasJob := m.jobs.snapshot(provisionKey(v.scope, v.Name))
+	snapshotJob, hasSnapshotJob := m.jobs.snapshot(snapshotKey(v.scope, v.Name))
 	sample, hasSample := m.sampleOf(v.scope, v.Name)
 	// The tile's provenance label names the OWNING member's profile —
 	// which profile this VM actually runs through — never guessed from the VM
@@ -1073,6 +1075,8 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		VM:                 v.VM,
 		Job:                job,
 		HasJob:             hasJob,
+		SnapshotJob:        snapshotJob,
+		HasSnapshotJob:     hasSnapshotJob,
 		RemoteProvisioning: !hasJob && m.remoteProvisioning(v.scope, v.Name),
 		RemoteProgress:     m.remoteProgress(v.scope, v.Name),
 		Sample:             sample,

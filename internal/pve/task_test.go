@@ -188,6 +188,64 @@ func TestWaitTaskWarningsIsSuccess(t *testing.T) {
 	}
 }
 
+func TestWaitTaskStreamingCopiesNewLogLinesWithoutReplayingThem(t *testing.T) {
+	withFastPolling(t)
+
+	var polls atomic.Int32
+	c := waitClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if polls.Add(1) < 3 {
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "running"}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "stopped", "exitstatus": "OK"}})
+	}, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("limit"); got != "1000" {
+			t.Errorf("log request limit = %q; want 1000", got)
+		}
+		switch r.URL.Query().Get("start") {
+		case "0":
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{{"n": 1, "t": "create full clone"}}})
+		case "1":
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{{"n": 2, "t": "transferred 4 GiB of 8 GiB (50.00%)"}}})
+		default:
+			writeJSON(w, http.StatusOK, map[string]any{"data": []map[string]any{}})
+		}
+	})
+
+	var out strings.Builder
+	if err := c.WaitTaskStreaming(context.Background(), "UPID:node1:00001234:1A2B3C4D:5E6F7A8B:qmclone:100:user@pve!token:", &out); err != nil {
+		t.Fatalf("WaitTaskStreaming: %v", err)
+	}
+	want := "create full clone\ntransferred 4 GiB of 8 GiB (50.00%)\n"
+	if got := out.String(); got != want {
+		t.Fatalf("streamed log = %q; want %q", got, want)
+	}
+}
+
+func TestWaitTaskStreamingTreatsLogAsBestEffort(t *testing.T) {
+	withFastPolling(t)
+	var statusPolls atomic.Int32
+	var logPolls atomic.Int32
+	c := waitClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if statusPolls.Add(1) < 3 {
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "running"}})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"status": "stopped", "exitstatus": "OK"}})
+	}, func(w http.ResponseWriter, r *http.Request) {
+		logPolls.Add(1)
+		w.WriteHeader(http.StatusForbidden)
+	})
+
+	var out strings.Builder
+	if err := c.WaitTaskStreaming(context.Background(), "UPID:node1:00001234:1A2B3C4D:5E6F7A8B:qmclone:100:user@pve!token:", &out); err != nil {
+		t.Fatalf("WaitTaskStreaming failed a successful task because its log was unavailable: %v", err)
+	}
+	if got := logPolls.Load(); got != 1 {
+		t.Fatalf("forbidden task log polled %d times; want one attempt, then status-only polling", got)
+	}
+}
+
 func TestWaitTaskArbitraryExitStatusIsFailureCarryingText(t *testing.T) {
 	c := waitClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{

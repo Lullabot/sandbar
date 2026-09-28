@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -83,12 +84,36 @@ type taskLogLine struct {
 // (401/403) is the opposite: it is returned immediately and never retried, so
 // a mis-scoped token fails fast instead of polling forever.
 func (c *Client) WaitTask(ctx context.Context, upid string) error {
+	return c.waitTask(ctx, upid, nil)
+}
+
+// WaitTaskStreaming is WaitTask with the task's log copied to out as new lines
+// arrive. PVE's task status has no numeric progress field; long-running workers
+// such as a full QEMU clone report their useful progress in this log instead.
+// Log reads are best-effort: a token that may poll the task but may not read its
+// log must still be able to complete the operation.
+func (c *Client) WaitTaskStreaming(ctx context.Context, upid string, out io.Writer) error {
+	return c.waitTask(ctx, upid, out)
+}
+
+func (c *Client) waitTask(ctx context.Context, upid string, out io.Writer) error {
 	path := fmt.Sprintf("/nodes/%s/tasks/%s/status", c.node, url.PathEscape(upid))
 	delay := waitTaskPollInterval
+	logStart := 0
+	logReadable := out != nil
 
 	for {
 		var st taskStatusResponse
 		err := c.do(ctx, http.MethodGet, path, nil, nil, &st)
+		if logReadable {
+			// A token can own/poll a task without being allowed to read another
+			// user's log. Once PVE says that access is forbidden, stop asking on
+			// every status poll; every other log error may be transient while the
+			// task is registering, so it remains retryable.
+			if logErr := c.streamTaskLog(ctx, upid, out, &logStart); IsPermission(logErr) {
+				logReadable = false
+			}
+		}
 
 		switch {
 		case err == nil && st.Status != "running" && st.Status != "":
@@ -125,6 +150,31 @@ func (c *Client) WaitTask(ctx context.Context, upid string) error {
 		}
 		if delay += waitTaskPollInterval; delay > waitTaskMaxPollInterval {
 			delay = waitTaskMaxPollInterval
+		}
+	}
+}
+
+// streamTaskLog copies every currently available line beginning at *start and
+// advances it for the next poll. The explicit start/limit pair avoids replaying
+// the whole task log every time WaitTask checks status.
+func (c *Client) streamTaskLog(ctx context.Context, upid string, out io.Writer, start *int) error {
+	const limit = 1000
+	path := fmt.Sprintf("/nodes/%s/tasks/%s/log", c.node, url.PathEscape(upid))
+	for {
+		var lines []taskLogLine
+		query := url.Values{
+			"start": {fmt.Sprintf("%d", *start)},
+			"limit": {fmt.Sprintf("%d", limit)},
+		}
+		if err := c.do(ctx, http.MethodGet, path, query, nil, &lines); err != nil {
+			return err
+		}
+		for _, line := range lines {
+			_, _ = fmt.Fprintln(out, line.T)
+		}
+		*start += len(lines)
+		if len(lines) < limit {
+			return nil
 		}
 	}
 }

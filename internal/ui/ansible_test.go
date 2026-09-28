@@ -234,6 +234,27 @@ func TestAnsibleProgressFraction(t *testing.T) {
 	}
 }
 
+func TestParserReadsProxmoxCloneProgress(t *testing.T) {
+	var p ansibleParser
+	p.feed("==> Creating template sandbar-tmpl-golden from web\n")
+	p.feed("transferred 15.9 GiB of 32.0 GiB (49.75%)\n")
+
+	if p.progress.Step != "Creating template sandbar-tmpl-golden from web" {
+		t.Errorf("phase = %q; want the template creation phase to remain visible", p.progress.Step)
+	}
+	if p.progress.Index != 50 || p.progress.Total != 100 {
+		t.Errorf("progress = %d/%d; want rounded PVE progress 50/100", p.progress.Index, p.progress.Total)
+	}
+}
+
+func TestParserIgnoresMalformedProxmoxCloneProgress(t *testing.T) {
+	var p ansibleParser
+	p.feed("transferred some data (not-a-percent%)\n")
+	if p.progress != (ansibleProgress{}) {
+		t.Fatalf("malformed clone line changed progress: %+v", p.progress)
+	}
+}
+
 // A stream that never sends a newline (a carriage-return progress bar, a binary
 // blob) must not grow the partial-line buffer without limit.
 func TestAnsibleParserBoundsItsPartialLine(t *testing.T) {

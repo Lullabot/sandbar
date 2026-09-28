@@ -63,11 +63,19 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	tmplUPID := "UPID:pve1:0:0:0:qmtemplate:900:u:"
 	m.data("/nodes/pve1/qemu/101/clone", fmt.Sprintf("%q", cloneUPID))
 	m.okTask(cloneUPID)
+	m.data("/nodes/pve1/tasks/"+cloneUPID+"/log", `[{"n":1,"t":"transferred 16.0 GiB of 32.0 GiB (50.00%)"}]`)
 	m.data("/nodes/pve1/qemu/900/template", fmt.Sprintf("%q", tmplUPID))
 	m.okTask(tmplUPID)
 
-	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", io.Discard); err != nil {
+	var out bytes.Buffer
+	if _, err := p.SnapshotTemplate(context.Background(), "web", "web-golden", &out); err != nil {
 		t.Fatalf("SnapshotTemplate: %v", err)
+	}
+	if got := out.String(); !strings.HasPrefix(got, "==> Creating template web-golden from web\n") {
+		t.Fatalf("snapshot output did not announce template creation before doing work:\n%s", got)
+	}
+	if got := out.String(); !strings.Contains(got, "transferred 16.0 GiB of 32.0 GiB (50.00%)") {
+		t.Fatalf("snapshot output did not stream the Proxmox clone progress:\n%s", got)
 	}
 	// A stopped source must never be powered: no stop, and — crucially — no
 	// start that would leave it running afterwards.

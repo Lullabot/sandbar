@@ -34,6 +34,10 @@ import (
 // That is why the restart is a defer using context.WithoutCancel — a cancelled
 // ctx must not skip it.
 func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, templateName string, out io.Writer) (provision.SnapshotResult, error) {
+	// This phase banner is deliberately the first observable action. Resolving
+	// and stopping the source can take time too, and the TUI parses the banner to
+	// put the source tile into its snapshot progress state immediately.
+	progress(out, "==> Creating template %s from %s\n", templateName, source)
 	vmid, st, err := p.resolve(ctx, source)
 	if err != nil {
 		return provision.SnapshotResult{}, fmt.Errorf("proxmox: resolving snapshot source %s: %w", source, err)
@@ -86,7 +90,7 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 		return provision.SnapshotResult{}, fmt.Errorf("proxmox: cloning %s into template %s: %w", source, templateName, err)
 	}
 	p.setVMID(templateName, newid)
-	if err := p.client.WaitTask(ctx, cUPID.Raw); err != nil {
+	if err := p.client.WaitTaskStreaming(ctx, cUPID.Raw, out); err != nil {
 		// The clone TASK started under newid and failed, so that partial VM is
 		// ours to purge (a synchronous collision never reaches here).
 		p.cleanupVM(ctx, newid, templateName, out)

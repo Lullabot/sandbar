@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -664,6 +665,37 @@ func TestBuildingTileFallsBackToStepBeforeAnsibleStarts(t *testing.T) {
 	got := ansi.Strip(renderTile(in))
 	if !strings.Contains(got, "Cloning") {
 		t.Fatalf("building tile should fall back to the Step banner, got:\n%s", got)
+	}
+}
+
+func TestSnapshottingTileShowsTemplateProgressWithoutChangingVMHealth(t *testing.T) {
+	in := baseTileInput()
+	in.VM = vm.VM{Name: "web", Status: "Running"}
+	in.SnapshotJob = jobSnapshot{
+		State:    jobRunning,
+		Progress: ansibleProgress{Step: "Creating template golden from web", Index: 42, Total: 100},
+	}
+	in.HasSnapshotJob = true
+	in.Sample = guestSample{HasCPU: true, CPUPct: 75}
+	in.HasSample = true
+
+	got := ansi.Strip(renderTile(in))
+	for _, want := range []string{"Snapshotting", "template", "42%", "Creating template golden from web"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("snapshotting tile is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "cpu") || strings.Contains(got, "Building") {
+		t.Fatalf("snapshot activity should replace gauges without claiming the source VM is being built:\n%s", got)
+	}
+
+	// A failed snapshot is a failed operation, not a failed source VM. Once the
+	// run settles, the tile returns to the source's real health.
+	in.SnapshotJob.State = jobFailed
+	in.SnapshotJob.Err = io.ErrUnexpectedEOF
+	got = ansi.Strip(renderTile(in))
+	if !strings.Contains(got, "Running") || strings.Contains(got, "Failed") {
+		t.Fatalf("failed snapshot changed the source VM's health:\n%s", got)
 	}
 }
 
