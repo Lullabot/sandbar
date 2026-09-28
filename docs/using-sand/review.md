@@ -118,10 +118,11 @@ self-review skills into that checkout before you start an agent session:
 | `self-review-guide` | Writes a `review.guide.xml` walkthrough that groups files in reading order. |
 | `self-review-apply` | Reads a finished `review.xml`, prioritises the comments, and makes the changes. |
 
-The skills go in `.agents/skills/` inside the checkout. Their instructions
-refer to schema files at that location. They are included in the base image
-and match the review server's version, so copying them needs no network
-access.
+The skills go in `.agents/skills/` inside the checkout, with links under
+`.claude/skills/` so Claude Code discovers the same copies. Their instructions
+refer to schema files under `.agents/skills/`. They are included in the base
+image and match the review server's version, so installing them needs no
+network access.
 
 For a repository you clone later, run the installer inside the VM:
 
@@ -129,9 +130,10 @@ For a repository you clone later, run the installer inside the VM:
 self-review-install-skills /path/to/repository
 ```
 
-The command installs or refreshes the skills and adds the review artifacts
-and skill directories to your active global Git excludes file. It leaves a
-skill unchanged when the repository tracks its own copy.
+The command installs or refreshes the skills and Claude Code links, then adds
+the review artifacts, skill directories, and links to your active global Git
+excludes file. It leaves a path unchanged when the repository tracks its own
+copy.
 
 A typical workflow inside the guest:
 
@@ -147,17 +149,19 @@ Press `v` in the Landing pane to review and edit those comments, then run:
 
 !!! note "Skills tracked by your project are kept"
 
-    If the repository already tracks its own `.agents/skills/self-review-*`
-    files in Git, `sand` leaves those skills unchanged.
+    If the repository already tracks its own `.agents/skills/self-review-*` or
+    `.claude/skills/self-review-*` files in Git, `sand` leaves those paths
+    unchanged.
 
 <a id="none-of-it-shows-up-in-git-status"></a>
 
 ### Keeping review files out of commits
 
 `self-review-install-skills` adds `review.xml`, `review.guide.xml`, and the
-three skill directories to the guest user's active global Git excludes file.
-That is `~/.config/git/ignore` by default, or the path selected by
-`core.excludesFile`. It does not change your project's `.gitignore`.
+three skill directories and their Claude Code links to the guest user's active
+global Git excludes file. That is `~/.config/git/ignore` by default, or the
+path selected by `core.excludesFile`. It does not change your project's
+`.gitignore`.
 
 Ignore rules do not hide files that Git already tracks.
 

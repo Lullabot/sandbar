@@ -54,6 +54,36 @@ if [ "$found" != true ]; then
   exit 1
 fi
 
+# .agents/skills is the portable source of truth, but Claude Code discovers
+# project skills under .claude/skills. Link the staged copies rather than
+# duplicating them so both agents always read the same instructions.
+set +f
+for src in "$skills_dir"/self-review-*; do
+  [ -d "$src" ] || continue
+  name=${src##*/}
+  rel=.claude/skills/$name
+  dest=$top/$rel
+  target=../../.agents/skills/$name
+
+  # As above, a repository-owned Claude skill takes precedence over sand's
+  # adapter, whether it is a file, directory, or symlink recorded by Git.
+  if git -C "$top" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
+    printf 'skipped=claude:%s\n' "$name"
+    continue
+  fi
+
+  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$target" ]; then
+    printf 'current=claude:%s\n' "$name"
+    continue
+  fi
+
+  mkdir -p "$top/.claude/skills"
+  rm -rf "$dest"
+  ln -s "$target" "$dest"
+  printf 'installed=claude:%s\n' "$name"
+done
+set -f
+
 # Respect the repository's effective core.excludesFile instead of writing to
 # Git's default file and then claiming the entries are active. `--path`
 # expands ~/.
@@ -70,7 +100,10 @@ for pattern in \
   review.guide.xml \
   .agents/skills/self-review-apply/ \
   .agents/skills/self-review-critique/ \
-  .agents/skills/self-review-guide/
+  .agents/skills/self-review-guide/ \
+  .claude/skills/self-review-apply \
+  .claude/skills/self-review-critique \
+  .claude/skills/self-review-guide
 do
   grep -Fqx "$pattern" "$ignore" 2>/dev/null || printf '%s\n' "$pattern" >>"$ignore"
 done
