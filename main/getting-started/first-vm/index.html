@@ -1492,30 +1492,38 @@ Run</a>.</p>
 <h2 id="logging-into-claude-code">Logging into Claude Code</h2>
 <p>When selected, <code>sand</code> installs the Claude Code CLI but does <strong>not</strong> provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (<code>S</code>
-on its tile, or <code>sand shell NAME</code>) and run <code>claude</code>: the first time, it
-walks you through an interactive sign-in, then starts the session. Later
-runs go straight to the prompt.</p>
+on its tile, or <code>sand shell NAME</code>) and run <code>claude</code> with no arguments. On
+the first bare interactive run, <code>sand</code> asks whether you want to enable
+Claude Code Remote Control, then walks you through sign-in and starts the
+session. Later runs go straight to the prompt.</p>
+<p><a href="https://code.claude.com/docs/en/remote-control">Remote Control</a> keeps Claude
+Code and all of its tools running inside the VM while letting you follow and
+steer the same live session from <code>claude.ai/code</code>, another browser, or the
+Claude mobile app. That makes it useful for checking a long-running task away
+from your desk, replying when Claude needs a decision, attaching a photo from
+your phone, or asking Claude to notify you when tests finish.</p>
+<p>If you opt in, every interactive session connects automatically. If you
+decline, <code>sand</code> remembers the choice and leaves cross-machine access off. You
+can still enable one session later with <code>/remote-control</code> (or <code>/rc</code>), or turn
+the default on from Claude Code's <code>/config</code> screen. Remote Control is available
+for eligible Claude subscriptions and full-scope Claude.ai logins; API keys and
+inference-only setup tokens do not support it.</p>
+<p>Remote Control does not remove Sandbar's cross-machine messaging boundary.
+Claude Code still asks for your explicit approval before one session sends a
+message to another machine or a cloud session, even though ordinary permission
+prompts are skipped inside the VM. Messages between sessions in the same VM do
+not cross that boundary.</p>
 <p>Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
 state so sessions start with bypass permissions active, and the provisioned
 <code>claude</code> command runs <code>claude auth login</code> for you whenever you're not signed
 in, so you're never dropped to an un-authed prompt.</p>
-<p><code>--dangerously-skip-permissions</code> and <code>/remote-control</code> aren't always active
-on the very session right after you sign in — Claude Code can prompt once
-about its full-screen renderer and come up in manual mode. If that happens,
-quit (<code>/exit</code>) and run <code>claude</code> again. The provisioned <code>claude</code> prints a
-one-time reminder about this on first use. (This is Claude Code's own first-run
-sequencing, which shifts between releases, so <code>sand</code> flags it rather than
-trying to script around it.) The per-directory trust dialog you see in each
-new folder is separate and deliberate.</p>
-<p>A full interactive login is required, rather than a headless token, because
-remote control is enabled by default (see
-<a href="../../reference/security-model/">Security Model</a>) and remote control
-sessions need a full-scope OAuth login — the inference-only token from
-<code>claude setup-token</code> can't establish one, so headless token auth isn't
-supported here.</p>
-<p>Once you're logged in, notifications arrive through Claude Code's remote
-control: you're alerted in the Claude app when a session needs input or
-finishes, with no webhook or extra configuration required.</p>
+<p><code>--dangerously-skip-permissions</code> and an opted-in Remote Control connection
+aren't always active in the session immediately after the first sign-in. Claude
+Code can also prompt once about its full-screen renderer. If the first session
+comes up in manual mode or without Remote Control, quit (<code>/exit</code>) and run
+<code>claude</code> again. The provisioned launcher prints a one-time reminder about this.
+The per-directory trust dialog you see in each new folder is separate and
+deliberate.</p>
 <h2 id="logging-into-codex">Logging into Codex</h2>
 <p>If you created the VM with <code>--with-codex</code> (or enabled Codex in the TUI create
 form), the Codex CLI is provisioned but no credential is included. Shell into

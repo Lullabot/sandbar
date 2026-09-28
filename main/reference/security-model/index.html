@@ -1541,9 +1541,18 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   without interactive approval prompts. This is deliberate, not an
   oversight: it's appropriate specifically because the VM is ephemeral and
   isolated, and can be torn down and reprovisioned at any time.</li>
-<li><strong>Remote control is on by default</strong> (<code>remoteControlAtStartup: true</code> in the
-  provisioned settings), so you can drive and monitor a session from the
-  Claude app once you've logged in inside the VM.</li>
+<li><strong>Claude Code Remote Control is off until you opt in.</strong> The provisioned
+  settings explicitly set <code>remoteControlAtStartup: false</code>. On the first bare
+  interactive launch, <code>sand</code> explains Remote Control and asks whether to turn
+  it on for future interactive sessions. If enabled, the session remains in
+  the VM but its transcript and tool activity are synchronized through
+  Anthropic so you can drive it from <code>claude.ai/code</code> or the Claude app. See
+  <a href="../../getting-started/first-vm/#logging-into-claude-code">Logging into Claude Code</a>.</li>
+<li><strong>Cross-machine session messaging stays isolated even when Remote Control is
+  enabled.</strong> The provisioned <code>isolatePeerMachines: true</code> setting requires your
+  explicit approval before Claude's <code>SendMessage</code> can reach a session on
+  another machine or in the cloud. Claude Code honors that prompt even in
+  bypass-permissions mode. Same-machine session messaging is unaffected.</li>
 <li><strong>Claude Code sessions see the scoped secrets of the directory they work
   in</strong>, via the provisioned direnv hooks (see
   <a href="../../using-sand/secrets/">Secrets</a>). Scope your tokens accordingly — a
