@@ -279,3 +279,31 @@ graph TD
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-28
+
+### Results
+
+- Added a dependency-free, cache-backed daily release checker with stable semantic-version comparison, trusted release-note URLs, silent failure handling, and a strict cross-process reservation lock.
+- Added a dedicated first-run onboarding screen that teaches the persistent tmux workflow and `C-a d`, conditionally warns exact `TERM_PROGRAM=WarpTerminal` users, links to support and current release notes, persists dismissal in XDG state, and remains reopenable from help.
+- Integrated asynchronous cached/update results into the TUI without blocking provider startup, including a linked `(Update available!)` header notice whose narrow layout sheds the notice before the installed version.
+- Documented onboarding, Warp/browser guidance, the daily release cache, persisted paths, and maintainership invariants in the user documentation and `AGENTS.md`.
+- Added unit, behavioral, pseudo-terminal golden, concurrency, response-validation, navigation, and layout coverage for the new workflows.
+- Verified with `gofmt -l .`, `go vet ./...`, the full race-enabled Go suite with the repository's 90.8% internal coverage floor, focused release/onboarding tests, and `mkdocs build --strict`.
+
+### Noteworthy Events
+
+- The approved plan had no tasks or execution blueprint, so the required task-generation stage created four tasks across three dependency-ordered phases before execution.
+- The blueprint validator documents a `taskManagerRoot` field while its shipped script accepts `strikethrooRoot`; execution used the script's supported field.
+- The branch helper was intentionally skipped because the worktree was on a detached `HEAD`, not `main` or `master`.
+- The two independent Phase 2 UI tasks were executed concurrently and coordinated around their shared model/key/view files before the phase commit.
+- Independent documentation review found and corrected one width-shedding description so it matches the implemented header behavior.
+- The first full coverage run reported 90.7%, below the committed 90.8% floor. Focused edge-case tests were added; the repeated full race-and-coverage run passed at 90.8% without lowering the gate.
+- MkDocs completed successfully in strict mode while emitting Material for MkDocs' upstream informational warning about MkDocs 2.0.
+
+### Necessary follow-ups
+
+- None required.
