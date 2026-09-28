@@ -14,6 +14,7 @@ import (
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/spinner"
@@ -24,6 +25,13 @@ import (
 // fakeRunner is a no-op lima.Runner so the model can be constructed and driven
 // in tests without ever spawning a real limactl.
 type fakeRunner struct{}
+
+type offlineReleaseChecker struct{}
+
+func (offlineReleaseChecker) Cached() releasecheck.Release { return releasecheck.Release{} }
+func (offlineReleaseChecker) Check(context.Context) releasecheck.Release {
+	return releasecheck.Release{}
+}
 
 func (fakeRunner) Output(context.Context, ...string) ([]byte, error)                { return nil, nil }
 func (fakeRunner) Stream(context.Context, io.Reader, io.Writer, ...string) error    { return nil }
@@ -52,7 +60,15 @@ func newTestModel(t *testing.T) model {
 func isolateHostState(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("LIMA_HOME", t.TempDir())
+	if err := saveOnboardingAcknowledged(); err != nil {
+		t.Fatalf("seed onboarding acknowledgement: %v", err)
+	}
+	oldReleaseFactory := releaseCheckerFactory
+	releaseCheckerFactory = func() releaseChecker { return offlineReleaseChecker{} }
+	t.Cleanup(func() { releaseCheckerFactory = oldReleaseFactory })
 	// XDG_CONFIG_HOME covers the connection-profiles store (internal/profiles):
 	// New (model.go) loads it exactly like the registry/secrets stores above,
 	// so without this every test process would read and seed-write the

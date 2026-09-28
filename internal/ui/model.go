@@ -28,6 +28,7 @@ import (
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -133,6 +134,7 @@ const (
 	// viewDest, ahead of the tracked job it starts on submit.
 	viewSnapshotPrompt
 	viewHelp
+	viewOnboarding
 )
 
 // model is the root Bubble Tea model. It is passed by value through Update, so
@@ -162,6 +164,10 @@ type model struct {
 	reg  *registry.Registry
 	keys keyMap
 	help help.Model
+	// Release metadata is cache-seeded before the first frame and refreshed by
+	// an independent startup command. The result is application-wide state.
+	releaseChecker releaseChecker
+	release        releasecheck.Release
 
 	view   view
 	width  int
@@ -189,6 +195,10 @@ type model struct {
 
 	// helpScroll is the `?` screen's scroll offset (help.go).
 	helpScroll int
+	// onboardingFromHelp sends Back/Continue to the help screen without changing
+	// the durable first-run acknowledgement.
+	onboardingFromHelp bool
+	onboardingScroll   int
 
 	// jobs is the job registry (jobs.go), keyed by VM AND KIND: every provision and
 	// transfer in flight, plus the last run of each kind a VM retained — a failed
@@ -635,6 +645,7 @@ func New(fleet provider.Fleet) tea.Model {
 		}
 	}
 
+	checker := releaseCheckerFactory()
 	m := model{
 		members:          members,
 		active:           active,
@@ -651,12 +662,20 @@ func New(fleet provider.Fleet) tea.Model {
 		reviewRun:        defaultReviewRun,
 		keys:             newKeyMap(),
 		help:             help.New(),
+		releaseChecker:   checker,
 		view:             viewBoard,
 		viewport:         viewport.New(),
 		spinner:          sp,
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
 		lastInput: time.Now(),
+	}
+	if checker != nil {
+		m.release = checker.Cached()
+	}
+	acknowledged, onboardingErr := loadOnboardingAcknowledged()
+	if !acknowledged {
+		m.view = viewOnboarding
 	}
 	// A create/reset dispatched before any form opens (tests) still keys its
 	// job/registry work correctly: default the form target to the active member.
@@ -677,7 +696,7 @@ func New(fleet provider.Fleet) tea.Model {
 	m.applySize(80, 24)
 	// No one load failure may silently shadow another.
 	var warnings []string
-	for _, err := range []error{loadErr, secErr, profErr, checkoutErr} {
+	for _, err := range []error{loadErr, secErr, profErr, checkoutErr, onboardingErr} {
 		if err != nil {
 			warnings = append(warnings, err.Error())
 		}
@@ -718,6 +737,7 @@ func fleetShellResolver(members []fleetMember) shellFor {
 // member. An error binding (nil provider) has nothing to connect.
 func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
+	cmds = append(cmds, releaseCheckCmd(m.releaseChecker))
 	for i := range m.members {
 		mem := m.members[i]
 		if mem.prov == nil {
@@ -972,6 +992,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // active sub-component.
 func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case onboardingBrowserMsg:
+		if msg.err != nil {
+			m.logWarn("could not open browser: " + msg.err.Error() + " (" + msg.target + ")")
+		} else {
+			m.logMsg("opened " + msg.target + " in your browser")
+		}
+		return m, nil
+	case releaseCheckedMsg:
+		// A failed check returns the last valid cached release. Keep the model's
+		// already-rendered value if the cache is unavailable in the meantime.
+		if msg.release.Tag != "" {
+			m.release = msg.release
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.applySize(msg.Width, msg.Height)
 		return m, nil
@@ -1761,6 +1796,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.quit()
 		}
 		switch m.view {
+		case viewOnboarding:
+			return m.updateOnboarding(msg)
 		case viewBoard:
 			return m.updateBoard(msg)
 		case viewForm:
@@ -1969,6 +2006,8 @@ func (m model) View() tea.View {
 		content = m.snapshotPromptView()
 	case viewHelp:
 		content = m.helpView()
+	case viewOnboarding:
+		content = m.onboardingView()
 	default:
 		content = m.boardView()
 	}

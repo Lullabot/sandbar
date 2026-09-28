@@ -69,6 +69,15 @@ func (m model) headerView() string {
 func (m model) titleRow() string {
 	title := titleStyle.Render("sand")
 	ver := statusStyle.Render(buildVersion)
+	// The update suffix is the lowest-priority title unit. Shedding it first
+	// preserves the installed version at widths where both cannot fit.
+	if release, ok := m.availableRelease(); ok {
+		suffix := " " + ansi.SetHyperlink(release.NotesURL) + warnStyle.Render("(Update available!)") + ansi.ResetHyperlink()
+		gap := m.layout.ContentWidth - ansi.StringWidth(title) - ansi.StringWidth(ver) - ansi.StringWidth(suffix)
+		if gap >= 1 {
+			return title + strings.Repeat(" ", gap) + ver + suffix
+		}
+	}
 	gap := m.layout.ContentWidth - ansi.StringWidth(title) - ansi.StringWidth(ver)
 	if gap < 1 {
 		return title
