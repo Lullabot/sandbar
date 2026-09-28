@@ -133,6 +133,19 @@ it is not where prose belongs.
   with the provisioner's base lock.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
   profile-management/…).
+- Onboarding is a child view shown before the board when its acknowledgement is
+  absent; it is also reopenable from `?`. Keep its origin-aware return behavior:
+  dismissal/escape from help returns to help, while first-run dismissal returns
+  to the board. The onboarding and release-note OSC 8 targets must be fixed or
+  validated local GitHub URLs before rendering; browser-opening keyboard routes
+  use the existing `OpenInBrowser` seam.
+- The optional GitHub latest-release check runs asynchronously at startup and
+  caches in `${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json` with a
+  sibling `.lock`. Reserve the attempt under the lock before networking, so
+  concurrent processes share the 24-hour throttle; failures are quiet, consume
+  that interval, and retain the last validated result. The header update link
+  is lowest-priority title content: shed it before the installed version, and
+  omit the version with the full title row in compact layouts.
 - `landreview` — runs a browser review for one guest checkout using
   `self-review-serve` (`ServeBinary`). Start the server before choosing the
   forward: it selects a free port and has no flag for a fixed one. Parse its
@@ -206,6 +219,10 @@ uvx --with-requirements docs/requirements.txt mkdocs build --strict # check (CI 
 a missing page. Run it locally before pushing a docs change.
 
 ## Testing
+
+Onboarding tests isolate `XDG_STATE_HOME`; release-check tests isolate
+`XDG_CACHE_HOME` and use local HTTP/clock/lock seams. UI tests fake browser
+opening so they neither launch a browser nor contact GitHub.
 
 ```
 go test ./...                                  # unit + integration (no VM needed)

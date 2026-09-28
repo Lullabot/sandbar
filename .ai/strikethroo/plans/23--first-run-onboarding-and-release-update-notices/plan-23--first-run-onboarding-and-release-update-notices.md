@@ -267,9 +267,9 @@ graph TD
 - ✔️ Task 002: Implement the first-run onboarding workflow — `completed` (depends on: 001)
 - ✔️ Task 003: Integrate the daily check and header update notice — `completed` (depends on: 001)
 
-### Phase 3: Documentation and maintainership guidance
+### ✅ Phase 3: Documentation and maintainership guidance
 **Parallel Tasks:**
-- Task 004: Document onboarding and release updates (depends on: 002, 003)
+- ✔️ Task 004: Document onboarding and release updates — `completed` (depends on: 002, 003)
 
 ### Post-phase Actions
 

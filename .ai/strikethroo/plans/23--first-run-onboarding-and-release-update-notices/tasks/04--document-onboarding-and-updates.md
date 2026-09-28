@@ -2,7 +2,7 @@
 id: 4
 group: "documentation"
 dependencies: [2, 3]
-status: "pending"
+status: "completed"
 created: 2026-09-28
 models:
   anthropic: "claude-haiku-4-5"

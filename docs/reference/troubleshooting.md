@@ -2,6 +2,24 @@
 
 Common problems with `sand` and how to resolve them.
 
+## Sand or Claude Code behaves oddly in Warp
+
+Sand detects Warp through `TERM_PROGRAM=WarpTerminal` and displays a warning
+on its onboarding screen: Sand and Claude Code can have terminal compatibility
+issues in Warp. If keys or rendering misbehave, try another terminal and
+compare. Reopen onboarding from the TUI's `?` help screen with `o`.
+
+## A help or release-notes link does not open
+
+The onboarding screen and update notice include clickable OSC 8 links when
+the terminal supports them. Onboarding also provides `h` for the Sand issue
+tracker and `r` for the installed version's release notes; the `?` help screen
+provides `r` for the latest available release notes. These keyboard actions
+ask the operating system to open your default browser. If that fails, open the
+[Sand issue tracker](https://github.com/Lullabot/sandbar/issues/new) or
+[Sand releases](https://github.com/Lullabot/sandbar/releases) directly in a
+browser.
+
 ## A stale base image
 
 `sand` builds shared dependencies (packages, Docker, Node,
