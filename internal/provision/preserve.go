@@ -51,7 +51,7 @@ const (
 // AgentStatePaths are the home-relative settings, credentials, sessions and
 // files preserved together for all supported coding agents.
 var AgentStatePaths = []string{
-	".claude", ".claude.json",
+	".claude", ".claude.json", ".config/sandbar/claude-remote-control-onboarding-complete",
 	".codex", ".config/sandbar/codex-remote-control-onboarding-complete",
 	".config/opencode", ".local/share/opencode", ".local/state/opencode",
 	".pi/agent",

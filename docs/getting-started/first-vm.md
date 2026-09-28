@@ -49,34 +49,43 @@ Run](../using-sand/connection-profiles.md).
 
 When selected, `sand` installs the Claude Code CLI but does **not** provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (`S`
-on its tile, or `sand shell NAME`) and run `claude`: the first time, it
-walks you through an interactive sign-in, then starts the session. Later
-runs go straight to the prompt.
+on its tile, or `sand shell NAME`) and run `claude` with no arguments. On
+the first bare interactive run, `sand` asks whether you want to enable
+Claude Code Remote Control, then walks you through sign-in and starts the
+session. Later runs go straight to the prompt.
+
+[Remote Control](https://code.claude.com/docs/en/remote-control) keeps Claude
+Code and all of its tools running inside the VM while letting you follow and
+steer the same live session from `claude.ai/code`, another browser, or the
+Claude mobile app. That makes it useful for checking a long-running task away
+from your desk, replying when Claude needs a decision, attaching a photo from
+your phone, or asking Claude to notify you when tests finish.
+
+If you opt in, every interactive session connects automatically. If you
+decline, `sand` remembers the choice and leaves cross-machine access off. You
+can still enable one session later with `/remote-control` (or `/rc`), or turn
+the default on from Claude Code's `/config` screen. Remote Control is available
+for eligible Claude subscriptions and full-scope Claude.ai logins; API keys and
+inference-only setup tokens do not support it.
+
+Remote Control does not remove Sandbar's cross-machine messaging boundary.
+Claude Code still asks for your explicit approval before one session sends a
+message to another machine or a cloud session, even though ordinary permission
+prompts are skipped inside the VM. Messages between sessions in the same VM do
+not cross that boundary.
 
 Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
 state so sessions start with bypass permissions active, and the provisioned
 `claude` command runs `claude auth login` for you whenever you're not signed
 in, so you're never dropped to an un-authed prompt.
 
-`--dangerously-skip-permissions` and `/remote-control` aren't always active
-on the very session right after you sign in — Claude Code can prompt once
-about its full-screen renderer and come up in manual mode. If that happens,
-quit (`/exit`) and run `claude` again. The provisioned `claude` prints a
-one-time reminder about this on first use. (This is Claude Code's own first-run
-sequencing, which shifts between releases, so `sand` flags it rather than
-trying to script around it.) The per-directory trust dialog you see in each
-new folder is separate and deliberate.
-
-A full interactive login is required, rather than a headless token, because
-remote control is enabled by default (see
-[Security Model](../reference/security-model.md)) and remote control
-sessions need a full-scope OAuth login — the inference-only token from
-`claude setup-token` can't establish one, so headless token auth isn't
-supported here.
-
-Once you're logged in, notifications arrive through Claude Code's remote
-control: you're alerted in the Claude app when a session needs input or
-finishes, with no webhook or extra configuration required.
+`--dangerously-skip-permissions` and an opted-in Remote Control connection
+aren't always active in the session immediately after the first sign-in. Claude
+Code can also prompt once about its full-screen renderer. If the first session
+comes up in manual mode or without Remote Control, quit (`/exit`) and run
+`claude` again. The provisioned launcher prints a one-time reminder about this.
+The per-directory trust dialog you see in each new folder is separate and
+deliberate.
 
 ## Logging into Codex
 
