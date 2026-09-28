@@ -73,7 +73,7 @@ Network downlink speed was not measured, but connectivity was stable. The primar
 
 No network errors were observed. All operations completed on first attempt.
 
-### Caveat 3: VM Configuration 
+### Caveat 3: VM Configuration
 The default sand configuration was used (2 vCPUs, 8GB RAM, 20GB disk for base; 100GB disk for cloned VM). This matches the production default.
 
 ### Caveat 4: Warm Create Not Measured
@@ -110,4 +110,3 @@ Key findings:
 - **Clone + finalize**: ~1m44s (estimated for warm create)
 
 The bulk of the time (22 out of 24 minutes) is spent building the base image. Baked images should eliminate this cost on first create.
-

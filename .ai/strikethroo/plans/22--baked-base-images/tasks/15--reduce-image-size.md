@@ -4,7 +4,9 @@ group: "image-build"
 dependencies: [3]
 status: "pending"
 created: 2026-09-13
-model: "sonnet"
+models:
+  anthropic: "claude-sonnet-5"
+  openai: "gpt-6-sol"
 effort: "medium"
 skills:
   - shell
@@ -29,8 +31,8 @@ Cut the published image's compressed size without removing any tool, by switchin
 - [ ] `/usr/share/go-1.24/test` and `/usr/share/go-1.24/api` are removed.
 - [ ] The `ieee-data` package (or its `/usr/share/ieee-data` payload) is removed.
 - [ ] **No tool is removed.** The JDK and cloudflared are explicitly retained by user decision. `/usr/include`, GCC, and Go's `src` tree are explicitly retained (see Technical Requirements).
-- [ ] Verification: build the image and paste the final compressed size in bytes and MiB, alongside the pre-optimization baseline of **1,229,651,968 bytes (1172.68 MiB)**. State the delta in MiB and as a percentage.
-- [ ] Verification: after the build, mount the image and confirm every tool still works — `chroot` in and run `node --version`, `go version`, `java -version`, `docker --version`, `ddev --version`, `glab --version`, `gh --version`, `uv --version`, and confirm `claude`, `codex`, `drupalorg`, `mkcert` and `cloudflared` are present. Paste the output. A smaller image that lost a tool is a failed task.
+- [ ] Verification: build the current-`main` base before and after optimization and report both sizes. Do not use the earlier 1,229,651,968-byte prototype as the baseline because it predates per-VM agent installation.
+- [ ] Verification: after the build, mount the image and confirm every shared dependency still works — Node, Go, Java, Docker, DDEV, glab, gh, uv, drupalorg, mkcert, cloudflared, and self-review tooling. Confirm coding-agent binaries remain absent because they install during finalize.
 - [ ] Verification: confirm the configured locale still works — `locale -a` inside the image lists `en_CA.utf8`. Paste it.
 - [ ] Verification: build twice and confirm the size remains reproducible (within ~1 MiB), so the optimization did not reintroduce the nondeterminism that task 03 fixed.
 
@@ -60,7 +62,7 @@ Use your internal Todo tool to track these and keep on track.
 
 **Measured starting point.** The image was analysed by mounting run 3's output. Total filesystem content is 3.0 GB, compressing to 1172.68 MiB (2.6x). The breakdown that matters:
 
-Inherent and untouchable (vendor binaries, ~1.1 GB uncompressed): Codex 318M (a 251M binary plus a 67M helper), JDK 286M, Go 282M, Claude 214M (single binary, single version — no duplicate versions to clean), the Docker stack ~300M, GCC + headers 230M, node 121M, then glab 49M / uv 48M / gh 41M / ddev 40M / cloudflared 38M.
+Inherent and untouchable content includes the JDK, Go toolchain and source, Docker stack, GCC and headers, Node, glab, uv, gh, DDEV, and cloudflared. Claude Code, Codex, OpenCode, and Pi are no longer image-size inputs: `main` installs selected agents per VM during finalize.
 
 Trimmable, with measured sizes:
 
@@ -82,6 +84,6 @@ Trimmable, with measured sizes:
 
 **Measure per-change.** Record the size after: (a) zstd alone, (b) zstd + trims. Two numbers, so the plan can say which lever mattered. If zstd alone gets the image comfortably small, the trims become optional complexity and that is a legitimate finding to report.
 
-**Do not chase the vendor binaries.** Codex's 251M binary and Claude's 214M binary are single upstream artifacts; there is nothing to strip without breaking them, and they are Rust/Go static binaries that already compress ~2.5-3x. Resist the temptation to `upx` them — it breaks signature checks and slows startup.
+**Do not move agents back into the image to simplify verification.** Their per-VM lifecycle is deliberate and keeps fast-moving binaries out of a slowly released base. Optimize only content the base phase actually owns.
 
 </details>

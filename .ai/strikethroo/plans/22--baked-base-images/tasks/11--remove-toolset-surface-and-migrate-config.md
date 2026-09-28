@@ -4,19 +4,21 @@ group: "cleanup"
 dependencies: [10]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 7
-complexity_notes: "Touches a persisted on-disk config format with a migration; per the rubric's risk floor, data-migration tasks never go below sonnet + high. A bad migration corrupts saved user state."
+complexity_notes: "Touches the persisted registry and golden-template records; the rubric's migration risk floor requires capable models and high effort."
 skills:
   - go
   - bubbletea
 ---
-# Remove the tool-selection surface and migrate saved configs
+# Remove base-tool selection while preserving per-VM agent choices
 
 ## Objective
 
-Delete the five tool checkboxes and everything behind them — CLI flags, TUI toggles, the model fields and the Ansible vars — because every image now ships every tool, and migrate saved configs that still carry the old fields with a one-time warning.
+Delete the three shared-base dependency choices (DDEV, Go, and Java) and everything behind them because every published base image contains them. Preserve the four coding-agent choices (Claude Code, Codex, OpenCode, and Pi), which `main` now installs per VM during finalize and remembers through `internal/agentprefs`. Migrate registry records, including golden-template configs, that still carry the retired base-tool fields.
 
 ## Skills Required
 
@@ -24,16 +26,16 @@ Delete the five tool checkboxes and everything behind them — CLI flags, TUI to
 
 ## Acceptance Criteria
 
-- [ ] `CreateConfig`'s `WithClaude`, `WithDDEV`, `WithGo`, `WithJava`, `WithCodex` (`internal/vm/vm.go:103-107`) and the helpers `ToolPtrs` (`:148-156`), `ToolsetKey` (`:188-200`) and `ApplyToolset` (`:165-169`) are removed.
-- [ ] The five CLI flags `--with-claude/-ddev/-go/-java/-codex` (`cmd/sand/create.go:113-120`) are removed.
-- [ ] The five TUI toggles in `createToggles()` (`internal/ui/form.go:528-568`) are removed, along with the `baseWideHelp()` "installs into the SHARED base image" warning, the `m.toolClaude/toolCodex/toolDDEV/toolGo/toolJava` model fields, their reset-replay counterparts (`:740-765`), and `formToolsetCmd`/`kickFormToolsetLoad` (`:297-335`).
-- [ ] The `toolset_*` Ansible variables are removed from `BuildExtraVars` (`internal/provision/vars.go:85-99`), from `roles/base/defaults/main.yml:93-97`, and from the role gates in `site.yml:29-40` — the `claude-code` and `codex` roles now always run in the base phase.
-- [ ] A migration detects the old toolset fields in a saved config, emits a **one-time** notice explaining that all images now include every tool, and rewrites the config without them. Existing VMs keep working untouched.
+- [ ] `CreateConfig.WithDDEV`, `WithGo`, and `WithJava`, plus `ToolPtrs`, `ToolsetKey`, and `ApplyToolset`, are removed. `WithClaude`, `WithCodex`, `WithOpenCode`, `WithPi`, and `AgentPtrs` remain.
+- [ ] The CLI flags and TUI toggles for DDEV, Go, and Java are removed. The four `--with-<agent>` flags and agent toggles remain and continue adopting/saving `agentprefs.Selection`.
+- [ ] `formToolsetCmd`, `kickFormToolsetLoad`, and `provision.BaseToolset` are removed; the golden-template Source selector and its delete interaction remain intact.
+- [ ] Base-only `toolset_ddev`, `toolset_go`, and `toolset_java` Ansible plumbing is removed. Agent `toolset_claude`, `toolset_codex`, `toolset_opencode`, and `toolset_pi` variables remain because the agent roles run during finalize.
+- [ ] A registry migration detects retired base-tool fields in both `vms[].config` and `templates[].config`, emits a one-time notice explaining that published images include the base dependencies, and rewrites without losing any VM/template provenance or agent selections.
 - [ ] Verification: `go build ./...`, `go vet ./...` and `go test ./...` pass, including the TUI golden snapshot tests (regenerate them deliberately and review the diff — do not blind-accept). Paste the output.
-- [ ] Verification: `sand create --help` lists no `--with-*` flag. Paste the help output.
+- [ ] Verification: `sand create --help` lists no `--with-ddev`, `--with-go`, or `--with-java`, and still lists all four agent flags.
 - [ ] Verification: write a config file containing old toolset fields, run `sand`, and confirm the warning appears once, the run succeeds, and the on-disk config no longer contains those fields. Paste the before/after config and the warning.
 - [ ] Verification: run `sand` a second time against the migrated config and confirm the warning does **not** reappear. Paste the output.
-- [ ] Verification: `grep -rn "ToolsetKey\|ApplyToolset\|ToolPtrs\|WithClaude\|toolset_" internal/ cmd/ roles/ site.yml` returns no hits outside the migration's own detection code. Paste it.
+- [ ] Verification: `grep -rn "ToolsetKey\|ApplyToolset\|ToolPtrs\|WithDDEV\|WithGo\|WithJava" internal/ cmd/` returns no hits outside migration compatibility code; agent fields and `toolset_<agent>` remain.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -42,9 +44,10 @@ Use your internal Todo tool to track these and keep on track.
 - The migration must be **safe against partial writes**: never truncate a config in place. Write to a temp file and rename, so an interrupted migration cannot destroy saved state.
 - The migration must be tolerant of a config that has *already* been migrated, and of one that never had the fields — neither should warn or rewrite.
 - Unknown/extra fields in the config must not be dropped by the migration beyond the toolset ones. If the config is decoded into a struct and re-encoded, confirm nothing else is silently lost — this is the classic way a migration eats user data.
-- `roles/claude-code` and `roles/codex` are currently gated on `toolset_claude` / `toolset_codex` in `site.yml:29-40`. Removing the gates means Codex is now always installed, where it was previously opt-in and defaulted to false. That is the intended behaviour ("one image with all tools") — note it for the docs task.
-- Reset flows replay a recorded selection (`internal/ui/form.go:740-765`); remove the tool parts while leaving the unrelated reset toggles (Preserve Claude Code settings, Preserve project) intact.
+- Coding agents are per-VM software on `main`, not base dependencies. Do not bake them, make them unconditional, remove their flags, or bypass `agentprefs.LoadOrMigrate` / `agentprefs.Save`.
+- Reset flows replay recorded base and agent state. Remove only the retired base-tool parts while leaving agent selection and Preserve Agents / Preserve project behavior intact.
 - `provision.BaseToolset`, read asynchronously to pre-fill the form, becomes meaningless — remove it and its call sites.
+- The managed registry is schema v4 and now stores golden templates as well as VMs. The migration must preserve `TemplateSource`, template records, and every unrelated `CreateConfig` field.
 
 ## Input Dependencies
 
@@ -67,9 +70,9 @@ Use your internal Todo tool to track these and keep on track.
 
 Suggested approach: decode into a generic map (or the existing type plus a catch-all), delete only the known toolset keys, write to `<config>.tmp`, `os.Rename` into place. Emit the notice once — keyed off "the fields were present and we removed them", which is naturally once, because the second run finds nothing to remove. That is simpler and more robust than storing a "have I warned" flag.
 
-**Codex becomes always-installed.** It is currently opt-in with a default of false (`DefaultCreateConfig`, `internal/vm/vm.go:111-140`). Under "one image with all tools" it ships to everyone. This is a deliberate product change following from the work order, not an oversight — but it does mean every VM now carries an OpenAI CLI. Flag it clearly in the task record so task 14 documents it, and so it is a visible decision rather than a side effect discovered later.
+**Agents remain per VM.** Since this plan was drafted, `main` generalized the coding-agent lifecycle: Claude Code, Codex, OpenCode, and Pi are installed during finalize, selected independently, and remembered outside the shared base stamp. That architecture already solves the staleness and image-size problem that the old lazy-shim task was trying to address. Preserve it.
 
-**Golden snapshot tests.** The TUI form changes will break golden tests under `internal/ui`. Regenerate them, then actually read the diff: you are expecting six checkboxes to become one (the "Rebuild base image" toggle survives, though task 10 may have changed its meaning — check). A golden diff that shows something *else* changing is a real bug, and blind-accepting regenerated goldens is how it would ship.
+**Golden snapshot tests.** The TUI form changes will break golden tests under `internal/ui`. Regenerate them, then read the diff. The expected change is removal of the three base-tool toggles; the Source row, four agent choices, and Rebuild base image toggle remain. Explicitly inspect `TestTUIFormSourceSelectorGolden` and template-delete goldens so a broad regeneration cannot erase the newly landed template UX.
 
 **Do not remove the `--rebuild` flag.** It is in `createToggles()` alongside the tool checkboxes but it is not a tool selector; it survives as the explicit rebuild-from-image path task 10 preserved.
 

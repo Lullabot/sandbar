@@ -1,11 +1,15 @@
 ---
 id: 5
 group: "image-build"
-dependencies: [3, 4]
+dependencies: [3, 4, 15]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
-effort: "medium"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
+effort: "high"
+complexity_score: 7
+complexity_notes: "Publishes bootable public artifacts and their trust manifest across two architectures; release ordering or checksum mistakes are supply-chain failures."
 skills:
   - github-actions
 ---

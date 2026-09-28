@@ -2,9 +2,11 @@
 id: 1
 group: "image-build"
 dependencies: []
-status: "completed"
+status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 7
 complexity_notes: "Requires reasoning about offline-root vs live-systemd semantics across two large roles; a missed task fails only later, inside CI, as a silent no-op rather than an error."

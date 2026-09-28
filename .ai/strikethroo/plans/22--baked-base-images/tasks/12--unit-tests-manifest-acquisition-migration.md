@@ -1,11 +1,15 @@
 ---
 id: 12
 group: "testing"
-dependencies: [7, 11]
+dependencies: [7, 11, 17]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
-effort: "medium"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
+effort: "high"
+complexity_score: 7
+complexity_notes: "Tests supply-chain failure handling, persisted-data migration, and provider-boundary source routing; false confidence here would permit unsafe images or corrupt user state."
 skills:
   - go
   - testing
@@ -14,7 +18,7 @@ skills:
 
 ## Objective
 
-Cover the genuinely new logic introduced by this plan — architecture resolution, digest verification and its failure modes, cache behaviour, and the toolset config migration — with focused tests that exercise this project's own logic rather than the standard library's.
+Cover the genuinely new logic introduced by this plan — architecture resolution, digest verification and its failure modes, cache behaviour, registry migration, and baked-image provenance through golden templates — with focused tests that exercise this project's own logic rather than the standard library's.
 
 ## Skills Required
 
@@ -28,7 +32,9 @@ Cover the genuinely new logic introduced by this plan — architecture resolutio
 - [ ] **Truncated download is tested**: a server that closes the connection mid-body produces an error and leaves no file in the cache that a later run would mistake for complete.
 - [ ] Cache hit is tested: a second acquisition with a valid cached file performs **no** HTTP request.
 - [ ] Corrupt cache is tested: a cached file whose contents no longer match the digest is detected, discarded and re-downloaded rather than used.
-- [ ] Config migration is tested: a config with old toolset fields is rewritten without them and warns; an already-migrated config is left alone and does not warn; **unrelated fields survive the migration unchanged**.
+- [ ] Registry migration is tested for both VM entries and golden-template records: retired base-tool fields are removed and warn once; agent choices, template provenance, scope, source, timestamps, and unrelated fields survive unchanged.
+- [ ] Legacy golden-template records carrying playbook/toolset stamps migrate to an explicit unknown image version rather than being mislabeled current.
+- [ ] Template-source routing is tested at the provider boundary: create and reset from a golden template clone the reserved template instance and perform no shared-base acquisition or rebuild.
 - [ ] Verification: `go test ./internal/... -run 'Manifest|Acquire|Migrat' -v` passes with every case above visible in the output. Paste it.
 - [ ] Verification: `go test ./... -race` passes and the `COVERAGE_FLOOR` gate holds. Paste the coverage summary.
 
@@ -44,7 +50,8 @@ Use your internal Todo tool to track these and keep on track.
 ## Input Dependencies
 
 - Task 07's manifest type and acquisition helper.
-- Task 11's config migration.
+- Task 11's registry/config migration.
+- Task 17's image-version-aware golden-template provenance.
 
 ## Output Artifacts
 
@@ -83,7 +90,9 @@ Use your internal Todo tool to track these and keep on track.
 
 **The two highest-value tests** are the digest mismatch and the truncated download, because both are the difference between "fails safely" and "boots an unverified disk image". For the truncation case, an `httptest` handler that writes a `Content-Length` larger than the body it actually sends, or that panics mid-write to force a connection close, reproduces it. Assert on the *filesystem state* afterwards, not only on the returned error — the bug that matters is a partial file surviving in the cache under its final name, which a later run would accept as complete.
 
-**For the migration**, the "unrelated fields survive" case is the one that protects real user data. Build a config containing both toolset fields and several unrelated ones (a connection profile, a disk size, a project setting — whatever the real format holds), migrate it, and assert every unrelated field is byte-identical afterwards. If the implementation round-trips through a typed struct, this test is what will catch silent field loss.
+**For the migration**, the "unrelated fields survive" case is the one that protects real user data. Build a schema-v4 registry containing VM entries, a template, template dependents, agent selections, sizing, and project settings; migrate it and assert every field outside the retired base-tool/stamp keys survives. If the implementation round-trips through a typed struct, this test is what catches silent field loss.
+
+**Reach the clone boundary.** A registry assertion alone does not prove template creates and resets use the right source. Fake `provider.Provider` and assert the `TemplateSource` passed to the create/reset operation is the reserved template instance while the baked-base acquisition seam is untouched.
 
 **Keep it proportionate.** This is roughly two test files. The plan does not call for a comprehensive suite over the provisioning layer, and task 10 already deleted a large body of tests covering removed behaviour; do not backfill replacements for those.
 

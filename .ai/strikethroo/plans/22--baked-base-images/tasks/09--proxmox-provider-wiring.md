@@ -1,10 +1,12 @@
 ---
 id: 9
 group: "provider-wiring"
-dependencies: [7]
+dependencies: [6, 7]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-sonnet-5"
+  openai: "gpt-6-sol"
 effort: "medium"
 skills:
   - go
@@ -30,7 +32,7 @@ Move the Proxmox provider from its hardcoded image constants to the pinned manif
 - [ ] Verification: `go build ./...` and `go vet ./...` pass; `go test ./internal/provider/...` passes against the mock PVE server. Paste the output.
 - [ ] Verification: the opt-in e2e suite passes against a real PVE target — `PROXMOX_E2E=1 go test -tags proxmoxe2e ./internal/provider/...` with the environment from `e2e.env`. Paste the result.
 - [ ] Verification: from the e2e run or a manual create, confirm no base-phase Ansible ran — grep the provisioning output for `TASK [base` and show it is absent, while finalize tasks are present.
-- [ ] Verification: shell into a created Proxmox VM and confirm the baked tools are present (`node --version`, `go version`, `claude --version`). Paste the output.
+- [ ] Verification: shell into a created Proxmox VM and confirm baked dependencies are present, a selected coding agent installs during finalize, and an unselected agent remains absent.
 
 Use your internal Todo tool to track these and keep on track.
 
