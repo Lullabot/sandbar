@@ -72,6 +72,67 @@ class AgentRolesTest(unittest.TestCase):
         self.assertIn("@opencode/cli@latest", argv)
         self.assertNotIn("opencode-ai@latest", argv)
 
+    def test_claude_remote_control_onboarding(self):
+        result = subprocess.run(
+            ["bash", str(ROOT / "roles/claude-code/tests/test-claude-shell-wrapper.sh")],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+        settings = json.loads(
+            (ROOT / "roles/claude-code/templates/claude-settings.json.j2").read_text()
+        )
+        self.assertIs(settings["remoteControlAtStartup"], False)
+        self.assertIs(settings["isolatePeerMachines"], True)
+
+    def test_claude_remote_control_migration_requires_opt_in(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            home = directory / "guest"
+            settings = home / ".claude/settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text('{"theme":"dark","remoteControlAtStartup":true}\n')
+            settings.chmod(0o600)
+
+            role = ROOT / "roles/claude-code"
+            all_tasks = yaml.safe_load((role / "tasks/main.yml").read_text())
+            names = {
+                "Deploy ~/.claude/settings.json from template",
+                "Check for prior Claude remote-control onboarding",
+                "Read Claude settings for safe communication defaults",
+                "Isolate peer machines and keep Remote Control opt-in",
+            }
+            tasks = [task for task in all_tasks if task["name"] in names]
+            template = next(task for task in tasks if "ansible.builtin.template" in task)
+            template["ansible.builtin.template"]["src"] = str(
+                role / "templates/claude-settings.json.j2"
+            )
+            group = grp.getgrgid(os.getgid()).gr_name
+            for task in tasks:
+                module = task.get("ansible.builtin.template") or task.get("ansible.builtin.copy")
+                if module:
+                    module["group"] = group
+
+            variables = {"user_home": str(home), "user_name": getpass.getuser()}
+            play = [{"hosts": "all", "gather_facts": False, "tasks": tasks}]
+            self.run_play(directory, play, variables)
+            migrated = json.loads(settings.read_text())
+            self.assertIs(migrated["remoteControlAtStartup"], False)
+            self.assertIs(migrated["isolatePeerMachines"], True)
+            self.assertEqual(migrated["theme"], "dark")
+            self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
+
+            marker = home / ".config/sandbar/claude-remote-control-onboarding-complete"
+            marker.parent.mkdir(parents=True)
+            marker.touch()
+            migrated["remoteControlAtStartup"] = True
+            migrated["isolatePeerMachines"] = False
+            settings.write_text(json.dumps(migrated))
+            self.run_play(directory, play, variables)
+            opted_in = json.loads(settings.read_text())
+            self.assertIs(opted_in["remoteControlAtStartup"], True)
+            self.assertIs(opted_in["isolatePeerMachines"], True)
+
     def test_agent_clipboard_shims_are_image_only(self):
         role = ROOT / "roles" / "agent-clipboard"
         tasks_text = (role / "tasks" / "main.yml").read_text()
@@ -152,6 +213,8 @@ class AgentRolesTest(unittest.TestCase):
             home.mkdir()
             old_artifacts = (".local/bin/claude", ".local/share/claude/versions/old",
                              ".claude/settings.json", ".claude.json",
+                             ".config/sandbar/claude-shell-wrapper.sh",
+                             ".config/sandbar/claude-remote-control-onboarding-complete",
                              ".local/bin/codex", ".codex/packages/standalone/current/codex")
             for relative in (*old_artifacts, ".local/bin/other", ".local/share/other/data",
                              ".config/sandbar/secrets.env"):
@@ -188,7 +251,7 @@ class AgentRolesTest(unittest.TestCase):
             variables["user_name"] = getpass.getuser()
             self.run_play(directory, [{"hosts": "all", "gather_facts": False,
                                        "tasks": [launcher]}], variables)
-            self.assertIn("claude()", bashrc.read_text())
+            self.assertIn("claude-shell-wrapper.sh", bashrc.read_text())
             syntax = subprocess.run(["bash", "-n", str(bashrc)], capture_output=True, text=True)
             self.assertEqual(syntax.returncode, 0, syntax.stderr)
 

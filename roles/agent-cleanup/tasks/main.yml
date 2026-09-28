@@ -26,6 +26,8 @@
     - .claude.json
     - .claude.json.backup
     - .config/sandbar/.claude-first-run-notice
+    - .config/sandbar/claude-remote-control-onboarding-complete
+    - .config/sandbar/claude-shell-wrapper.sh
     - .local/bin/codex
     - .local/bin/codex-code-mode-host
     - .codex

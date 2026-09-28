@@ -134,9 +134,10 @@ to make it easier (and faster!) to use.
   branch protection, so an unattended agent can push branches for
   review yet cannot merge anything or push straight to your default
   branch.
-- **Notifications come for free.** For supported agents, we enable
-  Remote Control or similar features so you are alerted when the agent
-  is waiting for you.
+- **Remote control and notifications are one prompt away.** For supported
+  agents, onboarding offers Remote Control or similar features so you can
+  steer a VM session from another device and be alerted when the agent is
+  waiting for you. Cross-machine access stays off unless you opt in.
 
 ## How it compares
 
