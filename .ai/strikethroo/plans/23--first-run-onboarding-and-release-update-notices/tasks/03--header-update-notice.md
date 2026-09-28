@@ -2,7 +2,7 @@
 id: 3
 group: "tui-release-integration"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-09-28
 models:
   anthropic: "claude-opus-5-5"

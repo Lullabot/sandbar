@@ -1,0 +1,14 @@
+                                                                               
+   Welcome to sand                                                             
+                                                                               
+  Sand creates disposable development VMs for your coding agents.              
+                                                                               
+  Your guest shell runs inside tmux. To leave a CLI tool running, detach with  
+  C-a d (press Ctrl+A, then d). Reattach from the VM shell later.              
+                                                                               
+  Help: https://github.com/Lullabot/sandbar/issues/new                         
+  Release notes: https://github.com/Lullabot/sandbar/releases/tag/v1.2.3       
+                                                                               
+  Press h for help in your browser, or r for the installed release notes.      
+  enter continue • h get help • r release notes                                
+                                                                               

@@ -9,24 +9,28 @@ import "charm.land/bubbles/v2/key"
 // there is exactly one place that defines each of those keys, its help text,
 // and when it applies.
 type keyMap struct {
-	Enter      key.Binding
-	New        key.Binding
-	Search     key.Binding
-	StopAll    key.Binding
-	Profiles   key.Binding
-	Back       key.Binding
-	Quit       key.Binding
-	Help       key.Binding
-	Tab        key.Binding
-	ShiftTab   key.Binding
-	Up         key.Binding
-	Down       key.Binding
-	Submit     key.Binding
-	Save       key.Binding
-	Confirm    key.Binding
-	Cancel     key.Binding
-	Interrupt  key.Binding
-	Background key.Binding
+	Enter             key.Binding
+	New               key.Binding
+	Search            key.Binding
+	StopAll           key.Binding
+	Profiles          key.Binding
+	Back              key.Binding
+	Quit              key.Binding
+	Help              key.Binding
+	Onboarding        key.Binding
+	OnboardingDone    key.Binding
+	OnboardingSupport key.Binding
+	OnboardingRelease key.Binding
+	Tab               key.Binding
+	ShiftTab          key.Binding
+	Up                key.Binding
+	Down              key.Binding
+	Submit            key.Binding
+	Save              key.Binding
+	Confirm           key.Binding
+	Cancel            key.Binding
+	Interrupt         key.Binding
+	Background        key.Binding
 }
 
 // newKeyMap builds the shared chrome/navigation keyMap.
@@ -52,15 +56,19 @@ func newKeyMap() keyMap {
 		// altering the board's own rendered output. It is still reachable
 		// (this binding fires from updateBoard) and documented on the `?`
 		// screen (help.go's boardKeys) — just not advertised in the footer.
-		Profiles: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "profiles")),
-		Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
-		Quit:     key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-		Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "keys")),
-		Tab:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
-		ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
-		Up:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "prev field")),
-		Down:     key.NewBinding(key.WithKeys("down", "enter"), key.WithHelp("↓/enter", "next field")),
-		Submit:   key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "create")),
+		Profiles:          key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "profiles")),
+		Back:              key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
+		Quit:              key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+		Help:              key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "keys")),
+		Onboarding:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "onboarding")),
+		OnboardingDone:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")),
+		OnboardingSupport: key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "get help")),
+		OnboardingRelease: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "release notes")),
+		Tab:               key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
+		ShiftTab:          key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
+		Up:                key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "prev field")),
+		Down:              key.NewBinding(key.WithKeys("down", "enter"), key.WithHelp("↓/enter", "next field")),
+		Submit:            key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "create")),
 		// Save is a distinct binding from Submit (same key, different screen) so
 		// the secrets editor's help bar reads "save" rather than the form's
 		// "create".

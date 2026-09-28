@@ -46,6 +46,8 @@ func (m model) boardKeys() []struct {
 		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sand runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sand."},
 		{label(m.keys.Quit), "Quit. If a build or a file transfer is still running, it confirms first rather than orphaning it."},
 		{label(m.keys.Help), "This screen."},
+		{label(m.keys.Onboarding), "Reopen the onboarding guide for tmux, support, and release notes."},
+		{label(m.keys.OnboardingRelease), "Open the latest available release notes in your browser."},
 	}
 }
 
@@ -59,6 +61,12 @@ func (m *model) openHelp() {
 // "done" returns to the board. `?` toggles, so the key that opened it closes it.
 func (m model) updateHelp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case key.Matches(msg, m.keys.Onboarding):
+		m.onboardingFromHelp = true
+		m.view = viewOnboarding
+		return m, nil
+	case key.Matches(msg, m.keys.OnboardingRelease):
+		return m, m.openOnboardingBrowser(m.releaseNotesURL())
 	case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Help):
 		m.view = viewBoard
 		m.helpScroll = 0
@@ -78,7 +86,7 @@ func (m model) updateHelp(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // helpHelp is the `?` screen's own footer.
 func (m model) helpHelp() []key.Binding {
-	return []key.Binding{boardMove, m.keys.Back}
+	return []key.Binding{boardMove, m.keys.Onboarding, m.keys.OnboardingRelease, m.keys.Back}
 }
 
 // helpLines renders the whole reference, one entry per paragraph: the keys, then a

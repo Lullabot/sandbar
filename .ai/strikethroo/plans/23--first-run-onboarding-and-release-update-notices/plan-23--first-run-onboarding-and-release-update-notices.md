@@ -262,10 +262,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: Implement the release checker and cache — `completed`
 
-### Phase 2: TUI workflows
+### ✅ Phase 2: TUI workflows
 **Parallel Tasks:**
-- Task 002: Implement the first-run onboarding workflow (depends on: 001)
-- Task 003: Integrate the daily check and header update notice (depends on: 001)
+- ✔️ Task 002: Implement the first-run onboarding workflow — `completed` (depends on: 001)
+- ✔️ Task 003: Integrate the daily check and header update notice — `completed` (depends on: 001)
 
 ### Phase 3: Documentation and maintainership guidance
 **Parallel Tasks:**
