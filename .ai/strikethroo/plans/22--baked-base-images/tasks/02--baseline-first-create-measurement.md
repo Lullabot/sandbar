@@ -2,9 +2,11 @@
 id: 2
 group: "measurement"
 dependencies: []
-status: "completed"
+status: "pending"
 created: 2026-09-12
-model: "haiku"
+models:
+  anthropic: "claude-haiku-4-5"
+  openai: "gpt-6-luna"
 effort: "low"
 skills:
   - shell
@@ -13,7 +15,7 @@ skills:
 
 ## Objective
 
-Measure and durably record how long a cold `sand create` takes today, on a machine with no prior sandbar state, so the plan's central success criterion — that the new model is *faster* — can be evaluated. This measurement cannot be recovered once the provider wiring lands, so it must happen first.
+Validate and complete the retained cold-create baseline against current `main`, including the independently measured warm create that the earlier prototype only estimated.
 
 ## Skills Required
 

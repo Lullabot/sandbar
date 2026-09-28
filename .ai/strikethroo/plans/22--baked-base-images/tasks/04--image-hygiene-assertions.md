@@ -4,10 +4,12 @@ group: "image-build"
 dependencies: [3]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 7
-complexity_notes: "Security verification gate over a publicly distributed artifact; per the rubric's risk floor this never goes below sonnet + high."
+complexity_notes: "Security verification gate over a publicly distributed artifact; the rubric's risk floor requires capable models and high effort."
 skills:
   - shell
   - security-verification

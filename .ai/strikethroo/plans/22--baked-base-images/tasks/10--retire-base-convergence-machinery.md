@@ -4,7 +4,9 @@ group: "cleanup"
 dependencies: [8, 9]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 8
 complexity_notes: "A large deletion across the core provisioning layer with subtle behavioural consequences; over-deleting breaks creates, under-deleting leaves dead code that re-triggers rebuilds users no longer expect."
@@ -27,7 +29,7 @@ Delete the machinery that existed solely to manage a locally built, drifting bas
 - [ ] `ensureBaseStopped`'s four-outcome logic (`internal/provision/provision.go:645-736`) is reduced to: base exists and its stamped image version matches the pinned one → use it; otherwise → rebuild from image.
 - [ ] `reapplyBase` (`:768-830`), `baseConvergeable` (`internal/provision/baseoverlay.go:131-157`), the 30-day `baseMaxAge` refresh (`:882`) and `mergeToolsetVersion` (`internal/provision/baseversion.go:396-411`) are removed.
 - [ ] The "de-selected but remain installed… Rebuild the base to remove them" advisory (`internal/provision/provision.go:671-673`) and `shrunkTools` (`baseversion.go:308`) are removed.
-- [ ] `PlaybookVersion` loses its toolset component; the base version stamp is the image version.
+- [ ] The shared-base stamp becomes the manifest image version. Playbook/toolset stamps are not reused for published-base or golden-template freshness.
 - [ ] The explicit rebuild path (the `--rebuild` flag's successor) still works and re-verifies the cached image rather than trusting it blindly.
 - [ ] No dead code remains: the removed functions have no remaining callers, and their tests are removed or rewritten rather than left asserting deleted behaviour.
 - [ ] Verification: `go build ./...` and `go vet ./...` pass. Paste the output.
@@ -42,7 +44,7 @@ Use your internal Todo tool to track these and keep on track.
 
 - The base advisory lock (`internal/provision/baselock.go`) and its discipline in `prepareBaseAndClone` stay — serialization of base mutation is still required.
 - `migrateLegacyBase` (`internal/provision/provision.go:569-627`), which renames a `claude-base` instance to `sandbar-base`, is unrelated to this change; leave it alone.
-- The playbook fileset hash may still be needed for the **finalize** phase's own purposes. Check before removing `PlaybookVersion` wholesale — the requirement is that it no longer drives *base* staleness and no longer carries a toolset component.
+- `PlaybookVersion` is also consumed by the landed golden-template feature. Do not delete or reinterpret those callers piecemeal: task 16 replaces their semantics with explicit image provenance.
 - `TestGuestSyncCopiesOnlyThePlaybook` pins the playbook fileset across four locations (`playbook_embed.go:20`, `internal/provision/provision.go:60-63`, `internal/provision/baseversion.go:63-70`, `internal/provider/proxmoxprovision.go:759`). If this task touches `baseversion.go`'s `playbookFileset`, that test must still pass.
 - Do not remove the tool-selection surface here — task 11 owns that. This task removes the *version-merging* consequences of toolsets, not the user-facing flags.
 
@@ -76,6 +78,6 @@ The specific mechanisms and why each dies:
 
 **Tests will need judgment.** `internal/provision` has roughly 5,900 lines of tests against 2,500 lines of code, much of it covering exactly the version-merging and staleness-classification behaviour being removed. Delete tests of deleted behaviour; do not contort them into testing something else. Where a test covers a *surviving* path incidentally, keep it. Watch the `COVERAGE_FLOOR` gate — removing well-tested code alongside its tests can move the ratio in either direction, and if the floor trips, adjust the committed floor with a note rather than writing filler tests.
 
-**A subtlety about `PlaybookVersion`.** It is used for the base stamp, but check whether anything else (the finalize path, the Proxmox template version, PR #70's template provenance) reads it. The requirement is narrow: base staleness stops depending on the playbook hash, and the toolset component goes away. If a playbook hash is still genuinely useful somewhere, keep the function and change what the base stores.
+**A subtlety about `PlaybookVersion`.** The golden-template feature now on `main` reads it in the registry, CLI list, TUI Source selector, Lima snapshot path, and Proxmox snapshot path. This task may orphan that machinery, but task 16 owns its coordinated replacement. Do not make a legacy playbook hash look like a manifest image version; unknown is safer than false freshness.
 
 </details>

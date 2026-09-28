@@ -1,11 +1,15 @@
 ---
 id: 13
 group: "testing"
-dependencies: [10, 11]
+dependencies: [10, 11, 17]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
-effort: "medium"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
+effort: "high"
+complexity_score: 7
+complexity_notes: "Defines real-VM quality gates for rebuild and golden-template routing; the rubric's verification-gate floor requires capable models and high effort."
 skills:
   - github-actions
   - testing
@@ -25,6 +29,7 @@ Replace the `lima-e2e` job's warm-path assertion — which deliberately dirties 
 - [ ] The assertion at `.github/workflows/test.yml:234-270` no longer dirties `roles/base/tasks/main.yml` to assert in-place re-application.
 - [ ] It is replaced by an assertion of the new contract: after editing a file under `roles/base/`, a subsequent create performs **no** base rebuild and **no** image re-download.
 - [ ] A complementary assertion confirms that changing the pinned image version **does** trigger a rebuild from the new image.
+- [ ] The real-Lima golden-template round trip remains green and proves a template-backed create/reset does not rebuild or substitute the shared base after an image-version bump.
 - [ ] `scripts/check-base-image.sh` runs as a gate wherever an image is produced, so a hygiene regression fails CI rather than shipping.
 - [ ] The `lint` job's `ansible-playbook --syntax-check` still passes with the `sand_image_build` flag present.
 - [ ] Verification: the full `test.yml` workflow runs green on a PR. Paste the run URL and the job summary.
@@ -45,6 +50,7 @@ Use your internal Todo tool to track these and keep on track.
 
 - Task 10's simplified staleness logic (defines the new contract being asserted).
 - Task 11's removed toolset surface (the job may reference `--with-*` flags that no longer exist).
+- Task 17's template provenance and source-routing contract.
 
 ## Output Artifacts
 

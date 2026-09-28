@@ -4,10 +4,12 @@ group: "verification"
 dependencies: [5]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 7
-complexity_notes: "Verification gate whose failure invalidates a core plan assumption; per the rubric's risk floor, gates never go below sonnet + high."
+complexity_notes: "Verification gate whose failure invalidates a core plan assumption; the rubric's risk floor requires capable models and high effort."
 skills:
   - lima
   - proxmox

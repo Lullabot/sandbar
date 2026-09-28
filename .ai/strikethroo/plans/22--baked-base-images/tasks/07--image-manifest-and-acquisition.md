@@ -4,7 +4,9 @@ group: "host-acquisition"
 dependencies: [5]
 status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 7
 complexity_notes: "Supply-chain-sensitive: this code decides whether a downloaded disk image is trusted and booted. Digest verification and partial-download handling are security-relevant, so the rubric's risk floor applies."
@@ -16,7 +18,7 @@ skills:
 
 ## Objective
 
-Replace the three hand-maintained image constants with a single generated, pinned manifest covering both architectures, and add one helper that resolves the right entry, returns a verified cached file, or downloads and verifies it — with progress reported through the existing TUI job stream.
+Replace the three hand-maintained image constants with a generated pinned manifest covering both architectures. Add verified cache acquisition for Lima hosts, while Proxmox continues passing the manifest URL and digest to PVE's existing server-side download.
 
 ## Skills Required
 
@@ -27,7 +29,8 @@ Replace the three hand-maintained image constants with a single generated, pinne
 - [ ] A generated Go source file carries the pinned manifest: per architecture, the asset URL, filename and SHA-256, plus the image version string.
 - [ ] A `go generate` (or `make`) target regenerates that file from a published release's `manifest.json`, so bumping the image is one command and one reviewable diff.
 - [ ] The three existing constants `baseImageURL`, `baseImageFile` and `defaultBaseImageSHA256` (`internal/provider/proxmoxprovision.go:61-77`) are removed in favour of the manifest.
-- [ ] An acquisition helper resolves the manifest entry for a target architecture and returns a local path to a verified image, downloading only when the cache misses or fails verification.
+- [ ] A Lima-host acquisition helper resolves the target architecture and returns a verified path on the host where `limactl` runs (workstation for local Lima, remote host for remote Lima), downloading only on a cache miss or failed verification.
+- [ ] Proxmox callers consume URL/filename/SHA directly from the same manifest and retain PVE's server-side download and verification; they do not download the image through the workstation cache.
 - [ ] A **digest mismatch is a hard failure** — never a fallback to using the file anyway, and never a silent re-download loop.
 - [ ] A partially downloaded file is never mistaken for a complete one: download to a temporary path and rename into the cache only after the digest verifies.
 - [ ] Download progress is written to the `io.Writer` the caller supplies, so it flows into the existing TUI job stream.
@@ -44,7 +47,7 @@ Use your internal Todo tool to track these and keep on track.
 - The cache location belongs with sand's other state; document it, because task 14 must add it to `docs/reference/files-and-state.md`.
 - Progress reporting should match the shape the TUI already consumes (`internal/ui/progress.go:39`, `internal/ui/jobstream.go`) — a periodic human-readable line is sufficient; do not invent a new protocol.
 - Verification is SHA-256, matching what the workflow publishes and what PVE's server-side download already checks.
-- Keep the helper free of provider specifics — both Lima and Proxmox wiring (tasks 08, 09) call it.
+- Keep manifest lookup provider-neutral. Keep filesystem acquisition on the `lima.HostFiles`/`Host` seam so a remote-Lima cache path is remote, not a nonexistent workstation path.
 
 ## Input Dependencies
 
@@ -53,7 +56,8 @@ Use your internal Todo tool to track these and keep on track.
 ## Output Artifacts
 
 - The generated manifest source and its regeneration target.
-- The acquisition helper — consumed by task 08 (Lima), task 09 (Proxmox) and task 12 (unit tests).
+- The Lima-host acquisition helper — consumed by task 08 and task 12.
+- Provider-neutral manifest lookup — consumed by both tasks 08 and 09.
 
 ## Implementation Notes
 
@@ -85,10 +89,10 @@ with `var PinnedManifest = Manifest{...}` in a generated file (header comment: `
 **Acquisition helper contract.** Something like:
 
 ```go
-func Acquire(ctx context.Context, m Manifest, goarch string, cacheDir string, out io.Writer) (string, error)
+func Acquire(ctx context.Context, host lima.Host, m Manifest, goarch string, out io.Writer) (string, error)
 ```
 
-returning the path to a verified local file. The order of operations matters:
+returning a path meaningful on that Lima host. The order of operations matters:
 
 1. Resolve the entry for `goarch`; unknown arch → error naming the supported set.
 2. Compute the cache path from the filename (and ideally the version, so two pinned versions can coexist).

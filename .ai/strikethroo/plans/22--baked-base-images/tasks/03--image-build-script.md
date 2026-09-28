@@ -2,9 +2,11 @@
 id: 3
 group: "image-build"
 dependencies: [1]
-status: "completed"
+status: "pending"
 created: 2026-09-12
-model: "sonnet"
+models:
+  anthropic: "claude-opus-5-5"
+  openai: "gpt-6-sol"
 effort: "high"
 complexity_score: 8
 complexity_notes: "Image plumbing over qemu-nbd and chroot, producing a publicly distributed artifact; correctness failures here are either silent (missing tool) or security-relevant (residual credential)."
@@ -12,11 +14,11 @@ skills:
   - shell
   - linux-image-plumbing
 ---
-# Build the all-tools image: a committed script running the base phase in a chroot
+# Build the shared-dependency image in a chroot
 
 ## Objective
 
-Create one committed, parameterized script that turns an upstream Debian 13 genericcloud qcow2 into a complete, generalized, compressed sandbar base image — by mounting it with `qemu-nbd`, running the full base-phase playbook inside a `chroot`, generalizing it, and compressing it under a size gate. This script is both what CI runs and the local image build facility for sandbar's own development.
+Create one committed, parameterized script that turns an upstream Debian 13 genericcloud qcow2 into a complete, generalized, compressed sandbar base image by running the current base phase in a `chroot`. The image contains shared dependencies; coding agents remain per-VM finalize work.
 
 ## Skills Required
 
@@ -30,7 +32,7 @@ Create one committed, parameterized script that turns an upstream Debian 13 gene
 - [ ] The image is sparsified and compressed, and the script **exits non-zero** if the result exceeds a configurable threshold defaulting conservatively below 2 GiB (suggested default: 1900 MiB).
 - [ ] The script prints the final size and SHA-256.
 - [ ] Verification: running `sudo ./scripts/build-base-image.sh --arch amd64 --out /tmp/test.qcow2` on a Linux amd64 host exits 0 and produces a file. Paste the printed size and SHA-256.
-- [ ] Verification: `sudo qemu-nbd --connect=/dev/nbd0 /tmp/test.qcow2`, mount it, and confirm the tools are present — `test -x /mnt/img/usr/bin/node`, `/usr/bin/docker`, `/usr/local/bin/ddev`, `/usr/bin/go`, a JDK, `/usr/local/bin/glab`, `/usr/local/bin/drupalorg`, and the per-user `claude`/`codex`/`uv` install paths. Paste the check output.
+- [ ] Verification: mount the image and confirm shared dependencies are present — Node, Docker, DDEV, Go, a JDK, glab, drupalorg, uv, mkcert, cloudflared, and self-review tooling — while Claude Code, Codex, OpenCode, and Pi binaries/state are absent.
 - [ ] Verification: the script is idempotent about cleanup — run it twice in a row and confirm the second run succeeds (no leftover `/dev/nbd0` connection or stale mount blocks it).
 
 Use your internal Todo tool to track these and keep on track.
