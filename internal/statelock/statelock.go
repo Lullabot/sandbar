@@ -57,9 +57,20 @@ func noop() {}
 // the caller writes anyway. Call the returned function — via defer — exactly
 // once.
 func Acquire(path string) (release func()) {
+	release, ok := AcquireStrict(path)
+	if !ok {
+		return noop
+	}
+	return release
+}
+
+// AcquireStrict takes the same lock as Acquire, but reports a failure to
+// acquire it. Optional work that requires an exclusive reservation must not
+// proceed when ok is false. The caller must release a successful lock once.
+func AcquireStrict(path string) (release func(), ok bool) {
 	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return noop
+		return nil, false
 	}
 	deadline := time.Now().Add(waitBudget)
 	for {
@@ -68,11 +79,11 @@ func Acquire(path string) (release func()) {
 			return func() {
 				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 				_ = f.Close()
-			}
+			}, true
 		}
 		if err != syscall.EWOULDBLOCK || time.Now().After(deadline) {
 			_ = f.Close()
-			return noop
+			return nil, false
 		}
 		time.Sleep(pollInterval)
 	}

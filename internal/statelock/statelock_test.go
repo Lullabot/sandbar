@@ -75,3 +75,21 @@ func TestAcquireOnAnUnlockablePathProceeds(t *testing.T) {
 	}
 	release()
 }
+
+func TestAcquireStrictReportsLockResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "release-check.json")
+	release, ok := AcquireStrict(path)
+	if !ok || release == nil {
+		t.Fatal("first holder must acquire the lock")
+	}
+	defer release()
+
+	defer func(p, w time.Duration) { pollInterval, waitBudget = p, w }(pollInterval, waitBudget)
+	pollInterval, waitBudget = time.Millisecond, 20*time.Millisecond
+	if secondRelease, ok := AcquireStrict(path); ok || secondRelease != nil {
+		t.Fatal("second holder must be refused while lock is held")
+	}
+	if badRelease, ok := AcquireStrict(filepath.Join(t.TempDir(), "missing", "release-check.json")); ok || badRelease != nil {
+		t.Fatal("unwritable lock path must be refused")
+	}
+}
