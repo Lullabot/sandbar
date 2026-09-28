@@ -27,6 +27,8 @@ func TestStableVersionsAndReleaseLinks(t *testing.T) {
 		{"v1.0.0-rc1", "v1.0.1", false},
 		{"v1.0.0", "v1.1.0-beta", false},
 		{"v1.0.0", "v1.1.0/../../evil", false},
+		{"v01.0.0", "v1.1.0", false},
+		{"v18446744073709551616.0.0", "v2.0.0", false},
 	}
 	for _, tt := range tests {
 		if got := UpdateAvailable(tt.installed, tt.latest); got != tt.want {
@@ -49,6 +51,14 @@ func TestCachePathUsesXDGCacheHome(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", dir)
 	if got, want := CachePath(), filepath.Join(dir, "sandbar", "release-check.json"); got != want {
 		t.Fatalf("CachePath() = %q, want %q", got, want)
+	}
+}
+
+func TestCachePathWithoutHomeFailsClosed(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "")
+	if got := CachePath(); got != "" {
+		t.Fatalf("CachePath without XDG cache or home = %q, want empty", got)
 	}
 }
 

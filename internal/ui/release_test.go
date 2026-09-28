@@ -68,6 +68,12 @@ func TestReleaseCacheFirstAndAsyncResultAcrossViews(t *testing.T) {
 	}
 }
 
+func TestReleaseCheckCmdNilIsDisabled(t *testing.T) {
+	if cmd := releaseCheckCmd(nil); cmd != nil {
+		t.Fatal("nil checker should not schedule a startup command")
+	}
+}
+
 func TestReleaseNoticeVersionGateAndTrustedTarget(t *testing.T) {
 	isolateHostState(t)
 	m := newTestModel(t)

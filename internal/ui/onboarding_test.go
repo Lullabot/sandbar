@@ -151,6 +151,42 @@ func TestOnboardingAcknowledgementWriteFailureStillEntersBoard(t *testing.T) {
 	}
 }
 
+func TestOnboardingStateFallbackAndNavigationEdges(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", home)
+	if got, want := onboardingStatePath(), filepath.Join(home, ".local", "state", "sandbar", "onboarding.json"); got != want {
+		t.Fatalf("fallback state path = %q, want %q", got, want)
+	}
+	if err := os.MkdirAll(onboardingStatePath(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if acknowledged, err := loadOnboardingAcknowledged(); err == nil || acknowledged {
+		t.Fatalf("directory-shaped state = (%v, %v), want a read error", acknowledged, err)
+	}
+
+	m := freshOnboardingModel(t)
+	m = resized(m, 60, 12)
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.view != viewOnboarding {
+		t.Fatal("esc must not bypass first-run acknowledgement")
+	}
+	for _, keyMsg := range []tea.KeyPressMsg{
+		{Code: tea.KeyDown}, {Code: tea.KeyUp},
+		{Code: tea.KeyPgDown}, {Code: tea.KeyPgUp},
+	} {
+		m, _ = press(t, m, keyMsg)
+	}
+	if m.onboardingScroll < 0 {
+		t.Fatalf("navigation left a negative scroll offset: %d", m.onboardingScroll)
+	}
+	m.onboardingFromHelp = true
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.view != viewHelp || m.onboardingFromHelp {
+		t.Fatalf("continue from help = view %v, origin %v", m.view, m.onboardingFromHelp)
+	}
+}
+
 func TestTUIOnboardingOrdinary80x24(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 	m := freshOnboardingModel(t)
