@@ -1691,16 +1691,18 @@ self-review skills into that checkout before you start an agent session:</p>
 </tr>
 </tbody>
 </table>
-<p>The skills go in <code>.agents/skills/</code> inside the checkout. Their instructions
-refer to schema files at that location. They are included in the base image
-and match the review server's version, so copying them needs no network
-access.</p>
+<p>The skills go in <code>.agents/skills/</code> inside the checkout, with links under
+<code>.claude/skills/</code> so Claude Code discovers the same copies. Their instructions
+refer to schema files under <code>.agents/skills/</code>. They are included in the base
+image and match the review server's version, so installing them needs no
+network access.</p>
 <p>For a repository you clone later, run the installer inside the VM:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>self-review-install-skills<span class="w"> </span>/path/to/repository
 </code></pre></div>
-<p>The command installs or refreshes the skills and adds the review artifacts
-and skill directories to your active global Git excludes file. It leaves a
-skill unchanged when the repository tracks its own copy.</p>
+<p>The command installs or refreshes the skills and Claude Code links, then adds
+the review artifacts, skill directories, and links to your active global Git
+excludes file. It leaves a path unchanged when the repository tracks its own
+copy.</p>
 <p>A typical workflow inside the guest:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-critique --staged     # in the agent: draft a review
 </code></pre></div>
@@ -1709,15 +1711,17 @@ skill unchanged when the repository tracks its own copy.</p>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Skills tracked by your project are kept</p>
-<p>If the repository already tracks its own <code>.agents/skills/self-review-*</code>
-files in Git, <code>sand</code> leaves those skills unchanged.</p>
+<p>If the repository already tracks its own <code>.agents/skills/self-review-*</code> or
+<code>.claude/skills/self-review-*</code> files in Git, <code>sand</code> leaves those paths
+unchanged.</p>
 </div>
 <p><a id="none-of-it-shows-up-in-git-status"></a></p>
 <h3 id="keeping-review-files-out-of-commits">Keeping review files out of commits</h3>
 <p><code>self-review-install-skills</code> adds <code>review.xml</code>, <code>review.guide.xml</code>, and the
-three skill directories to the guest user's active global Git excludes file.
-That is <code>~/.config/git/ignore</code> by default, or the path selected by
-<code>core.excludesFile</code>. It does not change your project's <code>.gitignore</code>.</p>
+three skill directories and their Claude Code links to the guest user's active
+global Git excludes file. That is <code>~/.config/git/ignore</code> by default, or the
+path selected by <code>core.excludesFile</code>. It does not change your project's
+<code>.gitignore</code>.</p>
 <p>Ignore rules do not hide files that Git already tracks.</p>
 <h2 id="feeding-it-back-to-the-agent">Feeding it back to the agent</h2>
 <p>Tell the agent to read <code>review.xml</code> in the checkout, or use
