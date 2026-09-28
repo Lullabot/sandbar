@@ -9,8 +9,8 @@ import (
 )
 
 // TestSelfReviewInstaller exercises the shipped guest command rather than a
-// Go copy of its rules. The tracked-skill case is the important boundary: a
-// repository-owned skill must never be overwritten by sand's staged copy.
+// Go copy of its rules. The tracked-skill cases are the important boundary:
+// repository-owned agent and Claude skills must never be overwritten.
 func TestSelfReviewInstaller(t *testing.T) {
 	script := filepath.Join("..", "..", "roles", "self-review", "files", "self-review-install-skills")
 	home := t.TempDir()
@@ -31,7 +31,9 @@ func TestSelfReviewInstaller(t *testing.T) {
 	runInstallerCommand(t, home, "", "git", "init", "-q", "-b", "main", repo)
 	tracked := filepath.Join(repo, ".agents", "skills", "self-review-critique", "SKILL.md")
 	writeInstallerFixture(t, tracked, "the repository's own copy\n")
-	runInstallerCommand(t, home, "", "git", "-C", repo, "add", ".agents")
+	trackedClaude := filepath.Join(repo, ".claude", "skills", "self-review-critique", "SKILL.md")
+	writeInstallerFixture(t, trackedClaude, "the repository's own Claude copy\n")
+	runInstallerCommand(t, home, "", "git", "-C", repo, "add", ".agents", ".claude")
 	runInstallerCommand(t, home, "", "git", "-C", repo, "commit", "-qm", "vendor review skill")
 
 	stale := filepath.Join(repo, ".agents", "skills", "self-review-apply", "SKILL.md")
@@ -43,6 +45,9 @@ func TestSelfReviewInstaller(t *testing.T) {
 		"installed=self-review-apply",
 		"skipped=self-review-critique",
 		"installed=self-review-guide",
+		"installed=claude:self-review-apply",
+		"skipped=claude:self-review-critique",
+		"installed=claude:self-review-guide",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("installer output does not contain %q:\n%s", want, out)
@@ -52,11 +57,20 @@ func TestSelfReviewInstaller(t *testing.T) {
 	if got := readInstallerFixture(t, tracked); got != "the repository's own copy\n" {
 		t.Errorf("tracked skill was overwritten: %q", got)
 	}
+	if got := readInstallerFixture(t, trackedClaude); got != "the repository's own Claude copy\n" {
+		t.Errorf("tracked Claude skill was overwritten: %q", got)
+	}
 	if got := readInstallerFixture(t, stale); got != "staged self-review-apply\n" {
 		t.Errorf("stale skill was not refreshed: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".agents", "skills", "unrelated-skill")); !os.IsNotExist(err) {
 		t.Errorf("unrelated staged skill was installed: %v", err)
+	}
+	for _, name := range []string{"self-review-apply", "self-review-guide"} {
+		link := filepath.Join(repo, ".claude", "skills", name)
+		if got, err := os.Readlink(link); err != nil || got != "../../.agents/skills/"+name {
+			t.Errorf("Claude skill link %s = %q, %v", name, got, err)
+		}
 	}
 
 	patterns := []string{
@@ -65,6 +79,9 @@ func TestSelfReviewInstaller(t *testing.T) {
 		".agents/skills/self-review-apply/",
 		".agents/skills/self-review-critique/",
 		".agents/skills/self-review-guide/",
+		".claude/skills/self-review-apply",
+		".claude/skills/self-review-critique",
+		".claude/skills/self-review-guide",
 	}
 	ignored := readInstallerFixture(t, ignore)
 	for _, pattern := range patterns {
@@ -74,11 +91,29 @@ func TestSelfReviewInstaller(t *testing.T) {
 	}
 	runInstallerCommand(t, home, "", "git", "-C", repo, "check-ignore", "-q", "review.xml")
 	runInstallerCommand(t, home, "", "git", "-C", repo, "check-ignore", "-q", ".agents/skills/self-review-apply/SKILL.md")
+	runInstallerCommand(t, home, "", "git", "-C", repo, "check-ignore", "-q", ".claude/skills/self-review-apply")
+	if status := runInstallerCommand(t, home, "", "git", "-C", repo, "status", "--porcelain"); status != "" {
+		t.Errorf("installer left the checkout dirty:\n%s", status)
+	}
+	ignoredStatus := runInstallerCommand(t, home, "", "git", "-C", repo, "status", "--porcelain", "--ignored", "--untracked-files=all")
+	for _, want := range []string{
+		"!! .claude/skills/self-review-apply",
+		"!! .claude/skills/self-review-guide",
+	} {
+		if !strings.Contains(ignoredStatus, want) {
+			t.Errorf("ignored status does not contain %q:\n%s", want, ignoredStatus)
+		}
+	}
 
 	// A second run is idempotent: untracked copies already matching the staged
 	// source are reported current and the excludes are not duplicated.
 	out = runInstallerCommand(t, home, stage, "sh", script, repo)
-	for _, want := range []string{"current=self-review-apply", "current=self-review-guide"} {
+	for _, want := range []string{
+		"current=self-review-apply",
+		"current=self-review-guide",
+		"current=claude:self-review-apply",
+		"current=claude:self-review-guide",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("second installer output does not contain %q:\n%s", want, out)
 		}
