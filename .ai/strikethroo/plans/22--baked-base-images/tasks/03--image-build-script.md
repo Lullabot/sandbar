@@ -2,7 +2,7 @@
 id: 3
 group: "image-build"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -18,7 +18,7 @@ skills:
 
 ## Objective
 
-Create one committed, parameterized script that turns an upstream Debian 13 genericcloud qcow2 into a complete, generalized, compressed sandbar base image by running the current base phase in a `chroot`. The image contains shared dependencies; coding agents remain per-VM finalize work.
+Create one parameterized script that turns an upstream Debian 13 genericcloud qcow2 into a complete, generalized, compressed sandbar base image by running the current base phase in a `chroot`. The image contains shared dependencies; coding agents remain per-VM finalize work.
 
 ## Skills Required
 
@@ -26,14 +26,14 @@ Create one committed, parameterized script that turns an upstream Debian 13 gene
 
 ## Acceptance Criteria
 
-- [ ] A committed script (suggested: `scripts/build-base-image.sh`) accepts an architecture (`amd64` | `arm64`) and an output path, and produces a compressed qcow2.
-- [ ] The script runs the **full base phase**: `ansible-playbook -i localhost, --connection=local site.yml` with `provision_phase=base` and `sand_image_build=true`, inside the chroot, with network working.
-- [ ] Generalization is performed: user password locked, `/etc/ssh/ssh_host_*` removed, `/etc/machine-id` truncated with `/var/lib/dbus/machine-id` re-linked, APT lists and caches cleared, logs and shell history cleared, and dpkg's `force-unsafe-io` build hack restored to safe settings.
-- [ ] The image is sparsified and compressed, and the script **exits non-zero** if the result exceeds a configurable threshold defaulting conservatively below 2 GiB (suggested default: 1900 MiB).
-- [ ] The script prints the final size and SHA-256.
-- [ ] Verification: running `sudo ./scripts/build-base-image.sh --arch amd64 --out /tmp/test.qcow2` on a Linux amd64 host exits 0 and produces a file. Paste the printed size and SHA-256.
-- [ ] Verification: mount the image and confirm shared dependencies are present — Node, Docker, DDEV, Go, a JDK, glab, drupalorg, uv, mkcert, cloudflared, and self-review tooling — while Claude Code, Codex, OpenCode, and Pi binaries/state are absent.
-- [ ] Verification: the script is idempotent about cleanup — run it twice in a row and confirm the second run succeeds (no leftover `/dev/nbd0` connection or stale mount blocks it).
+- [x] A committed script (`scripts/build-base-image.sh`) accepts an architecture (`amd64` | `arm64`) and an output path, and produces a compressed qcow2.
+- [x] The script runs the **full base phase**: `ansible-playbook -i localhost, --connection=local site.yml` with `provision_phase=base` and `sand_image_build=true`, inside the chroot, with network working.
+- [x] Generalization is performed: user password locked, `/etc/ssh/ssh_host_*` removed, `/etc/machine-id` truncated with `/var/lib/dbus/machine-id` re-linked, APT lists and caches cleared, logs and shell history cleared, and dpkg's `force-unsafe-io` build hack restored to safe settings.
+- [x] The image is sparsified and compressed, and the script **exits non-zero** if the result exceeds a configurable threshold defaulting conservatively below 2 GiB (suggested default: 1900 MiB).
+- [x] The script prints the final size and SHA-256.
+- [x] Verification: running `sudo ./scripts/build-base-image.sh --arch amd64 --out /var/tmp/sand-base-task03.qcow2` on a Linux amd64 host exits 0 and produces a file. The output and work paths are disk-backed; the printed size and SHA-256 are recorded below.
+- [x] Verification: mount the image and confirm shared dependencies are present — Node, Docker, DDEV, Go, a JDK, glab, drupalorg, uv, mkcert, cloudflared, and self-review tooling — while Claude Code, Codex, OpenCode, and Pi binaries/state are absent.
+- [x] Verification: the script is idempotent about cleanup — run it twice in a row and confirm the second run succeeds (no leftover `/dev/nbd0` connection or stale mount blocks it).
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -77,7 +77,7 @@ Use your internal Todo tool to track these and keep on track.
 10. Generalize (see below).
 11. Remove `policy-rc.d`, remove the staged playbook, unmount binds, unmount, disconnect nbd.
 12. Sparsify and compress: zero the free space (`zerofree` on the unmounted ext4, or `fstrim` before unmount), then `qemu-img convert -c -O qcow2` into the output path. Consider `-o compression_type=zstd` if the size gate is tight — it compresses notably better than the default zlib and is read transparently by QEMU and PVE.
-13. Check the size against the threshold and fail loudly if exceeded, naming the fallback ladder from the plan (zstd, trim, split, GHCR) in the error message so the next person knows the options.
+13. Check the size against the threshold and fail loudly if exceeded, naming the fallback ladder from the plan (zstd compression, safe trimming, or an alternate direct host such as GHCR for the intact qcow2) in the error message so the next person knows the options.
 14. Print size and `sha256sum`.
 
 **Generalization checklist** (task 04 will assert all of these, so get them right here):
@@ -94,3 +94,11 @@ Use your internal Todo tool to track these and keep on track.
 **Expect the first runs to fail inside the playbook.** That is the audit's job to have predicted, but reality will add a few. When a task fails under chroot, fix it by extending the `sand_image_build` guard from task 01 rather than by hacking the script around it — the flag is the designed seam.
 
 </details>
+
+## Noteworthy Events
+
+- [2026-09-28] The first real amd64 build exposed an Ansible 2.19 type error: `-e sand_image_build=true` supplied a string to a boolean `when` clause. The script now passes typed JSON extra vars. The failure trap removed all mounts, disconnected `/dev/nbd0`, and removed its private work directory before the retry.
+- [2026-09-28] Two consecutive amd64 builds from the upstream Debian 13 image exited 0 using disk-backed `/var/tmp`. Run 1: 1,085,472,768 bytes (1,036 MiB), SHA-256 `ec1160e27b664fe1296ea0d3d94c6f7bf30aa41dfa696b920885465512bf79ea`. Run 2, replacing the same output path: 1,081,409,536 bytes (1,032 MiB), SHA-256 `7416b92f6354e40923d8eefa532f4c7fd4212daa6c119b195bf4764332e19986`. Logs are `/var/tmp/sand-base-task03-run1-retry.log` and `/var/tmp/sand-base-task03-run2.log`.
+- [2026-09-28] Read-only nbd mounts of both outputs confirmed all requested shared tools and self-review skills present, four coding agents and their state absent, locked `claude` account, empty machine ID, no SSH host keys, APT lists, logs, or temporary dpkg unsafe-IO file. `qemu-img check` found no errors. The host `nbd` module was loaded for the builds and unloaded afterward; no nbd device or build mount remains.
+- [2026-09-28] The 1900 MiB failure path is verified by inspection of its `die` branch; an over-limit build was not run because the real artifacts were comfortably below the threshold.
+- [2026-09-28] Independent phase verification rebuilt from the upstream image at `/var/tmp/sand-base-phase2-root.qcow2`: 1,090,650,112 bytes (1,041 MiB), SHA-256 `27f24dc6aceda9ede14c34ad8d88239cd8261aed1c67777e37b7ffbb4a0f86c4`. `qemu-img check` found no errors. A read-only nbd inspection confirmed the shared toolchain and self-review tooling present; all four coding-agent binaries/state absent; locked password; empty machine ID; no SSH host keys, APT lists, logs, histories, staged playbook, or unsafe dpkg config; and the intended offline service links. Cleanup left no nbd connection, mount, or private work directory.
