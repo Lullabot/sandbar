@@ -104,9 +104,9 @@ func TestToolsetLoadedMsgIgnoresStaleScopeOrClosedForm(t *testing.T) {
 		t.Fatal("openForm should return a command (focus + tool-set read)")
 	}
 
-	// Dependencies start on and every agent starts off before the async result.
-	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
-		t.Fatal("openForm should start with agents off and dependencies on before any async result lands")
+	// Every agent starts off before the async result.
+	if m.toolClaude {
+		t.Fatal("openForm should start with agents off before any async result lands")
 	}
 
 	// Simulate the user cycling to a DIFFERENT profile before the ORIGINAL
@@ -121,14 +121,14 @@ func TestToolsetLoadedMsgIgnoresStaleScopeOrClosedForm(t *testing.T) {
 	// every toggle, clobbering the newly-selected profile's state.
 	next, _ := m.Update(toolsetLoadedMsg{scope: staleScope, toolset: map[string]bool{}, ok: true})
 	m = next.(model)
-	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
+	if m.toolClaude {
 		t.Fatal("a stale toolset result for a previously-selected scope must not clobber the currently-selected profile's toggles")
 	}
 
 	// A result for the CURRENTLY targeted scope is still applied normally.
 	next, _ = m.Update(toolsetLoadedMsg{scope: otherScope, toolset: map[string]bool{}, ok: true})
 	m = next.(model)
-	if m.toolClaude || m.toolDDEV || m.toolGo || m.toolJava {
+	if m.toolClaude {
 		t.Fatal("a result for the CURRENTLY targeted scope should still apply")
 	}
 
@@ -139,7 +139,7 @@ func TestToolsetLoadedMsgIgnoresStaleScopeOrClosedForm(t *testing.T) {
 	if m.view != viewBoard {
 		t.Fatal("a toolset result must not reopen or otherwise touch a closed form")
 	}
-	if m.toolClaude || m.toolDDEV || m.toolGo || m.toolJava {
+	if m.toolClaude {
 		t.Fatal("a toolset result delivered after the form closed must not touch its (now irrelevant) toggle state")
 	}
 }

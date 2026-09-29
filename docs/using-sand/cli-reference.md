@@ -78,9 +78,9 @@ not a prompt.
 | `--with-codex` | bool | remembered, initially `false` | Install current Codex in this VM. |
 | `--with-opencode` | bool | remembered, initially `false` | Install current OpenCode in this VM. |
 | `--with-pi` | bool | remembered, initially `false` | Install current Pi in this VM. |
-| `--with-ddev` | bool | `true` | Install DDEV in the base image. |
-| `--with-go` | bool | `true` | Install the Go toolchain in the base image. |
-| `--with-java` | bool | `true` | Install a headless JDK in the base image. |
+| `--with-ddev` | bool | `true` | Deprecated and ignored; DDEV is always in the base image. |
+| `--with-go` | bool | `true` | Deprecated and ignored; Go is always in the base image. |
+| `--with-java` | bool | `true` | Deprecated and ignored; a headless JDK is always in the base image. |
 
 Agent flags configure the individual VM. Omitted flags use the last submitted
 agent selections, shared across profiles; explicit flags (including `=false`)
@@ -89,9 +89,10 @@ for existing installations. Reset uses the selections recorded for that VM.
 Likewise `--recreate` adopts that VM's recorded agents unless explicit agent
 flags override them. Reset and recreate do not change the global preferences.
 
-The dependency flags `--with-ddev`, `--with-go`, and `--with-java` configure
-the shared base image. Omitted dependency flags adopt its version stamp;
-explicit flags override it. Changing agents alone does not rebuild the base.
+DDEV, Go, and a headless JDK ship in the published base image, so `sand create`
+and the TUI no longer ask about them. `--with-ddev`, `--with-go`, and
+`--with-java` are still accepted so existing scripts keep working, but they have
+no effect.
 
 When `--template` is set, the saved template is the clone source and the
 shared base is not inspected or rebuilt. The new VM records that provenance,
@@ -320,11 +321,11 @@ Flags:
   -with-codex
         Install OpenAI Codex when creating this VM (default: last submitted selection)
   -with-ddev
-    	Install DDEV in the base image (default true)
+    	Deprecated and ignored: this tool is always part of the base image (default true)
   -with-go
-    	Install the Go toolchain in the base image (default true)
+    	Deprecated and ignored: this tool is always part of the base image (default true)
   -with-java
-    	Install a headless JDK in the base image (default true)
+    	Deprecated and ignored: this tool is always part of the base image (default true)
   -with-opencode
         Install OpenCode when creating this VM (default: last submitted selection)
   -with-pi

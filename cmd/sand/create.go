@@ -114,13 +114,12 @@ Flags:
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
 	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
-	// The base-image tool-set (~500-700MB installed between Go and Java alone).
-	// All four default true, so these are opt-OUT flags: an unconfigured `sand
-	// create` installs everything today's base does. They configure the SHARED
-	// base image, not this individual clone.
-	fs.BoolVar(&cfg.WithDDEV, "with-ddev", cfg.WithDDEV, "Install DDEV in the base image")
-	fs.BoolVar(&cfg.WithGo, "with-go", cfg.WithGo, "Install the Go toolchain in the base image")
-	fs.BoolVar(&cfg.WithJava, "with-java", cfg.WithJava, "Install a headless JDK in the base image")
+	// DDEV, Go and Java ship in the published base image, so there is nothing to
+	// choose. The flags are still accepted (and ignored) so existing scripts and
+	// CI invocations keep working rather than failing on an unknown flag.
+	for _, name := range []string{"with-ddev", "with-go", "with-java"} {
+		fs.Bool(name, true, "Deprecated and ignored: this tool is always part of the base image")
+	}
 	// Agents belong to individual VMs; omitted flags adopt the remembered selection.
 	fs.BoolVar(&cfg.WithClaude, "with-claude", cfg.WithClaude, "Install Claude Code when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex when creating this VM (default: last submitted selection)")
@@ -207,29 +206,6 @@ Flags:
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-
-	// A tool-set flag the user did NOT pass adopts what the existing base was
-	// actually built with, instead of DefaultCreateConfig's all-on default. The
-	// tool-set belongs to the SHARED base, so defaulting it to "everything" meant
-	// a user who built a base with --with-go=false had to keep repeating that on
-	// every later create — and if they forgot once, that create silently marked
-	// the base stale and re-converged the Go toolchain back onto it.
-	//
-	// Explicit flags still win (fs.Visit reports only what was actually passed),
-	// which is what makes ADDING a tool to an existing base work: --with-go on a
-	// base without it is a real request, not an accidental default. With no base
-	// yet, or one stamped by an older sand, there is nothing to adopt and the
-	// all-on default stands.
-	//
-	// provision.BaseToolset takes the resolved provider's host-access handle
-	// (p.HostFiles()) rather than reading a process-global: the base's stamp
-	// lives on whichever host limactl actually runs (the remote host for a
-	// remote provider), not necessarily this one.
-	//
-	// The adoption itself is deferred until after the --recreate block below,
-	// because it is keyed by cfg.BaseName and that block may still change which
-	// base this VM belongs to. (`explicit` — the set fs.Visit reported — is built
-	// right after Parse, above.)
 
 	// Default the VM user to the provider's host user (the remote host for remote
 	// Lima, this machine for local), falling back to the local user if the host
@@ -331,17 +307,6 @@ Flags:
 			// and this is the last point anything checks it.
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("sand create: %s's recorded config is unusable (%w); pass the settings explicitly", cfg.Name, err)
-			}
-		}
-	}
-
-	// Now that cfg.BaseName is final, adopt the tool-set from that base's stamp
-	// (see the fs.Visit block above for why an omitted --with-* flag defers to
-	// the base instead of to DefaultCreateConfig's all-on default).
-	if base, ok := provision.BaseToolset(p.HostFiles(), cfg.BaseName); ok {
-		for tool, selected := range cfg.ToolPtrs() {
-			if !explicit["with-"+tool] {
-				*selected = base[tool]
 			}
 		}
 	}

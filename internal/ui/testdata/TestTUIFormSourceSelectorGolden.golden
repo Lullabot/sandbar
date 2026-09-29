@@ -19,7 +19,6 @@
   [ ] Install OpenAI Codex                                                                        
   [ ] Install OpenCode                                                                            
   [ ] Install Pi                                                                                  
-  [x] Install DDEV                                                                                
   │ ←/→ to pick a clone source: the shared base image, or a saved golden template. Choosing a     
   │ template skips the base entirely and hides the rebuild toggle below. Press d to delete the    
   │ highlighted template.                                                                         
