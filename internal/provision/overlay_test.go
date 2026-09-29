@@ -21,7 +21,7 @@ func TestRenderBaseOverlayRejectsMalformedDigest(t *testing.T) {
 }
 
 func TestRenderBaseOverlay(t *testing.T) {
-	cfg := vm.CreateConfig{CPUs: 4, Memory: "8GiB", Disk: "100GiB"}
+	cfg := vm.CreateConfig{User: "remote-login", CPUs: 4, Memory: "8GiB", Disk: "100GiB"}
 	const playbookDir = "/home/andrew/src/sandbar"
 
 	image := BaseImageSpec{Location: `/cache/sand "base".qcow2`, Arch: "x86_64", Digest: "sha256:" + strings.Repeat("a", 64)}
@@ -35,6 +35,8 @@ func TestRenderBaseOverlay(t *testing.T) {
 		"images:",
 		"sha256:",
 		"mountType: reverse-sshfs",
+		`user:`,
+		`name: "remote-login"`,
 		"cpus: 4",
 		`memory: "8GiB"`,
 		// The base overlay always pins disk to the floor, not cfg.Disk (100GiB
@@ -74,6 +76,9 @@ func TestRenderBaseOverlay(t *testing.T) {
 		CPUs   int    `yaml:"cpus"`
 		Memory string `yaml:"memory"`
 		Disk   string `yaml:"disk"`
+		User   struct {
+			Name string `yaml:"name"`
+		} `yaml:"user"`
 		Mounts []struct {
 			Location   string `yaml:"location"`
 			MountPoint string `yaml:"mountPoint"`
@@ -98,6 +103,9 @@ func TestRenderBaseOverlay(t *testing.T) {
 	}
 	if doc.CPUs != 4 || doc.Memory != "8GiB" || doc.Disk != "20GiB" {
 		t.Errorf("cpus/memory/disk = %d/%q/%q", doc.CPUs, doc.Memory, doc.Disk)
+	}
+	if doc.User.Name != cfg.User {
+		t.Errorf("user.name = %q, want configured guest user %q", doc.User.Name, cfg.User)
 	}
 	if len(doc.Mounts) != 1 {
 		t.Fatalf("got %d mounts, want 1", len(doc.Mounts))

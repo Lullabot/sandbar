@@ -113,6 +113,13 @@ func RenderBaseOverlay(cfg vm.CreateConfig, playbookDir string, image BaseImageS
 	var b strings.Builder
 	b.WriteString(overlayHeader)
 	fmt.Fprintf(&b, "images:\n- location: %s\n  arch: %s\n  digest: %s\n", quoteYAML(image.Location), quoteYAML(image.Arch), quoteYAML(image.Digest))
+	// The published image deliberately carries no login account. Make Lima's
+	// cloud-init user explicit instead of accepting the limactl host's username:
+	// on remote Lima those are different machines, and therefore often different
+	// names. Finalize must provision the same account that cloud-init creates.
+	if cfg.User != "" {
+		fmt.Fprintf(&b, "user:\n  name: %s\n", quoteYAML(cfg.User))
+	}
 	b.WriteString("mountType: reverse-sshfs\n")
 	fmt.Fprintf(&b, "cpus: %d\n", cfg.CPUs)
 	fmt.Fprintf(&b, "memory: %s\n", quoteYAML(cfg.Memory))

@@ -539,20 +539,18 @@ jobs:
           printf '%s' "$cold_id" > cold-machine-id.txt
           limactl delete -f claude-ci
 
-      # Change the playbook's actual byte content (a `touch` would not move the
-      # content hash that decides staleness — see baseversion.go's
-      # playbookContentHash) so the second create below hits the re-apply
-      # branch instead of silently reusing the base as-is. This proves the
-      # in-place re-apply path specifically, not just "no error occurred".
-      - name: Dirty the playbook so the next create re-applies it in place
+      # A published base is keyed by its release manifest, not by the current
+      # checkout's playbook bytes. Change a base-role byte before the second
+      # create to prove finalize development does not rebuild or reconverge the
+      # shared clone source.
+      - name: Dirty the playbook without invalidating the published base
         run: |
-          echo '# ci - force a re-apply for the lima-e2e warm-path assertion' >> roles/base/tasks/main.yml
+          echo '# ci - published base reuse ignores playbook-byte drift' >> roles/base/tasks/main.yml
 
       # Second create: same base name (fixed as "sandbar-base" — see
-      # vm.DefaultCreateConfig), no --rebuild. The base already exists, so this
-      # must take the in-place re-apply branch of ensureBaseStopped, not the
-      # cold-build branch.
-      - name: Create a second VM (warm — must re-apply the base in place, not rebuild it)
+      # vm.DefaultCreateConfig), no --rebuild. The matching published base must
+      # be reused directly; only clone startup and finalize should run.
+      - name: Create a second VM (warm — must reuse the published base)
         run: |
           # See the cold create above: `| tee` without pipefail hides a failure.
           set -o pipefail
@@ -583,21 +581,14 @@ jobs:
             pi --version
           '
 
-      # Assert the warm create took the re-apply branch (provision.go:522,
-      # "Re-applying the playbook to base image ... Ansible is idempotent") and
-      # never the from-scratch branches (provision.go:196 "Building base
-      # image...", provision.go:406/443/469 "Rebuilding base image .../
-      # ...rebuilding it from scratch..."). A from-scratch branch means the
-      # base was deleted and rebuilt (re-downloading Debian) instead of
-      # converged in place.
-      - name: Assert the base was re-applied, not rebuilt from scratch
+      - name: Assert the published base was reused without convergence
         run: |
-          if grep -qE 'Building base image|Rebuilding base image|rebuilding it from scratch' warm.log; then
-            echo "::error::the warm create rebuilt the base from scratch instead of re-applying it in place"
+          if grep -qE 'downloading base image|Creating base instance|Replacing base image|Building base image|Rebuilding base image|Re-applying the playbook to base image' warm.log; then
+            echo "::error::the warm create rebuilt or converged a matching published base"
             exit 1
           fi
-          if ! grep -qF 'Re-applying the playbook to base image' warm.log; then
-            echo "::error::the warm create did not show the expected re-apply banner"
+          if ! grep -qF 'Cloning "claude-ci-warm" from base image "sandbar-base"' warm.log; then
+            echo "::error::the warm create did not clone the existing published base"
             exit 1
           fi
 

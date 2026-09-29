@@ -306,6 +306,16 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 		p.cleanupInstance(cfg.BaseName, out)
 		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
 	}
+	// Booting the published image gives this Lima instance a machine ID. A
+	// stopped base is copied byte-for-byte, so leaving that identity in place
+	// makes every clone present the same DHCP identity. Return the disk to its
+	// generalized state after Lima's first boot and before it becomes a clone
+	// source; each clone then generates its own ID on first boot.
+	if err := timer.time("base identity reset", func() error {
+		return p.Lima.Shell(ctx, cfg.BaseName, nil, out, "sudo", "bash", "-c", GeneralizeScript)
+	}); err != nil {
+		return fmt.Errorf("reset base image %q machine identity: %w", cfg.BaseName, err)
+	}
 	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
 	if err := timer.time("base stop", func() error {
 		return p.Lima.StopStreaming(ctx, cfg.BaseName, out)

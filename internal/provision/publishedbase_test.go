@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,16 +47,27 @@ func TestPublishedBaseBuildAndReuse(t *testing.T) {
 	}
 	if !bytes.Contains(captured, []byte(`location: "/host/cache/verified.qcow2"`)) ||
 		!bytes.Contains(captured, []byte(`digest: "sha256:`)) ||
+		!bytes.Contains(captured, []byte("user:\n  name: \"andrew\"")) ||
 		bytes.Contains(captured, []byte("template:_images/debian-13")) {
 		t.Errorf("wrong image in Lima overlay:\n%s", captured)
 	}
 	if strings.Contains(log.String(), "TASK [base :") {
 		t.Errorf("base Ansible ran:\n%s", log.String())
 	}
-	for _, args := range f.snapshot() {
-		if args[0] == "shell" {
-			t.Fatalf("base build invoked a guest shell: %v", args)
+	generalizeAt, stopAt := -1, -1
+	for i, args := range f.snapshot() {
+		if slices.Contains(args, GeneralizeScript) {
+			if generalizeAt >= 0 {
+				t.Fatal("published base generalization ran more than once")
+			}
+			generalizeAt = i
 		}
+		if len(args) >= 2 && args[0] == "stop" && args[1] == cfg.BaseName {
+			stopAt = i
+		}
+	}
+	if generalizeAt < 0 || stopAt < 0 || generalizeAt >= stopAt {
+		t.Fatalf("published base identity must be reset before it is stopped; calls: %v", f.snapshot())
 	}
 	if got := readBaseVersion(lima.LocalFiles(), cfg.BaseName); got != baseimage.PinnedManifest.Version {
 		t.Errorf("stamp = %q, want image version %q", got, baseimage.PinnedManifest.Version)
