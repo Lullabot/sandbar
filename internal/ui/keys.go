@@ -19,7 +19,7 @@ type keyMap struct {
 	Help              key.Binding
 	Onboarding        key.Binding
 	OnboardingDone    key.Binding
-	OnboardingSupport key.Binding
+	OnboardingReport  key.Binding
 	OnboardingRelease key.Binding
 	Tab               key.Binding
 	ShiftTab          key.Binding
@@ -62,8 +62,8 @@ func newKeyMap() keyMap {
 		Help:              key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "keys")),
 		Onboarding:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "onboarding")),
 		OnboardingDone:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")),
-		OnboardingSupport: key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "get help")),
-		OnboardingRelease: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "release notes")),
+		OnboardingReport:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "report")),
+		OnboardingRelease: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "release notes")),
 		Tab:               key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next field")),
 		ShiftTab:          key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev field")),
 		Up:                key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "prev field")),

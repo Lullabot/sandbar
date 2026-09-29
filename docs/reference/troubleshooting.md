@@ -12,11 +12,11 @@ compare. Reopen onboarding from the TUI's `?` help screen with `o`.
 ## A help or release-notes link does not open
 
 The onboarding screen and update notice include clickable OSC 8 links when
-the terminal supports them. Onboarding also provides `h` for the Sand issue
-tracker and `r` for the installed version's release notes; the `?` help screen
-provides `r` for the latest available release notes. These keyboard actions
-ask the operating system to open your default browser. If that fails, open the
-[Sand issue tracker](https://github.com/Lullabot/sandbar/issues/new) or
+the terminal supports them. Onboarding also provides `n` for the installed
+version's release notes and `r` for feature and bug requests; the `?` help
+screen provides `n` for the latest available release notes. These keyboard
+actions ask the operating system to open your default browser. If that fails,
+open the [Sand issue tracker](https://github.com/Lullabot/sandbar/issues/new) or
 [Sand releases](https://github.com/Lullabot/sandbar/releases) directly in a
 browser.
 

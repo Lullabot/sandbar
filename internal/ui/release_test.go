@@ -150,7 +150,7 @@ func TestReleaseHelpOpensAvailableOrInstalledNotes(t *testing.T) {
 	m.ghActions = fake
 	m.release = releaseFor("v1.3.0")
 
-	next, cmd := m.updateHelp(runeKey('r'))
+	next, cmd := m.updateHelp(runeKey('n'))
 	if cmd == nil {
 		t.Fatal("help release key did not return browser command")
 	}
@@ -161,7 +161,7 @@ func TestReleaseHelpOpensAvailableOrInstalledNotes(t *testing.T) {
 
 	m = next.(model)
 	m.release = releaseFor("v1.2.3")
-	_, cmd = m.updateHelp(runeKey('r'))
+	_, cmd = m.updateHelp(runeKey('n'))
 	_ = cmd()
 	if got, want := fake.opened[1], releasecheck.ReleaseNotesURL("v1.2.3"); got != want {
 		t.Fatalf("browser opened %q, want installed notes %q", got, want)
