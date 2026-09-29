@@ -448,9 +448,6 @@ type model struct {
 	agentsEdited   [4]bool
 	agentsLoading  bool
 	formGeneration uint64
-	toolDDEV       bool
-	toolGo         bool
-	toolJava       bool
 	toolRebuild    bool
 
 	// Progress / streaming. Everything that used to be a single job's state on the
@@ -1761,13 +1758,6 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !m.agentsEdited[3] {
 			m.toolPi = msg.agents.Pi
-		}
-		if msg.ok {
-			cfg := vm.DefaultCreateConfig()
-			cfg.ApplyToolset(msg.toolset)
-			m.toolDDEV = cfg.WithDDEV
-			m.toolGo = cfg.WithGo
-			m.toolJava = cfg.WithJava
 		}
 		return m, nil
 

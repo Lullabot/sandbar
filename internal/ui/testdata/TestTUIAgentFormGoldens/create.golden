@@ -1,6 +1,9 @@
                                                                               
    New VM                                                                     
                                                                               
+  Git name:          > Test Author                                            
+  Git email:         > test@example.com                                       
+  CPUs:              > 2                                                      
   Memory:            > 8GiB                                                   
   Disk:              > 100GiB                                                 
   Docker proxy host: >                                                        
@@ -11,9 +14,6 @@
   [ ] Install OpenAI Codex                                                    
   [ ] Install OpenCode                                                        
   [ ] Install Pi                                                              
-  [x] Install DDEV                                                            
-  [x] Install Go                                                              
-  [x] Install Java                                                            
   [ ] Rebuild base image                                                      
   │ Install the current Pi release when this VM is created. Remembers your    
   │ last submitted choices.                                                   

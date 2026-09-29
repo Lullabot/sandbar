@@ -293,9 +293,6 @@ func (m *model) openForm() tea.Cmd {
 	m.toolPi = cfg.WithPi
 	m.agentsEdited = [4]bool{}
 	m.formGeneration++
-	m.toolDDEV = cfg.WithDDEV
-	m.toolGo = cfg.WithGo
-	m.toolJava = cfg.WithJava
 	m.toolRebuild = false
 	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
 	// The clone source always reopens on "base" (formTemplateName == "") — a
@@ -720,15 +717,6 @@ type formToggle struct {
 	locked bool
 }
 
-// baseWideHelp is shared by the three tool toggles: they configure the SHARED
-// base image every future VM is cloned from, not just the VM this form is
-// creating. That is never allowed to be a surprise from a per-VM screen.
-func baseWideHelp(tool string) string {
-	return "Installs " + tool + " into the SHARED base image every VM is cloned from — " +
-		"not just this VM. Changing this rebuilds the base; de-selecting a tool " +
-		"needs the \"Rebuild base image\" toggle below to actually remove it."
-}
-
 // createToggles is create mode's toggle list: the base-image tool-set
 // (default on) and the rebuild intent (default off, wired to the same path
 // `sand create --rebuild` uses — see submitForm).
@@ -764,30 +752,12 @@ func (m model) createToggles() []formToggle {
 			get:   func(m *model) bool { return m.toolPi },
 			set:   func(m *model, v bool) { m.toolPi = v; m.agentsEdited[3] = true },
 		},
-		{
-			label: "Install DDEV",
-			help:  baseWideHelp("DDEV"),
-			get:   func(m *model) bool { return m.toolDDEV },
-			set:   func(m *model, v bool) { m.toolDDEV = v },
-		},
-		{
-			label: "Install Go",
-			help:  baseWideHelp("Go"),
-			get:   func(m *model) bool { return m.toolGo },
-			set:   func(m *model, v bool) { m.toolGo = v },
-		},
-		{
-			label: "Install Java",
-			help:  baseWideHelp("Java"),
-			get:   func(m *model) bool { return m.toolJava },
-			set:   func(m *model, v bool) { m.toolJava = v },
-		},
 	}
 	if m.formTemplateName == "" {
 		t = append(t, formToggle{
 			label: "Rebuild base image",
 			help: "Delete and rebuild the base image from scratch before creating. " +
-				"Needed to actually remove a de-selected tool.",
+				"Re-downloads the published image even when the current one is cached.",
 			get: func(m *model) bool { return m.toolRebuild },
 			set: func(m *model, v bool) { m.toolRebuild = v },
 		})
@@ -1136,9 +1106,9 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.WithCodex = m.toolCodex
 		cfg.WithOpenCode = m.toolOpenCode
 		cfg.WithPi = m.toolPi
-		cfg.WithDDEV = m.toolDDEV
-		cfg.WithGo = m.toolGo
-		cfg.WithJava = m.toolJava
+		// DDEV, Go and Java ship in the published base image, so the create
+		// form neither asks about them nor overrides DefaultCreateConfig's
+		// all-on values.
 		// A template selected as the clone source overrides BaseName to the
 		// template's own reserved instance name (registry.Template's doc
 		// comment): submitForm reads it back off cfg.BaseName to build

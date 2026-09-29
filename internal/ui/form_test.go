@@ -249,49 +249,30 @@ func TestOpenResetFormNoOrgSegment(t *testing.T) {
 	}
 }
 
-// TestCreateFormJavaToggleOff walks create-mode focus onto the Java toggle,
-// flips it with space, and asserts buildConfig produces WithJava: false while
-// the other two tool toggles (left untouched, default on) stay true. This is
-// the create-mode analogue of TestResetToggleFlipsAndWarns: create mode's
-// focus walk and space/enter handling must reach and flip its own toggles,
-// not just reset mode's.
-func TestCreateFormJavaToggleOff(t *testing.T) {
+// TestCreateFormOffersNoBaseDependencyToggles: DDEV, Go and Java ship in the
+// published base image, so the create form must not ask about them, and the
+// config it builds must still carry them (the legacy path and the registry
+// record read those fields).
+func TestCreateFormOffersNoBaseDependencyToggles(t *testing.T) {
 	m := newTestModel(t)
 	m.openForm()
-
-	// Fill the required fields so buildConfig/Validate don't fail on something
-	// unrelated to the toggle under test.
 	m.inputs[fName].SetValue("web")
 	m.inputs[fGitName].SetValue("Dev")
 	m.inputs[fGitEmail].SetValue("dev@example.com")
 
-	if m.toggleFocus != -1 {
-		t.Fatalf("openForm must reset toggleFocus to -1, got %d", m.toggleFocus)
+	for _, tg := range m.createToggles() {
+		for _, banned := range []string{"DDEV", "Go", "Java"} {
+			if strings.Contains(tg.label, banned) {
+				t.Errorf("create form offers %q; base-image tools must not be asked about", tg.label)
+			}
+		}
 	}
-
-	// Walk from the last text input onto the toggles: Claude (0), Codex (1),
-	// DDEV (2), Go (3), Java (4).
-	m.focusIdx = fCloneToken
-	for i := 0; i < 7; i++ {
-		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-		m = next.(model)
-	}
-	if m.toggleFocus != 6 {
-		t.Fatalf("expected focus on the Java toggle (index 6), got toggleFocus=%d", m.toggleFocus)
-	}
-
-	sp, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
-	m = sp.(model)
-
 	cfg, err := m.buildConfig()
 	if err != nil {
 		t.Fatalf("buildConfig: %v", err)
 	}
-	if cfg.WithJava {
-		t.Fatalf("WithJava = true after flipping the Java toggle off, want false")
-	}
-	if cfg.WithClaude || !cfg.WithDDEV || !cfg.WithGo {
-		t.Fatalf("untouched toggles should retain their defaults: WithClaude=%v WithDDEV=%v WithGo=%v", cfg.WithClaude, cfg.WithDDEV, cfg.WithGo)
+	if !cfg.WithDDEV || !cfg.WithGo || !cfg.WithJava {
+		t.Fatalf("base dependencies must stay on: WithDDEV=%v WithGo=%v WithJava=%v", cfg.WithDDEV, cfg.WithGo, cfg.WithJava)
 	}
 }
 
@@ -401,12 +382,12 @@ func TestCreateFormRebuildToggle(t *testing.T) {
 	m.openForm()
 	m.focusIdx = fCloneToken
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 5; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
 	}
-	if m.toggleFocus != 7 {
-		t.Fatalf("expected focus on the Rebuild toggle (index 7), got toggleFocus=%d", m.toggleFocus)
+	if m.toggleFocus != 4 {
+		t.Fatalf("expected focus on the Rebuild toggle (index 4), got toggleFocus=%d", m.toggleFocus)
 	}
 	if m.toolRebuild {
 		t.Fatalf("rebuild should default off")
@@ -530,62 +511,6 @@ func writeBaseStamp(t *testing.T, baseName, toolset string) {
 	stamp := "v2:deadbeef:" + toolset + "\n" + time.Now().UTC().Format(time.RFC3339) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, baseName+".playbook-version"), []byte(stamp), 0o644); err != nil {
 		t.Fatalf("write stamp: %v", err)
-	}
-}
-
-// TestCreateFormSeedsTogglesFromTheBuiltBase: the create form's tool toggles
-// must show what the SHARED base actually CONTAINS, read back from its stamp.
-// They used to open all-on unconditionally, so a user who built a base with no
-// tools was shown four ticked boxes on the very next create — and either
-// un-ticked all four again by hand, every time, or unknowingly asked for the
-// full tool-set and silently converged it back onto the base.
-func TestCreateFormSeedsTogglesFromTheBuiltBase(t *testing.T) {
-	m := newTestModel(t)
-	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "none")
-
-	cmd := m.openForm()
-	deliverToolsetLoad(t, &m, cmd)
-
-	if m.toolClaude || m.toolDDEV || m.toolGo || m.toolJava {
-		t.Errorf("form opened with claude=%v ddev=%v go=%v java=%v against a base built with NO tools; every toggle must start off",
-			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
-	}
-	m.inputs[fName].SetValue("web")
-	m.inputs[fGitName].SetValue("Dev")
-	m.inputs[fGitEmail].SetValue("dev@example.com")
-	cfg, err := m.buildConfig()
-	if err != nil {
-		t.Fatalf("buildConfig: %v", err)
-	}
-	if got, want := cfg.ToolsetKey(), "none"; got != want {
-		t.Errorf("ToolsetKey() = %q, want %q — submitting the untouched form must not re-converge the base", got, want)
-	}
-}
-
-// The partial case: a base built with only DDEV opens with only DDEV ticked.
-func TestCreateFormSeedsTogglesFromAPartialToolset(t *testing.T) {
-	m := newTestModel(t)
-	writeBaseStamp(t, vm.DefaultCreateConfig().BaseName, "ddev+java")
-
-	cmd := m.openForm()
-	deliverToolsetLoad(t, &m, cmd)
-
-	if m.toolClaude || m.toolGo {
-		t.Errorf("claude=%v go=%v, want both off: the base does not have them", m.toolClaude, m.toolGo)
-	}
-	if !m.toolDDEV || !m.toolJava {
-		t.Errorf("ddev=%v java=%v, want both on: the base was built with them", m.toolDDEV, m.toolJava)
-	}
-}
-
-// With no base built yet there is nothing to adopt, so the form keeps the
-// dependency defaults while every agent remains opt-in.
-func TestCreateFormWithNoBaseKeepsDefaults(t *testing.T) {
-	m := newTestModel(t)
-	m.openForm()
-	if m.toolClaude || !m.toolDDEV || !m.toolGo || !m.toolJava {
-		t.Errorf("with no base stamp the form has wrong defaults: claude=%v ddev=%v go=%v java=%v",
-			m.toolClaude, m.toolDDEV, m.toolGo, m.toolJava)
 	}
 }
 
