@@ -59,6 +59,7 @@ Use your internal Todo tool to track these and keep on track.
 - The generated manifest source and its regeneration target.
 - The Lima-host acquisition helper — consumed by task 08 and task 12.
 - Provider-neutral manifest lookup — consumed by both tasks 08 and 09.
+- A standalone shared-foundation PR based on PR 206 while it is open, then rebased onto `main` after the verified producer lands. Provider lifecycle changes do not belong in this PR.
 
 ## Implementation Notes
 

@@ -52,6 +52,7 @@ Use your internal Todo tool to track these and keep on track.
 ## Output Artifacts
 
 - A written verification finding — consumed by tasks 08 and 09 as confirmation (or as a revised requirement) that one image serves both providers.
+- A merge-gate decision for PR 206: a positive finding makes the producer PR ready to merge; a negative finding keeps it open for a builder fix and a new immutable image release before provider wiring begins.
 
 ## Implementation Notes
 
@@ -59,6 +60,8 @@ Use your internal Todo tool to track these and keep on track.
 <summary>Detailed guidance</summary>
 
 **This task is a gate, and its most valuable outcome might be a failure.** Run it before tasks 08/09 begin so a negative result can redirect them cheaply. Do not paper over a partial success.
+
+**PR boundary.** PR 206 stays open only through this verification. Do not keep it as the base of the entire implementation stack. Once this task passes, merge the producer independently; if a later integration exposes a different image defect, address that in a focused producer follow-up and publish a new tag.
 
 **Minimal Lima test.** Write a throwaway YAML like:
 
