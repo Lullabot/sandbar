@@ -261,6 +261,13 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		return nil, fmt.Errorf("proxmox: pinned base image: %w", err)
 	}
 	baseURL, baseFile, baseSHA := image.URL, image.Filename, image.SHA256
+	// PVE's import storage is a cache keyed only by filename. Release assets
+	// deliberately keep a stable basename, so using it directly would make a
+	// newer pinned release silently reuse an older qcow2 already on the node.
+	// Keep the public URL unchanged, but make the node-local cache key immutable
+	// with the manifest version.
+	ext := path.Ext(baseFile)
+	baseFile = strings.TrimSuffix(baseFile, ext) + "-" + baseimage.PinnedManifest.Version + ext
 	if cfg.BaseImage != "" {
 		baseURL = cfg.BaseImage
 		name := baseURL
