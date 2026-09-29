@@ -404,9 +404,12 @@ The final image saves 80.3125 MiB (7.72%) against the fresh Task 03 baseline. Of
 
 **Build-host hazard discovered during execution:** `/tmp` on the development host is a **tmpfs**, so multi-gigabyte image outputs written there are held in RAM and triggered an OOM kill of a background process. Builds must write outputs to a disk-backed path (`/var/tmp`), and intermediate images must be deleted once their size and digest are recorded. **The publication workflow must apply the same rule in CI** — hosted runners also have constrained RAM and a small `/tmp`.
 
-### Phase 4: The Distribution Gate
+### ✅ Phase 4: The Distribution Gate
+
+**Status:** completed
+
 **Tasks:**
-- Task 04: Assert the built image is safe to distribute (depends on: 15)
+- ✔️ Task 04: Assert the built image is safe to distribute (depends on: 15) — `completed`
 
 ### Phase 5: Publication
 **Parallel Tasks:**
