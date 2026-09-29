@@ -106,7 +106,7 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	// NewDefault and Provisioner.playbookDir); a remote `sand shell` must not
 	// trigger playbook extraction either.
 	core := lima.New(host)
-	prov := &provision.Provisioner{Lima: core, HostFiles: host}
+	prov := &provision.Provisioner{Lima: core, HostFiles: host, UsePublishedBase: true}
 	return &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, prov: prov, hostFiles: host},
 		host:         host,

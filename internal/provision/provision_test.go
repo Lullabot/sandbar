@@ -648,7 +648,7 @@ func stubBaseOverlay(t *testing.T, dir string, bootstrap string) {
 // base may have and still be converged in place.
 func currentBootstrap(t *testing.T) string {
 	t.Helper()
-	y, err := RenderBaseOverlay(vm.DefaultCreateConfig(), "/playbook")
+	y, err := RenderBaseOverlay(vm.DefaultCreateConfig(), "/playbook", testOverlayImage())
 	if err != nil {
 		t.Fatalf("RenderBaseOverlay: %v", err)
 	}

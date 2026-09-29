@@ -287,7 +287,9 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 
 	runner := &buildingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	cli := lima.New(runner)
-	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir()}
+	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir(), AcquireBaseImage: func(context.Context, lima.ImageStore, string, io.Writer) (string, error) {
+		return "/isolated/verified-base.qcow2", nil
+	}}
 	tm := teatest.NewTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(100, 30))
 
 	// The managed index is empty here, so the canned VMs get no tile: the board

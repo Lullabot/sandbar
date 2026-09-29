@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -146,6 +147,12 @@ func sandProfileEnabled() bool {
 // lima.Client, streaming playbook output to the caller-supplied writer.
 type Provisioner struct {
 	Lima *lima.Client
+	// UsePublishedBase selects the baked-image path for provider creates. The
+	// older convergence path remains for its separately scheduled cleanup.
+	UsePublishedBase bool
+	// AcquireBaseImage overrides verified image acquisition for an isolated
+	// provisioner. A nil value uses the pinned release and host image store.
+	AcquireBaseImage func(context.Context, lima.ImageStore, string, io.Writer) (string, error)
 	// PlaybookDir is the host directory mounted into the guest at /mnt/playbook.
 	// It may be left empty at construction: playbookDir() locates it lazily (and
 	// caches it here) the first time a provisioning flow actually needs it. That
@@ -239,17 +246,90 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 	return nil
 }
 
-// BuildBase renders the base overlay, creates the base instance, runs the heavy
-// base-phase playbook over a shell, and stops the instance (kept as the clone
-// source). Mirrors the original bash provisioner's build_base.
+// BuildBase creates a clone source from the verified published image.
 func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	return p.buildBase(ctx, cfg, out, newPhaseTimer(out))
 }
 
-// buildBase is BuildBase's implementation, taking a timer so a caller already
-// running a per-phase timed sequence (createVM, Reset) can share one timer and
-// summary across the whole run instead of BuildBase starting its own.
+func (p *Provisioner) baseImageArch(ctx context.Context) (string, error) {
+	if _, remote := p.HostFiles.(*lima.SSHHost); remote {
+		return baseimage.RemoteArch(ctx, p.Lima)
+	}
+	return baseimage.LocalArch()
+}
+
 func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
+	hf := p.hostFiles()
+	store, ok := hf.(lima.ImageStore)
+	if !ok {
+		return fmt.Errorf("Lima host cannot store a verified base image")
+	}
+	arch, err := p.baseImageArch(ctx)
+	if err != nil {
+		return err
+	}
+	entry, err := baseimage.PinnedManifest.ForArch(arch)
+	if err != nil {
+		return err
+	}
+	acquire := p.AcquireBaseImage
+	if acquire == nil {
+		acquire = func(ctx context.Context, store lima.ImageStore, arch string, out io.Writer) (string, error) {
+			return baseimage.Acquire(ctx, store, baseimage.PinnedManifest, arch, nil, out)
+		}
+	}
+	location, err := acquire(ctx, store, arch, out)
+	if err != nil {
+		return fmt.Errorf("acquire base image: %w", err)
+	}
+	limaArch := "x86_64"
+	if arch == "arm64" {
+		limaArch = "aarch64"
+	}
+	mountDir, err := p.stagedPlaybookDir(ctx)
+	if err != nil {
+		return err
+	}
+	overlay, err := RenderBaseOverlay(cfg, mountDir, BaseImageSpec{Location: location, Arch: limaArch, Digest: "sha256:" + entry.SHA256})
+	if err != nil {
+		return fmt.Errorf("render base overlay: %w", err)
+	}
+	overlayPath := filepath.Join(hf.LimaHome(), "_sand", "sand-base-"+cfg.BaseName+".yaml")
+	if err := hf.WriteFile(overlayPath, overlay, 0o700, 0o600); err != nil {
+		return fmt.Errorf("write base overlay: %w", err)
+	}
+	defer func() { _ = hf.RemoveAll(overlayPath) }()
+	step(out, "Creating base instance %q from verified image %s…", cfg.BaseName, baseimage.PinnedManifest.Version)
+	if err := timer.time("base image creation", func() error {
+		return p.Lima.CreateStreaming(ctx, cfg.BaseName, overlayPath, out)
+	}); err != nil {
+		p.cleanupInstance(cfg.BaseName, out)
+		return fmt.Errorf("create base image %q: %w", cfg.BaseName, err)
+	}
+	// Booting the published image gives this Lima instance a machine ID. A
+	// stopped base is copied byte-for-byte, so leaving that identity in place
+	// makes every clone present the same DHCP identity. Return the disk to its
+	// generalized state after Lima's first boot and before it becomes a clone
+	// source; each clone then generates its own ID on first boot.
+	if err := timer.time("base identity reset", func() error {
+		return p.Lima.Shell(ctx, cfg.BaseName, nil, out, "sudo", "bash", "-c", GeneralizeScript)
+	}); err != nil {
+		return fmt.Errorf("reset base image %q machine identity: %w", cfg.BaseName, err)
+	}
+	step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
+	if err := timer.time("base stop", func() error {
+		return p.Lima.StopStreaming(ctx, cfg.BaseName, out)
+	}); err != nil {
+		return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
+	}
+	if err := writeBaseVersionFn(hf, cfg.BaseName, baseimage.PinnedManifest.Version, time.Now()); err != nil {
+		step(out, "Note: could not record the base image version (%v); it will rebuild on the next create.", err)
+	}
+	return nil
+}
+
+// buildLegacyBase retains the old convergence path until its separate cleanup.
+func (p *Provisioner) buildLegacyBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
 	hf := p.hostFiles()
 	dir, err := p.playbookDir()
 	if err != nil {
@@ -264,10 +344,7 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	if err != nil {
 		return err
 	}
-	overlay, err := RenderBaseOverlay(cfg, mountDir)
-	if err != nil {
-		return fmt.Errorf("render base overlay: %w", err)
-	}
+	overlay := renderLegacyBaseOverlay(cfg, mountDir)
 
 	// Write the overlay where limactl will READ it — on its host, not this one.
 	// os.CreateTemp would put it in this laptop's /tmp, which a remote limactl
@@ -726,6 +803,9 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 // verdict about a base that no longer exists in that state — act on it and this
 // create redoes work that finished while it queued.
 func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
+	if p.UsePublishedBase {
+		return p.ensurePublishedBaseStopped(ctx, cfg, opts, out, timer)
+	}
 	status, err := p.Lima.Status(cfg.BaseName)
 	exists := err == nil && status != ""
 
@@ -806,10 +886,38 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 
 	switch {
 	case !exists:
-		if err := p.buildBase(ctx, cfg, out, timer); err != nil {
+		if err := p.buildLegacyBase(ctx, cfg, out, timer); err != nil {
 			return err
 		}
 	case status != "Stopped":
+		step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
+		if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
+			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
+		}
+	}
+	return nil
+}
+
+// ensurePublishedBaseStopped compares the existing base with the pinned image
+// release under the same lock as the clone. An older base is replaced from
+// verified bytes; in-guest playbook convergence and apt refresh do not run.
+func (p *Provisioner) ensurePublishedBaseStopped(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
+	status, err := p.Lima.Status(cfg.BaseName)
+	exists := err == nil && status != ""
+	if exists {
+		have := readBaseVersionFn(p.hostFiles(), cfg.BaseName)
+		if opts.Rebuild || have != baseimage.PinnedManifest.Version {
+			step(out, "Replacing base image %q with published image %s…", cfg.BaseName, baseimage.PinnedManifest.Version)
+			if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
+				return fmt.Errorf("delete base image %q: %w", cfg.BaseName, err)
+			}
+			exists = false
+		}
+	}
+	if !exists {
+		return p.buildBase(ctx, cfg, out, timer)
+	}
+	if status != "Stopped" {
 		step(out, "Stopping base image %q (making it idle for cloning)…", cfg.BaseName)
 		if err := p.Lima.StopStreaming(ctx, cfg.BaseName, out); err != nil {
 			return fmt.Errorf("stop base image %q: %w", cfg.BaseName, err)
