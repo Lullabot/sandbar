@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +26,54 @@ type testStore struct {
 }
 
 func (s testStore) LimaHome() string { return s.root }
+
+type failingImageStore struct {
+	lima.ImageStore
+	root                         string
+	statErr, removeErr, writeErr error
+	shaErr, renameErr            error
+	shaValue                     string
+}
+
+func (s failingImageStore) LimaHome() string { return s.root }
+
+func (s failingImageStore) Stat(path string) (fs.FileInfo, error) {
+	if s.statErr != nil {
+		return nil, s.statErr
+	}
+	return s.ImageStore.Stat(path)
+}
+
+func (s failingImageStore) RemoveAll(path string) error {
+	if s.removeErr != nil {
+		return s.removeErr
+	}
+	return s.ImageStore.RemoveAll(path)
+}
+
+func (s failingImageStore) WriteStream(ctx context.Context, path string, src io.Reader) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	return s.ImageStore.WriteStream(ctx, path, src)
+}
+
+func (s failingImageStore) SHA256(ctx context.Context, path string) (string, error) {
+	if s.shaErr != nil {
+		return "", s.shaErr
+	}
+	if s.shaValue != "" {
+		return s.shaValue, nil
+	}
+	return s.ImageStore.SHA256(ctx, path)
+}
+
+func (s failingImageStore) Rename(ctx context.Context, oldPath, newPath string) error {
+	if s.renameErr != nil {
+		return s.renameErr
+	}
+	return s.ImageStore.Rename(ctx, oldPath, newPath)
+}
 
 func TestAcquireVerifiesAndCachesOnLimaHost(t *testing.T) {
 	const payload = "trusted qcow2 fixture"
@@ -105,6 +156,91 @@ func TestAcquireRejectsTruncatedDownload(t *testing.T) {
 	if err != nil || len(files) != 0 {
 		t.Fatalf("truncated download left files %v, %v", files, err)
 	}
+}
+
+func TestAcquireRejectsInvalidConfigurationBeforeDownload(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	valid := Manifest{Version: "release", Images: map[string]ImageEntry{"amd64": {
+		URL: "https://example.invalid/image.qcow2", Filename: "image.qcow2", SHA256: sha, Size: 1,
+	}}}
+	store := testStore{ImageStore: lima.LocalFiles().(lima.ImageStore), root: t.TempDir()}
+
+	tests := []struct {
+		name     string
+		manifest Manifest
+		arch     string
+		store    lima.ImageStore
+	}{
+		{name: "unsupported architecture", manifest: valid, arch: "riscv64", store: store},
+		{name: "invalid entry", manifest: Manifest{Version: "release", Images: map[string]ImageEntry{"amd64": {Filename: "../image.qcow2"}}}, arch: "amd64", store: store},
+		{name: "invalid version", manifest: Manifest{Version: "../release", Images: valid.Images}, arch: "amd64", store: store},
+		{name: "missing Lima home", manifest: valid, arch: "amd64", store: testStore{ImageStore: lima.LocalFiles().(lima.ImageStore)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Acquire(context.Background(), tt.store, tt.manifest, tt.arch, nil, nil); err == nil {
+				t.Fatal("Acquire succeeded with invalid configuration")
+			}
+		})
+	}
+}
+
+func TestAcquireReportsStorageAndTransportFailures(t *testing.T) {
+	const payload = "verified payload"
+	digest := sha256.Sum256([]byte(payload))
+	manifest := Manifest{Version: "release", Images: map[string]ImageEntry{"amd64": {
+		URL: "", Filename: "image.qcow2", SHA256: hex.EncodeToString(digest[:]), Size: int64(len(payload)),
+	}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer server.Close()
+	manifest.Images["amd64"] = ImageEntry{URL: server.URL, Filename: "image.qcow2", SHA256: hex.EncodeToString(digest[:]), Size: int64(len(payload))}
+	local := lima.LocalFiles().(lima.ImageStore)
+	failure := errors.New("injected failure")
+
+	t.Run("checking cache", func(t *testing.T) {
+		store := failingImageStore{ImageStore: local, root: t.TempDir(), statErr: failure}
+		if _, err := Acquire(context.Background(), store, manifest, "amd64", server.Client(), nil); !errors.Is(err, failure) {
+			t.Fatalf("Acquire error = %v, want wrapped %v", err, failure)
+		}
+	})
+
+	t.Run("writing download", func(t *testing.T) {
+		store := failingImageStore{ImageStore: local, root: t.TempDir(), writeErr: failure}
+		if _, err := Acquire(context.Background(), store, manifest, "amd64", server.Client(), nil); !errors.Is(err, failure) {
+			t.Fatalf("Acquire error = %v, want wrapped %v", err, failure)
+		}
+	})
+
+	t.Run("hashing downloaded file", func(t *testing.T) {
+		store := failingImageStore{ImageStore: local, root: t.TempDir(), shaErr: failure}
+		if _, err := Acquire(context.Background(), store, manifest, "amd64", server.Client(), nil); !errors.Is(err, failure) {
+			t.Fatalf("Acquire error = %v, want wrapped %v", err, failure)
+		}
+	})
+
+	t.Run("publishing verified file", func(t *testing.T) {
+		store := failingImageStore{ImageStore: local, root: t.TempDir(), renameErr: failure}
+		if _, err := Acquire(context.Background(), store, manifest, "amd64", server.Client(), nil); !errors.Is(err, failure) {
+			t.Fatalf("Acquire error = %v, want wrapped %v", err, failure)
+		}
+	})
+
+	t.Run("HTTP status", func(t *testing.T) {
+		failureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}))
+		defer failureServer.Close()
+		failedManifest := manifest
+		entry := failedManifest.Images["amd64"]
+		entry.URL = failureServer.URL
+		failedManifest.Images = map[string]ImageEntry{"amd64": entry}
+		store := testStore{ImageStore: local, root: t.TempDir()}
+		if _, err := Acquire(context.Background(), store, failedManifest, "amd64", failureServer.Client(), nil); err == nil || !strings.Contains(err.Error(), "503") {
+			t.Fatalf("Acquire error = %v, want HTTP 503", err)
+		}
+	})
 }
 
 // Run explicitly for the release smoke check; the normal suite stays offline.
