@@ -1674,6 +1674,22 @@ instead, naming the profile and the reason its tiles are absent. The header
 does not count base images or unmanaged VMs — the board only ever shows
 sand-managed clones, and the header doesn't either. Manage a base image with
 <code>limactl</code> (or the Proxmox UI) directly.</p>
+<p>On first launch, sand shows a short onboarding screen before the board. Press
+<code>enter</code> to continue; the acknowledgement is saved so it is not shown again.
+From the <code>?</code> help screen, press <code>o</code> to reopen it. Its installed release notes
+and feature or bug request links can be clicked in terminals that support OSC 8
+hyperlinks, or opened with <code>n</code> and <code>r</code> respectively using your default browser.
+The screen also explains the persistent tmux shell; see
+<a href="../files-and-shells/">Files and Shells</a> for the full tmux and file-transfer
+guide. When sand detects Warp (<code>TERM_PROGRAM=WarpTerminal</code>), onboarding warns
+that Sand and Claude Code can have terminal compatibility issues there.</p>
+<p>Sand checks GitHub for a newer stable release in the background, at most once
+per 24 hours. A newer release adds a clickable <code>(Update available!)</code> link
+beside the version in the full header; <code>?</code> then offers <code>n</code> to open those notes
+in your browser. A narrow full header drops the update notice before the
+installed version, and the entire title row is omitted in compact layouts. Failed
+checks are quiet, keep the last valid result, and still use the 24-hour retry
+interval. Sand never downloads or installs an update for you.</p>
 <h2 id="the-tile-board">The tile board</h2>
 <p>Tiles are sorted alphabetically by name and stay there — a VM changing
 status never reorders the board. An empty slot on the board is a "ghost

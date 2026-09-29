@@ -1557,6 +1557,21 @@ out; every other page links here instead of restating them.</p>
 <td>Delete only when no <code>sand</code> process is running. They contain no data and are re-created when needed, but deleting an active lock can allow conflicting writes.</td>
 </tr>
 <tr>
+<td><code>${XDG_STATE_HOME:-~/.local/state}/sandbar/onboarding.json</code></td>
+<td>Whether onboarding has been acknowledged (<code>{"acknowledged":true}</code>). Sand writes it with mode <code>0600</code> in a <code>0700</code> directory.</td>
+<td>Yes. The screen appears again the next time sand starts. VM, profile, and secret data are unaffected.</td>
+</tr>
+<tr>
+<td><code>${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json</code></td>
+<td>Disposable release-check metadata: the last attempt time and last validated stable release/tag URL. Created with mode <code>0600</code> in a <code>0700</code> directory.</td>
+<td>Yes. Sand can check GitHub again on its next startup; no VM or configuration data is affected.</td>
+</tr>
+<tr>
+<td><code>${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json.lock</code></td>
+<td>Advisory lock used to reserve a due release-check attempt before networking and update the shared cache safely when multiple sand processes run. It prevents duplicate daily requests and stale writes.</td>
+<td>Delete only when no <code>sand</code> process is running. It contains no user data and is re-created as needed; removing an active lock can allow duplicate checks or conflicting cache updates.</td>
+</tr>
+<tr>
 <td><code>${LIMA_HOME:-~/.lima}</code></td>
 <td>Lima's own instance store — disk images, <code>lima.yaml</code>, per-instance logs. <code>sand</code> does not own this directory; Lima does.</td>
 <td><code>sand</code> never deletes it directly; use <code>limactl delete</code> or Lima's own tooling.</td>

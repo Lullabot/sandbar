@@ -1127,6 +1127,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#sand-or-claude-code-behaves-oddly-in-warp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sand or Claude Code behaves oddly in Warp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-help-or-release-notes-link-does-not-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A help or release-notes link does not open
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-stale-base-image" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1436,6 +1458,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#sand-or-claude-code-behaves-oddly-in-warp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sand or Claude Code behaves oddly in Warp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-help-or-release-notes-link-does-not-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A help or release-notes link does not open
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-stale-base-image" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1556,6 +1600,20 @@
 
 <h1 id="troubleshooting">Troubleshooting</h1>
 <p>Common problems with <code>sand</code> and how to resolve them.</p>
+<h2 id="sand-or-claude-code-behaves-oddly-in-warp">Sand or Claude Code behaves oddly in Warp</h2>
+<p>Sand detects Warp through <code>TERM_PROGRAM=WarpTerminal</code> and displays a warning
+on its onboarding screen: Sand and Claude Code can have terminal compatibility
+issues in Warp. If keys or rendering misbehave, try another terminal and
+compare. Reopen onboarding from the TUI's <code>?</code> help screen with <code>o</code>.</p>
+<h2 id="a-help-or-release-notes-link-does-not-open">A help or release-notes link does not open</h2>
+<p>The onboarding screen and update notice include clickable OSC 8 links when
+the terminal supports them. Onboarding also provides <code>n</code> for the installed
+version's release notes and <code>r</code> for feature and bug requests; the <code>?</code> help
+screen provides <code>n</code> for the latest available release notes. These keyboard
+actions ask the operating system to open your default browser. If that fails,
+open the <a href="https://github.com/Lullabot/sandbar/issues/new">Sand issue tracker</a> or
+<a href="https://github.com/Lullabot/sandbar/releases">Sand releases</a> directly in a
+browser.</p>
 <h2 id="a-stale-base-image">A stale base image</h2>
 <p><code>sand</code> builds shared dependencies (packages, Docker, Node,
 and other development tools) into a stopped base image (<code>sandbar-base</code> by default),
