@@ -1392,9 +1392,11 @@ func TestProxmoxBaseImageDefaultAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if def.imageURL != image.URL || def.imageFile != image.Filename {
+	ext := filepath.Ext(image.Filename)
+	wantFile := strings.TrimSuffix(image.Filename, ext) + "-" + baseimage.PinnedManifest.Version + ext
+	if def.imageURL != image.URL || def.imageFile != wantFile {
 		t.Errorf("unset base_image = (%q, %q); want the built-in default (%q, %q)",
-			def.imageURL, def.imageFile, image.URL, image.Filename)
+			def.imageURL, def.imageFile, image.URL, wantFile)
 	}
 	if def.baseImageSHA256 != image.SHA256 {
 		t.Errorf("default image checksum = %q; want the pinned %q", def.baseImageSHA256, image.SHA256)
