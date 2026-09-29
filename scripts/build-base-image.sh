@@ -212,8 +212,11 @@ systemctl --root="$mount_dir" enable docker.socket
 systemctl --root="$mount_dir" disable docker.service
 systemctl --root="$mount_dir" enable sand-image-clipboard.service
 
-# The image is a clone source, not a machine or an account with credentials.
-chroot "$mount_dir" passwd -l "$user_name"
+# The playbook needs a temporary account while it builds the user-owned home
+# tools. Cloud-init must create the real login on first boot: Lima mirrors its
+# host user (including UID), while Proxmox uses ciuser. Move the reusable home
+# into the default skeleton, then remove the temporary account and its linger.
+bash "$repo/scripts/generalize-base-image-user.sh" "$mount_dir" "$user_name"
 rm -f -- "$mount_dir"/etc/ssh/ssh_host_*
 : > "$mount_dir/etc/machine-id"
 mkdir -p "$mount_dir/var/lib/dbus"
