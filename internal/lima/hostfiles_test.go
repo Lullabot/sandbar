@@ -2,10 +2,68 @@ package lima
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestLocalFilesImageStoreLifecycle(t *testing.T) {
+	store, ok := LocalFiles().(ImageStore)
+	if !ok {
+		t.Fatal("LocalFiles does not implement ImageStore")
+	}
+
+	dir := filepath.Join(t.TempDir(), "cache", "release")
+	if err := store.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	const payload = "verified image bytes"
+	partial := filepath.Join(dir, "image.qcow2.partial")
+	if err := store.WriteStream(context.Background(), partial, strings.NewReader(payload)); err != nil {
+		t.Fatalf("WriteStream: %v", err)
+	}
+	info, err := store.Stat(partial)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Size() != int64(len(payload)) {
+		t.Fatalf("Stat size = %d, want %d", info.Size(), len(payload))
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode = %o, want 600", got)
+	}
+
+	wantSum := sha256.Sum256([]byte(payload))
+	wantDigest := hex.EncodeToString(wantSum[:])
+	if got, err := store.SHA256(context.Background(), partial); err != nil || got != wantDigest {
+		t.Fatalf("SHA256 = %q, %v; want %q", got, err, wantDigest)
+	}
+
+	final := filepath.Join(dir, "image.qcow2")
+	if err := store.Rename(context.Background(), partial, final); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if _, err := store.Stat(partial); !os.IsNotExist(err) {
+		t.Fatalf("Stat(old path) err = %v, want fs.ErrNotExist", err)
+	}
+	if got, err := store.ReadFile(final); err != nil || string(got) != payload {
+		t.Fatalf("ReadFile(final) = %q, %v; want %q", got, err, payload)
+	}
+	if err := store.WriteStream(context.Background(), final, strings.NewReader("replacement")); err == nil {
+		t.Fatal("WriteStream replaced an existing verified image")
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := store.SHA256(canceled, final); !errors.Is(err, context.Canceled) {
+		t.Fatalf("SHA256(canceled) err = %v, want context.Canceled", err)
+	}
+}
 
 // TestLocalFilesProvenanceMarkerRoundTrip proves MarkerPath + WriteFile/ReadFile
 // round-trip a marker through localFiles exactly as the provider package's
