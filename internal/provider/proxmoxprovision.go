@@ -52,30 +52,6 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
-// baseImageURL / baseImageFile are the DEFAULT cloud image the base template is
-// built from, used when a profile sets no base_image (see NewProxmox, which
-// copies these into the provider's own fields). They are VARS, not consts, so a
-// test can point them at a rejected extension to exercise the early guard
-// without a real download.
-//
-// The default is the project's own golden image: upstream Debian genericcloud
-// with qemu-guest-agent baked in, published by .github/workflows/base-image.yml.
-// sand needs the agent running on first boot to learn a VM's IP, and stock cloud
-// images don't ship it — so the default carries it rather than making every user
-// build their own. Bumping to a newer monthly build means updating all three of
-// URL, file, and defaultBaseImageSHA256 together (the workflow publishes the
-// matching .sha256 asset).
-var (
-	baseImageURL  = "https://github.com/Lullabot/sandbar/releases/download/base-image-2026.07.21/sandbar-base-debian-13-amd64.qcow2"
-	baseImageFile = "sandbar-base-debian-13-amd64.qcow2"
-)
-
-// defaultBaseImageSHA256 pins the default image so PVE's download-url verifies it
-// server-side — the default image is downloaded and BOOTED, so its integrity is
-// worth checking. Empty for a custom base_image (a user's own URL carries no
-// checksum here). Keep in lockstep with baseImageURL above.
-const defaultBaseImageSHA256 = "57500f861b5a2e5a12a9d90a3046aae09b49d4a49bbfa7b1a9b48ff62b4b4659"
-
 // acceptedImportExts is the extension set PVE's download-url endpoint accepts for
 // content=import. `.img` is deliberately ABSENT: PVE rejects it outright, so a
 // configured .img image must fail early here with a message naming this set,
@@ -523,15 +499,15 @@ func (p *proxmoxProvider) templateVersion(cfg vm.CreateConfig) (string, error) {
 // extension PVE's download-url rejects (notably .img), naming the accepted set,
 // rather than letting the download task fail opaquely minutes later.
 func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (string, error) {
-	if !acceptedImportExt(p.baseImageFile) {
-		return "", fmt.Errorf("proxmox: cloud image %q has an extension PVE's download-url rejects; convert it to one of %s first", p.baseImageFile, strings.Join(acceptedImportExts, "|"))
+	if !acceptedImportExt(p.imageFile) {
+		return "", fmt.Errorf("proxmox: cloud image %q has an extension PVE's download-url rejects; convert it to one of %s first", p.imageFile, strings.Join(acceptedImportExts, "|"))
 	}
 	// The image is downloaded onto the file-based imageStorage (content=import),
 	// NOT the VM-disk storage — a block disk storage (zfspool, lvm-thin) rejects
 	// content=import. buildBaseTemplate then imports the disk onto p.storage FROM
 	// this volid (import-from allows a cross-storage source). See the imageStorage
 	// field's doc and Preflight's import-content check.
-	volid := fmt.Sprintf("%s:import/%s", p.imageStorage, p.baseImageFile)
+	volid := fmt.Sprintf("%s:import/%s", p.imageStorage, p.imageFile)
 
 	items, err := p.client.StorageContent(ctx, p.imageStorage)
 	if err != nil {
@@ -544,11 +520,11 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 		}
 	}
 
-	progress(out, "Downloading cloud image %s into %s\n", p.baseImageURL, p.imageStorage)
+	progress(out, "Downloading cloud image %s into %s\n", p.imageURL, p.imageStorage)
 	opts := pve.DownloadURLOptions{
 		Content:  "import",
-		Filename: p.baseImageFile,
-		URL:      p.baseImageURL,
+		Filename: p.imageFile,
+		URL:      p.imageURL,
 	}
 	// Pin the checksum for the default image so PVE verifies the download
 	// server-side (empty for a custom base_image — see NewProxmox).

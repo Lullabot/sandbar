@@ -2,7 +2,7 @@
 id: 7
 group: "host-acquisition"
 dependencies: [5]
-status: "pending"
+status: "completed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -26,19 +26,19 @@ Replace the three hand-maintained image constants with a generated pinned manife
 
 ## Acceptance Criteria
 
-- [ ] A generated Go source file carries the pinned manifest: per architecture, the asset URL, filename and SHA-256, plus the image version string.
-- [ ] A `go generate` (or `make`) target regenerates that file from a published release's `manifest.json`, so bumping the image is one command and one reviewable diff.
-- [ ] The three existing constants `baseImageURL`, `baseImageFile` and `defaultBaseImageSHA256` (`internal/provider/proxmoxprovision.go:61-77`) are removed in favour of the manifest.
-- [ ] A Lima-host acquisition helper resolves the target architecture and returns a verified path on the host where `limactl` runs (workstation for local Lima, remote host for remote Lima), downloading only on a cache miss or failed verification.
-- [ ] Architecture resolution is host-correct: local Lima maps `runtime.GOARCH`; remote Lima executes `uname -m` through the existing host runner and normalizes `x86_64`/`aarch64` to manifest keys. An unsupported result is an explicit error.
-- [ ] Proxmox callers consume URL/filename/SHA directly from the same manifest and retain PVE's server-side download and verification; they do not download the image through the workstation cache.
-- [ ] A **digest mismatch is a hard failure** — never a fallback to using the file anyway, and never a silent re-download loop.
-- [ ] A partially downloaded file is never mistaken for a complete one: download to a temporary path and rename into the cache only after the digest verifies.
-- [ ] Download progress is written to the `io.Writer` the caller supplies, so it flows into the existing TUI job stream.
-- [ ] Verification: `go build ./...` and `go vet ./...` pass. Paste the output.
-- [ ] Verification: `grep -rn "defaultBaseImageSHA256\|baseImageURL\|baseImageFile" internal/` returns no hits outside the generated manifest. Paste it.
-- [ ] Verification: run the regeneration target against the real published release and confirm the generated file's digests match `gh release view <tag>` checksums. Paste both.
-- [ ] Verification: a manual smoke test acquiring the image twice shows a download on the first call and a cache hit (no network) on the second. Paste the timings or log lines proving it.
+- [x] A generated Go source file carries the pinned manifest: per architecture, the asset URL, filename and SHA-256, plus the image version string.
+- [x] A `go generate` (or `make`) target regenerates that file from a published release's `manifest.json`, so bumping the image is one command and one reviewable diff.
+- [x] The three existing constants `baseImageURL`, `baseImageFile` and `defaultBaseImageSHA256` (`internal/provider/proxmoxprovision.go:61-77`) are removed in favour of the manifest.
+- [x] A Lima-host acquisition helper resolves the target architecture and returns a verified path on the host where `limactl` runs (workstation for local Lima, remote host for remote Lima), downloading only on a cache miss or failed verification.
+- [x] Architecture resolution is host-correct: local Lima maps `runtime.GOARCH`; remote Lima executes `uname -m` through the existing host runner and normalizes `x86_64`/`aarch64` to manifest keys. An unsupported result is an explicit error.
+- [x] Proxmox callers consume URL/filename/SHA directly from the same manifest and retain PVE's server-side download and verification; they do not download the image through the workstation cache.
+- [x] A **digest mismatch is a hard failure** — never a fallback to using the file anyway, and never a silent re-download loop.
+- [x] A partially downloaded file is never mistaken for a complete one: download to a temporary path and rename into the cache only after the digest verifies.
+- [x] Download progress is written to the `io.Writer` the caller supplies, so it flows into the existing TUI job stream.
+- [x] Verification: `go build ./...` and `go vet ./...` pass. Paste the output.
+- [x] Verification: `grep -rn "defaultBaseImageSHA256\|baseImageURL\|baseImageFile" internal/` returns no hits outside the generated manifest. Paste it.
+- [x] Verification: run the regeneration target against the real published release and confirm the generated file's digests match `gh release view <tag>` checksums. Paste both.
+- [x] Verification: a manual smoke test acquiring the image twice shows a download on the first call and a cache hit (no network) on the second. Paste the timings or log lines proving it.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -110,3 +110,11 @@ returning a path meaningful on that Lima host. Resolve `arch` from the local run
 **Testing hooks.** Task 12 will unit-test this. Keep the HTTP client injectable (or accept a base URL) so tests can serve a small fixture over `httptest` and cover: happy path, digest mismatch, truncated response, cache hit, and corrupt cache. Do not write tests here that merely re-test Go's HTTP client.
 
 </details>
+
+## Noteworthy Events
+
+- [2026-09-29] Added `internal/baseimage` with a generated pin for `base-image-2026.09.29.151245`, host-correct architecture resolution, and a verified cache at `<LIMA_HOME>/_sand/images/<version>/<filename>` on the Lima host. Remote acquisition streams the response over SSH to a unique temporary file; the remote host hashes its stored bytes before rename. Proxmox's existing PVE server-side download now receives the pinned amd64 entry from the same manifest.
+- [2026-09-29] RED: initial `go test ./internal/baseimage` failed on undefined manifest, architecture, and acquisition APIs. GREEN/REFACTOR: focused `go test ./internal/baseimage ./internal/lima ./internal/provider` passed, then `go test ./...` passed across all packages.
+- [2026-09-29] `go build ./...`, `go vet ./...`, and `git diff --check` each exited 0 with no output. `grep -rnE 'defaultBaseImageSHA256|baseImageURL|baseImageFile' internal/` exited with no matches.
+- [2026-09-29] `go generate ./internal/baseimage` read the real release. Generated vs GitHub release digests matched: amd64 `20813c0d17cd67c81dd96535285701a9415d519931059813c6d80f27719196db`; arm64 `167d4d06cdadfaf909eced145cf744018d901153e2a181c09e2291989dfc249e`.
+- [2026-09-29] `SAND_BASE_IMAGE_SMOKE=1 go test ./internal/baseimage -run TestPublishedImageAcquisitionSmoke -count=1 -v` passed: first acquisition downloaded and verified the 960 MiB amd64 image in `13.021073341s`; second acquisition logged `base image cache hit` in `3.308489303s` with no HTTP download. The smoke cache was isolated in a test temporary directory.

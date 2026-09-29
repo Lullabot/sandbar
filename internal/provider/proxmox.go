@@ -44,6 +44,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -131,13 +132,13 @@ type proxmoxProvider struct {
 	// Empty in the config defaults to defaultImageStorage; see NewProxmox.
 	imageStorage string
 
-	// baseImageURL is the cloud image the base template is built from, and
-	// baseImageFile is the filename derived from it (the "<imageStorage>:import/
-	// <baseImageFile>" volid the download lands on). Both come from the profile's
+	// imageURL is the cloud image the base template is built from, and
+	// imageFile is the filename derived from it (the "<imageStorage>:import/
+	// <imageFile>" volid the download lands on). Both come from the profile's
 	// base_image when set, or the built-in Debian default otherwise — see
-	// NewProxmox. Kept as fields (not the package vars) so one endpoint's custom
+	// NewProxmox. Kept as fields so one endpoint's custom
 	// image cannot leak into another's build.
-	baseImageURL, baseImageFile string
+	imageURL, imageFile string
 	// baseImageSHA256 is the expected checksum for the DEFAULT image, passed to
 	// PVE's download-url so it verifies the download server-side. Empty for a
 	// custom base_image (a user URL carries no pinned checksum here).
@@ -255,7 +256,11 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 	// qemu-guest-agent baked in); "" uses the built-in Debian default. The
 	// filename PVE stores the import under is derived from the URL, stripping any
 	// query/fragment so "…/img.qcow2?sig=…" still names "img.qcow2".
-	baseURL, baseFile, baseSHA := baseImageURL, baseImageFile, defaultBaseImageSHA256
+	image, err := baseimage.PinnedManifest.ForArch("amd64") // PVE QEMU hosts are x86_64.
+	if err != nil {
+		return nil, fmt.Errorf("proxmox: pinned base image: %w", err)
+	}
+	baseURL, baseFile, baseSHA := image.URL, image.Filename, image.SHA256
 	if cfg.BaseImage != "" {
 		baseURL = cfg.BaseImage
 		name := baseURL
@@ -273,8 +278,8 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		pool:            cfg.Pool,
 		storage:         cfg.Storage,
 		imageStorage:    imageStorage,
-		baseImageURL:    baseURL,
-		baseImageFile:   baseFile,
+		imageURL:        baseURL,
+		imageFile:       baseFile,
 		baseImageSHA256: baseSHA,
 		bridge:          cfg.Bridge,
 		ciUser:          ciUser,

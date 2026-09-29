@@ -673,14 +673,11 @@ func TestProxmoxCreateTreatsTaskWarningsAsSuccess(t *testing.T) {
 // before any download, with a message naming the accepted set — PVE's download-url
 // rejects .img outright, and failing early beats an opaque task failure minutes in.
 func TestProxmoxCreateRejectsImgImageEarly(t *testing.T) {
-	oldURL, oldFile := baseImageURL, baseImageFile
-	baseImageURL, baseImageFile = "https://example.test/debian.img", "debian.img"
-	t.Cleanup(func() { baseImageURL, baseImageFile = oldURL, oldFile })
-
 	m := newPVEMock(t)
 	rec := &createRecorder{}
 	registerBaseBuild(m, rec)
 	p := newCreateProvider(t, m)
+	p.imageURL, p.imageFile = "https://example.test/debian.img", "debian.img"
 
 	err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil)
 	if err == nil {
@@ -1013,11 +1010,11 @@ func TestProxmoxCreateReusesExistingCloudImage(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{}
 	registerBaseBuild(m, rec)
+	p := newCreateProvider(t, m)
 	// The cloud image is already present in the IMAGE storage's content.
 	m.data("/nodes/pve1/storage/local/content",
-		`[{"volid":"local:import/`+baseImageFile+`","content":"import","size":100}]`)
+		`[{"volid":"local:import/`+p.imageFile+`","content":"import","size":100}]`)
 
-	p := newCreateProvider(t, m)
 	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
 		t.Fatalf("Create: %v", err)
 	}

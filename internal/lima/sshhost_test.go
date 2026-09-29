@@ -57,6 +57,33 @@ func sh(ctx context.Context, script string) *exec.Cmd {
 
 func hasToken(argv []string, tok string) bool { return slices.Contains(argv, tok) }
 
+func TestSSHImageStoreUsesRemoteCommands(t *testing.T) {
+	rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
+		if anyContains(argv, "sha256sum") {
+			return sh(ctx, "printf '%064d  image.qcow2\\n' 0")
+		}
+		return sh(ctx, "cat >/dev/null")
+	}}
+	host := hostWith(testCfg, rec)
+	const remotePath = ".lima/_sand/images/release/image.qcow2.tmp-123"
+	if err := host.WriteStream(context.Background(), remotePath, strings.NewReader("image bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if !anyContains(rec.calls[0], remotePath) || !anyContains(rec.calls[0], "cat >") {
+		t.Fatalf("WriteStream command = %v", rec.calls[0])
+	}
+	digest, err := host.SHA256(context.Background(), remotePath)
+	if err != nil || digest != strings.Repeat("0", 64) {
+		t.Fatalf("remote SHA256 = %q, %v", digest, err)
+	}
+	if err := host.Rename(context.Background(), remotePath, ".lima/_sand/images/release/image.qcow2"); err != nil {
+		t.Fatal(err)
+	}
+	if !anyContains(rec.calls[2], "mv") || !anyContains(rec.calls[2], remotePath) {
+		t.Fatalf("Rename command = %v", rec.calls[2])
+	}
+}
+
 // anyContains reports whether any argv token contains sub — for matching a token
 // that is a full path or a quoted shell script rather than a bare word.
 func anyContains(argv []string, sub string) bool {
