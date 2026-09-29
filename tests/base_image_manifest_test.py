@@ -10,6 +10,8 @@ from scripts import write_base_image_manifest
 
 
 class BaseImageManifestTest(unittest.TestCase):
+    timestamped_tag = "base-image-2026.09.29.143205"
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -24,13 +26,13 @@ class BaseImageManifestTest(unittest.TestCase):
     def write_manifest(self):
         output = self.assets / "manifest.json"
         write_base_image_manifest.write_manifest(
-            "base-image-2026.09.29", "Lullabot/sandbar", self.assets, output
+            self.timestamped_tag, "Lullabot/sandbar", self.assets, output
         )
         return json.loads(output.read_text())
 
     def test_manifest_has_verified_urls_digests_and_byte_sizes(self):
         manifest = self.write_manifest()
-        self.assertEqual(manifest["version"], "base-image-2026.09.29")
+        self.assertEqual(manifest["version"], self.timestamped_tag)
         self.assertEqual(set(manifest["images"]), {"amd64", "arm64"})
         for arch in ("amd64", "arm64"):
             name = f"sandbar-base-debian-13-{arch}.qcow2"
@@ -38,7 +40,7 @@ class BaseImageManifestTest(unittest.TestCase):
             self.assertEqual(
                 image["url"],
                 f"https://github.com/Lullabot/sandbar/releases/download/"
-                f"base-image-2026.09.29/{name}",
+                f"{self.timestamped_tag}/{name}",
             )
             self.assertEqual(
                 image["sha256"], hashlib.sha256((self.assets / name).read_bytes()).hexdigest()
@@ -74,6 +76,23 @@ class BaseImageManifestTest(unittest.TestCase):
             write_base_image_manifest.write_manifest(
                 "v1.0.0", "Lullabot/sandbar", self.assets, self.assets / "manifest.json"
             )
+
+    def test_accepts_legacy_date_only_tag(self):
+        output = self.assets / "manifest.json"
+        write_base_image_manifest.write_manifest(
+            "base-image-2026.07.21", "Lullabot/sandbar", self.assets, output
+        )
+        self.assertEqual(json.loads(output.read_text())["version"], "base-image-2026.07.21")
+
+    def test_rejects_invalid_or_incomplete_timestamp(self):
+        for tag in (
+            "base-image-2026.09.29.246000",
+            "base-image-2026.09.29.1432",
+        ):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "tag"):
+                write_base_image_manifest.write_manifest(
+                    tag, "Lullabot/sandbar", self.assets, self.assets / "manifest.json"
+                )
 
 
 if __name__ == "__main__":

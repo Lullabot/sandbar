@@ -2,15 +2,17 @@
 # base playbook's tools and qemu-guest-agent, with machine identity removed.
 #
 # Releases are IMMUTABLE in this repo: create a draft, upload every asset, then
-# publish it. The base-image-YYYY.MM.DD namespace stays disjoint from
-# release-please's vX.Y.Z tags. Keep --repo explicit on gh commands.
+# publish it. New tags use base-image-YYYY.MM.DD.HHMMSS in UTC so multiple
+# immutable images can ship in one day; legacy date-only tags remain valid.
+# The namespace stays disjoint from release-please's vX.Y.Z tags. Keep --repo
+# explicit on gh commands.
 name: Base image
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (default: base-image-YYYY.MM.DD)'
+        description: 'Release tag (default: base-image-YYYY.MM.DD.HHMMSS UTC)'
         required: false
         default: ''
   schedule:
@@ -107,7 +109,7 @@ jobs:
         id: tag
         run: |
           tag="$TAG_INPUT"
-          if [[ -z "$tag" ]]; then tag="base-image-$(date -u +%Y.%m.%d)"; fi
+          if [[ -z "$tag" ]]; then tag="base-image-$(date -u +%Y.%m.%d.%H%M%S)"; fi
           python3 scripts/write_base_image_manifest.py \
             --tag "$tag" --repo "$GITHUB_REPOSITORY" \
             --assets "$IMAGE_DIR" --output "$IMAGE_DIR/manifest.json"
