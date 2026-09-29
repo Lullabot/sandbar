@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.13.0](https://github.com/Lullabot/sandbar/compare/v0.12.0...v0.13.0) (2026-09-29)
+
+
+### Features
+
+* add verified base image acquisition ([a5c0b61](https://github.com/Lullabot/sandbar/commit/a5c0b61a86eef90bfca0cffde546089608c810cc))
+* **claude:** make remote control opt-in ([#234](https://github.com/Lullabot/sandbar/issues/234)) ([4434d0e](https://github.com/Lullabot/sandbar/commit/4434d0e8e51b47a35246481cae363a544ae5f27b)), closes [#87](https://github.com/Lullabot/sandbar/issues/87) [#229](https://github.com/Lullabot/sandbar/issues/229)
+* **cli:** add golden template commands ([6d4221d](https://github.com/Lullabot/sandbar/commit/6d4221d2a781c595385399c105079fdb014c19a3))
+* **docs:** document golden VM templates ([427b9e4](https://github.com/Lullabot/sandbar/commit/427b9e44a9a6c163745feaf4400ce79f270e4ced))
+* **image-build:** add reusable base image builder ([0840699](https://github.com/Lullabot/sandbar/commit/0840699bc4a3bcb83805076da9cdce87e261fc7e))
+* **image-build:** add sand_image_build flag and record the baseline ([edbe8c8](https://github.com/Lullabot/sandbar/commit/edbe8c8b95b73aaf313529a33ba38d147df2ba57))
+* **image-build:** build the all-tools base image in a chroot ([0ff12a9](https://github.com/Lullabot/sandbar/commit/0ff12a9566866c60302cada3210090d3ad24845b))
+* **image-build:** optimize baked image footprint ([8aac40d](https://github.com/Lullabot/sandbar/commit/8aac40da002df1a6c42d319027cf3381689abf43))
+* **image-build:** prepare baked image foundation ([bc5b87d](https://github.com/Lullabot/sandbar/commit/bc5b87dc0230dcf104e4acc32c7c8a2dde0dad19))
+* **lima:** boot shared base from verified image ([#239](https://github.com/Lullabot/sandbar/issues/239)) ([2765c53](https://github.com/Lullabot/sandbar/commit/2765c534a422882221a5b96bde91bb0736311702))
+* **provider:** snapshot and clone golden templates ([f7f55ac](https://github.com/Lullabot/sandbar/commit/f7f55ac2f5facd8f00d60f609a50dc28d08d0a3b))
+* **proxmox:** build templates from baked image without base playbook ([fcca706](https://github.com/Lullabot/sandbar/commit/fcca70646fbe045ee25ec70401f23350fcbce324))
+* **registry:** model golden VM templates ([e78bb92](https://github.com/Lullabot/sandbar/commit/e78bb9297ccdaf215c47867b12b432160949021c))
+* **releases:** add daily update checker ([282850c](https://github.com/Lullabot/sandbar/commit/282850cd91ec72395ba5bd5615879fc5f3795fd2))
+* show Proxmox template clone progress ([c8f61c4](https://github.com/Lullabot/sandbar/commit/c8f61c43ab0a4fa6bf524f47277bb7115bc0765f))
+* stop asking about DDEV, Go and Java at create ([b69b132](https://github.com/Lullabot/sandbar/commit/b69b132752b257f9b9e0ae37d73bfd7a5e3b7342))
+* support self-review commit ranges and bases ([#243](https://github.com/Lullabot/sandbar/issues/243)) ([876164d](https://github.com/Lullabot/sandbar/commit/876164d9a454e5c28ada323f7be27244a7560799)), closes [#226](https://github.com/Lullabot/sandbar/issues/226)
+* **ui:** add first-run onboarding and update notice ([e13f037](https://github.com/Lullabot/sandbar/commit/e13f03704b1470e2ebd5eabece6323b0bdac9f48)), closes [#88](https://github.com/Lullabot/sandbar/issues/88) [#150](https://github.com/Lullabot/sandbar/issues/150) [#228](https://github.com/Lullabot/sandbar/issues/228)
+* **ui:** add golden template workflows ([d9fd811](https://github.com/Lullabot/sandbar/commit/d9fd811c523468682f3c24bc2a689ea2fbc45b19))
+* wip ([010fe37](https://github.com/Lullabot/sandbar/commit/010fe37eb746fef7951874fa124123537d26988e))
+
+
+### Bug Fixes
+
+* **deps:** update module charm.land/bubbletea/v2 to v2.0.10 ([#231](https://github.com/Lullabot/sandbar/issues/231)) ([a015814](https://github.com/Lullabot/sandbar/commit/a0158148a5d869878a611e81161faf5c94d502a6))
+* **deps:** update module github.com/charmbracelet/x/exp/golden to v0.1.0 ([#232](https://github.com/Lullabot/sandbar/issues/232)) ([6665482](https://github.com/Lullabot/sandbar/commit/6665482a6a4eba0dae064fbb6103e7104b17d0b4))
+* leave baked image login to cloud-init ([3319d81](https://github.com/Lullabot/sandbar/commit/3319d81c4b5134f319a42d32d46eb3a641f36089))
+* pin corrected baked image release ([2eb1ac2](https://github.com/Lullabot/sandbar/commit/2eb1ac2a496d3c80a2e9dc3c73fab04b44cc5650))
+* **provision:** renew DHCP hostname after clone ([7160516](https://github.com/Lullabot/sandbar/commit/7160516ab39b1640fa48a896a26b2aa8241758fc))
+* **review:** expose self-review skills to Claude Code ([#233](https://github.com/Lullabot/sandbar/issues/233)) ([a91625f](https://github.com/Lullabot/sandbar/commit/a91625fbdf28d3b5d046e4dba5edd9fedf7948f7)), closes [#224](https://github.com/Lullabot/sandbar/issues/224)
+* **ui:** clarify onboarding report action ([899fe19](https://github.com/Lullabot/sandbar/commit/899fe194a2bfa9cb8d2fb58bf053ce08e16c8f6a)), closes [#228](https://github.com/Lullabot/sandbar/issues/228)
+* **ui:** warn on application memory pressure ([#227](https://github.com/Lullabot/sandbar/issues/227)) ([bf705b8](https://github.com/Lullabot/sandbar/commit/bf705b8d43f177638b3067218a49f7f03823805b))
+* version Proxmox image cache keys ([94cf384](https://github.com/Lullabot/sandbar/commit/94cf3847ead994c4437b1fe6b0066d863a11c0af))
+
 ## [0.12.0](https://github.com/Lullabot/sandbar/compare/v0.11.1...v0.12.0) (2026-09-24)
 
 
