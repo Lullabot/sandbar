@@ -1008,6 +1008,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reviewing-only-part-of-a-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reviewing only part of a branch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reviewing only part of a branch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the TUI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#finishing-a-review" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1481,6 +1520,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reviewing-only-part-of-a-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reviewing only part of a branch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reviewing only part of a branch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the TUI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#finishing-a-review" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1649,12 +1727,62 @@ the base commit so you can check it.
 The <strong>TUI runs one review at a time</strong>. Trying to review another checkout
 while a session is running or still shutting down leaves a message in the
 session log.</p>
+<h2 id="reviewing-only-part-of-a-branch">Reviewing only part of a branch</h2>
+<p>By default, <code>sand</code> chooses a base commit for the review and includes all
+changes since that commit plus any uncommitted work. You can instead review
+just the commits or staged changes you specify, with precise control over the
+reviewed range.</p>
+<h3 id="from-the-cli">From the CLI</h3>
+<p>Add <code>--</code> followed by <code>git diff</code> arguments after the <code>--review</code> flag:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sand<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review<span class="w"> </span>--<span class="w"> </span>HEAD~2
+</code></pre></div>
+<p>This reviews the working tree against the last two commits (equivalent to
+<code>git diff HEAD~2</code>). Other examples:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it reviews</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sand land NAME PATH --review -- HEAD~2...HEAD</code></td>
+<td>Only the last two commits, no uncommitted changes</td>
+</tr>
+<tr>
+<td><code>sand land NAME PATH --review -- --staged</code></td>
+<td>Only the changes you have staged for commit</td>
+</tr>
+<tr>
+<td><code>sand land NAME PATH --review -- HEAD~10</code></td>
+<td>The last ten commits plus uncommitted work</td>
+</tr>
+</tbody>
+</table>
+<p>When you provide a range, <code>sand</code> skips its automatic base selection and the
+file-count guard. A saved review is still carried in, so comments you wrote
+earlier are there to keep, edit, or drop, and <code>--clean</code> still discards it
+first.</p>
+<h3 id="from-the-tui">From the TUI</h3>
+<p>Press <code>R</code> (capital R) on the Landing pane's checkout row to open a one-line
+prompt. Type your git diff arguments exactly as you would on the command line:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>HEAD~2
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>HEAD~2...HEAD
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>--staged
+</code></pre></div>
+<p>Arguments are split on spaces with no quoting support — git revisions and
+flags don't need it. Leaving the prompt blank is the same as pressing <code>v</code> and
+reviews the whole branch with the automatic base selection.</p>
+<p>You can cancel the prompt with <code>esc</code>. Once you submit, the review follows the
+same rules as the <code>v</code> key: it carries in any saved comments and clears the
+<code>reviewing…</code> state when you finish.</p>
 <h2 id="finishing-a-review">Finishing a review</h2>
 <p>Leave comments in the browser, then click <strong>Finish Review</strong>. The server
 writes <code>review.xml</code> into the checkout inside the VM and exits. The CLI
 reports the path and returns control of your terminal; the TUI clears the
 row's <code>reviewing…</code> state.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>review written to /home/claude/checkouts/my-repo/review.xml in myvm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>review written to /home/claude/checkouts/my-repo/review.xml in myvm
 </code></pre></div>
 <p>Closing the browser tab does <strong>not</strong> finish the review or save your comments.
 Comments stay in the page until you submit them. Pressing Ctrl-C in the CLI
@@ -1667,8 +1795,8 @@ with a confirmation naming the checkout.</p>
 <h2 id="picking-up-where-you-left-off">Picking up where you left off</h2>
 <p>A finished review leaves <code>review.xml</code> in the checkout. When you open another
 review there, <code>sand</code> loads the saved comments and viewed-file markers:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>carrying in the comments already in review.xml
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>[serve] Resumed 7 comments and 4 viewed files from /home/claude/…/review.xml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>carrying in the comments already in review.xml
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>[serve] Resumed 7 comments and 4 viewed files from /home/claude/…/review.xml
 </code></pre></div>
 <p>You can keep, edit, or delete the comments. <strong>Finish Review</strong> overwrites the
 same file with the result.</p>
@@ -1725,17 +1853,17 @@ refer to schema files under <code>.agents/skills/</code>. They are included in t
 image and match the review server's version, so installing them needs no
 network access.</p>
 <p>For a repository you clone later, run the installer inside the VM:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>self-review-install-skills<span class="w"> </span>/path/to/repository
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>self-review-install-skills<span class="w"> </span>/path/to/repository
 </code></pre></div>
 <p>The command installs or refreshes the skills and Claude Code links, then adds
 the review artifacts, skill directories, and links to your active global Git
 excludes file. It leaves a path unchanged when the repository tracks its own
 copy.</p>
 <p>A typical workflow inside the guest:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/self-review-critique --staged     # in the agent: draft a review
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>/self-review-critique --staged     # in the agent: draft a review
 </code></pre></div>
 <p>Press <code>v</code> in the Landing pane to review and edit those comments, then run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/self-review-apply review.xml      # in the agent: apply the saved feedback
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>/self-review-apply review.xml      # in the agent: apply the saved feedback
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Skills tracked by your project are kept</p>
