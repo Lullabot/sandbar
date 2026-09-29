@@ -14,7 +14,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 )
 
-//go:generate go run generate.go -tag base-image-2026.09.29.151245
+//go:generate go run generate.go -tag base-image-2026.09.29.164715
 
 type ImageEntry struct {
 	URL      string
