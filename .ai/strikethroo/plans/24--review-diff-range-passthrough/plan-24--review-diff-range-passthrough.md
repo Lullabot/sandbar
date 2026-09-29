@@ -189,9 +189,9 @@ graph TD
     003 --> 004
 ```
 
-### Phase 1: Shared session support
+### ✅ Phase 1: Shared session support
 **Parallel Tasks:**
-- Task 001: Add DiffArgs to landreview.Session
+- ✔️ Task 001: Add DiffArgs to landreview.Session (completed)
 
 ### Phase 2: Entrypoints
 **Parallel Tasks:**
