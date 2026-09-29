@@ -439,10 +439,11 @@ Release `base-image-2026.09.29.151245` was published from PR 206 commit `6a61c25
 
 _Task 06 is PR 206's merge gate and redirects Phase 7 on failure. Task 07 is the shared-foundation PR and may be developed in parallel, but provider wiring cannot begin until Task 06 succeeds._
 
-### Phase 7: Sibling Provider PRs
+### ✅ Phase 7: Sibling Provider PRs
+**Status:** completed
 **Parallel Tasks:**
-- Task 08: Create the Lima base from the downloaded image (depends on: 07)
-- Task 09: Point Proxmox at the manifest image and drop its base playbook run (depends on: 07)
+- ✔️ Task 08: Create the Lima base from the downloaded image (depends on: 07) — `completed`
+- ✔️ Task 09: Point Proxmox at the manifest image and drop its base playbook run (depends on: 07) — `completed`
 
 _Tasks 08 and 09 branch independently from Task 07's shared foundation. Neither provider PR is based on the other._
 
