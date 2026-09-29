@@ -14,7 +14,7 @@ created: 2026-09-12
 
 | Question | Answer |
 | --- | --- |
-| Free GitHub arm64 runners expose no `/dev/kvm`, so an arm64 image cannot be built inside an accelerated VM on free CI. How should images be built? | **Rootfs build, no VM.** Run the existing Ansible roles against a mounted image root on a native per-arch runner (`ubuntu-latest` for amd64, `ubuntu-24.04-arm` for arm64), then publish the resulting qcow2. Needs no virtualization on either arch. This is an extension of the technique `.github/workflows/base-image.yml` already uses in this repo. |
+| Free GitHub arm64 runners expose no `/dev/kvm`, so an arm64 image cannot be built inside an accelerated VM on free CI. How should images be built? | **Rootfs build, no VM.** Run the existing Ansible roles against a mounted image root on a native per-arch runner (`ubuntu-24.04` for amd64, `ubuntu-24.04-arm` for arm64), then publish the resulting qcow2. Needs no virtualization on either arch. This is an extension of the technique `.github/workflows/base-image.yml` already uses in this repo. |
 | What happens to plan 17's golden VM templates, now landed on `main`? | **Combine and migrate provenance.** Published base images replace the locally built `sandbar-base`; user-created golden templates remain a layer above it. Their current playbook/toolset freshness fields must become inherited image-version lineage, and template-backed create/reset must continue bypassing shared-base preparation. _(2026-09-28, auto-resolved from the landed registry/provider/CLI/TUI implementation.)_ |
 | Should Ansible still run on the user's machine for the per-VM finalize step? | **Ansible stays — and it never ran on the user's machine to begin with.** The survey of the current code established that `ansible-playbook` is installed *inside the guest* and run with `--connection=local` (`internal/provision/provision.go:55-67`); the host only ships a mount/tar of the playbook. Keeping Ansible for finalize therefore costs the user nothing locally, and preserves the natural extension point the user is interested in. _(User's stated lean: "I'm tempted to keep ansible and let it grow so that users could add ansible config to their repos to be automatically applied." That extension is **out of scope here** — see Notes — but this decision keeps the door open.)_ |
 | Removing the base-tool checkboxes changes registry records. How should that break be handled? | **Migrate with warning.** Retired DDEV/Go/Java fields are removed from VM and golden-template configs with a one-time notice. Agent selections and all unrelated registry/provenance fields survive. Existing VMs keep running untouched. |
@@ -59,7 +59,7 @@ The expected outcome is a first create that costs a one-time image download plus
 - **Generalization is a known, solved-once problem here.** `generalizeScript` (`internal/provider/proxmoxprovision.go:437-457`) truncates `/etc/machine-id` and re-links `/var/lib/dbus/machine-id`, because cloned machine-ids made `systemd-networkd` hand every clone the same DHCP lease. A publicly distributed image needs that and more.
 - **Prior art explicitly deferred this.** Archived plan 13 ("faster base VM provisioning") states at line 419: *"Tier 3 (publishing a pre-provisioned golden image) is explicitly out of scope. Nothing here should download, host, or publish a prebuilt image. The work in this plan is nonetheless the right precursor: a leaner, single-transaction, cache-backed playbook is exactly what a published image would run on top of."* This plan is that deferred Tier 3, and it inherits a base playbook already restructured into a single consolidated APT transaction for exactly this purpose.
 - **The `lima-e2e` CI job asserts the behaviour being removed.** `.github/workflows/test.yml:234-270` deliberately dirties `roles/base/tasks/main.yml` and then asserts the base was converged *in place* rather than rebuilt. Under a baked-image model there is no in-place base convergence, so that assertion inverts rather than merely relaxing.
-- **Release mechanics are constrained by immutable releases.** This repo has immutable releases enabled, so assets cannot be added after publish. `base-image.yml` works around it by creating a **draft**, uploading assets, then flipping `--draft=false`. Image tags are `base-image-YYYY.MM.DD`, a namespace disjoint from release-please's `vX.Y.Z`.
+- **Release mechanics are constrained by immutable releases.** This repo has immutable releases enabled, so assets cannot be added after publish. `base-image.yml` works around it by creating a **draft**, uploading assets, then flipping `--draft=false`. New image tags are UTC-timestamped as `base-image-YYYY.MM.DD.HHMMSS`, allowing multiple releases per day; legacy date-only tags remain valid. The `base-image-` namespace is disjoint from release-please's `vX.Y.Z`.
 
 ## Architectural Approach
 
@@ -73,7 +73,7 @@ flowchart TB
         A["chroot: ansible-playbook<br/>site.yml provision_phase=base<br/>(network via host netns)"]
         G[Generalize: machine-id, SSH host keys,<br/>logs, apt lists, no user password]
         C[Sparsify + compress + checksum<br/>+ size gate]
-        M[Publish assets + manifest.json<br/>to a base-image-YYYY.MM.DD release]
+        M[Publish assets + manifest.json<br/>to a UTC-timestamped base-image release]
         U --> N --> A --> G --> C --> M
     end
 
@@ -101,7 +101,7 @@ flowchart TB
 
 **Objective**: Produce a complete, generalized, publishable all-tools guest image for each architecture, on free CI, without virtualization.
 
-`base-image.yml` grows from a single amd64 job that installs one package into a matrix of two native jobs — `ubuntu-latest` for `amd64`, `ubuntu-24.04-arm` for `arm64` — that each run the full base phase. The existing `qemu-nbd` → `blkid` → mount → `policy-rc.d` → bind-mount scaffold is retained verbatim; what changes is what happens inside the chroot. Instead of `dpkg -i` over a prefetched `.deb` closure, the job installs `ansible-core` and the playbook's own bootstrap dependencies into the image root and runs `ansible-playbook -i localhost, --connection=local site.yml --extra-vars provision_phase=base` under `chroot`. Because the chroot shares the host network namespace, the five APT repositories, the three vendor `curl | sh` installers, the `glab` `.deb` and the `drupalorg.phar` fetch all behave as they do in-guest. The upstream source URL becomes arch-parameterized (`debian-13-genericcloud-{amd64,arm64}.qcow2`), and the published asset name follows.
+`base-image.yml` grows from a single amd64 job that installs one package into a matrix of two native jobs — `ubuntu-24.04` for `amd64`, `ubuntu-24.04-arm` for `arm64` — that each run the full base phase. The existing `qemu-nbd` → `blkid` → mount → `policy-rc.d` → bind-mount scaffold is retained verbatim; what changes is what happens inside the chroot. Instead of `dpkg -i` over a prefetched `.deb` closure, the job installs `ansible-core` and the playbook's own bootstrap dependencies into the image root and runs `ansible-playbook -i localhost, --connection=local site.yml --extra-vars provision_phase=base` under `chroot`. Because the chroot shares the host network namespace, the five APT repositories, the three vendor `curl | sh` installers, the `glab` `.deb` and the `drupalorg.phar` fetch all behave as they do in-guest. The upstream source URL becomes arch-parameterized (`debian-13-genericcloud-{amd64,arm64}.qcow2`), and the published asset name follows.
 
 Three classes of task cannot work under `chroot` and need explicit handling rather than hope. Units cannot be *started* — `policy-rc.d` already blocks that, and enabling is done with `systemctl --root=`, so any `state: started` in the base path must become enable-only at build time. `loginctl enable-linger` requires a live systemd and must be expressed as the file it creates, `/var/lib/systemd/linger/<user>`. And anything reading live system state (a running D-Bus, a populated `/run`) must be identified and gated. The approach is to introduce a single `sand_image_build` flag, default false, that the build passes and that the affected tasks consult — keeping one playbook rather than forking a build-only copy, and keeping the in-guest path byte-identical to today when the flag is false.
 
@@ -135,7 +135,7 @@ If measurement shows the image does not fit, three fallbacks exist in preference
 2. **Trim droppable bulk** — documentation, man pages, unused locales, and Go's bundled test/API data are removable without losing a tool. Go's `src` tree remains because modern Go builds the standard library from source on demand.
 3. **Alternate artifact hosting** — move the intact qcow2 to a host with a larger per-file ceiling, such as GHCR if its artifact URL and authentication model work with PVE's server-side importer. Splitting is not provider-transparent because PVE currently downloads the asset itself.
 
-Distribution reuses the existing, constraint-shaped release dance: create a draft release on a `base-image-YYYY.MM.DD` tag, upload every asset plus checksums, then flip it to published. Alongside the images, the build publishes a small `manifest.json` describing the release: for each arch, the asset URL, size, and SHA-256.
+Distribution reuses the existing, constraint-shaped release dance: create a draft release on a UTC `base-image-YYYY.MM.DD.HHMMSS` tag, upload every asset plus checksums, then flip it to published. Timestamp precision permits multiple immutable releases on one day without tag discovery or sequence allocation; legacy `base-image-YYYY.MM.DD` tags remain accepted for existing images. Alongside the images, the build publishes a small `manifest.json` describing the release: for each arch, the asset URL, size, and SHA-256.
 
 ### Component 4: Manifest and Provider-Aware Acquisition
 
@@ -227,7 +227,7 @@ The `lima-e2e` warm-path assertion inverts: a base-role edit does **not** rebuil
 
 ### Primary Success Criteria
 
-1. A `base-image-YYYY.MM.DD` GitHub Release carries a shared-dependency Debian 13 image for both `amd64` and `arm64`, each under 2 GiB with a published SHA-256, built on free CI without booting a guest.
+1. A UTC-timestamped `base-image-YYYY.MM.DD.HHMMSS` GitHub Release carries a shared-dependency Debian 13 image for both `amd64` and `arm64`, each under 2 GiB with a published SHA-256, built on free CI without booting a guest.
 2. On a machine with no prior sandbar state, `sand create` produces a working VM without running the base-phase playbook anywhere: the base instance is created from the downloaded image, and only the finalize play runs in-guest.
 3. Measured first-create wall-clock on a clean machine is **faster** than the current model's, with both figures recorded. (This is the user's stated condition for the work being worth doing; if it is not met, that is reported as the outcome rather than worked around.)
 4. Upgrading the `sand` binary, or editing a file under `roles/base/`, does **not** trigger a base rebuild; changing the pinned image version does.
@@ -262,7 +262,7 @@ After all tasks are complete, perform these concrete checks:
 
 - `docs/getting-started/how-it-works.md` — the page is currently a description of the two-pass local build, including a mermaid diagram of it. It needs rewriting around download-and-clone plus finalize. (Note two statements here are *already* stale independent of this plan — that finalize runs `apt upgrade`, and that the VM always restarts at the end of finalize — and should be corrected while the page is being rewritten.)
 - `docs/contributing/ansible-playbook.md` — the embed/mount/rsync/phase mechanism, the three-phase table, and above all the working-tree-edit promise at lines 35-38, which must be narrowed explicitly to the finalize phase and paired with the local image build path.
-- `docs/contributing/releases.md` — currently does not mention `base-image.yml` at all; needs a section covering image releases, the `base-image-YYYY.MM.DD` tag namespace, the draft-then-publish dance forced by immutable releases, and how to bump the pinned manifest.
+- `docs/contributing/releases.md` — currently does not mention `base-image.yml` at all; needs a section covering UTC-timestamped `base-image-YYYY.MM.DD.HHMMSS` releases, legacy date-only compatibility, the draft-then-publish dance forced by immutable releases, and how to bump the pinned manifest.
 - `docs/using-sand/cli-reference.md` — remove DDEV/Go/Java selectors, preserve agent flags, update `--rebuild`, and refresh pasted help.
 - `docs/getting-started/available-tools.md` — distinguish fixed shared dependencies from per-VM agents and document Claude/Codex first-use installation.
 - `docs/getting-started/first-vm.md` — the "first VM builds a shared base image, which can take a while" passage becomes a one-time image download.
@@ -285,7 +285,7 @@ After all tasks are complete, perform these concrete checks:
 
 ### Technical Infrastructure
 
-- GitHub-hosted `ubuntu-latest` (amd64) and `ubuntu-24.04-arm` (arm64) runners — both free for public repositories; neither exposes `/dev/kvm`, which the build does not need.
+- GitHub-hosted `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` (arm64) runners — both free for public repositories; neither exposes `/dev/kvm`, which the build does not need.
 - GitHub Releases as the artifact host — no total-size or bandwidth limit, 1000 assets per release, 2 GiB per file. GHCR is the named fallback host.
 - Upstream Debian 13 genericcloud qcow2 images for both architectures.
 - A real Proxmox VE target for the opt-in `proxmoxe2e` suite, and an arm64 host (Apple Silicon or Linux/arm64) for arm64 verification.

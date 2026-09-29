@@ -14,11 +14,16 @@ MAX_IMAGE_BYTES = 2 * 1024**3
 
 
 def write_manifest(tag: str, repo: str, assets: Path, output: Path) -> None:
-    match = re.fullmatch(r"base-image-(\d{4})\.(\d{2})\.(\d{2})", tag)
+    match = re.fullmatch(
+        r"base-image-(\d{4})\.(\d{2})\.(\d{2})(?:\.(\d{2})(\d{2})(\d{2}))?",
+        tag,
+    )
     if not match:
         raise ValueError(f"invalid base image tag: {tag}")
     try:
-        datetime.date(*(int(part) for part in match.groups()))
+        datetime.date(*(int(part) for part in match.groups()[:3]))
+        if match.group(4) is not None:
+            datetime.time(*(int(part) for part in match.groups()[3:]))
     except ValueError as error:
         raise ValueError(f"invalid base image tag: {tag}") from error
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):

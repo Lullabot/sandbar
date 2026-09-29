@@ -17,7 +17,7 @@ skills:
 
 ## Objective
 
-Rework `.github/workflows/base-image.yml` from a single amd64 job that bakes one package into a two-architecture matrix that calls the build script, runs the hygiene gate, and publishes both images plus checksums and a `manifest.json` to a `base-image-YYYY.MM.DD` release.
+Rework `.github/workflows/base-image.yml` from a single amd64 job that bakes one package into a two-architecture matrix that calls the build script, runs the hygiene gate, and publishes both images plus checksums and a `manifest.json` to a UTC-timestamped `base-image-YYYY.MM.DD.HHMMSS` release.
 
 ## Skills Required
 
@@ -25,11 +25,11 @@ Rework `.github/workflows/base-image.yml` from a single amd64 job that bakes one
 
 ## Acceptance Criteria
 
-- [x] The build job is a matrix over `{amd64 → ubuntu-latest, arm64 → ubuntu-24.04-arm}`, each calling `scripts/build-base-image.sh` for its own architecture.
+- [x] The build job is a matrix over `{amd64 → ubuntu-24.04, arm64 → ubuntu-24.04-arm}`, each calling `scripts/build-base-image.sh` for its own architecture.
 - [x] Each matrix leg runs `scripts/check-base-image.sh` against its output and fails the job if the gate fails.
 - [ ] A separate publish job collects both legs' artifacts and creates one release containing: both qcow2 assets, a `.sha256` per asset, and a `manifest.json` carrying, per architecture, the asset URL, size in bytes, and SHA-256, plus the image version string.
 - [x] Publishing follows the existing draft-then-flip pattern: `gh release create --draft`, upload all assets, then `gh release edit --draft=false` — because this repo has immutable releases and assets cannot be added post-publish.
-- [x] The tag namespace stays `base-image-YYYY.MM.DD`, disjoint from release-please's `vX.Y.Z`, with the existing `workflow_dispatch` tag input honoured.
+- [x] New tags use `base-image-YYYY.MM.DD.HHMMSS` in UTC so multiple immutable images can ship in one day; legacy `base-image-YYYY.MM.DD` tags remain accepted. The namespace stays disjoint from release-please's `vX.Y.Z`, and the existing `workflow_dispatch` tag input is honoured.
 - [ ] Verification: `gh workflow run base-image.yml` completes with both matrix legs green. Paste the run URL and `gh run view <id>` output showing both legs succeeded.
 - [ ] Verification: `gh release view <tag> --json assets` lists exactly the expected assets for both arches plus the manifest. Paste it.
 - [ ] Verification: download both images and confirm `sha256sum -c` passes against the published checksums, and that each asset is under 2 GiB. Paste `ls -l` and the checksum results.
@@ -54,7 +54,7 @@ Use your internal Todo tool to track these and keep on track.
 ## Output Artifacts
 
 - The reworked `.github/workflows/base-image.yml`.
-- A published `base-image-YYYY.MM.DD` release with both images, checksums and `manifest.json` — consumed by task 06 (verification), task 07 (manifest pinning) and tasks 08/09 (provider wiring).
+- A published `base-image-YYYY.MM.DD.HHMMSS` release with both images, checksums and `manifest.json` — consumed by task 06 (verification), task 07 (manifest pinning) and tasks 08/09 (provider wiring).
 
 ## Implementation Notes
 
@@ -64,7 +64,7 @@ Use your internal Todo tool to track these and keep on track.
 **Read the existing workflow's header comment first.** It documents three constraints that still apply and are easy to rediscover painfully:
 
 1. *Immutable releases.* Assets cannot be added after publish (a 422). Hence create as draft, upload everything, then flip to published. Do not restructure this into a plain `gh release create` with assets — the draft dance is load-bearing.
-2. *Tag namespace.* `base-image-YYYY.MM.DD` is deliberately disjoint from release-please's `vX.Y.Z` so the two release pipelines never collide.
+2. *Tag namespace.* New releases use `base-image-YYYY.MM.DD.HHMMSS` in UTC, while existing date-only tags remain valid. The `base-image-` namespace is deliberately disjoint from release-please's `vX.Y.Z` so the two release pipelines never collide.
 3. *`--repo` is explicit* because the publish job has no checkout and `gh` cannot infer the repository from a git remote. If you add a checkout step, you may drop it — but adding a checkout to a job handling multi-gigabyte artifacts is not obviously worth it.
 
 **Suggested job shape:**
@@ -77,14 +77,14 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps: checkout → install qemu-utils → build → check → upload-artifact
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps: download-artifact (both) → compute manifest → draft release → upload → flip
 ```
 
@@ -94,7 +94,7 @@ jobs:
 
 ```json
 {
-  "version": "base-image-2026.09.12",
+  "version": "base-image-2026.09.12.143205",
   "images": {
     "amd64": { "url": "https://github.com/.../sandbar-base-debian-13-amd64.qcow2", "sha256": "...", "size": 1523456789 },
     "arm64": { "url": "...", "sha256": "...", "size": 1498765432 }
@@ -136,3 +136,11 @@ The URL must be the final published asset URL, which is predictable from the tag
   run listing was empty and the release tag remained unused. Retry this task
   after providing a token with Actions workflow-dispatch permission; no code
   remediation or release cleanup is currently required.
+- A review follow-up removed the one-release-per-day collision: an empty tag
+  input now resolves to `base-image-YYYY.MM.DD.HHMMSS` in UTC. The manifest
+  validator strictly validates both the calendar date and clock time while
+  retaining legacy date-only tags for the already-published image. Focused
+  tests cover the timestamped happy path, legacy compatibility, an invalid
+  clock time, and an incomplete timestamp.
+- Review follow-up `580eacd` also fixed both amd64 jobs to Ubuntu 24.04 and
+  SHA-pinned every third-party action, matching the rest of the repository.
