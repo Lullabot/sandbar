@@ -1,0 +1,41 @@
+---
+- name: Verify stable base outcome
+  hosts: all
+  become: true
+  tasks:
+    - name: Gather the hostname after converge
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "min"
+
+    - name: Read /etc/hosts
+      ansible.builtin.slurp:
+        src: /etc/hosts
+      register: _etc_hosts
+
+    - name: Read /etc/default/locale
+      ansible.builtin.slurp:
+        src: /etc/default/locale
+      register: _etc_default_locale
+
+    - name: Read /etc/timezone
+      ansible.builtin.slurp:
+        src: /etc/timezone
+      register: _etc_timezone
+
+    - name: Inspect /etc/localtime without following it
+      ansible.builtin.stat:
+        path: /etc/localtime
+        follow: false
+      register: _etc_localtime
+
+    - name: Assert stable base state
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.hostname == "claude"
+          - "'127.0.1.1 claude.lan claude' in (_etc_hosts.content | b64decode)"
+          - "'LANG=en_CA.UTF-8' in (_etc_default_locale.content | b64decode)"
+          - (_etc_timezone.content | b64decode).strip() == "America/Toronto"
+          - _etc_localtime.stat.islnk
+          - _etc_localtime.stat.lnk_target == "/usr/share/zoneinfo/America/Toronto"

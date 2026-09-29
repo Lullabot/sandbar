@@ -84,6 +84,7 @@ base_packages:
 # Direct-playbook defaults. Agent roles run per VM in full/finalize; dependency
 # selections control the reusable base. Keep defaults together because role
 # defaults are play-wide, including defaults of roles skipped by a gate.
+sand_image_build: false
 toolset_claude: false
 toolset_codex: false
 toolset_opencode: false

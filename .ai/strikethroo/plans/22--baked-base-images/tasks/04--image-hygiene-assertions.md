@@ -1,7 +1,7 @@
 ---
 id: 4
 group: "image-build"
-dependencies: [3]
+dependencies: [15]
 status: "pending"
 created: 2026-09-12
 models:
@@ -27,9 +27,9 @@ Write an automated check that inspects a built image and fails if it carries any
 ## Acceptance Criteria
 
 - [ ] A committed script (suggested: `scripts/check-base-image.sh`) takes an image path, mounts it read-only, and asserts every hygiene property, exiting non-zero with a specific message naming the first failure.
-- [ ] Asserted: the sandbar user's password is **locked** (`passwd -S <user>` reports `L`, not `P`).
+- [ ] Asserted: the sandbar user cannot authenticate with a password (`passwd -S <user>` reports `L` or `NP`, never `P`).
 - [ ] Asserted: no `/etc/ssh/ssh_host_*` files exist.
-- [ ] Asserted: `/etc/machine-id` is zero-length, and `/var/lib/dbus/machine-id` is a symlink to it.
+- [ ] Asserted: `/etc/machine-id` is zero-length. If `/var/lib/dbus/machine-id` exists, it is a symlink to `/etc/machine-id`; absence is valid when the image does not install `dbus`.
 - [ ] Asserted: `/var/lib/apt/lists/` contains no package lists and `/var/cache/apt/archives/` contains no `.deb` files.
 - [ ] Asserted: no shell history files (`/root/.bash_history`, `/home/*/.bash_history`).
 - [ ] Asserted: dpkg's `force-unsafe-io` build hack is **not** present in `/etc/dpkg/dpkg.cfg.d/`.
@@ -48,7 +48,7 @@ Use your internal Todo tool to track these and keep on track.
 
 ## Input Dependencies
 
-- Task 03's `scripts/build-base-image.sh` and a built image to check against.
+- Task 03's `scripts/build-base-image.sh` and task 15's final size-optimized image to check against.
 
 ## Output Artifacts
 
@@ -65,7 +65,7 @@ Use your internal Todo tool to track these and keep on track.
 
 1. **Shared user password.** `roles/user/tasks/main.yml:6-19` generates a 24-character random password and sets it on the user. In a locally built base that is harmless. Baked into a published image it becomes one password shared by every sandbar user in the world, on a machine with passwordless `sudo`. Check with `chroot <root> passwd -S <user>` and require the status field to be `L` (locked) or `NP`. A `P` is a hard failure.
 2. **Shared SSH host keys.** If `/etc/ssh/ssh_host_ed25519_key` ships in the image, every VM created from it presents the same host identity, so host-key verification protects nobody and a MITM is undetectable. Require the glob to match nothing.
-3. **Shared machine-id.** Already a known, fixed bug class in this repo — cloned machine-ids made `systemd-networkd` hand every clone the same DHCP lease (`internal/provider/proxmoxprovision.go:437-457`). Require zero length.
+3. **Shared machine-id.** Already a known, fixed bug class in this repo — cloned machine-ids made `systemd-networkd` hand every clone the same DHCP lease (`internal/provider/proxmoxprovision.go:437-457`). Require `/etc/machine-id` to be zero length. If `/var/lib/dbus/machine-id` exists, require it to link there; do not require the path to exist on an image without `dbus`.
 4. **Build residue.** APT lists and caches bloat the artifact and leak what was installed when; shell history can contain anything the build typed; a stray credential file would be the worst case.
 
 **Determining the username.** Do not hardcode it if the playbook derives it. Read it from the image — e.g. the last entry in `/etc/passwd` with a `/home` directory and UID >= 1000 — or accept it as a parameter with a sensible default matching `user_name`'s default in the role defaults.

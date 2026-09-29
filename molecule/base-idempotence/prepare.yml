@@ -1,15 +1,9 @@
 ---
-# roles/base/tasks/main.yml uses locale-gen and gpg BEFORE its consolidated
-# apt install. The real base image already has locales and gnupg from its
-# bootstrap; this bare test container may not. Install both in prepare.
 - name: Prepare
   hosts: all
   become: true
   tasks:
-    # Docker 29 bind-mounts these two files. hostnamectl and Ansible's hosts
-    # template atomically replace them, which fails with EBUSY even in this
-    # privileged systemd container. Unmount only the injected files so the
-    # role's real tasks make the transitions that verify.yml asserts.
+    # Docker bind-mounts both files, preventing the role's atomic writes.
     - name: Check whether Docker mounted hostname and hosts files
       ansible.builtin.command: mountpoint -q {{ item }}
       loop:
@@ -26,6 +20,8 @@
         label: "{{ item.item }}"
       when: item.rc == 0
 
+    # The real image bootstrap provides these before the base role's early
+    # locale generation and repository-key setup.
     - name: Ensure bootstrap packages are present before the base role runs
       ansible.builtin.apt:
         name:

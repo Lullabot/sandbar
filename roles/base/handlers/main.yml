@@ -3,3 +3,4 @@
   ansible.builtin.service:
     name: ssh
     state: reloaded
+  when: not sand_image_build

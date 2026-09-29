@@ -64,3 +64,4 @@
     daemon_reload: true
     enabled: true
     state: "{{ 'restarted' if _sand_clipboard_service is changed else 'started' }}"
+  when: not sand_image_build
