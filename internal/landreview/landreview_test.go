@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -905,9 +906,10 @@ type stubProvider struct {
 	// noShell fails the test if the review server is started at all.
 	noShell bool
 
-	baseReport string // answer to diffBaseScript
-	shellArgv  []string
-	shellOuts  [][]string
+	baseReport   string // answer to diffBaseScript
+	resumeReport string // answer to resumeScript
+	shellArgv    []string
+	shellOuts    [][]string
 }
 
 func (p *stubProvider) Shell(_ context.Context, _ string, _ io.Reader, _ io.Writer, argv ...string) error {
@@ -930,6 +932,8 @@ func (p *stubProvider) ShellOut(_ context.Context, _ string, argv ...string) ([]
 	switch argv[2] {
 	case diffBaseScript:
 		return []byte(p.baseReport), nil
+	case resumeScript:
+		return []byte(p.resumeReport), nil
 	}
 	return nil, nil
 }
@@ -1119,6 +1123,103 @@ func TestDiffBaseScriptReportsAResumableReview(t *testing.T) {
 	writeFile(t, filepath.Join(work, ".self-review.yaml"), "output-file: ./elsewhere.xml\n")
 	if got := runDiffBase(t, home, work, ""); got.Resume {
 		t.Error("Resume = true although the project redirects output-file; the default path is not its review")
+	}
+}
+
+// TestRunPassesCallerDiffArgsToTheServer pins the argv a caller-chosen range
+// produces. The range replaces the resolved base outright, so the base lookup
+// (and the file-count refusal that depends on it) must not run, while the
+// resume check still must: a saved review is independent of which range is
+// being reviewed.
+func TestRunPassesCallerDiffArgsToTheServer(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	const review = "/home/u/repo/review.xml"
+	prefix := []string{"sh", "-c", serveScript, "sh", "/home/u/repo"}
+
+	cases := []struct {
+		name         string
+		diffArgs     []string
+		resumeReport string
+		clean        bool
+		want         []string // server argv after the fixed prefix
+		wantOut      string
+	}{
+		{name: "no range keeps the resolved base", want: []string{sha}},
+		{name: "one revision", diffArgs: []string{"HEAD~2"}, want: []string{"HEAD~2"}, wantOut: "range: HEAD~2"},
+		{name: "a range", diffArgs: []string{"HEAD~2...HEAD"}, want: []string{"HEAD~2...HEAD"}, wantOut: "range: HEAD~2...HEAD"},
+		{name: "a flag", diffArgs: []string{"--staged"}, want: []string{"--staged"}, wantOut: "range: --staged"},
+		{name: "empty elements are dropped", diffArgs: []string{"", "HEAD~1", ""}, want: []string{"HEAD~1"}},
+		{
+			name: "range with a saved review", diffArgs: []string{"HEAD~2"}, resumeReport: "sandresume=1\n",
+			want: []string{"--resume-from", review, "HEAD~2"}, wantOut: "carrying in",
+		},
+		{
+			name: "range with Clean", diffArgs: []string{"HEAD~2"}, resumeReport: "sandresume=1\n", clean: true,
+			want: []string{"HEAD~2"},
+		},
+		{
+			// Arguments are user input handed to git as argv, never text in a
+			// shell string, so metacharacters are inert.
+			name: "shell metacharacters stay one element", diffArgs: []string{"x; touch /tmp/y"},
+			want: []string{"x; touch /tmp/y"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &stubProvider{
+				t:            t,
+				baseReport:   "sandbase=" + sha + "\nsandfiles=3\n",
+				resumeReport: tc.resumeReport,
+			}
+			s := &Session{
+				Provider: p, Checkout: checkouts.Checkout{Path: "/home/u/repo"},
+				DiffArgs: tc.diffArgs, Clean: tc.clean,
+			}
+			if len(tc.diffArgs) > 0 {
+				// Under the report's 3 files, so a range that still consulted
+				// the limit would be refused.
+				s.MaxDiffFiles = 1
+			}
+			var out strings.Builder
+			_, _ = s.Run(context.Background(), &out)
+
+			if got, want := p.serverArgv(), append(append([]string(nil), prefix...), tc.want...); !slices.Equal(got, want) {
+				t.Errorf("server argv = %q, want %q", got, want)
+			}
+			if !strings.Contains(out.String(), tc.wantOut) {
+				t.Errorf("output %q does not contain %q", out.String(), tc.wantOut)
+			}
+			callerRange := len(tc.diffArgs) > 0
+			if callerRange && p.ranScript(diffBaseScript) {
+				t.Error("the base lookup ran although the caller chose the range")
+			}
+			if callerRange && !tc.clean && !p.ranScript(resumeScript) {
+				t.Error("the resume check did not run for a caller-chosen range")
+			}
+			if tc.clean && !p.ranScript(removeOutputScript) {
+				t.Error("Clean did not remove the existing review")
+			}
+		})
+	}
+}
+
+// TestResumeScriptAgainstRealShell pins the resume-only probe to the same
+// rules the base script applies, since both are built from one snippet.
+func TestResumeScriptAgainstRealShell(t *testing.T) {
+	requireTools(t, "sh")
+	home := t.TempDir()
+	work := t.TempDir()
+
+	if got := runScript(t, home, resumeScript, work); got != "" {
+		t.Errorf("output = %q with no review.xml, want nothing", got)
+	}
+	writeFile(t, filepath.Join(work, "review.xml"), "<review/>\n")
+	if got := runScript(t, home, resumeScript, work); strings.TrimSpace(got) != "sandresume=1" {
+		t.Errorf("output = %q, want sandresume=1", got)
+	}
+	writeFile(t, filepath.Join(work, ".self-review.yaml"), "output-file: ./elsewhere.xml\n")
+	if got := runScript(t, home, resumeScript, work); got != "" {
+		t.Errorf("output = %q although output-file is redirected, want nothing", got)
 	}
 }
 

@@ -1904,6 +1904,12 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p.issueInput, cmd = p.issueInput.Update(msg)
 			return m, cmd
 		}
+		// The review-range prompt is the pane's other text field, and a range
+		// pasted from a terminal's scrollback arrives the same way.
+		if ri := m.landing.rangeInput; ri != nil {
+			*ri, cmd = ri.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	case viewSnapshotPrompt:
 		m.snapshotInput, cmd = m.snapshotInput.Update(msg)

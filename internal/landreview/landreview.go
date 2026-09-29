@@ -219,6 +219,15 @@ type Session struct {
 	// this false would race its own probe; a caller that set this without
 	// deleting would leave a review.xml the NEXT run silently resumes from.
 	Clean bool
+	// DiffArgs, when non-empty, are handed to the review server as its
+	// `git diff` arguments INSTEAD of the base Run would resolve, so a caller
+	// can review exactly the range it names (`HEAD~2`, `main...HEAD`,
+	// `--staged`). Each element travels as its own argv element and is never
+	// interpolated into a shell string, so metacharacters in it are inert;
+	// they are otherwise passed through unvalidated because git is the judge
+	// of what a revision is. Empty elements are dropped. Leaving it empty keeps
+	// the resolved base and the file-count refusal.
+	DiffArgs []string
 }
 
 // errServerGone reports that the guest command exited while the session was
@@ -289,13 +298,23 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		}
 	}
 
-	base := s.diffBase(ctx)
-	if base.Commit != "" {
-		// Refused BEFORE the server starts, so the user gets a sentence about
-		// the base instead of a Node buffer error several seconds later. See
-		// maxDiffFiles.
-		if limit := s.maxDiffFiles(); base.Files > limit {
-			return "", diffTooLargeError(base, limit)
+	// A caller-chosen range replaces the base outright, and with it the
+	// refusal keyed to that base's file count: the user asked for this range,
+	// so a size heuristic about a base they did not pick has nothing to say.
+	// The resume check is independent of the range and still runs.
+	diffArgs := nonEmpty(s.DiffArgs)
+	var base diffBaseInfo
+	if len(diffArgs) > 0 {
+		base.Resume = s.resumable(ctx)
+	} else {
+		base = s.diffBase(ctx)
+		if base.Commit != "" {
+			// Refused BEFORE the server starts, so the user gets a sentence about
+			// the base instead of a Node buffer error several seconds later. See
+			// maxDiffFiles.
+			if limit := s.maxDiffFiles(); base.Files > limit {
+				return "", diffTooLargeError(base, limit)
+			}
 		}
 	}
 	// The Clean arm above already removed the file, so the probe cannot have
@@ -309,11 +328,17 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	if resuming {
 		argv = append(argv, "--resume-from", path.Join(s.Checkout.Path, outputFile))
 	}
-	if base.Commit != "" {
+	if len(diffArgs) > 0 {
+		argv = append(argv, diffArgs...)
+	} else if base.Commit != "" {
 		argv = append(argv, base.Commit)
 	}
 
-	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, describeBase(base))
+	described := describeBase(base)
+	if len(diffArgs) > 0 {
+		described = "range: " + strings.Join(diffArgs, " ")
+	}
+	fmt.Fprintf(w, "reviewing %s in %s (%s)\n", s.Checkout.Path, s.VM.Name, described)
 	if resuming {
 		fmt.Fprintf(w, "carrying in the comments already in %s\n", outputFile)
 	}
@@ -643,6 +668,28 @@ func (s *Session) waitReady(ctx context.Context, port int, exited <-chan struct{
 	}
 }
 
+// resumeProbe is the guest snippet that reports a resumable review. It is
+// shared by diffBaseScript and resumeScript through one constant so the
+// output-file rules cannot drift between the two: a caller-chosen range skips
+// the base lookup but must still decide about resuming exactly as the lookup
+// does. It expects $d to be the checkout path.
+const resumeProbe = `if [ -f "$d/` + outputFile + `" ] \
+  && ! grep -q '^[[:space:]]*output-file:' "$d/.self-review.yaml" 2>/dev/null \
+  && ! grep -q '^[[:space:]]*output-file:' "$HOME/.config/self-review/config.yaml" 2>/dev/null; then
+  printf 'sandresume=1\n'
+fi
+`
+
+// resumeScript is the resume check on its own, for a review whose range the
+// caller chose and which therefore has no use for the base lookup. Like
+// diffBaseScript it is a fixed literal that takes the checkout path as $1 and
+// prints only a flag; Go composes the --resume-from path itself.
+const resumeScript = `set -f
+d=$1
+` + resumeProbe + `
+exit 0
+`
+
 // diffBaseScript resolves, inside the guest, the commit a review of this
 // checkout should start from, and measures how big that review would be.
 //
@@ -695,12 +742,7 @@ d=$1
 db=$2
 base=
 
-if [ -f "$d/` + outputFile + `" ] \
-  && ! grep -q '^[[:space:]]*output-file:' "$d/.self-review.yaml" 2>/dev/null \
-  && ! grep -q '^[[:space:]]*output-file:' "$HOME/.config/self-review/config.yaml" 2>/dev/null; then
-  printf 'sandresume=1\n'
-fi
-
+` + resumeProbe + `
 oldest=$(git -C "$d" rev-list --topo-order HEAD --not --remotes 2>/dev/null | tail -n 1)
 if [ -n "$oldest" ]; then
   base=$(git -C "$d" rev-parse --verify -q "$oldest^" 2>/dev/null)
@@ -783,6 +825,32 @@ func (s *Session) diffBase(ctx context.Context) diffBaseInfo {
 		return diffBaseInfo{}
 	}
 	return parseDiffBase(string(out))
+}
+
+// resumable runs only the resume check, for a session whose range the caller
+// chose. Like diffBase it degrades every failure to "nothing to resume", and
+// is bounded for the same reason: it runs before Run has printed a line.
+func (s *Session) resumable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, diffBaseTimeout)
+	defer cancel()
+	out, err := s.Provider.ShellOut(ctx, s.VM.Name, "sh", "-c", resumeScript, "sh", s.Checkout.Path)
+	if err != nil {
+		return false
+	}
+	return parseDiffBase(string(out)).Resume
+}
+
+// nonEmpty returns args without its empty elements. A blank argument would
+// reach `git diff` as an empty revision and fail there with a message that
+// says nothing about where it came from.
+func nonEmpty(args []string) []string {
+	var out []string
+	for _, a := range args {
+		if a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // removeOutput deletes the checkout's review output and walkthrough sidecar
