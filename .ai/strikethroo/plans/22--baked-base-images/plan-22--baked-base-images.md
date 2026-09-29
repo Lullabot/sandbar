@@ -385,49 +385,56 @@ The rolled-back prototype proved the chroot approach and produced a 1.17 GiB art
 
 One additional playbook change beyond Task 01's: `roles/user/tasks/main.yml` now creates `/var/lib/systemd/linger/` before touching the per-user linger file. On a never-booted genericcloud image that directory does not exist (logind creates it lazily), so the offline-equivalent task failed with `ENOENT`. This was the only playbook task that failed under chroot across all four runs, and it was fixed by extending the `sand_image_build` guard rather than working around it in the script.
 
-### Phase 3: The Gate and the Size Work
-**Sequential Tasks** (all perform image builds and contend for `qemu-nbd` devices, RAM and disk — they must NOT run concurrently):
-- Task 15: Reduce the published image size with safe trims and zstd compression (depends on: 03)
-- Task 04: Assert the built image is safe to distribute (depends on: 15)
+### ✅ Phase 3: The Size Work
+
+**Status:** completed
+
+**Tasks:**
+- ✔️ Task 15: Reduce the published image size with safe trims and zstd compression (depends on: 03) — `completed`
 
 **Size reduction ledger** (measured unless marked estimate):
 
 | Stage | Compressed size | % of 2 GiB |
 | --- | --- | --- |
-| Task 03 as built | 1172.7 MiB | 57.3% |
-| + zstd compression | **1098.1 MiB** (measured) | 53.6% |
-| + safe trims | ~1078 MiB (est.) | ~53% |
-zstd bought 74.6 MiB (6.4%) in the prototype. Current-`main` measurements must be rerun because coding agents have since moved out of the base.
+| Task 03 zstd baseline | 1040.125 MiB | 50.8% |
+| Task 15 final build D | 960.625 MiB | 46.9% |
+| Task 15 final build E | **959.8125 MiB** | 46.9% |
 
-**Build-host hazard discovered during execution:** `/tmp` on the development host is a **tmpfs**, so multi-gigabyte image outputs written there are held in RAM and triggered an OOM kill of a background process. Builds must write outputs to a disk-backed path (`/var/tmp`), and intermediate images must be deleted once their size and digest are recorded. **Task 05 must apply the same rule in CI** — hosted runners also have constrained RAM and a small `/tmp`.
+The final image saves 80.3125 MiB (7.72%) against the fresh Task 03 baseline. Offline ext4 shrink/regrow normalization reduced the final D/E size delta to 0.8125 MiB without changing the 20 GiB runtime filesystem. The optimization also found and removed a shared mkcert CA private key from the base; a dedicated finalize/full role now creates it per VM.
 
-### Phase 4: Publication
+**Build-host hazard discovered during execution:** `/tmp` on the development host is a **tmpfs**, so multi-gigabyte image outputs written there are held in RAM and triggered an OOM kill of a background process. Builds must write outputs to a disk-backed path (`/var/tmp`), and intermediate images must be deleted once their size and digest are recorded. **The publication workflow must apply the same rule in CI** — hosted runners also have constrained RAM and a small `/tmp`.
+
+### Phase 4: The Distribution Gate
+**Tasks:**
+- Task 04: Assert the built image is safe to distribute (depends on: 15)
+
+### Phase 5: Publication
 **Parallel Tasks:**
 - Task 05: Two-arch CI matrix, hygiene gate, release publish with `manifest.json` (depends on: 03, 04)
 
-### Phase 5: Verify the Assumption, Build the Host Side
+### Phase 6: Verify the Assumption, Build the Host Side
 **Parallel Tasks:**
 - Task 06: Verify one image boots under Lima (both arches) and imports on Proxmox (depends on: 05)
 - Task 07: Pin the image manifest in Go and add the verified, cached acquisition helper (depends on: 05)
 
-_Task 06 is a gate whose failure redirects Phase 6; it runs in parallel with 07 so a negative result arrives before the provider wiring is written._
+_Task 06 is a gate whose failure redirects Phase 7; it runs in parallel with 07 so a negative result arrives before the provider wiring is written._
 
-### Phase 6: Provider Wiring
+### Phase 7: Provider Wiring
 **Parallel Tasks:**
 - Task 08: Create the Lima base from the downloaded image (depends on: 07)
 - Task 09: Point Proxmox at the manifest image and drop its base playbook run (depends on: 07)
 
-### Phase 7: Retire the Old Model
+### Phase 8: Retire the Old Model
 **Parallel Tasks:**
 - Task 10: Remove base staleness and convergence machinery (depends on: 08, 09)
 
-### Phase 8: Simplify the Surface
+### Phase 9: Simplify the Surface
 **Sequential then parallel Tasks:**
 - Task 11: Remove the base-tool selection surface and migrate registry records (depends on: 10)
 - Task 16: Lazy-install selected Claude Code and Codex agents on first use (depends on: 11)
 - Task 17: Carry baked-image provenance through golden VM templates (depends on: 08, 09, 10, 11)
 
-### Phase 9: Cover and Document
+### Phase 10: Cover and Document
 **Parallel Tasks:**
 - Task 12: Unit-test manifest resolution, migration, and template routing (depends on: 07, 11, 17)
 - Task 13: Invert the CI base-staleness assertion and wire the hygiene gate (depends on: 10, 11, 17)
@@ -435,12 +442,12 @@ _Task 06 is a gate whose failure redirects Phase 6; it runs in parallel with 07 
 
 ### Post-phase Actions
 
-- After Phase 4, the published release is a real, public artifact. Confirm its assets and checksums before any downstream task pins them.
-- After Phase 7, verify success criterion 4 directly (a `roles/base/` edit must not rebuild; an image version change must) rather than waiting for Phase 9's CI encoding of it.
-- After Phase 9, run the plan's Self Validation in full, comparing the measured first-create time against Task 02's recorded baseline. Success criterion 3 is the user's stated condition for the work being worthwhile; if it is not met, report that as the outcome.
+- After Phase 5, the published release is a real, public artifact. Confirm its assets and checksums before any downstream task pins them.
+- After Phase 8, verify success criterion 4 directly (a `roles/base/` edit must not rebuild; an image version change must) rather than waiting for Phase 10's CI encoding of it.
+- After Phase 10, run the plan's Self Validation in full, comparing the measured first-create time against Task 02's recorded baseline. Success criterion 3 is the user's stated condition for the work being worthwhile; if it is not met, report that as the outcome.
 
 ### Execution Summary
-- Total Phases: 9
+- Total Phases: 10
 - Total Tasks: 17
 
 ### Prior Prototype Findings (implementation rolled back)

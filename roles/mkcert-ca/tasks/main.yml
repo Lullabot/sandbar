@@ -1,0 +1,12 @@
+---
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Install a per-VM mkcert CA
+  ansible.builtin.command:
+    cmd: mkcert -install
+    creates: "{{ ansible_facts.getent_passwd[user_name][4] }}/.local/share/mkcert/rootCA.pem"
+  become: true
+  become_user: "{{ user_name }}"
