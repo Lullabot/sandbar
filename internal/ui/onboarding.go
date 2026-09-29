@@ -15,7 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-const onboardingSupportURL = "https://github.com/Lullabot/sandbar/issues/new"
+const onboardingReportURL = "https://github.com/Lullabot/sandbar/issues/new"
 
 type onboardingState struct {
 	Acknowledged bool `json:"acknowledged"`
@@ -117,10 +117,10 @@ func (m model) updateOnboarding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.view = viewHelp
 		}
 		return m, nil
-	case key.Matches(msg, m.keys.OnboardingSupport):
-		return m, m.openOnboardingBrowser(onboardingSupportURL)
 	case key.Matches(msg, m.keys.OnboardingRelease):
 		return m, m.openOnboardingBrowser(releasecheck.ReleaseNotesURL(buildVersion))
+	case key.Matches(msg, m.keys.OnboardingReport):
+		return m, m.openOnboardingBrowser(onboardingReportURL)
 	case msg.Code == tea.KeyDown:
 		m.onboardingScroll++
 	case msg.Code == tea.KeyUp:
@@ -151,11 +151,11 @@ func (m model) onboardingLines() []string {
 	lines = append(lines, "")
 	add("Your guest shell runs inside tmux. To leave a CLI tool running, detach with C-a d (press Ctrl+A, then d). Reattach from the VM shell later.")
 	lines = append(lines, "")
-	lines = append(lines, m.clipLine("Help: "+osc8Link(onboardingSupportURL, onboardingSupportURL)))
 	releaseURL := releasecheck.ReleaseNotesURL(buildVersion)
 	lines = append(lines, m.clipLine("Release notes: "+osc8Link(releaseURL, releaseURL)))
+	lines = append(lines, m.clipLine("Feature and bug requests: "+osc8Link(onboardingReportURL, onboardingReportURL)))
 	lines = append(lines, "")
-	add("Press h for help in your browser, or r for the installed release notes.")
+	add("Press n for the installed release notes, or r to report a feature or bug.")
 	return lines
 }
 
@@ -197,6 +197,6 @@ func (m model) onboardingView() string {
 	if end < len(lines) && len(visible) > 0 {
 		visible[len(visible)-1] = m.clipLine("↓ scroll for links and more")
 	}
-	footer := m.footerView([]key.Binding{m.keys.OnboardingDone, m.keys.OnboardingSupport, m.keys.OnboardingRelease})
+	footer := m.footerView([]key.Binding{m.keys.OnboardingDone, m.keys.OnboardingRelease, m.keys.OnboardingReport})
 	return appStyle.Render(strings.Join(visible, "\n") + "\n" + footer)
 }

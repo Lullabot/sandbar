@@ -23,17 +23,17 @@ sand-managed clones, and the header doesn't either. Manage a base image with
 
 On first launch, sand shows a short onboarding screen before the board. Press
 `enter` to continue; the acknowledgement is saved so it is not shown again.
-From the `?` help screen, press `o` to reopen it. Its support and installed
-release notes links can be clicked in terminals that support OSC 8 hyperlinks,
-or opened with `h` and `r` respectively using your default browser. The screen
-also explains the persistent tmux shell; see
+From the `?` help screen, press `o` to reopen it. Its installed release notes
+and feature or bug request links can be clicked in terminals that support OSC 8
+hyperlinks, or opened with `n` and `r` respectively using your default browser.
+The screen also explains the persistent tmux shell; see
 [Files and Shells](files-and-shells.md) for the full tmux and file-transfer
 guide. When sand detects Warp (`TERM_PROGRAM=WarpTerminal`), onboarding warns
 that Sand and Claude Code can have terminal compatibility issues there.
 
 Sand checks GitHub for a newer stable release in the background, at most once
 per 24 hours. A newer release adds a clickable `(Update available!)` link
-beside the version in the full header; `?` then offers `r` to open those notes
+beside the version in the full header; `?` then offers `n` to open those notes
 in your browser. A narrow full header drops the update notice before the
 installed version, and the entire title row is omitted in compact layouts. Failed
 checks are quiet, keep the last valid result, and still use the 24-hour retry

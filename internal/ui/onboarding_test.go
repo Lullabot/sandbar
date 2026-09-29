@@ -11,6 +11,7 @@ import (
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/releasecheck"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -99,12 +100,19 @@ func TestOnboardingConstrainedScrollReachesLinks(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	view := ansi.Strip(m.View().Content)
-	if !strings.Contains(view, "Release notes:") || !strings.Contains(view, "issues/new") {
+	rawView := m.View().Content
+	view := ansi.Strip(rawView)
+	if !strings.Contains(view, "Release notes:") || !strings.Contains(view, "Feature and bug requests:") {
 		t.Fatalf("links unreachable after scrolling: %q", view)
 	}
-	if strings.Count(m.View().Content, "\x1b]8;;") < 4 {
-		t.Fatal("support and release notes must both be OSC 8 links")
+	if !strings.Contains(rawView, onboardingReportURL) || !strings.Contains(rawView, releasecheck.ReleaseNotesURL(buildVersion)) {
+		t.Fatalf("rendered links lost their full targets: %q", rawView)
+	}
+	if strings.Count(rawView, "\x1b]8;;") < 4 {
+		t.Fatal("release notes and feature or bug requests must both be OSC 8 links")
+	}
+	if releaseAt, reportAt := strings.Index(view, "Release notes:"), strings.Index(view, "Feature and bug requests:"); releaseAt < 0 || reportAt < 0 || releaseAt >= reportAt {
+		t.Fatalf("release notes must appear before feature and bug requests: %q", view)
 	}
 }
 
@@ -117,8 +125,8 @@ func TestOnboardingBrowserRoutesAndFailure(t *testing.T) {
 		key  rune
 		want string
 	}{
-		{'h', onboardingSupportURL},
-		{'r', "https://github.com/Lullabot/sandbar/releases/tag/v1.2.3"},
+		{'n', "https://github.com/Lullabot/sandbar/releases/tag/v1.2.3"},
+		{'r', onboardingReportURL},
 	} {
 		var cmd tea.Cmd
 		m, cmd = press(t, m, runeKey(tc.key))
@@ -132,9 +140,9 @@ func TestOnboardingBrowserRoutesAndFailure(t *testing.T) {
 		}
 	}
 	fake.openErr = errors.New("no desktop browser")
-	m, cmd := press(t, m, runeKey('h'))
+	m, cmd := press(t, m, runeKey('r'))
 	m, _ = press(t, m, cmd())
-	if !strings.Contains(m.lastMessage(), "no desktop browser") || !strings.Contains(m.lastMessage(), onboardingSupportURL) {
+	if !strings.Contains(m.lastMessage(), "no desktop browser") || !strings.Contains(m.lastMessage(), onboardingReportURL) {
 		t.Fatalf("browser failure did not leave actionable warning: %q", m.lastMessage())
 	}
 }
