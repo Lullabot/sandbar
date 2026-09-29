@@ -2,7 +2,7 @@
 id: 6
 group: "verification"
 dependencies: [5]
-status: "failed"
+status: "completed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -28,11 +28,11 @@ Prove the plan's central architectural assumption before any provider wiring is 
 
 - [x] The corrected published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell with Lima's default cloud-init user and no explicit user override.
 - [x] The corrected published arm64 image boots as a Lima instance on Apple Silicon, reaching a usable shell with Lima's default cloud-init user and no explicit user override.
-- [ ] The published amd64 image imports on a real Proxmox VE target, starts, and its guest agent reports an IP address.
+- [x] The corrected published amd64 image imports on a real Proxmox VE target, starts, and its guest agent reports an IP address.
 - [x] SSH host keys are confirmed to **regenerate on first boot** — they were removed by generalization, so their absence at boot must be self-healing, not a broken sshd.
 - [x] `/etc/machine-id` is confirmed non-empty *after* first boot (systemd repopulates it), and two instances booted from the same image have **different** machine-ids.
 - [x] Verification: paste `limactl list` showing the instance running, plus in-guest `uname -m`, `systemctl is-system-running`, and `ls /etc/ssh/ssh_host_*` output for each arch.
-- [ ] Verification: paste the PVE side — the import command, the VM starting, and `qm agent <vmid> network-get-interfaces` returning an address.
+- [x] Verification: paste the PVE side — the import operation, the VM starting, and the guest-agent `network-get-interfaces` response returning an address.
 - [x] Verification: paste the two differing machine-ids from two instances of the same image.
 - [x] A written finding records whether one image serves both consumers. If it does **not**, the finding states precisely what failed and what the per-provider variant would need to differ in — that is the deliverable in the negative case, and it is a successful outcome for this task.
 
@@ -163,9 +163,52 @@ $ limactl shell sandbar-arm64-test sudo find /etc/ssh -maxdepth 1 -type f -name 
 /etc/ssh/ssh_host_rsa_key.pub
 ```
 
-Both Lima architectures now pass without a consumer workaround. Real Proxmox
-remains outstanding, so the task remains failed as a whole until that external
-check passes.
+Both Lima architectures pass without a consumer workaround.
+
+The corrected amd64 asset was then exercised against the real `sandbar-test`
+pool on PVE node `silo` through the same REST client and provider lifecycle the
+product uses. The test used a unique base and clone, a disposable SSH key, and
+an isolated local state directory so it neither reused nor rebuilt the pool's
+shared base. PVE downloaded the release URL with server-side SHA-256
+verification and stored it under the release-versioned import name introduced
+by PR 236:
+
+```text
+Downloading cloud image https://github.com/Lullabot/sandbar/releases/download/base-image-2026.09.29.164715/sandbar-base-debian-13-amd64.qcow2 into local
+Creating base VM sand-pve-image-gate-447440 importing local:import/sandbar-base-debian-13-amd64-base-image-2026.09.29.164715.qcow2
+Resizing scsi0 to 20GiB
+Starting sand-pve-image-gate-447440 (VMID 149) on node silo
+Waiting for sand-pve-image-gate-447440's guest agent
+Resolving sand-pve-image-gate-447440's address
+sand-pve-image-gate-447440 is up at 192.168.30.79
+```
+
+A direct PVE API call to
+`/nodes/silo/qemu/149/agent/network-get-interfaces` returned HTTP 200 with
+`eth0` at `192.168.30.79`. The provider then completed its base, clone,
+far-side SSH, reset, MAC-preservation, and delete checks. The clone reported:
+
+```text
+arch=x86_64
+system=running
+machine_id=5e35c474731348439d48ccf8d20113f0
+/etc/ssh/ssh_host_ecdsa_key
+/etc/ssh/ssh_host_ecdsa_key.pub
+/etc/ssh/ssh_host_ed25519_key
+/etc/ssh/ssh_host_ed25519_key.pub
+/etc/ssh/ssh_host_rsa_key
+/etc/ssh/ssh_host_rsa_key.pub
+
+--- PASS: TestE2EProxmoxLifecycle (368.97s)
+PASS
+ok github.com/lullabot/sandbar/internal/provider 368.976s
+```
+
+Fresh post-test API queries found zero temporary pool objects. The verified
+1,007,550,464-byte import remains in PVE's `local` image cache under its
+immutable release-versioned name for normal reuse. One published image per
+architecture therefore serves both Lima and PVE; no provider-specific image
+variant or consumer user override is required.
 
 ### Superseded first-release finding
 
@@ -270,8 +313,14 @@ or `qm agent ... network-get-interfaces` command was run.
   the default cloud-init user; no task 08 user override is required.
 - [2026-09-29] The user booted the corrected arm64 asset under Lima/QEMU on
   Apple Silicon. The default user, system state, disk growth, machine ID, and
-  regenerated host keys all passed. Task 06 now remains failed only because
-  the real PVE import/start/guest-agent check requires the offered API target.
+  regenerated host keys all passed.
+- [2026-09-29] The real PVE lifecycle passed against `sandbar-test`: the image
+  imported with its pinned checksum, started, reported an `eth0` address via
+  the guest agent, accepted SSH, reset, and cleaned up both temporary VMs.
+- [2026-09-29] Live verification exposed a cross-release cache collision:
+  PVE keys import content by filename while release assets retain a stable
+  basename. PR 236 commit `2af8e06` versions the node-local import filename
+  with the manifest tag; its regression and adjacent provider tests pass.
 - [2026-09-29] The superseded first release failed for Lima's default account
   because it baked `claude:1000`; producer commit `64a87ec` generalized the
   login into `/etc/skel` and the corrected release above verifies the fix.
