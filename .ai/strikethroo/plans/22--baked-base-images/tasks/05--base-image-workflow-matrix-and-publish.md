@@ -2,7 +2,7 @@
 id: 5
 group: "image-build"
 dependencies: [3, 4, 15]
-status: "pending"
+status: "in-progress"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -25,11 +25,11 @@ Rework `.github/workflows/base-image.yml` from a single amd64 job that bakes one
 
 ## Acceptance Criteria
 
-- [ ] The build job is a matrix over `{amd64 → ubuntu-latest, arm64 → ubuntu-24.04-arm}`, each calling `scripts/build-base-image.sh` for its own architecture.
-- [ ] Each matrix leg runs `scripts/check-base-image.sh` against its output and fails the job if the gate fails.
+- [x] The build job is a matrix over `{amd64 → ubuntu-latest, arm64 → ubuntu-24.04-arm}`, each calling `scripts/build-base-image.sh` for its own architecture.
+- [x] Each matrix leg runs `scripts/check-base-image.sh` against its output and fails the job if the gate fails.
 - [ ] A separate publish job collects both legs' artifacts and creates one release containing: both qcow2 assets, a `.sha256` per asset, and a `manifest.json` carrying, per architecture, the asset URL, size in bytes, and SHA-256, plus the image version string.
-- [ ] Publishing follows the existing draft-then-flip pattern: `gh release create --draft`, upload all assets, then `gh release edit --draft=false` — because this repo has immutable releases and assets cannot be added post-publish.
-- [ ] The tag namespace stays `base-image-YYYY.MM.DD`, disjoint from release-please's `vX.Y.Z`, with the existing `workflow_dispatch` tag input honoured.
+- [x] Publishing follows the existing draft-then-flip pattern: `gh release create --draft`, upload all assets, then `gh release edit --draft=false` — because this repo has immutable releases and assets cannot be added post-publish.
+- [x] The tag namespace stays `base-image-YYYY.MM.DD`, disjoint from release-please's `vX.Y.Z`, with the existing `workflow_dispatch` tag input honoured.
 - [ ] Verification: `gh workflow run base-image.yml` completes with both matrix legs green. Paste the run URL and `gh run view <id>` output showing both legs succeeded.
 - [ ] Verification: `gh release view <tag> --json assets` lists exactly the expected assets for both arches plus the manifest. Paste it.
 - [ ] Verification: download both images and confirm `sha256sum -c` passes against the published checksums, and that each asset is under 2 GiB. Paste `ls -l` and the checksum results.
@@ -109,3 +109,21 @@ The URL must be the final published asset URL, which is predictable from the tag
 **Do not** change the amd64 asset name gratuitously. `internal/provider/proxmoxprovision.go` derives its import filename from it today; task 09 will move that to the manifest, but keeping the name stable avoids a needless flag day.
 
 </details>
+
+## Execution Notes
+
+- Implemented the native architecture matrix, image hygiene gate, and durable
+  `upload-artifact`/`download-artifact` transfer. Artifact compression is off
+  because the qcow2 files are already compressed. Both jobs use disk-backed
+  `/var/tmp` paths.
+- `scripts/write_base_image_manifest.py` defines the stable schema used by task
+  07: `version`, then `images.amd64` and `images.arm64`, each with `url`,
+  `sha256`, and `size` in bytes. It rejects missing or extra assets, malformed
+  checksums, digest mismatch, and images at or above the 2 GiB release limit
+  before any draft release is created.
+- The manifest tests were written first and failed because the writer did not
+  exist. After implementation, all six passed; the full Python suite ran 13
+  tests and passed. `actionlint v1.7.8` passed on
+  `.github/workflows/base-image.yml`; `git diff --check` passed.
+- Live workflow, release asset, and published checksum verification remain
+  pending until this implementation is committed and dispatched on GitHub.
