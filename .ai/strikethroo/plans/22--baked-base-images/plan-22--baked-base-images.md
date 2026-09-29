@@ -370,15 +370,18 @@ The dependency graph is acyclic. Task numbering is descriptive rather than topol
 
 _Task 02 is ordering-critical: it measures a code path this plan deletes, so the number cannot be recovered after Phase 6. It has no dependencies precisely so it can run first._
 
-### Phase 2: The Build
+### ✅ Phase 2: The Build
+
+**Status:** completed
+
 **Parallel Tasks:**
-- Task 03: Image build script — chroot base-phase build, generalization, compression, size gate (depends on: 01)
+- ✔️ Task 03: Image build script — chroot base-phase build, generalization, compression, size gate (depends on: 01) — `completed`
 
 The rolled-back prototype proved the chroot approach and produced a 1.17 GiB artifact. Task 03 reimplements it against current `main`, where agents are no longer base content.
 
-**Root cause of the size instability** (recorded because it is non-obvious and will recur if the zero-fill is ever removed): ext4 does not zero a block's contents on delete — only the allocation bitmap changes. `qemu-img convert -c` cannot see ext4's free-block bitmap, so residual bytes from deleted files (apt lists and caches, logs, resize slack) were compressed as real entropy. Different runs left different garbage behind, which is why byte-identical inputs produced a 108 MiB spread. The fix zero-fills free space with `dd if=/dev/zero` and deletes the filler while still mounted — the manual equivalent of `zerofree`, needing no extra package and no TRIM plumbing through `qemu-nbd`.
+**Root cause of the size instability** (recorded because it is non-obvious): ext4 does not zero a block's contents on delete — only the allocation bitmap changes. `qemu-img convert -c` cannot infer that filesystem state, so residual bytes from deleted files can be compressed as real entropy. The implementation connects nbd with `--discard=unmap`, runs `fstrim` while the filesystem is mounted, and then converts with zstd compression. Three consecutive successful builds measured 1,032–1,041 MiB, comfortably below the 1,900 MiB gate.
 
-**Note for Task 04:** `/var/lib/dbus/machine-id` does **not exist** in this image — no `dbus` package is installed, so the upstream image never ships it. The generalization correctly did nothing (it only re-links when the path exists and is a regular file). Task 04's assertion must treat *absent* as a pass, not require a symlink.
+**Hygiene-gate note:** the builder creates `/var/lib/dbus` when needed and installs `/var/lib/dbus/machine-id` as a symlink to the deliberately empty `/etc/machine-id`. The distribution-safety assertion requires that exact generalized state.
 
 One additional playbook change beyond Task 01's: `roles/user/tasks/main.yml` now creates `/var/lib/systemd/linger/` before touching the per-user linger file. On a never-booted genericcloud image that directory does not exist (logind creates it lazily), so the offline-equivalent task failed with `ENOENT`. This was the only playbook task that failed under chroot across all four runs, and it was fixed by extending the `sand_image_build` guard rather than working around it in the script.
 
