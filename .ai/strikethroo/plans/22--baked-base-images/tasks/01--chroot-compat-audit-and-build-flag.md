@@ -104,9 +104,8 @@ roles/dev-tools/tasks/main.yml:44:  when: not sand_image_build
 roles/dev-tools/handlers/main.yml:11:  when: not sand_image_build
 roles/dev-tools/handlers/main.yml:17:  when: not sand_image_build
 roles/base/defaults/main.yml:87:sand_image_build: false
-roles/base/tasks/main.yml:81:  when: not sand_image_build
-roles/base/tasks/main.yml:550:    - not sand_image_build
-roles/base/tasks/main.yml:580:  when: not sand_image_build
+roles/base/tasks/main.yml:553:    - not sand_image_build
+roles/base/tasks/main.yml:583:  when: not sand_image_build
 roles/base/handlers/main.yml:6:  when: not sand_image_build
 ```
 
@@ -130,6 +129,7 @@ literal `state: started` and is also guarded.
 - [2026-09-28] Docker 29 bind-mounts `/etc/hostname` and `/etc/hosts`, so the unchanged hostname and hosts tasks failed with `EBUSY` when Molecule tried to replace those files. `molecule/base/prepare.yml` now unmounts only those file mount points before converge. This keeps the scenario's hostname and hosts transitions and verify assertions active.
 - [2026-09-28] The pinned Molecule container lacked `gpg` before the base role's early repository-key setup, although production bootstrap installs `gnupg`. Added `gnupg` to Molecule prepare alongside its existing `locales` prerequisite.
 - [2026-09-28] `uvx --with 'molecule>=6' --with 'molecule-plugins[docker]' --with ansible-core molecule test -s base` completed its two-play converge with `failed=0`, then exited 1 at Molecule's preexisting idempotence step. That step replays a scenario which intentionally changes the timezone America/Toronto → Europe/Berlin every time; it also repeats temporary dpkg speed and NodeSource key writes/removals and reports the existing fstrim task changed. It reported ten changed tasks and never reached verify. The role edits for this task do not change any of those false-flag actions.
+- [2026-09-29] PR CI exposed that the DHCP hostname-renew task had been over-gated with `not sand_image_build`. The shell already exits successfully when networkd is inactive in the chroot, while a clone's finalize phase must run the renew after applying its hostname. Removed the gate; the targeted DHCP contract tests, Ansible syntax check, and the unit job's exact vet/race/coverage command now pass locally at the 90.8% floor.
 
 ### Previous failed validation and resolution
 

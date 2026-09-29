@@ -78,7 +78,6 @@
       networkctl renew "$iface"
   changed_when: false
   failed_when: false
-  when: not sand_image_build
 
 # A base image can sit unused for weeks; when it is older than the 30-day
 # threshold (internal/provision/provision.go's baseMaxAge), the create that
