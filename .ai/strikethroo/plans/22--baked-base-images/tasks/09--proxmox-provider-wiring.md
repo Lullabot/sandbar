@@ -2,7 +2,7 @@
 id: 9
 group: "provider-wiring"
 dependencies: [6, 7]
-status: "pending"
+status: "completed"
 created: 2026-09-12
 models:
   anthropic: "claude-sonnet-5"
@@ -24,15 +24,15 @@ Move the Proxmox provider from its hardcoded image constants to the pinned manif
 
 ## Acceptance Criteria
 
-- [ ] `ensureCloudImage` (`internal/provider/proxmoxprovision.go:494-544`) resolves its URL, filename and SHA-256 from the pinned manifest rather than the removed constants.
-- [ ] `provisionBase` (`internal/provider/proxmoxprovision.go:386-432`) no longer calls `runPlaybookPhase(base)`.
-- [ ] The base template version (`templateVersion`, `:481-491`) records the image version instead of a playbook content hash; `templateGeneration` is bumped so existing templates rebuild once.
-- [ ] `Profile.BaseImage` (`internal/profiles/profiles.go:73`) still works as a per-profile override, and the manifest supplies only the default.
-- [ ] The finalize phase is unchanged: cloud-init identity, disk resize, start, then `runPlaybookPhase(finalize)`.
-- [ ] Verification: `go build ./...` and `go vet ./...` pass; `go test ./internal/provider/...` passes against the mock PVE server. Paste the output.
-- [ ] Verification: the opt-in e2e suite passes against a real PVE target — `PROXMOX_E2E=1 go test -tags proxmoxe2e ./internal/provider/...` with the environment from `e2e.env`. Paste the result.
-- [ ] Verification: from the e2e run or a manual create, confirm no base-phase Ansible ran — grep the provisioning output for `TASK [base` and show it is absent, while finalize tasks are present.
-- [ ] Verification: shell into a created Proxmox VM and confirm baked dependencies are present, a selected coding agent installs during finalize, and an unselected agent remains absent.
+- [x] The default URL, node-local filename and SHA-256 come from `baseimage.PinnedManifest.ForArch("amd64")`; `ensureCloudImage` keeps PVE's server-side download and SHA-256 verification.
+- [x] `provisionBase` does not install bootstrap dependencies or call the base playbook phase.
+- [x] `templateVersion` records the pinned image release (or custom image URL) plus `template-gen4`, replacing the playbook hash and invalidating prior stamps.
+- [x] `Profile.BaseImage` remains a per-profile override; only the default uses the manifest.
+- [x] Finalize still applies cloud-init identity, resizes, starts, and runs `runPlaybookPhase(finalize)`.
+- [x] Mock-provider tests, `go build ./...`, and `go vet ./...` pass (evidence below).
+- [x] The tagged e2e suite passes against `sandbar-test` (evidence below).
+- [x] The live create log reports no `(base phase)` and does report `(finalize phase)`; the mock lifecycle test also rejects a base bootstrap command. A literal `TASK [base` grep is not a phase test here because the `base` role still has clone-specific tasks in finalize.
+- [x] Live guest shell confirms baked dependencies, selected Pi, and absent unselected Claude (evidence below).
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -81,3 +81,16 @@ with a comment explicitly warning that all three must be bumped together. That c
 **E2E environment.** The suite needs `PROXMOX_E2E=1` plus HOST/NODE/POOL/STORAGE/BRIDGE/TOKEN_FILE/SSH_USER/SSH_IDENTITY, and skips cleanly when they are absent. A local `e2e.env` (gitignored) carries them. If no PVE target is reachable, say so plainly in the task record rather than marking the e2e criterion satisfied — an unrun test is not a passing test.
 
 </details>
+
+## Verification Evidence
+
+RED: the new tests failed because `templateVersion` returned a playbook hash with `template-gen3`, and a cold base build logged both dependency installation and `Provisioning sandbar-base (base phase)`. GREEN/REFACTOR: `go test ./internal/provider/... -count=1` returned `ok github.com/lullabot/sandbar/internal/provider 5.601s`. `go build ./...`, `go vet ./...`, and `go test ./... -count=1` all passed; `gofmt -l` and `git diff --check` were clean.
+
+Live setup: `e2e.env` pointed at `sandbar-test`; `PROXMOX_E2E=1`, `PROXMOX_E2E_INSECURE=1` (certificate SAN has a trailing dot), and `PROXMOX_E2E_IMAGE` unset. A fresh disposable Ed25519 key replaced the absent configured identity path. The refreshed 0600 token authenticated to the PVE node status API with HTTP 200. The live lifecycle command `go test -tags proxmoxe2e -timeout 45m -run TestE2EProxmoxLifecycle -v -count=1 ./internal/provider/` passed in 291.18s. It logged `Create phases: base=false, finalize=true` and the guest shell returned `/usr/bin/ansible-playbook`, `/usr/bin/rsync`, `/usr/bin/docker`, `/usr/bin/node`, and `pi-selected claude-absent`.
+
+The full tagged run, `go test -tags proxmoxe2e -timeout 60m -run TestE2EProxmox -v -count=1 ./internal/provider/...`, returned `PASS` and `ok github.com/lullabot/sandbar/internal/provider 783.129s`. Lifecycle passed (282.64s); the hard-stop SSH test passed (session ended 2m9s after guest loss); two clones had distinct machine identities and leases (`192.168.30.68`, `192.168.30.63`) and passed the concurrent-stream check. Pool isolation skipped because no `PROXMOX_E2E_FOREIGN_VMID` is configured; it is outside this task's lifecycle criterion. After each run, the test clones were deleted, the test-created base template VMID 121 was purged, the pool was verified to contain zero QEMU resources, and the disposable local key/state directory was removed.
+
+## Noteworthy Events
+
+- [2026-09-29] Kept the base boot and `generalizeBase`: the boot repopulates `/etc/machine-id` even though the published image is generalized, so clearing machine ID and hostname immediately before templating is still required for distinct clone identities and DHCP leases.
+- [2026-09-29] Task 07 had already wired the pinned amd64 manifest into `NewProxmox`, and commit `2af8e06` had versioned PVE's local import filename. This task reused both and removed only the obsolete base provisioning path; clone locks, host CPU, custom image override, and finalize ordering remain intact.

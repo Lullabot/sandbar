@@ -46,6 +46,7 @@ import (
 	"time"
 
 	sandbar "github.com/lullabot/sandbar"
+	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
@@ -247,13 +248,12 @@ func (p *proxmoxProvider) lockCloneSerial(baseName string) func() {
 // ensureBaseTemplate makes sure a current base TEMPLATE exists in the pool and
 // returns its VMID. It has three outcomes: reuse the existing template (present
 // and current), rebuild it from scratch (absent, or --rebuild asked, or the
-// playbook it was stamped with is stale), or build it for the first time.
+// image version it was stamped with is stale), or build it for the first time.
 //
 // A stale template is REBUILT rather than converged in place: a PVE template
 // cannot be started, so there is no equivalent of Lima's in-place re-apply. The
-// staleness signal is the same content-hash stamp the other providers use (via
-// provision.ReadBaseVersion), so a base built by any provider is judged
-// identically.
+// staleness signal is the pinned image version plus this provider's preparation
+// generation (via provision.ReadBaseVersion).
 func (p *proxmoxProvider) ensureBaseTemplate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) (int, error) {
 	vmid, exists, err := p.lookupTemplate(ctx, cfg.BaseName)
 	if err != nil {
@@ -301,7 +301,7 @@ func (p *proxmoxProvider) lookupTemplate(ctx context.Context, name string) (vmid
 }
 
 // baseStale reports whether the existing template was built from a different
-// version — playbook fileset, tool-set, or template preparation (see
+// version — source image or template preparation (see
 // templateGeneration) — than the one that would be used now, and a short
 // reason. A missing/unreadable stamp counts as stale (build it once with a
 // stamp); a version-lookup failure counts as NOT stale (reuse rather than
@@ -316,16 +316,15 @@ func (p *proxmoxProvider) baseStale(cfg vm.CreateConfig) (bool, string) {
 	case have == want:
 		return false, ""
 	case have == "":
-		return true, "it has no recorded playbook version"
+		return true, "it has no recorded image version"
 	default:
-		return true, "the playbook fileset, tool-set, or template preparation has changed since it was built"
+		return true, "the source image or template preparation has changed since it was built"
 	}
 }
 
-// buildBaseTemplate creates the base VM from the cloud image, provisions it over
-// SSH, stops it, and converts it to a template. Any failure after the VM is
-// created deletes the partial base (purge=1) so a retry starts from a clean slate
-// — mirroring the Lima flow's cleanup of a half-built base.
+// buildBaseTemplate creates the base VM from the baked image, boots it to
+// generalize the identity, stops it, and converts it to a template. Any failure
+// after creation deletes the partial base (purge=1) so a retry starts clean.
 func (p *proxmoxProvider) buildBaseTemplate(ctx context.Context, cfg vm.CreateConfig, out io.Writer) (int, error) {
 	progress(out, "Building base template %s — downloads the cloud image and boots once; the first run takes several minutes\n", cfg.BaseName)
 
@@ -379,7 +378,7 @@ func (p *proxmoxProvider) buildBaseTemplate(ctx context.Context, cfg vm.CreateCo
 	return vmid, nil
 }
 
-// provisionBase carries the created base VM through resize → boot → playbook →
+// provisionBase carries the created base VM through resize → boot → generalize →
 // stop → templatize → stamp. Every step writes a progress line so the multi-
 // minute build shows movement.
 func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
@@ -393,17 +392,8 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 	if err := p.start(ctx, cfg.BaseName, out); err != nil {
 		return err
 	}
-	// Install just enough to run the playbook (ansible-core, rsync, and the apt
-	// prerequisites), then run the heavy base phase over SSH.
-	if err := p.installBaseDeps(ctx, cfg.BaseName, out); err != nil {
-		return err
-	}
-	if err := p.runPlaybookPhase(ctx, cfg.BaseName, cfg, "base", cfg.BaseName, out); err != nil {
-		return err
-	}
-	// LAST guest-side step, deliberately after everything that runs inside the
-	// VM: strip the machine identity and the name the build's own boot and
-	// playbook committed, so every clone gets its own (see generalizeScript).
+	// Boot repopulates the image's empty machine-id, so clear it again before
+	// templating. No base playbook is needed: the published image has those tools.
 	if err := p.generalizeBase(ctx, cfg.BaseName, out); err != nil {
 		return err
 	}
@@ -419,7 +409,7 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 	if err := p.client.WaitTask(ctx, tUPID.Raw); err != nil {
 		return fmt.Errorf("proxmox: converting %s to a template: %w", cfg.BaseName, err)
 	}
-	// Stamp the playbook version this base was built from so a later create can
+	// Stamp the image version this base was built from so a later create can
 	// detect drift and rebuild. Best-effort: an unstamped base simply reads as
 	// stale and is rebuilt next time.
 	p.stampBaseVersion(cfg, out)
@@ -446,10 +436,9 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 // follows along; the guard re-links it only on an image that ships it as a
 // REGULAR file, which would otherwise resurrect the cloned identity for D-Bus.
 //
-// /etc/hostname, because the base phase runs the playbook with
-// base_hostname = the base's own name, so the template's disk says
-// "sandbar-base" — and a clone's very first DHCP request carries that as
-// option 12, before anything has had the chance to rename the guest. The clone
+// /etc/hostname, because the template's boot can leave its base name on disk,
+// and a clone's very first DHCP request carries that as option 12 before
+// anything has had the chance to rename the guest. The clone
 // IS renamed twice afterwards (cloud-init from the PVE VM name, then the
 // finalize playbook), but both happen after the lease exists, so a DHCP server
 // that publishes DNS from that option answers the clone's own address with
@@ -471,25 +460,27 @@ func (p *proxmoxProvider) generalizeBase(ctx context.Context, name string, out i
 }
 
 // templateGeneration versions the PROVIDER-SIDE template preparation — the
-// steps buildBaseTemplate performs around the playbook itself (today: the
-// machine-identity and hostname reset above). It is folded into the base version stamp
-// (templateVersion) because staleness is judged by the stamp alone: a template
+// steps buildBaseTemplate performs around the baked image (today: the
+// machine-identity and hostname reset above). It is folded into the base
+// version stamp (templateVersion) because staleness is judged by the stamp alone: a template
 // built before the identity reset hands every clone a duplicated DHCP identity,
-// and no playbook change would ever rebuild it away. Bump this whenever the
+// and no image change would ever rebuild it away. Bump this whenever the
 // preparation changes in a way existing templates must not survive.
-const templateGeneration = ":template-gen3"
+const templateGeneration = ":template-gen4"
 
 // templateVersion is the version stamp a base template is judged against: the
-// shared playbook content hash (provision.PlaybookVersion, identical across
-// providers) plus this backend's own template-preparation generation.
+// pinned image release plus this backend's template-preparation generation.
+// A custom image override uses its URL as the source identity so changing the
+// override rebuilds the template. The default manifest is regenerated with
+// `go generate ./internal/baseimage` when the pinned release changes.
 func (p *proxmoxProvider) templateVersion(cfg vm.CreateConfig) (string, error) {
-	dir, err := locatePlaybookFn()
+	image, err := baseimage.PinnedManifest.ForArch("amd64")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("proxmox: pinned base image: %w", err)
 	}
-	version, err := provision.PlaybookVersion(os.DirFS(dir), cfg.ToolsetKey())
-	if err != nil {
-		return "", err
+	version := baseimage.PinnedManifest.Version
+	if p.imageURL != image.URL {
+		version = "custom-image:" + p.imageURL
 	}
 	return version + templateGeneration, nil
 }
@@ -548,11 +539,11 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 func (p *proxmoxProvider) stampBaseVersion(cfg vm.CreateConfig, out io.Writer) {
 	version, err := p.templateVersion(cfg)
 	if err != nil {
-		progress(out, "Note: could not compute the base template's version (%v); it will rebuild on the next create\n", err)
+		progress(out, "Note: could not compute the base template's image version (%v); it will rebuild on the next create\n", err)
 		return
 	}
 	if err := provision.WriteBaseVersion(p.files, cfg.BaseName, version, time.Now()); err != nil {
-		progress(out, "Note: could not record the base template's playbook version (%v); it will rebuild on the next create\n", err)
+		progress(out, "Note: could not record the base template's image version (%v); it will rebuild on the next create\n", err)
 	}
 }
 
@@ -636,49 +627,6 @@ func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, 
 
 // --- guest provisioning over SSH ------------------------------------------------
 
-// baseDepsScript installs just enough in the base guest to run the playbook over
-// SSH — the SSH counterpart of Lima's `mode: dependency` overlay script. It is
-// the bootstrap, NOT the playbook (which is run separately below so its output
-// streams), and it reruns idempotently: the guard checks for every tool it
-// installs so a partial earlier run does not leave a later boot missing one.
-// --no-install-recommends is load-bearing (Debian's ansible-core Recommends the
-// 200MB `ansible` bundle), which is why python3-passlib — needed by the user
-// role's password_hash filter — is named explicitly.
-//
-// The apt_retry wrapper is load-bearing: we SSH in the moment the guest agent
-// answers, which is BEFORE the stock Debian cloud image's first-boot apt work
-// (apt-daily.service / unattended-upgrades) has released the apt locks. Racing
-// it dies with "Could not get lock /var/lib/apt/lists/lock ... held by process
-// N (apt-get)". DPkg::Lock::Timeout alone is NOT enough — it is not honoured by
-// apt-get update's /var/lib/apt/lists/lock acquisition, so a timeout-guarded
-// update still fails outright. We therefore retry the whole apt step until the
-// boot-time apt finishes and releases every lock, failing loudly if it never
-// does within the ceiling (40 * 15s = 10 min).
-const baseDepsScript = `set -eux -o pipefail
-if command -v ansible-playbook >/dev/null 2>&1 \
-   && command -v rsync >/dev/null 2>&1 \
-   && command -v curl >/dev/null 2>&1 \
-   && command -v gpg >/dev/null 2>&1 \
-   && python3 -c 'import passlib' >/dev/null 2>&1; then
-  exit 0
-fi
-export DEBIAN_FRONTEND=noninteractive
-apt_retry() {
-  n=0
-  until "$@"; do
-    n=$((n + 1))
-    if [ "$n" -ge 40 ]; then
-      echo "apt: still locked after $n attempts, giving up" >&2
-      return 1
-    fi
-    echo "apt: locked by the guest's first-boot apt, retry $n/40..." >&2
-    sleep 15
-  done
-}
-apt_retry apt-get -o DPkg::Lock::Timeout=60 update
-apt_retry apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends ansible-core rsync curl gnupg ca-certificates python3-passlib
-`
-
 // stagePlaybookScript receives the playbook tarball on stdin and unpacks it to
 // /root/playbook (replacing any prior copy so a stale file cannot survive), the
 // directory runPlaybookScript then runs ansible-playbook from.
@@ -711,18 +659,9 @@ cd /root/playbook
 ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 `
 
-// installBaseDeps runs the bootstrap dependency install in the base guest.
-func (p *proxmoxProvider) installBaseDeps(ctx context.Context, name string, out io.Writer) error {
-	progress(out, "Installing provisioning dependencies in %s\n", name)
-	if err := p.Shell(ctx, name, nil, out, "sudo", "bash", "-c", baseDepsScript); err != nil {
-		return fmt.Errorf("proxmox: installing provisioning dependencies in %s: %w", name, err)
-	}
-	return nil
-}
-
-// runPlaybookPhase stages the playbook onto the guest and runs one Ansible phase
-// (base or finalize) against it, streaming output to out. The extra-vars — which
-// carry the tool-set selection and, for finalize, the git identity and any
+// runPlaybookPhase stages the playbook onto the guest and runs the finalize phase
+// against it, streaming output to out. The extra-vars carry the tool-set
+// selection, git identity and any
 // project-clone token — come from provision.BuildExtraVars, reused unchanged so
 // the toolset flags are never reimplemented here.
 func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg vm.CreateConfig, phase, hostname string, out io.Writer) error {
@@ -739,8 +678,8 @@ func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg
 		return fmt.Errorf("proxmox: staging the playbook into %s: %w", name, err)
 	}
 
-	// aptUpgrade is false: the cold base build and the finalize phase never ask
-	// for an apt upgrade (only the Lima flow's 30-day in-place refresh does, and
+	// aptUpgrade is false: the finalize phase never asks for an apt upgrade
+	// (only the Lima flow's 30-day in-place refresh does, and
 	// there is no in-place refresh for a template).
 	vars, err := provision.BuildExtraVars(cfg, phase, hostname, false)
 	if err != nil {

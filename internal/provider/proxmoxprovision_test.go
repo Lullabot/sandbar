@@ -15,9 +15,63 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
 )
+
+func TestProxmoxTemplateVersionUsesPinnedImage(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m)
+	want := baseimage.PinnedManifest.Version + ":template-gen4"
+	first, err := p.templateVersion(webConfig())
+	if err != nil || first != want {
+		t.Fatalf("templateVersion = %q, %v; want %q", first, err, want)
+	}
+	other := webConfig()
+	other.WithGo = !other.WithGo
+	second, err := p.templateVersion(other)
+	if err != nil || second != want {
+		t.Fatalf("templateVersion with changed tools = %q, %v; want %q", second, err, want)
+	}
+}
+
+func TestProxmoxCustomImageChangesTemplateVersion(t *testing.T) {
+	m := newPVEMock(t)
+	p := newProxmoxForTest(t, m, func(c *TargetConfig) {
+		c.BaseImage = "https://images.example.test/one.qcow2"
+	})
+	first, err := p.templateVersion(webConfig())
+	if err != nil || first != "custom-image:https://images.example.test/one.qcow2:template-gen4" {
+		t.Fatalf("custom templateVersion = %q, %v", first, err)
+	}
+	p.imageURL = "https://images.example.test/two.qcow2"
+	second, err := p.templateVersion(webConfig())
+	if err != nil || second == first {
+		t.Fatalf("changed custom templateVersion = %q, %v; want change from %q", second, err, first)
+	}
+}
+
+func TestProxmoxBaseBuildUsesBakedToolsAndRunsFinalize(t *testing.T) {
+	m := newPVEMock(t)
+	rec := &createRecorder{}
+	registerBaseBuild(m, rec)
+	p := newCreateProvider(t, m)
+	argvs := recordSSH(p)
+	var out bytes.Buffer
+	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, &out); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(out.String(), "(base phase)") || !strings.Contains(out.String(), "(finalize phase)") {
+		t.Errorf("phase output = %q; want finalize only", out.String())
+	}
+	for _, argv := range *argvs {
+		joined := strings.Join(argv, " ")
+		if strings.Contains(joined, "apt-get install") {
+			t.Errorf("base bootstrap ran despite baked tools: %q", joined)
+		}
+	}
+}
 
 // quietSSH installs a STATELESS ssh stub: it swallows the argv and echoes a line
 // to stdout, keeping no shared slice. recordSSH (proxmox_test.go) appends every
@@ -1394,7 +1448,7 @@ func TestProxmoxCleanupVMTellsTheUserWhatToRemoveByHand(t *testing.T) {
 // committed hands every clone the same systemd-networkd DHCP client identity,
 // the DHCP server hands them all ONE lease, and the clones fight over the
 // address forever (see generalizeScript). The reset must run in the BASE guest
-// — after its playbook, so nothing later re-commits an identity — and exactly
+// — after its boot, so nothing later re-commits an identity — and exactly
 // once: the clone's own boot must regenerate, never re-truncate, its id.
 func TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating(t *testing.T) {
 	m := newPVEMock(t)
@@ -1414,7 +1468,7 @@ func TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating(t *testing.T) {
 	for i, argv := range *argvs {
 		joined := strings.Join(argv, " ")
 		if playbook == -1 && strings.Contains(joined, "ansible-playbook") {
-			playbook = i // the BASE phase: the first playbook run of the build
+			playbook = i // the clone's finalize phase
 		}
 		if strings.Contains(joined, "truncate -s 0 /etc/machine-id") {
 			truncate = i
@@ -1427,16 +1481,14 @@ func TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating(t *testing.T) {
 	if truncates != 1 {
 		t.Errorf("machine-id reset ran %d times; want exactly once, in the base guest", truncates)
 	}
-	if playbook == -1 || truncate < playbook {
-		t.Errorf("machine-id reset ran at ssh command %d, before the base playbook at %d — a later step could re-commit an identity", truncate, playbook)
+	if playbook == -1 || truncate > playbook {
+		t.Errorf("machine-id reset ran at ssh command %d, after the clone's finalize playbook at %d", truncate, playbook)
 	}
 }
 
 // TestProxmoxTemplateGenerationInvalidatesPreFixTemplates proves the migration
-// path: a template stamped before the machine-identity reset existed — its
-// stamp is the bare playbook version — must read as STALE under the new
-// generation-suffixed stamp, so the next create rebuilds it instead of quietly
-// cloning more same-identity VMs from it forever. A template stamped with the
+// path: a template stamped with a playbook version must read as STALE under
+// the image-version stamp, so the next create rebuilds it. A template stamped with the
 // current templateVersion reads as current.
 func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
 	m := newPVEMock(t)
@@ -1531,15 +1583,13 @@ func TestRunPlaybookScriptIsValidShell(t *testing.T) {
 }
 
 // TestProxmoxBaseBuildClearsTheTemplateHostname pins the second half of the
-// generalize step. The base phase runs the playbook with base_hostname = the
-// base's own name, so the template's disk says "sandbar-base"; a clone's very
+// generalize step. The base boot can leave its name on disk; a clone's very
 // first DHCP request carries that as option 12, long before cloud-init or the
 // finalize playbook rename the guest, and a DHCP server that publishes DNS
 // from that option then answers the clone's address with the BASE's name.
 // Observed on a real segment as four distinct addresses all reverse-resolving
 // to sandbar-base.lan. Like the machine-id reset this must run in the base
-// guest after its playbook — a hostname cleared before the playbook is simply
-// written again by it.
+// guest after its boot and before converting it to a template.
 func TestProxmoxBaseBuildClearsTheTemplateHostname(t *testing.T) {
 	m := newPVEMock(t)
 	rec := &createRecorder{}
@@ -1557,7 +1607,7 @@ func TestProxmoxBaseBuildClearsTheTemplateHostname(t *testing.T) {
 	for i, argv := range *argvs {
 		joined := strings.Join(argv, " ")
 		if playbook == -1 && strings.Contains(joined, "ansible-playbook") {
-			playbook = i // the BASE phase: the first playbook run of the build
+			playbook = i // the clone's finalize phase
 		}
 		if strings.Contains(joined, "truncate -s 0 /etc/hostname") {
 			truncate = i
@@ -1567,7 +1617,7 @@ func TestProxmoxBaseBuildClearsTheTemplateHostname(t *testing.T) {
 		t.Fatalf("no ssh command cleared /etc/hostname — every clone of this template announces itself to the DHCP server as %q on its first request; commands: %v",
 			webConfig().BaseName, *argvs)
 	}
-	if playbook == -1 || truncate < playbook {
-		t.Errorf("hostname reset ran at ssh command %d, before the base playbook at %d — the playbook writes the base's name back", truncate, playbook)
+	if playbook == -1 || truncate > playbook {
+		t.Errorf("hostname reset ran at ssh command %d, after the clone's finalize playbook at %d", truncate, playbook)
 	}
 }
