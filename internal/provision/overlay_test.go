@@ -8,18 +8,33 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func testOverlayImage() BaseImageSpec {
+	return BaseImageSpec{Location: "/verified/base.qcow2", Arch: "x86_64", Digest: "sha256:" + strings.Repeat("a", 64)}
+}
+
+func TestRenderBaseOverlayRejectsMalformedDigest(t *testing.T) {
+	image := testOverlayImage()
+	image.Digest = "sha256:abc"
+	if _, err := RenderBaseOverlay(vm.DefaultCreateConfig(), "/playbook", image); err == nil {
+		t.Fatal("short digest accepted")
+	}
+}
+
 func TestRenderBaseOverlay(t *testing.T) {
 	cfg := vm.CreateConfig{CPUs: 4, Memory: "8GiB", Disk: "100GiB"}
 	const playbookDir = "/home/andrew/src/sandbar"
 
-	data, err := RenderBaseOverlay(cfg, playbookDir)
+	image := BaseImageSpec{Location: `/cache/sand "base".qcow2`, Arch: "x86_64", Digest: "sha256:" + strings.Repeat("a", 64)}
+	data, err := RenderBaseOverlay(cfg, playbookDir, image)
 	if err != nil {
 		t.Fatalf("RenderBaseOverlay: %v", err)
 	}
 	got := string(data)
 
 	wantSubstrings := []string{
-		"- template:_images/debian-13",
+		"images:",
+		"sha256:",
+		"mountType: reverse-sshfs",
 		"cpus: 4",
 		`memory: "8GiB"`,
 		// The base overlay always pins disk to the floor, not cfg.Disk (100GiB
@@ -49,10 +64,16 @@ func TestRenderBaseOverlay(t *testing.T) {
 
 	// The render must be valid YAML with the expected shape.
 	var doc struct {
-		Base   []string `yaml:"base"`
-		CPUs   int      `yaml:"cpus"`
-		Memory string   `yaml:"memory"`
-		Disk   string   `yaml:"disk"`
+		Base      []string `yaml:"base"`
+		MountType string   `yaml:"mountType"`
+		Images    []struct {
+			Location string `yaml:"location"`
+			Arch     string `yaml:"arch"`
+			Digest   string `yaml:"digest"`
+		} `yaml:"images"`
+		CPUs   int    `yaml:"cpus"`
+		Memory string `yaml:"memory"`
+		Disk   string `yaml:"disk"`
 		Mounts []struct {
 			Location   string `yaml:"location"`
 			MountPoint string `yaml:"mountPoint"`
@@ -66,8 +87,14 @@ func TestRenderBaseOverlay(t *testing.T) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		t.Fatalf("overlay is not valid YAML: %v\n%s", err, got)
 	}
-	if len(doc.Base) != 1 || doc.Base[0] != "template:_images/debian-13" {
-		t.Errorf("base = %v, want [template:_images/debian-13]", doc.Base)
+	if len(doc.Base) != 0 {
+		t.Errorf("base = %v, want no inherited stock image", doc.Base)
+	}
+	if doc.MountType != "reverse-sshfs" {
+		t.Errorf("mountType = %q, want reverse-sshfs for cloud kernel", doc.MountType)
+	}
+	if len(doc.Images) != 1 || doc.Images[0].Location != image.Location || doc.Images[0].Arch != image.Arch || doc.Images[0].Digest != image.Digest {
+		t.Errorf("images = %+v, want exactly %+v", doc.Images, image)
 	}
 	if doc.CPUs != 4 || doc.Memory != "8GiB" || doc.Disk != "20GiB" {
 		t.Errorf("cpus/memory/disk = %d/%q/%q", doc.CPUs, doc.Memory, doc.Disk)

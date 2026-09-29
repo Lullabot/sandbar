@@ -97,7 +97,7 @@ func TestReadBaseOverlayAbsentInstance(t *testing.T) {
 // from-scratch rebuild, with nothing to show why.
 func TestBaseOverlayReaderUnderstandsTheOverlayWeWrite(t *testing.T) {
 	const dir = "/home/andrew/sandbar"
-	overlay, err := RenderBaseOverlay(vm.DefaultCreateConfig(), dir)
+	overlay, err := RenderBaseOverlay(vm.DefaultCreateConfig(), dir, testOverlayImage())
 	if err != nil {
 		t.Fatalf("RenderBaseOverlay: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestBaseConvergeable(t *testing.T) {
 	// The instance file of a base created from the CURRENT overlay, mounting the
 	// current playbook directory — the only case that may be converged.
 	dir := t.TempDir()
-	current, err := RenderBaseOverlay(vm.DefaultCreateConfig(), dir)
+	current, err := RenderBaseOverlay(vm.DefaultCreateConfig(), dir, testOverlayImage())
 	if err != nil {
 		t.Fatalf("RenderBaseOverlay: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestBaseConvergeable(t *testing.T) {
 	// Same overlay, but the base mounts a different checkout (a git worktree, or the
 	// temp dir a previous run of a released binary extracted the playbook into).
 	otherDir := t.TempDir()
-	foreignMount, err := RenderBaseOverlay(vm.DefaultCreateConfig(), otherDir)
+	foreignMount, err := RenderBaseOverlay(vm.DefaultCreateConfig(), otherDir, testOverlayImage())
 	if err != nil {
 		t.Fatalf("RenderBaseOverlay: %v", err)
 	}

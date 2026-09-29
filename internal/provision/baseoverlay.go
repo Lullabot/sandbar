@@ -141,10 +141,7 @@ func (p *Provisioner) baseConvergeable(cfg vm.CreateConfig) (bool, string) {
 	if err != nil {
 		return false, fmt.Sprintf("the playbook could not be located (%v)", err)
 	}
-	wantYAML, err := RenderBaseOverlay(cfg, dir)
-	if err != nil {
-		return false, fmt.Sprintf("the current base overlay could not be rendered (%v)", err)
-	}
+	wantYAML := renderLegacyBaseOverlay(cfg, dir)
 	want, ok := parseBaseOverlay(wantYAML)
 	if !ok {
 		return false, "the current base overlay could not be parsed"

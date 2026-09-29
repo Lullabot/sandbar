@@ -39,6 +39,9 @@ type limaProvider struct {
 // sand wires it today). It returns the Provider interface so callers depend on
 // the seam, not the concrete type.
 func NewLocalLima(core *lima.Client, prov *provision.Provisioner) Provider {
+	if prov != nil {
+		prov.UsePublishedBase = true
+	}
 	return &limaProvider{core: core, prov: prov, hostFiles: lima.LocalFiles()}
 }
 
