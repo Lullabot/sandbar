@@ -2,7 +2,7 @@
 id: 5
 group: "image-build"
 dependencies: [3, 4, 15]
-status: "in-progress"
+status: "failed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -127,3 +127,12 @@ The URL must be the final published asset URL, which is predictable from the tag
   `.github/workflows/base-image.yml`; `git diff --check` passed.
 - Live workflow, release asset, and published checksum verification remain
   pending until this implementation is committed and dispatched on GitHub.
+- The implementation was committed as `187a813` and pushed to
+  `origin/worktree-plan-baked-images`. Dispatching
+  `base-image-2026.09.29` failed before a run was created: GitHub returned
+  `HTTP 403: Resource not accessible by personal access token` for the workflow
+  dispatch endpoint. The active credential comes only from `GH_TOKEN`; no
+  stored `gh` credential is available when that override is removed. A fresh
+  run listing was empty and the release tag remained unused. Retry this task
+  after providing a token with Actions workflow-dispatch permission; no code
+  remediation or release cleanup is currently required.
