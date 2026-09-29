@@ -30,6 +30,7 @@ Replace the three hand-maintained image constants with a generated pinned manife
 - [ ] A `go generate` (or `make`) target regenerates that file from a published release's `manifest.json`, so bumping the image is one command and one reviewable diff.
 - [ ] The three existing constants `baseImageURL`, `baseImageFile` and `defaultBaseImageSHA256` (`internal/provider/proxmoxprovision.go:61-77`) are removed in favour of the manifest.
 - [ ] A Lima-host acquisition helper resolves the target architecture and returns a verified path on the host where `limactl` runs (workstation for local Lima, remote host for remote Lima), downloading only on a cache miss or failed verification.
+- [ ] Architecture resolution is host-correct: local Lima maps `runtime.GOARCH`; remote Lima executes `uname -m` through the existing host runner and normalizes `x86_64`/`aarch64` to manifest keys. An unsupported result is an explicit error.
 - [ ] Proxmox callers consume URL/filename/SHA directly from the same manifest and retain PVE's server-side download and verification; they do not download the image through the workstation cache.
 - [ ] A **digest mismatch is a hard failure** — never a fallback to using the file anyway, and never a silent re-download loop.
 - [ ] A partially downloaded file is never mistaken for a complete one: download to a temporary path and rename into the cache only after the digest verifies.
@@ -43,7 +44,7 @@ Use your internal Todo tool to track these and keep on track.
 
 ## Technical Requirements
 
-- Architecture resolution must map Go's `runtime.GOARCH` (`amd64`, `arm64`) to the manifest keys, and must return a clear error for an unsupported architecture rather than defaulting to one.
+- Architecture resolution must describe the machine running `limactl`, not necessarily the workstation running `sand`. Map local `runtime.GOARCH` and remote host `uname -m` results to manifest keys, and return a clear error for an unsupported architecture rather than defaulting to one.
 - The cache location belongs with sand's other state; document it, because task 14 must add it to `docs/reference/files-and-state.md`.
 - Progress reporting should match the shape the TUI already consumes (`internal/ui/progress.go:39`, `internal/ui/jobstream.go`) — a periodic human-readable line is sufficient; do not invent a new protocol.
 - Verification is SHA-256, matching what the workflow publishes and what PVE's server-side download already checks.
@@ -89,12 +90,12 @@ with `var PinnedManifest = Manifest{...}` in a generated file (header comment: `
 **Acquisition helper contract.** Something like:
 
 ```go
-func Acquire(ctx context.Context, host lima.Host, m Manifest, goarch string, out io.Writer) (string, error)
+func Acquire(ctx context.Context, host lima.Host, m Manifest, arch string, out io.Writer) (string, error)
 ```
 
-returning a path meaningful on that Lima host. The order of operations matters:
+returning a path meaningful on that Lima host. Resolve `arch` from the local runtime only for local Lima; remote Lima must query the remote host before calling this helper. The order of operations matters:
 
-1. Resolve the entry for `goarch`; unknown arch → error naming the supported set.
+1. Resolve the entry for `arch`; unknown arch → error naming the supported set.
 2. Compute the cache path from the filename (and ideally the version, so two pinned versions can coexist).
 3. If the file exists, **hash it and compare**. A cached file that fails verification is deleted and re-downloaded — do not trust the cache blindly, because a truncated earlier download or a corrupted disk would otherwise wedge the user permanently.
 4. On miss, download to `<cachepath>.tmp-<random>`, hashing as you stream (`io.TeeReader` into a `sha256.New()`), reporting progress periodically.

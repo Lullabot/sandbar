@@ -35,11 +35,13 @@
     name: docker.socket
     state: started
     enabled: true
+  when: not sand_image_build
 
 - name: Keep the Docker service off the boot path
   ansible.builtin.systemd_service:
     name: docker.service
     enabled: false
+  when: not sand_image_build
 
 - name: Add claude user to docker group
   ansible.builtin.user:

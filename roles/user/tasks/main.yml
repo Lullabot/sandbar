@@ -6,7 +6,9 @@
 - name: Generate a secure random password
   ansible.builtin.set_fact:
     user_password: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits', 'punctuation'], length=24) }}"
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - not sand_image_build
 
 - name: Create user {{ user_name }}
   ansible.builtin.user:
@@ -15,22 +17,46 @@
     create_home: true
     groups: sudo
     append: true
-    password: "{{ user_password | password_hash('sha512') }}"
+    # An image carries no usable password across clones; the live path keeps
+    # the generated password exactly as before.
+    password: "{{ '!' if sand_image_build else (user_password | password_hash('sha512')) }}"
   when: provision_phase | default('full') != 'finalize'
 
 # Without linger, logind stops user@<uid>.service ten seconds after the user's
-# last login session goes away, which tears down any detached tmux server — and
-# with it a long-running Claude Code session. That is easy to miss because an
-# overlapping shell usually keeps the user manager alive; it only fires when
-# every connection drains at once, and it is logged as a clean shutdown rather
-# than an error. Linger keeps the user manager running with no sessions open, so
-# detached work survives disconnecting.
+# last login session goes away, tearing down detached tmux sessions. Offline
+# roots have no logind, so create the file the live command would write.
+- name: Ensure the offline linger directory exists
+  ansible.builtin.file:
+    path: /var/lib/systemd/linger
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - sand_image_build
+
+- name: Enable offline systemd linger for {{ user_name }}
+  ansible.builtin.copy:
+    content: ""
+    dest: "/var/lib/systemd/linger/{{ user_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - sand_image_build
+
+# An overlapping shell usually keeps the user manager alive; the shutdown is
+# seen only after every connection drains, and logged as a clean shutdown.
 - name: Enable systemd linger for {{ user_name }} so detached tmux survives logout
   ansible.builtin.command:
     cmd: loginctl enable-linger {{ user_name }}
   args:
     creates: /var/lib/systemd/linger/{{ user_name }}
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - not sand_image_build
 
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
@@ -213,4 +239,6 @@
     msg: >-
       Password for user '{{ user_name }}': {{ user_password }}
       (use for SSH and Samba access)
-  when: provision_phase | default('full') != 'finalize'
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - not sand_image_build

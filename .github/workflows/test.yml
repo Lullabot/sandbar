@@ -796,13 +796,13 @@ jobs:
           name: mutation-report
           path: mutation.log
 
-  # Ansible role behaviour, not just YAML validity: molecule converges each role
-  # in a systemd-capable Debian container (so services actually start), re-runs
-  # for idempotence, and verifies concrete outcomes. Scoped to base + samba;
-  # the other roles are documented as follow-up. Weekly + on demand, not per-PR.
+  # Ansible role behaviour, not just YAML validity: molecule checks the base
+  # role's base-to-finalize transition and a separate stable base idempotence
+  # replay in a systemd-capable Debian container. Samba has its own scenario;
+  # the other roles remain follow-up. Weekly + on demand, not per-PR.
   molecule:
-    # No custom `name:` — GitHub derives `molecule (base)` / `molecule (samba)`
-    # from the matrix when the job runs, and shows a single clean `molecule`
+    # No custom `name:` — GitHub derives one check per scenario from the
+    # matrix when the job runs, and shows a single clean `molecule`
     # check when it is skipped on a PR. An explicit templated name would render
     # the raw `${{ matrix.scenario }}` on skipped runs (matrix never expands).
     runs-on: ubuntu-24.04
@@ -819,7 +819,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [base, samba]
+        scenario: [base, base-idempotence, samba]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

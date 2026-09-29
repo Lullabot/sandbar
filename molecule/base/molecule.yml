@@ -33,14 +33,13 @@ provisioner:
 verifier:
   name: ansible
 scenario:
-  # Explicit for readability; this matches molecule's own default sequence.
-  # `idempotence` re-runs converge.yml and fails the job if anything reports
-  # changed the second time.
+  # converge.yml intentionally moves America/Toronto -> Europe/Berlin on every
+  # run. Molecule's idempotence action replays the whole converge, so it cannot
+  # pass here; base-idempotence checks a stable base-phase replay separately.
   test_sequence:
     - dependency
     - create
     - prepare
     - converge
-    - idempotence
     - verify
     - destroy

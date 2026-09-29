@@ -306,8 +306,9 @@ Five jobs:
 - `mutation` — **advisory** gremlins mutation testing over the core packages
   (`provision`, `registry`, `vm`, `lima`; `ui` is out of the initial scope).
   Non-blocking (`continue-on-error`).
-- `molecule` — converge/verify for the `base` and `samba` roles in a
-  systemd-capable Debian container. **Advisory** (`continue-on-error`) because
+- `molecule` — transition and stable idempotence checks for `base`, plus
+  converge/verify for `samba`, in a systemd-capable Debian container.
+  **Advisory** (`continue-on-error`) because
   `roles/samba`'s `smbpasswd` task is unconditionally `changed_when: true`, so
   its idempotence stage fails until the role itself is revisited (follow-up).
 

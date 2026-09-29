@@ -21,7 +21,8 @@ created: 2026-09-12
 | The work order lists four image targets (lima/macos-arm, lima/linux-amd64, lima/linux-arm64, proxmox/amd64). Is that the real artifact count? | **No — two.** The artifact is a *guest* image, and the guest is Debian 13 either way, so the host OS is irrelevant: Lima on macOS/arm64 and Lima on Linux/arm64 consume the *same* arm64 qcow2. Proxmox/amd64 and Lima/amd64 share the amd64 one. The matrix is `{amd64, arm64}`. Confirming that one image boots under both Lima and PVE is an explicit task, not an assumption. |
 | Is "free storage in GitHub Releases without issue" actually true? | **In aggregate yes, per-file no.** GitHub documents no limit on total release size and no bandwidth limit, and allows up to 1000 assets per release — but **each individual file must be under 2 GiB**. See the dedicated question below; this was raised as a possible blocker and is not one. |
 | Does "one image with all tools" mean coding agents are baked in too? | **No.** Since this plan was drafted, `main` moved Claude Code, Codex, OpenCode, and Pi into a remembered per-VM agent lifecycle during finalize. Preserve those choices. For selected Claude Code and Codex, retain the user's explicit decision to install the current release on first invocation; OpenCode and Pi keep their current behavior. Agent state never participates in the published-image version. |
-| Could the 2 GiB per-asset limit block the plan outright? | **No.** Estimated compressed size for an all-tools image is ~1.2-1.6 GiB (from ~3.2-4.0 GiB of installed content), so it likely fits — but without comfortable margin, which is why it is measured early and gated in CI rather than assumed. If it does not fit, four independent fallbacks exist, none of which change the plan's architecture: (1) zstd rather than qcow2's default zlib compression; (2) trimming large droppable content such as `golang-doc` and Go's bundled `src`; (3) splitting into parts reassembled inside sand's own acquisition layer, invisible to both providers; (4) publishing to **GHCR** as an OCI artifact, which is free for public packages and has no comparable per-file ceiling. The constraint shapes one component; it is not a premise the plan rests on. |
+| Could the 2 GiB per-asset limit block the plan outright? | **No.** Estimated compressed size for an all-tools image is ~1.2-1.6 GiB (from ~3.2-4.0 GiB of installed content), so it likely fits — but without comfortable margin, which is why it is measured early and gated in CI rather than assumed. If it does not fit, three fallbacks exist: (1) zstd rather than qcow2's default zlib compression; (2) trimming safe, functionally unused content such as docs, man pages, extra locales, and Go's test/API data; (3) moving the intact qcow2 to a directly downloadable host such as **GHCR** if its delivery contract works for PVE's importer. Splitting is not a provider-transparent fallback because PVE performs its own server-side download. The constraint shapes one component; it is not a premise the plan rests on. |
+| How should the post-rebase plan/task inconsistencies be resolved? | **Apply the reviewed consistency fixes.** Serialize size reduction before hygiene verification, resolve Lima architecture on the host that runs `limactl`, accept an absent `/var/lib/dbus/machine-id`, and remove split-file fallback language that conflicts with PVE's downloader. Preserve the provider-specific task model mappings and keep the branch plan-only. _(Approved by the user on 2026-09-28.)_ |
 
 ## Executive Summary
 
@@ -42,7 +43,7 @@ The expected outcome is a first create that costs a one-time image download plus
 | A released binary's base is un-convergeable by construction (fresh temp dir per run), so upgrades rebuild from scratch | Upgrades change the pinned image reference or nothing at all; no rebuild path is triggered by the binary's own version | The current behaviour is the worst case of the thing the user wants removed |
 | DDEV, Go, and Java choices alter the shared base; four coding agents are separately selected and installed per VM | DDEV/Go/Java are fixed image content; agent choices and `agentprefs` remain per VM; retired base-tool fields migrate safely | Matches the all-tools base goal without undoing the newer generic-agent lifecycle |
 | Golden templates record playbook/toolset freshness and clone from reserved provider templates | Golden templates inherit baked-image-version lineage; template create/reset still clone their reserved source without touching the shared base | Prevent false “current” status and source substitution after the base model changes |
-| Lima gets its image from Lima's own `template:_images/debian-13`; sand has no arch handling for Lima at all | Lima gets a sand-published image via an `images:` block carrying one entry per arch with digests; Lima still selects by host arch | The image must be ours for it to be baked; Lima's per-arch selection is reused rather than reimplemented |
+| Lima gets its image from Lima's own `template:_images/debian-13`; sand has no arch handling for Lima at all | Lima gets a sand-published image via an `images:` block carrying the verified host-matching image and digest | The image must be ours for it to be baked; local and remote Lima must resolve the architecture where `limactl` actually runs |
 | Proxmox already downloads a project-built golden image, pinned by a hand-maintained triple of URL + filename + SHA-256 constant (`internal/provider/proxmoxprovision.go:61-77`) | Both providers resolve the same generated, single-source-of-truth image manifest | Three constants kept in sync by hand is a standing bug source, and there are about to be twice as many |
 | `base-image.yml` bakes only `qemu-guest-agent`, amd64 only, and the base playbook still runs on top in-guest | `base-image.yml` bakes the complete base phase, for amd64 and arm64, and nothing base-phase runs in the guest afterwards | The image has to actually contain the tools for any of this to pay off |
 | Users can build a base from their working-tree playbook simply by running `sand` from a checkout (`LocatePlaybook` tier 1) | A local image build path reproduces the CI build on a developer machine; the working-tree finalize loop is preserved | "We'd still need some facility for local builds of images for sandbar development of itself" |
@@ -114,7 +115,7 @@ First, **no shared user password**. `roles/user/tasks/main.yml:6-19` generates a
 
 Second, **no baked SSH host keys**. If the image ships `/etc/ssh/ssh_host_*`, every VM created from it worldwide shares a host identity. The build must remove them and ensure the regeneration path on first boot is intact.
 
-Third, **machine-id generalization**, reusing the established fix: truncate `/etc/machine-id` and re-link `/var/lib/dbus/machine-id`, exactly as `generalizeScript` does for Proxmox today.
+Third, **machine-id generalization**, reusing the established fix: truncate `/etc/machine-id`; when `/var/lib/dbus/machine-id` exists as a regular file, replace it with a link to `/etc/machine-id`. Its absence is valid for images without the `dbus` package and must not fail the hygiene gate.
 
 Fourth, **no build residue**: APT lists, package caches, logs, shell history, and any transient credential material are cleared, and `dpkg`'s `force-unsafe-io` build-speed hack is restored to safe settings — a step the base role already performs at `roles/base/tasks/main.yml:492-496` for precisely this reason.
 
@@ -128,11 +129,11 @@ GitHub imposes no limit on total release size or bandwidth and permits 1000 asse
 
 The image contains Debian plus shared dependencies such as Node, Docker, Go, a JDK, DDEV, uv, glab, drupalorg, mkcert, and self-review tooling. Coding-agent binaries are not part of this estimate because `main` installs them per VM. A prior prototype including agents produced a 1.17 GiB compressed artifact, so the current shape has comfortable expected margin, but the build still sparsifies, reports size, and fails below GitHub's hard ceiling.
 
-If measurement shows the image does not fit, four fallbacks exist in preference order, none of which changes the plan's architecture:
+If measurement shows the image does not fit, three fallbacks exist in preference order, none of which changes the plan's architecture:
 
 1. **zstd compression** — qcow2's `-c` defaults to zlib; `-o compression_type=zstd` gives a materially better ratio and is read transparently by QEMU/Lima and by PVE. Cheapest fix, likely sufficient alone.
-2. **Trim droppable bulk** — `golang-doc`, Go's bundled `src` tree and similar are large and removable without losing a tool.
-3. **Alternate artifact hosting** — move the single qcow2 to a host with a larger per-file ceiling while retaining a directly downloadable URL for PVE's server-side importer. Splitting is not provider-transparent because PVE currently downloads the asset itself.
+2. **Trim droppable bulk** — documentation, man pages, unused locales, and Go's bundled test/API data are removable without losing a tool. Go's `src` tree remains because modern Go builds the standard library from source on demand.
+3. **Alternate artifact hosting** — move the intact qcow2 to a host with a larger per-file ceiling, such as GHCR if its artifact URL and authentication model work with PVE's server-side importer. Splitting is not provider-transparent because PVE currently downloads the asset itself.
 
 Distribution reuses the existing, constraint-shaped release dance: create a draft release on a `base-image-YYYY.MM.DD` tag, upload every asset plus checksums, then flip it to published. Alongside the images, the build publishes a small `manifest.json` describing the release: for each arch, the asset URL, size, and SHA-256.
 
@@ -142,7 +143,7 @@ Distribution reuses the existing, constraint-shaped release dance: create a draf
 
 Today the Proxmox provider carries `baseImageURL`, `baseImageFile` and `defaultBaseImageSHA256` as three constants with a comment warning that they must be bumped together (`internal/provider/proxmoxprovision.go:61-77`). With two architectures and two providers that becomes four-plus constants and a standing source of drift. They are replaced by a single generated Go source file — the pinned image manifest — carrying, per architecture, the asset URL, filename and SHA-256, plus the image version string. A small `make`/`go generate` target regenerates it from a published release, so bumping the image is one command and one reviewable diff rather than a careful hand-edit.
 
-For Lima, acquisition runs through the existing `lima.Host` seam so the verified cached path exists where `limactl` runs: locally for local Lima and remotely for remote Lima. Progress feeds the existing job stream, and partial files never become cache hits. Proxmox does not use that workstation cache: it passes the same manifest URL and SHA-256 to PVE's existing server-side download/verification path.
+For Lima, acquisition runs through the existing `lima.Host` seam so the verified cached path exists where `limactl` runs: locally for local Lima and remotely for remote Lima. Architecture is resolved on that same host — `runtime.GOARCH` is sufficient only for local Lima; remote Lima must normalize the result of a host-side `uname -m` (`x86_64`/`aarch64`) before selecting the manifest entry. Only the matching image is acquired and emitted in the overlay. Progress feeds the existing job stream, and partial files never become cache hits. Proxmox does not use that workstation cache: it passes the same manifest URL and SHA-256 to PVE's existing server-side download/verification path.
 
 ### Component 5: Provider Wiring and the Retirement of Base Convergence
 
@@ -184,7 +185,7 @@ The `lima-e2e` warm-path assertion inverts: a base-role edit does **not** rebuil
 - **One image failing to satisfy both Lima and PVE**: Lima expects a cloud-init-capable image with a serial console and working `growpart`; PVE expects an importable disk with `qemu-guest-agent` present. Debian genericcloud nominally satisfies both, but "nominally" is not evidence.
     - **Mitigation**: make dual-consumption an explicit, early verification task — boot the built image under Lima and import it on PVE — before any downstream work is built on the assumption. If it fails, the fallback is two per-provider variants from one build, which costs assets but not architecture.
 - **Compressed image exceeding the 2 GiB per-asset limit**: an all-tools image may not fit, and neither Lima's `images:` block nor PVE's server-side `DownloadURL` can fetch a split file.
-    - **Mitigation**: measure before engineering; gate CI on a conservative size threshold so a future overflow fails loudly; then apply the Component 3 fallback ladder in order — zstd, trim, sand-side multi-part reassembly, GHCR — each of which leaves the architecture intact.
+    - **Mitigation**: measure before engineering; gate CI on a conservative size threshold so a future overflow fails loudly; then apply the Component 3 fallback ladder in order — zstd, safe trimming, then an alternate host capable of serving the intact qcow2 directly to PVE.
 - **arm64 built on a runner with no KVM anywhere in reach**: the whole build must remain virtualization-free; any step that quietly wants a VM will fail only on the arm64 leg.
     - **Mitigation**: the technique is `qemu-nbd` plus `chroot` and never boots a guest — the same property the existing workflow already relies on; run both matrix legs from day one so an arm64-only regression cannot hide behind a green amd64 job.
 - **Loss of the in-place converge safety net**: today a broken base can often be repaired by re-applying the playbook; with a pinned image the only repair is to re-download and re-clone.
@@ -200,7 +201,7 @@ The `lima-e2e` warm-path assertion inverts: a base-role edit does **not** rebuil
 - **Shared SSH host keys**: an image shipping `/etc/ssh/ssh_host_*` gives every VM worldwide the same host identity, defeating host verification.
     - **Mitigation**: remove host keys during generalization and verify first-boot regeneration; assert their absence in the built image.
 - **Shared machine-id**: known to make `systemd-networkd` hand every clone the same DHCP lease.
-    - **Mitigation**: reuse the established fix (truncate `/etc/machine-id`, re-link `/var/lib/dbus/machine-id`) and assert it.
+    - **Mitigation**: truncate `/etc/machine-id`; re-link `/var/lib/dbus/machine-id` only when that path exists, and accept absence on images without `dbus`. Assert the resulting valid state.
 - **Supply chain — users now execute a binary image we host**: the trust surface moves from "run this playbook on your machine" to "boot this disk we built".
     - **Mitigation**: pin and verify SHA-256 on every download and on every cache reuse; build only from upstream Debian genericcloud with a reproducible, committed, reviewable build script; publish checksums as release assets alongside the images; never fall back to an unverified image on digest mismatch — fail.
 - **Build residue leaking into a public artifact**: caches, logs, shell history or transient credential material captured into a widely distributed image.
@@ -303,7 +304,10 @@ The change lands against two existing pieces of work and must stay coherent with
 - **The artifact count is two, not four.** The work order anticipated four images (lima/macos-arm, lima/linux-amd64, lima/linux-arm64, proxmox/amd64). Because the artifact is a *guest* image and the guest is Debian 13 regardless of host OS, the real matrix is `{amd64, arm64}`. Whether one image serves both Lima and PVE is verified early rather than assumed.
 - **"Users apply an ansible playbook locally" was never literally true.** Ansible is installed in the guest and run with `--connection=local`; the host only provides the playbook files. The user-visible problem is the *time* the in-guest base build costs, which is what this plan removes.
 - **The 2 GiB ceiling is the one hard external constraint, and it is not a blocker.** It is measured and gated; coding agents no longer contribute to the artifact.
-- **2026-09-28 refinement:** rebased onto the landed golden-template and generic-agent work; separated base dependencies from per-VM agents; added template lineage/migration coverage; corrected local/remote Lima versus PVE acquisition; migrated every active task to provider-specific `models` plus `effort`.
+### Change Log
+
+- 2026-09-28: Rebased onto the landed golden-template and generic-agent work; separated base dependencies from per-VM agents; added template lineage/migration coverage; corrected local/remote Lima versus PVE acquisition; migrated every active task to provider-specific `models` plus `effort`.
+- 2026-09-28: Serialized size reduction before hygiene verification; made remote-Lima architecture resolution host-correct; aligned machine-id assertions with images that omit `dbus`; removed the provider-incompatible split-file fallback; revalidated all task model mappings.
 
 ## Execution Blueprint
 
@@ -316,8 +320,8 @@ The change lands against two existing pieces of work and must stay coherent with
 graph TD
     T01[01: Chroot audit + sand_image_build flag] --> T03[03: Image build script]
     T02[02: Baseline measurement]
-    T03 --> T04[04: Image hygiene assertions]
     T03 --> T15[15: Reduce image size]
+    T15 --> T04[04: Image hygiene assertions]
     T03 --> T05[05: Workflow matrix + publish]
     T04 --> T05
     T15 --> T05
@@ -346,18 +350,21 @@ graph TD
     T17 --> T14
 ```
 
-No circular dependencies: every edge runs from a lower task ID to a higher one.
+The dependency graph is acyclic. Task numbering is descriptive rather than topological: task 15 intentionally precedes task 04 at execution time so the final compressed artifact is the one the hygiene gate inspects.
 
-### Phase 1: Foundations — Playbook Audit and the Irrecoverable Measurement
+### ✅ Phase 1: Foundations — Playbook Audit and the Irrecoverable Measurement
+
+**Status:** completed
+
 **Parallel Tasks:**
-- Task 01: Audit `roles/base` and `roles/user` for chroot compatibility and add the `sand_image_build` flag
-- Task 02: Validate the cold baseline and independently measure the warm create
+- ✔️ Task 01: Audit `roles/base` and `roles/user` for chroot compatibility and add the `sand_image_build` flag — `completed`
+- ✔️ Task 02: Validate the cold baseline and independently measure the warm create — `completed`
 
 **Retained research from the earlier prototype:**
 
 - The earlier audit identified `loginctl enable-linger`, service starts, and handlers as the chroot-sensitive paths. Its implementation was intentionally rolled back; task 01 must reapply the findings against current `main`.
-- **Key constraint discovered for Task 03:** Ansible's `hostname` module (`hostname.py:613`) selects `SystemdStrategy` only when `is_systemd_managed()` finds `/run/systemd/system/`, `/dev/.run/systemd/` or `/dev/.systemd/`. On a never-booted image root none exist, so it silently falls back to writing `/etc/hostname` directly — the offline behaviour we want. **The build must therefore NOT bind-mount host `/run`.** Bind-mounting `/dev` remains safe (both `/dev/` canaries verified absent on the build host). No guard on the hostname task is needed or wanted.
-- **Task 03 interface:** run `systemctl --root="$MOUNT" enable docker.socket` and `disable docker.service` after the chroot run; pass `samba_enabled: false`, `provision_phase: base`, `sand_image_build: true`. No other unit enablement is required by this fileset.
+- **Key image-build constraint:** Ansible's `hostname` module (`hostname.py:613`) selects `SystemdStrategy` only when `is_systemd_managed()` finds `/run/systemd/system/`, `/dev/.run/systemd/` or `/dev/.systemd/`. On a never-booted image root none exist, so it silently falls back to writing `/etc/hostname` directly — the offline behaviour we want. **The build must therefore NOT bind-mount host `/run`.** Bind-mounting `/dev` remains safe (both `/dev/` canaries verified absent on the build host). No guard on the hostname task is needed or wanted.
+- **Image-build interface:** run `systemctl --root="$MOUNT" enable docker.socket` and `disable docker.service` after the chroot run; pass `samba_enabled: false`, `provision_phase: base`, `sand_image_build: true`. No other unit enablement is required by this fileset.
 - Baseline measured on x86_64 / Debian 13, commit `44a7c05`: **cold create 24m18.9s**, of which base image creation 8m55s and the base playbook 12m57s — **21m52s is exactly the work baked images remove**. Warm create was *estimated* at ~1m44s from the cold run's own clone+start+finalize phases, not independently measured.
 - Minor nit for later: the offline linger task uses `state: touch`, which always reports changed. Harmless in a run-once image build, but it would fail an idempotence check if that path is ever molecule-tested.
 
@@ -378,7 +385,7 @@ One additional playbook change beyond Task 01's: `roles/user/tasks/main.yml` now
 ### Phase 3: The Gate and the Size Work
 **Sequential Tasks** (all perform image builds and contend for `qemu-nbd` devices, RAM and disk — they must NOT run concurrently):
 - Task 15: Reduce the published image size with safe trims and zstd compression (depends on: 03)
-- Task 04: Assert the built image is safe to distribute (depends on: 03)
+- Task 04: Assert the built image is safe to distribute (depends on: 15)
 
 **Size reduction ledger** (measured unless marked estimate):
 

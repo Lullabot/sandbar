@@ -1,0 +1,16 @@
+---
+- name: Converge one stable base phase
+  hosts: all
+  become: true
+  vars:
+    # The base role normally sees dev-tools defaults through site.yml.
+    devtools_docker_packages: []
+    devtools_packages: []
+    devtools_ddev_packages: []
+    toolset_go: false
+    toolset_java: false
+    toolset_ddev: false
+    provision_phase: base
+    base_timezone: America/Toronto
+  roles:
+    - role: base
