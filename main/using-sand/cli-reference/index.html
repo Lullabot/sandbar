@@ -2217,19 +2217,19 @@ not a prompt.</p>
 <td><code>--with-ddev</code></td>
 <td>bool</td>
 <td><code>true</code></td>
-<td>Install DDEV in the base image.</td>
+<td>Deprecated and ignored; DDEV is always in the base image.</td>
 </tr>
 <tr>
 <td><code>--with-go</code></td>
 <td>bool</td>
 <td><code>true</code></td>
-<td>Install the Go toolchain in the base image.</td>
+<td>Deprecated and ignored; Go is always in the base image.</td>
 </tr>
 <tr>
 <td><code>--with-java</code></td>
 <td>bool</td>
 <td><code>true</code></td>
-<td>Install a headless JDK in the base image.</td>
+<td>Deprecated and ignored; a headless JDK is always in the base image.</td>
 </tr>
 </tbody>
 </table>
@@ -2239,9 +2239,10 @@ win. All four may be off. See <a href="../../reference/files-and-state/#coding-a
 for existing installations. Reset uses the selections recorded for that VM.
 Likewise <code>--recreate</code> adopts that VM's recorded agents unless explicit agent
 flags override them. Reset and recreate do not change the global preferences.</p>
-<p>The dependency flags <code>--with-ddev</code>, <code>--with-go</code>, and <code>--with-java</code> configure
-the shared base image. Omitted dependency flags adopt its version stamp;
-explicit flags override it. Changing agents alone does not rebuild the base.</p>
+<p>DDEV, Go, and a headless JDK ship in the published base image, so <code>sand create</code>
+and the TUI no longer ask about them. <code>--with-ddev</code>, <code>--with-go</code>, and
+<code>--with-java</code> are still accepted so existing scripts keep working, but they have
+no effect.</p>
 <p>When <code>--template</code> is set, the saved template is the clone source and the
 shared base is not inspected or rebuilt. The new VM records that provenance,
 so <code>sand reset NAME</code> continues cloning from the same template.</p>
@@ -2464,11 +2465,11 @@ anywhere in the underlying role's defaults, it does not apply to anything
 <a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>  -with-codex
 <a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>        Install OpenAI Codex when creating this VM (default: last submitted selection)
 <a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>  -with-ddev
-<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>        Install DDEV in the base image (default true)
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>        Deprecated and ignored: this tool is always part of the base image (default true)
 <a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>  -with-go
-<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>        Install the Go toolchain in the base image (default true)
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>        Deprecated and ignored: this tool is always part of the base image (default true)
 <a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a>  -with-java
-<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a>        Install a headless JDK in the base image (default true)
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a>        Deprecated and ignored: this tool is always part of the base image (default true)
 <a id="__codelineno-2-64" name="__codelineno-2-64" href="#__codelineno-2-64"></a>  -with-opencode
 <a id="__codelineno-2-65" name="__codelineno-2-65" href="#__codelineno-2-65"></a>        Install OpenCode when creating this VM (default: last submitted selection)
 <a id="__codelineno-2-66" name="__codelineno-2-66" href="#__codelineno-2-66"></a>  -with-pi
