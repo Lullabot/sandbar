@@ -33,7 +33,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
@@ -43,7 +43,7 @@ jobs:
       ASSET: sandbar-base-debian-13-${{ matrix.arch }}.qcow2
       IMAGE_DIR: /var/tmp/sand-base-image
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install qemu tools and show disk capacity
         run: |
@@ -67,7 +67,7 @@ jobs:
       # qcow2 is already compressed. Artifact compression would burn runner
       # time for almost no gain; the two jobs transfer through artifact storage.
       - name: Transfer image and checksum to publish job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: base-image-${{ matrix.arch }}
           path: |
@@ -80,7 +80,7 @@ jobs:
   publish:
     name: Publish both architectures
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: write
@@ -89,16 +89,16 @@ jobs:
       TAG_INPUT: ${{ inputs.tag }}
       IMAGE_DIR: /var/tmp/sand-base-image
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download amd64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: base-image-amd64
           path: /var/tmp/sand-base-image
 
       - name: Download arm64 image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: base-image-arm64
           path: /var/tmp/sand-base-image
