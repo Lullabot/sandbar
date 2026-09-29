@@ -2,7 +2,7 @@
 id: 6
 group: "verification"
 dependencies: [5]
-status: "pending"
+status: "failed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -26,15 +26,15 @@ Prove the plan's central architectural assumption before any provider wiring is 
 
 ## Acceptance Criteria
 
-- [ ] The published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell.
+- [x] The published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell (with Lima configured to use the baked `claude` user; the default host user fails, as recorded below).
 - [ ] The published arm64 image boots as a Lima instance on an arm64 host (Apple Silicon or Linux/arm64), reaching a usable shell.
 - [ ] The published amd64 image imports on a real Proxmox VE target, starts, and its guest agent reports an IP address.
-- [ ] SSH host keys are confirmed to **regenerate on first boot** — they were removed by generalization, so their absence at boot must be self-healing, not a broken sshd.
-- [ ] `/etc/machine-id` is confirmed non-empty *after* first boot (systemd repopulates it), and two instances booted from the same image have **different** machine-ids.
+- [x] SSH host keys are confirmed to **regenerate on first boot** — they were removed by generalization, so their absence at boot must be self-healing, not a broken sshd.
+- [x] `/etc/machine-id` is confirmed non-empty *after* first boot (systemd repopulates it), and two instances booted from the same image have **different** machine-ids.
 - [ ] Verification: paste `limactl list` showing the instance running, plus in-guest `uname -m`, `systemctl is-system-running`, and `ls /etc/ssh/ssh_host_*` output for each arch.
 - [ ] Verification: paste the PVE side — the import command, the VM starting, and `qm agent <vmid> network-get-interfaces` returning an address.
-- [ ] Verification: paste the two differing machine-ids from two instances of the same image.
-- [ ] A written finding records whether one image serves both consumers. If it does **not**, the finding states precisely what failed and what the per-provider variant would need to differ in — that is the deliverable in the negative case, and it is a successful outcome for this task.
+- [x] Verification: paste the two differing machine-ids from two instances of the same image.
+- [x] A written finding records whether one image serves both consumers. If it does **not**, the finding states precisely what failed and what the per-provider variant would need to differ in — that is the deliverable in the negative case, and it is a successful outcome for this task.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -90,3 +90,107 @@ then `limactl start --name img-test --tty=false ./img-test.yaml`. Lima will down
 **Record everything.** Tasks 08 and 09 will be written against this finding, so ambiguity here becomes rework there.
 
 </details>
+
+## Verification finding (2026-09-29)
+
+The published amd64 asset from `base-image-2026.09.29.151245` is bootable by
+Lima 2.1.3 on an x86_64 QEMU/KVM host. Lima fetched the release URL and accepted
+the manifest digest
+`sha256:20813c0d17cd67c81dd96535285701a9415d519931059813c6d80f27719196db`.
+With the baked `claude` account selected explicitly, two independent instances
+reached SSH and `systemctl is-system-running` returned `running`. The 20 GiB
+source filesystem grew to the requested 24 GiB disk. Fresh SSH host keys and
+different machine IDs appeared on each boot.
+
+The default Lima user setting fails on this image. The published image contains
+`claude:1000:1000:/home/claude` in `/etc/passwd`, while Lima generated
+`name: andrew`, `uid: "1000"` for this host. The first boot's serial log reports
+`Failed to create user andrew`; subsequent Lima boot scripts report
+`usermod: user 'andrew' does not exist`, and SSH remains denied. The source
+image's `/etc/machine-id` was empty, `/etc/ssh/ssh_host_*` absent, and
+`/var/lib/cloud/instances` absent, so this is an account collision rather than
+stale cloud-init state. The Lima consumer in task 08 must specify the baked
+`claude` user, UID 1000, and home `/home/claude` (or the producer must change
+the baked account layout); merely replacing the `images:` block as currently
+described in task 08 will fail for normal UID-1000 workstation users.
+
+The arm64 Lima and real Proxmox acceptance checks were not run: this host is
+`x86_64`, and no arm64 host or configured Proxmox connection profile/PVE CLI
+was available. The image contains the `qemu-guest-agent` package and Debian's
+udev rule that starts its service when `org.qemu.guest_agent.0` appears, but
+this is **not** evidence of a successful PVE import or agent IP report. One
+image serving both consumers remains unproven; PR 206's dual-consumption merge
+gate has not passed. No per-provider image variant is justified yet by the
+available evidence.
+
+### Commands and evidence
+
+The disposable Lima 2.1.3 binary came from
+`lima-vm/lima` release `v2.1.3`; `sha256sum -c SHA256SUMS --ignore-missing`
+reported `lima-2.1.3-Linux-x86_64.tar.gz: OK`. `LIMA_HOME` and
+`XDG_CACHE_HOME` pointed inside
+`/var/tmp/sandbar-lima-verify-2026.09.29.151245` for every Lima command.
+The initial YAML used the published amd64 URL, the digest above, `vmType: qemu`,
+`arch: x86_64`, `cpus: 2`, `memory: 4GiB`, and `disk: 24GiB`. The successful
+YAML added:
+
+```yaml
+containerd:
+  system: false
+  user: false
+user:
+  name: claude
+  uid: "1000"
+  home: /home/claude
+```
+
+Commands: `limactl start --name img-test-a --tty=false img-test.yaml`
+(default user), then `limactl start --name img-test-claude --tty=false
+img-test-claude.yaml` and `limactl start --name img-test-claude2 --tty=false
+img-test-claude.yaml` (explicit baked user). The successful starts ended in
+`READY. Run limactl shell ... to open the shell.` The default-user boot reached
+multi-user mode, but Lima kept reporting `Permission denied (publickey)` for
+`andrew` and never reached `READY`.
+
+```text
+$ limactl list
+NAME                STATUS     SSH                VMTYPE    ARCH      CPUS    MEMORY    DISK
+img-test-a          Stopped    127.0.0.1:41571    qemu      x86_64    2       4GiB      24GiB
+img-test-claude     Running    127.0.0.1:39329    qemu      x86_64    2       4GiB      24GiB
+img-test-claude2    Running    127.0.0.1:36735    qemu      x86_64    2       4GiB      24GiB
+
+$ limactl shell img-test-claude uname -m
+x86_64
+$ limactl shell img-test-claude systemctl is-system-running
+running
+$ limactl shell img-test-claude ls /etc/ssh/ssh_host_*
+/etc/ssh/ssh_host_ecdsa_key
+/etc/ssh/ssh_host_ecdsa_key.pub
+/etc/ssh/ssh_host_ed25519_key
+/etc/ssh/ssh_host_ed25519_key.pub
+/etc/ssh/ssh_host_rsa_key
+/etc/ssh/ssh_host_rsa_key.pub
+$ limactl shell img-test-claude df -h /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/vda1        24G  2.5G   20G  12% /
+
+$ limactl shell img-test-claude cat /etc/machine-id
+726c6ff974624b7e930a4086bc97e408
+$ limactl shell img-test-claude2 cat /etc/machine-id
+b5df1a9769bd4ee5a9cc73f9ffc9c1cb
+$ limactl shell img-test-claude ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:+w+KQHdvTLz3h4f0ubbZuZ0LzJb1VqRaxUndwAzbpbg root@lima-img-test-claude (ED25519)
+$ limactl shell img-test-claude2 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:idEC2Vg3zdHlOm0upX5AVDHCYGzaGU9Mku9Vys72lDM root@lima-img-test-claude2 (ED25519)
+```
+
+`img-test-claude2` separately returned `x86_64`, `running`, the same six
+host-key paths, and a 24 GiB root filesystem. No `qm importdisk`, PVE VM start,
+or `qm agent ... network-get-interfaces` command was run.
+
+## Noteworthy Events
+
+- [2026-09-29] Task 06 remains failed because arm64 Lima and real PVE checks
+  require external targets unavailable in this environment. The default Lima
+  account collision also requires task 08 to add explicit user settings or a
+  producer change. The amd64 image itself worked with the explicit baked user.

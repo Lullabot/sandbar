@@ -15,7 +15,7 @@ fi
 image=$(realpath -e -- "$1")
 
 for cmd in qemu-img qemu-nbd modprobe blkid mount umount mountpoint \
-           udevadm chroot passwd find grep awk readlink flock; do
+           udevadm find grep awk readlink flock; do
   command -v "$cmd" >/dev/null || die "missing host command: $cmd"
 done
 qemu-img info -f qcow2 "$image" >/dev/null || die "not a readable qcow2 image: $image"
@@ -75,14 +75,7 @@ mkdir "$mount_dir"
 mount -o ro,noload "$root_partition" "$mount_dir" || die "cannot mount $root_partition read-only"
 mounted=1
 
-[[ -f $mount_dir/etc/passwd ]] || die 'missing /etc/passwd'
-mapfile -t users < <(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home\// {print $1}' "$mount_dir/etc/passwd")
-((${#users[@]} > 0)) || die 'no non-system /home user found for password check'
-for user in "${users[@]}"; do
-  passwd_status=$(chroot "$mount_dir" passwd -S "$user") || die "cannot read password status for $user"
-  status=$(awk '{print $2}' <<<"$passwd_status")
-  [[ $status == L || $status == NP ]] || die "user password is not locked: $user (passwd -S status $status)"
-done
+bash "$(dirname -- "${BASH_SOURCE[0]}")/check-base-image-user-state.sh" "$mount_dir"
 
 if [[ -d $mount_dir/etc/ssh ]]; then
   found=$(find "$mount_dir/etc/ssh" -maxdepth 1 -name 'ssh_host_*' -print -quit) || die 'cannot inspect SSH host keys'
@@ -117,7 +110,7 @@ fi
 # Search home directories once. The mkcert directory check also catches CA
 # material with an unfamiliar extension, and protects against a shared root CA
 # or private key baked into every clone.
-found=$(find "$mount_dir/root" "$mount_dir/home" \( -type f -o -type l \) \( \
+found=$(find "$mount_dir/root" "$mount_dir/home" "$mount_dir/etc/skel" \( -type f -o -type l \) \( \
   -name '.bash_history' -o -name '.zsh_history' -o -name '.python_history' -o \
   -name '.env' -o -name '.env.*' -o -name '*.pem' -o -name '*.key' -o \
   -name 'id_rsa' -o -name 'id_ed25519' -o -name 'id_ecdsa' -o -name 'id_dsa' -o \
@@ -132,4 +125,4 @@ if [[ -n $found ]]; then
   esac
 fi
 
-log "PASS: $image is safe to distribute (passwords locked; no host keys, machine identity, build residue, or credential-shaped files)"
+log "PASS: $image is safe to distribute (cloud-init login is free; no host keys, machine identity, build residue, or credential-shaped files)"

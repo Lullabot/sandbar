@@ -869,16 +869,18 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   a new way to delete the base, reopens the exact race (`baselock.go`'s doc
   comment; `prepareBaseAndClone`'s doc comment in `provision.go`) this
   machinery exists to close.
-- **The `docker` group (and every other package/group grant) happens in the
-  BASE phase**, gated `when: provision_phase != 'finalize'` in `site.yml` —
-  not in finalize. A clone already has the group in `/etc/group` before it
-  ever boots, and every `limactl shell` does a fresh login with a fresh
-  `initgroups()`, so finalize needs no bounce to make group membership
-  effective. This corrects the folklore that used to justify an unconditional
-  post-finalize restart: `createVM` (`internal/provision/provision.go`) now
-  bounces the VM only when the guest itself reports
-  `/var/run/reboot-required` (a kernel/libc upgrade), and `Reset` warns
-  instead of silently destroying a live tmux session before bouncing one.
+- **The published image contains the `docker` group, but no baked login.** The
+  image build uses a temporary account to create identity-free home content,
+  moves that content into `/etc/skel`, then removes the account, its home and
+  its linger file so Lima or Proxmox cloud-init can create the real login at
+  first boot without a UID collision. Finalize must therefore add that new
+  login to `docker` and enable linger. This still needs no bounce: the first
+  interactive `limactl shell` is a fresh login with a fresh `initgroups()`
+  after finalize. The legacy full/base path continues granting membership in
+  `dev-tools`; do not remove the finalize grant while published images ship
+  without a login. `createVM` (`internal/provision/provision.go`) bounces only
+  when the guest reports `/var/run/reboot-required`, and `Reset` warns instead
+  of silently destroying a live tmux session before bouncing one.
 
 - **`roles/user`'s `~/.tmux.conf` deploy is deliberately UNGATED**, unlike its
   identity-free neighbours that all carry `when: provision_phase != 'finalize'`.

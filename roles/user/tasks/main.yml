@@ -22,41 +22,16 @@
     password: "{{ '!' if sand_image_build else (user_password | password_hash('sha512')) }}"
   when: provision_phase | default('full') != 'finalize'
 
-# Without linger, logind stops user@<uid>.service ten seconds after the user's
-# last login session goes away, tearing down detached tmux sessions. Offline
-# roots have no logind, so create the file the live command would write.
-- name: Ensure the offline linger directory exists
-  ansible.builtin.file:
-    path: /var/lib/systemd/linger
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - sand_image_build
-
-- name: Enable offline systemd linger for {{ user_name }}
-  ansible.builtin.copy:
-    content: ""
-    dest: "/var/lib/systemd/linger/{{ user_name }}"
-    owner: root
-    group: root
-    mode: "0644"
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - sand_image_build
-
 # An overlapping shell usually keeps the user manager alive; the shutdown is
 # seen only after every connection drains, and logged as a clean shutdown.
+# The published image has no login yet, so finalize enables linger for the
+# account cloud-init created on first boot. Existing bases already have it.
 - name: Enable systemd linger for {{ user_name }} so detached tmux survives logout
   ansible.builtin.command:
     cmd: loginctl enable-linger {{ user_name }}
   args:
     creates: /var/lib/systemd/linger/{{ user_name }}
-  when:
-    - provision_phase | default('full') != 'finalize'
-    - not sand_image_build
+  when: not sand_image_build
 
 - name: Get home directory for {{ user_name }}
   ansible.builtin.getent:
@@ -66,6 +41,16 @@
 - name: Set user home directory fact
   ansible.builtin.set_fact:
     user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+# The base playbook added its temporary user to docker, but the distributed
+# image removes that user. Apply this small per-login membership on finalize.
+- name: Add cloud-init login to docker group
+  ansible.builtin.user:
+    name: "{{ user_name }}"
+    shell: "{{ user_shell }}"
+    groups: docker
+    append: true
+  when: provision_phase | default('full') == 'finalize'
 
 - name: Deploy sudoers file for passwordless sudo
   ansible.builtin.copy:
