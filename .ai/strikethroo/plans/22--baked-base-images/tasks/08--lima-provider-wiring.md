@@ -56,6 +56,7 @@ Use your internal Todo tool to track these and keep on track.
 ## Output Artifacts
 
 - The rewired Lima create path — consumed by task 10 (which then removes the now-dead convergence machinery) and exercised by task 13's CI assertions.
+- A Lima-only provider PR branching from Task 07's shared foundation. It is a sibling of Task 09's Proxmox PR, not its parent or child.
 
 ## Implementation Notes
 

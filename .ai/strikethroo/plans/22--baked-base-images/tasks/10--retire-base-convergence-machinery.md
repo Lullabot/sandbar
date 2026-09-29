@@ -52,6 +52,7 @@ Use your internal Todo tool to track these and keep on track.
 
 - Task 08's rewired Lima base path.
 - Task 09's rewired Proxmox base path.
+- Both sibling provider PRs must be present together before this join/cleanup PR begins; do not implement cross-provider deletions on only one provider branch.
 
 ## Output Artifacts
 

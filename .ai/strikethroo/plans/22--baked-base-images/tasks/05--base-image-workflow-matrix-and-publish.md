@@ -2,7 +2,7 @@
 id: 5
 group: "image-build"
 dependencies: [3, 4, 15]
-status: "failed"
+status: "completed"
 created: 2026-09-12
 models:
   anthropic: "claude-opus-5-5"
@@ -27,13 +27,13 @@ Rework `.github/workflows/base-image.yml` from a single amd64 job that bakes one
 
 - [x] The build job is a matrix over `{amd64 → ubuntu-24.04, arm64 → ubuntu-24.04-arm}`, each calling `scripts/build-base-image.sh` for its own architecture.
 - [x] Each matrix leg runs `scripts/check-base-image.sh` against its output and fails the job if the gate fails.
-- [ ] A separate publish job collects both legs' artifacts and creates one release containing: both qcow2 assets, a `.sha256` per asset, and a `manifest.json` carrying, per architecture, the asset URL, size in bytes, and SHA-256, plus the image version string.
+- [x] A separate publish job collects both legs' artifacts and creates one release containing: both qcow2 assets, a `.sha256` per asset, and a `manifest.json` carrying, per architecture, the asset URL, size in bytes, and SHA-256, plus the image version string.
 - [x] Publishing follows the existing draft-then-flip pattern: `gh release create --draft`, upload all assets, then `gh release edit --draft=false` — because this repo has immutable releases and assets cannot be added post-publish.
 - [x] New tags use `base-image-YYYY.MM.DD.HHMMSS` in UTC so multiple immutable images can ship in one day; legacy `base-image-YYYY.MM.DD` tags remain accepted. The namespace stays disjoint from release-please's `vX.Y.Z`, and the existing `workflow_dispatch` tag input is honoured.
-- [ ] Verification: `gh workflow run base-image.yml` completes with both matrix legs green. Paste the run URL and `gh run view <id>` output showing both legs succeeded.
-- [ ] Verification: `gh release view <tag> --json assets` lists exactly the expected assets for both arches plus the manifest. Paste it.
-- [ ] Verification: download both images and confirm `sha256sum -c` passes against the published checksums, and that each asset is under 2 GiB. Paste `ls -l` and the checksum results.
-- [ ] Verification: `manifest.json`'s recorded SHA-256 for each arch matches the published `.sha256` file for that arch — a mismatch here would poison every downstream download.
+- [x] Verification: `gh workflow run base-image.yml` completes with both matrix legs green. Paste the run URL and `gh run view <id>` output showing both legs succeeded.
+- [x] Verification: `gh release view <tag> --json assets` lists exactly the expected assets for both arches plus the manifest. Paste it.
+- [x] Verification: download both images and confirm `sha256sum -c` passes against the published checksums, and that each asset is under 2 GiB. Paste `ls -l` and the checksum results.
+- [x] Verification: `manifest.json`'s recorded SHA-256 for each arch matches the published `.sha256` file for that arch — a mismatch here would poison every downstream download.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -144,3 +144,13 @@ The URL must be the final published asset URL, which is predictable from the tag
   clock time, and an incomplete timestamp.
 - Review follow-up `580eacd` also fixed both amd64 jobs to Ubuntu 24.04 and
   SHA-pinned every third-party action, matching the rest of the repository.
+- Workflow run https://github.com/Lullabot/sandbar/actions/runs/36587865806
+  completed successfully at PR 206 commit `6a61c25`: `Build amd64`, `Build
+  arm64`, and `Publish both architectures` all passed. It published
+  https://github.com/Lullabot/sandbar/releases/tag/base-image-2026.09.29.151245
+  with exactly the two qcow2 files, two checksum files, and `manifest.json`.
+- Downloaded publication verification passed:
+  `sandbar-base-debian-13-amd64.qcow2: OK` and
+  `sandbar-base-debian-13-arm64.qcow2: OK`. Sizes were 1,006,632,960 and
+  974,258,176 bytes respectively, both images passed `qemu-img check`, and the
+  manifest/checksum digests matched GitHub's server-computed asset digests.

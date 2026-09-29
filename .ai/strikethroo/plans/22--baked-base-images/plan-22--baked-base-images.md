@@ -23,6 +23,7 @@ created: 2026-09-12
 | Does "one image with all tools" mean coding agents are baked in too? | **No.** Since this plan was drafted, `main` moved Claude Code, Codex, OpenCode, and Pi into a remembered per-VM agent lifecycle during finalize. Preserve those choices. For selected Claude Code and Codex, retain the user's explicit decision to install the current release on first invocation; OpenCode and Pi keep their current behavior. Agent state never participates in the published-image version. |
 | Could the 2 GiB per-asset limit block the plan outright? | **No.** Estimated compressed size for an all-tools image is ~1.2-1.6 GiB (from ~3.2-4.0 GiB of installed content), so it likely fits — but without comfortable margin, which is why it is measured early and gated in CI rather than assumed. If it does not fit, three fallbacks exist: (1) zstd rather than qcow2's default zlib compression; (2) trimming safe, functionally unused content such as docs, man pages, extra locales, and Go's test/API data; (3) moving the intact qcow2 to a directly downloadable host such as **GHCR** if its delivery contract works for PVE's importer. Splitting is not a provider-transparent fallback because PVE performs its own server-side download. The constraint shapes one component; it is not a premise the plan rests on. |
 | How should the post-rebase plan/task inconsistencies be resolved? | **Apply the reviewed consistency fixes.** Serialize size reduction before hygiene verification, resolve Lima architecture on the host that runs `limactl`, accept an absent `/var/lib/dbus/machine-id`, and remove split-file fallback language that conflicts with PVE's downloader. Preserve the provider-specific task model mappings and keep the branch plan-only. _(Approved by the user on 2026-09-28.)_ |
+| How should the remaining work land after the image-producer PR? | **Use a diamond-shaped PR series.** Keep PR 206 open only through Task 06's direct Lima/Proxmox image verification so image defects can be fixed at the producer. Then land a shared manifest/acquisition PR, followed by sibling Lima and Proxmox integration PRs based on that shared foundation. Join them only after both provider PRs land, in a final cleanup/migration/docs/CI PR. Do not stack either provider on the other. If a later integration exposes a new image defect, fix and republish it in a focused producer follow-up instead of holding PR 206 open for the entire implementation. _(Approved by the user on 2026-09-29.)_ |
 
 ## Executive Summary
 
@@ -298,6 +299,17 @@ The change lands against two existing pieces of work and must stay coherent with
 
 **Archived plan 13 (faster base VM provisioning)** named this work as its deferred Tier 3 and deliberately built toward it — the single consolidated APT transaction and cache-backed playbook it produced are exactly what makes a chroot build tractable. Nothing from plan 13 is undone; its optimizations now run once in CI instead of once per user.
 
+### Pull Request Landing Strategy
+
+The remaining work lands as a diamond rather than a linear provider stack:
+
+1. **PR 206 — image production (Tasks 01–05):** keep it open only until Task 06 proves the published images boot under Lima and import into Proxmox. A negative finding is fixed and republished here before merge; a positive finding makes PR 206 ready to merge.
+2. **Shared foundation PR (Task 07 plus its focused acquisition tests):** pin the published manifest and add provider-neutral resolution plus verified Lima-host caching. It may be developed on PR 206 while review is open, but rebases onto `main` after PR 206 lands.
+3. **Sibling provider PRs (Tasks 08 and 09):** branch both from the shared foundation. Lima and Proxmox do not depend on each other's lifecycle changes, so neither PR is stacked on the other.
+4. **Join/cleanup PR (Tasks 10–14, 16, and 17):** begin only once both provider integrations are present together. Retire the old convergence model, migrate persisted/UI surfaces and golden-template provenance, invert CI, and update documentation in the integrated tree.
+
+This boundary keeps supply-chain acquisition review separate from provider lifecycle review, permits the two providers to be tested and landed independently, and avoids carrying PR 206 as the base of a deep stack. A provider integration that later reveals an image defect opens a focused producer fix and a new immutable image release; it does not reopen or indefinitely delay the already-verified producer PR.
+
 ## Notes
 
 - **Out of scope: per-repo user Ansible.** The user's stated interest — "let it grow so that users could add ansible config to their repos to be automatically applied" — is a genuine and appealing direction, and the decision to retain Ansible for the finalize phase is what keeps it available. Building it is separate work and is deliberately not planned here, per the YAGNI and scope-control rules in `PRE_PLAN.md`.
@@ -308,6 +320,7 @@ The change lands against two existing pieces of work and must stay coherent with
 
 - 2026-09-28: Rebased onto the landed golden-template and generic-agent work; separated base dependencies from per-VM agents; added template lineage/migration coverage; corrected local/remote Lima versus PVE acquisition; migrated every active task to provider-specific `models` plus `effort`.
 - 2026-09-28: Serialized size reduction before hygiene verification; made remote-Lima architecture resolution host-correct; aligned machine-id assertions with images that omit `dbus`; removed the provider-incompatible split-file fallback; revalidated all task model mappings.
+- 2026-09-29: Added the approved diamond PR landing strategy; made Task 06 the merge gate for PR 206; separated the shared acquisition foundation from sibling Lima/Proxmox integrations and their post-merge cleanup join.
 
 ## Execution Blueprint
 
@@ -411,25 +424,33 @@ The final image saves 80.3125 MiB (7.72%) against the fresh Task 03 baseline. Of
 **Tasks:**
 - ✔️ Task 04: Assert the built image is safe to distribute (depends on: 15) — `completed`
 
-### Phase 5: Publication
-**Parallel Tasks:**
-- Task 05: Two-arch CI matrix, hygiene gate, release publish with `manifest.json` (depends on: 03, 04)
+### ✅ Phase 5: Publication
+**Status:** completed
 
-### Phase 6: Verify the Assumption, Build the Host Side
+**Parallel Tasks:**
+- ✔️ Task 05: Two-arch CI matrix, hygiene gate, release publish with `manifest.json` (depends on: 03, 04) — `completed`
+
+Release `base-image-2026.09.29.151245` was published from PR 206 commit `6a61c25`; both architecture jobs and the publish job succeeded. The five release assets were downloaded, both checksum files passed `sha256sum -c`, both qcow2 files passed `qemu-img check`, and their sizes are 1,006,632,960 bytes (amd64) and 974,258,176 bytes (arm64).
+
+### Phase 6: Verify the Assumption, Build the Shared Host Side
 **Parallel Tasks:**
 - Task 06: Verify one image boots under Lima (both arches) and imports on Proxmox (depends on: 05)
 - Task 07: Pin the image manifest in Go and add the verified, cached acquisition helper (depends on: 05)
 
-_Task 06 is a gate whose failure redirects Phase 7; it runs in parallel with 07 so a negative result arrives before the provider wiring is written._
+_Task 06 is PR 206's merge gate and redirects Phase 7 on failure. Task 07 is the shared-foundation PR and may be developed in parallel, but provider wiring cannot begin until Task 06 succeeds._
 
-### Phase 7: Provider Wiring
+### Phase 7: Sibling Provider PRs
 **Parallel Tasks:**
 - Task 08: Create the Lima base from the downloaded image (depends on: 07)
 - Task 09: Point Proxmox at the manifest image and drop its base playbook run (depends on: 07)
 
-### Phase 8: Retire the Old Model
+_Tasks 08 and 09 branch independently from Task 07's shared foundation. Neither provider PR is based on the other._
+
+### Phase 8: Join the Providers and Retire the Old Model
 **Parallel Tasks:**
 - Task 10: Remove base staleness and convergence machinery (depends on: 08, 09)
+
+_This begins the integrated cleanup PR only after both provider PRs are present together._
 
 ### Phase 9: Simplify the Surface
 **Sequential then parallel Tasks:**
@@ -446,6 +467,8 @@ _Task 06 is a gate whose failure redirects Phase 7; it runs in parallel with 07 
 ### Post-phase Actions
 
 - After Phase 5, the published release is a real, public artifact. Confirm its assets and checksums before any downstream task pins them.
+- Keep PR 206 open through Task 06. If dual-consumption verification fails, fix the producer and publish a new immutable image before merging; if it succeeds, PR 206 is ready to merge and Task 07 rebases onto the resulting `main`.
+- After Task 07 lands, create Tasks 08 and 09 as sibling branches from the shared foundation. Do not base one provider PR on the other.
 - After Phase 8, verify success criterion 4 directly (a `roles/base/` edit must not rebuild; an image version change must) rather than waiting for Phase 10's CI encoding of it.
 - After Phase 10, run the plan's Self Validation in full, comparing the measured first-create time against Task 02's recorded baseline. Success criterion 3 is the user's stated condition for the work being worthwhile; if it is not met, report that as the outcome.
 

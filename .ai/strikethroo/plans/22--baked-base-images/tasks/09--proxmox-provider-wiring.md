@@ -53,6 +53,7 @@ Use your internal Todo tool to track these and keep on track.
 ## Output Artifacts
 
 - The rewired Proxmox base path — consumed by task 10 (staleness cleanup) and exercised by the `proxmoxe2e` suite.
+- A Proxmox-only provider PR branching from Task 07's shared foundation. It is a sibling of Task 08's Lima PR, not its parent or child.
 
 ## Implementation Notes
 
