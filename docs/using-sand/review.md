@@ -62,6 +62,54 @@ The **TUI runs one review at a time**. Trying to review another checkout
 while a session is running or still shutting down leaves a message in the
 session log.
 
+## Reviewing only part of a branch
+
+By default, `sand` chooses a base commit for the review and includes all
+changes since that commit plus any uncommitted work. You can instead review
+just the commits or staged changes you specify, with precise control over the
+reviewed range.
+
+### From the CLI
+
+Add `--` followed by `git diff` arguments after the `--review` flag:
+
+```sh
+sand land NAME PATH --review -- HEAD~2
+```
+
+This reviews the working tree against the last two commits (equivalent to
+`git diff HEAD~2`). Other examples:
+
+| Command | What it reviews |
+| ------- | --------------- |
+| `sand land NAME PATH --review -- HEAD~2...HEAD` | Only the last two commits, no uncommitted changes |
+| `sand land NAME PATH --review -- --staged` | Only the changes you have staged for commit |
+| `sand land NAME PATH --review -- HEAD~10` | The last ten commits plus uncommitted work |
+
+When you provide a range, `sand` skips its automatic base selection and the
+file-count guard. A saved review is still carried in, so comments you wrote
+earlier are there to keep, edit, or drop, and `--clean` still discards it
+first.
+
+### From the TUI
+
+Press `R` (capital R) on the Landing pane's checkout row to open a one-line
+prompt. Type your git diff arguments exactly as you would on the command line:
+
+```
+HEAD~2
+HEAD~2...HEAD
+--staged
+```
+
+Arguments are split on spaces with no quoting support — git revisions and
+flags don't need it. Leaving the prompt blank is the same as pressing `v` and
+reviews the whole branch with the automatic base selection.
+
+You can cancel the prompt with `esc`. Once you submit, the review follows the
+same rules as the `v` key: it carries in any saved comments and clears the
+`reviewing…` state when you finish.
+
 ## Finishing a review
 
 Leave comments in the browser, then click **Finish Review**. The server

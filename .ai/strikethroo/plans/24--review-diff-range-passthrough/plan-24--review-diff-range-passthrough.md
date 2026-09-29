@@ -198,12 +198,38 @@ graph TD
 - ✔️ Task 002: Accept `-- <diff args>` in `sand land --review` (depends on: 001)
 - ✔️ Task 003: Landing pane review-range prompt (depends on: 001)
 
-### Phase 3: Documentation
+### ✅ Phase 3: Documentation
 **Parallel Tasks:**
-- Task 004: Document the review range (depends on: 002, 003)
+- ✔️ Task 004: Document the review range (depends on: 002, 003)
 
 ### Post-phase Actions
 
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-29
+
+### Results
+- `landreview.Session.DiffArgs` replaces the resolved base with caller-supplied diff arguments, passed as discrete argv elements. The base lookup and file-count refusal are skipped for a custom range; the saved-review probe runs on its own through a script sharing one constant with the base script.
+- `sand land NAME PATH --review -- <args>` splits at the first `--` before flag reordering; `--` arguments without `--review` are refused. `--help` documents it.
+- The Landing pane's `R` key opens a one-line range prompt (split on whitespace, blank equals `v`, `esc` cancels) through the shared review-start body.
+- `docs/using-sand/review.md` and `AGENTS.md` updated.
+- Verified fresh: `gofmt -l .` empty, `go vet ./...` clean, `go test -race -count=1 ./...` passing, `mkdocs build --strict` passing, and a stub server run confirming arguments (including `x; touch …`) arrive as discrete, inert argv elements.
+
+### Noteworthy Events
+- A worker's docs edit replaced the `## Finishing a review` heading; found in review of the diff and restored.
+- The CLI worker left an unused `sep` return value on `splitLandDiffArgs`; removed as dead code.
+- The longest Landing-pane footers (push and publish rows) now wrap onto a second help row at 80 columns because of the added `R range` entry. The layout already reserves two help rows and nothing is truncated; the old single-line footer test was replaced with one checking the reserved rows, width and truncation.
+- No Landing golden existed before, so the two new goldens are new files rather than diffs.
+- `internal/ui/model.go` also changed (non-key messages such as paste are forwarded to the range input), outside the task's listed files.
+- Not run: the real-Lima end-to-end step from Self Validation (no Lima host used), and the coverage-floor comparison against `COVERAGE_FLOOR`.
+
+### Necessary follow-ups
+- Honouring `default-diff-args` from `.self-review.yaml` (out of scope; worth a follow-up issue).
+- A file-count guard for custom ranges (out of scope).
+- Run the real-VM check once on a Lima host: `sand land NAME PATH --review -- HEAD~1` lists only the last commit.
+- Check `COVERAGE_FLOOR` in CI and ratchet it if coverage rose.
