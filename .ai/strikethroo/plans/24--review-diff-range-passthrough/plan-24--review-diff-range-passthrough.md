@@ -21,7 +21,8 @@ Source issue: Lullabot/sandbar#226, "`sand land --review`: accept a diff range, 
 | Question | Answer |
 | --- | --- |
 | Is backwards compatibility required? | Yes. `sand land … --review` with no `--`, the TUI `v`/`V` keys, and a zero-value `landreview.Session` must behave exactly as today. Every change is additive. |
-| Which TUI key opens the range prompt? | Not `r` (an earlier suggestion): `r` is already the Landing pane's rescan key (`landingRefreshKey`). Use `R`, the shift-pair of an unused-by-review key, unless it proves taken during implementation; the key is a one-line binding, so the choice is cheap to revisit in review. |
+| Which TUI key opens the range prompt? | Not `r` (an earlier suggestion): `r` is the Landing pane's rescan key (`landingRefreshKey`). Use `R`. *Auto-resolved:* the pane's only bindings are `enter`/`o`, `r`, `v`, `V` and `↑↓`, so `R` is free. |
+| Should the file-count guard and `default-diff-args` be handled for custom ranges? | No; both are out of scope. *Auto-resolved from the agreed scope.* |
 
 ## Executive Summary
 
@@ -74,7 +75,7 @@ flowchart LR
 - `Clean` behaves as now: `removeOutput` runs first, so the resume probe finds nothing and no `--resume-from` is added.
 - Argv order stays flags first, then the range: `--resume-from <path>` (when resuming), then each `DiffArgs` element as its own argv element. Arguments reach the fixed `serveScript` as positional parameters, never interpolated.
 - The progress line printed by `Run` gets a range variant, for example "reviewing <path> in <vm> (range: HEAD~2)", alongside the existing `describeBase` wording. `describeBase` itself is unchanged.
-- Arguments are the user's own input, not guest data, so no allow-list is applied beyond rejecting an argument list that contains an empty element or a NUL, which cannot be a meaningful git argument. Flags such as `--staged` must pass through untouched.
+- Arguments are the user's own input, not guest data, so no allow-list is applied. Empty elements are dropped, and flags such as `--staged` pass through untouched.
 
 ### CLI pass-through in `sand land`
 **Objective**: Accept `-- <git diff args>` after `--review` and hand them to the session.
@@ -88,7 +89,7 @@ flowchart LR
 ### Landing pane range prompt
 **Objective**: Give the TUI the same capability without slowing the common case.
 
-- Add a `landingReviewRangeKey` binding and a matching entry wherever the Landing pane derives its footer help, so the key appears next to `v review` and disappears when a review is in flight on that row, as `v` does. The key is `R`, not `r`, because `r` is the rescan key; confirm no other Landing binding uses it.
+- Add a `landingReviewRangeKey` binding and a matching entry wherever the Landing pane derives its footer help, so the key appears next to `v review` and disappears when a review is in flight on that row, as `v` does. The key is `R`, not `r`, because `r` is the rescan key; `R` is verified unused on this pane.
 - The key opens a single-line `textinput`, styled and sized like the issue input (including the width setting the existing code documents as required). The placeholder and help say a blank value reviews the whole branch and give examples (`HEAD~2`, `HEAD~2...HEAD`, `--staged`). All help strings are constants, per the project's golden-file rule.
 - `enter` submits: split the text on whitespace into argv elements with no shell or quote handling, then start the review through the existing review-start body with `DiffArgs` set. Blank input starts a review identical to `v`. `esc` closes the prompt and starts nothing.
 - Reuse `startLandingReview` rather than duplicating it: extend it (or the small wrapper both verbs call) to take the diff arguments, so the in-flight-review guard, context ownership, URL forwarding and teardown are shared and unchanged. `v` and `V` keep their current signatures and behaviour, and `V`'s confirmation flow is not altered.
@@ -170,4 +171,5 @@ The change sits entirely behind two existing entrypoints (`cmd/sand/land.go` and
 ## Notes
 
 - **Out of scope**: honouring `default-diff-args` from `.self-review.yaml` (it would need the guest to read the project config and stop passing a base), a commit-picker UI, and a numstat-based size guard for custom ranges. The first is worth a follow-up issue.
+- 2026-09-29: Refined after a baseline review. Verified `R` is unused on the Landing pane, recorded it and the scope exclusions as auto-resolved clarifications, and removed an unnecessary NUL check from the argument handling (argv cannot contain NUL).
 - The TUI prompt is intentionally a plain string, not a structured picker: a second UI for the same idea would add a render path and a guest round trip on a path where guest contact is avoided.
