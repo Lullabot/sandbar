@@ -2442,9 +2442,10 @@ func landingWithOneCheckout(t *testing.T) (model, boardVM) {
 
 // TestLandingFooterOffersCleanReviewAndStillFits guards the two ways a new
 // footer entry goes wrong. It must be OFFERED — a verb the footer never names
-// is a verb nobody finds — and the footer must still fit the 80-column
-// terminal this project budgets for, because a footer that wraps costs the
-// pane a row it never reserved and pushes content off the bottom.
+// is a verb nobody finds — and the footer must still fit the 80x24 terminal
+// this project budgets for: within the help rows the layout reserves
+// (maxFooterHelpLines), because a footer that wraps beyond them is cut short
+// with an ellipsis and whatever wrapped last is simply gone.
 func TestLandingFooterOffersCleanReviewAndStillFits(t *testing.T) {
 	m, _ := landingWithOneCheckout(t)
 
@@ -2464,9 +2465,11 @@ func TestLandingFooterOffersCleanReviewAndStillFits(t *testing.T) {
 	// At 80 columns, against the LONGEST footer this pane can produce. The
 	// act binding's help is the row's own verb, so the worst case is the
 	// longest of those ("publish to drupal.org", 17 columns more than
-	// "push"). The footer is CLIPPED rather than wrapped, so overflow does
-	// not announce itself — it silently drops whatever sits at the end of the
-	// line, which is exactly where a newly added verb goes.
+	// "push"). With the range verb in it that footer no longer fits one
+	// 80-column line and wraps onto the second reserved row; past that row it
+	// would be truncated, and truncation does not announce itself — it
+	// silently drops whatever sits at the end, which is exactly where a newly
+	// added verb goes.
 	for _, tc := range []struct {
 		name string
 		seed func(*testing.T) (model, boardVM)
@@ -2482,19 +2485,32 @@ func TestLandingFooterOffersCleanReviewAndStillFits(t *testing.T) {
 			sized, _ := wide.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 			m80 := sized.(model)
 
-			footer := landingFooterLine(ansi.Strip(m80.landingView()))
-			if footer == "" {
+			rendered := ansi.Strip(m80.landingView())
+			lines := landingFooterLines(rendered)
+			if len(lines) == 0 {
 				t.Fatal("no footer line found in the rendered pane")
 			}
-			if w := len([]rune(footer)); w > 80 {
-				t.Errorf("the footer is %d columns at an 80-column terminal:\n%q", w, footer)
+			if len(lines) > maxFooterHelpLines {
+				t.Errorf("the footer takes %d rows, more than the %d the layout reserves:\n%q", len(lines), maxFooterHelpLines, lines)
 			}
+			for _, l := range lines {
+				if w := len([]rune(l)); w > 80 {
+					t.Errorf("a footer row is %d columns at an 80-column terminal:\n%q", w, l)
+				}
+			}
+			if h := strings.Count(rendered, "\n") + 1; h > 24 {
+				t.Errorf("the pane is %d rows at a 24-row terminal", h)
+			}
+			footer := strings.Join(lines, " ")
 			// The review key is there either way; which verb it names is
 			// the subject of TestLandingReviewKeyHelpSaysCancelWhileReviewing.
 			for _, want := range []string{"v ", "esc back"} {
 				if !strings.Contains(footer, want) {
-					t.Errorf("the footer lost %q at 80 columns — it was clipped off the end:\n%q", want, footer)
+					t.Errorf("the footer lost %q at 80 columns — it was cut off the end:\n%q", want, footer)
 				}
+			}
+			if strings.Contains(footer, "…") {
+				t.Errorf("the footer was truncated at 80 columns:\n%q", footer)
 			}
 		})
 	}
@@ -2547,21 +2563,27 @@ func landingWithActionableCheckout(t *testing.T) (model, boardVM) {
 	return m, v
 }
 
-// landingFooterLine picks the footer out of a rendered pane: the line naming
-// the move key, which every footer on this pane starts with.
+// landingFooterLines picks the footer out of a rendered pane: every non-blank
+// row from the one naming the move key, which every footer on this pane starts
+// with, to the end.
 //
 // It deliberately anchors on the FIRST key rather than the last. A footer too
 // wide for the terminal wraps, and the wrapped remainder still ends in "esc
-// back" — so a helper that searched for the end would happily return the
-// second line and report a comfortable 28 columns for a footer that had just
-// eaten a row of the pane.
-func landingFooterLine(rendered string) string {
+// back" — so a helper that searched for the end would find only the second row
+// and report a comfortable width for a footer that had just taken another row
+// of the pane.
+func landingFooterLines(rendered string) []string {
+	var out []string
 	for _, line := range strings.Split(rendered, "\n") {
-		if strings.Contains(line, "move") {
-			return strings.TrimRight(line, " ")
+		line = strings.TrimRight(line, " ")
+		if out == nil && !strings.Contains(line, "move") {
+			continue
+		}
+		if strings.TrimSpace(line) != "" {
+			out = append(out, line)
 		}
 	}
-	return ""
+	return out
 }
 
 // TestLandingCleanReviewConfirmsBeforeDiscarding pins the guard. review.xml is the

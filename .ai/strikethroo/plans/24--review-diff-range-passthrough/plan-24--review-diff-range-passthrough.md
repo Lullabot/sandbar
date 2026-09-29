@@ -193,10 +193,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: Add DiffArgs to landreview.Session (completed)
 
-### Phase 2: Entrypoints
+### ✅ Phase 2: Entrypoints
 **Parallel Tasks:**
-- Task 002: Accept `-- <diff args>` in `sand land --review` (depends on: 001)
-- Task 003: Landing pane review-range prompt (depends on: 001)
+- ✔️ Task 002: Accept `-- <diff args>` in `sand land --review` (depends on: 001)
+- ✔️ Task 003: Landing pane review-range prompt (depends on: 001)
 
 ### Phase 3: Documentation
 **Parallel Tasks:**

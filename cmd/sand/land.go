@@ -104,7 +104,7 @@ func confirmOpenPrompt() bool {
 // asserted in a test without capturing the process's real stderr — the same
 // reason landPR takes its stdout as a parameter.
 func landUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review [--clean]] [--profile <name>]
+	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review [--clean] [-- DIFF-ARGS...]] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
@@ -114,6 +114,9 @@ List NAME's git checkouts and their branch/push/PR state, or act on one:
   sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
   sand land NAME PATH --review --clean
                                 the same, discarding any review already saved there
+  sand land NAME PATH --review -- HEAD~2
+                                review the range you name after -- instead of the
+                                default (here, the working tree against HEAD~2)
 
 --pr uses the workstation's own 'gh' (never the guest's token). Without gh
 it prints the compare URL and, on a terminal, offers to open it; piped or
@@ -127,6 +130,11 @@ blocks until you finish the review — which writes review.xml into PATH inside
 the VM, where the agent can read it. Nothing leaves the VM. The review tool is
 part of every base image; a base older than the tool itself picks it up on the
 next 'sand create'.
+
+Everything after -- is handed to the review server as its diff arguments, so
+you choose what is reviewed: 'HEAD~2...HEAD' for just the last two commits,
+'--staged' for only what is staged. Without it, sand picks the range itself.
+A saved review is still carried in, whatever range you choose.
 
 A review.xml already in PATH is carried into the new review, so comments you
 wrote earlier are there to keep, edit or drop. Nothing ever removes that file
@@ -175,6 +183,12 @@ func runLand(args []string) error {
 	// precede them, which is what flag.FlagSet.Parse requires (it stops
 	// parsing flags at the first non-flag token) — mirrors shell.go's
 	// reorderShellFlags.
+	//
+	// Everything after the first "--" is the caller's own diff arguments for
+	// --review, so it is cut off BEFORE the reorder: a range like "--staged"
+	// must never be mistaken for one of land's flags, nor moved ahead of the
+	// positionals.
+	args, diffArgs := splitLandDiffArgs(args)
 	if err := fs.Parse(reorderLandFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil // usage was already printed; -h/--help is not a failure
@@ -196,6 +210,11 @@ func runLand(args []string) error {
 	// silently not doing that is the one outcome they would not forgive.
 	if *cleanFlag && !*reviewFlag {
 		return errors.New("sand land: --clean only applies to --review")
+	}
+	// Refused rather than ignored, like --clean: a range the user typed that
+	// nothing reads would leave them believing a different diff was reviewed.
+	if len(diffArgs) > 0 && !*reviewFlag {
+		return errors.New("sand land: diff arguments after -- only apply to --review")
 	}
 	name := fs.Arg(0)
 	var path string
@@ -273,10 +292,27 @@ func runLand(args []string) error {
 			Checkout: co,
 			Open:     gh.OpenInBrowser,
 			Clean:    *cleanFlag,
+			DiffArgs: diffArgs,
 		})
 	default:
 		return listCheckouts(ctx, os.Stdout, gh, vc)
 	}
+}
+
+// splitLandDiffArgs cuts args at the first "--": what precedes it is land's
+// own flags and positionals, what follows is passed untouched to the review's
+// diff. A trailing empty "--" yields no diff args, which means the default
+// review.
+func splitLandDiffArgs(args []string) (before, diff []string) {
+	for i, a := range args {
+		if a == "--" {
+			if rest := args[i+1:]; len(rest) > 0 {
+				diff = rest
+			}
+			return args[:i], diff
+		}
+	}
+	return args, nil
 }
 
 // reorderLandFlags moves every recognised flag token (and, for --profile,

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -463,6 +464,10 @@ func TestLandUsageDocumentsReview(t *testing.T) {
 		"--review",
 		"sand land NAME PATH --review",
 		"no pushed branch",
+		"--review -- HEAD~2",
+		"HEAD~2...HEAD",
+		"--staged",
+		"saved review is still carried in",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("sand land usage missing %q; got:\n%s", want, out)
@@ -484,6 +489,10 @@ func TestRunLandReviewArgValidation(t *testing.T) {
 		// discard. Refused, never ignored.
 		{name: "fresh without review", args: []string{"vm", "/path", "--clean"}, wantErr: "--clean only applies to --review"},
 		{name: "fresh with web", args: []string{"vm", "/path", "--web", "--clean"}, wantErr: "--clean only applies to --review"},
+		// A range typed after -- that no action would read must not vanish
+		// silently into a listing or a PR.
+		{name: "range without review", args: []string{"vm", "/path", "--web", "--", "HEAD~2"}, wantErr: "only apply to --review"},
+		{name: "range with no action", args: []string{"vm", "--", "HEAD~2"}, wantErr: "only apply to --review"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -535,6 +544,29 @@ func TestRunLandArgValidation(t *testing.T) {
 			err := runLand(tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("runLand(%v) error = %v, want it to contain %q", tc.args, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestSplitLandDiffArgs(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       []string
+		wantBefore []string
+		wantDiff   []string
+	}{
+		{name: "no separator", args: []string{"vm", "/p", "--review"}, wantBefore: []string{"vm", "/p", "--review"}},
+		{name: "range after separator", args: []string{"vm", "/p", "--review", "--", "HEAD~2"}, wantBefore: []string{"vm", "/p", "--review"}, wantDiff: []string{"HEAD~2"}},
+		{name: "several diff args", args: []string{"--review", "vm", "/p", "--", "--staged", "--", "x"}, wantBefore: []string{"--review", "vm", "/p"}, wantDiff: []string{"--staged", "--", "x"}},
+		{name: "trailing separator", args: []string{"vm", "/p", "--review", "--"}, wantBefore: []string{"vm", "/p", "--review"}},
+		{name: "flag-looking diff arg stays out of flag parsing", args: []string{"vm", "/p", "--review", "--", "--clean"}, wantBefore: []string{"vm", "/p", "--review"}, wantDiff: []string{"--clean"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before, diff := splitLandDiffArgs(tc.args)
+			if !reflect.DeepEqual(before, tc.wantBefore) || !reflect.DeepEqual(diff, tc.wantDiff) {
+				t.Errorf("splitLandDiffArgs(%v) = %v, %v; want %v, %v", tc.args, before, diff, tc.wantBefore, tc.wantDiff)
 			}
 		})
 	}

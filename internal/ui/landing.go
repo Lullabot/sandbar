@@ -543,6 +543,13 @@ type landingPane struct {
 	// would reset to zero on every reopen — exactly the collision
 	// model.landingPublishEpoch's doc comment describes avoiding.
 	publish *landingPublish
+
+	// rangeInput is the review-range prompt's field, nil except while the
+	// prompt is open (the R key). It lives on the pane, not the model, so that
+	// reopening the pane — which replaces this struct — always starts with the
+	// prompt closed.
+	rangeInput *textinput.Model
+
 	// A review started from this pane is NOT tracked here: its teardown state
 	// lives on the model as model.review (activeReview), because a review
 	// session outlives the pane struct that started it. See activeReview's
@@ -958,6 +965,38 @@ var landingReviewKey = key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "revi
 // nothing else in the system has them.
 var landingCleanReviewKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "clean review"))
 
+// landingReviewRangeKey reviews a slice of the checkout rather than the whole
+// local branch: it opens a one-line prompt for git diff arguments (HEAD~2,
+// HEAD~2...HEAD, --staged) that are handed to the review server unchanged, the
+// way `sand land NAME PATH --review -- <args>` does. After a round of review
+// feedback the last commit or two are what needs reading, and the default base
+// otherwise re-presents everything not yet on a remote.
+//
+// Capital R rather than r because r is this pane's rescan key; nothing else on
+// the pane binds R. The help is two words on purpose: the pane's longest
+// footer already sits within a few columns of an 80-column terminal, and this
+// entry is what makes it wrap onto the second help row the layout reserves.
+var landingReviewRangeKey = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "range"))
+
+// landingRangeSubmitKey and landingRangeCancelKey are the only keys the range
+// prompt answers to besides text, and so the only ones its footer names.
+// esc cancels rather than m.keys.Back, which also binds backspace: backspace
+// must keep editing the field, the same conflict the issue prompt resolves the
+// same way.
+var (
+	landingRangeSubmitKey = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "review"))
+	landingRangeCancelKey = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
+)
+
+// landingRangePlaceholder and landingRangeHelp are the prompt's text. They are
+// constants so a rendered pane never carries anything from the environment.
+// The help says the text is split on spaces because users will reasonably
+// expect shell quoting, and there is none: git revisions and flags need none.
+const (
+	landingRangePlaceholder = "Blank → whole branch"
+	landingRangeHelp        = "git diff arguments, split on spaces (no quoting) — e.g. HEAD~2, HEAD~2...HEAD, --staged"
+)
+
 // landingMoveKey describes the pane's row cursor in the footer. It is a
 // pane-local binding rather than the shared form keys (m.keys.Up/Down) for two
 // reasons: those are labelled "prev field"/"next field", which is the wrong
@@ -1043,6 +1082,12 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.landing.publish != nil {
 		return m.updateLandingPublish(msg)
 	}
+	// Ahead of m.confirm for the same reason the publish flow is: the range
+	// prompt is a text field, and a confirmation that arrived mid-keystroke
+	// must not take the user's typing as its answer.
+	if m.landing.rangeInput != nil {
+		return m.updateLandingRange(msg)
+	}
 	if m.confirm != nil {
 		return m.updateConfirm(msg)
 	}
@@ -1077,6 +1122,7 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// treats a live review as work in flight so quitting asks first.
 		// Cancelling is now something the user does on purpose, with the
 		// review key on the row being reviewed.
+		m.landing.rangeInput = nil
 		m.view = viewBoard
 		return m, nil
 	case key.Matches(msg, landingActKey):
@@ -1101,14 +1147,73 @@ func (m model) updateLanding(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, landingCleanReviewKey):
 		m.confirmCleanReview()
 		return m, nil
+	case key.Matches(msg, landingReviewRangeKey):
+		cmd := m.openLandingRange()
+		return m, cmd
 	}
 	return m, nil
+}
+
+// openLandingRange opens the review-range prompt for the row under the
+// cursor. It refuses up front, rather than at submit, when a review is already
+// in flight: a prompt that accepted a range only to report that nothing could
+// start would waste the typing.
+func (m *model) openLandingRange() tea.Cmd {
+	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
+		return nil // empty sweep: nothing under the cursor to review
+	}
+	if m.reviewInFlight() {
+		return nil
+	}
+	ti := newRangeInput()
+	m.landing.rangeInput = &ti
+	return textinput.Blink
+}
+
+// updateLandingRange routes keys while the range prompt is open: every key
+// but enter and esc is text, so a q, v or r typed into a range edits it rather
+// than running the verb it names elsewhere.
+func (m model) updateLandingRange(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, landingRangeCancelKey):
+		m.landing.rangeInput = nil
+		return m, nil
+	case key.Matches(msg, landingRangeSubmitKey):
+		// strings.Fields and nothing more: the arguments reach the review
+		// server as argv elements, never through a shell, so quoting would be
+		// a promise with nothing behind it. A blank entry yields no arguments,
+		// which is exactly the review v starts.
+		args := strings.Fields(m.landing.rangeInput.Value())
+		m.landing.rangeInput = nil
+		cmd := m.startLandingReview(false, args)
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	*m.landing.rangeInput, cmd = m.landing.rangeInput.Update(msg)
+	return m, cmd
+}
+
+// newRangeInput builds the review-range prompt's text input, sized like the
+// issue input for the reason newIssueInput documents: without a width the
+// placeholder renders as its first character alone.
+func newRangeInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = landingRangePlaceholder
+	ti.CharLimit = 256
+	ti.SetWidth(44)
+	ti.Focus()
+	return ti
 }
 
 // landingHelp is the Landing pane's footer. The act key carries the focused
 // row's REAL verb (see landingActBinding), so the footer answers "what happens
 // if I press enter" without the user having to press it.
 func (m model) landingHelp() []key.Binding {
+	// The range prompt owns every key while it is open (updateLanding checks it
+	// ahead of m.confirm), so it owns the footer ahead of the confirmation too.
+	if m.landing.rangeInput != nil {
+		return []key.Binding{landingRangeSubmitKey, landingRangeCancelKey}
+	}
 	// A pending confirmation owns the keys (updateLanding), so it owns the help
 	// bar too — offering "move/act/refresh" beside a prompt that answers none of
 	// them is how a live overlay comes to look like a dead one. Mirrors
@@ -1121,6 +1226,7 @@ func (m model) landingHelp() []key.Binding {
 		m.landing.landingActBinding(),
 		landingRefreshKey,
 		m.landingReviewBinding(),
+		m.landingReviewRangeBinding(),
 		m.landingCleanReviewBinding(),
 		m.keys.Back,
 	}
@@ -1267,7 +1373,18 @@ func (m model) landingView() string {
 		b.WriteString("\n")
 	}
 
-	if m.confirm != nil {
+	switch {
+	case m.landing.rangeInput != nil:
+		// Drawn where the confirmation overlay goes, and in its place: the
+		// prompt owns the keys, so a confirmation raised meanwhile waits
+		// unseen rather than showing beside a field that would swallow its
+		// answer.
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Width(cw).Render(landingRangeHelp))
+		b.WriteString("\n")
+		b.WriteString(m.landing.rangeInput.View())
+		b.WriteString("\n")
+	case m.confirm != nil:
 		b.WriteString("\n" + m.confirmView())
 	}
 	b.WriteString("\n" + m.footerView(m.landingHelp()))
@@ -2220,7 +2337,7 @@ func (m *model) handleLandCommitPushDone(msg landCommitPushDoneMsg) tea.Cmd {
 // reviewing — potentially many minutes — and Update must never block the
 // board's event loop waiting for it.
 func (m *model) runLandingReview() tea.Cmd {
-	return m.startLandingReview(false)
+	return m.startLandingReview(false, nil)
 }
 
 // cancelFocusedReview cancels the in-flight review when the cursor sits on
@@ -2282,6 +2399,29 @@ func (m model) landingCleanReviewBinding() key.Binding {
 	return landingCleanReviewKey
 }
 
+// landingReviewRangeBinding hides the range verb on a row whose review is
+// already running, for the reason landingCleanReviewBinding hides V: nothing
+// can start there until the current review ends.
+func (m model) landingReviewRangeBinding() key.Binding {
+	b := landingReviewRangeKey
+	b.SetEnabled(!m.focusedRowUnderReview())
+	return b
+}
+
+// reviewInFlight reports whether a review is already running, saying so in the
+// session log when it is. Only one review runs at a time; a second would leak
+// the first one's cancel func. It is said out loud rather than dropped because
+// the state outlives the pane (see activeReview) — a review cancelled a moment
+// ago is still tearing down, and its row may no longer be on screen to explain
+// why a review key now does nothing at all.
+func (m *model) reviewInFlight() bool {
+	if m.review.path == "" {
+		return false
+	}
+	m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+	return true
+}
+
 // confirmCleanReview raises the confirmation behind the clean-review verb.
 //
 // It confirms whether or not a review.xml is actually there, which is a
@@ -2294,8 +2434,7 @@ func (m *model) confirmCleanReview() {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return // empty sweep: nothing under the cursor to review
 	}
-	if m.review.path != "" {
-		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+	if m.reviewInFlight() {
 		return
 	}
 	co := m.landing.rows[m.landing.cursor].Checkout
@@ -2336,23 +2475,19 @@ func (m *model) handleLandReviewClean(msg landReviewCleanMsg) tea.Cmd {
 		m.landing.rows[m.landing.cursor].Checkout.Path != msg.path {
 		return nil // the cursor moved between the prompt and the answer
 	}
-	return m.startLandingReview(true)
+	return m.startLandingReview(true, nil)
 }
 
-// startLandingReview is the body both review verbs share. fresh discards any
+// startLandingReview is the body every review verb shares. fresh discards any
 // review already saved in the checkout and carries nothing in; see
-// landreview.Session.Clean.
-func (m *model) startLandingReview(fresh bool) tea.Cmd {
+// landreview.Session.Clean. diffArgs, when non-empty, replace the resolved
+// review base with the caller's own git diff arguments; see
+// landreview.Session.DiffArgs.
+func (m *model) startLandingReview(fresh bool, diffArgs []string) tea.Cmd {
 	if m.landing.cursor < 0 || m.landing.cursor >= len(m.landing.rows) {
 		return nil // empty sweep: nothing under the cursor to review
 	}
-	if m.review.path != "" {
-		// One review already in flight; a second would leak the first's cancel
-		// func. It is said out loud rather than dropped, because the state
-		// outlives the pane (see activeReview) — a review cancelled by Back a
-		// moment ago is still tearing down, and its row is no longer on screen
-		// to explain why 'v' now does nothing at all.
-		m.logMsg("a review of " + m.review.path + " is still in flight; only one runs at a time")
+	if m.reviewInFlight() {
 		return nil
 	}
 	p := m.provFor(m.landing.scope)
@@ -2391,6 +2526,7 @@ func (m *model) startLandingReview(fresh bool) tea.Cmd {
 		Checkout: co,
 		Open:     m.ghActions.OpenInBrowser,
 		Clean:    fresh,
+		DiffArgs: diffArgs,
 	}
 	run := m.reviewRun
 	// urls carries the review UI's URL out of Session.Run's writer and back
