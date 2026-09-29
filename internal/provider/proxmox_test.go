@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -1387,21 +1388,25 @@ func TestProxmoxBaseImageDefaultAndOverride(t *testing.T) {
 	m := newPVEMock(t)
 
 	def := newProxmoxForTest(t, m)
-	if def.baseImageURL != baseImageURL || def.baseImageFile != baseImageFile {
-		t.Errorf("unset base_image = (%q, %q); want the built-in default (%q, %q)",
-			def.baseImageURL, def.baseImageFile, baseImageURL, baseImageFile)
+	image, err := baseimage.PinnedManifest.ForArch("amd64")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if def.baseImageSHA256 != defaultBaseImageSHA256 {
-		t.Errorf("default image checksum = %q; want the pinned %q", def.baseImageSHA256, defaultBaseImageSHA256)
+	if def.imageURL != image.URL || def.imageFile != image.Filename {
+		t.Errorf("unset base_image = (%q, %q); want the built-in default (%q, %q)",
+			def.imageURL, def.imageFile, image.URL, image.Filename)
+	}
+	if def.baseImageSHA256 != image.SHA256 {
+		t.Errorf("default image checksum = %q; want the pinned %q", def.baseImageSHA256, image.SHA256)
 	}
 
 	const url = "https://example.test/golden/sandbar-base.qcow2?sig=abc"
 	over := newProxmoxForTest(t, m, func(c *TargetConfig) { c.BaseImage = url })
-	if over.baseImageURL != url {
-		t.Errorf("base_image URL = %q; want the override %q", over.baseImageURL, url)
+	if over.imageURL != url {
+		t.Errorf("base_image URL = %q; want the override %q", over.imageURL, url)
 	}
-	if over.baseImageFile != "sandbar-base.qcow2" {
-		t.Errorf("derived filename = %q; want %q (query stripped)", over.baseImageFile, "sandbar-base.qcow2")
+	if over.imageFile != "sandbar-base.qcow2" {
+		t.Errorf("derived filename = %q; want %q (query stripped)", over.imageFile, "sandbar-base.qcow2")
 	}
 	if over.baseImageSHA256 != "" {
 		t.Errorf("custom base_image must carry no pinned checksum, got %q", over.baseImageSHA256)

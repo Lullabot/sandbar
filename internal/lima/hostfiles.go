@@ -16,7 +16,10 @@ package lima
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -99,6 +102,16 @@ type HostFiles interface {
 	ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error)
 }
 
+// ImageStore extends HostFiles with streaming, hashing and atomic publication
+// for the verified base-image cache. These methods operate on the limactl host;
+// SSHHost implements them over SSH without buffering a disk image in memory.
+type ImageStore interface {
+	HostFiles
+	WriteStream(ctx context.Context, path string, src io.Reader) error
+	SHA256(ctx context.Context, path string) (string, error)
+	Rename(ctx context.Context, oldPath, newPath string) error
+}
+
 // LockFile is an advisory exclusive lock on a file on the limactl host. It backs
 // the base-image lock that serializes base preparation across concurrent creates
 // and across separate sand processes (internal/provision/baselock.go).
@@ -135,6 +148,50 @@ func (localFiles) WriteFile(path string, data []byte, dirPerm, filePerm fs.FileM
 		return err
 	}
 	return os.WriteFile(path, data, filePerm)
+}
+
+func (localFiles) WriteStream(ctx context.Context, path string, src io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, &contextReader{ctx: ctx, reader: src}); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
+func (localFiles) SHA256(ctx context.Context, path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, &contextReader{ctx: ctx, reader: f}); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (localFiles) Rename(_ context.Context, oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
 }
 
 func (localFiles) LimaHome() string {

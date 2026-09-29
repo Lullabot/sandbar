@@ -144,8 +144,44 @@ type SSHHost struct {
 // Compile-time proof the SSH host satisfies the whole seam and the copy hook.
 var (
 	_ Host         = (*SSHHost)(nil)
+	_ ImageStore   = (*SSHHost)(nil)
 	_ remoteCopier = (*SSHHost)(nil)
 )
+
+// WriteStream writes an exclusive cache temp file on the remote Lima host.
+// Bytes travel over stdin, so even a large qcow2 is never buffered here.
+func (h *SSHHost) WriteStream(ctx context.Context, path string, src io.Reader) error {
+	script := `set -e; mkdir -p -- "$1"; ( set -C; umask 077; cat > "$2" )`
+	_, errb, err := h.runRemote(ctx, src, "sh", "-c", script, "sand", filepath.Dir(path), path)
+	if err != nil {
+		return asNotExist("write image", path, errb, err)
+	}
+	return nil
+}
+
+// SHA256 hashes a cached image on its host, avoiding a gigabyte transfer on
+// every cache hit. GNU/Linux uses sha256sum; macOS uses shasum.
+func (h *SSHHost) SHA256(ctx context.Context, path string) (string, error) {
+	script := `if command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$1"; else shasum -a 256 -- "$1"; fi`
+	out, errb, err := h.runRemote(ctx, nil, "sh", "-c", script, "sand", path)
+	if err != nil {
+		return "", asNotExist("hash image", path, errb, err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 || len(fields[0]) != 64 {
+		return "", fmt.Errorf("hash image %s: unexpected output %q", path, out)
+	}
+	return strings.ToLower(fields[0]), nil
+}
+
+// Rename atomically publishes a fully verified temp file on the remote host.
+func (h *SSHHost) Rename(ctx context.Context, oldPath, newPath string) error {
+	_, errb, err := h.runRemote(ctx, nil, "mv", "-f", "--", oldPath, newPath)
+	if err != nil {
+		return asNotExist("rename image", oldPath, errb, err)
+	}
+	return nil
+}
 
 // NewSSHHost builds an SSH host-access implementation for the given connection.
 func NewSSHHost(cfg SSHConfig) *SSHHost {
