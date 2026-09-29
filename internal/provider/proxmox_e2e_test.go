@@ -42,7 +42,7 @@
 //	                             LEAVE IT UNSET to use sand's own default golden
 //	                             image: sand needs qemu-guest-agent running on
 //	                             first boot to learn a VM's IP, and a stock cloud
-//	                             image does not ship it, so most overrides here
+//	                             image does not ship it or the baked build tools, so most overrides here
 //	                             will hang the lifecycle test rather than teach
 //	                             you anything.
 //	PROXMOX_E2E_INSECURE=1       skip TLS verification (self-signed PVE cert)
@@ -265,8 +265,7 @@ func TestE2EProxmoxLifecycle(t *testing.T) {
 		Disk:     vm.BaseDiskFloor,
 		Domain:   "lan",
 		Locale:   "en_US.UTF-8",
-		// Tool flags left at their zero value: this test exercises the Proxmox
-		// transport and lifecycle, not the base's installed tooling.
+		WithPi:   true, // agent selection is a finalize-only operation
 	}
 
 	ctx := context.Background()
@@ -274,6 +273,10 @@ func TestE2EProxmoxLifecycle(t *testing.T) {
 	if err := prov.Create(ctx, vmCfg, provision.CreateOptions{}, &createLog); err != nil {
 		t.Fatalf("Create: %v\n%s", err, createLog.String())
 	}
+	if strings.Contains(createLog.String(), "(base phase)") || !strings.Contains(createLog.String(), "(finalize phase)") {
+		t.Fatalf("Create ran unexpected phases:\n%s", createLog.String())
+	}
+	t.Logf("Create phases: base=false, finalize=true")
 
 	// --- List() sees it ------------------------------------------------------
 	vms, err := prov.List()
@@ -292,6 +295,11 @@ func TestE2EProxmoxLifecycle(t *testing.T) {
 	if got := strings.TrimSpace(string(back)); got != "sentinel-42" {
 		t.Fatalf("ShellOut echo = %q, want %q", got, "sentinel-42")
 	}
+	tools, err := prov.ShellOut(ctx, name, "sh", "-c", `set -eu; command -v ansible-playbook; command -v rsync; command -v docker; command -v node; test -x "$HOME/.local/bin/pi"; if command -v claude >/dev/null 2>&1; then exit 9; fi; printf 'pi-selected claude-absent\n'`)
+	if err != nil {
+		t.Fatalf("baked dependencies and agent selection: %v\n%s", err, tools)
+	}
+	t.Logf("Guest baked dependencies and agent selection:\n%s", tools)
 
 	// --- host resources come from the API -----------------------------------
 	hr := prov.HostResources()
