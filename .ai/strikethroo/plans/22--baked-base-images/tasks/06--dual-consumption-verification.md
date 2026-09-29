@@ -27,11 +27,11 @@ Prove the plan's central architectural assumption before any provider wiring is 
 ## Acceptance Criteria
 
 - [x] The corrected published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell with Lima's default cloud-init user and no explicit user override.
-- [ ] The published arm64 image boots as a Lima instance on an arm64 host (Apple Silicon or Linux/arm64), reaching a usable shell.
+- [x] The corrected published arm64 image boots as a Lima instance on Apple Silicon, reaching a usable shell with Lima's default cloud-init user and no explicit user override.
 - [ ] The published amd64 image imports on a real Proxmox VE target, starts, and its guest agent reports an IP address.
 - [x] SSH host keys are confirmed to **regenerate on first boot** — they were removed by generalization, so their absence at boot must be self-healing, not a broken sshd.
 - [x] `/etc/machine-id` is confirmed non-empty *after* first boot (systemd repopulates it), and two instances booted from the same image have **different** machine-ids.
-- [ ] Verification: paste `limactl list` showing the instance running, plus in-guest `uname -m`, `systemctl is-system-running`, and `ls /etc/ssh/ssh_host_*` output for each arch.
+- [x] Verification: paste `limactl list` showing the instance running, plus in-guest `uname -m`, `systemctl is-system-running`, and `ls /etc/ssh/ssh_host_*` output for each arch.
 - [ ] Verification: paste the PVE side — the import command, the VM starting, and `qm agent <vmid> network-get-interfaces` returning an address.
 - [x] Verification: paste the two differing machine-ids from two instances of the same image.
 - [x] A written finding records whether one image serves both consumers. If it does **not**, the finding states precisely what failed and what the per-provider variant would need to differ in — that is the deliverable in the negative case, and it is a successful outcome for this task.
@@ -135,8 +135,37 @@ $ limactl shell img-fixed-b sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pu
 The two machine IDs and host keys differ. Both disposable instances were
 deleted after verification, and the temporary host KVM ACL was restored. The
 amd64 Lima portion of this gate now passes without a consumer workaround.
-Arm64 Lima and real Proxmox remain outstanding, so the task remains failed as a
-whole until those external checks pass.
+
+The user independently booted the same corrected release's arm64 asset on an
+Apple Silicon host with Lima/QEMU and no `user:` override. Lima reported the
+instance `Running` as `aarch64`; the guest login was the host-derived
+`andrew:501`, `uname -m` returned `aarch64`, systemd returned `running`,
+cloud-init reported `done`, `/dev/vda1` grew to 24 GiB, and `getent passwd
+claude` returned no entry. Its regenerated machine ID was
+`0c7653cc94dc4c178012abe119fd0433`. The cloud-init extended status was degraded
+only by Lima-generated deprecation warnings for `ssh-authorized-keys` and a
+string UID; it reported no errors.
+
+```text
+$ limactl list
+NAME                  STATUS     SSH                VMTYPE    ARCH       CPUS    MEMORY    DISK
+sandbar-arm64-test    Running    127.0.0.1:64168    qemu      aarch64    2       4GiB      24GiB
+$ limactl shell sandbar-arm64-test uname -m
+aarch64
+$ limactl shell sandbar-arm64-test systemctl is-system-running
+running
+$ limactl shell sandbar-arm64-test sudo find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -print
+/etc/ssh/ssh_host_ed25519_key.pub
+/etc/ssh/ssh_host_ecdsa_key.pub
+/etc/ssh/ssh_host_rsa_key
+/etc/ssh/ssh_host_ed25519_key
+/etc/ssh/ssh_host_ecdsa_key
+/etc/ssh/ssh_host_rsa_key.pub
+```
+
+Both Lima architectures now pass without a consumer workaround. Real Proxmox
+remains outstanding, so the task remains failed as a whole until that external
+check passes.
 
 ### Superseded first-release finding
 
@@ -238,9 +267,11 @@ or `qm agent ... network-get-interfaces` command was run.
 ## Noteworthy Events
 
 - [2026-09-29] `base-image-2026.09.29.164715` passed the amd64 Lima gate with
-  the default cloud-init user; no task 08 user override is required. Task 06
-  remains failed only because arm64 Lima and real PVE checks require the
-  external targets offered by the user.
+  the default cloud-init user; no task 08 user override is required.
+- [2026-09-29] The user booted the corrected arm64 asset under Lima/QEMU on
+  Apple Silicon. The default user, system state, disk growth, machine ID, and
+  regenerated host keys all passed. Task 06 now remains failed only because
+  the real PVE import/start/guest-agent check requires the offered API target.
 - [2026-09-29] The superseded first release failed for Lima's default account
   because it baked `claude:1000`; producer commit `64a87ec` generalized the
   login into `/etc/skel` and the corrected release above verifies the fix.
