@@ -109,15 +109,6 @@
   args:
     creates: "{{ devtools_user_home }}/.local/bin/uv"
 
-# mkcert CA
-- name: Install mkcert CA
-  ansible.builtin.command:
-    cmd: mkcert -install
-  become: true
-  become_user: "{{ devtools_user_name }}"
-  args:
-    creates: "{{ devtools_user_home }}/.local/share/mkcert/rootCA.pem"
-
 # Docker Registry Proxy
 - name: Download Docker registry proxy CA certificate
   ansible.builtin.get_url:

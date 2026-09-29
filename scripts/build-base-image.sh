@@ -8,6 +8,7 @@ usage() {
 Usage: sudo scripts/build-base-image.sh --arch amd64|arm64 --out PATH [--max-size-mib N] [--src-url URL_OR_FILE]
 
 The output directory must have enough disk space for a 20 GiB working image.
+The builder prefers zstd qcow2 compression and warns before falling back to zlib.
 EOF
 }
 
@@ -45,7 +46,7 @@ case "$arch:$host_arch" in
 esac
 
 for cmd in qemu-img qemu-nbd modprobe blkid mount umount mountpoint udevadm \
-           resize2fs chroot systemctl fstrim curl sha256sum; do
+           resize2fs e2fsck chroot systemctl fstrim curl sha256sum; do
   command -v "$cmd" >/dev/null || die "missing $cmd (install qemu-utils and standard Ubuntu system tools)"
 done
 if ! command -v growpart >/dev/null; then
@@ -75,6 +76,7 @@ mounted=0
 resolv_saved=0
 policy_saved=0
 output_tmp="$work/output.qcow2"
+compression=zstd
 
 cleanup() {
   local status=$?
@@ -116,6 +118,15 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+
+# Probe the actual encoder rather than parsing qemu-img's version or help text:
+# distributors can build the same QEMU release with different codec support.
+qemu-img create -q -f qcow2 "$work/compression-probe.qcow2" 1M
+if ! qemu-img convert -q -f qcow2 -O qcow2 -c -o compression_type=zstd \
+    "$work/compression-probe.qcow2" "$work/compression-probe-zstd.qcow2" 2>/dev/null; then
+  compression=zlib
+  log 'warning: qemu-img cannot encode zstd qcow2; falling back to zlib compression'
+fi
 
 src_url=${src_url:-"https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-${arch}.qcow2"}
 log "fetching $src_url"
@@ -215,6 +226,23 @@ find "$mount_dir/root" "$mount_dir/home" -maxdepth 2 -type f \
   \( -name '.bash_history' -o -name '.zsh_history' -o -name '.python_history' \) -delete
 [[ ! -e $mount_dir/etc/dpkg/dpkg.cfg.d/99-sand-base-speed ]] || die 'dpkg force-unsafe-io remained after the base role'
 
+# The nodoc dpkg policy applies to future unpacking, but Debian's cloud image
+# and the bootstrap packages arrived before the role wrote that policy. Keep
+# license notices while removing those already unpacked files as well.
+find "$mount_dir/usr/share/doc" -mindepth 2 -type f ! -name copyright -delete
+find "$mount_dir/usr/share/doc" -mindepth 2 -type l -delete
+find "$mount_dir/usr/share/doc" -mindepth 1 -depth -type d -empty -delete
+find "$mount_dir/usr/share/man" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+
+# Compiled locales live in /usr/lib/locale. After locale-gen, translation
+# catalogues for other languages and the source definitions are unnecessary.
+# Keep both configured English variants and the generic English fallback.
+find "$mount_dir/usr/share/locale" -mindepth 1 -maxdepth 1 -type d \
+  ! -name en ! -name en_CA ! -name en_US -exec rm -rf -- {} +
+rm -rf -- "$mount_dir/usr/share/i18n"
+rm -rf -- "$mount_dir/usr/share/go-1.24/test" "$mount_dir/usr/share/go-1.24/api"
+rm -rf -- "$mount_dir/usr/share/ieee-data"
+
 # Drop staged material before trim. Discard reaches the qcow2 through nbd's
 # --discard=unmap setting; conversion compresses the remaining allocated data.
 rm -rf -- "$mount_dir/root/playbook"
@@ -233,14 +261,30 @@ fstrim -v "$mount_dir"
 for d in sys proc dev; do umount "$mount_dir/$d"; done
 umount "$mount_dir"
 mounted=0
+
+# Package installation order changes physical ext4 block placement even when
+# the file payload is the same, shifting zstd's output by several MiB. An
+# offline minimum-size pass packs the blocks, then regrowing restores the full
+# 20 GiB runtime filesystem. Recheck and discard free space after the move.
+e2fsck -f -y "$root"
+resize2fs -M "$root"
+resize2fs "$root"
+e2fsck -f -y "$root"
+mount "$root" "$mount_dir"
+mounted=1
+sync
+fstrim -v "$mount_dir"
+umount "$mount_dir"
+mounted=0
 qemu-nbd --disconnect "$nbd"
 connected=0
 
-qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zstd "$image" "$output_tmp"
+log "compressing qcow2 with $compression"
+qemu-img convert -f qcow2 -O qcow2 -c -o "compression_type=$compression" "$image" "$output_tmp"
 bytes=$(stat -c %s "$output_tmp")
 limit=$((max_size_mib * 1024 * 1024))
 if ((bytes > limit)); then
-  die "compressed image is $bytes bytes, above ${max_size_mib} MiB; try zstd compression, safe trimming, or a direct host for the intact qcow2"
+  die "compressed image is $bytes bytes, above ${max_size_mib} MiB; use a direct host for the intact qcow2 if this builder cannot meet the limit"
 fi
 mv -f -- "$output_tmp" "$out"
 if [[ -n ${SUDO_UID:-} && -n ${SUDO_GID:-} ]]; then chown "$SUDO_UID:$SUDO_GID" "$out"; fi

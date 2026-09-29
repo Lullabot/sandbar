@@ -106,17 +106,21 @@
   register: _locale_line
   when: provision_phase | default('full') != 'finalize'
 
-# Deliberately NOT gated on `_locale_line.changed`. The line edit and the compile
-# are two steps, and a run interrupted between them leaves the line present but no
-# compiled locale — after which `changed` is forever false and the locale would
-# never be generated, while /etc/default/locale below still names it. Every shell
-# in the base and in every clone from it then falls back to C with a `setlocale`
-# warning and nothing in the provisioning output says why. locale-gen is
-# idempotent and cheap, so just run it.
+# Check the compiled locale, not only whether /etc/locale.gen changed: a run
+# interrupted after editing that file must still compile it on retry. Baked
+# images remove locale source definitions after compilation to save space, so
+# a later base refresh must skip locale-gen when the compiled locale exists.
+- name: Check whether the configured locale is already compiled
+  ansible.builtin.command: locale -a
+  register: _available_locales
+  changed_when: false
+  when: provision_phase | default('full') != 'finalize'
+
 - name: Generate the locale
   ansible.builtin.command: locale-gen
-  when: provision_phase | default('full') != 'finalize'
-  changed_when: _locale_line.changed
+  when:
+    - provision_phase | default('full') != 'finalize'
+    - (base_locale.split('.')[0] ~ '.utf8') not in _available_locales.stdout_lines
 
 - name: Set default locale
   ansible.builtin.copy:

@@ -27,6 +27,10 @@
         - provision_phase | default('full') != 'finalize'
     - role: dev-tools
       when: provision_phase | default('full') != 'finalize'
+    # mkcert is baked with the other packages, but its CA private key belongs
+    # to each clone. This role follows dev-tools so full runs have the binary.
+    - role: mkcert-ca
+      when: provision_phase | default('full') != 'base'
     # Agent releases change frequently, so fetch them only after cloning.
     - role: claude-code
       when:
