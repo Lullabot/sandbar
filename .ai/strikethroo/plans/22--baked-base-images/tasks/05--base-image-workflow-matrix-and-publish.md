@@ -154,3 +154,12 @@ The URL must be the final published asset URL, which is predictable from the tag
   `sandbar-base-debian-13-arm64.qcow2: OK`. Sizes were 1,006,632,960 and
   974,258,176 bytes respectively, both images passed `qemu-img check`, and the
   manifest/checksum digests matched GitHub's server-computed asset digests.
+- After task 06 found that the first release baked a UID-1000 login, workflow
+  run https://github.com/Lullabot/sandbar/actions/runs/36599739583 rebuilt the
+  generalized image at commit `64a87ec` and published
+  `base-image-2026.09.29.164715`. Its amd64 asset is 1,007,550,464 bytes with
+  SHA-256 `1db1103bf8095f03ac383b226653087f0eaef9d3d235d8c7ee6fc155b770d5bf`;
+  its arm64 asset is 975,241,216 bytes with SHA-256
+  `81031834a776961eb94a5cb4a8f716060d1540799110fd4cd5d33cd4859e982b`.
+  The release manifest, checksum sidecars, and GitHub's server-computed asset
+  digests agree.
