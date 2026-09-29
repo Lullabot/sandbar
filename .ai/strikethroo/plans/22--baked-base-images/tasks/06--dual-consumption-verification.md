@@ -26,7 +26,7 @@ Prove the plan's central architectural assumption before any provider wiring is 
 
 ## Acceptance Criteria
 
-- [x] The published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell (with Lima configured to use the baked `claude` user; the default host user fails, as recorded below).
+- [x] The corrected published amd64 image boots as a Lima instance on an amd64 host, reaching a usable shell with Lima's default cloud-init user and no explicit user override.
 - [ ] The published arm64 image boots as a Lima instance on an arm64 host (Apple Silicon or Linux/arm64), reaching a usable shell.
 - [ ] The published amd64 image imports on a real Proxmox VE target, starts, and its guest agent reports an IP address.
 - [x] SSH host keys are confirmed to **regenerate on first boot** — they were removed by generalization, so their absence at boot must be self-healing, not a broken sshd.
@@ -92,6 +92,53 @@ then `limactl start --name img-test --tty=false ./img-test.yaml`. Lima will down
 </details>
 
 ## Verification finding (2026-09-29)
+
+### Corrected release re-verification
+
+`base-image-2026.09.29.164715`, built from producer commit `64a87ec`, fixes the
+UID collision described below. A minimal Lima 2.1.3 YAML with no `user:` block
+booted two independent x86_64 QEMU/KVM instances to `READY` as the host-derived
+`andrew:1000` account. In both guests cloud-init reported `done`, systemd
+reported `running`, the transient `claude` user and group were absent, the
+expected `/etc/skel` payload had populated the new home, and the root filesystem
+grew to the requested 24 GiB. The only cloud-init recoverable errors were
+deprecation warnings in Lima-generated cloud config; there were no failed
+systemd units.
+
+The release URL, `manifest.json`, checksum sidecar, and GitHub asset metadata
+all agree on amd64 SHA-256
+`1db1103bf8095f03ac383b226653087f0eaef9d3d235d8c7ee6fc155b770d5bf`
+and size 1,007,550,464 bytes. Lima accepted that digest before booting.
+
+```text
+$ limactl list
+NAME           STATUS     SSH                VMTYPE    ARCH      CPUS    MEMORY    DISK
+img-fixed-a    Running    127.0.0.1:34771    qemu      x86_64    2       4GiB      24GiB
+img-fixed-b    Running    127.0.0.1:46745    qemu      x86_64    2       4GiB      24GiB
+
+$ limactl shell img-fixed-a id -un
+andrew
+$ limactl shell img-fixed-a uname -m
+x86_64
+$ limactl shell img-fixed-a systemctl is-system-running
+running
+$ limactl shell img-fixed-a cat /etc/machine-id
+1601a38b52fb4890ad1e41bdb78bcf1c
+$ limactl shell img-fixed-b cat /etc/machine-id
+5d1f5012638e4ff8afb6f85a8ec5f86b
+$ limactl shell img-fixed-a sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:2NzfSBEZZT6WZQO35kSdYxqOOUkI3f2qHOkXMiG3csk root@lima-img-fixed-a (ED25519)
+$ limactl shell img-fixed-b sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:QbTTF1TEWuKuoInKPlVesvPO+GqsdZ+8yU06aVZ38hg root@lima-img-fixed-b (ED25519)
+```
+
+The two machine IDs and host keys differ. Both disposable instances were
+deleted after verification, and the temporary host KVM ACL was restored. The
+amd64 Lima portion of this gate now passes without a consumer workaround.
+Arm64 Lima and real Proxmox remain outstanding, so the task remains failed as a
+whole until those external checks pass.
+
+### Superseded first-release finding
 
 The published amd64 asset from `base-image-2026.09.29.151245` is bootable by
 Lima 2.1.3 on an x86_64 QEMU/KVM host. Lima fetched the release URL and accepted
@@ -190,7 +237,10 @@ or `qm agent ... network-get-interfaces` command was run.
 
 ## Noteworthy Events
 
-- [2026-09-29] Task 06 remains failed because arm64 Lima and real PVE checks
-  require external targets unavailable in this environment. The default Lima
-  account collision also requires task 08 to add explicit user settings or a
-  producer change. The amd64 image itself worked with the explicit baked user.
+- [2026-09-29] `base-image-2026.09.29.164715` passed the amd64 Lima gate with
+  the default cloud-init user; no task 08 user override is required. Task 06
+  remains failed only because arm64 Lima and real PVE checks require the
+  external targets offered by the user.
+- [2026-09-29] The superseded first release failed for Lima's default account
+  because it baked `claude:1000`; producer commit `64a87ec` generalized the
+  login into `/etc/skel` and the corrected release above verifies the fix.
