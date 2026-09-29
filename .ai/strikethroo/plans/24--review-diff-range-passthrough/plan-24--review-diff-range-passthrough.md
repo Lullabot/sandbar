@@ -173,3 +173,37 @@ The change sits entirely behind two existing entrypoints (`cmd/sand/land.go` and
 - **Out of scope**: honouring `default-diff-args` from `.self-review.yaml` (it would need the guest to read the project config and stop passing a base), a commit-picker UI, and a numstat-based size guard for custom ranges. The first is worth a follow-up issue.
 - 2026-09-29: Refined after a baseline review. Verified `R` is unused on the Landing pane, recorded it and the scope exclusions as auto-resolved clarifications, and removed an unnecessary NUL check from the argument handling (argv cannot contain NUL).
 - The TUI prompt is intentionally a plain string, not a structured picker: a second UI for the same idea would add a render path and a guest round trip on a path where guest contact is avoided.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001[Task 001: Session DiffArgs] --> 002[Task 002: CLI pass-through]
+    001 --> 003[Task 003: TUI range prompt]
+    002 --> 004[Task 004: Docs]
+    003 --> 004
+```
+
+### Phase 1: Shared session support
+**Parallel Tasks:**
+- Task 001: Add DiffArgs to landreview.Session
+
+### Phase 2: Entrypoints
+**Parallel Tasks:**
+- Task 002: Accept `-- <diff args>` in `sand land --review` (depends on: 001)
+- Task 003: Landing pane review-range prompt (depends on: 001)
+
+### Phase 3: Documentation
+**Parallel Tasks:**
+- Task 004: Document the review range (depends on: 002, 003)
+
+### Post-phase Actions
+
+### Execution Summary
+- Total Phases: 3
+- Total Tasks: 4
