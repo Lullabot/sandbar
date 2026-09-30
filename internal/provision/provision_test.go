@@ -1421,8 +1421,9 @@ func TestReset_NoPreserve(t *testing.T) {
 	}
 
 	want := [][]string{
+		{"list", "sandbar-base", "--format", "{{.Status}}"}, // pre-check: base is usable BEFORE the VM is touched
 		{"delete", "claude", "-f"},                          // destroy
-		{"list", "sandbar-base", "--format", "{{.Status}}"}, // ensureBaseStopped
+		{"list", "sandbar-base", "--format", "{{.Status}}"}, // ensureBaseStopped (no-op on the base just checked)
 		{"clone", "sandbar-base", "claude"},                 // re-clone
 		{"edit", "--set", `.cpus=4 | .memory="8GiB" | .disk="100GiB" | .mounts |= map(select(.writable != true)) | (.mounts[] | select(.mountPoint == "/mnt/playbook") | .location) = "/playbook"`, "claude"}, // configure size (and strip the base's writable apt-cache mount)
 		{"start", "claude"}, // start clone

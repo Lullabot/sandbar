@@ -1621,3 +1621,35 @@ func TestProxmoxBaseBuildClearsTheTemplateHostname(t *testing.T) {
 		t.Errorf("hostname reset ran at ssh command %d, after the clone's finalize playbook at %d", truncate, playbook)
 	}
 }
+
+// A reset whose clone source cannot be found must fail BEFORE the VM is
+// touched. Resolving the source after the delete — the old order — left a
+// missing template, or a base that could not be rebuilt, as a VM already gone.
+func TestProxmoxResetChecksTheCloneSourceBeforeDeleting(t *testing.T) {
+	m := newPVEMock(t)
+	stubProvisioning(t)
+	m.data("/cluster/resources", `[
+	  {"vmid":105,"name":"web","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu"}
+	]`)
+	m.data("/nodes/pve1/qemu/105/status/current", `{"vmid":105,"name":"web","status":"stopped"}`)
+	m.on("/nodes/pve1/qemu/105", func(w http.ResponseWriter, _ *http.Request) { upidData(w, testUPID) })
+	m.okTask(testUPID)
+
+	p := newProxmoxForTest(t, m)
+	recordSSH(p)
+
+	cfg := webConfig()
+	cfg.BaseName = "no-such-template"
+	err := p.Reset(context.Background(), cfg, provision.ResetOptions{TemplateSource: "no-such-template"}, nil)
+	if err == nil {
+		t.Fatal("Reset: want an error when the template does not exist")
+	}
+	if !strings.Contains(err.Error(), "was not touched") {
+		t.Errorf("the error does not say the VM was left alone: %v", err)
+	}
+	for _, path := range m.seen() {
+		if path == "/api2/json/nodes/pve1/qemu/105" {
+			t.Fatalf("the VM was deleted before its clone source was checked; requests: %v", m.seen())
+		}
+	}
+}

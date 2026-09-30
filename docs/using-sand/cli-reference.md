@@ -382,6 +382,12 @@ update the files it manages. The rebuilt VM keeps its new
 `~/.ssh/authorized_keys` so `sand` can still connect. Preserving the whole
 home copies more data than preserving individual directories.
 
+Before it backs up or deletes anything, a reset makes sure the base image is
+ready: it downloads a replacement when the local one is stale or missing. If
+that fails, for example because you are offline, `sand` stops with the VM and
+its data untouched, and a stale base is kept rather than deleted. Only then
+does it back up and delete the VM.
+
 Preserved data passes through a private (`0700`) directory on your
 workstation. After a successful reset, `sand` removes that copy. If the
 reset fails before attempting to delete the VM, it also removes the copy:

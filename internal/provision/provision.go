@@ -258,19 +258,31 @@ func (p *Provisioner) baseImageArch(ctx context.Context) (string, error) {
 	return baseimage.LocalArch()
 }
 
-func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
-	hf := p.hostFiles()
-	store, ok := hf.(lima.ImageStore)
+// acquiredImage is a verified published base image on the Lima host, ready to be
+// turned into a base instance.
+type acquiredImage struct {
+	location string
+	arch     string
+	entry    baseimage.ImageEntry
+}
+
+// acquirePublishedImage fetches (or finds in the host cache) the pinned base
+// image and verifies it. It is its own step, separate from creating the
+// instance, so a replacement can be fetched BEFORE the base it replaces is
+// deleted: a failed download then leaves the old base in place instead of
+// leaving the host with none.
+func (p *Provisioner) acquirePublishedImage(ctx context.Context, out io.Writer) (acquiredImage, error) {
+	store, ok := p.hostFiles().(lima.ImageStore)
 	if !ok {
-		return fmt.Errorf("Lima host cannot store a verified base image")
+		return acquiredImage{}, fmt.Errorf("Lima host cannot store a verified base image")
 	}
 	arch, err := p.baseImageArch(ctx)
 	if err != nil {
-		return err
+		return acquiredImage{}, err
 	}
 	entry, err := baseimage.PinnedManifest.ForArch(arch)
 	if err != nil {
-		return err
+		return acquiredImage{}, err
 	}
 	acquire := p.AcquireBaseImage
 	if acquire == nil {
@@ -280,8 +292,23 @@ func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io
 	}
 	location, err := acquire(ctx, store, arch, out)
 	if err != nil {
-		return fmt.Errorf("acquire base image: %w", err)
+		return acquiredImage{}, fmt.Errorf("acquire base image: %w", err)
 	}
+	return acquiredImage{location: location, arch: arch, entry: entry}, nil
+}
+
+func (p *Provisioner) buildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer, timer *phaseTimer) error {
+	img, err := p.acquirePublishedImage(ctx, out)
+	if err != nil {
+		return err
+	}
+	return p.createBaseFrom(ctx, cfg, img, out, timer)
+}
+
+// createBaseFrom creates the base instance from an already-acquired image.
+func (p *Provisioner) createBaseFrom(ctx context.Context, cfg vm.CreateConfig, img acquiredImage, out io.Writer, timer *phaseTimer) error {
+	hf := p.hostFiles()
+	location, arch, entry := img.location, img.arch, img.entry
 	limaArch := "x86_64"
 	if arch == "arm64" {
 		limaArch = "aarch64"
@@ -656,10 +683,7 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 	// before any of that code is reached, leaving the base-image path below
 	// completely untouched for every non-template call.
 	if opts.TemplateSource != "" {
-		if _, err := p.Lima.Get(opts.TemplateSource); err != nil {
-			if errors.Is(err, lima.ErrNoSuchInstance) {
-				return fmt.Errorf("template %q not found: %w", opts.TemplateSource, err)
-			}
+		if err := p.requireTemplate(opts.TemplateSource); err != nil {
 			return err
 		}
 		release, err := lockBase(ctx, p.hostFiles(), opts.TemplateSource, out)
@@ -702,6 +726,38 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
 	}
 	return nil
+}
+
+// requireTemplate fails unless the named golden-template instance exists.
+func (p *Provisioner) requireTemplate(name string) error {
+	if _, err := p.Lima.Get(name); err != nil {
+		if errors.Is(err, lima.ErrNoSuchInstance) {
+			return fmt.Errorf("template %q not found: %w", name, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// prepareSource does everything prepareBaseAndClone does up to the clone: it
+// makes the clone source exist, current and stopped, under the same lock, and
+// then lets go of it. A reset calls it BEFORE touching the VM being reset, so
+// the slow, network-dependent step — building or replacing the base — happens
+// while a failure still costs nothing. The clone that follows re-runs
+// ensureBaseStopped, which is a cheap no-op on a base this call just readied;
+// if another process changed the base in between, that re-run simply acts on
+// what it finds, exactly as it did before this pre-check existed.
+func (p *Provisioner) prepareSource(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
+	if opts.TemplateSource != "" {
+		return p.requireTemplate(opts.TemplateSource)
+	}
+	release, err := lockBase(ctx, p.hostFiles(), cfg.BaseName, out)
+	if err != nil {
+		return err // only a cancelled context gets here
+	}
+	defer release()
+	p.migrateLegacyBase(ctx, cfg, out)
+	return p.ensureBaseStopped(ctx, cfg, opts, out, timer)
 }
 
 // legacyBaseName is the base image's pre-rename name. A machine provisioned by an
@@ -908,10 +964,18 @@ func (p *Provisioner) ensurePublishedBaseStopped(ctx context.Context, cfg vm.Cre
 		have := readBaseVersionFn(p.hostFiles(), cfg.BaseName)
 		if opts.Rebuild || have != baseimage.PinnedManifest.Version {
 			step(out, "Replacing base image %q with published image %s…", cfg.BaseName, baseimage.PinnedManifest.Version)
+			// Fetch the replacement BEFORE deleting what it replaces. The download
+			// is the step that fails (offline, release asset moved, disk full), and
+			// doing it second left the host with no base at all: every later create
+			// or reset then had to win that download before it could do anything.
+			img, err := p.acquirePublishedImage(ctx, out)
+			if err != nil {
+				return fmt.Errorf("%w (the existing base image %q was left in place)", err, cfg.BaseName)
+			}
 			if err := p.Lima.Delete(cfg.BaseName, true); err != nil {
 				return fmt.Errorf("delete base image %q: %w", cfg.BaseName, err)
 			}
-			exists = false
+			return p.createBaseFrom(ctx, cfg, img, out, timer)
 		}
 	}
 	if !exists {
@@ -1180,8 +1244,22 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	var home string
 	var plan PreservePlan
 
-	// 1. Stage out the selected state while the source VM is still alive. WHAT is
-	// staged, and in what order it comes back, is StagePreserve's and the two
+	cloneOpts := CreateOptions{}
+	if opts.TemplateSource != "" {
+		cloneOpts.TemplateSource = cfg.BaseName
+	}
+
+	// 0. Make sure the clone source is usable BEFORE anything is staged or
+	// deleted. Building or replacing the base is the slow step and the one that
+	// depends on the network; running it after the delete meant a failed
+	// download left no VM and, for a stale base, no base either.
+	step(out, "Checking the base image before touching %q…", cfg.Name)
+	if err := p.prepareSource(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
+		return fmt.Errorf("prepare the base image (%q was not touched): %w", cfg.Name, err)
+	}
+
+	// 1. Stage out the selected state while the source VM is still alive. WHAT
+	// is staged, and in what order it comes back, is StagePreserve's and the two
 	// Restore* helpers' — shared with the Proxmox provider's reset so the two
 	// backends cannot drift on the ordering rules.
 	if opts.Any() {
@@ -1221,10 +1299,6 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// does; see phaseTimer's doc comment) — prepareBaseAndClone still needs a
 	// timer to share its signature with createVM, so give it one whose readings
 	// are simply discarded here.
-	cloneOpts := CreateOptions{}
-	if opts.TemplateSource != "" {
-		cloneOpts.TemplateSource = cfg.BaseName
-	}
 	if err := p.prepareBaseAndClone(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
 		return stage.Fail(err)
 	}
