@@ -99,7 +99,11 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 			varItem{"user_git_user_email", cfg.GitEmail},
 		)
 		if cfg.CloneURL != "" {
-			items = append(items, varItem{"project_clone_url", cfg.CloneURL})
+			forge, err := vm.ResolveCloneForge(cfg.CloneURL, cfg.CloneForge)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, varItem{"project_clone_url", cfg.CloneURL}, varItem{"project_clone_forge", forge})
 			if cfg.CloneToken != "" {
 				items = append(items, varItem{"project_clone_token", cfg.CloneToken})
 			}

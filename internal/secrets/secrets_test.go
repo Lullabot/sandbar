@@ -332,7 +332,7 @@ func TestLoad_CorruptFileWarnsButReturnsUsableStore(t *testing.T) {
 // "" (global) and a normal dir path are accepted; anything that could escape
 // $HOME or inject into a shell/gitconfig pattern is rejected.
 func TestValidScope(t *testing.T) {
-	accept := []string{"", "github.com/acme", "a", "a-b_c.d", "a/b/c"}
+	accept := []string{"", "github.com/acme", "a", "a-b_c.d", "a/b/c", "git.example.com:8443/group/subgroup", "gitlab:8443/group"}
 	reject := []string{
 		"/etc", "../x", "a/../b", "a//b", "a/", "/a", "$(id)", "a b", "a;rm",
 		".", "a/.", "a/..", "..", "a/./b",

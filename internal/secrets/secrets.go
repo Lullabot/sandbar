@@ -155,13 +155,13 @@ func ValidKey(k string) bool {
 }
 
 // scopeSegmentRE is the grammar for one path segment of a scope: one or more
-// of [A-Za-z0-9._-]. A segment that is exactly "." or ".." is rejected
+// of [A-Za-z0-9._:-]. A segment that is exactly "." or ".." is rejected
 // separately below (the character class alone would allow them).
-var scopeSegmentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var scopeSegmentRE = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
 
 // ValidScope reports whether scope is a safe home-relative directory path.
 // "" is the global scope. A non-empty scope must be one or more path segments
-// of [A-Za-z0-9._-] (a single dot alone or ".." are rejected), slash-separated,
+// of [A-Za-z0-9._:-] (a single dot alone or ".." are rejected), slash-separated,
 // with no leading/trailing slash and no empty segments. It becomes ~/<scope>/
 // on the guest and a gitdir: pattern, so anything that could escape $HOME or
 // inject into a shell/gitconfig is rejected.
