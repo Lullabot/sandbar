@@ -987,6 +987,21 @@ shared rules.
   Keep the ordering in `ensurePublishedBaseStopped` too: acquire the replacement
   image, then delete the old base, then create the new one. Deleting first
   reopens the same hole one level down.
+- **A staging directory must be resumable** (`internal/provision/resetmanifest.go`).
+  After the delete, the archives are the only copy of the guest's data, and the
+  plan that decides what goes back before or after finalize exists only in
+  memory. So `StagePreserve`'s caller writes `reset.json` beside the archives,
+  while the guest is still intact: the VM's config (never `CloneToken`) and the
+  `PreservePlan`. `sand reset NAME --from-backup DIR` (`ResetOptions.RestoreFrom`)
+  reads it back and skips the stage-out and the delete. It takes the config from
+  the manifest, not the managed index, because the index prunes a VM that no
+  longer exists. A resume refuses a live instance of that name, and its guard
+  starts out marked as having destroyed the guest, so every failure keeps the
+  archives and only full success removes the directory. A directory with no
+  manifest restores only a whole-home or agents archive. Project and extras
+  archives are refused, since their paths came from a probe that cannot be
+  repeated. `StageGuard.Fail` prints the resume command: keep it accurate when
+  the flag changes.
 - **Validate preserve paths before deleting the VM.** Guest-supplied
   `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
   during restore. `preservePathRel` must reject paths outside the guest home

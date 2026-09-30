@@ -392,7 +392,8 @@ Preserved data passes through a private (`0700`) directory on your
 workstation. After a successful reset, `sand` removes that copy. If the
 reset fails before attempting to delete the VM, it also removes the copy:
 the original VM still has the data. If deletion has been attempted, `sand`
-keeps the archives and prints their path for recovery.
+keeps the archives and prints their path for recovery. See
+[If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted).
 
 **Do not preserve data from a VM you suspect is compromised.** The copy can
 include credentials and anything an agent wrote in the selected directories.
@@ -400,6 +401,45 @@ See [Security Model](../reference/security-model.md).
 
 Files outside the directories you preserve are deleted. Nothing outside the
 guest home, such as `/srv` or `/opt`, can be preserved by these options.
+
+### If a reset fails after the VM was deleted
+
+When a reset fails after it deleted the VM, for example because the clone ran
+out of disk space, the VM is gone and the only copy of your preserved data is
+the backup directory. The error names it and says how to finish:
+
+```
+reset failed after staging; your data is preserved at /home/you/.local/state/sandbar/staging/sand-reset-123456789: <cause>
+
+To finish this reset once the cause is fixed: sand reset web --from-backup /home/you/.local/state/sandbar/staging/sand-reset-123456789
+```
+
+Fix the cause, then run that command. It rebuilds `web` with the settings the
+failed reset recorded, restores the backup in the same order a normal reset
+does, and removes the directory once everything is back. If it fails again, the
+directory is kept and you can retry.
+
+- The backup directory contains `reset.json` beside the archives. It records
+  the VM's settings and what was backed up. It never contains the clone token,
+  so pass `--clone-token` again if the repository is private and the project is
+  not being restored from the backup.
+- The VM must not exist. `--from-backup` completes a reset; it never
+  overwrites a running VM. If you already created a replacement, delete it
+  first.
+- Don't combine `--from-backup` with the `--preserve` flags. The backup says
+  what it holds.
+- Other flags, such as `--memory`, override the recorded settings, as they do
+  in a normal reset.
+- The VM no longer exists, so `sand` can't discover its connection profile.
+  Pass `--profile` when more than one profile is enabled.
+- A backup made by an older `sand` has no `reset.json`. A whole-home or
+  agent-state backup still restores, using the VM's entry in the managed index
+  or defaults for its settings. A backup that holds a project or checkout
+  archive is refused, because the paths inside it aren't recorded. Extract
+  those with `tar` by hand.
+
+The TUI reports the same error and path. Finish the reset from a terminal with
+the command above.
 
 ### Watching a copy run
 
@@ -444,6 +484,7 @@ before creating a VM.
 | `--domain` | string | *this VM's* | Domain suffix. |
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
 | `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless `--preserve-project` is keeping the checkout, in which case nothing is cloned. |
+| `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
 | `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. |
 
 `NAME` is required (exactly one positional argument), and flags may appear
@@ -510,6 +551,16 @@ work on a different repo, create another VM with 'sand create'.
 For a private repo that will be cloned again, pass --clone-token; saved guest
 secrets are reapplied after cloning and cannot authenticate that clone.
 
+If a reset fails after the VM was deleted, the error names a directory holding
+your backup. Finish the job with:
+
+  sand reset NAME --from-backup DIR
+
+That rebuilds NAME with the settings the failed reset recorded, restores the
+backup in the usual order, and removes DIR once everything is back. The VM must
+not exist (the failed reset already deleted it). Pass --profile if NAME's
+connection profile is not the only enabled one.
+
 Examples:
   sand reset web                                  # clean rebuild, same settings
   sand reset web --preserve-agents                # keep coding-agent state
@@ -529,6 +580,8 @@ Flags:
     	Docker registry pull-through proxy host (default: whatever this VM has)
   -domain string
     	Domain suffix (default: whatever this VM has)
+  -from-backup DIR
+    	Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in DIR (the path the failure named)
   -git-email string
     	git user.email written into the VM (default: whatever this VM has)
   -git-name string

@@ -252,7 +252,9 @@ enter to toggle the focused option; its help text describes what it copies.
 Preserved data passes through a private directory on your workstation.
 `sand` removes the copy after a successful reset. If a reset fails after
 attempting to delete the VM, it keeps the archives and prints their path
-for recovery. See [`sand reset`](cli-reference.md#sand-reset-name).
+for recovery, along with the `sand reset NAME --from-backup DIR` command that
+finishes the reset from a terminal. See
+[`sand reset`](cli-reference.md#if-a-reset-fails-after-the-vm-was-deleted).
 
 **Do not preserve data if you suspect the VM is compromised.** It can
 include credentials and files written by an agent. See

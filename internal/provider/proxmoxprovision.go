@@ -814,6 +814,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	// A nil guard means nothing was staged; every method on it is nil-safe.
 	var stage *provision.StageGuard
 	var plan provision.PreservePlan
+	var macs map[string]string // nil on a resume: the old VM is gone, so its MACs cannot be read
 
 	// A reset never asks for a base rebuild. A template-provenanced reset routes
 	// back to that same golden template; ordinary resets retain the base path.
@@ -822,64 +823,85 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 		cloneOpts.TemplateSource = cfg.BaseName
 	}
 
-	// 0. Make sure the clone source is usable BEFORE anything is staged or
-	// deleted. Building or replacing the base template is the slow step and
-	// the one that depends on the network; running it after the delete meant a
-	// failed image download left no VM behind.
-	progress(out, "Checking the base image before touching %s\n", cfg.Name)
-	if err := p.prepareBase(ctx, cfg, cloneOpts, out); err != nil {
-		return fmt.Errorf("prepare the base image (%s was not touched): %w", cfg.Name, err)
-	}
+	if opts.RestoreFrom != "" {
+		// Resuming a reset that failed after the VM was deleted: the stage-out and
+		// the delete already happened in a previous run, and the archives are the
+		// only copy of the guest's data.
+		if _, err := p.Status(cfg.Name); err == nil {
+			return fmt.Errorf("proxmox: cannot restore into %s: a VM with that name already exists; delete it first (this restores into a freshly built VM, it never overwrites a live one)", cfg.Name)
+		} else if !errors.Is(err, lima.ErrNoSuchInstance) {
+			return err
+		}
+		var err error
+		if stage, plan, err = provision.ResumeReset(opts.RestoreFrom, cfg.Name, out); err != nil {
+			return err
+		}
+	} else {
+		// 0. Make sure the clone source is usable BEFORE anything is staged or
+		// deleted. Building or replacing the base template is the slow step and
+		// the one that depends on the network; running it after the delete meant a
+		// failed image download left no VM behind.
+		progress(out, "Checking the base image before touching %s\n", cfg.Name)
+		if err := p.prepareBase(ctx, cfg, cloneOpts, out); err != nil {
+			return fmt.Errorf("prepare the base image (%s was not touched): %w", cfg.Name, err)
+		}
 
-	// 1. Stage out the selected state while the source VM is still alive.
-	if opts.Any() {
-		// Status is the existence check AND gives the running state in one resolve,
-		// without Get's discarded whole-storage listing or the extra Status call
-		// this used to make.
-		st, err := p.Status(cfg.Name)
-		if err != nil {
-			// Nothing to preserve from a VM that is not there; fall through to a
-			// clean recreate rather than fail.
-			if !errors.Is(err, lima.ErrNoSuchInstance) {
-				return err
-			}
-		} else {
-			if st != "Running" {
-				progress(out, "Starting %s to stage its data\n", cfg.Name)
-				if err := p.start(ctx, cfg.Name, out); err != nil {
-					return fmt.Errorf("proxmox: starting %s for staging: %w", cfg.Name, err)
+		// 1. Stage out the selected state while the source VM is still alive.
+		if opts.Any() {
+			// Status is the existence check AND gives the running state in one resolve,
+			// without Get's discarded whole-storage listing or the extra Status call
+			// this used to make.
+			st, err := p.Status(cfg.Name)
+			if err != nil {
+				// Nothing to preserve from a VM that is not there; fall through to a
+				// clean recreate rather than fail.
+				if !errors.Is(err, lima.ErrNoSuchInstance) {
+					return err
+				}
+			} else {
+				if st != "Running" {
+					progress(out, "Starting %s to stage its data\n", cfg.Name)
+					if err := p.start(ctx, cfg.Name, out); err != nil {
+						return fmt.Errorf("proxmox: starting %s for staging: %w", cfg.Name, err)
+					}
+				}
+				var err error
+				if stage, err = provision.NewStageGuard(); err != nil {
+					return fmt.Errorf("proxmox: %w", err)
+				}
+				// Shared with the Lima Reset rather than reimplemented: what the guest
+				// ACTUALLY holds decides what is staged, the rules for reading an
+				// unreachable one are subtle enough that two copies would drift, and
+				// the order things go back in is the same order on both backends.
+				if plan, err = provision.StagePreserve(ctx, p, cfg.Name, home, user, cfg.CloneURL, opts, stage, out); err != nil {
+					return stage.Fail(err)
+				}
+				// Recorded while the VM is still intact, so a failure that strands the
+				// archives can be resumed with `sand reset --from-backup`.
+				if err := stage.WriteManifest(provision.NewResetManifest(cfg, plan, opts)); err != nil {
+					return stage.Fail(err)
 				}
 			}
-			var err error
-			if stage, err = provision.NewStageGuard(); err != nil {
-				return fmt.Errorf("proxmox: %w", err)
-			}
-			// Shared with the Lima Reset rather than reimplemented: what the guest
-			// ACTUALLY holds decides what is staged, the rules for reading an
-			// unreachable one are subtle enough that two copies would drift, and
-			// the order things go back in is the same order on both backends.
-			if plan, err = provision.StagePreserve(ctx, p, cfg.Name, home, user, cfg.CloneURL, opts, stage, out); err != nil {
-				return stage.Fail(err)
-			}
 		}
-	}
 
-	// 2. Remember the MACs, delete the existing VM (force), then re-clone from
-	// the base. From here on the staged archives are the only copy of what the
-	// guest held, so every later failure keeps them — flipped BEFORE the call,
-	// since a delete that reports an error may still have taken the VM with it.
-	//
-	// The MAC read has to happen here, while the VM still exists, and it is the
-	// last thing done before it stops existing. It cannot fail the reset: see
-	// proxmoxmac.go.
-	macs, err := p.nicMACs(ctx, cfg.Name)
-	if err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
-		progress(out, "Warning: could not read %s's MAC address(es), so the rebuilt VM will have new ones: %v\n", cfg.Name, err)
-	}
+		// 2. Remember the MACs, delete the existing VM (force), then re-clone from
+		// the base. From here on the staged archives are the only copy of what the
+		// guest held, so every later failure keeps them — flipped BEFORE the call,
+		// since a delete that reports an error may still have taken the VM with it.
+		//
+		// The MAC read has to happen here, while the VM still exists, and it is the
+		// last thing done before it stops existing. It cannot fail the reset: see
+		// proxmoxmac.go.
+		var err error
+		macs, err = p.nicMACs(ctx, cfg.Name)
+		if err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
+			progress(out, "Warning: could not read %s's MAC address(es), so the rebuilt VM will have new ones: %v\n", cfg.Name, err)
+		}
 
-	stage.DestroyingGuest()
-	if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
-		return stage.Fail(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
+		stage.DestroyingGuest()
+		if err := p.Delete(cfg.Name, true); err != nil && !errors.Is(err, lima.ErrNoSuchInstance) {
+			return stage.Fail(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
+		}
 	}
 
 	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, cloneOpts, out)
