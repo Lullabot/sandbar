@@ -14,7 +14,21 @@ import (
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vm"
 )
+
+// A transfer needs SSH, not containers or host filesystem mounts. Disabling
+// those defaults keeps the fixture independent of container-tool installation.
+const transferE2EOverlay = `base:
+- template:_images/debian-13
+cpus: 2
+memory: "2GiB"
+disk: "` + vm.BaseDiskFloor + `"
+mounts: []
+containerd:
+  system: false
+  user: false
+`
 
 // The byte-decoder test uses a fake provider; this gated test checks the far
 // side of the real copy operation, including directory nesting and spaces.
@@ -30,7 +44,7 @@ func TestE2EDroppedTransferPathsMoveContents(t *testing.T) {
 	const name = "sand-dropped-path-e2e"
 	t.Cleanup(func() { _ = cli.Delete(name, true) })
 	overlay := filepath.Join(t.TempDir(), "vm.yaml")
-	if err := os.WriteFile(overlay, []byte(secretsE2EOverlay), 0600); err != nil {
+	if err := os.WriteFile(overlay, []byte(transferE2EOverlay), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := cli.Create(name, overlay); err != nil {

@@ -301,7 +301,9 @@ Five jobs:
   from CI, and no third-party coverage service. The run uploads `coverage.out` +
   `coverage.html` as an artifact.
 - `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
-  QEMU+KVM on the hosted runner. Also runs the `cmd/sand` `limae2e` tests
+  QEMU+KVM on the hosted runner. First runs the isolated UI dropped-path
+  upload/download test, checking contents on both receiving filesystems.
+  Also runs the `cmd/sand` `limae2e` tests
   (headless create + `--recreate` gate) first, on max free disk. (It does not
   run the fast Go suite — that's the `unit` job.) It checks all four agent
   executables in a clone, their absence from the base, and remembered choices
