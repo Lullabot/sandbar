@@ -19,6 +19,7 @@ type secretStore interface {
 	Get(vm string, connScope registry.Scope) map[string]string
 	Set(vm string, connScope registry.Scope, pairs map[string]string) error
 	GetAll(vm string, connScope registry.Scope) map[string]map[string]string
+	SetAll(vm string, connScope registry.Scope, scopes map[string]map[string]string) error
 }
 
 // guestSecretsApplier writes a VM's secrets into its guest. It is
@@ -51,7 +52,7 @@ func loadSecretStore(out io.Writer) secretStore {
 // model.go) — deliberately, because the two entrypoints having different
 // answers here is what this fixes:
 //
-//   - The token passed for the clone becomes the VM's GH_TOKEN secret, so it can
+//   - The token passed for the clone becomes the VM's forge-specific secret, so it can
 //     be rotated later from the secrets editor without a rebuild. The TUI has
 //     always done this with the create form's token; a `sand create
 //     --clone-token` recorded nothing, so the same VM built headlessly had no
@@ -79,12 +80,26 @@ func settleSecrets(ctx context.Context, p provider.Provider, scope registry.Scop
 // disk (loadSecretStore reaches for the user's XDG data dir).
 func settleSecretsIn(ctx context.Context, p provider.Provider, store secretStore, scope registry.Scope, cfg vm.CreateConfig, out io.Writer) {
 	if cfg.CloneToken != "" {
-		// Get returns a defensive copy, so mutating it cannot corrupt the store
-		// ahead of Set validating the result.
-		pairs := store.Get(cfg.Name, scope)
-		pairs["GH_TOKEN"] = cfg.CloneToken
-		if err := store.Set(cfg.Name, scope, pairs); err != nil {
-			fmt.Fprintln(out, "warning: VM ready, but the token could not be saved as a secret:", err)
+		key := vm.CloneTokenKey(cfg.CloneURL, cfg.CloneForge)
+		var saveErr error
+		switch key {
+		case "GH_TOKEN":
+			pairs := store.Get(cfg.Name, scope)
+			pairs[key] = cfg.CloneToken
+			saveErr = store.Set(cfg.Name, scope, pairs)
+		case "GITLAB_TOKEN":
+			all := store.GetAll(cfg.Name, scope)
+			dir, _ := provision.OrgRelDir(cfg.CloneURL)
+			if all[dir] == nil {
+				all[dir] = map[string]string{}
+			}
+			all[dir][key] = cfg.CloneToken
+			saveErr = store.SetAll(cfg.Name, scope, all)
+		default:
+			saveErr = fmt.Errorf("repository Git service is unknown")
+		}
+		if saveErr != nil {
+			fmt.Fprintln(out, "warning: VM ready, but the token could not be saved as a secret:", saveErr)
 		}
 	}
 

@@ -114,7 +114,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.StringVar(&o.values.timezone, "timezone", "", "IANA timezone for the guest (default: whatever this VM has)")
 	fs.StringVar(&o.values.domain, "domain", "", "Domain suffix (default: whatever this VM has)")
 	fs.StringVar(&o.values.dockerProxy, "docker-proxy-host", "", "Docker registry pull-through proxy host (default: whatever this VM has)")
-	fs.StringVar(&o.values.cloneToken, "clone-token", "", "Token for this VM's recorded repo (tokens are never stored in the index; pass it again for a private repo)")
+	fs.StringVar(&o.values.cloneToken, "clone-token", "", "Token for this VM's recorded repo (GitHub or GitLab); required to re-clone a private repo unless its checkout is preserved")
 	fs.StringVar(&o.profile, "profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sand reset NAME [flags]
@@ -148,6 +148,8 @@ Every other flag you omit is taken from the VM's own recorded settings, so
 
 There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sand create'.
+For a private repo that will be cloned again, pass --clone-token; saved guest
+secrets are reapplied after cloning and cannot authenticate that clone.
 
 Examples:
   sand reset web                                  # clean rebuild, same settings
@@ -235,7 +237,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		// the secret before it ever reaches disk), and a preserved project skips
 		// the clone entirely — so this only bites a private repo being re-cloned.
 		// Say so rather than let the finalize playbook fail on `git clone`.
-		fmt.Fprintf(os.Stderr, "sand: %s clones %s; tokens are never stored, so pass --clone-token if that repo is private.\n", name, cfg.CloneURL)
+		fmt.Fprintf(os.Stderr, "sand: %s clones %s; saved secrets apply after cloning, so pass --clone-token to re-clone a private repo unless its checkout is preserved.\n", name, cfg.CloneURL)
 	}
 
 	opts := provision.ResetOptions{

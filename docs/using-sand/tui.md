@@ -135,6 +135,12 @@ The create form includes a clone-source row. Choose the shared base or a
 template in the selected profile; template rows show their size, age, and
 staleness. A template-sourced reset keeps using that same template.
 
+For an initial checkout, enter its HTTPS `Repository URL`. The `Git service`
+row detects GitHub and GitLab.com automatically. Focus it and press `space`
+or `←`/`→` to choose GitLab for a self-hosted instance; `enter` advances to
+the masked `Clone token` field. The token help follows the selected service.
+See [Secrets](secrets.md#github-and-gitlab-tokens) for token permissions.
+
 `d` is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does **not** use
 `d`; it's bound to `g` instead.
@@ -205,10 +211,12 @@ Press `R` on a managed VM's tile to open the *Reset VM* form, filled with
 its recorded settings. Change resources or settings as needed, then press
 `ctrl+s` to delete and rebuild the VM. The next reset uses the new settings.
 
-`Name` and `GitHub repo URL` are locked: a reset keeps the VM's identity and
+`Name` and `Repository URL` are locked: a reset keeps the VM's identity and
 project. Press `n` to create another VM for a different repository. The
-`GitHub token` field stays editable because cloning a private repository
-again requires a token.
+`Git service` selection is retained, and the `Clone token` field stays
+editable because cloning a private repository again requires a token. GitHub
+and GitLab.com are detected from their hostnames; a self-hosted GitLab choice
+is recorded when the VM is created.
 
 The CLI equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name).
 

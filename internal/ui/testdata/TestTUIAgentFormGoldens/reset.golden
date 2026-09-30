@@ -1,11 +1,11 @@
                                                                                 
    Reset VM                                                                     
                                                                                 
-  Memory:            > 8GiB                                                     
   Disk:              > 100GiB                                                   
   Docker proxy host: >                                                          
-  GitHub repo URL: (none) (locked)                                              
-  GitHub token:      >                                                          
+  Repository URL: (none) (locked)                                               
+  Git service:       Auto (locked)                                              
+  Clone token:       >                                                          
                                                                                 
   [ ] Preserve the entire home directory                                        
   [x] Preserve agent settings and files                                         

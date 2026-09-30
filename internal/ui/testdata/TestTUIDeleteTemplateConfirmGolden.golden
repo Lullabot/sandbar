@@ -12,13 +12,13 @@
   Memory:            > 8GiB                                                                       
   Disk:              > 1GiB                                                                       
   Docker proxy host: >                                                                            
-  GitHub repo URL:   >                                                                            
-  GitHub token:      >                                                                            
+  Repository URL:    >                                                                            
+  Git service:       < Auto >                                                                     
+  Clone token:       >                                                                            
                                                                                                   
   [ ] Install Claude Code                                                                         
   [ ] Install OpenAI Codex                                                                        
   [ ] Install OpenCode                                                                            
-  [ ] Install Pi                                                                                  
   │ ←/→ to pick a clone source: the shared base image, or a saved golden template. Choosing a     
   │ template skips the base entirely and hides the rebuild toggle below. Press d to delete the    
   │ highlighted template.                                                                         

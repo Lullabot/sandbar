@@ -169,6 +169,27 @@ it is not where prose belongs.
   per-directory scope, see `docs/reference/files-and-state.md`), shared
   registry bookkeeping, file browser, domain types.
 
+Clone tokens preserve the GitHub convention (`GH_TOKEN`) and support GitLab
+with `GITLAB_TOKEN`. GitHub and GitLab.com are inferred from their HTTPS host;
+self-hosted GitLab requires `--clone-forge gitlab` or choosing GitLab in the
+TUI. Store GitLab tokens in a non-empty repository-parent scope beginning
+with the host (`<hostname>[:port]/group[/subgroup]`). The Git credential
+helper binds a GITLAB_TOKEN in a slash-containing scope to its first component,
+including single-label hosts and ports. A bare one-component scope defaults
+to `gitlab.com`; a `github.com/...` scope also targets GitLab.com, allowing
+GH_TOKEN and GITLAB_TOKEN to coexist. Scope names allow colons for ports;
+token-bearing IPv6 literal clone URLs are rejected because square brackets in
+the host conflict with Git `includeIf` glob syntax, so use a DNS name.
+GitHub create tokens remain global `GH_TOKEN` and are also written to the
+cloned repository's `.env`; GitLab create tokens use their non-empty
+repository-parent scope. Create and reset apply saved secrets, but a private
+reset that reclones still needs `--clone-token` or a token entered in the form
+because saved secrets are applied after cloning. Preserving the checkout skips
+the clone. Rotation and removal update a running guest immediately. `glab`
+sees a scoped GitLab token after changing into the matching project directory.
+Landing's `--pr` and `--web` actions remain GitHub-only; drupal.org publishing
+is separate.
+
 Entrypoint: `cmd/sand/main.go`. Keep CLI operations consistent with their
 TUI equivalents: `sand create` is `n`, `sand reset` is `R`, `sand shell` is
 `S`, `sand template snapshot` is `t`, `sand land` is `l`, and
@@ -189,8 +210,8 @@ all enabled profiles. Commands acting on an existing VM
 owning profile through the marker, registry, then live listing.
 
 **A reset keeps the target VM's identity and project.** Its name, base image,
-and clone URL come from its recorded configuration. The TUI locks the name
-and repository rows (`fieldLocked` in `internal/ui/form.go`); `sand reset`
+clone URL, and Git service come from its recorded configuration. The TUI locks
+the name, repository, and Git service rows (`fieldLocked` in `internal/ui/form.go`); `sand reset`
 has no `--clone-url`; `sand create --recreate --clone-url` is rejected.
 Allowing the URL to change could make a preserve option name the old
 project while cloning a different one. Create another VM for a different

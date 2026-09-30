@@ -15,11 +15,9 @@ import (
 // credential subsystem.
 type forgeWiring struct{ host, user string }
 
-// recognizedForgeTokens is the ONE "recognized forge tokens" table — the only
-// place in sand that knows a forge exists. internal/secrets stores plain
-// (scope, KEY, VALUE) triples with no forge concept at all; this table is
-// purely a delivery-layer lookup consulted when rendering a scope's secrets
-// into the guest. GitLab scopes can select their self-hosted endpoint.
+// recognizedForgeTokens maps scoped-secret names to Git credential defaults.
+// internal/secrets stores plain (scope, KEY, VALUE) triples; forge-specific
+// delivery belongs here. GitLab scopes can select their self-hosted endpoint.
 var recognizedForgeTokens = map[string]forgeWiring{
 	"GH_TOKEN":     {host: "github.com", user: "x-access-token"},
 	"GITLAB_TOKEN": {host: "gitlab.com", user: "oauth2"},

@@ -58,6 +58,36 @@ func (f *fakeSecretStore) GetAll(_ string, _ registry.Scope) map[string]map[stri
 	return out
 }
 
+func (f *fakeSecretStore) SetAll(_ string, _ registry.Scope, scopes map[string]map[string]string) error {
+	f.setCall++
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.scopes = scopes
+	return nil
+}
+
+func TestSettleSecretsSeedsScopedGitLabToken(t *testing.T) {
+	store := newFakeSecretStore()
+	store.scopes[""] = map[string]string{"GH_TOKEN": "github-token"}
+	store.scopes["git.example.test/group"] = map[string]string{"OTHER": "kept"}
+	applied := captureApply(t, nil)
+	cfg := vm.CreateConfig{Name: "web", User: "ada", CloneURL: "https://git.example.test/group/repo.git", CloneForge: "gitlab", CloneToken: "gitlab-token"}
+	settleSecretsIn(context.Background(), nil, store, registry.LocalScope, cfg, io.Discard)
+	if got := store.scopes["git.example.test/group"]["GITLAB_TOKEN"]; got != "gitlab-token" {
+		t.Errorf("scoped GitLab token = %q", got)
+	}
+	if got := store.scopes["git.example.test/group"]["OTHER"]; got != "kept" {
+		t.Errorf("existing scoped secret = %q", got)
+	}
+	if got := store.scopes[""]["GH_TOKEN"]; got != "github-token" {
+		t.Errorf("global GitHub token = %q", got)
+	}
+	if got := applied.scopes["git.example.test/group"]["GITLAB_TOKEN"]; got != "gitlab-token" {
+		t.Errorf("applied GitLab token = %q", got)
+	}
+}
+
 // captureApply swaps the guest-apply seam for the duration of a test and
 // returns what it was called with.
 type applyCall struct {
@@ -87,7 +117,7 @@ func TestSettleSecretsSeedsTheCloneToken(t *testing.T) {
 	store := newFakeSecretStore()
 	applied := captureApply(t, nil)
 
-	cfg := vm.CreateConfig{Name: "web", User: "ada", CloneToken: "ghp_secret"}
+	cfg := vm.CreateConfig{Name: "web", User: "ada", CloneURL: "https://github.com/acme/web", CloneToken: "ghp_secret"}
 	settleSecretsIn(context.Background(), nil, store, registry.LocalScope, cfg, io.Discard)
 
 	if got := store.scopes[""]["GH_TOKEN"]; got != "ghp_secret" {
@@ -137,7 +167,7 @@ func TestSettleSecretsFailureIsAWarning(t *testing.T) {
 	captureApply(t, errors.New("guest unreachable"))
 
 	var out strings.Builder
-	cfg := vm.CreateConfig{Name: "web", User: "ada", CloneToken: "ghp_secret"}
+	cfg := vm.CreateConfig{Name: "web", User: "ada", CloneURL: "https://github.com/acme/web", CloneToken: "ghp_secret"}
 	settleSecretsIn(context.Background(), nil, store, registry.LocalScope, cfg, &out)
 
 	for _, want := range []string{"token could not be saved", "secrets were not applied"} {

@@ -12,8 +12,9 @@
   Memory:            > 8GiB                                                                       
   Disk:              > 1GiB                                                                       
   Docker proxy host: >                                                                            
-  GitHub repo URL:   >                                                                            
-  GitHub token:      >                                                                            
+  Repository URL:    >                                                                            
+  Git service:       < Auto >                                                                     
+  Clone token:       >                                                                            
                                                                                                   
   [ ] Install Claude Code                                                                         
   [ ] Install OpenAI Codex                                                                        

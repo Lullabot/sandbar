@@ -27,6 +27,7 @@ import (
 	"github.com/lullabot/sandbar/internal/paste"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/secrets"
@@ -407,7 +408,9 @@ type model struct {
 	// full stop: a reset rebuilds the project this VM already has. It is also
 	// what projectToggleLabel/projectToggleEnabled below are derived from, so the
 	// toggle and the clone can never name two different orgs.
-	resetCloneURL string
+	resetCloneURL   string
+	resetCloneForge string
+	formCloneForge  string
 	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
 	// form shows no tool toggles, so without carrying these the rebuilt config
 	// would fall back to DefaultCreateConfig()'s all-on selection and a reset
@@ -1679,7 +1682,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			// The create form's token becomes the VM's GH_TOKEN secret, so it can
+			// The create form's token becomes the VM's forge-specific secret, so it can
 			// be edited later without a rebuild. It never enters the managed
 			// registry, which strips CloneToken by design (registry.Add). Seeding
 			// it here — in the TUI, on provisionDoneMsg — rather than inside
@@ -1690,9 +1693,23 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
 			// cannot corrupt the store ahead of Set validating it.
 			if cfg.CloneToken != "" {
-				pairs := m.sec.Get(cfg.Name, msg.job.scope)
-				pairs["GH_TOKEN"] = cfg.CloneToken
-				if err := m.sec.Set(cfg.Name, msg.job.scope, pairs); err != nil {
+				key := vm.CloneTokenKey(cfg.CloneURL, cfg.CloneForge)
+				var err error
+				switch key {
+				case "GH_TOKEN":
+					pairs := m.sec.Get(cfg.Name, msg.job.scope)
+					pairs[key] = cfg.CloneToken
+					err = m.sec.Set(cfg.Name, msg.job.scope, pairs)
+				case "GITLAB_TOKEN":
+					all := m.sec.GetAll(cfg.Name, msg.job.scope)
+					dir, _ := provision.OrgRelDir(cfg.CloneURL)
+					if all[dir] == nil {
+						all[dir] = map[string]string{}
+					}
+					all[dir][key] = cfg.CloneToken
+					err = m.sec.SetAll(cfg.Name, msg.job.scope, all)
+				}
+				if err != nil {
 					m.logMsg("VM ready, but the token could not be saved as a secret: " + err.Error())
 				}
 			}
@@ -1700,7 +1717,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// BEFORE this handler and before GH_TOKEN lands in the store above —
 			// so the guest would have no secrets.env until the VM's *next* start.
 			// Dispatch the apply now (batched with the list refresh) so a user who
-			// creates a VM and immediately shells in finds GH_TOKEN already set.
+			// creates a VM and immediately shells in finds its token already set.
 			user, scopes := m.secretsFor(msg.job.scope, cfg.Name)
 			applyCmd = applySecretsCmd(m.provFor(msg.job.scope), msg.job.scope, cfg.Name, user, scopes)
 		}

@@ -81,11 +81,11 @@ graph TD
 **Status:** completed
 **Parallel Tasks:**
 - ✔️ Task 001: Forge credentials (completed)
-### Phase 2: User experience and documentation
-**Status:** pending
+### ✅ Phase 2: User experience and documentation
+**Status:** completed
 **Parallel Tasks:**
-- Task 002: Create/reset UX (depends on: 001)
-- Task 003: Forge documentation (depends on: 001)
+- ✔️ Task 002: Create/reset UX (completed; depends on: 001)
+- ✔️ Task 003: Forge documentation (completed; depends on: 001)
 ### Post-phase Actions
 Verify evidence and create conventional phase commits.
 ### Execution Summary
@@ -94,3 +94,6 @@ Verify evidence and create conventional phase commits.
 
 ### Phase 1 verification
 Parent ran `go test ./internal/vm ./internal/secrets ./internal/provision` and Ansible syntax check successfully, including real HTTPS authenticated clone/fetch/push and real-Git lookup tests. `gofmt -l` and `git diff --check` are clean. Feature-branch script skipped detached HEAD; continuing on current checkout as instructed.
+
+### Phase 2 verification
+Parent inspected the CLI help, deterministic focused-token 80x24 golden, and changes to token seeding, reset configuration, secrets tips and docs. The full Go race suite passes with `TMPDIR=/var/tmp`. Vet/build/format checks pass; all 22 Python lifecycle tests, Ansible syntax and MkDocs strict build pass. Initial race snapshots exposed unpinned host free space in two template form fixtures; those fixtures now explicitly suppress host warnings. Golden trailing padding is intentional; nongolden whitespace checks pass.

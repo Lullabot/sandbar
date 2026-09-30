@@ -106,10 +106,9 @@ func TestTUIFormSourceSelectorGolden(t *testing.T) {
 	if m.view != viewForm {
 		t.Fatalf("precondition: 'n' should open the create form, got view %v", m.view)
 	}
-	// The disk-overflow warning compares the typed size against the REAL host's
-	// free disk space (freeDiskBytes, form.go) — not portable across machines.
-	// A tiny requested size keeps it well under whatever any test box actually
-	// has free, so this golden's line count stays fixed everywhere.
+	// Disable the host-capacity warning in this layout fixture. The temporary
+	// filesystem may have less than even a small requested disk available.
+	m.hostDiskFree = 0
 	m.inputs[fDisk].SetValue("1GiB")
 	// Pin the host-derived identity fields (fUser/fGitName/fGitEmail come from
 	// hostUser()/hostGit(), which isolateHostState does not control) so the
@@ -160,8 +159,8 @@ func TestTUIDeleteTemplateConfirmGolden(t *testing.T) {
 
 	next, _ = m.Update(runeKey('n'))
 	m = next.(model)
-	// See TestTUIFormSourceSelectorGolden: keeps the disk-overflow warning
-	// (compared against the REAL host's free space) from appearing.
+	// See TestTUIFormSourceSelectorGolden: keep host free space out of this fixture.
+	m.hostDiskFree = 0
 	m.inputs[fDisk].SetValue("1GiB")
 	// Pin the host-derived identity fields (fUser/fGitName/fGitEmail come from
 	// hostUser()/hostGit(), which isolateHostState does not control) so the

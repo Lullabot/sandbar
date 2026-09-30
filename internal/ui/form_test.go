@@ -7,12 +7,49 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+func TestCreateFormSelectsSelfHostedGitLab(t *testing.T) {
+	m := resized(newTestModel(t), 80, 24)
+	m.openForm()
+	m.inputs[fCloneURL].SetValue("https://git.example.test/group/repo")
+	m.focusIdx = fCloneForge
+	for _, code := range []rune{tea.KeySpace, tea.KeyEnter} {
+		next, _ := m.Update(tea.KeyPressMsg{Code: code})
+		m = next.(model)
+	}
+	if m.focusIdx != fCloneToken {
+		t.Fatalf("enter did not advance from Git service to token: %d", m.focusIdx)
+	}
+	if m.formCloneForge != "github" {
+		t.Fatalf("first selection = %q", m.formCloneForge)
+	}
+	m.focusIdx = fCloneForge
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = next.(model)
+	if m.formCloneForge != "gitlab" {
+		t.Fatalf("right did not select GitLab: %q", m.formCloneForge)
+	}
+	m.inputs[fCloneToken].SetValue("secret")
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloneForge != "gitlab" || cfg.CloneToken != "secret" {
+		t.Fatalf("form config lost GitLab selection: %+v", cfg)
+	}
+	m.focusIdx = fCloneToken
+	view := ansi.Strip(m.formView())
+	if !strings.Contains(view, "Git service:") || !strings.Contains(view, "< GitLab >") || !strings.Contains(view, "Clone token:") || !strings.Contains(view, "Download for clone/pull") || !strings.Contains(view, "ctrl+s create") {
+		t.Fatalf("narrow form lost service, token, help, or footer:\n%s", view)
+	}
+}
 
 func TestAgentChoicesSurviveLateBaseRead(t *testing.T) {
 	m := newTestModel(t)

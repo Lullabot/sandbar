@@ -17,6 +17,7 @@ import (
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/teatest/v2"
 )
@@ -234,6 +235,38 @@ func TestTUINewFormAcceptsTyping(t *testing.T) {
 	if got := fm.inputs[fName].Value(); got != "myvm" {
 		t.Fatalf("typed name did not reach the focused field: Name input = %q, want %q", got, "myvm")
 	}
+}
+
+func TestTUIGitLabCloneTokenFocused80x24(t *testing.T) {
+	m := newTestModel(t)
+	m.openForm()
+	m.inputs[fUser].SetValue("tester")
+	m.inputs[fGitName].SetValue("Test Author")
+	m.inputs[fGitEmail].SetValue("test@example.com")
+	m.inputs[fCPUs].SetValue("2")
+	m.inputs[fMemory].SetValue("8GiB")
+	m.hostDiskFree = 0
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	waitForText(t, tm, "New VM")
+	for range fCloneURL {
+		tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
+	}
+	tm.Type("https://git.example.test/group/repo")
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeySpace})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeySpace})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Type("private-token")
+	screen := finalScreen(t, tm)
+	if lipgloss.Height(string(screen)) > 24 {
+		t.Fatalf("form exceeds terminal height: %d", lipgloss.Height(string(screen)))
+	}
+	for _, want := range []string{"Git service:", "< GitLab >", "Clone token:", "Personal access tokens", "ctrl+s create"} {
+		if !strings.Contains(string(screen), want) {
+			t.Fatalf("focused token form lacks %q:\n%s", want, screen)
+		}
+	}
+	teatest.RequireEqualOutput(t, screen)
 }
 
 // buildingRunner is a lima.Runner whose streaming calls BLOCK, dribbling

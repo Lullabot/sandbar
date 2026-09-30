@@ -113,7 +113,8 @@ Flags:
 	fs.StringVar(&cfg.Domain, "domain", cfg.Domain, "Domain suffix")
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
-	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)")
+	fs.StringVar(&cfg.CloneForge, "clone-forge", "auto", "Git service: auto detects github.com and gitlab.com; choose gitlab for self-hosted GitLab")
+	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab; never placed on guest argv)")
 	// DDEV, Go and Java ship in the published base image, so there is nothing to
 	// choose. The flags are still accepted (and ignored) so existing scripts and
 	// CI invocations keep working rather than failing on an unknown flag.
@@ -253,7 +254,14 @@ Flags:
 		cfg.BaseName = templateInstance
 	}
 
-	if err := cfg.Validate(); err != nil {
+	// A recreate's --clone-token belongs to the recorded URL adopted below.
+	// Validate the other fields now, then validate the complete config after
+	// adoption, before the provider receives it.
+	preAdoption := cfg
+	if *recreate {
+		preAdoption.CloneToken = ""
+	}
+	if err := preAdoption.Validate(); err != nil {
 		return fmt.Errorf("sand create: %w", err)
 	}
 	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
@@ -301,13 +309,18 @@ Flags:
 			// strips the secret before it ever reaches disk — so say so rather than
 			// let the finalize playbook fail on `git clone` with no credentials.
 			if cfg.CloneURL != "" && cfg.CloneToken == "" && !explicit["clone-url"] {
-				fmt.Fprintf(os.Stderr, "sand: reusing %s's recorded --clone-url %s; tokens are never stored, so pass --clone-token if that repo is private.\n", cfg.Name, cfg.CloneURL)
+				fmt.Fprintf(os.Stderr, "sand: reusing %s's recorded --clone-url %s; saved secrets apply after cloning, so pass --clone-token to re-clone a private repo.\n", cfg.Name, cfg.CloneURL)
 			}
 			// The record was valid when it was written, but it is a file on disk
 			// and this is the last point anything checks it.
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("sand create: %s's recorded config is unusable (%w); pass the settings explicitly", cfg.Name, err)
 			}
+		}
+	}
+	if *recreate {
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("sand create: %w", err)
 		}
 	}
 
@@ -463,6 +476,9 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	// nothing" is an answer, and the flag default says the same thing anyway.
 	if !explicit["clone-url"] {
 		cfg.CloneURL = rec.CloneURL
+	}
+	if !explicit["clone-forge"] {
+		cfg.CloneForge = rec.CloneForge
 	}
 	// TimezoneExplicit rides along with the zone it describes — it records
 	// whether a HUMAN named that zone, which decides whether the guest treats an
