@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -389,5 +392,140 @@ func TestResetValidationBlamesTheRightValue(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should contain %q", err.Error(), want)
 		}
+	}
+}
+
+// backupDir builds a staging directory as a failed reset leaves it: archives
+// plus (when m is non-nil) the manifest.
+func backupDir(t *testing.T, m *provision.ResetManifest, archives ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, a := range archives {
+		if err := os.WriteFile(filepath.Join(dir, a), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m != nil {
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "reset.json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func resumeFlags(dir string, args ...string) (*resetOptions, map[string]bool) {
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	_ = fs.Parse(append([]string{"--from-backup", dir}, args...))
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	return &o, explicit
+}
+
+// The rebuilt VM is the one the failed reset was rebuilding — from the
+// manifest, not the index (which forgets a VM once it stops existing) and not
+// the defaults.
+func TestResumeResetUsesTheBackupsRecordedConfig(t *testing.T) {
+	rec := recordedVM()
+	m := &provision.ResetManifest{Schema: 1, Config: rec, Plan: provision.PreservePlan{WholeHome: true}, TemplateSource: "golden"}
+	dir := backupDir(t, m, "home.tar")
+	o, explicit := resumeFlags(dir)
+
+	cfg, opts, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil)
+	if err != nil {
+		t.Fatalf("resumeReset: %v", err)
+	}
+	if cfg.Memory != rec.Memory || cfg.Disk != rec.Disk || cfg.BaseName != rec.BaseName || cfg.CPUs != rec.CPUs {
+		t.Errorf("config = %+v, want the backup's recorded settings %+v", cfg, rec)
+	}
+	if opts.RestoreFrom != dir || opts.TemplateSource != "golden" {
+		t.Errorf("opts = %+v, want RestoreFrom=%q and the recorded template source", opts, dir)
+	}
+}
+
+func TestResumeResetFlagsOverrideTheRecord(t *testing.T) {
+	m := &provision.ResetManifest{Schema: 1, Config: recordedVM(), Plan: provision.PreservePlan{WholeHome: true}}
+	dir := backupDir(t, m, "home.tar")
+	o, explicit := resumeFlags(dir, "--memory", "2GiB")
+	o.values.memory = "2GiB"
+
+	cfg, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Memory != "2GiB" {
+		t.Errorf("memory = %q, an explicit flag must win over the record", cfg.Memory)
+	}
+}
+
+// A backup made before manifests existed still resumes, from the index (or
+// defaults), with its archive restored.
+func TestResumeResetLegacyBackupFallsBackToTheIndex(t *testing.T) {
+	dir := backupDir(t, nil, "home.tar")
+	o, explicit := resumeFlags(dir)
+
+	cfg, opts, err := resumeReset(seededRegistry(t), "web", registry.LocalScope, o, explicit, "ada", nil)
+	if err != nil {
+		t.Fatalf("resumeReset: %v", err)
+	}
+	if cfg.Memory != recordedVM().Memory {
+		t.Errorf("memory = %q, want the index's %q", cfg.Memory, recordedVM().Memory)
+	}
+	if opts.RestoreFrom != dir {
+		t.Errorf("RestoreFrom = %q, want %q", opts.RestoreFrom, dir)
+	}
+}
+
+func TestResumeResetRefusals(t *testing.T) {
+	m := &provision.ResetManifest{Schema: 1, Config: recordedVM(), Plan: provision.PreservePlan{WholeHome: true}}
+	dir := backupDir(t, m, "home.tar")
+
+	cases := []struct {
+		name string
+		mod  func(o *resetOptions)
+		vmN  string
+		live []vm.VM
+		want string
+	}{
+		{"preserve flags conflict", func(o *resetOptions) { o.preserveHome = true }, "web", nil, "drop the --preserve flags"},
+		{"live VM of that name", nil, "web", []vm.VM{{Name: "web"}}, "already exists"},
+		{"backup of a different VM", nil, "api", nil, `backup of "web", not "api"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o, explicit := resumeFlags(dir)
+			if tc.mod != nil {
+				tc.mod(o)
+			}
+			_, _, err := resumeReset(registry.NewEmpty(), tc.vmN, registry.LocalScope, o, explicit, "ada", tc.live)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestResumeResetRejectsAnUnreadableBackup(t *testing.T) {
+	o, explicit := resumeFlags(filepath.Join(t.TempDir(), "gone"))
+	if _, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil); err == nil {
+		t.Fatal("a missing backup directory must be refused")
+	}
+}
+
+func TestResetHelpDocumentsFromBackup(t *testing.T) {
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	if fs.Lookup("from-backup") == nil {
+		t.Fatal("the reset flag set has no --from-backup")
+	}
+	var buf strings.Builder
+	fs.SetOutput(&buf)
+	fs.Usage()
+	if !strings.Contains(buf.String(), "--from-backup DIR") {
+		t.Errorf("the help never explains how to resume a failed reset:\n%s", buf.String())
 	}
 }

@@ -167,6 +167,9 @@ type StageGuard struct {
 	// flipped on a clean delete would throw away the archives in exactly the
 	// case where they are most likely to be all that is left.
 	destroyed bool
+	// name is the VM the directory belongs to, known once a manifest has been
+	// written (or read back by a resume). It only feeds the recovery hint in Fail.
+	name string
 }
 
 // NewStageGuard creates the private (0700) staging directory and returns the
@@ -211,6 +214,9 @@ func (g *StageGuard) Fail(err error) error {
 	if !g.destroyed {
 		removeStageDir(g.dir)
 		return err
+	}
+	if g.name != "" {
+		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w\n\nTo finish this reset once the cause is fixed: sand reset %s --from-backup %s", g.dir, err, g.name, g.dir)
 	}
 	return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", g.dir, err)
 }

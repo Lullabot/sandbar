@@ -63,6 +63,7 @@ type resetOptions struct {
 	preserveProject bool
 	preserveHome    bool
 	preservePaths   repeatedString
+	fromBackup      string
 	profile         string
 	values          resetFlagValues
 }
@@ -103,6 +104,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	// backquoted run in a usage string as the argument's display name, so a
 	// stray `sand land NAME` in here printed "-preserve sand land NAME".
 	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts")
+	fs.StringVar(&o.fromBackup, "from-backup", "", "Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in `DIR` (the path the failure named)")
 	fs.StringVar(&o.values.cpus, "cpus", "", "vCPUs (default: whatever this VM has)")
 	fs.StringVar(&o.values.hostname, "hostname", "", "VM hostname (default: whatever this VM has)")
 	fs.StringVar(&o.values.user, "user", "", "Primary VM user (default: whatever this VM has)")
@@ -151,6 +153,16 @@ work on a different repo, create another VM with 'sand create'.
 For a private repo that will be cloned again, pass --clone-token; saved guest
 secrets are reapplied after cloning and cannot authenticate that clone.
 
+If a reset fails after the VM was deleted, the error names a directory holding
+your backup. Finish the job with:
+
+  sand reset NAME --from-backup DIR
+
+That rebuilds NAME with the settings the failed reset recorded, restores the
+backup in the usual order, and removes DIR once everything is back. The VM must
+not exist (the failed reset already deleted it). Pass --profile if NAME's
+connection profile is not the only enabled one.
+
 Examples:
   sand reset web                                  # clean rebuild, same settings
   sand reset web --preserve-agents                # keep coding-agent state
@@ -196,6 +208,9 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	// exists, so the VM decides, not a default.
 	target, err := resolveVMProfile(store, reg, name, o.profile)
 	if err != nil {
+		if o.fromBackup != "" {
+			return fmt.Errorf("sand reset: %w (with --from-backup the VM no longer exists, so name its connection profile with --profile)", err)
+		}
 		return fmt.Errorf("sand reset: %w", err)
 	}
 	p, scope, err := providerForProfile(target)
@@ -222,14 +237,31 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	provenancer, _ := p.(provider.Provenancer)
 	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
 
-	base, ok := manage.RecreateBase(reg, name, scope, provenancer)
-	if !ok {
-		return fmt.Errorf("sand reset: %q is not a sand-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
+	opts := provision.ResetOptions{
+		PreserveAgents:  o.preserveAgents,
+		PreserveProject: o.preserveProject,
+		PreserveHome:    o.preserveHome,
+		PreservePaths:   o.preservePaths,
 	}
 
-	cfg, err := resetConfigFor(reg, name, scope, base, explicit, o.values, p.HostUser())
-	if err != nil {
-		return fmt.Errorf("sand reset: %w", err)
+	var cfg vm.CreateConfig
+	if o.fromBackup != "" {
+		// Finishing a failed reset: the VM is gone by definition, so the
+		// managed-VM gate below cannot apply (it would refuse every such VM) and
+		// the recorded config has to come from the backup's own manifest.
+		cfg, opts, err = resumeReset(reg, name, scope, o, explicit, p.HostUser(), live)
+		if err != nil {
+			return fmt.Errorf("sand reset: %w", err)
+		}
+	} else {
+		base, ok := manage.RecreateBase(reg, name, scope, provenancer)
+		if !ok {
+			return fmt.Errorf("sand reset: %q is not a sand-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
+		}
+		cfg, err = resetConfigFor(reg, name, scope, base, explicit, o.values, p.HostUser())
+		if err != nil {
+			return fmt.Errorf("sand reset: %w", err)
+		}
 	}
 
 	if cfg.CloneURL != "" && cfg.CloneToken == "" {
@@ -240,12 +272,6 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		fmt.Fprintf(os.Stderr, "sand: %s clones %s; saved secrets apply after cloning, so pass --clone-token to re-clone a private repo unless its checkout is preserved.\n", name, cfg.CloneURL)
 	}
 
-	opts := provision.ResetOptions{
-		PreserveAgents:  o.preserveAgents,
-		PreserveProject: o.preserveProject,
-		PreserveHome:    o.preserveHome,
-		PreservePaths:   o.preservePaths,
-	}
 	if err := doReset(ctx, reg, p, cfg, scope, opts, os.Stdout, provenancer); err != nil {
 		return err
 	}
@@ -254,6 +280,49 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	// the old one had until someone started it from the TUI. See settleSecrets.
 	settleSecrets(ctx, p, scope, cfg, os.Stdout)
 	return nil
+}
+
+// resumeReset prepares `sand reset NAME --from-backup DIR`: it reads the
+// backup's manifest, checks the request makes sense, and returns the config and
+// options to hand to Reset. Everything it refuses, it refuses before any VM is
+// built.
+func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *resetOptions, explicit map[string]bool, hostUser string, live []vm.VM) (vm.CreateConfig, provision.ResetOptions, error) {
+	var zero vm.CreateConfig
+	if o.preserveAgents || o.preserveProject || o.preserveHome || len(o.preservePaths) > 0 {
+		return zero, provision.ResetOptions{}, errors.New("--from-backup restores what the backup recorded; drop the --preserve flags")
+	}
+	for _, v := range live {
+		if v.Name == name {
+			return zero, provision.ResetOptions{}, fmt.Errorf("%q already exists; delete it first (--from-backup restores into a freshly built VM and never overwrites a live one)", name)
+		}
+	}
+	_, m, legacy, err := provision.ResumeStage(o.fromBackup)
+	if err != nil {
+		return zero, provision.ResetOptions{}, err
+	}
+	if m.Config.Name != "" && m.Config.Name != name {
+		return zero, provision.ResetOptions{}, fmt.Errorf("%s is the backup of %q, not %q", o.fromBackup, m.Config.Name, name)
+	}
+
+	// The index may still remember the VM (a failure before the next reconcile),
+	// or may not; the manifest is the authority, the index the fallback for a
+	// backup from before manifests.
+	rec, found := m.Config, m.Config.Name != ""
+	if !found {
+		rec, found = reg.ConfigInScope(name, scope)
+	}
+	base := rec.BaseName
+	if base == "" {
+		base = vm.DefaultCreateConfig().BaseName
+	}
+	cfg, err := resetConfigFromRecord(rec, found, name, base, explicit, o.values, hostUser)
+	if err != nil {
+		return zero, provision.ResetOptions{}, err
+	}
+	if legacy {
+		fmt.Fprintf(os.Stderr, "sand: %s predates backup manifests; rebuilding %s from its recorded settings (or defaults) and restoring the archive.\n", o.fromBackup, name)
+	}
+	return cfg, provision.ResetOptions{RestoreFrom: o.fromBackup, TemplateSource: m.TemplateSource}, nil
 }
 
 // resetFlagValues is the raw flag surface resetConfigFor applies over a VM's
@@ -278,10 +347,17 @@ type resetFlagValues struct {
 // resets, from defaults plus this host's identity, because refusing would leave
 // the one entrypoint that can rebuild it unable to.
 func resetConfigFor(reg *registry.Registry, name string, scope registry.Scope, base string, explicit map[string]bool, flags resetFlagValues, hostUser string) (vm.CreateConfig, error) {
+	rec, found := reg.ConfigInScope(name, scope)
+	return resetConfigFromRecord(rec, found, name, base, explicit, flags, hostUser)
+}
+
+// resetConfigFromRecord is resetConfigFor with the recorded config supplied by
+// the caller, so a resume can use the one its backup carries instead of the
+// managed index (which forgets a VM the moment it stops existing).
+func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, explicit map[string]bool, flags resetFlagValues, hostUser string) (vm.CreateConfig, error) {
 	cfg := vm.DefaultCreateConfig()
 	cfg.Name = name
 
-	rec, found := reg.ConfigInScope(name, scope)
 	if found && rec.Name != "" {
 		// Reuse the create path's adoption table so the two commands cannot drift
 		// on what "a flag you did not pass" means. It is keyed by FLAG NAME, and

@@ -1209,6 +1209,15 @@ type ResetOptions struct {
 	// takes, instead of treating cfg.BaseName as a base image to build/
 	// converge.
 	TemplateSource string
+
+	// RestoreFrom, when non-empty, names a staging directory left behind by a
+	// reset that failed after deleting the guest. The reset then skips the
+	// stage-out and the delete — they already happened — and rebuilds the VM,
+	// restoring that directory's archives in the usual order. The instance must
+	// not exist: this finishes a reset, it never overwrites a live VM. The other
+	// preserve options are ignored, since the directory's own manifest says what
+	// was staged.
+	RestoreFrom string
 }
 
 // Any reports whether the options ask for anything at all to survive the
@@ -1249,46 +1258,65 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		cloneOpts.TemplateSource = cfg.BaseName
 	}
 
-	// 0. Make sure the clone source is usable BEFORE anything is staged or
-	// deleted. Building or replacing the base is the slow step and the one that
-	// depends on the network; running it after the delete meant a failed
-	// download left no VM and, for a stale base, no base either.
-	step(out, "Checking the base image before touching %q…", cfg.Name)
-	if err := p.prepareSource(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
-		return fmt.Errorf("prepare the base image (%q was not touched): %w", cfg.Name, err)
-	}
-
-	// 1. Stage out the selected state while the source VM is still alive. WHAT
-	// is staged, and in what order it comes back, is StagePreserve's and the two
-	// Restore* helpers' — shared with the Proxmox provider's reset so the two
-	// backends cannot drift on the ordering rules.
-	if opts.Any() {
-		// Ensure the source VM is running so tar can read from it.
-		if status, _ := p.Lima.Status(cfg.Name); status != "Running" {
-			step(out, "Starting %q to stage its data…", cfg.Name)
-			if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
-				return fmt.Errorf("start %q for staging: %w", cfg.Name, err)
-			}
+	if opts.RestoreFrom != "" {
+		// Resuming a reset that failed after the guest was deleted: steps 1 and 2
+		// already happened, in a previous run. The archives are the only copy of
+		// the guest's data, which is why ResumeStage hands back a guard that keeps
+		// them on every failure.
+		if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
+			return fmt.Errorf("cannot restore into %q: an instance with that name already exists; delete it first (this restores into a freshly built VM, it never overwrites a live one)", cfg.Name)
 		}
 		var err error
-		if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
-			return fmt.Errorf("resolve home for %q: %w", cfg.Name, err)
-		}
-		if stage, err = NewStageGuard(); err != nil {
+		if stage, plan, err = ResumeReset(opts.RestoreFrom, cfg.Name, out); err != nil {
 			return err
 		}
-		if plan, err = StagePreserve(ctx, p.Lima, cfg.Name, home, cfg.User, cfg.CloneURL, opts, stage, out); err != nil {
-			return stage.Fail(err)
+	} else {
+		// 0. Make sure the clone source is usable BEFORE anything is staged or
+		// deleted. Building or replacing the base is the slow step and the one that
+		// depends on the network; running it after the delete meant a failed
+		// download left no VM and, for a stale base, no base either.
+		step(out, "Checking the base image before touching %q…", cfg.Name)
+		if err := p.prepareSource(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
+			return fmt.Errorf("prepare the base image (%q was not touched): %w", cfg.Name, err)
 		}
-	}
 
-	// 2. Delete the existing VM. From here on the staged archives are the only
-	// copy of what was in the guest, so every later failure keeps them — flipped
-	// BEFORE the call, since a delete that reports an error may still have taken
-	// the instance with it.
-	stage.DestroyingGuest()
-	if err := p.Lima.Delete(cfg.Name, true); err != nil {
-		return stage.Fail(fmt.Errorf("delete %q: %w", cfg.Name, err))
+		// 1. Stage out the selected state while the source VM is still alive. WHAT
+		// is staged, and in what order it comes back, is StagePreserve's and the two
+		// Restore* helpers' — shared with the Proxmox provider's reset so the two
+		// backends cannot drift on the ordering rules.
+		if opts.Any() {
+			// Ensure the source VM is running so tar can read from it.
+			if status, _ := p.Lima.Status(cfg.Name); status != "Running" {
+				step(out, "Starting %q to stage its data…", cfg.Name)
+				if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+					return fmt.Errorf("start %q for staging: %w", cfg.Name, err)
+				}
+			}
+			var err error
+			if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
+				return fmt.Errorf("resolve home for %q: %w", cfg.Name, err)
+			}
+			if stage, err = NewStageGuard(); err != nil {
+				return err
+			}
+			if plan, err = StagePreserve(ctx, p.Lima, cfg.Name, home, cfg.User, cfg.CloneURL, opts, stage, out); err != nil {
+				return stage.Fail(err)
+			}
+			// Recorded while the guest is still intact, so a failure that strands
+			// the archives can be resumed with `sand reset --from-backup`.
+			if err := stage.WriteManifest(NewResetManifest(cfg, plan, opts)); err != nil {
+				return stage.Fail(err)
+			}
+		}
+
+		// 2. Delete the existing VM. From here on the staged archives are the only
+		// copy of what was in the guest, so every later failure keeps them — flipped
+		// BEFORE the call, since a delete that reports an error may still have taken
+		// the instance with it.
+		stage.DestroyingGuest()
+		if err := p.Lima.Delete(cfg.Name, true); err != nil {
+			return stage.Fail(fmt.Errorf("delete %q: %w", cfg.Name, err))
+		}
 	}
 
 	// 3. Recreate sized from the base image — or, when this VM's provenance is a
@@ -1312,6 +1340,14 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	step(out, "Starting %q…", cfg.Name)
 	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
 		return stage.Fail(fmt.Errorf("start %q: %w", cfg.Name, err))
+	}
+
+	if opts.RestoreFrom != "" {
+		// A resume never saw the old guest, so the home is read from the rebuilt one.
+		var err error
+		if home, err = guestHome(ctx, p.Lima, cfg.Name, cfg.User); err != nil {
+			return stage.Fail(fmt.Errorf("resolve home for %q: %w", cfg.Name, err))
+		}
 	}
 
 	// 4. Restore what the playbook must land on top of, BEFORE finalize.
