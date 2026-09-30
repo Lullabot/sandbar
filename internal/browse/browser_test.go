@@ -197,3 +197,99 @@ func TestBrowserClearsFilterOnNavigateAndSelect(t *testing.T) {
 		t.Fatalf("select should clear the filter, state=%v", b2.list.FilterState())
 	}
 }
+
+func TestBrowserDroppedPaths(t *testing.T) {
+	f := fakeLister{"/root": {{Name: "My File.txt"}, {Name: "雪", IsDir: true}}}
+	for _, tc := range []struct {
+		input, want string
+		dir         bool
+	}{
+		{`/root/My\ File.txt`, "/root/My File.txt", false},
+		{`'/root/雪/'`, "/root/雪", true},
+		{`file:///root/My%20File.txt`, "/root/My File.txt", false},
+		{`My File.txt`, "/root/My File.txt", false},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			b := NewBrowser(f, "test")
+			b, _ = b.Update(runCmd(b.Open("/root")))
+			b, cmd := b.Update(tea.PasteMsg{Content: tc.input})
+			if _, _, selected := b.Selected(); selected {
+				t.Fatal("selected before existence check")
+			}
+			b, _ = b.Update(runCmd(cmd))
+			p, dir, selected := b.Selected()
+			if !selected || p != tc.want || dir != tc.dir {
+				t.Fatalf("selection=(%q,%v,%v), want (%q,%v,true); err=%v", p, dir, selected, tc.want, tc.dir, b.err)
+			}
+		})
+	}
+}
+
+func TestBrowserPathErrorsAndCancellation(t *testing.T) {
+	b := NewBrowser(fakeLister{"/root": {{Name: "file"}}}, "test")
+	b, _ = b.Update(runCmd(b.Open("/root")))
+	for _, raw := range []string{`/root/missing`, `'/root/file' '/root/other'`} {
+		var cmd tea.Cmd
+		b, cmd = b.Update(tea.PasteMsg{Content: raw})
+		b, _ = b.Update(runCmd(cmd))
+		if b.err == nil {
+			t.Fatalf("no error for %q", raw)
+		}
+		if _, _, ok := b.Selected(); ok {
+			t.Fatal("invalid path selected")
+		}
+		if b.NotFiltering() {
+			t.Fatal("escape should cancel path input first")
+		}
+		b, _ = b.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+		if !b.NotFiltering() || b.err != nil {
+			t.Fatal("escape did not restore browser")
+		}
+	}
+	b, cmd := b.Update(tea.PasteMsg{Content: "/root/file"})
+	result := runCmd(cmd)
+	b, _ = b.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	b, _ = b.Update(result)
+	if _, _, ok := b.Selected(); ok {
+		t.Fatal("cancelled check selected a path")
+	}
+}
+
+func TestBrowserPathRequestOrdering(t *testing.T) {
+	b := NewBrowser(fakeLister{"/root": {{Name: "first"}, {Name: "second"}}}, "test")
+	initial := runCmd(b.Open("/root"))
+	b, first := b.Update(tea.PasteMsg{Content: "/root/first"})
+	b, second := b.Update(tea.PasteMsg{Content: "/root/second"})
+	b, _ = b.Update(runCmd(second))
+	b, _ = b.Update(runCmd(first))
+	b, _ = b.Update(initial)
+	if p, _, ok := b.Selected(); !ok || p != "/root/second" {
+		t.Fatalf("stale result changed selection: %q, %v", p, ok)
+	}
+}
+
+func TestBrowserPathEntryWithOrdinaryKeys(t *testing.T) {
+	b := NewBrowser(fakeLister{"/root": {{Name: "My File.txt"}}}, "test")
+	b, _ = b.Update(runCmd(b.Open("/root")))
+	b, _ = b.Update(ctrlKey('l'))
+	for _, r := range `/root/My\ File.txt` {
+		b, _ = b.Update(runeKey(r))
+	}
+	b, cmd := b.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	b, _ = b.Update(runCmd(cmd))
+	if p, _, ok := b.Selected(); !ok || p != "/root/My File.txt" {
+		t.Fatalf("typed source = %q, %v; err=%v", p, ok, b.err)
+	}
+}
+
+func TestBrowserDroppedPathListError(t *testing.T) {
+	b := NewBrowser(errLister{}, "test")
+	b, cmd := b.Update(tea.PasteMsg{Content: "/root/file"})
+	b, _ = b.Update(runCmd(cmd))
+	if b.err == nil {
+		t.Fatal("listing error hidden")
+	}
+	if _, _, ok := b.Selected(); ok {
+		t.Fatal("selected after listing failed")
+	}
+}

@@ -176,6 +176,23 @@ below is for.
   artifact Claude Code produced, to look at on the host. You browse the
   guest for a source, then pick a destination on the host.
 
+In the source picker, paste a path or drag a file or folder into the terminal
+window to select it directly. Sand checks that it exists, then opens the
+destination prompt. A pasted or dropped destination replaces the prefilled
+path. Quoted paths, escaped spaces, and local `file://` URLs are accepted;
+choose one file or folder at a time. Press **ctrl+s** to start the copy.
+
+A drop from your desktop supplies a **local** path: use it for an upload source
+or a download destination. For a download source or upload destination, paste
+a path inside the guest instead. Sand does not translate local paths to guest
+paths.
+
+If your terminal sends drops as ordinary keystrokes rather than a bracketed
+paste, press **ctrl+l** first: it opens a source path field or clears the
+destination field. Type or drop the path, then press **enter** to select a
+source, or **ctrl+s** to confirm the destination. **esc** cancels source path
+entry and returns to browsing.
+
 Both directions require the VM to be running, and neither is offered while
 a build or a reset is in progress on that VM — starting a transfer against
 a VM mid-reset would stream files into an instance that's about to be

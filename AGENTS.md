@@ -452,6 +452,13 @@ every bullet, not the constraint itself.
   so a stopped VM's footer offered actions that silently did nothing when
   pressed. There is deliberately no fuzzy command palette; this file "stays
   narrow on purpose" per its own header comment.
+- **Dropped source paths complete asynchronously.** Both key events and non-key
+  messages in `viewBrowse` must go through `updateBrowse`, which advances to
+  the destination after `Browser.Selected`. Forwarding only to the browser
+  loses the transition on its asynchronous path-check result. Preserve request
+  guards so cancelled or superseded checks cannot select an old path. Terminal
+  byte tests cover bracketed paste through the copy provider; `ctrl+l` offers
+  explicit path entry for ordinary keystrokes. Paths are decoded without a shell.
 - **An assertion must reach the boundary the user cares about.** A golden
   test proves a screen *painted*. An in-process behavioural test proves the
   model or the store changed. **Neither proves the guest changed.** This rule

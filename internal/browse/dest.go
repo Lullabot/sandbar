@@ -11,40 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// NormalizePath cleans a pasted or drag-dropped path so it is immediately
-// usable: it trims surrounding whitespace, drops an optional file:// (or
-// file://localhost) scheme, strips one layer of surrounding matching quotes, and
-// un-escapes backslash-escaped non-alphanumeric characters (a terminal escapes
-// spaces/parens on drag-drop, e.g. "/a\ b" -> "/a b"). It returns plain text
-// only — percent-decoding of file:// URLs is intentionally out of scope for v1,
-// and the result is always passed downstream as a discrete process argument,
-// never interpolated into a shell string.
-func NormalizePath(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "file://localhost")
-	s = strings.TrimPrefix(s, "file://")
-	// Strip one layer of surrounding matching quotes.
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			s = s[1 : len(s)-1]
-		}
-	}
-	// Drop a backslash that escapes a non-alphanumeric char (spaces, parens, …).
-	// Byte iteration is fine: paths are UTF-8 and the escapes we drop are ASCII.
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			nxt := s[i+1]
-			isAlnum := (nxt >= 'a' && nxt <= 'z') || (nxt >= 'A' && nxt <= 'Z') || (nxt >= '0' && nxt <= '9')
-			if !isAlnum {
-				continue // skip the backslash; the escaped char is kept next iteration
-			}
-		}
-		b.WriteByte(s[i])
-	}
-	return strings.TrimSpace(b.String())
-}
-
 // maxSuggestRows caps the visible autocomplete dropdown.
 const maxSuggestRows = 8
 
@@ -72,6 +38,8 @@ type DestInput struct {
 	entries []string // subdirectory names in dir, sorted
 	matches []string // entries filtered by the trailing path component
 	cursor  int      // highlighted match, or -1 when editing the field
+	err     error
+	plain   bool // pasted/default values are already literal; do not unquote twice
 }
 
 // NewDestInput builds a focused destination field pre-filled with def and returns
@@ -84,13 +52,28 @@ func NewDestInput(prompt, def string, lister DirLister) (DestInput, tea.Cmd) {
 	ti.SetValue(def)
 	ti.CursorEnd()
 	_ = ti.Focus()
-	d := DestInput{ti: ti, lister: lister, cursor: -1}
+	d := DestInput{ti: ti, lister: lister, cursor: -1, plain: true}
 	d.dir, _ = splitDest(def)
 	return d, d.suggest(d.dir)
 }
 
 // Value returns the current destination text.
 func (d DestInput) Value() string { return d.ti.Value() }
+
+// Prepare validates the destination before copy and decodes paths entered as
+// keystrokes. Already-normalized paste values stay literal, including backslashes.
+func (d DestInput) Prepare() (DestInput, string, error) {
+	if d.err != nil {
+		return d, "", d.err
+	}
+	p := d.ti.Value()
+	if !d.plain {
+		p, d.err = ParsePath(p)
+	} else if p == "" {
+		_, d.err = ParsePath(p)
+	}
+	return d, p, d.err
+}
 
 // suggest lists dir's subdirectories off the Update goroutine (the guest lister
 // shells out over SSH), yielding a dirSuggestMsg.
@@ -171,6 +154,8 @@ func (d *DestInput) accept() tea.Cmd {
 	}
 	val := dir + sep + d.matches[d.cursor] + "/"
 	d.ti.SetValue(val)
+	d.err = nil
+	d.plain = true
 	d.ti.CursorEnd()
 	d.dir = strings.TrimSuffix(val, "/")
 	if d.dir == "" {
@@ -196,10 +181,22 @@ func (d DestInput) Update(msg tea.Msg) (DestInput, tea.Cmd) {
 		d.refilter()
 		return d, nil
 	case tea.PasteMsg:
-		d.ti.SetValue(NormalizePath(msg.Content))
+		p, err := ParsePath(msg.Content)
+		d.err = err
+		if err != nil {
+			return d, nil
+		}
+		d.ti.SetValue(p)
+		d.plain = true
 		d.ti.CursorEnd()
 		return d, d.maybeRelist()
 	case tea.KeyPressMsg:
+		if msg.String() == "ctrl+l" {
+			d.ti.SetValue("")
+			d.plain = false
+			d.err = nil
+			return d, d.maybeRelist()
+		}
 		switch msg.Code {
 		case tea.KeyDown:
 			if d.cursor < len(d.matches)-1 {
@@ -224,6 +221,7 @@ func (d DestInput) Update(msg tea.Msg) (DestInput, tea.Cmd) {
 	if d.ti.Value() == before {
 		return d, cmd
 	}
+	d.err = nil
 	return d, tea.Batch(cmd, d.maybeRelist())
 }
 
@@ -231,6 +229,9 @@ func (d DestInput) Update(msg tea.Msg) (DestInput, tea.Cmd) {
 func (d DestInput) View() string {
 	var b strings.Builder
 	b.WriteString(d.ti.View())
+	if d.err != nil {
+		b.WriteString("\nerror: " + d.err.Error())
+	}
 	for i, name := range d.matches {
 		if i >= maxSuggestRows {
 			b.WriteString("\n  … " + strconv.Itoa(len(d.matches)-maxSuggestRows) + " more")
