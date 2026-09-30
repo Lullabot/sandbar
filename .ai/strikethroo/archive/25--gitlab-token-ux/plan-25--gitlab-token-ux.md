@@ -97,3 +97,25 @@ Parent ran `go test ./internal/vm ./internal/secrets ./internal/provision` and A
 
 ### Phase 2 verification
 Parent inspected the CLI help, deterministic focused-token 80x24 golden, and changes to token seeding, reset configuration, secrets tips and docs. The full Go race suite passes with `TMPDIR=/var/tmp`. Vet/build/format checks pass; all 22 Python lifecycle tests, Ansible syntax and MkDocs strict build pass. Initial race snapshots exposed unpinned host free space in two template form fixtures; those fixtures now explicitly suppress host warnings. Golden trailing padding is intentional; nongolden whitespace checks pass.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-29
+
+### Results
+Implemented GitLab.com and self-hosted GitLab token cloning, fresh-shell Git credentials, scoped secret delivery/rotation/removal, and reset reapplication while retaining the GitHub global-token convention. Added automatic public-host detection and explicit GitLab service selection in CLI/TUI, masked tokens and focused permission guidance, honest reset placeholders, and deterministic 80x24 form coverage. Updated published-site documentation and AGENTS.md.
+
+### Noteworthy Events
+- Pulled origin/main from 2765c53 to e37c427 before implementation.
+- Feature-branch helper skipped detached HEAD. Commits remain local; nothing was pushed.
+- Prevented a proposed GitHub permanent-helper regression: GitHub still uses GH_TOKEN and gh; GitLab uses a host-specific helper and directory-scoped token.
+- Real HTTPS integration runs the production Ansible clone/credential tasks against a token-authenticated local Git server, then fetches and pushes in fresh processes and verifies the server commit.
+- Fixed recreate validation to adopt the recorded clone URL/service before validating its supplied token.
+- Final race checks found unpinned free disk in two existing template goldens; fixtures now explicitly suppress host warnings.
+- Validation needed a larger temporary filesystem, then a short temporary path for Lima's Unix socket naming oracle. Two overlapping reruns collided on one coverage filename; the final successful run uses a separate, valid coverage report.
+- All validation gates pass: full Go race/atomic coverage suite, go vet, binary build, gofmt, nongolden whitespace checks, 22 Python lifecycle tests, Ansible syntax, MkDocs strict, CLI create/reset help and inspected form goldens.
+- Verified internal aggregate coverage is 90.8%, meeting the committed 90.8% floor. The measured total did not rise, so the floor is retained rather than raised beyond the verified result.
+
+### Necessary follow-ups
+No required implementation follow-ups. Live private GitHub/GitLab endpoint and full VM provisioning validation require an authorized endpoint/token and were not claimed by local tests. Token-bearing IPv6 literal URLs require a DNS hostname instead. GitLab Landing merge-request/browser actions remain outside this issue's scope.
