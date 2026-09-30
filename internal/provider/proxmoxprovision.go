@@ -211,10 +211,19 @@ func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateC
 	}
 	defer release()
 
-	var templateVMID int
+	templateVMID, err := p.resolveCloneSource(ctx, cfg, opts, out)
+	if err != nil {
+		return 0, err
+	}
+	return p.cloneFromTemplate(ctx, templateVMID, cfg, out)
+}
+
+// resolveCloneSource makes the clone source template exist and be current, and
+// returns its VMID. The caller holds the serial mutex and the base lock.
+func (p *proxmoxProvider) resolveCloneSource(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) (int, error) {
 	if opts.TemplateSource != "" {
-		var exists bool
-		templateVMID, exists, err = p.lookupTemplate(ctx, cloneSource)
+		cloneSource := opts.TemplateSource
+		templateVMID, exists, err := p.lookupTemplate(ctx, cloneSource)
 		if err != nil {
 			return 0, err
 		}
@@ -222,13 +231,30 @@ func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateC
 			return 0, fmt.Errorf("proxmox: template %q not found", cloneSource)
 		}
 		progress(out, "Reusing golden template %s (VMID %d)\n", cloneSource, templateVMID)
-	} else {
-		templateVMID, err = p.ensureBaseTemplate(ctx, cfg, opts, out)
-		if err != nil {
-			return 0, err
-		}
+		return templateVMID, nil
 	}
-	return p.cloneFromTemplate(ctx, templateVMID, cfg, out)
+	return p.ensureBaseTemplate(ctx, cfg, opts, out)
+}
+
+// prepareBase is ensureBaseAndClone without the clone. A reset calls it before
+// staging or deleting anything, so building or replacing the base template —
+// the slow step, and the one that depends on the image download — fails while a
+// failure still costs nothing. The clone that follows re-resolves the template,
+// which is a lookup on a base this call just readied.
+func (p *proxmoxProvider) prepareBase(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	cloneSource := cfg.BaseName
+	if opts.TemplateSource != "" {
+		cloneSource = opts.TemplateSource
+	}
+	unlock := p.lockCloneSerial(cloneSource)
+	defer unlock()
+	release, err := provision.LockBase(ctx, p.files, cloneSource, out)
+	if err != nil {
+		return err // only a cancelled context reaches here
+	}
+	defer release()
+	_, err = p.resolveCloneSource(ctx, cfg, opts, out)
+	return err
 }
 
 // lockCloneSerial takes the per-(endpoint, base) in-process mutex and returns its
@@ -789,6 +815,22 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	var stage *provision.StageGuard
 	var plan provision.PreservePlan
 
+	// A reset never asks for a base rebuild. A template-provenanced reset routes
+	// back to that same golden template; ordinary resets retain the base path.
+	cloneOpts := provision.CreateOptions{}
+	if opts.TemplateSource != "" {
+		cloneOpts.TemplateSource = cfg.BaseName
+	}
+
+	// 0. Make sure the clone source is usable BEFORE anything is staged or
+	// deleted. Building or replacing the base template is the slow step and
+	// the one that depends on the network; running it after the delete meant a
+	// failed image download left no VM behind.
+	progress(out, "Checking the base image before touching %s\n", cfg.Name)
+	if err := p.prepareBase(ctx, cfg, cloneOpts, out); err != nil {
+		return fmt.Errorf("prepare the base image (%s was not touched): %w", cfg.Name, err)
+	}
+
 	// 1. Stage out the selected state while the source VM is still alive.
 	if opts.Any() {
 		// Status is the existence check AND gives the running state in one resolve,
@@ -840,12 +882,6 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 		return stage.Fail(fmt.Errorf("proxmox: deleting %s: %w", cfg.Name, err))
 	}
 
-	// A reset never asks for a base rebuild. A template-provenanced reset routes
-	// back to that same golden template; ordinary resets retain the base path.
-	cloneOpts := provision.CreateOptions{}
-	if opts.TemplateSource != "" {
-		cloneOpts.TemplateSource = cfg.BaseName
-	}
 	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, cloneOpts, out)
 	if err != nil {
 		return stage.Fail(err)

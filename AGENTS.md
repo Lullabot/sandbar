@@ -977,6 +977,16 @@ shared rules.
 - **Whole-home preservation includes all other options.** `StagePreserve`
   returns early after staging the home to avoid duplicate archives. It
   still calls `probeProject` so finalize knows whether to skip cloning.
+- **Ready the base image before touching the VM** (`Provisioner.prepareSource`,
+  `proxmoxProvider.prepareBase`). Both resets call it first, before staging and
+  before the delete. Replacing a stale or missing base is the slow step and the
+  one that needs the network; running it after the delete meant a failed
+  download left no VM and, for a stale published base, no base either. The clone
+  step re-runs `ensureBaseStopped`, which is a cheap no-op on a base just readied,
+  so do not drop that re-run: another process may change the base in between.
+  Keep the ordering in `ensurePublishedBaseStopped` too: acquire the replacement
+  image, then delete the old base, then create the new one. Deleting first
+  reopens the same hole one level down.
 - **Validate preserve paths before deleting the VM.** Guest-supplied
   `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
   during restore. `preservePathRel` must reject paths outside the guest home
