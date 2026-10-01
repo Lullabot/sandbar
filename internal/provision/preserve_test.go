@@ -155,6 +155,7 @@ func TestReset_PreserveHome(t *testing.T) {
 	cfg := testConfig()
 	cfg.User = "andrew"
 	cfg.CloneURL = "https://github.com/lullabot/sandbar"
+	cfg.CloneToken = "saved-reset-token"
 
 	if err := p.Reset(context.Background(), cfg, ResetOptions{PreserveHome: true}, io.Discard); err != nil {
 		t.Fatalf("Reset: %v", err)

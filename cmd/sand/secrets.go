@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -110,4 +111,17 @@ func settleSecretsIn(ctx context.Context, p provider.Provider, store secretStore
 	if err := guestSecretsApplier(ctx, p, cfg.Name, user, store.GetAll(cfg.Name, scope), io.Discard); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but its secrets were not applied:", err)
 	}
+}
+
+// resetCloneConfig reads credentials before provisioning without changing what
+// the success handler saves. Store errors are deliberately credential-free.
+func resetCloneConfig(cfg vm.CreateConfig, scope registry.Scope) (vm.CreateConfig, error) {
+	if cfg.CloneToken == "" && cfg.CloneURL != "" {
+		store, err := secrets.Load()
+		if err != nil {
+			return cfg, fmt.Errorf("cannot read saved clone token from host secrets store")
+		}
+		cfg = manage.ResolveCloneToken(store, cfg, scope)
+	}
+	return cfg, cfg.Validate()
 }

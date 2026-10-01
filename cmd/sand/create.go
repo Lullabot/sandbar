@@ -305,12 +305,6 @@ Flags:
 	if *recreate {
 		if rec, ok := reg.ConfigInScope(cfg.Name, scope); ok && rec.Name != "" {
 			adoptRecordedConfig(&cfg, rec, explicit)
-			// A recorded clone URL comes back without its token — registry.Add
-			// strips the secret before it ever reaches disk — so say so rather than
-			// let the finalize playbook fail on `git clone` with no credentials.
-			if cfg.CloneURL != "" && cfg.CloneToken == "" && !explicit["clone-url"] {
-				fmt.Fprintf(os.Stderr, "sand: reusing %s's recorded --clone-url %s; saved secrets apply after cloning, so pass --clone-token to re-clone a private repo.\n", cfg.Name, cfg.CloneURL)
-			}
 			// The record was valid when it was written, but it is a file on disk
 			// and this is the last point anything checks it.
 			if err := cfg.Validate(); err != nil {
@@ -383,7 +377,14 @@ Flags:
 	// Provenancer).
 	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
 
-	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cfg, scope, *recreate, *rebuild, *templateFlag, os.Stdout, provenancer); err != nil {
+	cloneCfg := cfg
+	if *recreate {
+		cloneCfg, err = resetCloneConfig(cfg, scope)
+		if err != nil {
+			return err
+		}
+	}
+	if err := doHeadlessCreate(ctx, reg, providerProvisioner{p}, cloneCfg, scope, *recreate, *rebuild, *templateFlag, os.Stdout, provenancer); err != nil {
 		return err
 	}
 
