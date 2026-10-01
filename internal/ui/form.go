@@ -35,10 +35,10 @@ const (
 	fCPUs
 	fMemory
 	fDisk
-	fDockerProxyHost
 	fCloneURL
 	fCloneForge
 	fCloneToken
+	fDockerProxyHost
 )
 
 // fProfileSelector is a sentinel m.focusIdx value (never a real m.inputs
@@ -73,10 +73,10 @@ var fieldLabels = []string{
 	"CPUs",
 	"Memory",
 	"Disk",
-	"Docker proxy host",
 	"Repository URL",
 	"Git service",
 	"Clone token",
+	"Docker proxy host",
 }
 
 // fieldInfo is the per-field help shown for the focused field. Forge-specific
@@ -90,7 +90,6 @@ var fieldInfo = []string{
 	"vCPUs for the VM. Blank → half your host's cores (minimum 2).",
 	"RAM for the VM, e.g. 8GiB. Blank → 8GiB, or half your host's RAM if that's less.",
 	"Disk size for the VM, e.g. 100GiB. Blank → 100GiB.",
-	"Optional. Docker registry pull-through proxy host. Blank to skip.",
 	"Optional. HTTPS repository to clone into the VM now. Blank to skip.",
 	"Auto detects github.com and gitlab.com. For a self-hosted GitLab URL, choose GitLab with space or ←/→.",
 	"Optional. Token for a private GitHub repo (blank = public / set up later).\n" +
@@ -100,6 +99,7 @@ var fieldInfo = []string{
 		"self-merge to main without human review):\n" +
 		"  Actions: Read and write    Contents: Read and write\n" +
 		"  Issues: Read    Pull requests: Read    Workflows: Read and write",
+	"Optional. Docker registry pull-through proxy host. Blank to skip.",
 }
 
 // hostGit seeds a git-identity field from the host git config. The headless
@@ -245,10 +245,10 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 		strconv.Itoa(defaultCPUs(hostCPUs)), // fCPUs      (half the host cores, floor 2)
 		defaultMemory(hostMem),              // fMemory    (8GiB, capped at half host RAM)
 		def.Disk,                            // fDisk
-		"",                                  // fDockerProxyHost
 		"",                                  // fCloneURL
 		"",                                  // fCloneForge (selector, not text input)
 		"",                                  // fCloneToken
+		"",                                  // fDockerProxyHost
 	}
 
 	inputs := make([]textinput.Model, len(fieldLabels))
@@ -904,7 +904,7 @@ func (m *model) focusNext() tea.Cmd {
 		m.focusIdx = fName
 		return m.inputs[fName].Focus()
 	}
-	return m.formFocusNext(fName, fCloneToken)
+	return m.formFocusNext(fName, fDockerProxyHost)
 }
 
 func (m *model) focusPrev() tea.Cmd {
@@ -920,7 +920,7 @@ func (m *model) focusPrev() tea.Cmd {
 		m.focusIdx = fSourceSelector
 		return nil
 	default:
-		return m.formFocusPrev(fName, fCloneToken)
+		return m.formFocusPrev(fName, fDockerProxyHost)
 	}
 }
 
@@ -929,12 +929,12 @@ func (m *model) focusPrev() tea.Cmd {
 // The locked Name field is never focused, and toggles() already omits the
 // project toggle when disabled (the VM cloned no repo).
 func (m *model) resetFocusNext() tea.Cmd {
-	return m.formFocusNext(fHostname, fCloneToken)
+	return m.formFocusNext(fHostname, fDockerProxyHost)
 }
 
 // resetFocusPrev reverses resetFocusNext.
 func (m *model) resetFocusPrev() tea.Cmd {
-	return m.formFocusPrev(fHostname, fCloneToken)
+	return m.formFocusPrev(fHostname, fDockerProxyHost)
 }
 
 // fieldLocked reports whether field i is displayed but not editable in the
@@ -958,7 +958,7 @@ func (m model) fieldLocked(i int) bool {
 // nextEditable walks from index `from` in direction step (+1/-1) to the first
 // unlocked input inside [firstInput, lastInput], reporting false when the walk
 // runs off that range. It is what lets a locked field sit in the middle of the
-// ring (the repo URL, between the docker proxy host and the token) without
+// ring (the repo URL and Git service, before the token) without
 // focus ever landing on it.
 func (m model) nextEditable(from, step, firstInput, lastInput int) (int, bool) {
 	for i := from + step; i >= firstInput && i <= lastInput; i += step {

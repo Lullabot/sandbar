@@ -5,10 +5,10 @@
   CPUs:              > 2                                                      
   Memory:            > 8GiB                                                   
   Disk:              > 100GiB                                                 
-  Docker proxy host: >                                                        
   Repository URL:    >                                                        
   Git service:       < Auto >                                                 
   Clone token:       >                                                        
+  Docker proxy host: >                                                        
                                                                               
   [ ] Install Claude Code                                                     
   [ ] Install OpenAI Codex                                                    

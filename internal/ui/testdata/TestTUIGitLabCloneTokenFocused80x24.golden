@@ -1,18 +1,18 @@
                                                                               
    New VM                                                                     
                                                                               
+  Git email:         > test@example.com                                       
   CPUs:              > 2                                                      
   Memory:            > 8GiB                                                   
   Disk:              > 100GiB                                                 
-  Docker proxy host: >                                                        
   Repository URL:    > https://git.example.test/group/repo                    
   Git service:       < GitLab >                                               
   Clone token:       > *************                                          
+  Docker proxy host: >                                                        
                                                                               
   [ ] Install Claude Code                                                     
   [ ] Install OpenAI Codex                                                    
   [ ] Install OpenCode                                                        
-  [ ] Install Pi                                                              
   │ GitLab: create a fine-grained personal access token in your profile's     
   │ Access → Personal access tokens, scoped to the project/group. Grant Code  
   │ Download for clone/pull; add Code Push for push. Saved as scoped          

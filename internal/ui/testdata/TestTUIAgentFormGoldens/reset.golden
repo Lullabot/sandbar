@@ -2,10 +2,10 @@
    Reset VM                                                                     
                                                                                 
   Disk:              > 100GiB                                                   
-  Docker proxy host: >                                                          
   Repository URL: (none) (locked)                                               
   Git service:       Auto (locked)                                              
   Clone token:       >                                                          
+  Docker proxy host: >                                                          
                                                                                 
   [ ] Preserve the entire home directory                                        
   [x] Preserve agent settings and files                                         
