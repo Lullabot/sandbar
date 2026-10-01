@@ -208,13 +208,12 @@ Both the TUI and [`sand reset`](cli-reference.md#sand-reset-name) apply it
 to the rebuilt guest, and the Git credential helper is restored for fresh
 shells.
 
-Cloning happens **before** saved secrets are applied. As a current limitation,
-a reset does not reuse the saved forge token for that clone. To reset a VM
-with a private project, enter the token again in the form's `Clone token`
-field or pass `sand reset NAME --clone-token …`. This supplies the token for
-provisioning; the saved secret is then reapplied. If you preserve the
-project checkout, reset skips cloning and needs no clone token. See
-[Resetting a VM](tui.md#resetting-a-vm).
+When reset re-clones the project, leaving the clone token blank reuses the
+saved global `GH_TOKEN` for GitHub or the most specific matching scoped
+`GITLAB_TOKEN` for GitLab, including self-hosted GitLab. An explicitly entered
+token takes precedence and replaces the saved token after a successful reset.
+Preserving the project checkout or whole home skips cloning when the checkout
+is restored. See [Resetting a VM](tui.md#resetting-a-vm).
 
 ### GitLab token permissions
 

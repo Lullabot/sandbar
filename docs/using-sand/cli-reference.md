@@ -216,9 +216,9 @@ These sound similar and do different things to different objects:
   You cannot pass `--clone-url` with `--recreate`: a rebuild keeps the
   recorded project URL. Create another VM to work on a different repository.
 
-  Tokens are never recorded in the managed index. If the recorded clone URL
-  points to a private repository, pass `--clone-token` again. Without it,
-  `sand` warns that the clone may fail. See
+  Tokens are never recorded in the managed index. A rebuild reuses the saved
+  global GitHub token or matching scoped GitLab token from the host secrets
+  store. Pass `--clone-token` to override it. See
   [credential handling](#-clone-token-is-a-credential).
 
 ### Disk sizing
@@ -421,8 +421,8 @@ directory is kept and you can retry.
 
 - The backup directory contains `reset.json` beside the archives. It records
   the VM's settings and what was backed up. It never contains the clone token,
-  so pass `--clone-token` again if the repository is private and the project is
-  not being restored from the backup.
+  so cloning reuses the saved host token. Pass `--clone-token` if no token is
+  saved or to override it.
 - The VM must not exist. `--from-backup` completes a reset; it never
   overwrites a running VM. If you already created a replacement, delete it
   first.
@@ -483,7 +483,7 @@ before creating a VM.
 | `--timezone` | string | *this VM's* | IANA timezone. Naming one explicitly makes an unknown zone fatal in the guest, exactly as it does on `sand create`. |
 | `--domain` | string | *this VM's* | Domain suffix. |
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
-| `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless `--preserve-project` is keeping the checkout, in which case nothing is cloned. |
+| `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. |
 | `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
 | `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. |
 
@@ -548,8 +548,8 @@ Every other flag you omit is taken from the VM's own recorded settings, so
 
 There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sand create'.
-For a private repo that will be cloned again, pass --clone-token; saved guest
-secrets are reapplied after cloning and cannot authenticate that clone.
+A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
+An explicit token replaces the saved token after a successful reset.
 
 If a reset fails after the VM was deleted, the error names a directory holding
 your backup. Finish the job with:
@@ -571,7 +571,7 @@ Examples:
 
 Flags:
   -clone-token string
-        Token for this VM's recorded repo (GitHub or GitLab); required to re-clone a private repo unless its checkout is preserved
+        Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token
   -cpus string
     	vCPUs (default: whatever this VM has)
   -disk string

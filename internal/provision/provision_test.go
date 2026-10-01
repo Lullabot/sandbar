@@ -1522,6 +1522,7 @@ func TestReset_BothPreserve(t *testing.T) {
 	cfg := testConfig()
 	cfg.User = "andrew"
 	cfg.CloneURL = "https://github.com/lullabot/sandbar"
+	cfg.CloneToken = "saved-reset-token"
 	opts := ResetOptions{PreserveAgents: true, PreserveProject: true}
 
 	if err := p.Reset(context.Background(), cfg, opts, io.Discard); err != nil {

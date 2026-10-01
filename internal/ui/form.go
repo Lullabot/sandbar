@@ -13,6 +13,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -364,7 +365,7 @@ func (m *model) kickFormToolsetLoad() tea.Cmd {
 // openResetForm initialises the create form in reset mode, pre-filled from the
 // target VM's recorded config. The Name is locked to the VM being reset, so focus
 // starts on the first editable field (Hostname); the clone token is never in the
-// recorded config, so it is left blank to be re-supplied for a private repo.
+// recorded config, so it is left blank to reuse the saved host secret.
 func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateConfig) tea.Cmd {
 	// A reset targets the VM's OWN member (scope), not the active one — its host
 	// sample, provider and bookkeeping all resolve through m.formScope.
@@ -384,10 +385,9 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.inputs[fCloneURL].SetValue(cfg.CloneURL)
 
 	// The token itself is never in the recorded config, so the field seeds blank.
-	// A saved secret is reapplied only after provisioning; it cannot authenticate
-	// a fresh private clone. The placeholder says both facts.
+	// A saved host secret can authenticate a fresh private clone.
 	if m.hasStoredToken(scope, cfg.Name, cfg.CloneURL, cfg.CloneForge) {
-		m.inputs[fCloneToken].Placeholder = "*** saved; enter token to re-clone private repo"
+		m.inputs[fCloneToken].Placeholder = "*** saved — leave blank to keep it"
 	}
 
 	m.hostDiskFree = freeDiskBytes()
@@ -427,26 +427,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 // repository. GitHub retains its global token convention; GitLab uses a
 // directory scope matching the repo's parent or an ancestor.
 func (m model) hasStoredToken(scope registry.Scope, name, cloneURL, forge string) bool {
-	key := vm.CloneTokenKey(cloneURL, forge)
-	if key == "" {
-		return false
-	}
-	repoDir, _ := provision.OrgRelDir(cloneURL)
-	for dir, pairs := range m.sec.GetAll(name, scope) {
-		if pairs[key] == "" {
-			continue
-		}
-		if dir == "" {
-			if key == "GH_TOKEN" {
-				return true
-			}
-			continue
-		}
-		if repoDir == dir || strings.HasPrefix(repoDir, dir+"/") {
-			return true
-		}
-	}
-	return false
+	return manage.SavedCloneToken(m.sec, vm.CreateConfig{Name: name, CloneURL: cloneURL, CloneForge: forge}, scope) != ""
 }
 
 // formProfiles returns the ENABLED profiles the create form's selector offers
@@ -1313,12 +1294,13 @@ func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 // not shrink.
 func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	cfg = m.resetConfig(cfg)
+	cloneCfg := manage.ResolveCloneToken(m.sec, cfg, m.formScope)
 	// Deliberately NOT name-checked the way submitForm is. A reset's name is the
 	// locked target's, not something the form can edit (see resetConfig), so a
 	// rule the name failed would be an error with no field to fix it in — and it
 	// would refuse the reset of a VM the backend itself was happy to create, e.g.
 	// an underscore-bearing Lima instance made before any of this existed.
-	if err := cfg.Validate(); err != nil {
+	if err := cloneCfg.Validate(); err != nil {
 		// Validate now enforces the base-disk floor for every entrypoint (a clone
 		// cannot shrink below it), so the reset path no longer needs its own check.
 		m.formErr = err
@@ -1364,7 +1346,7 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
 			return err
 		}
-		return prov.Reset(ctx, c, opts, out)
+		return prov.Reset(ctx, cloneCfg, opts, out)
 	}
 	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
 	// its VM legitimately vanishes from `limactl list` mid-run. The registry has to
@@ -1509,7 +1491,7 @@ func (m model) cloneTokenHelp() string {
 	forge, _ := vm.ResolveCloneForge(m.inputs[fCloneURL].Value(), m.formCloneForge)
 	resetAdvice := ""
 	if m.resetMode && m.hasStoredToken(m.formScope, m.resetName, m.resetCloneURL, m.resetCloneForge) {
-		resetAdvice = "A saved token is reapplied after reset. To re-clone a private repository, enter its token here or preserve the project checkout. "
+		resetAdvice = "Leave blank to reuse the saved token for cloning. Enter a token to replace it after a successful reset. "
 	}
 	switch forge {
 	case "gitlab":

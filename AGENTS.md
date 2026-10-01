@@ -182,11 +182,13 @@ do not allow colons. Token-bearing clone URLs reject explicit ports and IPv6
 literals; use a DNS name and standard HTTPS.
 GitHub create tokens remain global `GH_TOKEN` and are also written to the
 cloned repository's `.env`; GitLab create tokens use their non-empty
-repository-parent scope. Create and reset apply saved secrets, but a private
-reset that reclones still needs `--clone-token` or a token entered in the form
-because saved secrets are applied after cloning. Preserving the checkout skips
-the clone. Rotation and removal update a running guest immediately. `glab`
-sees a scoped GitLab token after changing into the matching project directory.
+repository-parent scope. Create and reset apply saved secrets. A reset that
+reclones reuses the saved global `GH_TOKEN` or most specific matching scoped
+`GITLAB_TOKEN` when no token is entered, via `manage.ResolveCloneToken`. Keep the resolved token ephemeral:
+only an explicit token is saved after success, so inherited GitLab tokens are
+not copied into narrower scopes. Preserving the checkout skips the clone.
+Rotation and removal update a running guest immediately. `glab` sees a scoped
+GitLab token after changing into the matching project directory.
 Landing's `--pr` and `--web` actions remain GitHub-only; drupal.org publishing
 is separate.
 
