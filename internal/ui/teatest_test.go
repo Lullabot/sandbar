@@ -12,6 +12,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -318,39 +319,6 @@ func TestTUIGitLabCloneTokenFocused80x24(t *testing.T) {
 	teatest.RequireEqualOutput(t, screen)
 }
 
-// buildingRunner is a lima.Runner whose streaming calls BLOCK, dribbling
-// Ansible-shaped output until the test releases them — a stand-in for the real
-// provisioner, which blocks for minutes. `limactl list` still answers, so the
-// program's normal refreshes keep working underneath the build.
-type buildingRunner struct {
-	listFakeRunner
-	started chan struct{} // closed once the provisioner is actually streaming
-	release chan struct{} // closed to let the build finish
-	once    sync.Once
-}
-
-// Output answers the fleet listing from the canned JSON, but reports a per-name
-// status lookup (`limactl list <name> --format {{.Status}}`) as EMPTY: the VM
-// being created does not exist yet, which is exactly the state the provisioner's
-// already-exists guard is checking for.
-func (r *buildingRunner) Output(ctx context.Context, args ...string) ([]byte, error) {
-	if len(args) >= 2 && args[0] == "list" && !strings.HasPrefix(args[1], "--") {
-		return nil, nil
-	}
-	return r.listFakeRunner.Output(ctx, args...)
-}
-
-func (r *buildingRunner) Stream(ctx context.Context, _ io.Reader, out io.Writer, _ ...string) error {
-	r.once.Do(func() { close(r.started) })
-	io.WriteString(out, "SAND_ANSIBLE_TASK_TOTAL=19\nPLAY [Provision]\nTASK [dev-tools : Install Docker] ***\n")
-	select {
-	case <-r.release:
-		return nil
-	case <-ctx.Done(): // a real cancel (ctrl+c) kills the limactl subprocess here
-		return ctx.Err()
-	}
-}
-
 // THE CORE BEHAVIOUR OF THE BOARD, driven through the REAL Bubble Tea
 // runtime rather than a hand-rolled update loop: a user starts a VM, and instead
 // of the screen going dark with a full-screen Ansible dump for minutes, they can
@@ -367,21 +335,32 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 
-	runner := &buildingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	started := make(chan vm.CreateConfig, 1)
+	release := make(chan struct{})
 	var releaseOnce sync.Once
-	releaseBuild := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	releaseBuild := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(releaseBuild)
-	cli := lima.New(runner)
-	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir(), AcquireBaseImage: func(context.Context, lima.ImageStore, string, io.Writer) (string, error) {
-		return "/isolated/verified-base.qcow2", nil
-	}}
+	// This test exercises the UI's Provider consumer. Running the real Lima
+	// provisioner here also takes a base-image lock and prepares host files,
+	// which can block before the fake runner ever starts streaming.
+	prov := &providerfake.Provider{
+		CreateFunc: func(ctx context.Context, cfg vm.CreateConfig, _ provision.CreateOptions, out io.Writer) error {
+			started <- cfg
+			io.WriteString(out, "SAND_ANSIBLE_TASK_TOTAL=19\nPLAY [Provision]\nTASK [dev-tools : Install Docker] ***\n")
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	}
 	ready := make(chan struct{})
-	m := formReadyModel{model: New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model), ready: ready}
+	m := formReadyModel{model: New(singleFleet(prov, registry.LocalScope)).(model), ready: ready}
 	t.Cleanup(func() { m.jobs.cancelJob(provisionKey(registry.LocalScope, "newvm")) })
 	tm := newManagedTeaTestModel(t, m, teatest.WithInitialTermSize(100, 30))
 
-	// The managed index is empty here, so the canned VMs get no tile: the board
-	// opens on its empty-slot invitation.
+	// The empty provider listing opens the board on its empty-slot invitation.
 	waitForText(t, tm, ghostTileText)
 
 	// n → the create form → name it → ctrl+s → the provisioner starts streaming.
@@ -397,14 +376,19 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	tm.Send(ctrlKey('s'))
 
 	select {
-	case <-runner.started:
+	case cfg := <-started:
+		if cfg.Name != "newvm" || cfg.GitName != "Ada Lovelace" || cfg.GitEmail != "ada@example.com" {
+			t.Fatalf("the provider received the wrong form config: name=%q git name=%q email=%q", cfg.Name, cfg.GitName, cfg.GitEmail)
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("submitting the form should have started the provisioner")
+		fm := finalModel(t, tm)
+		snapshot, _ := fm.jobs.snapshot(provisionKey(registry.LocalScope, "newvm"))
+		t.Fatalf("submitting the form should have started the provider: form error=%v job error=%v output=%q", fm.formErr, snapshot.Err, snapshot.Output)
 	}
 	// Submitting the form leaves the user ON THE BOARD, watching a tile that is
 	// already building. There is no full-screen Ansible dump to escape from — which
 	// is why this waits for the tile rather than pressing ESC to get back to it. The
-	// VM being built is one `limactl list` has never heard of, and is not managed
+	// VM being built is absent from the provider listing, and is not managed
 	// until the build SUCCEEDS, yet it has a live tile throughout.
 	waitForText(t, tm, "Building")
 
