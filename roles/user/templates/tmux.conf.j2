@@ -9,6 +9,8 @@ set -g base-index 1
 setw -g pane-base-index 1
 set -g mouse on
 set -g history-limit 50000
+# Forward native Claude notifications through the guest multiplexer.
+set -g allow-passthrough on
 set -g focus-events on  # forward terminal focus in/out to apps (Claude Code, vim) so they can refresh on refocus
 
 # Claude Code: modified keys, notifications and terminal progress updates.

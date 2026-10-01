@@ -40,6 +40,8 @@
 # the safe defaults into an existing settings file without destroying user
 # customizations. Cross-machine sends always require approval; Remote Control is
 # forced off only until the user has answered its separate opt-in prompt.
+# The workstation notification channel is explicit because SSH and guest tmux
+# hide terminal identity. Unknown terminals leave the existing choice intact.
 - name: Check for prior Claude remote-control onboarding
   ansible.builtin.stat:
     path: "{{ user_home }}/.config/sandbar/claude-remote-control-onboarding-complete"
@@ -52,7 +54,7 @@
 
 - name: Isolate peer machines and keep Remote Control opt-in
   ansible.builtin.copy:
-    content: "{{ (claude_settings_content.content | b64decode | from_json | combine({'isolatePeerMachines': true}) | combine((not claude_onboarding_marker.stat.exists) | ternary({'remoteControlAtStartup': false}, {}))) | to_nice_json }}\n"
+    content: "{{ (claude_settings_content.content | b64decode | from_json | combine({'isolatePeerMachines': true}) | combine((not claude_onboarding_marker.stat.exists) | ternary({'remoteControlAtStartup': false}, {})) | combine((claude_notification_channel | default('') in ['iterm2', 'kitty', 'ghostty']) | ternary({'preferredNotifChannel': claude_notification_channel | default('')}, {}))) | to_nice_json }}\n"
     dest: "{{ user_home }}/.claude/settings.json"
     owner: "{{ user_name }}"
     group: "{{ user_name }}"

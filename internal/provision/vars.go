@@ -90,6 +90,11 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 	}
 
 	if phase != "base" {
+		if cfg.WithClaude {
+			if channel := claudeNotificationChannel(); channel != "" {
+				items = append(items, varItem{"claude_notification_channel", channel})
+			}
+		}
 		items = append(items,
 			varItem{"toolset_claude", cfg.WithClaude},
 			varItem{"toolset_codex", cfg.WithCodex},
