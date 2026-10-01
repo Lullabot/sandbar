@@ -2001,6 +2001,10 @@ from the guest, with each one's branch, push state, and PR state. This is
 how code — as opposed to the data <code>u</code>/<code>g</code> move above — leaves the VM: not by
 copying files, but by pushing a branch and opening a PR against it, exactly
 as you would from your own machine.</p>
+<p>The draft PR and browser actions use GitHub's <code>gh</code> CLI and are GitHub-only.
+GitLab checkout push and fetch work through the guest's scoped
+<code>GITLAB_TOKEN</code>; Landing does not create GitLab merge requests. The
+drupal.org publishing action is a separate workflow described below.</p>
 <p>The sweep finds repositories up to six directories below the guest's home
 (skipping <code>node_modules</code>, <code>.cache</code>, <code>.cargo</code> and <code>.npm</code>), and then asks git
 itself for each repository's linked worktrees — so a worktree is listed

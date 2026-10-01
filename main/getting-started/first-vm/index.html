@@ -1504,6 +1504,11 @@ running, select its tile and press <code>S</code> to get a shell inside it.</p>
 </code></pre></div>
 <p>See the <a href="../../using-sand/cli-reference/">CLI Reference</a> for the full flag
 list.</p>
+<p>To clone a private GitHub or GitLab project while creating the VM, provide a
+clone token with the repository URL. GitHub and GitLab.com are detected
+automatically. For a self-hosted GitLab URL, select GitLab in the form or use
+<code>sand create --clone-forge gitlab</code>; token setup and reset behavior are in
+<a href="../../using-sand/secrets/#github-and-gitlab-tokens">Secrets</a>.</p>
 <h2 id="what-to-expect-the-first-time">What to expect the first time</h2>
 <p>The very first VM you create builds a shared base image (<code>sandbar-base</code>),
 which can take a while. Every VM you

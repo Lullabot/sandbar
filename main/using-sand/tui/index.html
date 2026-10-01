@@ -1864,6 +1864,11 @@ require the VM to be running.</p>
 <p>The create form includes a clone-source row. Choose the shared base or a
 template in the selected profile; template rows show their size, age, and
 staleness. A template-sourced reset keeps using that same template.</p>
+<p>For an initial checkout, enter its HTTPS <code>Repository URL</code>. The <code>Git service</code>
+row detects GitHub and GitLab.com automatically. Focus it and press <code>space</code>
+or <code>←</code>/<code>→</code> to choose GitLab for a self-hosted instance; <code>enter</code> advances to
+the masked <code>Clone token</code> field. The token help follows the selected service.
+See <a href="../secrets/#github-and-gitlab-tokens">Secrets</a> for token permissions.</p>
 <p><code>d</code> is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does <strong>not</strong> use
 <code>d</code>; it's bound to <code>g</code> instead.</p>
@@ -1922,10 +1927,12 @@ recorded for that VM and does not change global preferences.</p>
 <p>Press <code>R</code> on a managed VM's tile to open the <em>Reset VM</em> form, filled with
 its recorded settings. Change resources or settings as needed, then press
 <code>ctrl+s</code> to delete and rebuild the VM. The next reset uses the new settings.</p>
-<p><code>Name</code> and <code>GitHub repo URL</code> are locked: a reset keeps the VM's identity and
+<p><code>Name</code> and <code>Repository URL</code> are locked: a reset keeps the VM's identity and
 project. Press <code>n</code> to create another VM for a different repository. The
-<code>GitHub token</code> field stays editable because cloning a private repository
-again requires a token.</p>
+<code>Git service</code> selection is retained, and the <code>Clone token</code> field stays
+editable because cloning a private repository again requires a token. GitHub
+and GitLab.com are detected from their hostnames; a self-hosted GitLab choice
+is recorded when the VM is created.</p>
 <p>The CLI equivalent is <a href="../cli-reference/#sand-reset-name"><code>sand reset NAME</code></a>.</p>
 <h3 id="choosing-what-survives">Choosing what survives</h3>
 <p>Preserve options follow the settings. <strong>All default off.</strong> Press space or
