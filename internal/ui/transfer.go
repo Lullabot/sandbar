@@ -59,8 +59,8 @@ func (m model) startTransfer(v boardVM, upload bool) (tea.Model, tea.Cmd) {
 // the board (unless the user is mid-filter, where the browser cancels the
 // filter). When the browser reports a selection, the flow advances to the
 // destination prompt pre-filled with a per-direction default directory.
-func (m model) updateBrowse(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Back) && m.browser.NotFiltering() {
+func (m model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyPressMsg); ok && key.Matches(k, m.keys.Back) && m.browser.NotFiltering() {
 		m.view = viewBoard
 		return m, nil
 	}
@@ -126,7 +126,12 @@ func (m model) updateDest(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // dest/mydir/mydir. Verified against real limactl 2.1.3.
 func (m model) launchCopy() (tea.Model, tea.Cmd) {
 	prov := m.provFor(m.transferScope)
-	destDir := m.dest.Value()
+	var destDir string
+	var err error
+	m.dest, destDir, err = m.dest.Prepare()
+	if err != nil {
+		return m, nil
+	}
 	var src, dst string
 	if m.transferUpload {
 		src, dst = m.transferSrc, prov.GuestPath(m.transferVM, destDir)
@@ -186,7 +191,7 @@ func (m model) destView() string {
 	b.WriteString(m.dest.View())
 	b.WriteString("\n\n")
 	b.WriteString(statusStyle.Render("The selected item is placed INSIDE this directory."))
-	b.WriteString("\n" + statusStyle.Render("Type to autocomplete · ↑/↓ choose · enter fills · ctrl+s copy · esc back"))
+	b.WriteString("\n" + statusStyle.Render("Type to autocomplete · ↑/↓ choose · enter fills\nctrl+l clear · ctrl+s copy · esc back"))
 	b.WriteString("\n\n" + m.footerView(m.destHelp()))
 	return appStyle.Render(b.String())
 }

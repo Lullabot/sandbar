@@ -74,7 +74,7 @@ jobs:
       # Bump COVERAGE_FLOOR by hand in a PR as coverage rises.
       - name: Go tests (race) + coverage gate
         env:
-          COVERAGE_FLOOR: "90.8"
+          COVERAGE_FLOOR: "90.9"
         run: |
           go test ./... -race -covermode=atomic \
             -coverpkg=./internal/... -coverprofile=coverage.out
@@ -150,6 +150,11 @@ jobs:
 
       - name: Build sand from the checkout
         run: go build -o sand ./cmd/sand
+
+      # This isolated SSH-only VM is deleted before the base-building tests.
+      # Check both receiving filesystems after dropped-path uploads/downloads.
+      - name: Dropped-path file transfers end-to-end
+        run: LIMA_E2E=1 go test -tags limae2e -timeout 15m -run '^TestE2EDroppedTransferPathsMoveContents$' ./internal/ui/
 
       # The cmd/sand limae2e tests build their own minimal base
       # (sand-cmde2e-base, all tool flags off) and tear it and their tiny

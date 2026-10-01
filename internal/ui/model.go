@@ -1869,10 +1869,9 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case viewBrowse:
-		// Deliver the browser's own async dirLoadedMsg (an internal browse type)
-		// and any list ticks by forwarding every non-key message to it.
-		m.browser, cmd = m.browser.Update(msg)
-		return m, cmd
+		// Pasted sources are checked asynchronously; their result must follow
+		// the same selection/transition path as a keyboard selection.
+		return m.updateBrowse(msg)
 	case viewDest:
 		m.dest, cmd = m.dest.Update(msg)
 		return m, cmd

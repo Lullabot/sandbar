@@ -6,8 +6,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// TestNormalizePath table-tests the custom un-escaping/quote/scheme logic.
-func TestNormalizePath(t *testing.T) {
+// TestParsePath table-tests the path decoding.
+func TestParsePath(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
@@ -22,12 +22,12 @@ func TestNormalizePath(t *testing.T) {
 		{"file scheme", "file:///Users/me/x", "/Users/me/x"},
 		{"file localhost scheme", "file://localhost/Users/me/x", "/Users/me/x"},
 		{"surrounding whitespace", "  /a/b  ", "/a/b"},
-		{"keeps alnum backslash", `/a\b`, `/a\b`},
+		{"literal backslash in quotes", `'/a\b'`, `/a\b`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := NormalizePath(tc.in); got != tc.want {
-				t.Fatalf("NormalizePath(%q) = %q, want %q", tc.in, got, tc.want)
+			if got, err := ParsePath(tc.in); err != nil || got != tc.want {
+				t.Fatalf("ParsePath(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -114,5 +114,30 @@ func TestDestSelectionSurvivesNonEdits(t *testing.T) {
 	d, _ = d.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	if d.cursor != 0 {
 		t.Fatalf("a value-preserving message reset the selection, cursor=%d want 0", d.cursor)
+	}
+}
+
+func TestDestinationPasteAndTypedPath(t *testing.T) {
+	d, _ := NewDestInput("dest: ", "/prefilled", nil)
+	d, _ = d.Update(tea.PasteMsg{Content: `'/tmp/My\ Files'`})
+	d, p, err := d.Prepare()
+	if err != nil || p != `/tmp/My\ Files` {
+		t.Fatalf("literal backslash decoded twice: %q, %v", p, err)
+	}
+	d, _ = d.Update(tea.PasteMsg{Content: `'/one' '/two'`})
+	if _, _, err = d.Prepare(); err == nil {
+		t.Fatal("invalid paste allowed copying to previous destination")
+	}
+	d, _ = d.Update(ctrlKey('l'))
+	for _, r := range `/tmp/My\ Files` {
+		d, _ = d.Update(runeKey(r))
+	}
+	_, p, err = d.Prepare()
+	if err != nil || p != "/tmp/My Files" {
+		t.Fatalf("typed path = %q, %v", p, err)
+	}
+	d, _ = d.Update(ctrlKey('l'))
+	if _, _, err = d.Prepare(); err == nil {
+		t.Fatal("empty destination accepted")
 	}
 }
