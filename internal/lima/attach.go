@@ -85,10 +85,10 @@ import "regexp"
 // capability therefore do NOT each re-skin main's existing panes — the first client
 // wins those — they only diverge on windows opened after attaching.
 //
-// **clipboardCmds is prepended to BOTH new-session commands** — see its own comment
+// **terminalSetupCmds is prepended to BOTH new-session commands** — see its own comment
 // for what it does and why it is here rather than only in the shipped ~/.tmux.conf.
 func guestAttachExpr(colortermEnv, ccFlag string) string {
-	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + clipboardCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + clipboardCmds + `new-session` + colortermEnv + ` -s main; fi`
+	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -s main; fi`
 }
 
 // AttachMode selects which kind of tmux CLIENT the attach expression starts.
@@ -131,7 +131,7 @@ const (
 )
 
 // flag is the fragment spliced in directly after `tmux`, with its leading
-// space, so it stays a separate argv word and still precedes clipboardCmds —
+// space, so it stays a separate argv word and still precedes terminalSetupCmds —
 // -CC is a client flag and tmux only accepts it ahead of the commands.
 //
 // Only the two attaching invocations take it. The `has-session` probe in front
@@ -145,7 +145,7 @@ func (m AttachMode) flag() string {
 	return ""
 }
 
-// clipboardCmds is the `start-server \; set -s … \; ` prefix that turns on tmux's
+// terminalSetupCmds is the `start-server \; set -s … \; ` prefix that turns on tmux's
 // OSC 52 clipboard bridge, so a copy inside the guest (mouse drag, or copy-mode
 // `y`) reaches the clipboard of the terminal the user is actually sitting at,
 // several hops away. Both settings are also in the ~/.tmux.conf roles/user ships
@@ -153,10 +153,10 @@ func (m AttachMode) flag() string {
 // which is every VM already in existence when this landed. They are cheap and
 // idempotent, so the duplication costs a VM with a current conf nothing.
 //
-// The two settings, and why neither alone is enough:
+// The clipboard settings:
 //
-//   - `set-clipboard on`: the default is `external`, which only forwards OSC 52
-//     that programs INSIDE tmux emit. tmux's own copies never leave the guest.
+//   - `set-clipboard on`: accepts OSC 52 from programs inside tmux, including
+//     nested tmux. The default `external` permits only tmux's own copies.
 //   - `terminal-features[…] '*:clipboard'`: tmux writes OSC 52 only to a terminal
 //     it believes has the `Ms` capability, and its built-in list is `xterm*` and
 //     nothing else. A guest reached from inside a host tmux sees TERM=screen-256color
@@ -188,7 +188,12 @@ func (m AttachMode) flag() string {
 //     as the unreadable close-reopen escape (quote, backslash, quote, quote) and
 //     TestSSHAttachArgvPreservesGuestExpr stops recognising it. Neither string
 //     contains a `$`, so double quotes cost nothing.
-const clipboardCmds = `start-server \; set -s set-clipboard on \; set -s "terminal-features[99]" "*:clipboard" \; `
+//
+// Also apply Claude Code's terminal settings to already-running servers. The
+// extkeys patterns cover a direct xterm-compatible client and nested host tmux.
+// Use fixed array slots so repeated attachment does not grow terminal-features.
+// Global window defaults reach existing windows unless explicitly overridden.
+const terminalSetupCmds = `start-server \; set -s set-clipboard on \; set -s "terminal-features[99]" "*:clipboard" \; set -g allow-passthrough on \; set -s extended-keys on \; set -s focus-events on \; set -s "terminal-features[100]" "xterm*:extkeys" \; set -s "terminal-features[101]" "screen*:extkeys" \; set -s "terminal-features[102]" "tmux*:extkeys" \; `
 
 // AttachArgv returns the full argv that attaches a caller to instance name's
 // persistent guest tmux session (see guestAttachExpr for the tmux semantics).

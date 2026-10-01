@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The guest's ~/.tmux.conf is the only place two settings live that decide
+// The guest's ~/.tmux.conf carries two settings that decide
 // whether a copy made inside a VM ever reaches the user's clipboard, and both
 // fail SILENTLY when absent — a selection is made, no error appears anywhere,
 // and nothing lands. Neither is covered by the molecule suite (which converges
@@ -18,11 +18,11 @@ import (
 const tmuxConfPath = "roles/user/templates/tmux.conf.j2"
 
 // TestTmuxConfEnablesTheClipboard pins both halves of the OSC 52 bridge. They
-// are useless individually: `set-clipboard on` alone emits nothing at all when
+// together support tmux and application copies. `set-clipboard on` alone
+// emits nothing at all when
 // TERM is screen-256color or tmux-256color — which is what a guest reached from
 // inside a host tmux sees, i.e. sand's own host-tmux fast path — and the
-// terminal feature alone only forwards sequences that programs inside tmux
-// emit, never tmux's own copies.
+// terminal feature alone does not allow applications inside tmux to copy.
 func TestTmuxConfEnablesTheClipboard(t *testing.T) {
 	conf, err := sandbar.PlaybookFS.ReadFile(tmuxConfPath)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestTmuxConfEnablesTheClipboard(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s does not contain %q. Without both the `set-clipboard on` and the `clipboard`"+
 				" terminal-feature lines, copying text inside the guest silently puts nothing on the user's"+
-				" clipboard — see internal/lima.clipboardCmds for the measurements.", tmuxConfPath, want)
+				" clipboard — see internal/lima.terminalSetupCmds for the measurements.", tmuxConfPath, want)
 		}
 	}
 }
@@ -93,4 +93,20 @@ func taskNames(tasks []map[string]any) string {
 		fmt.Fprintf(&b, "\t%v\n", task["name"])
 	}
 	return b.String()
+}
+
+// Both direct terminals and nested host tmux must negotiate modified keys.
+func TestTmuxConfClaudeTerminalSettings(t *testing.T) {
+	conf, err := sandbar.PlaybookFS.ReadFile(tmuxConfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"set -g allow-passthrough on", "set -s extended-keys on",
+		"set -g focus-events on", "xterm*:extkeys", "screen*:extkeys", "tmux*:extkeys",
+	} {
+		if !strings.Contains(string(conf), want) {
+			t.Errorf("missing %q in guest config", want)
+		}
+	}
 }

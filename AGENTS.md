@@ -815,10 +815,19 @@ the network.
 **This invariant is about the HOST → GUEST direction only.** Copying text the
 other way — guest → host, a selection the user makes inside the VM's tmux
 reaching their own clipboard over OSC 52 — is a separate, deliberate feature
-(`internal/lima.clipboardCmds` plus `set -s set-clipboard on` in
+(`internal/lima.terminalSetupCmds` plus `set -s set-clipboard on` in
 `roles/user/templates/tmux.conf.j2`), and enabling it does not weaken anything
 above. The password-leak surface is a host clipboard the guest can read at
 will; a copy the user performs inside the guest is neither.
+
+The same attach prefix applies Claude Code's passthrough and extended-key
+settings, plus focus events, to existing guest tmux servers without restarting
+sessions. Terminal feature entries use fixed array slots so repeated attachment
+does not accumulate entries. Match `screen*` and `tmux*` as well as `xterm*`
+for extended keys: a guest reached inside host tmux sees the outer tmux's
+terminal name. The host tmux needs its own configuration; in particular,
+`set-clipboard external` blocks nested guest clipboard writes, so the host
+must use `on` and have the `Ms` capability for its actual terminal.
 
 For the security rationale, see the plan's Risk Considerations and the spec
 comment at `roles/agent-clipboard/tasks/main.yml`.

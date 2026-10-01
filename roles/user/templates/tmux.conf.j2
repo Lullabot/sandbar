@@ -11,6 +11,14 @@ set -g mouse on
 set -g history-limit 50000
 set -g focus-events on  # forward terminal focus in/out to apps (Claude Code, vim) so they can refresh on refocus
 
+# Claude Code: modified keys, notifications and terminal progress updates.
+# https://code.claude.com/docs/en/terminal-config#configure-tmux
+set -g allow-passthrough on
+set -s extended-keys on
+set -as terminal-features ',xterm*:extkeys'
+# The outer terminal is another tmux when sand runs in a host tmux window.
+set -as terminal-features ',screen*:extkeys,tmux*:extkeys'
+
 # Vi copy mode
 setw -g mode-keys vi
 
@@ -19,10 +27,9 @@ setw -g mode-keys vi
 # with `mouse on` above there is no fallback: the mouse belongs to tmux, so a
 # drag no longer makes a terminal-native selection you could copy yourself.
 #
-# set-clipboard defaults to `external`, which only FORWARDS the sequence when a
-# program running inside tmux emits one. tmux's own copies — mouse drag, or
-# copy-mode `y` — never leave the guest under that default. `on` makes tmux emit
-# the sequence for those too.
+# `on` lets applications inside tmux write the clipboard as well as tmux's
+# own copies. `external` permits only tmux's own copies, so it blocks a nested
+# tmux or an application such as Claude Code from setting the clipboard.
 set -s set-clipboard on
 # ...and tmux only writes OSC 52 to a terminal it believes supports it (the `Ms`
 # capability, matched against TERM). Its built-in list is `xterm*` and nothing
