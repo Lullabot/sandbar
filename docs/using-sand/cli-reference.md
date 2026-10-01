@@ -69,7 +69,8 @@ not a prompt.
 | `--domain` | string | `lan` | Domain suffix. |
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sand` also forces on `devtools_docker_registry_proxy_enabled`. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
-| `--clone-token` | string | *(empty)* | Token for `--clone-url` (e.g. a GitHub PAT). Optional; see [credential handling](#-clone-token-is-a-credential) below. |
+| `--clone-token` | string | *(empty)* | GitHub or GitLab token for `--clone-url`. Optional; see [credential handling](#-clone-token-is-a-credential) below. |
+| `--clone-forge` | string | `auto` | `auto`, `github`, or `gitlab`. Auto detects `github.com` and `gitlab.com`; select `gitlab` for self-hosted GitLab. |
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sand reset NAME`](#sand-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
 | `--template` | string | *(empty)* | Clone from the named [golden template](golden-templates.md), bypassing the shared base. Mutually exclusive with `--rebuild`, `--recreate`, and an explicit `--base-name`. |
@@ -252,6 +253,10 @@ sand create
 sand create --name myproj --clone-url https://github.com/org/repo.git \
   --clone-token "$GITHUB_TOKEN"
 
+# Clone from a self-hosted GitLab instance (explicit forge selection required).
+sand create --name tools --clone-url https://git.example.internal/platform/tools/app.git \
+  --clone-forge gitlab --clone-token "$GITLAB_TOKEN"
+
 # Non-default resources, explicit identity.
 sand create --name big --cpus 8 --memory 16GiB --disk 200GiB \
   --git-name "Jane Dev" --git-email jane@example.com
@@ -282,8 +287,10 @@ Examples:
 Flags:
   -base-name string
     	Base image instance name (default "sandbar-base")
+  -clone-forge string
+	Git service: auto detects github.com and gitlab.com; choose gitlab for self-hosted GitLab (default "auto")
   -clone-token string
-    	Token for the repo above (optional; GitHub uses it — never placed on argv inside the guest)
+	Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab; never placed on guest argv)
   -clone-url string
     	HTTPS repo to clone into the VM (optional)
   -cpus string
@@ -430,7 +437,7 @@ before creating a VM.
 | `--timezone` | string | *this VM's* | IANA timezone. Naming one explicitly makes an unknown zone fatal in the guest, exactly as it does on `sand create`. |
 | `--domain` | string | *this VM's* | Domain suffix. |
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
-| `--clone-token` | string | *(empty)* | Token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless `--preserve-project` is keeping the checkout, in which case nothing is cloned. |
+| `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless `--preserve-project` is keeping the checkout, in which case nothing is cloned. |
 | `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. |
 
 `NAME` is required (exactly one positional argument), and flags may appear
@@ -456,8 +463,8 @@ is also no `--rebuild`, which replaces the shared base image and belongs to
 A reset ends by writing the VM's host-stored [secrets](secrets.md) into the
 rebuilt guest, so the VM comes back with the environment it had. `sand create`
 does the same after a build, and additionally records `--clone-token` as the
-VM's `GH_TOKEN` secret so it can be rotated later without a rebuild — the same
-thing the TUI has always done with the create form's token.
+`GH_TOKEN` secret for GitHub or scoped `GITLAB_TOKEN` for GitLab so it can be
+rotated later without a rebuild. See [GitHub and GitLab tokens](secrets.md#github-and-gitlab-tokens).
 
 ### Verified `--help` output
 
@@ -494,6 +501,8 @@ Every other flag you omit is taken from the VM's own recorded settings, so
 
 There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sand create'.
+For a private repo that will be cloned again, pass --clone-token; saved guest
+secrets are reapplied after cloning and cannot authenticate that clone.
 
 Examples:
   sand reset web                                  # clean rebuild, same settings
@@ -505,7 +514,7 @@ Examples:
 
 Flags:
   -clone-token string
-    	Token for this VM's recorded repo (tokens are never stored in the index; pass it again for a private repo)
+        Token for this VM's recorded repo (GitHub or GitLab); required to re-clone a private repo unless its checkout is preserved
   -cpus string
     	vCPUs (default: whatever this VM has)
   -disk string

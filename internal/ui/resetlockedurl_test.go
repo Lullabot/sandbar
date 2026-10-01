@@ -71,7 +71,7 @@ func TestResetFormRepoURLIsRenderedLocked(t *testing.T) {
 	if !strings.Contains(view, "https://github.com/octocat/hello") {
 		t.Fatalf("reset form should still show the VM's repo; got:\n%s", view)
 	}
-	for _, want := range []string{"Name: vm1 (locked)", "GitHub repo URL: https://github.com/octocat/hello (locked)"} {
+	for _, want := range []string{"Name: vm1 (locked)", "Repository URL: https://github.com/octocat/hello (locked)"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("reset form missing %q; got:\n%s", want, view)
 		}
@@ -80,7 +80,7 @@ func TestResetFormRepoURLIsRenderedLocked(t *testing.T) {
 	// A VM that cloned nothing says so rather than showing a bare label.
 	m2 := newTestModel(t)
 	m2.openResetForm(registry.LocalScope, "vm2", vm.CreateConfig{Name: "vm2", BaseName: "sandbar-base"})
-	if !strings.Contains(m2.formView(), "GitHub repo URL: (none) (locked)") {
+	if !strings.Contains(m2.formView(), "Repository URL: (none) (locked)") {
 		t.Errorf("a VM with no repo should render an explicit (none); got:\n%s", m2.formView())
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,14 +14,12 @@ import (
 // credential subsystem.
 type forgeWiring struct{ host, user string }
 
-// recognizedForgeTokens is the ONE "recognized forge tokens" table — the only
-// place in sand that knows a forge exists. internal/secrets stores plain
-// (scope, KEY, VALUE) triples with no forge concept at all; this table is
-// purely a delivery-layer lookup consulted when rendering a scope's secrets
-// into the guest. Adding GitLab later is one line:
-// "GITLAB_TOKEN": {host: "gitlab.com", user: "oauth2"}.
+// recognizedForgeTokens maps scoped-secret names to Git credential defaults.
+// internal/secrets stores plain (scope, KEY, VALUE) triples; forge-specific
+// delivery belongs here. GitLab scopes can select their self-hosted endpoint.
 var recognizedForgeTokens = map[string]forgeWiring{
-	"GH_TOKEN": {host: "github.com", user: "x-access-token"},
+	"GH_TOKEN":     {host: "github.com", user: "x-access-token"},
+	"GITLAB_TOKEN": {host: "gitlab.com", user: "oauth2"},
 }
 
 // gitCredSlug turns a scope into the filesystem-safe basename used for its
@@ -75,13 +74,22 @@ func collectGitCredEntries(scopes map[string]map[string]string) []gitCredEntry {
 		pairs := scopes[scope]
 		for _, key := range forgeKeys {
 			token, ok := pairs[key]
-			if !ok {
+			if !ok || token == "" {
 				continue
 			}
 			w := recognizedForgeTokens[key]
+			slug := gitCredSlug(scope)
+			if key == "GITLAB_TOKEN" {
+				// Scopes are home-relative directories. The checkout convention
+				// puts the forge hostname in the top-level directory, including
+				// a host-wide scope such as "gitlab.com".
+				w.host, _, _ = strings.Cut(scope, "/")
+
+				slug += "-gitlab"
+			}
 			entries = append(entries, gitCredEntry{
 				scope: scope,
-				slug:  gitCredSlug(scope),
+				slug:  slug,
 				host:  w.host,
 				user:  w.user,
 				token: token,
@@ -94,7 +102,8 @@ func collectGitCredEntries(scopes map[string]map[string]string) []gitCredEntry {
 // renderGitCredentialLine renders the git-credential-store body for e, ported
 // verbatim from main's proven format: "https://<user>:<token>@<host>\n".
 func renderGitCredentialLine(e gitCredEntry) string {
-	return fmt.Sprintf("https://%s:%s@%s\n", e.user, e.token, e.host)
+	u := url.URL{Scheme: "https", Host: e.host, User: url.UserPassword(e.user, e.token)}
+	return u.String() + "\n"
 }
 
 // renderGitconfigInclude renders the scoped gitconfig.d/<slug> include file
@@ -167,7 +176,8 @@ const (
 // guest ("slug" is interpolated after single-quoting, defense in depth beyond
 // the already-safe [A-Za-z0-9-]+ charset gitCredSlug produces), never a
 // host-side guess, per renderGitconfigInclude's doc comment.
-func gitCredWriteScript(slug string) string {
+func gitCredWriteScript(slug, host string) string {
+	header := fmt.Sprintf("[credential \"https://%s\"]", host)
 	return `set -eu -o pipefail
 credDir="$HOME/.config/sandbar/git-credentials"
 incDir="$HOME/.config/sandbar/gitconfig.d"
@@ -178,7 +188,7 @@ credFile="$credDir/$slug"
 incFile="$incDir/$slug"
 install -m 600 /dev/null "$credFile"
 cat > "$credFile"
-printf '[credential]\n\thelper = store --file=%s/.config/sandbar/git-credentials/%s\n' "$HOME" "$slug" > "$incFile"
+printf '%s\n\thelper =\n\thelper = store --file=%s/.config/sandbar/git-credentials/%s\n' ` + shellSingleQuote(header) + ` "$HOME" "$slug" > "$incFile"
 chmod 644 "$incFile"
 `
 }
@@ -244,7 +254,7 @@ mv "$tmp" "$gc"
 func applyGitCredEntries(ctx context.Context, cli guestRunner, name, user string, entries []gitCredEntry, out io.Writer) error {
 	for _, e := range entries {
 		body := renderGitCredentialLine(e)
-		if err := cli.Shell(ctx, name, strings.NewReader(body), out, "sudo", "-H", "-u", user, "bash", "-c", gitCredWriteScript(e.slug)); err != nil {
+		if err := cli.Shell(ctx, name, strings.NewReader(body), out, "sudo", "-H", "-u", user, "bash", "-c", gitCredWriteScript(e.slug, e.host)); err != nil {
 			return fmt.Errorf("apply git credential for scope %q: %w", e.scope, err)
 		}
 	}

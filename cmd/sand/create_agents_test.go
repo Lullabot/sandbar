@@ -147,6 +147,36 @@ func TestRecreateReplaysRecordedAgentsBeforeExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestRecreateAcceptsTokenForRecordedGitLabRepo(t *testing.T) {
+	isolateCreateState(t)
+	rec := vm.DefaultCreateConfig()
+	rec.Name = "existing"
+	rec.CloneURL = "https://git.example.test/group/repo"
+	rec.CloneForge = "gitlab"
+	reg, err := registry.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Add(rec); err != nil {
+		t.Fatal(err)
+	}
+	var got vm.CreateConfig
+	p := &providerfake.Provider{
+		HostFilesFunc: lima.LocalFiles,
+		ListFunc:      func() ([]vm.VM, error) { return []vm.VM{{Name: "existing"}}, nil },
+		RecreateFunc: func(_ context.Context, cfg vm.CreateConfig, _ provision.CreateOptions, _ io.Writer) error {
+			got = cfg
+			return nil
+		},
+	}
+	if err := runCreateWithBinding(createAgentArgs("existing", "--recreate", "--clone-token=secret"), bindCreateFake(p)); err != nil {
+		t.Fatal(err)
+	}
+	if got.CloneURL != rec.CloneURL || got.CloneForge != "gitlab" || got.CloneToken != "secret" {
+		t.Fatalf("recreate config = %+v", got)
+	}
+}
+
 func TestRecreateFirstMigratesRecordedBaseBeforeProvisioning(t *testing.T) {
 	isolateCreateState(t)
 	stampDir := filepath.Join(os.Getenv("LIMA_HOME"), "_sand")

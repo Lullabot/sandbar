@@ -83,7 +83,7 @@ which a world-readable file could hold a secret.
 Deleting a VM (`d` on a tile) removes its host-stored secrets along with
 its disk.
 
-## GitHub tokens
+## GitHub and GitLab tokens
 
 A key named `GH_TOKEN` gets special handling on top of the generic scope
 mechanism above: for any **non-empty** (directory) scope, `sand` also wires
@@ -91,16 +91,46 @@ mechanism above: for any **non-empty** (directory) scope, `sand` also wires
 "gitdir:~/<scope>/"` stanza that points at a generated credential helper.
 Put a token under `[github.com/acme]` and `git`/`gh` authenticate
 automatically for anything under `~/github.com/acme/` — no manual `gh auth
-login`, no per-repo credential setup. This is a convention read by a small,
-fixed table of recognized token names (`internal/provision/gitcred.go`), not
-a feature of the secrets store itself — the store only ever holds
-`(scope, KEY, VALUE)` triples and has no idea what GitHub is.
+login`, no per-repo credential setup. `GITLAB_TOKEN` receives the same
+scoped Git credential-helper treatment for GitLab. Its helper username is
+`oauth2`; on GitLab.com it targets `gitlab.com`, and for a self-hosted
+instance it targets the host in the scope. Git and `glab` receive the scoped
+`GITLAB_TOKEN` when run from that directory. A fresh shell can fetch and push from an existing checkout over HTTPS
+without an interactive login. This is a convention read
+by a small, fixed table of recognized token names (`internal/provision/gitcred.go`),
+not a feature of the secrets store itself — the store only ever holds
+`(scope, KEY, VALUE)` triples.
 
-**The global scope is the one exception.** A `GH_TOKEN` with no scope is
-still delivered to the guest as a plain environment variable, but it does
-**not** get the automatic git-credential wiring — that only fires for a
-named, non-empty scope. See below for where the create-time clone token
-lands by default.
+Scopes remain **directories relative to the guest home**, for every project.
+Sand clones into `~/<host>/<group>/<repo>` (including nested groups), so the
+top-level directory is `github.com`, `gitlab.com`, a self-hosted instance
+such as `git.example.internal`, or `git.drupalcode.org` for a Drupal.org
+HTTPS clone.
+
+For GitLab, place `GITLAB_TOKEN` in that directory tree. A scope of
+`[gitlab.com]` covers checkouts beneath `~/gitlab.com/`;
+`[git.example.internal/platform]` covers checkouts beneath
+`~/git.example.internal/platform/`. Use a deeper directory scope to limit
+where the token is available. The GitLab helper uses the first directory
+component as its HTTPS endpoint. It only activates for repositories in the
+scoped subtree; matching a remote hostname elsewhere does not activate it.
+There are no aliases or fallbacks from other directories to GitLab.com.
+
+Self-hosted GitLab still requires choosing GitLab in the create form or
+passing `--clone-forge gitlab`, since a hostname does not identify which
+service runs there. Clone tokens support standard HTTPS endpoints without
+explicit port numbers. Use a DNS name rather than an IPv6 literal.
+
+Drupal.org projects follow the same directory-scope convention for secrets.
+Their [publishing authentication](drupalorg-publishing.md) remains separate
+from GitHub and GitLab token handling.
+
+**The global scope is the one exception.** `GH_TOKEN` or `GITLAB_TOKEN` with
+no scope is delivered to the guest as a plain environment variable, but does
+**not** get automatic git-credential wiring — that only fires for a named,
+non-empty scope. The create-time GitHub token uses global `GH_TOKEN` and is
+also written to the cloned repository's `.env`; GitLab create tokens use the
+repository-parent scope described below.
 
 **Known limitation: a linked worktree inherits its main clone's token.**
 `includeIf "gitdir:…"` is matched against git's `$GIT_DIR`, and for a linked
@@ -130,53 +160,71 @@ in the damage it can do. See further details in the
 
 ### Supplying it and where it lands
 
-Provide the token at VM-create time — the TUI create form's `GitHub token`
-field, or `sand create --clone-token` — alongside a repo URL to clone. From
-there:
+Provide the token at VM-create time — the TUI's `Clone token` field or
+`sand create --clone-token` — alongside a repository URL. GitHub URLs select
+GitHub automatically; `gitlab.com` selects GitLab automatically. For a
+self-hosted GitLab URL, choose GitLab in the form or pass
+`--clone-forge gitlab`. `--clone-forge` also accepts `auto` (the default) and
+`github`.
 
-- It's written into the cloned repo's per-org `.env` as `GH_TOKEN` (treat
-  that file as a secret; it's what makes the git/gh wiring above work for
-  that directory).
-- Both the create form and `sand create --clone-token` save it as `GH_TOKEN`
-  in the host secrets store's **global** scope. You can edit that saved value
-  later. Global scope does not configure Git credentials for a directory;
-  the per-org `.env` created during cloning provides those credentials. To
-  configure other organisations, add the token to their `[host/org]`
-  sections in the secrets editor (`e`).
-- `sand` writes the saved token to `~/.config/sandbar/secrets.env` after
-  creating or resetting the VM, and on every start. See
-  [scopes](#scopes-global-vs-per-directory).
+For GitHub, `sand` saves the token as `GH_TOKEN` in the host secrets store's
+**global** scope, and writes it to the cloned repository's per-org `.env` for
+Git and `gh`. Global scope does not configure the credential helper for
+other directories; add `GH_TOKEN` to a `[host/org]` section to do that.
+
+For GitLab, `sand` saves the token as `GITLAB_TOKEN` in the non-empty
+repository-parent scope. For example,
+`https://gitlab.example.internal/platform/tools/app.git` stores it in
+`[gitlab.example.internal/platform/tools]`. This gives the initial clone
+and future Git commands in that directory the right credential.
+
+After creating or resetting the VM, and on every start, `sand` applies saved
+secrets to the guest. Git credentials are supplied by the generated
+host-specific helper. Treat scoped `.env` files as secrets. Edit or remove the
+GitLab token in its scope (or the GitHub global token) in the secrets editor
+(`e`); saving applies the change immediately to a running VM, or on its next
+start if stopped.
 
 ### Precedence and multiple orgs
 
-`GH_TOKEN` takes precedence over any token `gh auth login` stored, because
-`gh` is the configured git credential helper — `git`/`gh` over HTTPS use
-whichever token is in the environment. For multiple organizations or
-clients, prefer a **separate VM per org** over juggling several tokens on
-one VM: VMs are disposable, and this keeps each context's credentials and
-code fully isolated.
+For GitHub, `GH_TOKEN` takes precedence over a token stored by `gh auth login`;
+it is the configured Git credential helper's environment token. GitLab
+credentials are scoped by instance host, so GitLab.com and a self-hosted
+instance can use different tokens. For unrelated organizations or clients,
+prefer a **separate VM per org** to keep each context's credentials and code
+isolated.
 
 ### Rotating, expiring, and revoking
 
-Fine-grained tokens must have an expiry. When one expires or you rotate it,
-update the secret in the secrets editor (`e` on the VM's tile) or re-supply
-the new token the next time you create a VM, then revoke the old token in
-GitHub's settings.
+When a token expires or you rotate it, update `GH_TOKEN` in global scope or
+`GITLAB_TOKEN` in its repository-parent scope in the secrets editor (`e` on
+the VM's tile); saving applies it to a running guest immediately. Revoke the
+old token in the forge's settings.
 
 ### Reset and the token
 
 The token survives a reset because it is saved in the host secrets store.
 Both the TUI and [`sand reset`](cli-reference.md#sand-reset-name) apply it
-to the rebuilt guest. See [Files and State](../reference/files-and-state.md).
+to the rebuilt guest, and the Git credential helper is restored for fresh
+shells.
 
 Cloning happens **before** saved secrets are applied. As a current limitation,
-a reset does not reuse the saved `GH_TOKEN` for that clone. To reset a VM with
-a private project, enter the same token again in the form's `GitHub token`
-field or pass `sand reset NAME --clone-token …`. This does not create another
-saved secret: it supplies the token during provisioning, then updates the
-existing `GH_TOKEN` after the VM is ready. If you preserve the project
-checkout, the reset skips cloning and needs no clone token. See
+a reset does not reuse the saved forge token for that clone. To reset a VM
+with a private project, enter the token again in the form's `Clone token`
+field or pass `sand reset NAME --clone-token …`. This supplies the token for
+provisioning; the saved secret is then reapplied. If you preserve the
+project checkout, reset skips cloning and needs no clone token. See
 [Resetting a VM](tui.md#resetting-a-vm).
+
+### GitLab token permissions
+
+For fine-grained GitLab personal access tokens, grant **Code Download** for
+clone and pull, and **Code Push** for push. Choose the narrowest project or
+group boundary that contains the repositories the VM needs; a group boundary
+also authorizes its projects. See GitLab's
+[fine-grained token permissions](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens_other/).
+Legacy personal access tokens use the separate `read_repository` and
+`write_repository` scopes for those operations.
 
 ## drupal.org: a notable exception
 

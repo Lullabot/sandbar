@@ -145,3 +145,19 @@ func TestAdoptRecordedConfigKeepsTheBaseImage(t *testing.T) {
 		t.Errorf("BaseName = %q, want the explicitly passed other-base", cfg.BaseName)
 	}
 }
+
+func TestAdoptRecordedConfigKeepsSelectedForge(t *testing.T) {
+	rec := recordedConfig()
+	rec.CloneURL = "https://git.example.test/group/repo"
+	rec.CloneForge = "gitlab"
+	cfg := flagDefaultConfig()
+	adoptRecordedConfig(&cfg, rec, map[string]bool{})
+	if cfg.CloneForge != "gitlab" || cfg.CloneURL != rec.CloneURL {
+		t.Fatalf("recreate lost selected forge or repo: %+v", cfg)
+	}
+	cfg.CloneForge = "auto"
+	adoptRecordedConfig(&cfg, rec, map[string]bool{"clone-forge": true})
+	if cfg.CloneForge != "auto" {
+		t.Fatalf("explicit forge overwritten: %q", cfg.CloneForge)
+	}
+}

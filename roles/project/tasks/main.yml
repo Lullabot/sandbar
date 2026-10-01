@@ -19,8 +19,21 @@
     # the exact path git clone then refuses ("destination path already exists").
     - name: Parse the clone URL
       ansible.builtin.set_fact:
+        _clone_hostname: "{{ project_clone_url | urlsplit('hostname') | default('', true) | lower }}"
         _clone_host: "{{ project_clone_url | regex_replace('^[a-zA-Z]+://', '') | regex_replace('/.*$', '') }}"
         _clone_relpath: "{{ project_clone_url | regex_replace('^[a-zA-Z]+://[^/]+/', '') | regex_replace('/+$', '') | regex_replace('\\.git$', '') }}"
+
+    - name: Resolve the clone forge
+      ansible.builtin.set_fact:
+        _clone_forge: "{{ project_clone_forge if project_clone_forge not in ['', 'auto'] else ('github' if _clone_hostname == 'github.com' else ('gitlab' if _clone_hostname == 'gitlab.com' else '')) }}"
+
+    - name: Validate token destination
+      ansible.builtin.assert:
+        that:
+          - project_clone_url is match('^https://[^/@?#]+/[^?#]+$')
+          - _clone_forge in ['github', 'gitlab']
+        fail_msg: "Clone token requires HTTPS and a recognized forge. For self-hosted GitLab set project_clone_forge to gitlab."
+      when: project_clone_token | length > 0
 
     - name: Derive the org directory and clone destination
       ansible.builtin.set_fact:
@@ -35,19 +48,17 @@
         group: "{{ user_name }}"
         mode: "0755"
 
-    # GitHub convention: GH_TOKEN in a per-org .env, loaded by direnv. The
-    # gitconfig credential helper (gh) reads GH_TOKEN so HTTPS auth just works.
-    - name: Write the per-org .env with GH_TOKEN (GitHub only)
+    - name: Write the per-org forge token .env
       ansible.builtin.copy:
         dest: "{{ _clone_org_dir }}/.env"
-        content: "GH_TOKEN={{ project_clone_token }}\n"
+        content: "{{ 'GH_TOKEN' if _clone_forge == 'github' else 'GITLAB_TOKEN' }}={{ project_clone_token | quote }}\n"
         owner: "{{ user_name }}"
         group: "{{ user_name }}"
         mode: "0600"
       no_log: true
       when:
         - project_clone_token | length > 0
-        - _clone_host == "github.com"
+        - _clone_forge in ["github", "gitlab"]
 
     - name: Approve the .env with direnv
       ansible.builtin.command:
@@ -59,7 +70,59 @@
       changed_when: true
       when:
         - project_clone_token | length > 0
-        - _clone_host == "github.com"
+        - _clone_forge in ["github", "gitlab"]
+
+    # Store auth independently of the current shell: a new agent or shell can
+    # fetch immediately, and the host-specific helper never serves another host.
+    - name: Set credential paths
+      ansible.builtin.set_fact:
+        _clone_cred_slug: "{{ (_clone_host ~ '/' ~ (_clone_relpath | dirname)) | regex_replace('[^A-Za-z0-9]+', '-') }}{{ '-gitlab' if _clone_forge == 'gitlab' else '' }}"
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+
+    - name: Create scoped credential directories
+      ansible.builtin.file:
+        path: "{{ user_home }}/.config/sandbar/{{ item }}"
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0700"
+      loop: [git-credentials, gitconfig.d]
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+
+    - name: Write host-bound clone credentials
+      ansible.builtin.copy:
+        dest: "{{ user_home }}/.config/sandbar/git-credentials/{{ _clone_cred_slug }}"
+        content: "https://{{ 'x-access-token' if _clone_forge == 'github' else 'oauth2' }}:{{ project_clone_token | urlencode | replace('/', '%2F') }}@{{ _clone_host }}\n"
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0600"
+      no_log: true
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+
+    - name: Write scoped credential helper
+      ansible.builtin.copy:
+        dest: "{{ user_home }}/.config/sandbar/gitconfig.d/{{ _clone_cred_slug }}"
+        content: |
+          [credential "https://{{ _clone_host }}"]
+              helper =
+              helper = store --file={{ user_home }}/.config/sandbar/git-credentials/{{ _clone_cred_slug }}
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0644"
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+
+    - name: Enable credentials for the project directory
+      ansible.builtin.blockinfile:
+        path: "{{ user_home }}/.gitconfig"
+        marker: "# {mark} sandbar git-credentials"
+        create: true
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0644"
+        block: |
+          [includeIf "gitdir:{{ _clone_org_dir }}/"]
+              path = {{ user_home }}/.config/sandbar/gitconfig.d/{{ _clone_cred_slug }}
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
 
     - name: Clone the project with a safe failure reason
       block:
@@ -72,8 +135,13 @@
           become_user: "{{ user_name }}"
           environment:
             HOME: "{{ user_home }}"
-            GH_TOKEN: "{{ project_clone_token if _clone_host == 'github.com' else '' }}"
+            GH_TOKEN: "{{ project_clone_token if _clone_forge == 'github' else '' }}"
             GIT_TERMINAL_PROMPT: "0"
+            GIT_CONFIG_COUNT: "{{ '2' if project_clone_token | length > 0 and _clone_forge == 'gitlab' else '0' }}"
+            GIT_CONFIG_KEY_0: "credential.https://{{ _clone_host }}.helper"
+            GIT_CONFIG_VALUE_0: ""
+            GIT_CONFIG_KEY_1: "credential.https://{{ _clone_host }}.helper"
+            GIT_CONFIG_VALUE_1: "store --file={{ user_home }}/.config/sandbar/git-credentials/{{ _clone_cred_slug | default('unused') }}"
           # Git can echo credentials in its error. Keep the raw result out of
           # the log, then report only a fixed, credential-free reason below.
           no_log: "{{ project_clone_token | length > 0 }}"

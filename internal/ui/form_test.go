@@ -7,12 +7,49 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lullabot/sandbar/internal/agentprefs"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+func TestCreateFormSelectsSelfHostedGitLab(t *testing.T) {
+	m := resized(newTestModel(t), 80, 24)
+	m.openForm()
+	m.inputs[fCloneURL].SetValue("https://git.example.test/group/repo")
+	m.focusIdx = fCloneForge
+	for _, code := range []rune{tea.KeySpace, tea.KeyEnter} {
+		next, _ := m.Update(tea.KeyPressMsg{Code: code})
+		m = next.(model)
+	}
+	if m.focusIdx != fCloneToken {
+		t.Fatalf("enter did not advance from Git service to token: %d", m.focusIdx)
+	}
+	if m.formCloneForge != "github" {
+		t.Fatalf("first selection = %q", m.formCloneForge)
+	}
+	m.focusIdx = fCloneForge
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = next.(model)
+	if m.formCloneForge != "gitlab" {
+		t.Fatalf("right did not select GitLab: %q", m.formCloneForge)
+	}
+	m.inputs[fCloneToken].SetValue("secret")
+	cfg, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloneForge != "gitlab" || cfg.CloneToken != "secret" {
+		t.Fatalf("form config lost GitLab selection: %+v", cfg)
+	}
+	m.focusIdx = fCloneToken
+	view := ansi.Strip(m.formView())
+	if !strings.Contains(view, "Git service:") || !strings.Contains(view, "< GitLab >") || !strings.Contains(view, "Clone token:") || !strings.Contains(view, "Download for clone/pull") || !strings.Contains(view, "ctrl+s create") {
+		t.Fatalf("narrow form lost service, token, help, or footer:\n%s", view)
+	}
+}
 
 func TestAgentChoicesSurviveLateBaseRead(t *testing.T) {
 	m := newTestModel(t)
@@ -47,14 +84,14 @@ func walkResetFocusNext(m *model, n int) []int {
 }
 
 // resetCycleSteps is how many focus moves it takes to leave fHostname, visit
-// every EDITABLE input up to fCloneToken, walk the toggles, and land back on
+// every EDITABLE input up to fDockerProxyHost, walk the toggles, and land back on
 // fHostname. Derived from fieldLocked rather than from the field indices,
 // because reset mode steps over its locked fields (the Name and the repo URL)
 // and a hard-coded span silently stops testing a full cycle the moment that set
 // changes.
 func resetCycleSteps(m model, toggles int) int {
 	editable := 0
-	for i := fHostname; i <= fCloneToken; i++ {
+	for i := fHostname; i <= fDockerProxyHost; i++ {
 		if !m.fieldLocked(i) {
 			editable++
 		}
@@ -95,8 +132,8 @@ func TestResetFocusNextToggleHidden(t *testing.T) {
 		t.Fatal("reset mode must offer at least one preserve toggle")
 	}
 
-	// Advance focus from fHostname all the way to fCloneToken.
-	m.focusIdx = fCloneToken
+	// Advance focus from fHostname all the way to fDockerProxyHost.
+	m.focusIdx = fDockerProxyHost
 	m.toggleFocus = -1
 
 	for want := 0; want < n; want++ {
@@ -146,8 +183,8 @@ func TestResetFocusPrevToggleHidden(t *testing.T) {
 	}
 
 	m.resetFocusPrev()
-	if m.toggleFocus != -1 || m.focusIdx != fCloneToken {
-		t.Fatalf("after wrap: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fCloneToken", m.toggleFocus, m.focusIdx)
+	if m.toggleFocus != -1 || m.focusIdx != fDockerProxyHost {
+		t.Fatalf("after wrap: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fDockerProxyHost", m.toggleFocus, m.focusIdx)
 	}
 
 	m.focusIdx = fHostname
@@ -175,7 +212,7 @@ func TestResetFocusNextToggleShown(t *testing.T) {
 	}
 	n := len(m.toggles())
 
-	m.focusIdx = fCloneToken
+	m.focusIdx = fDockerProxyHost
 	m.toggleFocus = -1
 
 	for want := 0; want < n; want++ {
@@ -206,8 +243,8 @@ func TestResetFocusPrevToggleShown(t *testing.T) {
 		}
 	}
 	m.resetFocusPrev()
-	if m.toggleFocus != -1 || m.focusIdx != fCloneToken {
-		t.Fatalf("after wrap: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fCloneToken", m.toggleFocus, m.focusIdx)
+	if m.toggleFocus != -1 || m.focusIdx != fDockerProxyHost {
+		t.Fatalf("after wrap: toggleFocus=%d focusIdx=%d, want toggleFocus=-1 focusIdx=fDockerProxyHost", m.toggleFocus, m.focusIdx)
 	}
 }
 
@@ -289,7 +326,7 @@ func TestCreateFormClaudeToggleOn(t *testing.T) {
 		t.Fatalf("Claude Code must default OFF like every other agent")
 	}
 
-	m.focusIdx = fCloneToken
+	m.focusIdx = fDockerProxyHost
 	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = next.(model)
 	if m.toggleFocus != 0 {
@@ -331,7 +368,7 @@ func TestCreateFormCodexToggleOn(t *testing.T) {
 	}
 
 	// Walk from the last text input onto the toggles: Claude (0), Codex (1).
-	m.focusIdx = fCloneToken
+	m.focusIdx = fDockerProxyHost
 	for i := 0; i < 2; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		m = next.(model)
@@ -380,7 +417,7 @@ func TestCreateFormCodexDefaultOff(t *testing.T) {
 func TestCreateFormRebuildToggle(t *testing.T) {
 	m := newTestModel(t)
 	m.openForm()
-	m.focusIdx = fCloneToken
+	m.focusIdx = fDockerProxyHost
 
 	for i := 0; i < 5; i++ {
 		next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})

@@ -35,9 +35,10 @@ const (
 	fCPUs
 	fMemory
 	fDisk
-	fDockerProxyHost
 	fCloneURL
+	fCloneForge
 	fCloneToken
+	fDockerProxyHost
 )
 
 // fProfileSelector is a sentinel m.focusIdx value (never a real m.inputs
@@ -72,15 +73,14 @@ var fieldLabels = []string{
 	"CPUs",
 	"Memory",
 	"Disk",
+	"Repository URL",
+	"Git service",
+	"Clone token",
 	"Docker proxy host",
-	"GitHub repo URL",
-	"GitHub token",
 }
 
-// fieldInfo is the per-field help shown for the focused field. The GitHub token
-// entry mirrors the original bash provisioner's github_token_help: where to
-// create a fine-grained token and the recommended (deliberately limited)
-// permissions.
+// fieldInfo is the per-field help shown for the focused field. Forge-specific
+// clone-token guidance is selected by cloneTokenHelp below.
 var fieldInfo = []string{
 	"Required. The VM's name, and the name you'll pass to `sand shell`. Letters, digits and '-'; must differ from the base image.",
 	"VM hostname inside the guest. Blank → same as the instance name.",
@@ -90,8 +90,8 @@ var fieldInfo = []string{
 	"vCPUs for the VM. Blank → half your host's cores (minimum 2).",
 	"RAM for the VM, e.g. 8GiB. Blank → 8GiB, or half your host's RAM if that's less.",
 	"Disk size for the VM, e.g. 100GiB. Blank → 100GiB.",
-	"Optional. Docker registry pull-through proxy host. Blank to skip.",
-	"Optional. HTTPS repo to clone into the VM now (GitHub-oriented). Blank to skip.",
+	"Optional. HTTPS repository to clone into the VM now. Blank to skip.",
+	"Auto detects github.com and gitlab.com. For a self-hosted GitLab URL, choose GitLab with space or ←/→.",
 	"Optional. Token for a private GitHub repo (blank = public / set up later).\n" +
 		"Create a fine-grained token scoped to the repo at:\n" +
 		"  https://github.com/settings/personal-access-tokens/new\n" +
@@ -99,6 +99,7 @@ var fieldInfo = []string{
 		"self-merge to main without human review):\n" +
 		"  Actions: Read and write    Contents: Read and write\n" +
 		"  Issues: Read    Pull requests: Read    Workflows: Read and write",
+	"Optional. Docker registry pull-through proxy host. Blank to skip.",
 }
 
 // hostGit seeds a git-identity field from the host git config. The headless
@@ -244,9 +245,10 @@ func newInputs(hostCPUs int, hostMem int64, user string) []textinput.Model {
 		strconv.Itoa(defaultCPUs(hostCPUs)), // fCPUs      (half the host cores, floor 2)
 		defaultMemory(hostMem),              // fMemory    (8GiB, capped at half host RAM)
 		def.Disk,                            // fDisk
-		"",                                  // fDockerProxyHost
 		"",                                  // fCloneURL
+		"",                                  // fCloneForge (selector, not text input)
 		"",                                  // fCloneToken
+		"",                                  // fDockerProxyHost
 	}
 
 	inputs := make([]textinput.Model, len(fieldLabels))
@@ -274,6 +276,7 @@ func (m *model) openForm() tea.Cmd {
 	m.setDefaultFormProfile()
 	hs := m.formHostSample()
 	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
+	m.formCloneForge = "auto"
 	m.focusIdx = 0
 	m.formErr = nil
 	m.hostDiskFree = freeDiskBytes()
@@ -360,14 +363,15 @@ func (m *model) kickFormToolsetLoad() tea.Cmd {
 
 // openResetForm initialises the create form in reset mode, pre-filled from the
 // target VM's recorded config. The Name is locked to the VM being reset, so focus
-// starts on the first editable field (Hostname); the clone token is never stored,
-// so it is left blank to be re-supplied for a private repo.
+// starts on the first editable field (Hostname); the clone token is never in the
+// recorded config, so it is left blank to be re-supplied for a private repo.
 func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateConfig) tea.Cmd {
 	// A reset targets the VM's OWN member (scope), not the active one — its host
 	// sample, provider and bookkeeping all resolve through m.formScope.
 	m.formScope = scope
 	hs := m.formHostSample()
 	m.inputs = newInputs(hs.cpus, hs.mem, hs.user)
+	m.formCloneForge = cfg.CloneForge
 	m.inputs[fName].SetValue(cfg.Name)
 	m.inputs[fHostname].SetValue(cfg.Hostname)
 	m.inputs[fUser].SetValue(cfg.User)
@@ -379,13 +383,11 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.inputs[fDockerProxyHost].SetValue(cfg.DockerProxyHost)
 	m.inputs[fCloneURL].SetValue(cfg.CloneURL)
 
-	// The token itself is never stored in the recorded config, so the field seeds
-	// blank. When the VM already has a saved GH_TOKEN secret, an empty box is
-	// confusing ("is there no token?"); a placeholder makes clear that blank keeps
-	// the saved token and typing replaces it (submitReset only overwrites the
-	// secret when the field is non-empty).
-	if m.hasStoredToken(scope, cfg.Name) {
-		m.inputs[fCloneToken].Placeholder = "*** saved — leave blank to keep it"
+	// The token itself is never in the recorded config, so the field seeds blank.
+	// A saved secret is reapplied only after provisioning; it cannot authenticate
+	// a fresh private clone. The placeholder says both facts.
+	if m.hasStoredToken(scope, cfg.Name, cfg.CloneURL, cfg.CloneForge) {
+		m.inputs[fCloneToken].Placeholder = "*** saved; enter token to re-clone private repo"
 	}
 
 	m.hostDiskFree = freeDiskBytes()
@@ -393,6 +395,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
 	m.resetCloneURL = cfg.CloneURL
+	m.resetCloneForge = cfg.CloneForge
 	m.resetWithClaude = cfg.WithClaude
 	m.resetWithCodex = cfg.WithCodex
 	m.resetWithOpenCode = cfg.WithOpenCode
@@ -420,12 +423,26 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	return m.inputs[fHostname].Focus()
 }
 
-// hasStoredToken reports whether the VM already has a GH_TOKEN secret in any
-// scope (global or directory-scoped). The reset form uses it to decide whether
-// to hint — via the token field's placeholder — that a saved token exists.
-func (m model) hasStoredToken(scope registry.Scope, name string) bool {
-	for _, pairs := range m.sec.GetAll(name, scope) {
-		if _, ok := pairs["GH_TOKEN"]; ok {
+// hasStoredToken checks the selected forge's key in scopes that apply to this
+// repository. GitHub retains its global token convention; GitLab uses a
+// directory scope matching the repo's parent or an ancestor.
+func (m model) hasStoredToken(scope registry.Scope, name, cloneURL, forge string) bool {
+	key := vm.CloneTokenKey(cloneURL, forge)
+	if key == "" {
+		return false
+	}
+	repoDir, _ := provision.OrgRelDir(cloneURL)
+	for dir, pairs := range m.sec.GetAll(name, scope) {
+		if pairs[key] == "" {
+			continue
+		}
+		if dir == "" {
+			if key == "GH_TOKEN" {
+				return true
+			}
+			continue
+		}
+		if repoDir == dir || strings.HasPrefix(repoDir, dir+"/") {
 			return true
 		}
 	}
@@ -887,7 +904,7 @@ func (m *model) focusNext() tea.Cmd {
 		m.focusIdx = fName
 		return m.inputs[fName].Focus()
 	}
-	return m.formFocusNext(fName, fCloneToken)
+	return m.formFocusNext(fName, fDockerProxyHost)
 }
 
 func (m *model) focusPrev() tea.Cmd {
@@ -903,7 +920,7 @@ func (m *model) focusPrev() tea.Cmd {
 		m.focusIdx = fSourceSelector
 		return nil
 	default:
-		return m.formFocusPrev(fName, fCloneToken)
+		return m.formFocusPrev(fName, fDockerProxyHost)
 	}
 }
 
@@ -912,12 +929,12 @@ func (m *model) focusPrev() tea.Cmd {
 // The locked Name field is never focused, and toggles() already omits the
 // project toggle when disabled (the VM cloned no repo).
 func (m *model) resetFocusNext() tea.Cmd {
-	return m.formFocusNext(fHostname, fCloneToken)
+	return m.formFocusNext(fHostname, fDockerProxyHost)
 }
 
 // resetFocusPrev reverses resetFocusNext.
 func (m *model) resetFocusPrev() tea.Cmd {
-	return m.formFocusPrev(fHostname, fCloneToken)
+	return m.formFocusPrev(fHostname, fDockerProxyHost)
 }
 
 // fieldLocked reports whether field i is displayed but not editable in the
@@ -935,13 +952,13 @@ func (m *model) resetFocusPrev() tea.Cmd {
 //
 // Create mode locks nothing — every field there is a real choice.
 func (m model) fieldLocked(i int) bool {
-	return m.resetMode && (i == fName || i == fCloneURL)
+	return m.resetMode && (i == fName || i == fCloneURL || i == fCloneForge)
 }
 
 // nextEditable walks from index `from` in direction step (+1/-1) to the first
 // unlocked input inside [firstInput, lastInput], reporting false when the walk
 // runs off that range. It is what lets a locked field sit in the middle of the
-// ring (the repo URL, between the docker proxy host and the token) without
+// ring (the repo URL and Git service, before the token) without
 // focus ever landing on it.
 func (m model) nextEditable(from, step, firstInput, lastInput int) (int, bool) {
 	for i := from + step; i >= firstInput && i <= lastInput; i += step {
@@ -1080,6 +1097,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	}
 	cfg.DockerProxyHost = m.field(fDockerProxyHost)
 	cfg.CloneURL = m.field(fCloneURL)
+	cfg.CloneForge = m.formCloneForge
 	cfg.CloneToken = m.field(fCloneToken)
 	if m.resetMode {
 		// Reset mode shows no tool-set toggles, so it has to REPLAY the VM's
@@ -1284,6 +1302,7 @@ func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 	cfg.Name = m.resetName
 	cfg.BaseName = m.resetBaseName
 	cfg.CloneURL = m.resetCloneURL
+	cfg.CloneForge = m.resetCloneForge
 	return cfg
 }
 
@@ -1419,6 +1438,16 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.confirmDeleteFormSource()
 		}
 	}
+	if m.toggleFocus == -1 && m.focusIdx == fCloneForge {
+		switch msg.Code {
+		case tea.KeySpace, tea.KeyRight:
+			m.cycleCloneForge(1)
+			return m, nil
+		case tea.KeyLeft:
+			m.cycleCloneForge(-1)
+			return m, nil
+		}
+	}
 
 	switch {
 	case key.Matches(msg, m.keys.ShiftTab), key.Matches(msg, m.keys.Up):
@@ -1430,7 +1459,7 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Only forward edits while a text input is focused (toggles and the
 	// profile/source selectors aren't inputs).
-	if m.toggleFocus != -1 || m.focusIdx == fProfileSelector || m.focusIdx == fSourceSelector {
+	if m.toggleFocus != -1 || m.focusIdx == fProfileSelector || m.focusIdx == fSourceSelector || m.focusIdx == fCloneForge {
 		return m, nil
 	}
 
@@ -1439,6 +1468,57 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inputs[i], cmds[i] = m.inputs[i].Update(msg)
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *model) cycleCloneForge(step int) {
+	choices := []string{"auto", "github", "gitlab"}
+	for i, choice := range choices {
+		if m.formCloneForge == choice || (m.formCloneForge == "" && choice == "auto") {
+			m.formCloneForge = choices[(i+step+len(choices))%len(choices)]
+			return
+		}
+	}
+	m.formCloneForge = "auto"
+}
+
+func (m model) cloneForgeDisplay() string {
+	selection := m.formCloneForge
+	if selection == "" {
+		selection = "auto"
+	}
+	if selection != "auto" {
+		return forgeLabel(selection)
+	}
+	if inferred, err := vm.ResolveCloneForge(m.inputs[fCloneURL].Value(), selection); err == nil && inferred != "" {
+		return "Auto (" + forgeLabel(inferred) + ")"
+	}
+	return "Auto"
+}
+
+func forgeLabel(forge string) string {
+	switch forge {
+	case "github":
+		return "GitHub"
+	case "gitlab":
+		return "GitLab"
+	}
+	return forge
+}
+
+func (m model) cloneTokenHelp() string {
+	forge, _ := vm.ResolveCloneForge(m.inputs[fCloneURL].Value(), m.formCloneForge)
+	resetAdvice := ""
+	if m.resetMode && m.hasStoredToken(m.formScope, m.resetName, m.resetCloneURL, m.resetCloneForge) {
+		resetAdvice = "A saved token is reapplied after reset. To re-clone a private repository, enter its token here or preserve the project checkout. "
+	}
+	switch forge {
+	case "gitlab":
+		return resetAdvice + "GitLab: create a fine-grained personal access token in your profile's Access → Personal access tokens, scoped to the project/group. Grant Code Download for clone/pull; add Code Push for push. Saved as scoped GITLAB_TOKEN."
+	case "github":
+		return resetAdvice + fieldInfo[fCloneToken]
+	default:
+		return resetAdvice + "Optional clone token. Auto detects github.com and gitlab.com; for a self-hosted GitLab URL, select GitLab above before entering a token."
+	}
 }
 
 // updateResetForm handles keys for the reset-mode form: navigation skips the
@@ -1576,6 +1656,20 @@ func (m model) formView() string {
 	}
 
 	for i := range m.inputs {
+		if i == fCloneForge {
+			label := labelStyle
+			if m.toggleFocus == -1 && m.focusIdx == fCloneForge {
+				label = focusedLabelStyle
+			}
+			value := m.cloneForgeDisplay()
+			if m.resetMode {
+				value += " (locked)"
+			} else {
+				value = "< " + value + " >"
+			}
+			b.WriteString(label.Render(fieldLabels[i]+":") + " " + value + "\n")
+			continue
+		}
 		// A locked field (reset mode's Name and repo URL — see fieldLocked) is
 		// still SHOWN, as a static dimmed line rather than an editable box: it is
 		// what identifies the VM being rebuilt, and hiding it would leave the
@@ -1636,7 +1730,11 @@ func (m model) formView() string {
 	case m.toggleFocus == -1 && m.focusIdx >= 0 && m.focusIdx < len(fieldInfo):
 		// cw-2 accounts for fieldInfoStyle's left border + left padding, so the
 		// wrapped help still fits inside the content column.
-		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(fieldInfo[m.focusIdx]) + "\n")
+		info := fieldInfo[m.focusIdx]
+		if m.focusIdx == fCloneToken {
+			info = m.cloneTokenHelp()
+		}
+		b.WriteString("\n" + fieldInfoStyle.Width(cw-2).Render(info) + "\n")
 	}
 
 	footer := m.footerView(m.formHelp())
@@ -1660,12 +1758,12 @@ func (m model) formView() string {
 	if len(rows) > budget {
 		focusLine := m.focusIdx
 		if !m.resetMode {
-			focusLine++
+			focusLine += 2 // profile and source selector rows precede the inputs
 		}
 		if m.toggleFocus >= 0 {
 			focusLine = 1 + len(m.inputs) + m.toggleFocus
 			if !m.resetMode {
-				focusLine++
+				focusLine += 2
 			}
 		}
 		start := max(0, min(focusLine-budget/2, len(rows)-budget))

@@ -183,6 +183,7 @@ func TestTokenSeedsStoreNotRegistry(t *testing.T) {
 	seedJob(t, &m, "claude", vm.CreateConfig{
 		Name:       "claude",
 		BaseName:   "sandbar-base",
+		CloneURL:   "https://github.com/acme/repo",
 		CloneToken: "ghp_x",
 	})
 

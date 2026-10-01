@@ -28,6 +28,12 @@ sand shell NAME
 See the [CLI Reference](../using-sand/cli-reference.md) for the full flag
 list.
 
+To clone a private GitHub or GitLab project while creating the VM, provide a
+clone token with the repository URL. GitHub and GitLab.com are detected
+automatically. For a self-hosted GitLab URL, select GitLab in the form or use
+`sand create --clone-forge gitlab`; token setup and reset behavior are in
+[Secrets](../using-sand/secrets.md#github-and-gitlab-tokens).
+
 ## What to expect the first time
 
 The very first VM you create builds a shared base image (`sandbar-base`),

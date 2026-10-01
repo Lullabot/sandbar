@@ -5,17 +5,17 @@
   CPUs:              > 2                                                      
   Memory:            > 8GiB                                                   
   Disk:              > 100GiB                                                 
-  Repository URL:    >                                                        
-  Git service:       < Auto >                                                 
-  Clone token:       >                                                        
+  Repository URL:    > https://git.example.test/group/repo                    
+  Git service:       < GitLab >                                               
+  Clone token:       > *************                                          
   Docker proxy host: >                                                        
                                                                               
   [ ] Install Claude Code                                                     
   [ ] Install OpenAI Codex                                                    
   [ ] Install OpenCode                                                        
-  [ ] Install Pi                                                              
-  [ ] Rebuild base image                                                      
-  │ Install the current Pi release when this VM is created. Remembers your    
-  │ last submitted choices.                                                   
+  │ GitLab: create a fine-grained personal access token in your profile's     
+  │ Access → Personal access tokens, scoped to the project/group. Grant Code  
+  │ Download for clone/pull; add Code Push for push. Saved as scoped          
+  │ GITLAB_TOKEN.                                                             
   ↑ prev field • ↓/enter next field • ctrl+s create • esc back                
                                                                               

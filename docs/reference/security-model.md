@@ -192,10 +192,11 @@ agent cannot directly reach, and stops there:
 
 ## A least-privilege token: reasonable agent access
 
-`sand` can hand Claude Code a GitHub token at create time so it can clone,
-pull, push, and open pull requests from inside the VM (see
-[GitHub tokens](../using-sand/secrets.md#github-tokens)). An autonomous agent
-uses whatever that token grants, so the token is itself a security boundary —
+`sand` can hand an agent a GitHub or GitLab token at create time so it can
+clone, pull, and push from inside the VM (see
+[GitHub and GitLab tokens](../using-sand/secrets.md#github-and-gitlab-tokens)).
+GitHub Landing actions can also open pull requests. An autonomous agent uses
+whatever its token grants, so the token is itself a security boundary —
 and scoping it well is a concrete, real-world exercise in giving an agent
 *reasonable* access: enough to do the work, not enough to do damage that no
 human reviewed.

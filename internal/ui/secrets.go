@@ -259,8 +259,8 @@ func (m model) secretsView() string {
 			"Saving applies them to a RUNNING VM immediately; a stopped one gets them on its next start.") + "\n")
 
 	b.WriteString("\n" + hintStyle.Width(cw).Render(
-		"Tip: name a GitHub token GH_TOKEN and put it under an [org dir] section "+
-			"(e.g. [github.com/acme]) to scope git auth to that subtree.") + "\n")
+		"Tip: GH_TOKEN works for GitHub. Put GITLAB_TOKEN under a [host/group] section "+
+			"(e.g. [gitlab.com/acme] or [git.example.test/acme]) for scoped GitLab Git auth.") + "\n")
 
 	b.WriteString("\n" + m.footerView(m.secretsHelp()))
 	return appStyle.Render(b.String())

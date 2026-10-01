@@ -1514,7 +1514,7 @@ func TestResetFormPlaceholdersSavedToken(t *testing.T) {
 		t.Fatalf("seed secret: %v", err)
 	}
 
-	m.openResetForm(registry.LocalScope, "has-token", vm.CreateConfig{Name: "has-token", BaseName: "sandbar-base"})
+	m.openResetForm(registry.LocalScope, "has-token", vm.CreateConfig{Name: "has-token", BaseName: "sandbar-base", CloneURL: "https://github.com/acme/repo"})
 	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "***") {
 		t.Fatalf("token placeholder for a VM with a saved token = %q, want it to signal a saved token", ph)
 	}
@@ -1523,6 +1523,107 @@ func TestResetFormPlaceholdersSavedToken(t *testing.T) {
 	m2.openResetForm(registry.LocalScope, "no-token", vm.CreateConfig{Name: "no-token", BaseName: "sandbar-base"})
 	if ph := m2.inputs[fCloneToken].Placeholder; ph != "" {
 		t.Fatalf("token placeholder for a VM with no saved token = %q, want empty", ph)
+	}
+}
+
+func TestGitLabResetRetainsForgeAndExplainsSavedToken(t *testing.T) {
+	m := newTestModel(t)
+	cfg := resetConfig()
+	cfg.CloneURL = "https://git.example.test/group/repo"
+	cfg.CloneForge = "gitlab"
+	all := map[string]map[string]string{"git.example.test/group": {"GITLAB_TOKEN": "private-token"}}
+	cfg.CloneURL = "https://git.example.test/group/subgroup/repo"
+	if err := m.sec.SetAll(cfg.Name, registry.LocalScope, all); err != nil {
+		t.Fatal(err)
+	}
+	m.openResetForm(registry.LocalScope, cfg.Name, cfg)
+	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "saved") || !strings.Contains(ph, "re-clone") {
+		t.Fatalf("misleading reset token placeholder: %q", ph)
+	}
+	got, err := m.buildConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = m.resetConfig(got)
+	if got.CloneForge != "gitlab" {
+		t.Fatalf("reset forge = %q", got.CloneForge)
+	}
+}
+
+func TestGitLabProvisionSavesScopedToken(t *testing.T) {
+	isolateHostState(t)
+	type shellCall struct {
+		argv []string
+		body string
+	}
+	var calls []shellCall
+	p := &providerfake.Provider{
+		ShellFunc: func(_ context.Context, _ string, stdin io.Reader, _ io.Writer, argv ...string) error {
+			body := ""
+			if stdin != nil {
+				b, _ := io.ReadAll(stdin)
+				body = string(b)
+			}
+			calls = append(calls, shellCall{append([]string(nil), argv...), body})
+			return nil
+		},
+		ShellOutFunc: func(_ context.Context, _ string, argv ...string) ([]byte, error) {
+			if strings.Join(argv, " ") == "getent passwd ada" {
+				return []byte("ada:x:1000:1000::/home/ada:/bin/bash\n"), nil
+			}
+			return nil, nil
+		},
+	}
+	m := New(singleFleet(p, registry.LocalScope)).(model)
+	cfg := resetConfig()
+	cfg.Name = "gitlab-vm"
+	cfg.CloneURL = "https://git.example.test/group/repo"
+	cfg.CloneForge = "gitlab"
+	cfg.CloneToken = "private-token"
+	if err := m.sec.Set(cfg.Name, registry.LocalScope, map[string]string{"GH_TOKEN": "github-token"}); err != nil {
+		t.Fatal(err)
+	}
+	seedJob(t, &m, cfg.Name, cfg)
+	done, cmd := m.dispatch(provisionDoneMsg{job: provisionKey(registry.LocalScope, cfg.Name)})
+	m = done.(model)
+	all := m.sec.GetAll(cfg.Name, registry.LocalScope)
+	if all["git.example.test/group"]["GITLAB_TOKEN"] != "private-token" || all[""]["GH_TOKEN"] != "github-token" {
+		t.Fatalf("host secrets after successful provision = %v", all)
+	}
+	var run func(tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		if batch, ok := c().(tea.BatchMsg); ok {
+			for _, child := range batch {
+				run(child)
+			}
+		}
+	}
+	run(cmd)
+	if len(calls) == 0 {
+		t.Fatal("successful provision did not apply scoped token to guest")
+	}
+	seenScoped, seenCredential := false, false
+	for _, call := range calls {
+		for _, arg := range call.argv {
+			if strings.Contains(arg, "private-token") {
+				t.Fatalf("token leaked into shell argv: %v", call.argv)
+			}
+		}
+		if strings.Contains(call.body, "GITLAB_TOKEN='private-token'") && strings.Contains(strings.Join(call.argv, " "), "git.example.test/group") {
+			seenScoped = true
+		}
+		if strings.Contains(call.body, "https://oauth2:private-token@git.example.test") {
+			seenCredential = true
+		}
+	}
+	if !seenScoped {
+		t.Fatal("scoped GitLab token did not reach guest stdin")
+	}
+	if !seenCredential {
+		t.Fatal("host-bound GitLab credential did not reach guest stdin")
 	}
 }
 

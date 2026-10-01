@@ -46,7 +46,7 @@ func TestTUIAgentChoicesPersistAt80x24(t *testing.T) {
 		m.inputs[fUser].SetValue("tester")
 		m.inputs[fGitName].SetValue("Test Author")
 		m.inputs[fGitEmail].SetValue("test@example.com")
-		m.focusIdx = fCloneToken
+		m.focusIdx = fDockerProxyHost
 		return m
 	}
 	m := newForm()
@@ -89,7 +89,7 @@ func TestTUIAgentChoicesPersistAt80x24(t *testing.T) {
 	all.Apply(&cfg)
 	m = New(singleFleet(p, registry.LocalScope)).(model)
 	m.openResetForm(registry.LocalScope, cfg.Name, cfg)
-	m.focusIdx = fCloneToken
+	m.focusIdx = fDockerProxyHost
 	tm = teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 	waitForText(t, tm, "Reset VM")
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})

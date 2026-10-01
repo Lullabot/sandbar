@@ -1,13 +1,13 @@
                                                                                 
    New VM                                                                       
                                                                                 
-  Git email:         >                                                          
   CPUs:              > 2                                                        
   Memory:            > 8GiB                                                     
   Disk:              > 100GiB                                                   
+  Repository URL:    >                                                          
+  Git service:       < Auto >                                                   
+  Clone token:       >                                                          
   Docker proxy host: >                                                          
-  GitHub repo URL:   >                                                          
-  GitHub token:      >                                                          
                                                                                 
   [ ] Install Claude Code                                                       
   [ ] Install OpenAI Codex                                                      

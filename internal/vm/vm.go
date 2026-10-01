@@ -85,6 +85,7 @@ type CreateConfig struct {
 	TimezoneExplicit bool
 	DockerProxyHost  string
 	CloneURL         string
+	CloneForge       string
 	CloneToken       string
 
 	// DDEV, Go and Java configure shared base dependencies. Coding agents are
@@ -203,6 +204,9 @@ func (c CreateConfig) ToolsetKey() string {
 // original bash provisioner: a git identity is required, the instance name
 // must differ from the base image name, and CPUs must be a positive integer.
 func (c CreateConfig) Validate() error {
+	if err := c.validateCloneToken(); err != nil {
+		return err
+	}
 	if c.Name == "" {
 		return fmt.Errorf("instance name is required")
 	}
