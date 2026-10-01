@@ -843,6 +843,16 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   v2 base stamp. Saved all-off is a real preference. Existing VM records keep
   their Claude/Codex booleans (including false); missing OpenCode/Pi means off.
   Reset starts from those recorded VM choices, not global preferences.
+- **Claude's notification terminal is detected on the workstation.**
+  `BuildExtraVars` emits `claude_notification_channel` only for selected Claude
+  installs in finalize/full. `terminal.go` recognizes iTerm2, Kitty and Ghostty,
+  including host-tmux identifiers and its saved terminal environment. Unknown
+  terminals omit the variable, preserving the existing preference. The Claude
+  role merges `preferredNotifChannel` into user settings; do not spoof
+  `TERM_PROGRAM` in the guest. Guest tmux enables `allow-passthrough`, while
+  users running host tmux must enable passthrough there too. Terminal detection
+  must not become a base-image stamp input.
+
 - **Reset has one agent-state preservation option.** Keep its path set in
   `internal/provision/staging.go` (`AgentStatePaths`), covering all four
   agents even when deselected. This includes credentials and sessions and

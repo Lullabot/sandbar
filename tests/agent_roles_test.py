@@ -85,6 +85,37 @@ class AgentRolesTest(unittest.TestCase):
         self.assertIs(settings["remoteControlAtStartup"], False)
         self.assertIs(settings["isolatePeerMachines"], True)
 
+    def test_claude_native_notification_channel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            home = directory / "guest"
+            settings = home / ".claude/settings.json"
+            settings.parent.mkdir(parents=True)
+            all_tasks = yaml.safe_load((ROOT / "roles/claude-code/tasks/main.yml").read_text())
+            names = {"Check for prior Claude remote-control onboarding",
+                     "Read Claude settings for safe communication defaults",
+                     "Isolate peer machines and keep Remote Control opt-in"}
+            tasks = [task for task in all_tasks if task["name"] in names]
+            for task in tasks:
+                if "ansible.builtin.copy" in task:
+                    task["ansible.builtin.copy"]["group"] = grp.getgrgid(os.getgid()).gr_name
+            play = [{"hosts": "all", "gather_facts": False, "tasks": tasks}]
+            for channel in ("iterm2", "kitty", "ghostty", "", "unknown"):
+                with self.subTest(channel=channel):
+                    original = {"theme": "dark", "preferredNotifChannel": "terminal_bell"}
+                    settings.write_text(json.dumps(original))
+                    settings.chmod(0o600)
+                    variables = {"user_home": str(home), "user_name": getpass.getuser(),
+                                 "claude_notification_channel": channel}
+                    self.run_play(directory, play, variables)
+                    result = json.loads(settings.read_text())
+                    self.assertEqual(result["theme"], "dark")
+                    self.assertEqual(result["preferredNotifChannel"],
+                                     channel if channel in ("iterm2", "kitty", "ghostty") else "terminal_bell")
+                    self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
+                    output = self.run_play(directory, play, variables)
+                    self.assertIn("changed=0", output)
+
     def test_claude_remote_control_migration_requires_opt_in(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
