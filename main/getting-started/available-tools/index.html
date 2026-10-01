@@ -679,6 +679,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Coding agents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#claude-code-terminal-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code terminal notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1433,6 +1450,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Coding agents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#claude-code-terminal-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code terminal notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1520,6 +1554,21 @@ and <code>--with-pi</code>; use <code>=false</code> to explicitly deselect an ag
 flags use the remembered selection. Changing agents does not rebuild the
 shared base. Reset retains that VM's recorded selections, independently of
 the defaults for new VMs.</p>
+<h3 id="claude-code-terminal-notifications">Claude Code terminal notifications</h3>
+<p>When creating or resetting a VM with Claude Code selected, sand detects the
+workstation terminal and sets Claude's native notification channel for iTerm2,
+Kitty, or Ghostty. Detection also checks terminal identifiers retained inside
+host tmux and its saved <code>TERM_PROGRAM</code>. If sand cannot identify a supported
+terminal, it leaves your existing notification preference unchanged.</p>
+<p>The guest tmux configuration enables notification passthrough. If you also run
+sand inside <strong>host tmux</strong>, enable <code>set -g allow-passthrough on</code> in the host's
+<code>~/.tmux.conf</code> and reload it with <code>tmux source-file ~/.tmux.conf</code>.
+iTerm2 additionally needs <strong>Notification Center Alerts</strong> and <strong>Send escape
+sequence-generated alerts</strong> enabled under its profile's Terminal settings.
+See <a href="https://code.claude.com/docs/en/terminal-config#get-a-terminal-bell-or-notification">Claude's terminal notification guide</a>.</p>
+<p>The channel reflects the terminal used during provisioning. If you later
+connect from a different terminal, change <code>preferredNotifChannel</code> in the guest's
+<code>~/.claude/settings.json</code> to match it.</p>
 <h2 id="git">Git</h2>
 <ul>
 <li>The <a href="https://cli.github.com/">GitHub CLI (<code>gh</code>)</a>, configured as the git
