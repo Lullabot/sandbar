@@ -586,6 +586,11 @@ func runBatchedCmd(cmd tea.Cmd, out chan<- tea.Msg) {
 		return
 	}
 	msg := cmd()
+	// Bubble Tea ignores nil messages. Forwarding one here lets the URL
+	// waiter's channel-close result race with the review completion message.
+	if msg == nil {
+		return
+	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, c := range batch {
 			go runBatchedCmd(c, out)
