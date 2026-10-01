@@ -51,13 +51,72 @@ to be true on your side for it to arrive:
   clipboard", xterm's `allowWindowOps`) because a program that can write
   your clipboard can also clobber it. If a copy silently does nothing,
   that's the first thing to check.
-- **If you run `sand` inside your own tmux**, that tmux passes the guest's
-  sequence through by default (`set-clipboard external`), so nothing is
-  needed — unless you've set `set-clipboard off`, which drops it.
+- **If you run `sand` inside your own tmux**, configure the host tmux with
+  `set -s set-clipboard on`. Its default, `external`, allows its own copies
+  but blocks clipboard writes from the guest tmux. The host tmux also needs
+  the clipboard capability for your terminal; see the configuration below.
 
 A VM created before sand shipped this doesn't need rebuilding: the setting
 is applied at attach time as well as baked into the guest's `~/.tmux.conf`,
 so the next `S` or `sand shell` has it.
+
+### Claude Code and host tmux settings
+
+The guest configuration includes
+[Claude Code's recommended tmux settings](https://code.claude.com/docs/en/terminal-config#configure-tmux)
+for Shift+Enter, notifications and terminal progress updates. It also enables
+focus events and recognizes a host tmux as an extended-key terminal. These
+settings are applied on every `S` or `sand shell` attachment, including to
+an existing VM's running tmux server, without restarting its sessions.
+
+If you run sand inside tmux on your workstation, add the following to your
+**host's** `~/.tmux.conf` too (tmux 3.3 or newer):
+
+```tmux
+set -g allow-passthrough on
+set -s extended-keys on
+set -as terminal-features ',xterm*:extkeys'
+set -s focus-events on
+set -s set-clipboard on
+```
+
+The outer terminal must support extended keys. If tmux does not detect them,
+add an `extkeys` entry matching that terminal's `$TERM` outside tmux. For
+clipboard support, check `tmux info` inside the host tmux: if `Ms` is
+missing, add a matching clipboard feature. For example, for a terminal
+advertising `xterm-256color` and supporting OSC 52:
+
+```tmux
+set -as terminal-features ',xterm-256color:clipboard'
+```
+
+See [tmux's nested clipboard instructions](https://github.com/tmux/tmux/wiki/Clipboard#terminal-support---tmux-inside-tmux).
+Enabling `set-clipboard on` allows programs in the host tmux panes to write
+your clipboard; it does not provide clipboard read access.
+
+Apply the host configuration from a host shell:
+
+```console
+$ tmux source-file ~/.tmux.conf
+```
+
+Detach and reattach the host tmux client after changing terminal features,
+then reattach to the guest. sand configures only guest tmux; it does not
+modify your host configuration.
+
+If the host also uses `C-a` as its prefix, ensure it has
+`bind C-a send-prefix`. Press `C-a C-a` to send the prefix to the guest:
+for example, `C-a C-a d` detaches the guest, while `C-a d` detaches the
+host. With the usual host `C-b` prefix, guest `C-a` bindings work directly.
+
+Shift+Enter and desktop notifications still depend on the terminal emulator
+and both tmux layers. In Claude Code, `Ctrl+J` or `\` followed by Enter
+inserts a newline if Shift+Enter is unavailable. If your terminal needs
+Claude Code's `/terminal-setup`, run it on the workstation outside tmux,
+where it can change the host terminal settings. Notification permissions
+must likewise be enabled in the host terminal. Passthrough does not enable
+nested control mode; the [`--cc` restriction](#why-you-cant-have-both-at-once)
+still applies.
 
 ### What the board does while you're attached
 

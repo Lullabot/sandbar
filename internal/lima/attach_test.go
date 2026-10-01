@@ -234,7 +234,7 @@ func TestAttachArgvColorterm(t *testing.T) {
 	}
 	// `new-session` is no longer the first word after `tmux` — the clipboard
 	// settings run ahead of it in the same command sequence, and must (see
-	// clipboardCmds) — so the assertion is on `-e` landing on the new-session
+	// terminalSetupCmds) — so the assertion is on `-e` landing on the new-session
 	// itself, not on its adjacency to the `tmux` that starts the sequence.
 	if !strings.Contains(mainBranch, `new-session -e COLORTERM=truecolor -s main`) {
 		t.Errorf("the `main` branch does not set COLORTERM via `-e`:\n\t%s", mainBranch)
@@ -285,8 +285,7 @@ func TestAttachArgvTurnsOnTheClipboard(t *testing.T) {
 		// Both settings, in both branches. Either one alone is a dead clipboard:
 		// `set-clipboard on` without the terminal feature emits nothing at all
 		// under TERM=screen-256color (i.e. from sand's host-tmux fast path), and
-		// the feature without `set-clipboard on` only forwards what programs
-		// inside tmux emit, never tmux's own copies.
+		// the feature alone does not allow applications inside tmux to copy.
 		if !strings.Contains(b.branch, "set -s set-clipboard on") {
 			t.Errorf("the %s branch does not `set -s set-clipboard on`; tmux's own copies never leave the guest:\n\t%s", b.name, b.branch)
 		}
@@ -384,7 +383,7 @@ func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
 		{"main", mainBranch},
 	} {
 		// `-CC` sits directly after `tmux` and ahead of every command, not
-		// glued to new-session: clipboardCmds' `start-server \; set -s …`
+		// glued to new-session: terminalSetupCmds' `start-server \; set -s …`
 		// runs in between, and tmux takes client flags only before commands.
 		cc := strings.Index(tc.branch, "tmux -CC ")
 		if cc < 0 || !strings.Contains(tc.branch[cc:], "new-session") {
@@ -440,5 +439,24 @@ func TestAttachArgvControlModeKeepsDestroyUnattachedOffMain(t *testing.T) {
 	}
 	if strings.Contains(mainBranch, "destroy-unattached") {
 		t.Fatalf("destroy-unattached reached the `main` branch under control mode. This DESTROYS the user's long-running work the moment they detach:\n\t%s", mainBranch)
+	}
+}
+
+func TestAttachArgvClaudeTerminalSettings(t *testing.T) {
+	for _, mode := range []AttachMode{AttachFullScreen, AttachControl} {
+		_, grouped, main := splitGuestExpr(t, AttachArgvMode("claude", "/home/debian.guest", "", mode))
+		for _, branch := range []string{grouped, main} {
+			for _, setting := range []string{
+				"set -g allow-passthrough on", "set -s extended-keys on", "set -s focus-events on",
+				`set -s "terminal-features[100]" "xterm*:extkeys"`,
+				`set -s "terminal-features[101]" "screen*:extkeys"`,
+				`set -s "terminal-features[102]" "tmux*:extkeys"`,
+			} {
+				i := strings.Index(branch, setting)
+				if i < 0 || i > strings.Index(branch, "new-session") {
+					t.Errorf("setting %q must precede attachment: %s", setting, branch)
+				}
+			}
+		}
 	}
 }
