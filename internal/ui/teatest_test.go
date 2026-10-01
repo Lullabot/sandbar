@@ -83,7 +83,56 @@ func newTeaProgramSized(t *testing.T, w, h int) *teatest.TestModel {
 	seedManagedIndex(t, "claude", "web")
 	cli := lima.New(listFakeRunner{})
 	prov := &provision.Provisioner{Lima: cli}
-	return teatest.NewTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(w, h))
+	return newManagedTeaTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(w, h))
+}
+
+// Stop the event loop before earlier cleanups restore shared probes and host
+// state, including when an assertion exits the test before finalModel is called.
+func newManagedTeaTestModel(t *testing.T, m tea.Model, opts ...teatest.TestOption) *teatest.TestModel {
+	t.Helper()
+	tm := teatest.NewTestModel(t, m, opts...)
+	t.Cleanup(func() {
+		if err := tm.Quit(); err != nil {
+			t.Errorf("quit: %v", err)
+		}
+		tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	})
+	return tm
+}
+
+func TestTUIProgramCleanupStopsEventLoop(t *testing.T) {
+	var tm *teatest.TestModel
+	t.Run("return before finalModel", func(t *testing.T) {
+		tm = newTeaProgram(t)
+		waitForText(t, tm, "claude")
+	})
+	done := make(chan struct{})
+	go func() {
+		tm.GetProgram().Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the TUI event loop survived the test's cleanup")
+	}
+}
+
+// Observe readiness on the event-loop goroutine: a rendered form or a finished
+// file read does not prove that Update has applied the saved agent choices.
+type formReadyModel struct {
+	model
+	ready chan struct{}
+}
+
+func (m formReadyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.model.Update(msg)
+	m.model = next.(model)
+	if m.ready != nil && m.view == viewForm && !m.agentsLoading {
+		close(m.ready)
+		m.ready = nil
+	}
+	return m, cmd
 }
 
 // pinHostCapacity overrides the header's host-capacity probes (header.go)
@@ -246,7 +295,7 @@ func TestTUIGitLabCloneTokenFocused80x24(t *testing.T) {
 	m.inputs[fCPUs].SetValue("2")
 	m.inputs[fMemory].SetValue("8GiB")
 	m.hostDiskFree = 0
-	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	tm := newManagedTeaTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 	waitForText(t, tm, "New VM")
 	for range fCloneURL {
 		tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -319,11 +368,17 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 
 	runner := &buildingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	releaseBuild := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	t.Cleanup(releaseBuild)
 	cli := lima.New(runner)
 	prov := &provision.Provisioner{Lima: cli, PlaybookDir: t.TempDir(), AcquireBaseImage: func(context.Context, lima.ImageStore, string, io.Writer) (string, error) {
 		return "/isolated/verified-base.qcow2", nil
 	}}
-	tm := teatest.NewTestModel(t, New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)), teatest.WithInitialTermSize(100, 30))
+	ready := make(chan struct{})
+	m := formReadyModel{model: New(singleFleet(provider.NewLocalLima(cli, prov), registry.LocalScope)).(model), ready: ready}
+	t.Cleanup(func() { m.jobs.cancelJob(provisionKey(registry.LocalScope, "newvm")) })
+	tm := newManagedTeaTestModel(t, m, teatest.WithInitialTermSize(100, 30))
 
 	// The managed index is empty here, so the canned VMs get no tile: the board
 	// opens on its empty-slot invitation.
@@ -334,6 +389,11 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	waitForText(t, tm, "New VM")
 	tm.Type("newvm")
 	waitForTypedText(t, tm, "newvm")
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the create form should have loaded saved agent selections")
+	}
 	tm.Send(ctrlKey('s'))
 
 	select {
@@ -364,7 +424,7 @@ func TestTUIKeyboardStaysLiveWhileAVMBuilds(t *testing.T) {
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	// The build is still running, and its log kept filling while the user was away.
-	close(runner.release)
+	releaseBuild()
 	fm := finalModel(t, tm)
 	if !fm.vmHasRetainedRun(registry.LocalScope, "newvm") {
 		t.Fatal("the build should have been retained as newvm's run")
@@ -414,7 +474,11 @@ func finalModel(t *testing.T, tm *teatest.TestModel) model {
 	if err := tm.Quit(); err != nil {
 		t.Fatalf("quit: %v", err)
 	}
-	m, ok := tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second)).(model)
+	final := tm.FinalModel(t, teatest.WithFinalTimeout(3*time.Second))
+	if observed, ok := final.(formReadyModel); ok {
+		final = observed.model
+	}
+	m, ok := final.(model)
 	if !ok {
 		t.Fatal("FinalModel was not a ui.model")
 	}
