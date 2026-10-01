@@ -953,6 +953,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#claude-code-and-host-tmux-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code and host tmux settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1560,6 +1571,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#claude-code-and-host-tmux-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code and host tmux settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#what-the-board-does-while-youre-attached" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1819,13 +1841,57 @@ to be true on your side for it to arrive:</p>
   clipboard", xterm's <code>allowWindowOps</code>) because a program that can write
   your clipboard can also clobber it. If a copy silently does nothing,
   that's the first thing to check.</li>
-<li><strong>If you run <code>sand</code> inside your own tmux</strong>, that tmux passes the guest's
-  sequence through by default (<code>set-clipboard external</code>), so nothing is
-  needed — unless you've set <code>set-clipboard off</code>, which drops it.</li>
+<li><strong>If you run <code>sand</code> inside your own tmux</strong>, configure the host tmux with
+  <code>set -s set-clipboard on</code>. Its default, <code>external</code>, allows its own copies
+  but blocks clipboard writes from the guest tmux. The host tmux also needs
+  the clipboard capability for your terminal; see the configuration below.</li>
 </ul>
 <p>A VM created before sand shipped this doesn't need rebuilding: the setting
 is applied at attach time as well as baked into the guest's <code>~/.tmux.conf</code>,
 so the next <code>S</code> or <code>sand shell</code> has it.</p>
+<h3 id="claude-code-and-host-tmux-settings">Claude Code and host tmux settings</h3>
+<p>The guest configuration includes
+<a href="https://code.claude.com/docs/en/terminal-config#configure-tmux">Claude Code's recommended tmux settings</a>
+for Shift+Enter, notifications and terminal progress updates. It also enables
+focus events and recognizes a host tmux as an extended-key terminal. These
+settings are applied on every <code>S</code> or <code>sand shell</code> attachment, including to
+an existing VM's running tmux server, without restarting its sessions.</p>
+<p>If you run sand inside tmux on your workstation, add the following to your
+<strong>host's</strong> <code>~/.tmux.conf</code> too (tmux 3.3 or newer):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>set -g allow-passthrough on
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>set -s extended-keys on
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>set -as terminal-features ',xterm*:extkeys'
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>set -s focus-events on
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>set -s set-clipboard on
+</code></pre></div>
+<p>The outer terminal must support extended keys. If tmux does not detect them,
+add an <code>extkeys</code> entry matching that terminal's <code>$TERM</code> outside tmux. For
+clipboard support, check <code>tmux info</code> inside the host tmux: if <code>Ms</code> is
+missing, add a matching clipboard feature. For example, for a terminal
+advertising <code>xterm-256color</code> and supporting OSC 52:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>set -as terminal-features ',xterm-256color:clipboard'
+</code></pre></div>
+<p>See <a href="https://github.com/tmux/tmux/wiki/Clipboard#terminal-support---tmux-inside-tmux">tmux's nested clipboard instructions</a>.
+Enabling <code>set-clipboard on</code> allows programs in the host tmux panes to write
+your clipboard; it does not provide clipboard read access.</p>
+<p>Apply the host configuration from a host shell:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>tmux<span class="w"> </span>source-file<span class="w"> </span>~/.tmux.conf
+</code></pre></div>
+<p>Detach and reattach the host tmux client after changing terminal features,
+then reattach to the guest. sand configures only guest tmux; it does not
+modify your host configuration.</p>
+<p>If the host also uses <code>C-a</code> as its prefix, ensure it has
+<code>bind C-a send-prefix</code>. Press <code>C-a C-a</code> to send the prefix to the guest:
+for example, <code>C-a C-a d</code> detaches the guest, while <code>C-a d</code> detaches the
+host. With the usual host <code>C-b</code> prefix, guest <code>C-a</code> bindings work directly.</p>
+<p>Shift+Enter and desktop notifications still depend on the terminal emulator
+and both tmux layers. In Claude Code, <code>Ctrl+J</code> or <code>\</code> followed by Enter
+inserts a newline if Shift+Enter is unavailable. If your terminal needs
+Claude Code's <code>/terminal-setup</code>, run it on the workstation outside tmux,
+where it can change the host terminal settings. Notification permissions
+must likewise be enabled in the host terminal. Passthrough does not enable
+nested control mode; the <a href="#why-you-cant-have-both-at-once"><code>--cc</code> restriction</a>
+still applies.</p>
 <h3 id="what-the-board-does-while-youre-attached">What the board does while you're attached</h3>
 <p>If sand is itself running inside a host tmux session, <code>S</code> opens the shell in
 a <strong>new host window</strong> and leaves the board on screen beside it, still live.
@@ -1878,7 +1944,7 @@ window as scrolling text rather than failing cleanly — sand cannot tell the
 difference, so if that is what you see, drop <code>--cc</code> and attach normally.</p>
 <h4 id="a-tab-per-vm-with-the-board-still-live">A tab per VM, with the board still live</h4>
 <p>Start sand inside a control-mode tmux session:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>tmux<span class="w"> </span>-CC<span class="w"> </span>new-session<span class="w"> </span>-s<span class="w"> </span>sandbar<span class="w"> </span>sand
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>tmux<span class="w"> </span>-CC<span class="w"> </span>new-session<span class="w"> </span>-s<span class="w"> </span>sandbar<span class="w"> </span>sand
 </code></pre></div>
 <p><code>$TMUX</code> is now set, so <code>S</code> takes the new-window path described above instead
 of suspending — and because your terminal is rendering that tmux, the new
@@ -1888,7 +1954,7 @@ it, progress bars and all, and each <code>S</code> on a different VM opens anoth
 <h4 id="a-tab-per-window-inside-one-vm">A tab per window inside one VM</h4>
 <p><code>sand shell --cc NAME</code> attaches to the <strong>guest's</strong> tmux in control mode, so
 the windows <code>C-a c</code> makes inside the VM become native tabs:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
 </code></pre></div>
 <p>Run this from a plain terminal window, not from the board.</p>
 <h4 id="why-you-cant-have-both-at-once">Why you can't have both at once</h4>
@@ -1901,10 +1967,10 @@ this; that option forwards a specific <code>tmux;</code>-prefixed wrapper, not t
 handshake tmux emits on its own.</p>
 <p>Rather than print raw protocol into your pane, <code>sand shell --cc</code> refuses
 when <code>$TMUX</code> is set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">handshake before your terminal can see it; detach (C-a d) and run this from a</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">plain terminal window</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>sand<span class="w"> </span>shell<span class="w"> </span>--cc<span class="w"> </span>web
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">handshake before your terminal can see it; detach (C-a d) and run this from a</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">plain terminal window</span>
 </code></pre></div>
 <p>So pick the layer that matters more to you. If you mostly want several VMs
 open at once, take the first recipe. If you mostly want several windows
