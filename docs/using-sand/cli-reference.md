@@ -254,7 +254,7 @@ sand create --name myproj --clone-url https://github.com/org/repo.git \
   --clone-token "$GITHUB_TOKEN"
 
 # Clone from a self-hosted GitLab instance (explicit forge selection required).
-sand create --name tools --clone-url https://git.example.internal:8443/platform/tools/app.git \
+sand create --name tools --clone-url https://git.example.internal/platform/tools/app.git \
   --clone-forge gitlab --clone-token "$GITLAB_TOKEN"
 
 # Non-default resources, explicit identity.

@@ -101,19 +101,29 @@ by a small, fixed table of recognized token names (`internal/provision/gitcred.g
 not a feature of the secrets store itself — the store only ever holds
 `(scope, KEY, VALUE)` triples.
 
-For GitLab, use a scope beginning with the instance host, followed by the
-namespace path. For example, `[git.example.internal:8443/platform/tools]`
-binds `GITLAB_TOKEN` to that self-hosted instance and namespace, including
-nested groups. A single-label host works too: `[gitlab/platform]` targets
-`gitlab`. A bare one-component scope such as `[platform]` defaults to
-`gitlab.com`. In a `[github.com/team]` scope, `GITLAB_TOKEN` still targets
-`gitlab.com`, so it can coexist there with a manually scoped `GH_TOKEN`.
-Custom hosts are never inferred from a URL: select GitLab in the create form
-or pass `--clone-forge gitlab`.
+Scopes remain **directories relative to the guest home**, for every project.
+Sand clones into `~/<host>/<group>/<repo>` (including nested groups), so the
+top-level directory is `github.com`, `gitlab.com`, a self-hosted instance
+such as `git.example.internal`, or `git.drupalcode.org` for a Drupal.org
+HTTPS clone.
 
-Scopes accept a colon for host ports. Token-bearing IPv6 literal clone URLs
-are rejected because square brackets in IPv6 URL hosts would be interpreted
-as glob syntax in Git's `includeIf` path; use a DNS name for the instance.
+For GitLab, place `GITLAB_TOKEN` in that directory tree. A scope of
+`[gitlab.com]` covers checkouts beneath `~/gitlab.com/`;
+`[git.example.internal/platform]` covers checkouts beneath
+`~/git.example.internal/platform/`. Use a deeper directory scope to limit
+where the token is available. The GitLab helper uses the first directory
+component as its HTTPS endpoint. It only activates for repositories in the
+scoped subtree; matching a remote hostname elsewhere does not activate it.
+There are no aliases or fallbacks from other directories to GitLab.com.
+
+Self-hosted GitLab still requires choosing GitLab in the create form or
+passing `--clone-forge gitlab`, since a hostname does not identify which
+service runs there. Clone tokens support standard HTTPS endpoints without
+explicit port numbers. Use a DNS name rather than an IPv6 literal.
+
+Drupal.org projects follow the same directory-scope convention for secrets.
+Their [publishing authentication](drupalorg-publishing.md) remains separate
+from GitHub and GitLab token handling.
 
 **The global scope is the one exception.** `GH_TOKEN` or `GITLAB_TOKEN` with
 no scope is delivered to the guest as a plain environment variable, but does
@@ -164,8 +174,8 @@ other directories; add `GH_TOKEN` to a `[host/org]` section to do that.
 
 For GitLab, `sand` saves the token as `GITLAB_TOKEN` in the non-empty
 repository-parent scope. For example,
-`https://gitlab.example.internal:8443/platform/tools/app.git` stores it in
-`[gitlab.example.internal:8443/platform/tools]`. This gives the initial clone
+`https://gitlab.example.internal/platform/tools/app.git` stores it in
+`[gitlab.example.internal/platform/tools]`. This gives the initial clone
 and future Git commands in that directory the right credential.
 
 After creating or resetting the VM, and on every start, `sand` applies saved

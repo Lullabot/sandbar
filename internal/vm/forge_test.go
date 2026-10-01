@@ -30,7 +30,7 @@ func TestCloneForgeValidation(t *testing.T) {
 	cfg.GitName = "Test"
 	cfg.GitEmail = "test@example.com"
 	cfg.CloneToken = "secret"
-	for _, u := range []string{"https://example.com/org/repo", "http://gitlab.com/org/repo", "https://user:pass@gitlab.com/org/repo", "https://gitlab.com/org/../repo", "https://gitlab.com/org/repo?x=1", "https://[::1]/org/repo"} {
+	for _, u := range []string{"https://example.com/org/repo", "http://gitlab.com/org/repo", "https://user:pass@gitlab.com/org/repo", "https://gitlab.com/org/../repo", "https://gitlab.com/org/repo?x=1", "https://[::1]/org/repo", "https://gitlab.com:8443/org/repo", "https://gitlab.com:443/org/repo"} {
 		cfg.CloneURL = u
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("accepted token URL %q", u)

@@ -173,13 +173,13 @@ Clone tokens preserve the GitHub convention (`GH_TOKEN`) and support GitLab
 with `GITLAB_TOKEN`. GitHub and GitLab.com are inferred from their HTTPS host;
 self-hosted GitLab requires `--clone-forge gitlab` or choosing GitLab in the
 TUI. Store GitLab tokens in a non-empty repository-parent scope beginning
-with the host (`<hostname>[:port]/group[/subgroup]`). The Git credential
-helper binds a GITLAB_TOKEN in a slash-containing scope to its first component,
-including single-label hosts and ports. A bare one-component scope defaults
-to `gitlab.com`; a `github.com/...` scope also targets GitLab.com, allowing
-GH_TOKEN and GITLAB_TOKEN to coexist. Scope names allow colons for ports;
-token-bearing IPv6 literal clone URLs are rejected because square brackets in
-the host conflict with Git `includeIf` glob syntax, so use a DNS name.
+with the host (`<hostname>/group[/subgroup]`). Scopes remain home-relative
+directories, following the checkout layout `~/<host>/<group>/<repo>` used
+for GitHub, GitLab and drupal.org. The GitLab credential helper uses the first
+directory component as its endpoint, even for a host-wide scope such as
+`gitlab.com`; it has no directory aliases or GitLab.com fallbacks. Scope names
+do not allow colons. Token-bearing clone URLs reject explicit ports and IPv6
+literals; use a DNS name and standard HTTPS.
 GitHub create tokens remain global `GH_TOKEN` and are also written to the
 cloned repository's `.env`; GitLab create tokens use their non-empty
 repository-parent scope. Create and reset apply saved secrets, but a private

@@ -64,6 +64,9 @@ func (c CreateConfig) validateCloneToken() error {
 	if strings.Contains(u.Hostname(), ":") {
 		return fmt.Errorf("clone token requires a DNS hostname or IPv4 address; IPv6 literal clone URLs are not supported")
 	}
+	if u.Port() != "" {
+		return fmt.Errorf("clone token URLs must use the standard HTTPS port; explicit ports are not supported")
+	}
 	for _, component := range strings.Split(u.Path, "/") {
 		if component == "." || component == ".." {
 			return fmt.Errorf("clone URL must not contain relative path components")

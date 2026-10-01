@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"regexp"
 	"sort"
@@ -81,14 +80,10 @@ func collectGitCredEntries(scopes map[string]map[string]string) []gitCredEntry {
 			w := recognizedForgeTokens[key]
 			slug := gitCredSlug(scope)
 			if key == "GITLAB_TOKEN" {
-				first, _, hasNamespace := strings.Cut(scope, "/")
-				host := first
-				if h, _, err := net.SplitHostPort(first); err == nil {
-					host = h
-				}
-				if hasNamespace && !strings.EqualFold(host, "github.com") && !strings.ContainsAny(first, "@\\\"\n\r") {
-					w.host = first
-				}
+				// Scopes are home-relative directories. The checkout convention
+				// puts the forge hostname in the top-level directory, including
+				// a host-wide scope such as "gitlab.com".
+				w.host, _, _ = strings.Cut(scope, "/")
 
 				slug += "-gitlab"
 			}

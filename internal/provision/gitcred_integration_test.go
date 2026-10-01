@@ -15,7 +15,7 @@ func TestGitLabCredentialsAtGitBoundary(t *testing.T) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")
-	entries := collectGitCredEntries(map[string]map[string]string{"git.example.com/group/subgroup": {"GH_TOKEN": "github-secret", "GITLAB_TOKEN": "lab:@/?secret"}, "gitlab.com/empty": {"GITLAB_TOKEN": ""}, "gitlab/group": {"GITLAB_TOKEN": "single-host"}, "GitHub.COM/team": {"GH_TOKEN": "gh-mixed", "GITLAB_TOKEN": "gl-mixed"}, "project": {"GITLAB_TOKEN": "default-host"}, "GitLab.Example.COM:8443/team": {"GITLAB_TOKEN": "mixed-host"}})
+	entries := collectGitCredEntries(map[string]map[string]string{"git.example.com/group/subgroup": {"GH_TOKEN": "github-secret", "GITLAB_TOKEN": "lab:@/?secret"}, "gitlab.com/empty": {"GITLAB_TOKEN": ""}, "gitlab/group": {"GITLAB_TOKEN": "single-host"}, "GitHub.COM/team": {"GH_TOKEN": "gh-mixed"}, "gitlab.com": {"GITLAB_TOKEN": "cloud-host"}, "GitLab.Example.COM/team": {"GITLAB_TOKEN": "mixed-host"}})
 	run := func(script, body string) {
 		t.Helper()
 		cmd := exec.Command("bash", "-c", script)
@@ -32,7 +32,7 @@ func TestGitLabCredentialsAtGitBoundary(t *testing.T) {
 	}
 	run(gitCredReconcileScript(slugs), renderGitconfigManagedBlock(entries, ""))
 	repo := filepath.Join(home, "git.example.com/group/subgroup/repo")
-	for _, scope := range []string{"git.example.com/group/subgroup", "gitlab/group", "GitHub.COM/team", "project", "GitLab.Example.COM:8443/team"} {
+	for _, scope := range []string{"git.example.com/group/subgroup", "gitlab/group", "GitHub.COM/team", "gitlab.com", "GitLab.Example.COM/team"} {
 		dir := filepath.Join(home, scope, "repo")
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -57,7 +57,7 @@ func TestGitLabCredentialsAtGitBoundary(t *testing.T) {
 		}
 	}
 
-	for _, tc := range []struct{ scope, host, want string }{{"gitlab/group", "gitlab", "single-host"}, {"GitHub.COM/team", "github.com", "gh-mixed"}, {"GitHub.COM/team", "gitlab.com", "gl-mixed"}, {"project", "gitlab.com", "default-host"}, {"GitLab.Example.COM:8443/team", "GitLab.Example.COM:8443", "mixed-host"}} {
+	for _, tc := range []struct{ scope, host, want string }{{"gitlab/group", "gitlab", "single-host"}, {"GitHub.COM/team", "github.com", "gh-mixed"}, {"gitlab.com", "gitlab.com", "cloud-host"}, {"GitLab.Example.COM/team", "GitLab.Example.COM", "mixed-host"}} {
 		cmd := exec.Command("git", "-C", filepath.Join(home, tc.scope, "repo"), "credential", "fill")
 		cmd.Stdin = strings.NewReader("protocol=https\nhost=" + tc.host + "\n\n")
 		out, err := cmd.CombinedOutput()
