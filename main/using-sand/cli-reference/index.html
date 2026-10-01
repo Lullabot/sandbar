@@ -2398,9 +2398,9 @@ VM's persistent disk and never appears in a process listing.</p>
   always deletes everything on the guest disk.</p>
 <p>You cannot pass <code>--clone-url</code> with <code>--recreate</code>: a rebuild keeps the
   recorded project URL. Create another VM to work on a different repository.</p>
-<p>Tokens are never recorded in the managed index. If the recorded clone URL
-  points to a private repository, pass <code>--clone-token</code> again. Without it,
-  <code>sand</code> warns that the clone may fail. See
+<p>Tokens are never recorded in the managed index. A rebuild reuses the saved
+  global GitHub token or matching scoped GitLab token from the host secrets
+  store. Pass <code>--clone-token</code> to override it. See
   <a href="#-clone-token-is-a-credential">credential handling</a>.</p>
 <h3 id="disk-sizing">Disk sizing</h3>
 <p>The base image is always built at a fixed <strong>20GiB floor</strong>
@@ -2594,8 +2594,8 @@ directory is kept and you can retry.</p>
 <ul>
 <li>The backup directory contains <code>reset.json</code> beside the archives. It records
   the VM's settings and what was backed up. It never contains the clone token,
-  so pass <code>--clone-token</code> again if the repository is private and the project is
-  not being restored from the backup.</li>
+  so cloning reuses the saved host token. Pass <code>--clone-token</code> if no token is
+  saved or to override it.</li>
 <li>The VM must not exist. <code>--from-backup</code> completes a reset; it never
   overwrites a running VM. If you already created a replacement, delete it
   first.</li>
@@ -2730,7 +2730,7 @@ before creating a VM.</p>
 <td><code>--clone-token</code></td>
 <td>string</td>
 <td><em>(empty)</em></td>
-<td>GitHub or GitLab token for this VM's recorded repo. Tokens are never stored in the managed index, so pass it again to re-clone a private repo — unless <code>--preserve-project</code> is keeping the checkout, in which case nothing is cloned.</td>
+<td>GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning.</td>
 </tr>
 <tr>
 <td><code>--from-backup</code></td>
@@ -2798,8 +2798,8 @@ rotated later without a rebuild. See <a href="../secrets/#github-and-gitlab-toke
 <a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>
 <a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a>There is no --clone-url: a reset rebuilds the project this VM already has. To
 <a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a>work on a different repo, create another VM with 'sand create'.
-<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>For a private repo that will be cloned again, pass --clone-token; saved guest
-<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>secrets are reapplied after cloning and cannot authenticate that clone.
+<a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
+<a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>An explicit token replaces the saved token after a successful reset.
 <a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a>
 <a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a>If a reset fails after the VM was deleted, the error names a directory holding
 <a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a>your backup. Finish the job with:
@@ -2821,7 +2821,7 @@ rotated later without a rebuild. See <a href="../secrets/#github-and-gitlab-toke
 <a id="__codelineno-6-53" name="__codelineno-6-53" href="#__codelineno-6-53"></a>
 <a id="__codelineno-6-54" name="__codelineno-6-54" href="#__codelineno-6-54"></a>Flags:
 <a id="__codelineno-6-55" name="__codelineno-6-55" href="#__codelineno-6-55"></a>  -clone-token string
-<a id="__codelineno-6-56" name="__codelineno-6-56" href="#__codelineno-6-56"></a>        Token for this VM's recorded repo (GitHub or GitLab); required to re-clone a private repo unless its checkout is preserved
+<a id="__codelineno-6-56" name="__codelineno-6-56" href="#__codelineno-6-56"></a>        Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token
 <a id="__codelineno-6-57" name="__codelineno-6-57" href="#__codelineno-6-57"></a>  -cpus string
 <a id="__codelineno-6-58" name="__codelineno-6-58" href="#__codelineno-6-58"></a>        vCPUs (default: whatever this VM has)
 <a id="__codelineno-6-59" name="__codelineno-6-59" href="#__codelineno-6-59"></a>  -disk string
