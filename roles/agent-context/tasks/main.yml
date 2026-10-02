@@ -1,0 +1,6 @@
+---
+- name: Install global context for selected agents outside the base image
+  ansible.builtin.import_tasks: install.yml
+  when:
+    - provision_phase | default('full') != 'base'
+    - (toolset_claude | default(false) | bool) or (toolset_codex | default(false) | bool) or (toolset_pi | default(false) | bool) or (toolset_opencode | default(false) | bool)
