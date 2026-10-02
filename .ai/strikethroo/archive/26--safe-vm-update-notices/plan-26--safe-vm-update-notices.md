@@ -124,3 +124,22 @@ Root ran the CI Go race/coverage command over all packages with `TMPDIR=/var/tmp
 Root inspected the read-only CLI path and asynchronous tile refresh, and confirmed they invoke no lifecycle or marker writes. Legacy metadata is read without migration or quarantine. Tile goldens retain fixed gauges and work badges; existing board golden changes only replace legacy uptime footers with unknown-version advice. Formatting and non-golden diff checks passed. Golden snapshots intentionally preserve padded terminal rows, the sole trailing-whitespace exception.
 
 Initial race compilation exhausted the shared `/tmp` tmpfs. Moving temporary files to a longer path exposed existing Unix socket path-length limits; the short `/var/tmp/s26` path resolved both environmental failures. A legacy-index fixture initially used `local` instead of the persisted `lima` provider identifier and was corrected. Coverage initially measured 90.8%; adding real provider/source boundary tests brought it to 90.9% without changing the gate.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-10-02
+
+### Results
+
+All three tasks and both phases are completed. New successful VMs retain their actual source base and applied setup revisions; legacy and failed histories remain unknown. Tiles and `sand updates NAME [--profile NAME] [--json]` show independent advisory states without provisioning or guest changes. Explicit preserved-home resets update unchanged tracked defaults, retain user-owned or intentionally deleted files, and save proposed defaults separately. Existing VMs and all three providers remain supported. All Success Criteria and Self Validation checks passed as recorded above.
+
+Implementation commits: `e080ee3` (revision tracking and protected home defaults) and `f8f6f52` (tile/CLI notices and integration corrections).
+
+### Noteworthy Events
+
+Review found and corrected a delayed-progress marker race, a legacy registry migration side effect in read-only inspection, and a collision when users edited proposed defaults. GitLab credential include blocks survive an unchanged identity refresh. Symlinked parent directories refuse writes and preserve recovery archives. Template freshness uses actual source revisions; resetting a template clone still requires refreshing its template to change the base. Environmental test failures and the coverage correction are detailed in Final Verification. No automatic provisioning or in-place updater was introduced, and no existing VM was modified.
+
+### Necessary follow-ups
+
+No required implementation follow-ups. Live VM e2e/reset tests were not run locally; filesystem and provider boundaries were verified through the listed integration tests. The remaining unreachable pinned-manifest/embedded-source error arms are documented in task 001 rather than adding artificial production seams.
