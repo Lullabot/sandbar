@@ -48,6 +48,10 @@
       when:
         - toolset_pi | default(false) | bool
         - provision_phase | default('full') != 'base'
+    - role: agent-context
+      when:
+        - provision_phase | default('full') != 'base'
+        - (toolset_claude | default(false) | bool) or (toolset_codex | default(false) | bool) or (toolset_opencode | default(false) | bool) or (toolset_pi | default(false) | bool)
     # The browser review UI is NOT a tool-set selection: it is a pinned 17MB
     # npm install with no build step that runs only when `sand land --review`
     # invokes it, so it is simply part of the image. Making it a selection
