@@ -36,6 +36,34 @@ flags use the remembered selection. Changing agents does not rebuild the
 shared base. Reset retains that VM's recorded selections, independently of
 the defaults for new VMs.
 
+### Global Sandbar environment context
+
+During provisioning of a new VM, each selected agent receives a short global
+instruction block identifying the Sandbar guest. It tells the agent that
+passwordless `sudo` is available for guest system changes within work you have
+authorized, without asking again solely because a command uses `sudo`. It does
+not replace the agent's system prompt or grant access to your workstation.
+
+The block points to the shared `sandbar-environment` skill for details about
+Sandbar's tmux keys, persistent sessions, clipboard, and installed tools. The
+skill and its local references live at `~/.agents/skills/sandbar-environment`.
+Claude Code discovers the same skill through a symlink at
+`~/.claude/skills/sandbar-environment`. The instruction blocks live at:
+
+| Agent | Global instruction file |
+| --- | --- |
+| Claude Code | `~/.claude/CLAUDE.md` |
+| Codex | `~/.codex/AGENTS.md` |
+| Pi | `~/.pi/agent/AGENTS.md` |
+| OpenCode | `~/.config/opencode/AGENTS.md` |
+
+Provisioning preserves personal text in those files and unrelated skills. It
+refreshes only Sandbar's marked block and skill files; a user-owned skill at
+the same destination causes provisioning to stop with a collision error. A VM
+with no agents selected receives no agent context. Existing running VMs are
+not updated automatically. Start a fresh agent session after provisioning to
+load the global context.
+
 ### Claude Code terminal notifications
 
 When creating or resetting a VM with Claude Code selected, sand detects the
