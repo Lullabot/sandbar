@@ -1,9 +1,10 @@
 # Tools and boundaries
 
-The common base includes Docker with Compose and Buildx, Node.js, Python 3
-with `uv`, `gh`, `glab`, `tmux`, `direnv`, and `jq`. Go, a JDK, and `ddev` are
-configurable selections and may be absent. Check with `command -v` and a
-version command before relying on a tool in the live VM.
+Sandbar's standard base includes Docker with Compose and Buildx, `ddev`,
+Node.js, Go, Python 3 with `uv`, a headless JDK, `gh`, `glab`, `tmux`,
+`direnv`, and `jq`. Custom or older images and user changes can differ.
+Check with `command -v` and a version command before relying on a tool in
+the live VM.
 Docker starts through socket activation, so an inactive `docker.service`
 before first use does not by itself indicate a failure; try `docker info`.
 
