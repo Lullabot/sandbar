@@ -1,0 +1,16 @@
+---
+agent_context_targets:
+  - name: claude
+    enabled: "{{ toolset_claude | default(false) | bool }}"
+    path: "{{ user_home }}/.claude/CLAUDE.md"
+  - name: codex
+    enabled: "{{ toolset_codex | default(false) | bool }}"
+    path: "{{ user_home }}/.codex/AGENTS.md"
+  - name: pi
+    enabled: "{{ toolset_pi | default(false) | bool }}"
+    path: "{{ user_home }}/.pi/agent/AGENTS.md"
+  - name: opencode
+    enabled: "{{ toolset_opencode | default(false) | bool }}"
+    path: "{{ user_home }}/.config/opencode/AGENTS.md"
+agent_context_skill_path: "{{ user_home }}/.agents/skills/sandbar-environment"
+agent_context_claude_skill_path: "{{ user_home }}/.claude/skills/sandbar-environment"
