@@ -290,3 +290,20 @@ func TestDoTemplateListPrintsRow(t *testing.T) {
 		t.Fatalf("doTemplateList output = %q, want it to contain the template name %q", out.String(), "golden")
 	}
 }
+
+func TestDoTemplateListUsesProviderBaseRevision(t *testing.T) {
+	reg := registry.NewEmpty()
+	if err := reg.AddTemplate(registry.Template{Name: "golden", Scope: registry.LocalScope, Source: "dev",
+		CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), PlaybookVersion: "published-image-v1",
+		Config: vm.CreateConfig{Name: "dev", BaseName: "sandbar-base"}}); err != nil {
+		t.Fatal(err)
+	}
+	p := updatesProvider{Provider: &providerfake.Provider{}, base: "published-image-v1"}
+	var out bytes.Buffer
+	if err := doTemplateList(reg, p, registry.LocalScope, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "current") {
+		t.Fatalf("matching provider base revision should be current: %s", out.String())
+	}
+}

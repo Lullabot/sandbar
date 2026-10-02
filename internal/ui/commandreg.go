@@ -442,10 +442,9 @@ type publishProgressMsg struct {
 // ssh round trip, and it is called from the streamed-output handler, so doing it
 // inline would stall the UI on every role boundary.
 //
-// It rewrites the WHOLE marker (NewProvenance from the job's own config, with
-// Provisioning still true) rather than reading, patching and writing back: the
-// builder already holds the authoritative config, so a read-modify-write would
-// double the round trips to re-learn something it knows.
+// Actual providers serialize MarkProgress with completion so a late output
+// chunk cannot replace a ready marker's revision history. Lightweight fakes
+// without that seam retain the original MarkManaged behavior.
 func publishProgressCmd(pv provider.Provenancer, key jobKey, cfg vm.CreateConfig, prog provider.BuildProgress) tea.Cmd {
 	if pv == nil {
 		return nil
@@ -453,6 +452,9 @@ func publishProgressCmd(pv provider.Provenancer, key jobKey, cfg vm.CreateConfig
 	return func() tea.Msg {
 		p := provider.NewProvenance(cfg, true)
 		p.Progress = prog
+		if writer, ok := pv.(provider.ProgressProvenancer); ok {
+			return publishProgressMsg{job: key, err: writer.MarkProgress(context.Background(), key.vm, p)}
+		}
 		return publishProgressMsg{job: key, err: pv.MarkManaged(context.Background(), key.vm, p)}
 	}
 }

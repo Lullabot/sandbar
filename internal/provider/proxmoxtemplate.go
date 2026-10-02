@@ -13,10 +13,13 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
@@ -114,26 +117,31 @@ func (p *proxmoxProvider) SnapshotTemplate(ctx context.Context, source, template
 	progress(out, "%s is ready\n", templateName)
 	metaCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), apiTimeout)
 	defer cancel()
-	return p.snapshotResult(metaCtx, source), nil
+	return p.snapshotResult(metaCtx, source, templateName, newid), nil
 }
 
-// snapshotResult records the same staleness inputs the Lima implementation
-// returns. Proxmox stores the source configuration in its provider-side
-// provenance marker, so the toolset comes from the VM actually captured; the
-// playbook hash comes from this build. Missing metadata degrades to an empty
-// result, which callers render as an unknown template.
-func (p *proxmoxProvider) snapshotResult(ctx context.Context, source string) provision.SnapshotResult {
+// snapshotResult copies the source VM's recorded base revision onto the PVE
+// template itself. Missing source history stays unknown on every controller.
+func (p *proxmoxProvider) snapshotResult(ctx context.Context, source, templateName string, templateVMID int) provision.SnapshotResult {
 	marker, ok, err := p.ProvenanceOf(ctx, source)
 	if err != nil || !ok {
 		return provision.SnapshotResult{}
 	}
-	result := provision.SnapshotResult{ToolsetKey: marker.Config.ToolsetKey()}
-	dir, err := locatePlaybookFn()
-	if err != nil {
-		return result
-	}
-	if version, err := provision.PlaybookVersion(os.DirFS(dir), result.ToolsetKey); err == nil {
-		result.PlaybookVersion = version
+	result := provision.SnapshotResult{ToolsetKey: marker.Config.ToolsetKey(), PlaybookVersion: marker.BaseRevision}
+	if marker.BaseRevision != "" {
+		_ = provision.WriteBaseVersion(p.files, templateName, marker.BaseRevision, time.Now())
+		// Keep the source revision on the PVE template itself so another
+		// controller can read it. Do not add the sandbar tag: templates are
+		// clone sources and must not become managed tiles on the board.
+		if cfg, err := p.client.GetConfig(ctx, templateVMID); err == nil {
+			marker.SchemaVersion = MarkerSchemaVersion
+			marker.Config.Name = templateName
+			payload, err := json.Marshal(marker)
+			if err == nil {
+				desc, _ := cfg["description"].(string)
+				_ = p.client.SetConfigSync(ctx, templateVMID, url.Values{"description": {spliceDescriptionBlock(desc, payload)}})
+			}
+		}
 	}
 	return result
 }

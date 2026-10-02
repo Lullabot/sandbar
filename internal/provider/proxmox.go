@@ -116,7 +116,8 @@ var (
 // and every field below is either that identity or a cache of what PVE told us
 // about it.
 type proxmoxProvider struct {
-	client *pve.Client
+	provenanceMu sync.Mutex
+	client       *pve.Client
 	// host/node/pool/storage/bridge mirror the client's own configuration
 	// because error messages must name them: a preflight failure that does not
 	// say WHICH pool or storage it was looking for is a support ticket.
@@ -1704,7 +1705,25 @@ func (p *proxmoxProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opt
 }
 
 func (p *proxmoxProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
-	return p.resetInstance(ctx, cfg, opts, out)
+	var sourceRevision, setupRevision string
+	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
+	opts.OnSourceRevision = func(v string) {
+		sourceRevision = v
+		if previousSource != nil {
+			previousSource(v)
+		}
+	}
+	opts.OnSetupRevision = func(v string) {
+		setupRevision = v
+		if previousSetup != nil {
+			previousSetup(v)
+		}
+	}
+	if err := p.resetInstance(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	return nil
 }
 
 // --- progress -------------------------------------------------------------------

@@ -79,6 +79,10 @@ var playbookFileset = map[string]bool{
 // path, then length, then content, so a rename (same bytes, different path)
 // is detected rather than cancelling out.
 func playbookContentHash(fsys fs.FS) (string, error) {
+	return hashPlaybookFiles(fsys, func(string) bool { return true })
+}
+
+func hashPlaybookFiles(fsys fs.FS, include func(string) bool) (string, error) {
 	var paths []string
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -97,7 +101,7 @@ func playbookContentHash(fsys fs.FS) (string, error) {
 			}
 			return nil
 		}
-		if !d.IsDir() {
+		if !d.IsDir() && include(p) {
 			paths = append(paths, p)
 		}
 		return nil
@@ -117,6 +121,26 @@ func playbookContentHash(fsys fs.FS) (string, error) {
 		h.Write(b)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// SetupVersion identifies the files that the finalize pass can apply to a
+// clone. Base-only roles intentionally do not trigger setup notices.
+func SetupVersion(fsys fs.FS) (string, error) {
+	finalizeRoles := map[string]bool{
+		"base": true, "user": true, "mkcert-ca": true, "claude-code": true,
+		"codex": true, "opencode": true, "pi": true, "project": true,
+	}
+	hash, err := hashPlaybookFiles(fsys, func(path string) bool {
+		parts := strings.Split(path, "/")
+		if len(parts) < 2 || parts[0] != "roles" {
+			return true
+		}
+		return finalizeRoles[parts[1]]
+	})
+	if err != nil {
+		return "", err
+	}
+	return "setup-v1:" + hash, nil
 }
 
 // PlaybookVersion is the base image's version stamp: a content hash of the

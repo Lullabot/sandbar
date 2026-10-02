@@ -562,16 +562,12 @@ var templateNowFn = time.Now
 // through prov (nil-safe: an error-bound member reports zero-byte sizes
 // rather than panicking). Called once when the form opens or the profile
 // selector cycles — never on every render — because staleness re-hashes the
-// whole playbook fileset (provision.PlaybookVersion), and doing that on every
-// keystroke while the form sits open would be wasteful.
+// provider's desired base revision, and doing that on every keystroke while
+// the form sits open would be wasteful.
 func (m model) computeFormSourceRows(prov provider.Provider, scope registry.Scope) []templateRow {
 	templates := m.reg.TemplatesInScope(scope)
 	if len(templates) == 0 {
 		return nil
-	}
-	var curDir string
-	if dir, err := provision.LocatePlaybook(); err == nil {
-		curDir = dir
 	}
 	rows := make([]templateRow, len(templates))
 	for i, t := range templates {
@@ -579,13 +575,9 @@ func (m model) computeFormSourceRows(prov provider.Provider, scope registry.Scop
 		if prov != nil {
 			size = prov.TemplateDiskBytes(vm.TemplateInstanceName(t.Name))
 		}
-		// No playbook could be located to compare against: never claim a
-		// template is current when there is nothing to vouch for it.
 		stale := true
-		if curDir != "" {
-			if cur, err := provision.PlaybookVersion(os.DirFS(curDir), t.ToolsetKey); err == nil {
-				stale = cur != t.PlaybookVersion
-			}
+		if prov != nil {
+			stale = provider.CheckUpdates(context.Background(), prov, provider.Provenance{Config: t.Config, BaseRevision: t.PlaybookVersion}).Base != provider.UpdateCurrent
 		}
 		rows[i] = templateRow{Name: t.Name, SizeBytes: size, Age: templateNowFn().Sub(t.CreatedAt), Stale: stale}
 	}

@@ -1,0 +1,15 @@
+# Suggested sand shell additions. Review and merge into ~/.bashrc yourself.
+export PATH="$HOME/.local/bin:$PATH"
+export IS_SANDBOX=1
+export VISUAL=vim
+export EDITOR=vim
+eval "$(direnv hook bash)"
+if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
+  . "$HOME/.config/sandbar/secrets.env"
+fi
+{% if toolset_claude | default(false) | bool %}
+. "$HOME/.config/sandbar/claude-shell-wrapper.sh"
+{% endif %}
+{% if toolset_codex | default(false) | bool %}
+. "$HOME/.config/sandbar/codex-shell-wrapper.sh"
+{% endif %}
