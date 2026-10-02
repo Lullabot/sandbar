@@ -76,11 +76,18 @@ func TestTileUpdateNoticesAndFailedBuild(t *testing.T) {
 		{provider.UpdateStatus{Base: provider.UpdateCurrent, Setup: provider.UpdateAvailable}, "setup update available"},
 		{provider.UpdateStatus{Base: provider.UpdateUnknown, Setup: provider.UpdateCurrent}, "base version unknown"},
 		{provider.UpdateStatus{Base: provider.UpdateAvailable, Setup: provider.UpdateUnknown}, "base update"},
+		{provider.UpdateStatus{Base: provider.UpdateUnknown, Setup: provider.UpdateAvailable}, "base unknown, setup update"},
+		{provider.UpdateStatus{Base: provider.UpdateCurrent, Setup: provider.UpdateUnknown}, "setup version unknown"},
 	} {
 		view := renderTile(tileInput{VM: vm.VM{Name: "dev", Status: "Stopped"}, Width: 40, Update: tc.status, HasUpdate: true})
 		if !strings.Contains(view, tc.want) || !strings.Contains(view, "R reset") {
 			t.Errorf("status %+v: tile lacks %q or reset advice:\n%s", tc.status, tc.want, view)
 		}
+	}
+	current := renderTile(tileInput{VM: vm.VM{Name: "dev", Status: "Stopped"}, Width: 40,
+		Update: provider.UpdateStatus{Base: provider.UpdateCurrent, Setup: provider.UpdateCurrent}, HasUpdate: true, Badge: "dirty"})
+	if strings.Contains(current, "R reset") || !strings.Contains(current, "never used") || !strings.Contains(current, "dirty") {
+		t.Fatalf("current VM lost normal footer or received update advice:\n%s", current)
 	}
 	status := provider.UpdateStatus{Base: provider.UpdateAvailable, Setup: provider.UpdateAvailable}
 	for _, tc := range []struct {
