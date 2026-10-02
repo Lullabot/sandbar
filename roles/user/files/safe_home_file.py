@@ -8,6 +8,7 @@ This script is installed outside the guest home before any role uses it.
 
 import argparse
 import hashlib
+from itertools import count
 import os
 from pathlib import Path, PurePosixPath
 import pwd
@@ -47,7 +48,7 @@ def regular_bytes(path):
         return file.read()
 
 
-def put(path, content, mode, uid, gid):
+def put(path, content, mode, uid, gid, exclusive=False):
     fd, temporary = tempfile.mkstemp(prefix=".sand-home-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as file:
@@ -56,7 +57,12 @@ def put(path, content, mode, uid, gid):
             os.fsync(file.fileno())
         os.chmod(temporary, mode)
         os.chown(temporary, uid, gid)
-        os.replace(temporary, path)
+        if exclusive:
+            # Publishing a proposal must never replace a file created after
+            # the existence check, including a newly added symlink.
+            os.link(temporary, path, follow_symlinks=False)
+        else:
+            os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -146,19 +152,24 @@ def install(home, relative, user, mode, candidate, preserved_home, fresh_clone=F
         print("changed: installed default" if changed else "unchanged: installed default current")
         return
 
-    proposed = checked_path(home, proposed_rel, create=True, uid=uid, gid=gid)
-    existing = regular_bytes(proposed)
-    if existing is not None and existing != candidate:
-        suffix = hashlib.sha256(candidate).hexdigest()[:12]
-        proposed = checked_path(home, proposed_rel + "." + suffix, create=True, uid=uid, gid=gid)
+    suffix = hashlib.sha256(candidate).hexdigest()[:12]
+    for index in count(-1):
+        rel = proposed_rel if index < 0 else proposed_rel + "." + suffix + ("." + str(index) if index else "")
+        proposed = checked_path(home, rel, create=True, uid=uid, gid=gid)
         existing = regular_bytes(proposed)
-    if existing is None:
+        if existing == candidate:
+            print("unchanged: proposed default at " + str(proposed))
+            return
         if os.path.lexists(proposed):
-            raise ValueError("proposed default has a non-regular destination: " + str(proposed))
-        put(proposed, candidate, mode, uid, gid)
+            if index < 0 and existing is None:
+                raise ValueError("proposed default has a non-regular destination: " + str(proposed))
+            continue
+        try:
+            put(proposed, candidate, mode, uid, gid, exclusive=True)
+        except FileExistsError:
+            continue
         print("changed: proposed default at " + str(proposed))
-    else:
-        print("unchanged: proposed default at " + str(proposed))
+        return
 
 
 def main():

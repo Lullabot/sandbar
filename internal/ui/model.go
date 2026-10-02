@@ -1312,6 +1312,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The provenance map travels with vms, from the SAME refreshCmd batched
 		// read (commands.go) — never fetched here on the Update goroutine.
 		mem.provenance = msg.provenance
+		mem.updates = msg.updates
 		// A batched provenance read that failed does NOT fail the refresh: every
 		// VM falls back to the legacy per-controller registry and the board stays
 		// usable. But it must not do that in silence — a controller quietly

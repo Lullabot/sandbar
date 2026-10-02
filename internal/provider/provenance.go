@@ -250,3 +250,11 @@ type Provenancer interface {
 	// Unmark clears any marker for name.
 	Unmark(ctx context.Context, name string) error
 }
+
+// ProgressProvenancer is the optional write path for asynchronous build
+// progress. Unlike a new clone's MarkManaged call, MarkProgress may arrive
+// after completion; implementations preserve the clone source revision while
+// building and ignore a late update once the marker is ready.
+type ProgressProvenancer interface {
+	MarkProgress(ctx context.Context, name string, progress Provenance) error
+}

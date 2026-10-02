@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
@@ -26,8 +27,9 @@ import (
 // remote provider (remote.go) is this same shape configured with the SSH
 // host-access implementation.
 type limaProvider struct {
-	core *lima.Client
-	prov *provision.Provisioner
+	provenanceMu sync.Mutex
+	core         *lima.Client
+	prov         *provision.Provisioner
 	// hostFiles is this provider's host-access handle — lima.LocalFiles() here
 	// (local Lima IS the host limactl runs on); a remote provider embeds this
 	// struct and overrides it with its SSHHost at construction (see

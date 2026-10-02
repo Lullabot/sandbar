@@ -1,5 +1,6 @@
 """Exercise the guest installer against actual home files, without Ansible."""
 
+import hashlib
 import os
 from pathlib import Path
 import pwd
@@ -131,6 +132,35 @@ class SafeHomeFileTest(unittest.TestCase):
         self.path(".config/sandbar/home-baselines/.gitconfig").unlink()
         self.install(".gitconfig", "later\n")
         self.assertEqual(self.path(".gitconfig").read_text(), "user edit\n")
+
+    def test_edited_hashed_proposal_does_not_hide_latest_default(self):
+        rel = ".tmux.conf"
+        self.path(rel).write_text("user config\n")
+        self.install(rel, "first default\n", preserved=True)
+        second = "second default\n"
+        self.install(rel, second, preserved=True)
+        base = self.path(".config/sandbar/proposed-defaults/.tmux.conf")
+        hashed = self.path(".config/sandbar/proposed-defaults/.tmux.conf." + hashlib.sha256(second.encode()).hexdigest()[:12])
+        self.assertEqual(base.read_text(), "first default\n")
+        self.assertEqual(hashed.read_text(), second)
+
+        hashed.write_text("user edited proposal\n")
+        outside = self.path("outside")
+        outside.write_text("outside data\n")
+        hashed.with_name(hashed.name + ".1").symlink_to(outside)
+        result = self.install(rel, second, preserved=True)
+        latest = hashed.with_name(hashed.name + ".2")
+        self.assertIn(b"changed:", result.stdout)
+        self.assertEqual(latest.read_text(), second)
+        self.assertEqual(hashed.read_text(), "user edited proposal\n")
+        self.assertEqual(outside.read_text(), "outside data\n")
+        self.assertEqual(self.path(rel).read_text(), "user config\n")
+        self.assertFalse(self.path(".config/sandbar/home-baselines/.tmux.conf").exists())
+
+        before = sorted(path.name for path in base.parent.iterdir())
+        result = self.install(rel, second, preserved=True)
+        self.assertIn(b"unchanged:", result.stdout)
+        self.assertEqual(sorted(path.name for path in base.parent.iterdir()), before)
 
 
 if __name__ == "__main__":

@@ -132,7 +132,13 @@ it is not where prose belongs.
   be acquired within the wait budget, the write proceeds without it, as
   with the provisioner's base lock.
 - `ui` — the Bubble Tea model, views, and commands (board/form/secrets/progress/
-  profile-management/…).
+  profile-management/…). Per-VM update states are computed in each member's
+  asynchronous refresh from its batched provenance and the optional
+  `provider.RevisionProvider`, then stored for tile rendering. Keep revision
+  lookups out of `renderTile`. A missing marker/revision is **unknown**, not
+  current or stale. The fixed gauge rows remain fixed; update notices share
+  the footer with the unlanded-work badge and offer `R` reset. Building and
+  failed provision tiles suppress update advice.
 - Onboarding is a child view shown before the board when its acknowledgement is
   absent; it is also reopenable from `?`. Keep its origin-aware return behavior:
   dismissal/escape from help returns to help, while first-run dismissal returns
@@ -208,8 +214,19 @@ Create/reset checks and bookkeeping belong in `internal/manage`
 Create and the TUI build providers through `provider.BuildFleet` from the
 enabled profiles. A CLI create binds only its target profile; the TUI binds
 all enabled profiles. Commands acting on an existing VM
-(`reset`, `shell`, `land`, `paste-image`) use `resolveVMProfile` to find its
+(`reset`, `updates`, `shell`, `land`, `paste-image`) use `resolveVMProfile` to find its
 owning profile through the marker, registry, then live listing.
+
+`sand updates NAME [--profile NAME] [--json]` reads the owning VM's marker
+and checks base/setup independently without a lifecycle action or registry
+write. JSON states are `current`, `update_available`, `unknown`. A legacy VM
+without recorded revisions stays usable and reports unknown. `sand` never
+reruns provisioning just because an update is available; an explicit reset
+is the update path. A template-sourced VM resets from the same template, so
+the template must be refreshed to change its base. Template list/form
+freshness compares `registry.Template.PlaybookVersion` (the captured actual
+source base revision) with `RevisionProvider.DesiredBaseRevision(t.Config)`;
+comparing it with the current playbook hash mislabels published images.
 
 **A reset keeps the target VM's identity and project.** Its name, base image,
 clone URL, and Git service come from its recorded configuration. The TUI locks
@@ -982,7 +999,14 @@ shared rules.
 
 - **Restore before or after finalize according to what Ansible should
   update.** Restore the Claude login and whole home before finalize so
-  Ansible can update its configuration files. Restore the project and
+  the home-file safety policy can compare provisioned files against their
+  recorded baselines. It replaces only unchanged tracked files; it retains
+  edited, unknown, deleted, and symlinked destination files and writes new defaults under
+  `~/.config/sandbar/proposed-defaults/`. Baselines live under
+  `~/.config/sandbar/home-baselines/`. Preserve-agents is a distinct option,
+  and a reset without preservation still deliberately wipes guest files.
+  Symlinked parent directories abort the reset with recovery archives retained.
+  Restore the project and
   individually selected checkouts after finalize to avoid overwriting them.
   Omit `project_clone_url` when a checkout will be restored. Reversing this
   order can leave stale configuration or overwrite a preserved checkout.

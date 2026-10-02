@@ -136,10 +136,10 @@ Everything inside the guest is lost unless you ask for it back:
                        Repeatable. Run 'sand land NAME' to list what this VM
                        holds. Paths may be absolute (/home/you/src/app), tilde
                        (~/src/app) or home-relative (src/app).
-  --preserve-home      keep the WHOLE home directory, then re-run the playbook
-                       on top of it. This is the one to use when the VM is fine
-                       and you only want an up-to-date build; it implies every
-                       flag above.
+  --preserve-home      keep the WHOLE home directory during the rebuild.
+                       Sand replaces only unchanged tracked home configs;
+                       edited or unknown files keep their content and new
+                       defaults are saved separately. Implies every flag above.
 
 All of these copy data out of the VM to this host and back in afterwards. Do NOT
 preserve anything from a VM you believe is compromised.

@@ -285,6 +285,26 @@ func Load() (*Registry, error) {
 	return LoadFrom(p)
 }
 
+// LoadReadOnly reads the current index without persisting a schema migration,
+// copying a legacy index, or quarantining malformed data. Update inspection
+// uses it because viewing VM revisions must not change host state.
+func LoadReadOnly() (*Registry, error) {
+	r := &Registry{vms: map[scopedKey]entry{}, templates: map[scopedKey]Template{}}
+	path := defaultPath()
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		// Load normally copies the pre-rename index into the current directory.
+		// Inspection reads it in place so owner lookup keeps working without a
+		// migration write (or removal of the old file).
+		path = filepath.Join(filepath.Dir(filepath.Dir(path)), "claude-code-ansible", "managed-vms.json")
+	}
+	vms, templates, _, err := readIndexMode(path, false)
+	if err != nil {
+		return r, err
+	}
+	r.vms, r.templates = vms, templates
+	return r, nil
+}
+
 // LoadFrom reads the registry from an explicit path. A missing or empty file
 // yields an empty registry (not an error). A corrupt file is moved aside to
 // "<path>.corrupt" — so a later save() cannot silently clobber recoverable
@@ -338,6 +358,18 @@ var errNewerSchema = errors.New("upgrade sand")
 // a file is parsed, and a re-read that could itself save would recurse into the
 // lock it already holds.
 func readIndex(path string) (map[scopedKey]entry, map[scopedKey]Template, bool, error) {
+	return readIndexMode(path, true)
+}
+
+func indexReadError(path string, err error, quarantine bool) error {
+	if quarantine {
+		_ = os.Rename(path, path+".corrupt")
+		return fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+	}
+	return fmt.Errorf("managed-VM index at %s was unreadable: %w", path, err)
+}
+
+func readIndexMode(path string, quarantine bool) (map[scopedKey]entry, map[scopedKey]Template, bool, error) {
 	out := map[scopedKey]entry{}
 	templates := map[scopedKey]Template{}
 	data, err := os.ReadFile(path)
@@ -352,8 +384,7 @@ func readIndex(path string) (map[scopedKey]entry, map[scopedKey]Template, bool, 
 	}
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return out, templates, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return out, templates, false, indexReadError(path, err, quarantine)
 	}
 	version := probe.Version
 	if version == 0 {
@@ -370,8 +401,7 @@ func readIndex(path string) (map[scopedKey]entry, map[scopedKey]Template, bool, 
 		// v1 or v2: the legacy flat object, keyed by bare name.
 		var legacy legacyFileSchema
 		if err := json.Unmarshal(data, &legacy); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return out, templates, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, templates, false, indexReadError(path, err, quarantine)
 		}
 		vms := legacy.VMs
 		if vms == nil {
@@ -415,8 +445,7 @@ func readIndex(path string) (map[scopedKey]entry, map[scopedKey]Template, bool, 
 		// forces a rewrite.
 		var parsed fileSchema
 		if err := json.Unmarshal(data, &parsed); err != nil {
-			_ = os.Rename(path, path+".corrupt")
-			return out, templates, false, fmt.Errorf("managed-VM index at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+			return out, templates, false, indexReadError(path, err, quarantine)
 		}
 		for _, de := range parsed.VMs {
 			scope := Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}

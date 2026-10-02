@@ -102,10 +102,10 @@ graph TD
 - ✔️ Task 001: Truthful revision tracking
 - ✔️ Task 002: Preserve home configuration
 
-### Phase 2: User update surfaces
-**Status:** pending
+### Phase 2: ✅ User update surfaces
+**Status:** completed
 **Parallel Tasks:**
-- Task 003: Tile and CLI notices (depends on: 001, 002)
+- ✔️ Task 003: Tile and CLI notices (depends on: 001, 002)
 
 ### Post-phase Actions
 Review evidence, run verification and create a conventional commit per phase.
@@ -116,3 +116,11 @@ Review evidence, run verification and create a conventional commit per phase.
 
 ### Phase 1 Verification
 Root verified provider/manage/provision/registry tests, full Python lifecycle suite (31 tests), final helper filesystem tests (9), and final Ansible home-role integration (including GitLab include preservation and zero-change rerun). Ansible syntax, gofmt and diff checks passed. Temporary standalone Ansible fixture also installed and preserved actual temp-home contents.
+
+### Phase 2 and Final Verification
+
+Root ran the CI Go race/coverage command over all packages with `TMPDIR=/var/tmp/s26`; every package passed and internal coverage was 90.9%, meeting the existing 90.9% floor. Build, vet, `go run ./cmd/sand updates -h`, Ansible syntax, strict MkDocs build, and the full Python suite (33 tests) passed. New real-provider revision tests and checkout/embedded source tests passed, including the no-extraction filesystem assertion. The production Ansible home-role fixture verifies installed defaults, retained edits and GitLab include blocks, proposed defaults, and zero-change reruns on actual temporary home contents. No live VM reset or VM e2e was performed.
+
+Root inspected the read-only CLI path and asynchronous tile refresh, and confirmed they invoke no lifecycle or marker writes. Legacy metadata is read without migration or quarantine. Tile goldens retain fixed gauges and work badges; existing board golden changes only replace legacy uptime footers with unknown-version advice. Formatting and non-golden diff checks passed. Golden snapshots intentionally preserve padded terminal rows, the sole trailing-whitespace exception.
+
+Initial race compilation exhausted the shared `/tmp` tmpfs. Moving temporary files to a longer path exposed existing Unix socket path-length limits; the short `/var/tmp/s26` path resolved both environmental failures. A legacy-index fixture initially used `local` instead of the persisted `lima` provider identifier and was corrected. Coverage initially measured 90.8%; adding real provider/source boundary tests brought it to 90.9% without changing the gate.

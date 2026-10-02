@@ -116,7 +116,8 @@ var (
 // and every field below is either that identity or a cache of what PVE told us
 // about it.
 type proxmoxProvider struct {
-	client *pve.Client
+	provenanceMu sync.Mutex
+	client       *pve.Client
 	// host/node/pool/storage/bridge mirror the client's own configuration
 	// because error messages must name them: a preflight failure that does not
 	// say WHICH pool or storage it was looking for is a support ticket.
