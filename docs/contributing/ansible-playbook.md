@@ -70,7 +70,7 @@ values:
 | Phase | What runs | When |
 |---|---|---|
 | `base` | Shared setup: `base`, `user`, `agent-clipboard`, `agent-cleanup`, (conditionally) `samba`, `dev-tools` | Building or maintaining the shared base before cloning; clipboard support is common to every agent and cleanup removes legacy agent installs |
-| `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `project` | Against each clone; agents install current releases here |
+| `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `agent-context`, `project` | Against each clone; selected agents and their global context install here |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
 This split is what lets `sand` build one expensive base image and clone it
@@ -80,13 +80,28 @@ identity-specific work against each clone.
 ## Roles
 
 `roles/` contains `base`, `user`, `agent-clipboard`, `agent-cleanup`, `samba`, `dev-tools`,
-`claude-code`, `codex`, `opencode`, `pi`, and `project`.
+`mkcert-ca`, `claude-code`, `codex`, `opencode`, `pi`, `agent-context`,
+`self-review`, and `project`.
 `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
 `internal/provision/vars.go` sets `samba_enabled: false` on every `sand`
 run (files move with `limactl copy` or `scp` instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
 does not execute on the `sand` path.
+
+`agent-context` runs after the selected agent roles, during `full` or
+`finalize` only when at least one of Claude Code, Codex, Pi, or OpenCode is
+selected. It adds a marked block to each selected agent's global instruction
+file and installs one shared `sandbar-environment` skill at
+`~/.agents/skills/sandbar-environment`, with a Claude symlink under
+`~/.claude/skills`. The instruction files are `~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md`, `~/.pi/agent/AGENTS.md`, and
+`~/.config/opencode/AGENTS.md`. The role preserves other text, file modes, and
+unrelated skills; it fails on a user-owned skill at either destination instead
+of replacing it. It does not run for the base phase or a VM with no selected
+agents. This is per-VM provisioning, not a background update of existing VMs
+or a replacement for an agent's system prompt. The shared files under
+`roles/agent-context/files/` are embedded with the playbook.
 
 ## CI coverage
 
