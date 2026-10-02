@@ -64,6 +64,25 @@ with no agents selected receives no agent context. Existing running VMs are
 not updated automatically. Start a fresh agent session after provisioning to
 load the global context.
 
+### Claude Code terminal notifications
+
+When creating or resetting a VM with Claude Code selected, sand detects the
+workstation terminal and sets Claude's native notification channel for iTerm2,
+Kitty, or Ghostty. Detection also checks terminal identifiers retained inside
+host tmux and its saved `TERM_PROGRAM`. If sand cannot identify a supported
+terminal, it leaves your existing notification preference unchanged.
+
+The guest tmux configuration enables notification passthrough. If you also run
+sand inside **host tmux**, enable `set -g allow-passthrough on` in the host's
+`~/.tmux.conf` and reload it with `tmux source-file ~/.tmux.conf`.
+iTerm2 additionally needs **Notification Center Alerts** and **Send escape
+sequence-generated alerts** enabled under its profile's Terminal settings.
+See [Claude's terminal notification guide](https://code.claude.com/docs/en/terminal-config#get-a-terminal-bell-or-notification).
+
+The channel reflects the terminal used during provisioning. If you later
+connect from a different terminal, change `preferredNotifChannel` in the guest's
+`~/.claude/settings.json` to match it.
+
 ## Git
 
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git

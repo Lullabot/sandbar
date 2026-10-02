@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.0](https://github.com/Lullabot/sandbar/compare/v0.13.0...v0.14.0) (2026-10-01)
+
+
+### Features
+
+* **claude:** provision native notifications for the host terminal ([#250](https://github.com/Lullabot/sandbar/issues/250)) ([b51f1d8](https://github.com/Lullabot/sandbar/commit/b51f1d8936927689d0f157d98c978b9ecdd57023)), closes [#31](https://github.com/Lullabot/sandbar/issues/31)
+* **reset:** add `sand reset NAME --from-backup DIR` to finish a failed reset ([424346a](https://github.com/Lullabot/sandbar/commit/424346a5cd54d1cb12908723ab2fe5c280c7364e))
+* support drag-and-drop paths for upload and download ([#244](https://github.com/Lullabot/sandbar/issues/244)) ([34daccf](https://github.com/Lullabot/sandbar/commit/34daccf57f5849d1e84f1e2a3b098c650103eb95)), closes [#163](https://github.com/Lullabot/sandbar/issues/163)
+* support GitLab onboarding ([#248](https://github.com/Lullabot/sandbar/issues/248)) ([b6c4e2a](https://github.com/Lullabot/sandbar/commit/b6c4e2ac99399c12389c5e1bc933bb5e2423e719)), closes [#188](https://github.com/Lullabot/sandbar/issues/188)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/charmbracelet/x/exp/teatest/v2 to v2.0.0-20260927004216-9c77d672503d ([#245](https://github.com/Lullabot/sandbar/issues/245)) ([32fc7d7](https://github.com/Lullabot/sandbar/commit/32fc7d7be668d846a6396439a9f7ba7f44aa8083))
+* **reset:** ready the base image before deleting the VM ([6d2807a](https://github.com/Lullabot/sandbar/commit/6d2807a2d37a6578ff01fa3116117671b0ee7ff9))
+* **reset:** reuse saved GitHub and GitLab clone tokens ([#252](https://github.com/Lullabot/sandbar/issues/252)) ([5140d16](https://github.com/Lullabot/sandbar/commit/5140d16d77dc922a48c31b600736b4e296ffcae4)), closes [#204](https://github.com/Lullabot/sandbar/issues/204)
+* **tmux:** support Claude Code terminal features and nested sessions ([#249](https://github.com/Lullabot/sandbar/issues/249)) ([fefceb2](https://github.com/Lullabot/sandbar/commit/fefceb21b8d42ea8601d25caecc4e7a18f242409)), closes [#31](https://github.com/Lullabot/sandbar/issues/31)
+
 ## [0.13.0](https://github.com/Lullabot/sandbar/compare/v0.12.0...v0.13.0) (2026-09-29)
 
 

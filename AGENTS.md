@@ -182,11 +182,13 @@ do not allow colons. Token-bearing clone URLs reject explicit ports and IPv6
 literals; use a DNS name and standard HTTPS.
 GitHub create tokens remain global `GH_TOKEN` and are also written to the
 cloned repository's `.env`; GitLab create tokens use their non-empty
-repository-parent scope. Create and reset apply saved secrets, but a private
-reset that reclones still needs `--clone-token` or a token entered in the form
-because saved secrets are applied after cloning. Preserving the checkout skips
-the clone. Rotation and removal update a running guest immediately. `glab`
-sees a scoped GitLab token after changing into the matching project directory.
+repository-parent scope. Create and reset apply saved secrets. A reset that
+reclones reuses the saved global `GH_TOKEN` or most specific matching scoped
+`GITLAB_TOKEN` when no token is entered, via `manage.ResolveCloneToken`. Keep the resolved token ephemeral:
+only an explicit token is saved after success, so inherited GitLab tokens are
+not copied into narrower scopes. Preserving the checkout skips the clone.
+Rotation and removal update a running guest immediately. `glab` sees a scoped
+GitLab token after changing into the matching project directory.
 Landing's `--pr` and `--web` actions remain GitHub-only; drupal.org publishing
 is separate.
 
@@ -843,6 +845,16 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   v2 base stamp. Saved all-off is a real preference. Existing VM records keep
   their Claude/Codex booleans (including false); missing OpenCode/Pi means off.
   Reset starts from those recorded VM choices, not global preferences.
+- **Claude's notification terminal is detected on the workstation.**
+  `BuildExtraVars` emits `claude_notification_channel` only for selected Claude
+  installs in finalize/full. `terminal.go` recognizes iTerm2, Kitty and Ghostty,
+  including host-tmux identifiers and its saved terminal environment. Unknown
+  terminals omit the variable, preserving the existing preference. The Claude
+  role merges `preferredNotifChannel` into user settings; do not spoof
+  `TERM_PROGRAM` in the guest. Guest tmux enables `allow-passthrough`, while
+  users running host tmux must enable passthrough there too. Terminal detection
+  must not become a base-image stamp input.
+
 - **Reset has one agent-state preservation option.** Keep its path set in
   `internal/provision/staging.go` (`AgentStatePaths`), covering all four
   agents even when deselected. This includes credentials and sessions and
@@ -1085,6 +1097,12 @@ shared rules.
 
 ## Conventions
 
+- **Update main before starting a new branch.** When branching from a local
+  `main` checkout, run `git pull --ff-only origin main` first. If `main` is
+  checked out in another worktree, run `git fetch origin main` and create the
+  new branch from the updated `origin/main` instead. This applies to every
+  coding agent, including Codex and Claude Code; do not start new work from a
+  stale main or an unrelated feature branch.
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
   (`feat:`, `fix:`, `test:`, `ci:`, `docs:`, `chore:`, scopes like
   `fix(reset):`). Releases are automated by release-please, which parses them.

@@ -1537,7 +1537,7 @@ func TestGitLabResetRetainsForgeAndExplainsSavedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.openResetForm(registry.LocalScope, cfg.Name, cfg)
-	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "saved") || !strings.Contains(ph, "re-clone") {
+	if ph := m.inputs[fCloneToken].Placeholder; !strings.Contains(ph, "saved") || !strings.Contains(ph, "leave blank to keep it") {
 		t.Fatalf("misleading reset token placeholder: %q", ph)
 	}
 	got, err := m.buildConfig()
