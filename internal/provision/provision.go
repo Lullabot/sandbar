@@ -229,8 +229,8 @@ func step(out io.Writer, format string, args ...any) {
 // aptUpgrade is threaded straight through to BuildExtraVars: true only for a
 // base self-refresh run (see reapplyBase), never for a cold base build and
 // never for finalize.
-func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, aptUpgrade bool, out io.Writer) error {
-	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade)
+func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, aptUpgrade bool, out io.Writer, preservation ...PreservationVars) error {
+	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade, preservation...)
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
@@ -239,9 +239,18 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 	if sandProfileEnabled() {
 		script = profileGuestScript
 	}
+	setupRevision := ""
+	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
+		if dir, err := p.playbookDir(); err == nil {
+			setupRevision, _ = SetupVersion(os.DirFS(dir))
+		}
+	}
 	// Vars go over STDIN, never argv (secret hygiene).
 	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", script); err != nil {
 		return fmt.Errorf("provisioning (%s) failed for %q: %w", phase, name, err)
+	}
+	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
+		preservation[0].OnSetupRevision(setupRevision)
 	}
 	return nil
 }
@@ -450,6 +459,10 @@ func (p *Provisioner) buildLegacyBase(ctx context.Context, cfg vm.CreateConfig, 
 // living on it would be persisted with the VM and would silently force a
 // from-scratch base rebuild on every future reset of it.
 type CreateOptions struct {
+	// OnSourceRevision receives the source stamp inside the clone lock, after a
+	// successful clone. Empty means the source's history cannot be proved.
+	OnSourceRevision func(string)
+	OnSetupRevision  func(string)
 	// Rebuild destroys the base image and builds it again from the raw Debian
 	// image, whatever its version stamp says. It is the escape hatch for a base
 	// that the idempotent re-apply cannot fix — a hand-broken guest, or an image
@@ -584,7 +597,7 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	// (The in-flight provenance marker was stamped earlier, the moment the clone
 	// landed — see prepareBaseAndClone's caller above.)
 	if err := timer.time("finalize playbook", func() error {
-		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out)
+		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", OnSetupRevision: opts.OnSetupRevision})
 	}); err != nil {
 		return err
 	}
@@ -698,6 +711,9 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		}); err != nil {
 			return fmt.Errorf("clone %q -> %q: %w", opts.TemplateSource, cfg.Name, err)
 		}
+		if opts.OnSourceRevision != nil {
+			opts.OnSourceRevision(readBaseVersionFn(p.hostFiles(), opts.TemplateSource))
+		}
 		return nil
 	}
 
@@ -724,6 +740,9 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		return p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out)
 	}); err != nil {
 		return fmt.Errorf("clone %q -> %q: %w", cfg.BaseName, cfg.Name, err)
+	}
+	if opts.OnSourceRevision != nil {
+		opts.OnSourceRevision(readBaseVersionFn(p.hostFiles(), cfg.BaseName))
 	}
 	return nil
 }
@@ -1170,8 +1189,11 @@ func (p *Provisioner) baseNeedsRefresh(cfg vm.CreateConfig, out io.Writer) bool 
 // ResetOptions selects which of a VM's local state survives a reset. The zero
 // value rebuilds the VM cleanly from the base image, keeping nothing.
 type ResetOptions struct {
-	PreserveAgents  bool // keep all supported coding-agent settings and files
-	PreserveProject bool // keep the per-org checkout + restored .env
+	// OnSourceRevision is used by providers to record the actual clone source.
+	OnSourceRevision func(string)
+	OnSetupRevision  func(string)
+	PreserveAgents   bool // keep all supported coding-agent settings and files
+	PreserveProject  bool // keep the per-org checkout + restored .env
 
 	// PreserveHome keeps the ENTIRE guest home directory, and is the option for
 	// the common reason to rebuild a VM that is working fine: picking up playbook
@@ -1253,7 +1275,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	var home string
 	var plan PreservePlan
 
-	cloneOpts := CreateOptions{}
+	cloneOpts := CreateOptions{OnSourceRevision: opts.OnSourceRevision}
 	if opts.TemplateSource != "" {
 		cloneOpts.TemplateSource = cfg.BaseName
 	}
@@ -1364,7 +1386,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out); err != nil {
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 

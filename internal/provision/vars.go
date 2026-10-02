@@ -13,6 +13,16 @@ type varItem struct {
 	value any
 }
 
+// PreservationVars tells finalize which existing home files came from the VM
+// being reset. A fresh create passes the zero value and has no ownership claim.
+type PreservationVars struct {
+	Home, Agents bool
+	FreshClone   bool
+	// OnSetupRevision is called after a successful finalize with the revision
+	// computed before the guest run began.
+	OnSetupRevision func(string)
+}
+
 // BuildExtraVars renders the Ansible extra-vars (all.yml) for one provisioning
 // phase, mirroring the original bash provisioner's build_allyml. The phase
 // (base/finalize/full) drives which tasks site.yml runs.
@@ -29,7 +39,7 @@ type varItem struct {
 // aptUpgrade=true from ensureBaseStopped's 30-day age check) — never for the
 // cold base build and never for a clone's finalize phase, so every clone from a
 // fresh base skips the upgrade entirely.
-func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool) ([]byte, error) {
+func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool, preservation ...PreservationVars) ([]byte, error) {
 	items := []varItem{
 		{"user_name", cfg.User},
 		{"base_hostname", hostname},
@@ -38,6 +48,17 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 		{"provision_phase", phase},
 		// Lima VMs have no host-home mount to share, so skip Samba.
 		{"samba_enabled", false},
+	}
+	if phase == "finalize" && len(preservation) > 0 {
+		if preservation[0].FreshClone {
+			items = append(items, varItem{"sand_fresh_clone", true})
+		}
+		if preservation[0].Home {
+			items = append(items, varItem{"sand_preserved_home", true})
+		}
+		if preservation[0].Agents {
+			items = append(items, varItem{"sand_preserved_agents", true})
+		}
 	}
 
 	// The timezone is emitted for EVERY phase, including finalize — unlike the

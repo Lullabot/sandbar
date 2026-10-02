@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -73,6 +74,20 @@ func (p *limaProvider) StopStreaming(ctx context.Context, name string, out io.Wr
 // --- Provisioning lifecycle ---
 
 func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	var sourceRevision, setupRevision string
+	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
+	opts.OnSourceRevision = func(v string) {
+		sourceRevision = v
+		if previousSource != nil {
+			previousSource(v)
+		}
+	}
+	opts.OnSetupRevision = func(v string) {
+		setupRevision = v
+		if previousSetup != nil {
+			previousSetup(v)
+		}
+	}
 	// Write a PROVISIONAL (in-flight) provenance marker the moment the clone
 	// exists, so another controller of this same host sees the VM as a managed,
 	// building tile while the (long) finalize step runs — not only after it
@@ -95,18 +110,68 @@ func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts pro
 			// headless create has no progress republisher to refresh it afterwards
 			// (that lives in the TUI), so the stamp taken here is the only one it will
 			// ever get. See Provenance.BuildAbandoned.
-			return p.MarkManaged(ctx, name, NewProvenance(cfg, true))
+			pv := NewProvenance(cfg, true)
+			pv.BaseRevision = sourceRevision
+			return p.MarkManaged(ctx, name, pv)
 		}
 	}
-	return p.prov.CreateVMWithOptions(ctx, cfg, opts, out)
+	if err := p.prov.CreateVMWithOptions(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	return nil
 }
 
 func (p *limaProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	return p.prov.RecreateWithOptions(ctx, cfg, opts, out)
+	var sourceRevision, setupRevision string
+	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
+	opts.OnSourceRevision = func(v string) {
+		sourceRevision = v
+		if previousSource != nil {
+			previousSource(v)
+		}
+	}
+	opts.OnSetupRevision = func(v string) {
+		setupRevision = v
+		if previousSetup != nil {
+			previousSetup(v)
+		}
+	}
+	if err := p.prov.RecreateWithOptions(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	return nil
 }
 
 func (p *limaProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
-	return p.prov.Reset(ctx, cfg, opts, out)
+	var sourceRevision, setupRevision string
+	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
+	opts.OnSourceRevision = func(v string) {
+		sourceRevision = v
+		if previousSource != nil {
+			previousSource(v)
+		}
+	}
+	opts.OnSetupRevision = func(v string) {
+		setupRevision = v
+		if previousSetup != nil {
+			previousSetup(v)
+		}
+	}
+	if err := p.prov.Reset(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	return nil
+}
+
+func (p *limaProvider) markCompleted(ctx context.Context, cfg vm.CreateConfig, sourceRevision, setupRevision string) {
+	pv := NewProvenance(cfg, false)
+	pv.BaseRevision = sourceRevision
+	pv.SetupRevision = setupRevision
+	// Provenance remains best effort, matching the existing in-flight write.
+	_ = p.MarkManaged(ctx, cfg.Name, pv)
 }
 
 // --- Golden VM templates ---
@@ -119,7 +184,17 @@ func (p *limaProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts prov
 // NewRemoteLima.
 
 func (p *limaProvider) SnapshotTemplate(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error) {
-	return p.prov.SnapshotTemplate(ctx, source, templateInstance, out)
+	result, err := p.prov.SnapshotTemplate(ctx, source, templateInstance, out)
+	if err != nil {
+		return result, err
+	}
+	marker, ok, err := p.ProvenanceOf(ctx, source)
+	if err == nil && ok && marker.BaseRevision != "" {
+		result.PlaybookVersion = marker.BaseRevision
+		result.ToolsetKey = marker.Config.ToolsetKey()
+		_ = provision.WriteBaseVersion(p.hostFiles, templateInstance, marker.BaseRevision, time.Now())
+	}
+	return result, nil
 }
 
 func (p *limaProvider) DeleteTemplate(ctx context.Context, templateInstance string, out io.Writer) error {
