@@ -260,11 +260,28 @@ jobs:
             done
           '
 
-      # The review tool is not a tool-set selection at all, so the create above
-      # could not have asked for it: its presence here is the role running
-      # unconditionally, which is the whole point of it not being a flag.
-      #
+      # Create intentionally uses a published image, whose base tools may be
+      # older than this checkout. Exercise the checkout's role before the
+      # review round-trip so dependency PRs test their new server and skills.
+      # Keep the published-image creation/reuse checks above and below intact.
+      - name: Upgrade self-review with the checkout's provisioning role
+        run: |
+          set -euo pipefail
+          limactl shell claude-ci bash -lc '
+            set -euo pipefail
+            play=$(mktemp --suffix=.yml)
+            trap '\''rm -f "$play"'\'' EXIT
+            printf "%s\n" \
+              "- hosts: localhost" \
+              "  become: true" \
+              "  gather_facts: false" \
+              "  roles: [self-review]" > "$play"
+            sudo env ANSIBLE_ROLES_PATH=/mnt/playbook/roles \
+              ansible-playbook -i localhost, --connection=local "$play"
+          '
+
       # The size check is the dependency substitution's own regression test.
+      #
       # roles/self-review replaces @self-review/serve's declared (but unused)
       # @self-review/react dependency with @self-review/types, which is the
       # difference between a ~17MB install and a ~310MB one. A threshold
@@ -274,6 +291,13 @@ jobs:
       - name: Assert the review tool is installed, lean, and runnable
         run: |
           set -euo pipefail
+          expected=$(sed -n 's/^selfreview_version: "\([^"]*\)"$/\1/p' roles/self-review/defaults/main.yml)
+          test -n "$expected"
+          actual=$(limactl shell claude-ci self-review-serve --version)
+          echo "review version: $actual (expected v$expected)"
+          test "$actual" = "self-review-serve v$expected" \
+            || { echo "::error::the review test is not using the checkout version"; exit 1; }
+          limactl shell claude-ci test -f "/opt/sandbar/self-review/skills/.sandbar-$expected"
           limactl shell claude-ci bash -lc '
             set -e
             test -x /opt/sandbar/self-review/node_modules/.bin/self-review-serve
