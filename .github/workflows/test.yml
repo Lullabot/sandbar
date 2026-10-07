@@ -293,7 +293,7 @@ jobs:
           set -euo pipefail
           expected=$(sed -n 's/^selfreview_version: "\([^"]*\)"$/\1/p' roles/self-review/defaults/main.yml)
           test -n "$expected"
-          actual=$(limactl shell claude-ci self-review-serve --version)
+          actual=$(limactl shell claude-ci bash -lc 'self-review-serve --version 2>&1')
           echo "review version: $actual (expected v$expected)"
           test "$actual" = "self-review-serve v$expected" \
             || { echo "::error::the review test is not using the checkout version"; exit 1; }
