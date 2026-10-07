@@ -96,8 +96,10 @@ locally before pushing.
 
 ## CI
 
-`.github/workflows/test.yml` triggers on `push` to `main`, on
-`pull_request`, and on `workflow_dispatch`. A plain feature-branch push runs
+`.github/workflows/test.yml` triggers on `pull_request` (including release PRs),
+on `workflow_dispatch`, and on a weekly schedule. Main pushes run release
+automation without repeating the test suite; see [Release CI](releases.md#release-ci).
+A plain feature-branch push runs
 **no** CI by itself — only once a pull request exists, or via an explicit
 dispatch:
 

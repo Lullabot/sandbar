@@ -340,8 +340,13 @@ Five jobs:
   `roles/samba`'s `smbpasswd` task is unconditionally `changed_when: true`, so
   its idempotence stage fails until the role itself is revisited (follow-up).
 
-**Triggers:** `push` only on `main`, plus `pull_request` and
-`workflow_dispatch`. The heavy `mutation` and `molecule` jobs additionally run
+**Triggers:** `pull_request` (including release PRs), `workflow_dispatch`, and
+a weekly `schedule`. Main pushes run release automation without repeating the
+test suite: feature PR and release PR checks are the two full runs on the
+release path. Keep PR checks required, require PRs to be up to date before
+merging, and merge changes through PRs. Only PR runs cancel superseded runs;
+manual and scheduled runs are not cancelled by later runs.
+The heavy `mutation` and `molecule` jobs run
 on a weekly `schedule` and are gated to `schedule`/`workflow_dispatch` only, so
 they never block a PR. A plain feature-branch push runs **no** CI.
 

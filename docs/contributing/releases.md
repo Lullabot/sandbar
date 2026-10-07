@@ -31,6 +31,24 @@ draft's creation and risk a GoReleaser run that finds no draft to adopt,
 which creates and publishes a release of its own and burns that version
 number permanently.
 
+## Release CI
+
+The full Test workflow runs on every pull request, including release-please's
+release PRs. The release PR tests provide a fresh check of upstream dependencies
+after the feature PR has merged. New PR commits cancel outdated test runs.
+
+1. Feature PR checks pass, then the PR is merged into `main`.
+2. release-please immediately creates or updates the release PR.
+3. Release PR checks pass, then the release PR is merged into `main`.
+4. release-please creates the draft release, then GoReleaser builds and publishes it.
+
+Main pushes do not repeat the Test workflow, removing two full test runs from
+this path. Keep the PR checks required on `main`, require PRs to be up to date
+before merging, and merge changes through PRs. Publishing relies on those
+pre-merge checks; it does not run another test suite after the release PR merges.
+Maintainers can run Test manually from the Actions tab when needed; manual runs
+are not cancelled by later runs.
+
 ## The Homebrew tap
 
 GoReleaser's `brews:` publisher (not `homebrew_casks:`) pushes to
