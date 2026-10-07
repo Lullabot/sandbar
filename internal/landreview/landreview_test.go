@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -68,8 +69,117 @@ func TestProbeHTTPAcceptsTheReviewServer(t *testing.T) {
 	srv := httptest.NewServer(reviewServerStub())
 	defer srv.Close()
 
-	if err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://")); err != nil {
+	if err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"), ""); err != nil {
 		t.Fatalf("probeHTTP against a live review server: %v, want nil", err)
+	}
+}
+
+func TestProbeHTTPAuthenticatesTheReviewServer(t *testing.T) {
+	const capability = "session-key_2x"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+capability {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		reviewServerStub().ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	for _, key := range []string{"", "wrong-key", capability} {
+		t.Run("key="+key, func(t *testing.T) {
+			err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"), key)
+			if (err == nil) != (key == capability) {
+				t.Fatalf("probeHTTP: %v, success must require the session key", err)
+			}
+		})
+	}
+}
+
+func TestProbeHTTPDoesNotSendCapabilitiesThroughRedirects(t *testing.T) {
+	redirected := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected = true
+		reviewServerStub().ServeHTTP(w, r)
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+probePath, http.StatusFound)
+	}))
+	defer srv.Close()
+	if err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "session-key"); err == nil {
+		t.Fatal("a redirect was accepted as readiness")
+	}
+	if redirected {
+		t.Fatal("probe followed the redirect with a session credential")
+	}
+}
+
+// Use the production HTTP probe and observe the browser URL, so accepting a
+// banner alone cannot pass while readiness or reopening loses the capability.
+func TestSessionCarriesCapabilityThroughForwarding(t *testing.T) {
+	for _, forwarded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("forwarded=%t", forwarded), func(t *testing.T) {
+			const capability = "session-key_2x"
+			release := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+capability {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				reviewServerStub().ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			hostPort := srv.Listener.Addr().(*net.TCPAddr).Port
+			guestPort := hostPort
+			if forwarded {
+				guestPort = hostPort%65535 + 1
+			}
+			var forwardedTo []int
+			stopped := false
+			p := &providerfake.Provider{
+				ShellFunc: func(ctx context.Context, _ string, _ io.Reader, out io.Writer, _ ...string) error {
+					fmt.Fprintf(out, "[serve] Review ready at http://127.0.0.1:%d/#cap=%s\n", guestPort, capability)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+				ForwardArgvFunc: func(_ vm.VM, host, guest int) []string {
+					if !forwarded {
+						return nil
+					}
+					forwardedTo = []int{host, guest}
+					return []string{"forward"}
+				},
+			}
+			s := &Session{
+				Provider: p, VM: vm.VM{Name: "review"}, Checkout: checkouts.Checkout{Path: "/repo"},
+				PickPort: func() (int, error) { return hostPort, nil },
+				StartForward: func(context.Context, []string, io.Writer) (func(), error) {
+					return func() { stopped = true }, nil
+				},
+				ReadyTimeout: time.Second, PollInterval: time.Millisecond,
+				Open: func(_ context.Context, u string) error {
+					want := fmt.Sprintf("%s/#cap=%s", srv.URL, capability)
+					if u != want {
+						t.Errorf("browser URL = %q, want %q", u, want)
+					}
+					close(release)
+					return nil
+				},
+			}
+			var out strings.Builder
+			if _, err := s.Run(context.Background(), &out); err != nil {
+				t.Fatalf("Run: %v\n%s", err, out.String())
+			}
+			if !strings.Contains(out.String(), srv.URL+"/#cap="+capability) {
+				t.Fatalf("printed URL lost the session key: %s", out.String())
+			}
+			if forwarded && (!slices.Equal(forwardedTo, []int{hostPort, guestPort}) || !stopped) {
+				t.Fatalf("forward = %v, stopped = %t", forwardedTo, stopped)
+			}
+		})
 	}
 }
 
@@ -113,7 +223,7 @@ func TestProbeHTTPRejectsAForeignListener(t *testing.T) {
 			srv := httptest.NewServer(tc.handler)
 			defer srv.Close()
 
-			err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"))
+			err := probeHTTP(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "")
 			if err == nil {
 				t.Fatal("probeHTTP accepted a listener that is not the review server — the browser would open onto the wrong application and the session would hang forever")
 			}
@@ -129,7 +239,7 @@ func TestProbeHTTPFailsWhenNothingIsListening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := probeHTTP(context.Background(), "127.0.0.1:"+strconv.Itoa(port)); err == nil {
+	if err := probeHTTP(context.Background(), "127.0.0.1:"+strconv.Itoa(port), ""); err == nil {
 		t.Fatal("probeHTTP against a closed port returned nil, want an error")
 	}
 }
@@ -171,7 +281,7 @@ func TestProbeHTTPRejectsAListenerThatNeverAnswers(t *testing.T) {
 			// not a floor.
 			ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 			defer cancel()
-			if err := probeHTTP(ctx, l.Addr().String()); err == nil {
+			if err := probeHTTP(ctx, l.Addr().String(), ""); err == nil {
 				t.Error("probeHTTP reported ready against a socket that never answered — a bare dial would have, which is exactly the bug this guards")
 			}
 		})
@@ -653,11 +763,38 @@ func TestWrittenPathPrefersWhatTheServerAnnounced(t *testing.T) {
 
 // --- the readiness banner, which is the only way the port is learned ---
 
-// TestParseServePortReadsUpstreamsBanner pins the one string this side
+func TestParseServeEndpointPreservesTheSessionKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, url string
+		want      serveEndpoint
+	}{
+		{"1.x", "http://127.0.0.1:33749/\n", serveEndpoint{port: 33749}},
+		{"2.x", "http://127.0.0.1:33749/#cap=abc_123-XYZ\n", serveEndpoint{port: 33749, capability: "abc_123-XYZ"}},
+		{"CRLF", "http://127.0.0.1:33749/#cap=abc_123-XYZ\r\n", serveEndpoint{port: 33749, capability: "abc_123-XYZ"}},
+		{"split before fragment", "http://127.0.0.1:33749/", serveEndpoint{}},
+		{"split inside key", "http://127.0.0.1:33749/#cap=abc", serveEndpoint{}},
+		{"missing key", "http://127.0.0.1:33749/#cap=\n", serveEndpoint{}},
+		{"unknown fragment", "http://127.0.0.1:33749/#other=abc\n", serveEndpoint{}},
+		{"URL with query", "http://127.0.0.1:33749/?cap=abc\n", serveEndpoint{}},
+		{"unsafe key", "http://127.0.0.1:33749/#cap=abc xyz\n", serveEndpoint{}},
+		{"non-loopback", "http://example.com:33749/#cap=abc\n", serveEndpoint{}},
+		{"zero port", "http://127.0.0.1:0/#cap=abc\n", serveEndpoint{}},
+		{"invalid port", "http://127.0.0.1:65536/#cap=abc\n", serveEndpoint{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseServeEndpoint("[serve] Review ready at " + tc.url)
+			if got != tc.want {
+				t.Fatalf("parseServeEndpoint = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseServeEndpointReadsUpstreamsBanner pins the one string this side
 // depends on upstream printing. Upstream has no --port flag, so if this line
 // ever changes shape the review command stops working entirely — the test
 // exists so that breaks here, loudly, rather than as a 30s timeout in a VM.
-func TestParseServePortReadsUpstreamsBanner(t *testing.T) {
+func TestParseServeEndpointReadsUpstreamsBanner(t *testing.T) {
 	// Verbatim from @self-review/serve 1.45.0, in the order it prints them.
 	const real = "[serve] Output path: /work/repo/review.xml\n" +
 		"[serve] Startup mode: git\n" +
@@ -686,8 +823,8 @@ func TestParseServePortReadsUpstreamsBanner(t *testing.T) {
 			"[serve] Review ready at http://127.0.0.1:99999/\n", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := parseServePort(tc.out); got != tc.want {
-				t.Fatalf("parseServePort() = %d, want %d", got, tc.want)
+			if got := parseServeEndpoint(tc.out).port; got != tc.want {
+				t.Fatalf("parseServeEndpoint().port = %d, want %d", got, tc.want)
 			}
 		})
 	}
@@ -703,12 +840,12 @@ func TestAwaitGuestPortReturnsAsSoonAsTheBannerLands(t *testing.T) {
 		_, _ = buf.Write([]byte("[serve] Review ready at http://127.0.0.1:41234/\n"))
 	}()
 
-	port, err := s.awaitGuestPort(context.Background(), &buf, exited)
+	endpoint, err := s.awaitGuestEndpoint(context.Background(), &buf, exited)
 	if err != nil {
-		t.Fatalf("awaitGuestPort: %v", err)
+		t.Fatalf("awaitGuestEndpoint: %v", err)
 	}
-	if port != 41234 {
-		t.Fatalf("awaitGuestPort = %d, want 41234", port)
+	if endpoint.port != 41234 {
+		t.Fatalf("awaitGuestEndpoint = %d, want 41234", endpoint.port)
 	}
 }
 
@@ -722,12 +859,12 @@ func TestAwaitGuestPortPrefersALateBannerOverTheExit(t *testing.T) {
 	exited := make(chan struct{})
 	close(exited) // the command has ALREADY finished
 
-	port, err := s.awaitGuestPort(context.Background(), &buf, exited)
+	endpoint, err := s.awaitGuestEndpoint(context.Background(), &buf, exited)
 	if err != nil {
-		t.Fatalf("awaitGuestPort: %v, want the port it plainly announced", err)
+		t.Fatalf("awaitGuestEndpoint: %v, want the port it plainly announced", err)
 	}
-	if port != 41234 {
-		t.Fatalf("awaitGuestPort = %d, want 41234", port)
+	if endpoint.port != 41234 {
+		t.Fatalf("awaitGuestEndpoint = %d, want 41234", endpoint.port)
 	}
 }
 
@@ -737,8 +874,8 @@ func TestAwaitGuestPortReportsASilentExit(t *testing.T) {
 	exited := make(chan struct{})
 	close(exited)
 
-	if _, err := s.awaitGuestPort(context.Background(), &buf, exited); !errors.Is(err, errServerGone) {
-		t.Fatalf("awaitGuestPort error = %v, want errServerGone", err)
+	if _, err := s.awaitGuestEndpoint(context.Background(), &buf, exited); !errors.Is(err, errServerGone) {
+		t.Fatalf("awaitGuestEndpoint error = %v, want errServerGone", err)
 	}
 }
 
@@ -746,9 +883,9 @@ func TestAwaitGuestPortGivesUp(t *testing.T) {
 	s := &Session{ReadyTimeout: 30 * time.Millisecond, PollInterval: time.Millisecond}
 	var buf lockedBuffer
 
-	_, err := s.awaitGuestPort(context.Background(), &buf, make(chan struct{}))
+	_, err := s.awaitGuestEndpoint(context.Background(), &buf, make(chan struct{}))
 	if err == nil || errors.Is(err, errServerGone) {
-		t.Fatalf("awaitGuestPort error = %v, want a plain timeout", err)
+		t.Fatalf("awaitGuestEndpoint error = %v, want a plain timeout", err)
 	}
 }
 
@@ -758,8 +895,8 @@ func TestAwaitGuestPortHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := s.awaitGuestPort(ctx, &buf, make(chan struct{})); !errors.Is(err, context.Canceled) {
-		t.Fatalf("awaitGuestPort error = %v, want context.Canceled", err)
+	if _, err := s.awaitGuestEndpoint(ctx, &buf, make(chan struct{})); !errors.Is(err, context.Canceled) {
+		t.Fatalf("awaitGuestEndpoint error = %v, want context.Canceled", err)
 	}
 }
 

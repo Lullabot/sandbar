@@ -197,9 +197,9 @@ type Session struct {
 	// of a forward. Backends that need no forward (local Lima) ignore it and
 	// browse the guest's own port.
 	PickPort func() (int, error)
-	// Probe reports whether the review UI answers at addr (host:port), nil
-	// meaning ready.
-	Probe func(ctx context.Context, addr string) error
+	// Probe reports whether the review UI answers at addr (host:port), using
+	// the session capability when present. Empty capability supports 1.x VMs.
+	Probe func(ctx context.Context, addr, capability string) error
 	// StartForward runs a long-lived forwarder child, streaming its output to
 	// out, and returns a stop func that kills AND reaps it.
 	StartForward func(ctx context.Context, argv []string, out io.Writer) (stop func(), err error)
@@ -265,7 +265,22 @@ const missingToolHint = "\n(if this VM's base image predates the review tool, " 
 // Anchored on 127.0.0.1 because that is what upstream binds and all this side
 // knows how to bridge; a future upstream that bound something else must not be
 // silently misread as reachable.
-var serveReadyRe = regexp.MustCompile(`Review ready at http://127\.0\.0\.1:([0-9]{1,5})/`)
+// Wait for a whole line: transports can split a write just before #cap, and
+// accepting the port alone would silently discard 2.x's session key.
+var serveReadyRe = regexp.MustCompile(`(?m)^\[serve\] Review ready at http://127\.0\.0\.1:([0-9]{1,5})/([^\r\n]*)\r?\n`)
+
+type serveEndpoint struct {
+	port       int
+	capability string
+}
+
+func (e serveEndpoint) launchURL(hostPort int) string {
+	u := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
+	if e.capability != "" {
+		u += "/#cap=" + e.capability
+	}
+	return u
+}
 
 // Run performs the whole session and returns the guest path the finished
 // review was written to.
@@ -389,7 +404,8 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	// FIRST wait for the guest's own banner, because upstream picks the port
 	// itself and no forward can be built before that number is known. This is
 	// also where a guest with no review tool fails, in well under a second.
-	guestPort, err := s.awaitGuestPort(ctx, &srvOut, exited)
+	endpoint, err := s.awaitGuestEndpoint(ctx, &srvOut, exited)
+	guestPort = endpoint.port
 	if err != nil {
 		if errors.Is(err, errServerGone) {
 			// exited is closed, so srvErr is safe to read here (and only
@@ -438,7 +454,7 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 		defer stop()
 	}
 
-	switch err := s.waitReady(ctx, hostPort, exited); {
+	switch err := s.waitReady(ctx, hostPort, endpoint.capability, exited); {
 	case err == nil:
 	case errors.Is(err, errServerGone):
 		return "", fmt.Errorf("%w: %w%s", errServerGone, orExitedCleanly(srvErr),
@@ -448,7 +464,7 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 			hostPort, err, detail(srvOut.String(), fwdOut.String()), unreachableHint(hostPort, guestPort))
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
+	url := endpoint.launchURL(hostPort)
 	fmt.Fprintf(w, "review UI ready at %s\n", url)
 	if s.Open != nil {
 		if err := s.Open(ctx, url); err != nil {
@@ -554,7 +570,7 @@ func (s *Session) stopGuestServer(ctx context.Context, port int, w io.Writer) {
 	}
 }
 
-// awaitGuestPort waits for the port @self-review/serve announces at startup.
+// awaitGuestEndpoint waits for the port @self-review/serve announces at startup.
 //
 // It polls the buffer the server goroutine is filling rather than reading a
 // pipe, and that is what keeps the whole flow testable with no VM:
@@ -565,11 +581,11 @@ func (s *Session) stopGuestServer(ctx context.Context, port int, w io.Writer) {
 // Noticing the exit matters as much as noticing the banner: a guest with no
 // review tool fails in well under a second, and waiting out the full timeout
 // to report a generic "no URL" would bury the guest's own explanation.
-func (s *Session) awaitGuestPort(ctx context.Context, out *lockedBuffer, exited <-chan struct{}) (int, error) {
+func (s *Session) awaitGuestEndpoint(ctx context.Context, out *lockedBuffer, exited <-chan struct{}) (serveEndpoint, error) {
 	deadline := time.Now().Add(s.readyTimeout())
 	for {
-		if port := parseServePort(out.String()); port != 0 {
-			return port, nil
+		if endpoint := parseServeEndpoint(out.String()); endpoint.port != 0 {
+			return endpoint, nil
 		}
 		select {
 		case <-exited:
@@ -577,12 +593,12 @@ func (s *Session) awaitGuestPort(ctx context.Context, out *lockedBuffer, exited 
 			// so one more look settles the case where the banner and the exit
 			// arrive together: a server that announced its port and then died
 			// still told us the number teardown needs.
-			if port := parseServePort(out.String()); port != 0 {
-				return port, nil
+			if endpoint := parseServeEndpoint(out.String()); endpoint.port != 0 {
+				return endpoint, nil
 			}
-			return 0, errServerGone
+			return serveEndpoint{}, errServerGone
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return serveEndpoint{}, ctx.Err()
 		case <-time.After(s.pollInterval()):
 		}
 		if !time.Now().Before(deadline) {
@@ -591,28 +607,37 @@ func (s *Session) awaitGuestPort(ctx context.Context, out *lockedBuffer, exited 
 			// filling, so the banner may well have landed during the sleep
 			// that just expired the budget. Returning without re-reading
 			// would throw away an answer already in hand.
-			if port := parseServePort(out.String()); port != 0 {
-				return port, nil
+			if endpoint := parseServeEndpoint(out.String()); endpoint.port != 0 {
+				return endpoint, nil
 			}
-			return 0, fmt.Errorf("gave up after %s", s.readyTimeout())
+			return serveEndpoint{}, fmt.Errorf("gave up after %s", s.readyTimeout())
 		}
 	}
 }
 
-// parseServePort extracts the guest port from whatever the server has printed
-// so far, returning 0 when it has not announced one yet. A number outside the
-// port range is treated as no answer rather than trusted: it is about to be
-// used to build a forward.
-func parseServePort(out string) int {
+// parseServeEndpoint accepts the complete loopback startup URL. A bare URL
+// belongs to a 1.x guest; a 2.x URL must carry a nonempty, URL-safe capability.
+// Do not reinterpret a malformed fragment as an unauthenticated session.
+var capabilityRe = regexp.MustCompile(`^#cap=([A-Za-z0-9_-]{1,256})$`)
+
+func parseServeEndpoint(out string) serveEndpoint {
 	m := serveReadyRe.FindStringSubmatch(out)
 	if m == nil {
-		return 0
+		return serveEndpoint{}
 	}
 	port, err := strconv.Atoi(m[1])
 	if err != nil || port <= 0 || port > 65535 {
-		return 0
+		return serveEndpoint{}
 	}
-	return port
+	endpoint := serveEndpoint{port: port}
+	if m[2] != "" {
+		cap := capabilityRe.FindStringSubmatch(m[2])
+		if cap == nil {
+			return serveEndpoint{}
+		}
+		endpoint.capability = cap[1]
+	}
+	return endpoint
 }
 
 // unreachableHint explains the likeliest reason a server that DID announce a
@@ -640,11 +665,11 @@ func unreachableHint(hostPort, guestPort int) string {
 // announced a port and then died fails in under a second, and waiting out the
 // full timeout to report a generic "not reachable" would bury the guest's own
 // explanation.
-func (s *Session) waitReady(ctx context.Context, port int, exited <-chan struct{}) error {
+func (s *Session) waitReady(ctx context.Context, port int, capability string, exited <-chan struct{}) error {
 	addr := "127.0.0.1:" + strconv.Itoa(port)
 	deadline := time.Now().Add(s.readyTimeout())
 	for {
-		if err := s.probe(ctx, addr); err == nil {
+		if err := s.probe(ctx, addr, capability); err == nil {
 			return nil
 		}
 		// Checked without blocking, and before the timer, so an
@@ -986,11 +1011,11 @@ func (s *Session) pickPort() (int, error) {
 	return freePort()
 }
 
-func (s *Session) probe(ctx context.Context, addr string) error {
+func (s *Session) probe(ctx context.Context, addr, capability string) error {
 	if s.Probe != nil {
-		return s.Probe(ctx, addr)
+		return s.Probe(ctx, addr, capability)
 	}
-	return probeHTTP(ctx, addr)
+	return probeHTTP(ctx, addr, capability)
 }
 
 func (s *Session) startForward(ctx context.Context, argv []string, out io.Writer) (func(), error) {
@@ -1037,7 +1062,12 @@ const probePath = "/api/config"
 // probeClient is the readiness prober's HTTP client. Keep-alives are off so a
 // probe never leaves a pooled connection behind on a port that is about to be
 // handed to a browser.
-var probeClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+var probeClient = &http.Client{
+	Transport: &http.Transport{DisableKeepAlives: true},
+	// The listener must answer directly. Following a redirect can send the
+	// capability to another service, including one on a different local port.
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
 
 // probeHTTP reports whether the review UI actually answers at addr.
 //
@@ -1064,13 +1094,16 @@ var probeClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: tru
 // far end is @self-review/serve — where the bare `/` this used to request is
 // just an HTML page, which any number of things serve. Everything else becomes
 // an ordinary readiness timeout naming the problem.
-func probeHTTP(ctx context.Context, addr string) error {
+func probeHTTP(ctx context.Context, addr, capability string) error {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+probePath, nil)
 	if err != nil {
 		return err
+	}
+	if capability != "" {
+		req.Header.Set("Authorization", "Bearer "+capability)
 	}
 	resp, err := probeClient.Do(req)
 	if err != nil {
