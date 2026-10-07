@@ -105,6 +105,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	// stray `sand land NAME` in here printed "-preserve sand land NAME".
 	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts")
 	fs.StringVar(&o.fromBackup, "from-backup", "", "Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in `DIR` (the path the failure named)")
+	fs.BoolVar(&o.values.disableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots (default: recorded setting)")
 	fs.StringVar(&o.values.cpus, "cpus", "", "vCPUs (default: whatever this VM has)")
 	fs.StringVar(&o.values.hostname, "hostname", "", "VM hostname (default: whatever this VM has)")
 	fs.StringVar(&o.values.user, "user", "", "Primary VM user (default: whatever this VM has)")
@@ -323,6 +324,7 @@ func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *r
 // these (clearing --docker-proxy-host) — what decides is whether the flag was
 // PASSED, not whether it is empty.
 type resetFlagValues struct {
+	disableStartAtBoot                      bool
 	cpus, hostname, user, gitName, gitEmail string
 	memory, disk, locale, timezone, domain  string
 	dockerProxy, cloneToken                 string
@@ -376,6 +378,9 @@ func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, e
 	// see runReset's flag-set comment.
 	cfg.BaseName = base
 
+	if explicit["no-start-at-boot"] {
+		cfg.DisableStartAtBoot = flags.disableStartAtBoot
+	}
 	if explicit["cpus"] {
 		n, err := vm.ParseCPUs(flags.cpus)
 		if err != nil {

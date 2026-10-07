@@ -1653,3 +1653,37 @@ func TestProxmoxResetChecksTheCloneSourceBeforeDeleting(t *testing.T) {
 		}
 	}
 }
+
+func TestProxmoxCloneStartAtBoot(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(disabled), func(t *testing.T) {
+			m := newPVEMock(t)
+			p := newCreateProvider(t, m)
+			want := "1"
+			if disabled {
+				want = "0"
+			}
+			writes := 0
+			m.on("/nodes/pve1/qemu/101/config", func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if got := r.Form.Get("onboot"); got != want {
+					t.Errorf("onboot = %q, want %q", got, want)
+				}
+				writes++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":null}`))
+			})
+			m.data("/nodes/pve1/qemu/101/cloudinit", `null`)
+			cfg := webConfig()
+			cfg.DisableStartAtBoot = disabled
+			if err := p.applyCloudInitIdentity(context.Background(), 101, cfg, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if writes != 1 {
+				t.Fatalf("config writes = %d", writes)
+			}
+		})
+	}
+}

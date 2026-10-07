@@ -83,10 +83,13 @@ type CreateConfig struct {
 	// zone that canonicalZone could not resolve. That case degrades to the
 	// guest's existing zone with a warning instead.
 	TimezoneExplicit bool
-	DockerProxyHost  string
-	CloneURL         string
-	CloneForge       string
-	CloneToken       string
+	// DisableStartAtBoot opts Proxmox clones out of starting when the host boots.
+	// The zero value enables startup, including records predating this setting.
+	DisableStartAtBoot bool
+	DockerProxyHost    string
+	CloneURL           string
+	CloneForge         string
+	CloneToken         string
 
 	// DDEV, Go and Java configure shared base dependencies. Coding agents are
 	// installed per VM during finalize. Existing Claude/Codex field names retain

@@ -529,3 +529,31 @@ func TestResetHelpDocumentsFromBackup(t *testing.T) {
 		t.Errorf("the help never explains how to resume a failed reset:\n%s", buf.String())
 	}
 }
+
+func TestResetStartAtBoot(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		rec := vm.DefaultCreateConfig()
+		rec.Name = "web"
+		rec.DisableStartAtBoot = disabled
+		rec.GitName, rec.GitEmail = "Dev", "dev@example.com"
+		cfg, err := resetConfigFromRecord(rec, true, "web", rec.BaseName, nil, resetFlagValues{}, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.DisableStartAtBoot != disabled {
+			t.Fatal("reset lost recorded boot preference")
+		}
+		var o resetOptions
+		fs := newResetFlagSet(&o)
+		if err := fs.Parse([]string{"--no-start-at-boot=false"}); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err = resetConfigFromRecord(rec, true, "web", rec.BaseName, map[string]bool{"no-start-at-boot": true}, o.values, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.DisableStartAtBoot {
+			t.Fatal("explicit flag failed to re-enable startup")
+		}
+	}
+}
