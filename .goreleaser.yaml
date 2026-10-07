@@ -4,6 +4,11 @@ builds:
   - id: sandbar
     main: ./cmd/sandbar
     binary: sandbar
+    # Generate the compatibility link beside each built binary. A dangling
+    # link in the source checkout breaks remote playbook staging with scp.
+    hooks:
+      post:
+        - sh -c 'ln -sf sandbar "$(dirname "{{ .Path }}")/sand"'
     env:
       - CGO_ENABLED=0
     goos:
@@ -22,7 +27,7 @@ archives:
       - README.md
       - LICENSE*
       - CHANGELOG.md
-      - src: packaging/sand
+      - src: "dist/sandbar_{{ .Os }}_{{ .Arch }}*/sand"
         dst: .
         strip_parent: true
 
