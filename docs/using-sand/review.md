@@ -17,9 +17,10 @@ opens your browser, and stops the session when you finish.
 The review tool is included in every base image and runs only when you open
 a review. There is no installation flag to enable.
 
-If your base image predates the tool, the next `sand create` updates the base
-before cloning a new VM. Existing VMs need to be reset from an updated base
-or replaced to get it.
+New VMs inherit the tool version in the published base image. Upgrades arrive
+when a new base image is published; changing the source pin alone does not
+update that image. Existing VMs need to be reset from an updated base or
+replaced to get the newer tool.
 
 ## Opening a review
 
@@ -56,6 +57,11 @@ A review does not require a pushed branch, a configured remote, or `gh`.
 3. The browser displays the checkout's file tree and diff.
 
 If no browser opens, open the printed URL yourself. The review stays running.
+
+With self-review 2.x, use the complete URL, including `/#cap=…`. That fragment
+contains the session key the browser needs to load the review. The page removes
+it from the address bar after loading; to reopen the review, use the original
+URL shown by `sand`. Existing VMs with self-review 1.x also work.
 
 You can run multiple CLI reviews at once, on the same VM or different VMs.
 The **TUI runs one review at a time**. Trying to review another checkout
@@ -262,6 +268,12 @@ Automatic resumption uses only the default `review.xml` path. If you set
 `~/.config/self-review/config.yaml`, `sand` does not load the saved review
 automatically. A clean review also deletes only the default `review.xml`
 and `review.guide.xml` files.
+
+Self-review 2.x requires a project's `.self-review.yaml` `output-file` to stay
+inside the checkout directory where the review starts. An output path in your
+user-level `~/.config/self-review/config.yaml` can still point elsewhere.
+Project-configured `default-diff-args` cannot use `--output`, `--ext-diff`, or
+`--textconv`.
 
 The browser uses self-review's interface, including extra context around
 changes, image and attachment previews, suggestions, and walkthroughs from
