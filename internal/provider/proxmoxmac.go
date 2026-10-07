@@ -44,7 +44,7 @@ var netDeviceKey = regexp.MustCompile(`^net\d+$`)
 //
 // A VM that is not there any more yields an empty map and no error: a reset can
 // legitimately run against a name whose VM has already been destroyed (that is
-// the shape `sand create --recreate` takes when the guest is gone), and there is
+// the shape `sandbar create --recreate` takes when the guest is gone), and there is
 // no MAC to keep in that case — not a failure to report.
 func (p *proxmoxProvider) nicMACs(ctx context.Context, name string) (map[string]string, error) {
 	vmid, _, err := p.resolve(ctx, name)

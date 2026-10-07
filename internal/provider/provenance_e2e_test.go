@@ -84,7 +84,7 @@ func sshSeedRemoteInstance(t *testing.T, cfg provider.TargetConfig, remoteHomeDi
 
 // TestE2EProvenanceConvergenceAndTwoController proves, over a real ssh hop:
 //  1. a marker written by one controller (through manage.RecordSuccess — the
-//     same production path cmd/sand/create.go and the TUI use — handed the
+//     same production path cmd/sandbar/create.go and the TUI use — handed the
 //     REMOTE provider) is read back by that controller;
 //  2. two-controller convergence: a SECOND, independently-constructed remote
 //     provider (a distinct controller) reads the identical marker, corroborated

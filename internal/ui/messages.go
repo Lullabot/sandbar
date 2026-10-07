@@ -33,7 +33,7 @@ type message struct {
 	warn bool
 }
 
-// maxMessages bounds the ring. sand can run for hours in one session (or
+// maxMessages bounds the ring. sandbar can run for hours in one session (or
 // days, over ssh); a log that grew forever would be the memory-leak twin of
 // the invisibility this log exists to remove.
 const maxMessages = 50

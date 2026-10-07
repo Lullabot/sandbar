@@ -56,8 +56,8 @@ func TestBoardRendersAtEverySizeInTheSweep(t *testing.T) {
 			return m
 		}},
 		{"confirm", func(m model) model {
-			m.logMsg("stop all: three sand VMs are running")
-			m.confirm = &confirmState{prompt: "Stop 3 running sand VMs (web, api, db and 1 more)?"}
+			m.logMsg("stop all: three sandbar VMs are running")
+			m.confirm = &confirmState{prompt: "Stop 3 running sandbar VMs (web, api, db and 1 more)?"}
 			return m
 		}},
 		{"searching", func(m model) model {
@@ -242,7 +242,7 @@ func TestHeaderShowsTheBuildRightAligned(t *testing.T) {
 	m = putOnBoard(t, m, vm.VM{Name: "web", Status: "Running"})
 
 	title := ansi.Strip(strings.Split(m.headerView(), "\n")[0])
-	if !strings.Contains(title, "sand") || !strings.Contains(title, "v9.9.9-dirty") {
+	if !strings.Contains(title, "sandbar") || !strings.Contains(title, "v9.9.9-dirty") {
 		t.Fatalf("the title row should carry the app name and the build, got %q", title)
 	}
 	if !strings.HasSuffix(strings.TrimRight(title, " "), "v9.9.9-dirty") {

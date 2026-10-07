@@ -25,19 +25,19 @@ type resetter interface {
 	Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error
 }
 
-// runReset implements `sand reset NAME`: the headless spelling of the TUI's `R`,
+// runReset implements `sandbar reset NAME`: the headless spelling of the TUI's `R`,
 // with the same gate (a sand-managed VM only), the same defaulting (every
 // setting you do not restate comes from the VM's own recorded config), the same
 // preserve options, and the same follow-up bookkeeping.
 //
 // It exists because the two entrypoints had drifted into different verbs for
 // the same act. The TUI could preserve a Claude login or a project tree across a
-// rebuild; the CLI's only spelling was `sand create --recreate`, which could
-// not, so the docs told a CLI user to go and open the TUI. `sand create
+// rebuild; the CLI's only spelling was `sandbar create --recreate`, which could
+// not, so the docs told a CLI user to go and open the TUI. `sandbar create
 // --recreate` is now this command under an older name (see runCreate).
 //
 // There is deliberately NO --clone-url. A reset rebuilds the VM it is pointed
-// at, project included; a different repo is a different VM, and `sand create`
+// at, project included; a different repo is a different VM, and `sandbar create`
 // makes one. Editing the URL used to mean the preserve toggle and the clone
 // disagreed about which org they were talking about — see internal/ui's
 // fieldLocked for the same rule on the TUI side.
@@ -54,7 +54,7 @@ func runReset(args []string) error {
 	return resetParsed(fs, &o)
 }
 
-// resetOptions is the whole flag surface of `sand reset`, bound in ONE place
+// resetOptions is the whole flag surface of `sandbar reset`, bound in ONE place
 // (newResetFlagSet) so the command, its help text and its tests cannot disagree
 // about what exists — a test asserting "there is no --clone-url here" is only
 // worth something if it inspects the same set the command parses.
@@ -86,7 +86,7 @@ func (r *repeatedString) Set(v string) error {
 	return nil
 }
 
-// newResetFlagSet defines `sand reset`'s flags, bound to o.
+// newResetFlagSet defines `sandbar reset`'s flags, bound to o.
 //
 // The set is create's MINUS the ones a reset cannot mean: --name (the
 // positional NAME is the target), --clone-url (a reset rebuilds the project the
@@ -94,7 +94,7 @@ func (r *repeatedString) Set(v string) error {
 // provenance/registry record; resetting onto a different base is a create),
 // --recreate (this IS the recreate), and --rebuild (that acts on the SHARED
 // base image every other VM clones from, so one VM's reset must never silently
-// rebuild the fleet's base — `sand create --rebuild` remains the way to ask).
+// rebuild the fleet's base — `sandbar create --rebuild` remains the way to ask).
 func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
 	fs.BoolVar(&o.preserveAgents, "preserve-agents", false, "Keep settings and files for Claude Code, Codex, OpenCode, and Pi across the rebuild")
@@ -102,8 +102,8 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.BoolVar(&o.preserveHome, "preserve-home", false, "Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)")
 	// The backquoted PATH is not decoration: flag.PrintDefaults takes the FIRST
 	// backquoted run in a usage string as the argument's display name, so a
-	// stray `sand land NAME` in here printed "-preserve sand land NAME".
-	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sand land NAME' to list this VM's checkouts")
+	// stray `sandbar land NAME` in here printed "-preserve sandbar land NAME".
+	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sandbar land NAME' to list this VM's checkouts")
 	fs.StringVar(&o.fromBackup, "from-backup", "", "Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in `DIR` (the path the failure named)")
 	fs.BoolVar(&o.values.disableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots (default: recorded setting)")
 	fs.StringVar(&o.values.cpus, "cpus", "", "vCPUs (default: whatever this VM has)")
@@ -120,7 +120,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.StringVar(&o.values.cloneToken, "clone-token", "", "Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token")
 	fs.StringVar(&o.profile, "profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand reset NAME [flags]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar reset NAME [flags]
 
 Delete a sand-managed VM and clone it fresh from its base image, keeping its
 name, its project, and every setting it was built with. This is the headless
@@ -133,8 +133,8 @@ Everything inside the guest is lost unless you ask for it back:
   --preserve-project   keep the cloned project's per-org directory (the checkout,
                        its uncommitted work, and the .env alongside it)
   --preserve PATH      keep one more directory inside the guest home — any git
-                       checkout or worktree, whether sand cloned it or you did.
-                       Repeatable. Run 'sand land NAME' to list what this VM
+                       checkout or worktree, whether sandbar cloned it or you did.
+                       Repeatable. Run 'sandbar land NAME' to list what this VM
                        holds. Paths may be absolute (/home/you/src/app), tilde
                        (~/src/app) or home-relative (src/app).
   --preserve-home      keep the WHOLE home directory, then re-run the playbook
@@ -146,18 +146,18 @@ All of these copy data out of the VM to this host and back in afterwards. Do NOT
 preserve anything from a VM you believe is compromised.
 
 Every other flag you omit is taken from the VM's own recorded settings, so
-'sand reset web' means "give me this VM back". Pass one to change it:
-'sand reset web --disk 200GiB' resizes on the way through.
+'sandbar reset web' means "give me this VM back". Pass one to change it:
+'sandbar reset web --disk 200GiB' resizes on the way through.
 
 There is no --clone-url: a reset rebuilds the project this VM already has. To
-work on a different repo, create another VM with 'sand create'.
+work on a different repo, create another VM with 'sandbar create'.
 A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 An explicit token replaces the saved token after a successful reset.
 
 If a reset fails after the VM was deleted, the error names a directory holding
 your backup. Finish the job with:
 
-  sand reset NAME --from-backup DIR
+  sandbar reset NAME --from-backup DIR
 
 That rebuilds NAME with the settings the failed reset recorded, restores the
 backup in the usual order, and removes DIR once everything is back. The VM must
@@ -165,12 +165,12 @@ not exist (the failed reset already deleted it). Pass --profile if NAME's
 connection profile is not the only enabled one.
 
 Examples:
-  sand reset web                                  # clean rebuild, same settings
-  sand reset web --preserve-agents                # keep coding-agent state
-  sand reset web --preserve-agents --preserve-project
-  sand reset web --preserve ~/src/app --preserve ~/scratch/spike
-  sand reset web --preserve-home                  # keep everything, rebuild the OS
-  sand reset web --cpus 8 --memory 16GiB          # rebuild bigger
+  sandbar reset web                                  # clean rebuild, same settings
+  sandbar reset web --preserve-agents                # keep coding-agent state
+  sandbar reset web --preserve-agents --preserve-project
+  sandbar reset web --preserve ~/src/app --preserve ~/scratch/spike
+  sandbar reset web --preserve-home                  # keep everything, rebuild the OS
+  sandbar reset web --cpus 8 --memory 16GiB          # rebuild bigger
 
 Flags:
 `)
@@ -187,7 +187,7 @@ Flags:
 func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("sand reset: need exactly one VM name")
+		return errors.New("sandbar reset: need exactly one VM name")
 	}
 	name := fs.Arg(0)
 
@@ -203,27 +203,27 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		fmt.Fprintln(os.Stderr, "warning:", loadErr)
 	}
 
-	// WHICH profile owns NAME is resolved the same way `sand shell NAME` resolves
+	// WHICH profile owns NAME is resolved the same way `sandbar shell NAME` resolves
 	// it (marker first, then the registry, then a live listing) rather than
 	// create's "the profile you last used": a reset acts on a VM that already
 	// exists, so the VM decides, not a default.
 	target, err := resolveVMProfile(store, reg, name, o.profile)
 	if err != nil {
 		if o.fromBackup != "" {
-			return fmt.Errorf("sand reset: %w (with --from-backup the VM no longer exists, so name its connection profile with --profile)", err)
+			return fmt.Errorf("sandbar reset: %w (with --from-backup the VM no longer exists, so name its connection profile with --profile)", err)
 		}
-		return fmt.Errorf("sand reset: %w", err)
+		return fmt.Errorf("sandbar reset: %w", err)
 	}
 	p, scope, err := providerForProfile(target)
 	if err != nil {
-		return fmt.Errorf("sand reset: %w", err)
+		return fmt.Errorf("sandbar reset: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
 	}
 
-	// Reconcile against the live listing first, exactly as `sand create` does, so
-	// a VM deleted outside sand is not still treated as managed (and resettable).
+	// Reconcile against the live listing first, exactly as `sandbar create` does, so
+	// a VM deleted outside sandbar is not still treated as managed (and resettable).
 	live, err := p.List()
 	if err != nil {
 		return fmt.Errorf("list existing instances: %w", err)
@@ -252,30 +252,30 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		// the recorded config has to come from the backup's own manifest.
 		cfg, opts, err = resumeReset(reg, name, scope, o, explicit, p.HostUser(), live)
 		if err != nil {
-			return fmt.Errorf("sand reset: %w", err)
+			return fmt.Errorf("sandbar reset: %w", err)
 		}
 	} else {
 		base, ok := manage.RecreateBase(reg, name, scope, provenancer)
 		if !ok {
-			return fmt.Errorf("sand reset: %q is not a sand-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
+			return fmt.Errorf("sandbar reset: %q is not a sand-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
 		}
 		cfg, err = resetConfigFor(reg, name, scope, base, explicit, o.values, p.HostUser())
 		if err != nil {
-			return fmt.Errorf("sand reset: %w", err)
+			return fmt.Errorf("sandbar reset: %w", err)
 		}
 	}
 
 	if err := doReset(ctx, reg, p, cfg, scope, opts, os.Stdout, provenancer); err != nil {
 		return err
 	}
-	// The host secrets, applied into the rebuilt guest — the step `sand create
+	// The host secrets, applied into the rebuilt guest — the step `sandbar create
 	// --recreate` never took, which left a reset VM silently without the secrets
 	// the old one had until someone started it from the TUI. See settleSecrets.
 	settleSecrets(ctx, p, scope, cfg, os.Stdout)
 	return nil
 }
 
-// resumeReset prepares `sand reset NAME --from-backup DIR`: it reads the
+// resumeReset prepares `sandbar reset NAME --from-backup DIR`: it reads the
 // backup's manifest, checks the request makes sense, and returns the config and
 // options to hand to Reset. Everything it refuses, it refuses before any VM is
 // built.
@@ -313,7 +313,7 @@ func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *r
 		return zero, provision.ResetOptions{}, err
 	}
 	if legacy {
-		fmt.Fprintf(os.Stderr, "sand: %s predates backup manifests; rebuilding %s from its recorded settings (or defaults) and restoring the archive.\n", o.fromBackup, name)
+		fmt.Fprintf(os.Stderr, "sandbar: %s predates backup manifests; rebuilding %s from its recorded settings (or defaults) and restoring the archive.\n", o.fromBackup, name)
 	}
 	return cfg, provision.ResetOptions{RestoreFrom: o.fromBackup, TemplateSource: m.TemplateSource}, nil
 }
@@ -334,8 +334,8 @@ type resetFlagValues struct {
 // recorded settings, with any flag the user actually passed applied on top.
 //
 // The recorded config is the SOURCE, not a fallback, and that is the whole
-// contract of the verb — the same one `sand create --recreate` was fixed to
-// honour and the TUI's reset form has always had: `sand reset web` means "give
+// contract of the verb — the same one `sandbar create --recreate` was fixed to
+// honour and the TUI's reset form has always had: `sandbar reset web` means "give
 // me this VM back", never "give me a default VM with this name". A VM with no
 // recorded config (a marker-only instance created by another controller) still
 // resets, from defaults plus this host's identity, because refusing would leave
@@ -444,11 +444,11 @@ func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, e
 
 	if err := cfg.Validate(); err != nil {
 		// Whose value was it? A config the user restated nothing of can only have
-		// failed on what the index holds — a record written by an older sand, or
+		// failed on what the index holds — a record written by an older sandbar, or
 		// hand-edited — and the way out is to pass the settings. A config with a
 		// flag in it most likely failed on THAT, so the bare error is the honest
 		// one; blaming the record would send the user to fix a file that is fine
-		// (`sand reset web --disk 10GiB` reported "web's recorded config is
+		// (`sandbar reset web --disk 10GiB` reported "web's recorded config is
 		// unusable", about a disk size the user had just typed).
 		if found && !anyExplicitSetting(explicit) {
 			return cfg, fmt.Errorf("%s's recorded config is unusable (%w); pass the settings explicitly", name, err)
@@ -497,8 +497,8 @@ func doReset(ctx context.Context, reg *registry.Registry, p resetter, cfg vm.Cre
 }
 
 // reorderFlags moves flag tokens (and the values of flags that take one) ahead
-// of the positional arguments, so `sand reset web --disk 200GiB` parses the
-// same as `sand reset --disk 200GiB web`. flag.FlagSet stops parsing at the
+// of the positional arguments, so `sandbar reset web --disk 200GiB` parses the
+// same as `sandbar reset --disk 200GiB web`. flag.FlagSet stops parsing at the
 // first non-flag token, which would otherwise make the natural spelling —
 // verb, then VM, then options — silently drop every flag after the name.
 //

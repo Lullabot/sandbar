@@ -16,7 +16,7 @@ import (
 
 // TestDoTemplateSnapshotRejectsCollidingName proves a snapshot refuses to
 // overwrite an existing template silently: the whole point of a template
-// name is that `sand create --template NAME` always means the same golden
+// name is that `sandbar create --template NAME` always means the same golden
 // image, so a second `snapshot` under a name already in use must be an error,
 // not a quiet replace.
 func TestDoTemplateSnapshotRejectsCollidingName(t *testing.T) {
@@ -97,7 +97,7 @@ func TestDoTemplateDeleteRejectsUnknownName(t *testing.T) {
 	}
 }
 
-// TestResolveTemplateCreateRejectsRebuild proves `sand create --template X
+// TestResolveTemplateCreateRejectsRebuild proves `sandbar create --template X
 // --rebuild` is refused: --rebuild targets the shared base image, which a
 // --template create never touches (it clones the template instance instead),
 // so combining them is a contradictory request rather than a no-op.
@@ -135,7 +135,7 @@ func TestResolveTemplateCreateRejectsExplicitBaseName(t *testing.T) {
 	}
 }
 
-// TestResolveTemplateCreateRejectsUnknownTemplate proves `sand create
+// TestResolveTemplateCreateRejectsUnknownTemplate proves `sandbar create
 // --template does-not-exist` exits with an error naming the missing template,
 // per the task's acceptance criteria, rather than proceeding to clone a
 // nonexistent instance.
@@ -171,7 +171,7 @@ func TestResolveTemplateCreateResolvesInstanceName(t *testing.T) {
 
 // TestResolveTemplateCreateNoFlagIsNoOp proves that when --template is not
 // passed at all, resolveTemplateCreate is inert: an empty instance name and
-// no error, so an ordinary `sand create` is completely unaffected by this
+// no error, so an ordinary `sandbar create` is completely unaffected by this
 // task's new flag.
 func TestResolveTemplateCreateNoFlagIsNoOp(t *testing.T) {
 	reg := registry.NewEmpty()
@@ -184,7 +184,7 @@ func TestResolveTemplateCreateNoFlagIsNoOp(t *testing.T) {
 	}
 }
 
-// TestHeadlessCreateRecordsTemplateProvenance proves a `sand create
+// TestHeadlessCreateRecordsTemplateProvenance proves a `sandbar create
 // --template` records TemplateSource provenance on the new VM's registry
 // entry (via doHeadlessCreate's templateName parameter), so
 // DependentsOfTemplate and a later --recreate can find it again.
@@ -250,7 +250,7 @@ func TestHeadlessRecreateRejectsTemplateOverride(t *testing.T) {
 	}
 }
 
-// TestDoTemplateListEmptyRegistryIsGraceful proves `sand template list`
+// TestDoTemplateListEmptyRegistryIsGraceful proves `sandbar template list`
 // against an empty registry prints something graceful instead of erroring or
 // printing nothing at all silently.
 func TestDoTemplateListEmptyRegistryIsGraceful(t *testing.T) {

@@ -456,7 +456,7 @@ func (s *Store) Remove(vm string, connScope registry.Scope) error {
 // The re-read matters for the same reason it does in internal/registry: save
 // rewrites the WHOLE file from an in-memory map, so a long-running TUI holding
 // the store it read at startup would otherwise erase the secrets a `sand
-// create`/`sand reset` in another terminal had just written for a different VM.
+// create`/`sandbar reset` in another terminal had just written for a different VM.
 // Two writers editing the SAME VM's pairs concurrently still resolve
 // last-writer-wins for that VM — this store's API replaces a VM's scopes
 // wholesale, so there is no finer merge to make — but they no longer take each

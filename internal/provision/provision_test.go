@@ -677,7 +677,7 @@ func TestCreateVM_StaleBaseIsReappliedInPlace(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 	written := stubBaseVersion(t, "newsha", nil, map[string]string{"sandbar-base": "oldsha"})
-	stubConvergeableBase(t, "/playbook") // a base this build of sand created, from this playbook
+	stubConvergeableBase(t, "/playbook") // a base this build of sandbar created, from this playbook
 
 	if err := p.CreateVM(context.Background(), testConfig(), io.Discard); err != nil {
 		t.Fatalf("CreateVM: %v", err)
@@ -765,7 +765,7 @@ func TestCreateVM_ShrinkingToolsetPrintsAdvisoryOnReapply(t *testing.T) {
 		t.Errorf("advisory did not explain why the tool remains installed:\n%s", got)
 	}
 	if !strings.Contains(got, "--rebuild") {
-		t.Errorf("advisory did not point at the fix (sand create --rebuild):\n%s", got)
+		t.Errorf("advisory did not point at the fix (sandbar create --rebuild):\n%s", got)
 	}
 	// Only the de-selected tool is named — ddev and go are still selected, so
 	// they must not appear as if THEY were the residue.
@@ -947,8 +947,8 @@ func TestCreateVM_RebuildDestroysEvenAnUpToDateBase(t *testing.T) {
 // TestRebuildDeletesTheBaseOnlyWhileHoldingTheBaseLock is the ordering proof for
 // the race this task closes.
 //
-// `sand create --rebuild` used to delete the base in the CLI layer
-// (cmd/sand/create.go), BEFORE the provisioner — and therefore before the base
+// `sandbar create --rebuild` used to delete the base in the CLI layer
+// (cmd/sandbar/create.go), BEFORE the provisioner — and therefore before the base
 // lock was ever taken. Another create holding that lock could be mid-clone from
 // the very base being force-deleted underneath it: the exact race baselock.go's
 // doc comment says the lock exists to close. The destroy now lives inside
@@ -2160,7 +2160,7 @@ func TestConcurrentCreatesReapplyTheStaleBaseOnce(t *testing.T) {
 
 // A --rebuild MUST NOT DESTROY A BASE ANOTHER CREATE IS CLONING FROM.
 //
-// This is the race this task closes. `sand create --rebuild` deleted the base in
+// This is the race this task closes. `sandbar create --rebuild` deleted the base in
 // the CLI layer, before the provisioner and therefore before the base lock was
 // ever taken, while a concurrent create held that lock and spent 40-60s cloning
 // the very disk being deleted. Neither create is doing anything wrong; the destroy

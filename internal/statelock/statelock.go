@@ -4,7 +4,7 @@
 //
 // Both files are rewritten WHOLE from an in-memory map. That is safe for one
 // writer and quietly lossy for two: a long-running TUI holds the state it read
-// at startup, a `sand create` in another terminal adds an entry, and the TUI's
+// at startup, a `sandbar create` in another terminal adds an entry, and the TUI's
 // next save — a delete, a reconcile, a secret edit — writes its own older map
 // over the top and the new VM is simply gone from the index (still a real VM,
 // no longer sand-managed, no longer resettable). The atomic temp-file+rename

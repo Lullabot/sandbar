@@ -1,11 +1,11 @@
 # The Board (TUI)
 
-Running `sand` with no arguments opens a terminal UI: a **tile board**, one
+Running `sandbar` with no arguments opens a terminal UI: a **tile board**, one
 tile per sand-managed VM. There is no table view and no per-VM detail
 screen — both were deliberately removed. Every verb fires straight from the
 tile under the focus ring.
 
-![The sand board: a running 'drupal-contrib' VM and a stopped 'lullabotdotcom' VM as tiles, with a Messages pane and keybinding footer.](../images/board.png)
+![The sandbar board: a running 'drupal-contrib' VM and a stopped 'lullabotdotcom' VM as tiles, with a Messages pane and keybinding footer.](../images/board.png)
 
 ## The header
 
@@ -21,23 +21,23 @@ does not count base images or unmanaged VMs — the board only ever shows
 sand-managed clones, and the header doesn't either. Manage a base image with
 `limactl` (or the Proxmox UI) directly.
 
-On first launch, sand shows a short onboarding screen before the board. Press
+On first launch, sandbar shows a short onboarding screen before the board. Press
 `enter` to continue; the acknowledgement is saved so it is not shown again.
 From the `?` help screen, press `o` to reopen it. Its installed release notes
 and feature or bug request links can be clicked in terminals that support OSC 8
 hyperlinks, or opened with `n` and `r` respectively using your default browser.
 The screen also explains the persistent tmux shell; see
 [Files and Shells](files-and-shells.md) for the full tmux and file-transfer
-guide. When sand detects Warp (`TERM_PROGRAM=WarpTerminal`), onboarding warns
-that Sand and Claude Code can have terminal compatibility issues there.
+guide. When sandbar detects Warp (`TERM_PROGRAM=WarpTerminal`), onboarding warns
+that Sandbar and Claude Code can have terminal compatibility issues there.
 
-Sand checks GitHub for a newer stable release in the background, at most once
+Sandbar checks GitHub for a newer stable release in the background, at most once
 per 24 hours. A newer release adds a clickable `(Update available!)` link
 beside the version in the full header; `?` then offers `n` to open those notes
 in your browser. A narrow full header drops the update notice before the
 installed version, and the entire title row is omitted in compact layouts. Failed
 checks are quiet, keep the last valid result, and still use the 24-hour retry
-interval. Sand never downloads or installs an update for you.
+interval. Sandbar never downloads or installs an update for you.
 
 ## The tile board
 
@@ -60,7 +60,7 @@ the host or hypervisor, followed by the VM's configured total. For example,
 `30 GiB/32 GiB` means the VM currently occupies about 30 GiB from the host's
 point of view. It is not Linux's guest-side `used` calculation.
 
-For Lima, sand samples the host process backing each VM: QEMU's process or the
+For Lima, sandbar samples the host process backing each VM: QEMU's process or the
 macOS Virtualization worker that has the VM's disk open. This is a process RSS
 estimate, which can include virtualization overhead. If that host measurement
 cannot be obtained, the existing guest memory reading remains visible as
@@ -69,7 +69,7 @@ physical host RAM used by the VM.
 
 The filled memory bar separates the guest's filesystem cache with a patterned
 segment. That segment is part of the host-resident total, not an amount added
-to it. The two readings are sampled independently, so sand clamps the cache
+to it. The two readings are sampled independently, so sandbar clamps the cache
 segment when they momentarily disagree. A guest-only gauge has no cache
 pattern because Linux's guest `used` figure excludes cache. If neither memory
 reading is available, the tile shows an unknown value instead of a guessed zero.
@@ -103,7 +103,7 @@ These act on the board itself, regardless of which tile is focused.
 | `n` | Create a new VM |
 | `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
 | `/` | Search / filter tiles by name |
-| `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sand` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
+| `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sandbar` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
 | `?` | Show the keys screen |
 | `q` | Quit |
 
@@ -120,7 +120,7 @@ require the VM to be running.
 | `x` | Stop | Shut the VM down cleanly. Its disk and its secrets are kept. |
 | `r` | Restart | Stop the VM and start it again, applying any secrets you've changed since it booted. |
 | `m` | Reclaim memory | Flush writes and release the guest filesystem cache. Offered only on a running VM whose provider can return that cache memory to its host; currently this means Proxmox. The tile refreshes its guest cache and host-resident memory readings when the action finishes. |
-| `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sand created. |
+| `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sandbar created. |
 | `t` | Snapshot → template | Capture this managed VM as a reusable [golden template](golden-templates.md). A running source is stopped briefly and restored afterward. |
 | `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](files-and-shells.md). |
 | `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent. |
@@ -184,13 +184,13 @@ triggers a round-trip into it. On a stopped VM the warning is labeled with
 how long ago that data was last seen (`as of 3d ago`), since a stopped guest
 cannot be re-swept.
 
-For the full set of `sand` subcommands and flags (including `sand shell`),
+For the full set of `sandbar` subcommands and flags (including `sandbar shell`),
 see the [CLI Reference](cli-reference.md).
 
 ## Connection profiles
 
 `p` opens the profile management screen — a list of every
-[Connection Profile](connection-profiles.md) `sand` knows about (Local plus
+[Connection Profile](connection-profiles.md) `sandbar` knows about (Local plus
 any remote hosts you've added), with keys to create, edit, enable/disable,
 and delete them. Every change there is live: enabling a profile builds its
 connection and starts showing its tiles immediately, with no restart.
@@ -218,7 +218,7 @@ editable because cloning a private repository again requires a token. GitHub
 and GitLab.com are detected from their hostnames; a self-hosted GitLab choice
 is recorded when the VM is created.
 
-The CLI equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name).
+The CLI equivalent is [`sandbar reset NAME`](cli-reference.md#sandbar-reset-name).
 
 ### Choosing what survives
 
@@ -250,11 +250,11 @@ enter to toggle the focused option; its help text describes what it copies.
   use the whole-home option if you need to keep its files.
 
 Preserved data passes through a private directory on your workstation.
-`sand` removes the copy after a successful reset. If a reset fails after
+`sandbar` removes the copy after a successful reset. If a reset fails after
 attempting to delete the VM, it keeps the archives and prints their path
-for recovery, along with the `sand reset NAME --from-backup DIR` command that
+for recovery, along with the `sandbar reset NAME --from-backup DIR` command that
 finishes the reset from a terminal. See
-[`sand reset`](cli-reference.md#if-a-reset-fails-after-the-vm-was-deleted).
+[`sandbar reset`](cli-reference.md#if-a-reset-fails-after-the-vm-was-deleted).
 
 **Do not preserve data if you suspect the VM is compromised.** It can
 include credentials and files written by an agent. See

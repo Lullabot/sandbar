@@ -1,6 +1,6 @@
 # Web Servers and Ports
 
-How to reach a web server running inside a `sand` VM — a ddev project,
+How to reach a web server running inside a `sandbar` VM — a ddev project,
 `npm run dev`, `python3 -m http.server`, anything listening on a TCP port.
 The answer depends on where the VM lives:
 
@@ -13,7 +13,7 @@ The answer depends on where the VM lives:
 ## Local VMs: ports appear on localhost
 
 Lima automatically forwards every TCP port that starts listening inside the
-guest to `127.0.0.1` on your machine, same port number. `sand` doesn't add
+guest to `127.0.0.1` on your machine, same port number. `sandbar` doesn't add
 or restrict anything here — it inherits Lima's default behavior — so a
 server started in the guest:
 
@@ -72,7 +72,7 @@ after which the project URL is `https://myproj.ddev.site:8443`.
 
 A VM on a Proxmox host isn't behind port forwarding at all. It's attached to
 a Linux bridge and gets its own address on that network — the same address
-`sand` uses to SSH into it — so a server listening in the guest is reachable
+`sandbar` uses to SSH into it — so a server listening in the guest is reachable
 at `http://<guest-ip>:PORT` from anything that can route to it, including
 your browser. Privileged ports are not a problem either: nothing is
 forwarded, so a guest server on port 80 or 443 is just there.
@@ -89,7 +89,7 @@ Two consequences of a real network address:
   are reachable by anything else on that network, not just by you. That's
   why the [security model](../reference/security-model.md) expects a Proxmox
   host to sit on an isolated LAN or VLAN, and why you shouldn't run a
-  `sand` VM on a network you don't control.
+  `sandbar` VM on a network you don't control.
 - **`*.ddev.site` won't resolve to it.** Those names resolve to
   `127.0.0.1` in public DNS, which is wrong for a guest on its own address.
   Add a hosts entry pointing the project name at the guest IP, or use
@@ -100,7 +100,7 @@ Two consequences of a real network address:
 On a `remote-ssh` profile the same Lima forwarding happens — but to
 `127.0.0.1` **on the remote host**. That's a machine you can SSH into, not
 the one your browser runs on, so a guest web server is reachable from nowhere
-except the remote host itself. `sand` adds no port forwarding of its own over
+except the remote host itself. `sandbar` adds no port forwarding of its own over
 the profile's SSH connection, and the
 [security model](../reference/security-model.md) assumes remote hosts sit
 on an isolated network behind whatever firewalling you already have.
@@ -145,7 +145,7 @@ account and `ngrok config add-authtoken` first; cloudflared avoids both.)
     Anyone who has the URL can reach the server — there is no
     authentication in front of it. The URL is random and unlisted, but
     treat it as public: don't leave a tunnel running unattended, and
-    remember that everything a `sand` VM serves may be agent-written.
+    remember that everything a `sandbar` VM serves may be agent-written.
     Quick Tunnels are also rate-limited and intended for testing, not
     hosting.
 
@@ -172,7 +172,7 @@ local VM.
 
 The catches, and why this recipe is manual:
 
-- **The remote end must exist.** The remote hosts `sand` targets are Linux,
+- **The remote end must exist.** The remote hosts `sandbar` targets are Linux,
   so the privileged-port rule applies *there*: out of the box Lima has not
   forwarded a guest's port 80/443 to the remote loopback at all. Move ddev
   to high router ports (easiest), or raise
@@ -184,7 +184,7 @@ The catches, and why this recipe is manual:
 - **One `-L` per port, one process to babysit.** The forward lives and dies
   with that `ssh` process.
 
-Connection profiles have no field for declaring port forwards — `sand`
+Connection profiles have no field for declaring port forwards — `sandbar`
 neither creates nor manages SSH tunnels. If a guest port matters to your
 workflow, script the `ssh -L` invocation yourself, or prefer cloudflared,
 which needs nothing from the machine you're browsing on.

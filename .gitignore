@@ -1,18 +1,18 @@
 group_vars/all.yml
-# Personal Lima config (image digests, paths) — generate VMs with `sand create`
+# Personal Lima config (image digests, paths) — generate VMs with `sandbar create`
 /lima.yaml
 
 # GoReleaser build output
 dist/
 
-# `go build ./cmd/sand` drops the binary at the repo root
+# `go build ./cmd/sandbar` drops the binary at the repo root
 /sand
 
 # MkDocs build output
 site/
 
 # Local env for the opt-in e2e suites (host names, pool, token file paths).
-# `sand` itself reads no env vars — these belong to the tests alone.
+# `sandbar` itself reads no env vars — these belong to the tests alone.
 .env
 
 # Claude Code's per-task git worktrees, checked out inside the repo.
@@ -21,3 +21,5 @@ site/
 # Local env for the opt-in Proxmox e2e suite, beside the `.env` above: host,
 # node, pool, storage and the PATH to a token file — never the token itself.
 /e2e.env
+
+/sandbar

@@ -882,7 +882,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 					return stage.Fail(err)
 				}
 				// Recorded while the VM is still intact, so a failure that strands the
-				// archives can be resumed with `sand reset --from-backup`.
+				// archives can be resumed with `sandbar reset --from-backup`.
 				if err := stage.WriteManifest(provision.NewResetManifest(cfg, plan, opts)); err != nil {
 					return stage.Fail(err)
 				}

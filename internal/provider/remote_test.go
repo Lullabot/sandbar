@@ -28,7 +28,7 @@ func newRemote(t *testing.T) provider.Provider {
 
 // TestRemoteProviderAttachArgv proves the remote provider produces the ssh-wrapped
 // attach argv (`ssh -t [mux flags] dev@example.com limactl shell <name> bash -c
-// <expr>`) so `sand shell` and the TUI `S` verb get the remote form with zero
+// <expr>`) so `sandbar shell` and the TUI `S` verb get the remote form with zero
 // drift. With an empty Dir the guest home cannot be read (no remote round trip),
 // so --workdir is omitted, exactly mirroring the local provider's documented
 // fallback. The guest tmux expression is preserved byte-for-byte.

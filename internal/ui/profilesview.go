@@ -10,7 +10,7 @@ package ui
 // Every mutation is LIVE, with no restart: ENABLE builds that one profile's
 // provider/scope binding (buildProfileProvider — the same conversion
 // provider.BuildFleet applies per-profile, reimplemented here exactly as
-// cmd/sand/resolve.go's providerForProfile already does, since neither
+// cmd/sandbar/resolve.go's providerForProfile already does, since neither
 // package can reach the other's unexported constructor without risking an
 // import cycle), appends (or revives) its fleetMember in the connecting
 // state, and kicks its connect/list cmd — see rebuildMember. DISABLE tears
@@ -70,7 +70,7 @@ var profileFieldLabels = []string{"Name", "Host", "User", "Port", "Identity path
 // which is why that one must read true for a Local profile too.
 var profileFieldInfo = []string{
 	"Required. Display label for this profile. Rename it freely — VMs, jobs and the last-used pointer follow it by ID, not by name.",
-	"Required. Hostname or IP sand reaches this Lima host at over SSH.",
+	"Required. Hostname or IP sandbar reaches this Lima host at over SSH.",
 	"Required. SSH login on that host. With host and port this forms the profile's registry scope, so editing it re-keys which VMs the profile owns.",
 	"SSH port. Blank → 22.",
 	"Optional. Path to the SSH private key. Blank → whatever your ssh agent and ~/.ssh/config already resolve for this host.",
@@ -93,7 +93,7 @@ const (
 	ppTokenFile
 	ppCAFile
 	// ppIdentityPath is REQUIRED for Proxmox, unlike its RemoteSSH namesake
-	// (which may fall back to the ssh agent): sand installs
+	// (which may fall back to the ssh agent): sandbar installs
 	// <identity_path>.pub into every guest via cloud-init and then connects
 	// with the private key. Without a field for it here, a profile created on
 	// this screen could never launch a VM — it failed at Preflight with an
@@ -135,13 +135,13 @@ var proxmoxFieldInfo = []string{
 	profileFieldInfo[pfName],
 	"Required. Hostname or IP the Proxmox API answers on. A bare host uses port 8006; append :port only if you changed it.",
 	"Required. The PVE node name — the identifier in /nodes/<node>/… API paths, which is not always the same string as the host above.",
-	"Required. The resource pool sand's VMs are created in, and the pool the API token is scoped to. Host, node and pool together form this profile's registry scope.",
+	"Required. The resource pool sandbar's VMs are created in, and the pool the API token is scoped to. Host, node and pool together form this profile's registry scope.",
 	"Required. Storage backing VM disks — it must accept content type \"images\" (local-lvm, a ZFS pool, …).",
 	"Required. The Linux bridge each VM's NIC attaches to, usually vmbr0. Leaving it blank would not mean \"no network\" — it gives QEMU user-mode NAT, and the guest is then unreachable over SSH.",
 	"Required. PATH to a file holding user@realm!tokenid=value — never the token itself. It must not be readable by group or other.",
 	"Optional. PEM CA bundle to verify the Proxmox API certificate against — the safe alternative to Insecure for a self-signed cert.",
-	"Required. Path to your SSH private key. sand installs <path>.pub into every guest via cloud-init, then connects with the key.",
-	"Optional. The guest login cloud-init creates in each VM, and that sand SSHes in as. Blank → your local username. Existing VMs keep the account they were built with.",
+	"Required. Path to your SSH private key. sandbar installs <path>.pub into every guest via cloud-init, then connects with the key.",
+	"Optional. The guest login cloud-init creates in each VM, and that sandbar SSHes in as. Blank → your local username. Existing VMs keep the account they were built with.",
 	"Optional. FILE-BASED storage (dir/NFS/CIFS) the cloud image downloads to with content=import, which block storages like zfspool and lvm-thin reject. Blank → local.",
 	"Optional. URL of the cloud image the base template is built from. Blank → the project golden image (Debian with qemu-guest-agent, checksum-verified).",
 }
@@ -261,7 +261,7 @@ func (m model) profileFormFocusIsCheckbox() bool {
 }
 
 // isRemoteProfile reports whether p is reached over the NETWORK rather than
-// being the machine sand runs on — true for RemoteSSH and for Proxmox, which
+// being the machine sandbar runs on — true for RemoteSSH and for Proxmox, which
 // is equally remote, just not over ssh. The one place that answers this, so
 // the connection lifecycle speaks with one voice: the sites that announce
 // "connecting to", "connected to", "reconnecting to" and "reconnected to"
@@ -379,7 +379,7 @@ func (m model) profileBlockingJobForID(id string) (string, bool) {
 // truth for it, because the hand-copy that used to live here silently dropped
 // IdentityPath (and ImageStorage/BaseImage), so a Proxmox profile enabled
 // from this screen built a provider with no SSH key and failed at Preflight
-// while the identical profile worked from `sand --profile`. Only the
+// while the identical profile worked from `sandbar --profile`. Only the
 // constructor choice and this package's own error wrapping stay local.
 // Construction never round-trips the network (NewDefault/NewRemoteLima/
 // NewProxmox do not connect), so this is always fast and safe to call from
@@ -832,7 +832,7 @@ func (m model) submitProfileForm() (tea.Model, tea.Cmd) {
 		// anything — the form would have accepted a configuration that is dead
 		// on arrival:
 		//
-		//   identity path — the key sand installs into every guest via
+		//   identity path — the key sandbar installs into every guest via
 		//     cloud-init and then connects with (readPublicKey, then ssh -i).
 		//   storage       — backs scsi0/ide2; pve.CreateVMOptions rejects an
 		//     empty one outright (internal/pve/vm.go).

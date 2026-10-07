@@ -232,7 +232,7 @@ func TestDoPublishReportsPartialFailureFromResult(t *testing.T) {
 	dp := &fakeDestPublisher{
 		dest:       sampleDestination(),
 		result:     res,
-		publishErr: fmt.Errorf("sand publish: commit 2/3 failed: %w", failErr),
+		publishErr: fmt.Errorf("sandbar publish: commit 2/3 failed: %w", failErr),
 	}
 
 	var stdout strings.Builder

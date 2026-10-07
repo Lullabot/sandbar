@@ -1,7 +1,7 @@
 // Package guestsh builds the commands that run INSIDE a sand VM, independent of
 // how a backend reaches it. It is the ONLY place in sand that knows tmux exists.
 //
-// Every entrypoint into a guest shell — the TUI's `S` verb and `sand shell`, on
+// Every entrypoint into a guest shell — the TUI's `S` verb and `sandbar shell`, on
 // every backend — builds its command from AttachArgv, and none constructs a tmux
 // command of its own. A Lima backend wraps these argv elements in `limactl shell
 // <name> …`; the Proxmox backend wraps the SAME elements in `ssh -t <ip> …`. That
@@ -56,7 +56,7 @@ import "regexp"
 // session evaporates on detach while `main` and its processes live on.
 //
 // **The grouped session's name is chosen in the guest** ($$, the attaching shell's
-// PID) so two concurrent `sand shell` invocations cannot collide on it. A
+// PID) so two concurrent `sandbar shell` invocations cannot collide on it. A
 // host-computed counter would race; a PID is allocated by the same kernel that owns
 // the tmux server it is naming a session in.
 //
@@ -133,7 +133,7 @@ const (
 	// AttachControl starts a control-mode client (`tmux -CC`). tmux then speaks
 	// a line protocol on stdout instead of drawing, and a terminal that
 	// understands it renders each tmux window as a NATIVE tab. This is what
-	// `sand shell --cc` asks for.
+	// `sandbar shell --cc` asks for.
 	//
 	// Nothing here detects the terminal, and nothing should: this is stock
 	// tmux, so which emulators cooperate is their business and changes without
@@ -150,7 +150,7 @@ const (
 	// `allow-passthrough` both off and on: text either side of the sequence
 	// reaches the client and the sequence itself never does. So an emulator
 	// sitting outside a host tmux never sees the handshake and the user gets
-	// the raw control protocol printed as gibberish. cmd/sand's shell
+	// the raw control protocol printed as gibberish. cmd/sandbar's shell
 	// subcommand warns when $TMUX is set for exactly this reason.
 	AttachControl
 )

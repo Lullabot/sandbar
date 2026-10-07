@@ -11,7 +11,7 @@ import (
 // upstream tracking ref (which BuildCollectCommand takes as its base).
 //
 // It lives here, beside BuildCollectCommand and ParseCollect, rather than in
-// either surface. Both `sand publish` and the Landing pane's publish action
+// either surface. Both `sandbar publish` and the Landing pane's publish action
 // need exactly this step, and the plan requires resolution logic to live once
 // rather than be implemented twice — when it was written per-surface the two
 // copies had already drifted apart in their error text before either shipped.

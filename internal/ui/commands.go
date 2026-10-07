@@ -244,7 +244,7 @@ var errNoProvider = fmt.Errorf("connection profile could not be constructed")
 // that is up without its secrets is more useful than one reported as
 // failed-to-start. If Start itself fails, ApplySecrets is never attempted.
 //
-// Note: a VM started outside sand (a bare `limactl start`) does not get
+// Note: a VM started outside sandbar (a bare `limactl start`) does not get
 // freshly applied secrets — it sources whatever secrets.env was last written
 // by a previous sand-initiated start (or none, if there never was one).
 func startCmd(p provider.Provider, scope registry.Scope, name, user string, scopes map[string]map[string]string) tea.Cmd {
@@ -403,7 +403,7 @@ func stopAllCmd(p provider.Provider, scope registry.Scope, names []string) tea.C
 //     tear down the alt-screen and release input to suspend the TUI for
 //     essentially no time at all — defeating the entire point of the branch,
 //     which is to keep the live board and its in-flight job progress bars on
-//     screen next to the new shell. The new window re-enters through `sand
+//     screen next to the new shell. The new window re-enters through `sandbar
 //     shell <name>` rather than reaching into the provider directly, so the
 //     fast path and a user typing the command by hand are the exact same
 //     code.
@@ -459,7 +459,7 @@ func hostTmuxWindowCmd(scope registry.Scope, name string) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
-			self = "sand" // last resort: PATH lookup: os.Executable rarely fails
+			self = "sandbar" // last resort: PATH lookup: os.Executable rarely fails
 		}
 		err = runHostTmuxNewWindow(hostTmuxShellCommand(self, name))
 		return actionDoneMsg{action: "shell", name: name, scope: scope, err: err}
@@ -469,12 +469,12 @@ func hostTmuxWindowCmd(scope registry.Scope, name string) tea.Cmd {
 // hostTmuxShellCommand builds the single shell-command string `tmux
 // new-window` runs in its new window. tmux hands that string to $SHELL -c,
 // so self (the running binary's own resolved path — NOT the bare word
-// "sand", which may not be on PATH for an absolute invocation or a `go run`)
+// "sandbar", which may not be on PATH for an absolute invocation or a `go run`)
 // and name are each quoted as one POSIX shell word rather than joined with a
 // bare space: a resolved binary path is not guaranteed to be space-free.
 //
 // THE WINDOW IS HELD OPEN ON FAILURE. tmux closes a window the instant its command
-// exits, so a `sand shell` that fails — the VM stopped between the keypress and the
+// exits, so a `sandbar shell` that fails — the VM stopped between the keypress and the
 // attach, limactl not on PATH, a guest with no tmux — printed its error into a
 // window that vanished in the same frame. What the user sees is "a tmux window
 // opened and immediately closed", with no way to find out why; the board, meanwhile,
@@ -484,7 +484,7 @@ func hostTmuxWindowCmd(scope registry.Scope, name string) tea.Cmd {
 // must not tax the normal path.
 func hostTmuxShellCommand(self, name string) string {
 	attach := shQuote(self) + " shell " + shQuote(name)
-	return attach + ` || { printf '\n[sand] shell exited with an error — press enter to close this window.'; read -r _; }`
+	return attach + ` || { printf '\n[sandbar] shell exited with an error — press enter to close this window.'; read -r _; }`
 }
 
 // shQuote quotes s as a single POSIX shell word.

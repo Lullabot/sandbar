@@ -36,7 +36,7 @@ func TestHelpScreenDescribesEveryVerb(t *testing.T) {
 	}
 	// It is a REFERENCE, not a footer: a verb that does not apply to the focused VM
 	// right now is still listed. `s start` does not apply to a running VM, and a user
-	// asking "can sand start a VM" must not have to stop one first to find out.
+	// asking "can sandbar start a VM" must not have to stop one first to find out.
 	if !strings.Contains(boardVerbs(m), "x stop") {
 		t.Fatal("precondition: a running VM offers stop, not start")
 	}

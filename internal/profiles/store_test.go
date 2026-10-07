@@ -457,7 +457,7 @@ func TestSecondLocalRejected(t *testing.T) {
 // a read failure that is NOT "file does not exist" (e.g. a permission error)
 // must not degrade to an empty, unseeded store — that locks the user out of
 // even purely-local VMs (runTUI's "no enabled connection profiles" exit,
-// `sand create` failing). Using a directory at path (rather than chmod,
+// `sandbar create` failing). Using a directory at path (rather than chmod,
 // which behaves inconsistently when tests run as root) forces os.ReadFile to
 // fail with something other than fs.ErrNotExist, portably. The fix must
 // return the store seeded with a usable, ENABLED Local profile alongside the

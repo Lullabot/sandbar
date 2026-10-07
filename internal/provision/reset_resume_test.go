@@ -31,7 +31,7 @@ func TestReset_WritesManifestWithoutTheToken(t *testing.T) {
 	if dir == "" {
 		t.Fatalf("expected a kept staging dir, got %v", err)
 	}
-	if want := "sand reset claude --from-backup " + dir; !strings.Contains(err.Error(), want) {
+	if want := "sandbar reset claude --from-backup " + dir; !strings.Contains(err.Error(), want) {
 		t.Errorf("the error does not say how to resume (want %q):\n%v", want, err)
 	}
 	data, rerr := os.ReadFile(filepath.Join(dir, resetManifestName))

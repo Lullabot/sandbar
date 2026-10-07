@@ -9,7 +9,7 @@ package ui
 // stays raised on a VM that finished building and works perfectly. Every
 // controller then reads that marker on every refresh and paints "Building", and
 // since deriveStatus consults remoteProvisioning BEFORE the VM's real status,
-// the tile cannot even fall through to Stopped. Nothing in sand cleared it: the
+// the tile cannot even fall through to Stopped. Nothing in sandbar cleared it: the
 // only exit was hand-editing the marker on the host (a Proxmox VM's Notes
 // field), which is not a thing a user should ever need to know exists.
 //
@@ -17,7 +17,7 @@ package ui
 // marker is not a decision anyone needs to make — it is bookkeeping that fell
 // out of step with reality, and the tool can see that and fix it. Shipping a
 // "clear this marker" command instead would have made every user learn the
-// marker exists in order to recover from a bug in how sand maintains it.
+// marker exists in order to recover from a bug in how sandbar maintains it.
 
 import (
 	"context"

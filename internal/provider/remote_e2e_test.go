@@ -1,7 +1,7 @@
 //go:build limae2e
 
 // remote_e2e_test.go is the remote-Lima-over-SSH counterpart to
-// cmd/sand/create_e2e_test.go and internal/lima/copy_e2e_test.go: it drives the
+// cmd/sandbar/create_e2e_test.go and internal/lima/copy_e2e_test.go: it drives the
 // REAL remote provider (remote.go) against a REAL SSH target end to end —
 // create, the recorded-managed/remote-scope claim, the attach argv, a
 // copy-and-read-back, list, stop, delete — and confirms a
@@ -187,7 +187,7 @@ func TestE2ERemoteLima(t *testing.T) {
 		Locale:   "en_US.UTF-8",
 		// Every optional tool flag left at its zero value (false): this test
 		// exercises the SSH transport/topology, never the base's installed
-		// tooling — see cmd/sand/create_e2e_test.go's ensureCmdE2EBase for the
+		// tooling — see cmd/sandbar/create_e2e_test.go's ensureCmdE2EBase for the
 		// same reasoning.
 	}
 

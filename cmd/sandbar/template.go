@@ -38,7 +38,7 @@ type templateDiskSizer interface {
 	TemplateDiskBytes(templateInstance string) int64
 }
 
-// runTemplate implements the `sand template` subcommand group: snapshot, list,
+// runTemplate implements the `sandbar template` subcommand group: snapshot, list,
 // and delete for golden VM templates (see internal/vm/template.go and
 // internal/registry.Template). Mirrors runCreate/runShell's dispatch shape —
 // os.Args[2:] is handed straight in from main.go, and this switches on the
@@ -59,17 +59,17 @@ func runTemplate(args []string) int {
 	case "delete":
 		return runTemplateDelete(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "sand template: unknown subcommand %q\n\n", args[0])
+		fmt.Fprintf(os.Stderr, "sandbar template: unknown subcommand %q\n\n", args[0])
 		printTemplateUsage(os.Stderr)
 		return 2
 	}
 }
 
 func printTemplateUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage: sand template <command> [flags]
+	fmt.Fprint(w, `Usage: sandbar template <command> [flags]
 
 Manage golden VM templates: named, reusable clone sources captured from an
-existing sand-managed VM, so 'sand create --template NAME' can skip the
+existing sand-managed VM, so 'sandbar create --template NAME' can skip the
 shared base image build while still running the clone's finalize pass.
 
 Commands:
@@ -78,12 +78,12 @@ Commands:
   delete <name>                 delete a template
 
 Every command accepts --profile to select a connection profile (default: the
-last-used profile, else "local"). Run 'sand template <command> -h' for
+last-used profile, else "local"). Run 'sandbar template <command> -h' for
 command-specific flags.
 `)
 }
 
-// runTemplateSnapshot implements `sand template snapshot <source> <name>`: it
+// runTemplateSnapshot implements `sandbar template snapshot <source> <name>`: it
 // resolves the connection profile, loads the registry, and delegates the
 // decision logic to doTemplateSnapshot (kept separate so it can be unit
 // tested against a providerfake.Provider without any of this profile/registry
@@ -92,7 +92,7 @@ func runTemplateSnapshot(args []string) int {
 	fs := flag.NewFlagSet("template snapshot", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile to act on (default: the last-used profile, else \"local\")")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand template snapshot <source-vm> <name> [--profile P]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar template snapshot <source-vm> <name> [--profile P]
 
 Capture source-vm — an existing sand-managed VM, running or stopped — into a
 new golden template named name. The source VM's power state is preserved
@@ -110,7 +110,7 @@ Flags:
 	}
 	if fs.NArg() != 2 {
 		fs.Usage()
-		fmt.Fprintln(os.Stderr, "sand template snapshot: need exactly two positional args: <source-vm> <name>")
+		fmt.Fprintln(os.Stderr, "sandbar template snapshot: need exactly two positional args: <source-vm> <name>")
 		return 2
 	}
 	source, name := fs.Arg(0), fs.Arg(1)
@@ -118,7 +118,7 @@ Flags:
 	store := loadStore()
 	p, scope, profile, err := bindingForProfileName(store, *profileFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sand template snapshot:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template snapshot:", err)
 		return 1
 	}
 	if err := p.Preflight(); err != nil {
@@ -138,7 +138,7 @@ Flags:
 	defer stop()
 
 	if err := doTemplateSnapshot(ctx, reg, p, scope, source, name, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "sand template snapshot:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template snapshot:", err)
 		return 1
 	}
 
@@ -154,7 +154,7 @@ Flags:
 // and records the resulting registry.Template. Config is copied from the
 // source VM's own recorded config, with BaseName repointed at the template's
 // own reserved instance name (vm.TemplateInstanceName(name)) — a later
-// `sand create --template name` clones from THAT, never from source itself,
+// `sandbar create --template name` clones from THAT, never from source itself,
 // so `source` staying alive/mutating afterward cannot affect the template.
 func doTemplateSnapshot(ctx context.Context, reg *registry.Registry, prov templateSnapshotter, scope registry.Scope, source, name string, out io.Writer) error {
 	if err := vm.ValidateTemplateName(name); err != nil {
@@ -207,15 +207,15 @@ func doTemplateSnapshot(ctx context.Context, reg *registry.Registry, prov templa
 	return nil
 }
 
-// runTemplateList implements `sand template list`.
+// runTemplateList implements `sandbar template list`.
 func runTemplateList(args []string) int {
 	fs := flag.NewFlagSet("template list", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile to act on (default: the last-used profile, else \"local\")")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand template list [--profile P]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar template list [--profile P]
 
 List golden templates in scope: name, disk size, creation date, source VM,
-and whether the template is stale against the playbook this build of sand
+and whether the template is stale against the playbook this build of sandbar
 embeds.
 
 Flags:
@@ -236,7 +236,7 @@ Flags:
 	store := loadStore()
 	p, scope, _, err := bindingForProfileName(store, *profileFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sand template list:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template list:", err)
 		return 1
 	}
 	if err := p.Preflight(); err != nil {
@@ -253,7 +253,7 @@ Flags:
 	}
 
 	if err := doTemplateList(reg, p, scope, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "sand template list:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template list:", err)
 		return 1
 	}
 	return 0
@@ -318,12 +318,12 @@ func humanizeTemplateBytes(n int64) string {
 	return str + " " + units[exp]
 }
 
-// runTemplateDelete implements `sand template delete <name>`.
+// runTemplateDelete implements `sandbar template delete <name>`.
 func runTemplateDelete(args []string) int {
 	fs := flag.NewFlagSet("template delete", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile to act on (default: the last-used profile, else \"local\")")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand template delete <name> [--profile P]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar template delete <name> [--profile P]
 
 Delete a golden template. If any managed VMs were cloned from it, a warning
 lists them (they keep working, but can no longer be recreated from this
@@ -342,7 +342,7 @@ Flags:
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		fmt.Fprintln(os.Stderr, "sand template delete: need exactly one positional arg: <name>")
+		fmt.Fprintln(os.Stderr, "sandbar template delete: need exactly one positional arg: <name>")
 		return 2
 	}
 	name := fs.Arg(0)
@@ -350,7 +350,7 @@ Flags:
 	store := loadStore()
 	p, scope, _, err := bindingForProfileName(store, *profileFlag)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sand template delete:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template delete:", err)
 		return 1
 	}
 	if err := p.Preflight(); err != nil {
@@ -370,7 +370,7 @@ Flags:
 	defer stop()
 
 	if err := doTemplateDelete(ctx, reg, p, scope, name, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "sand template delete:", err)
+		fmt.Fprintln(os.Stderr, "sandbar template delete:", err)
 		return 1
 	}
 	return 0
@@ -397,11 +397,11 @@ func doTemplateDelete(ctx context.Context, reg *registry.Registry, prov template
 	return nil
 }
 
-// resolveTemplateCreate is `sand create --template`'s decision logic,
+// resolveTemplateCreate is `sandbar create --template`'s decision logic,
 // factored out of runCreate so it can be unit tested against a bare registry
 // without constructing a provider/binding at all.
 //
-// An empty templateName is a no-op (ordinary `sand create`, unaffected by
+// An empty templateName is a no-op (ordinary `sandbar create`, unaffected by
 // this flag): it returns ("", nil). A non-empty templateName is rejected as
 // mutually exclusive with --rebuild (which targets the shared base image, not
 // touched by a template clone) and with an explicitly-passed --base-name
@@ -421,7 +421,7 @@ func resolveTemplateCreate(reg *registry.Registry, scope registry.Scope, templat
 		return "", fmt.Errorf("--template is mutually exclusive with an explicit --base-name (the template instance IS the clone source)")
 	}
 	if _, ok := reg.TemplateInScope(templateName, scope); !ok {
-		return "", fmt.Errorf("no template named %q in this scope (run 'sand template list')", templateName)
+		return "", fmt.Errorf("no template named %q in this scope (run 'sandbar template list')", templateName)
 	}
 	return vm.TemplateInstanceName(templateName), nil
 }

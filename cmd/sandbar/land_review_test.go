@@ -78,7 +78,7 @@ func newReviewHarness() *reviewHarness {
 }
 
 // announceOn writes the startup lines @self-review/serve prints to stderr,
-// which every guest transport in sand merges into the single writer Shell is
+// which every guest transport in sandbar merges into the single writer Shell is
 // handed. The session learns the port from nowhere else, so a fake that
 // skipped this would be modelling a server that never came up.
 func (h *reviewHarness) announceOn(out io.Writer, port int) {
@@ -529,7 +529,7 @@ func TestReviewServerExitFailureBeatsTheReadinessTimeout(t *testing.T) {
 	// guest's own `not found` names a command, not a way out of it. There is
 	// no flag to name any more: adding the role moved the playbook hash, so
 	// the next create converges the base and installs it.
-	if !strings.Contains(err.Error(), "sand create") {
+	if !strings.Contains(err.Error(), "sandbar create") {
 		t.Errorf("landReview error = %v, want it to say how to get the tool installed", err)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {

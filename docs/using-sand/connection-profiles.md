@@ -1,22 +1,22 @@
 # Where VMs Run
 
-A `sand` VM doesn't have to run on the machine in front of you. It can run:
+A `sandbar` VM doesn't have to run on the machine in front of you. It can run:
 
-- **On this machine** — the default. `sand` runs [Lima](https://lima-vm.io)
+- **On this machine** — the default. `sandbar` runs [Lima](https://lima-vm.io)
   locally, and nothing needs configuring.
-- **On another machine, over SSH** — `sand` runs the same Lima commands on a
+- **On another machine, over SSH** — `sandbar` runs the same Lima commands on a
   host you can SSH into, so VMs live on a bigger box (a workstation, a home
   server) while you work from a laptop.
-- **On a [Proxmox VE](https://www.proxmox.com/) host** — `sand` drives VMs
+- **On a [Proxmox VE](https://www.proxmox.com/) host** — `sandbar` drives VMs
   through the Proxmox REST API with a pool-scoped token. No Lima involved.
   See [Proxmox VE Setup](proxmox.md) for the one-time host setup.
 
 Whichever you pick, the commands, the board, and the keybindings are the
 same. Only the machine underneath changes.
 
-Every location `sand` knows about is a **Connection Profile**. Profiles are
+Every location `sandbar` knows about is a **Connection Profile**. Profiles are
 the only configuration surface for this: there is no environment variable to
-set and no per-invocation flag needed to pick a backend (older `sand` builds
+set and no per-invocation flag needed to pick a backend (older `sandbar` builds
 used `SAND_PROVIDER` / `SAND_REMOTE_*` environment variables for this; those
 are **removed** — see [Environment variables
 removed](#environment-variables-removed) below).
@@ -42,7 +42,7 @@ A profile has:
 - An **enabled** flag.
 
 There is always exactly one **Local** profile — permanent, created
-automatically the first time `sand` runs, and not deletable (though you can
+automatically the first time `sandbar` runs, and not deletable (though you can
 rename it). Every other profile is `remote-ssh` or `proxmox`, and you can
 create, edit, enable, disable, or delete as many of those as you like.
 
@@ -80,7 +80,7 @@ profiles:
 ```
 
 `id` is assigned once at creation and never changes, even across a rename —
-it's how `sand` tracks "the last profile you used" and which managed VMs
+it's how `sandbar` tracks "the last profile you used" and which managed VMs
 belong to which profile without losing track when you rename one. `name` is
 the label you see and address the profile by from the CLI (`--profile`) and
 in the TUI.
@@ -94,7 +94,7 @@ you isolate instances on a shared host by pointing different profiles at
 different `LIMA_HOME` paths.
 
 Two enabled `remote-ssh` profiles may not point at the same
-`user@host:port` — `sand` refuses to save that, so the same physical target
+`user@host:port` — `sandbar` refuses to save that, so the same physical target
 is never double-counted as two separate fleet members. There can also only
 ever be one `local` profile.
 
@@ -131,7 +131,7 @@ step:
 - **Deleting** a non-Local profile removes it from `profiles.yaml` and drops
   its tiles from the board. It **never touches the remote host** — no VM is
   stopped or deleted, no SSH command is run against it. Deleting a profile
-  only forgets that `sand` should manage that connection; if you want to
+  only forgets that `sandbar` should manage that connection; if you want to
   re-adopt the same host later, create a new profile pointing at it.
 - **Renaming** a profile (a pure name edit, connection unchanged) doesn't
   rebuild anything — its VMs, jobs, and last-used pointer all follow the
@@ -149,8 +149,8 @@ the TUI.
 
 ### From the CLI
 
-`sand create --profile <name>` picks which profile a headless create acts
-on. `sand shell NAME --profile <name>` disambiguates when a VM named `NAME`
+`sandbar create --profile <name>` picks which profile a headless create acts
+on. `sandbar shell NAME --profile <name>` disambiguates when a VM named `NAME`
 exists on more than one enabled profile. See the
 [CLI Reference](cli-reference.md) for the full flag semantics and resolution
 order.
@@ -167,7 +167,7 @@ instead of tiles, naming the profile and the reason.
 Because VMs are tracked per-profile, the **same VM name can exist under two
 different profiles** without conflict — `claude` on your `local` profile and
 `claude` on your `work` profile are two independent VMs that happen to share
-a display name. `sand shell claude` is ambiguous in that case and asks you to
+a display name. `sandbar shell claude` is ambiguous in that case and asks you to
 disambiguate with `--profile`.
 
 ## Requirements on a remote SSH host
@@ -176,26 +176,26 @@ These apply to a `remote-ssh` profile. A Proxmox profile has its own,
 different setup — see [Proxmox VE Setup](proxmox.md).
 
 - **Lima** (`limactl` on `PATH`) — the remote host runs the exact same
-  `limactl` the local provider does; `sand` only changes *where* it runs.
+  `limactl` the local provider does; `sandbar` only changes *where* it runs.
 - **A working hypervisor** (QEMU/KVM, etc.), just like any Linux host running
   Lima — see the [Lima installation docs](https://lima-vm.io/docs/installation/).
-- **Passwordless SSH** to the target (key-based auth). `sand` runs `limactl`
+- **Passwordless SSH** to the target (key-based auth). `sandbar` runs `limactl`
   non-interactively over SSH, so the connection must not prompt.
 
 ## What changes when the VM isn't on your machine
 
-Not much. With any profile enabled, `sand create --profile`, the TUI, `sand
+Not much. With any profile enabled, `sandbar create --profile`, the TUI, `sandbar
 shell`, and file copy work the way they do locally — the base image is built
 on that host once, each VM is a clone of it, and finalize runs there too.
 Three things are worth knowing:
 
-- **Interactive shells** (`sand shell NAME` and `S` on a tile) wrap the guest
+- **Interactive shells** (`sandbar shell NAME` and `S` on a tile) wrap the guest
   tmux attach with `ssh -t` automatically; detaching still leaves the session
   running, exactly as with a local VM (see [Files and Shells](files-and-shells.md)).
 - **File transfer** works in both directions, but the route differs. On a
   `remote-ssh` profile the remote `limactl copy` can't see your local
-  filesystem, so `sand` stages the file through the remote host and preserves
-  where it lands in the guest. On a `proxmox` profile `sand` copies straight
+  filesystem, so `sandbar` stages the file through the remote host and preserves
+  where it lands in the guest. On a `proxmox` profile `sandbar` copies straight
   to the guest with `scp`.
 - **Reaching a web server** in the guest differs the same way. On a
   `remote-ssh` profile, Lima forwards the guest's ports to the *remote host's*
@@ -213,11 +213,11 @@ password, or API token.
 
 ## Environment variables removed
 
-Earlier (unreleased) builds of `sand` selected a single remote target for the
+Earlier (unreleased) builds of `sandbar` selected a single remote target for the
 whole process via `SAND_PROVIDER`, `SAND_REMOTE_HOST`, `SAND_REMOTE_USER`,
 `SAND_REMOTE_PORT`, `SAND_REMOTE_IDENTITY`, and `SAND_REMOTE_LIMA_HOME`
 environment variables. That surface has been **removed entirely** and
-replaced by Connection Profiles: set these variables and `sand` will simply
+replaced by Connection Profiles: set these variables and `sandbar` will simply
 ignore them. If you were using them, create an equivalent `remote-ssh`
 profile instead (in the TUI's `p` screen, or by hand-editing
 `profiles.yaml`) — see [`profiles.yaml`](#profilesyaml) above for the field
@@ -228,6 +228,6 @@ mapping (`SAND_REMOTE_HOST` → `host`, `SAND_REMOTE_USER` → `user`,
 ## More backends later
 
 The three profile types are three implementations of one internal seam in
-`sand`, which is what lets them share every command and screen. Further
+`sandbar`, which is what lets them share every command and screen. Further
 backends (DigitalOcean, Linode) can be added the same way; none are available
 yet.

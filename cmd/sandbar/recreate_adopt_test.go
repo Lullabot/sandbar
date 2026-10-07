@@ -28,7 +28,7 @@ func recordedConfig() vm.CreateConfig {
 	}
 }
 
-// flagDefaultConfig is what a bare `sand create --recreate --name mybox` builds
+// flagDefaultConfig is what a bare `sandbar create --recreate --name mybox` builds
 // before adoption: this flag set's defaults, plus the host-derived identity.
 func flagDefaultConfig() vm.CreateConfig {
 	cfg := vm.DefaultCreateConfig()

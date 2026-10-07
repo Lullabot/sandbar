@@ -53,5 +53,5 @@ and certificate-store updates are file or process work and need no live guest
 systemd. The builder must provide networking and a usable `/etc/resolv.conf`.
 
 `roles/samba` has its own `smbd` start and restart handler; it is outside the
-sand base image path because the builder passes `samba_enabled=false` (as sand
+sandbar base image path because the builder passes `samba_enabled=false` (as sandbar
 does for its VM builds). Finalize-only agent roles are outside this path too.

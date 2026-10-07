@@ -37,7 +37,7 @@ func SetVersion(v string) { buildVersion = v }
 // of it — a prefix outside the budget is a line seven cells wider than the band
 // it lives in, and lipgloss will happily paint it past the right edge of the
 // terminal.
-const compactPrefix = "sand · "
+const compactPrefix = "sandbar · "
 
 // headerView renders the pinned header band, HeaderHeight lines exactly:
 // full (a title line plus the counts) when the terminal is tall enough, or
@@ -62,12 +62,12 @@ func (m model) headerView() string {
 	return strings.Join(lines, "\n")
 }
 
-// titleRow is "sand" on the left and the build on the right, which is the one
+// titleRow is "sandbar" on the left and the build on the right, which is the one
 // question a bug report always needs and a user can never answer. The version is
 // dropped entirely rather than squeezed when the terminal cannot hold both — a
 // truncated commit hash is worse than no commit hash.
 func (m model) titleRow() string {
-	title := titleStyle.Render("sand")
+	title := titleStyle.Render("sandbar")
 	ver := statusStyle.Render(buildVersion)
 	// The update suffix is the lowest-priority title unit. Shedding it first
 	// preserves the installed version at widths where both cannot fit.

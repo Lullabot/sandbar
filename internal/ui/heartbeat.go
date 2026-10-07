@@ -7,7 +7,7 @@ package ui
 //
 // vm.VM carries CPUs and Memory. Those are ALLOCATIONS — what Lima was told to
 // give the guest — and drawing an allocation as a utilization bar would imply
-// telemetry sand does not have. A tile that says "4 CPUs" beside a bar filled to
+// telemetry sandbar does not have. A tile that says "4 CPUs" beside a bar filled to
 // 4/4 is not a gauge; it is a lie with a progress bar around it. CPU and cache
 // come from the guest; host-resident memory comes from the provider's optional
 // VMHostMemoryProvider capability. This file joins those asynchronously sampled
@@ -26,7 +26,7 @@ package ui
 // 150–400ms and a fresh SSH connection, so a per-tick spawn would cost more than
 // the numbers are worth. The price is one SSH connection and one goroutine per
 // running VM, which at this tool's scale (1–3 VMs typically, ~10 for a power user)
-// is nothing. It would not be nothing at 100 VMs. sand does not have 100 VMs.
+// is nothing. It would not be nothing at 100 VMs. sandbar does not have 100 VMs.
 //
 // # Two things learned from a real VM rather than assumed
 //
@@ -44,9 +44,9 @@ package ui
 // the orphaned ssh takes a SIGPIPE on its next write, and the guest loop dies with
 // the session — all true, and all beside the point for a connection that has not
 // finished CONNECTING. An ssh still waiting on the agent has written nothing, so
-// there is no next write to fail: it sits on the agent socket, outliving sand,
+// there is no next write to fail: it sits on the agent socket, outliving sandbar,
 // until someone answers a prompt for a session that no longer exists. Reported
-// from the field as several 1Password prompts arriving after sand had exited.
+// from the field as several 1Password prompts arriving after sandbar had exited.
 //
 // Worse, the key that quits is the key that CAUSES those connections — it
 // refreshes lastInput, reopening the gate, and this file's reconcile then starts
@@ -99,7 +99,7 @@ import (
 // syncHeartbeats, which asks the same question for its own reason — is there a
 // guest to open a shell into.
 //
-// It is NOT the word the board prints: derivedStatus.String() renders sand's own
+// It is NOT the word the board prints: derivedStatus.String() renders sandbar's own
 // status labels (Running, Building, Failed, Stopped), which are a display concern
 // and deliberately not this constant.
 const limaRunning = "Running"
@@ -113,7 +113,7 @@ const (
 	// collide with it.
 	heartbeatDelim = "---sand-heartbeat---"
 
-	// heartbeatRetry is how long a VM waits before sand re-opens a heartbeat that
+	// heartbeatRetry is how long a VM waits before sandbar re-opens a heartbeat that
 	// DIED ON ITS OWN. Without it, a VM that Lima calls Running but that cannot be
 	// shelled into — one still booting, one whose sshd is wedged — would have a
 	// fresh `limactl shell` thrown at it on every single refresh. A deliberate stop
@@ -123,13 +123,13 @@ const (
 
 	// heartbeatRetryMax caps the backoff heartbeatRetry starts. A guest that keeps
 	// dropping its stream doubles its own cooldown up to this, which is what stops
-	// sand answering a sick VM's every failure with an immediate reconnect: the
+	// sandbar answering a sick VM's every failure with an immediate reconnect: the
 	// reconnect itself costs the guest an ssh handshake and a fresh shell, so a
 	// flat retry turns one unhealthy guest into a load source that keeps it
 	// unhealthy. It resets the moment a reading actually arrives.
 	heartbeatRetryMax = 30 * time.Second
 
-	// heartbeatIdleAfter is how long sand may sit with no input from the user before
+	// heartbeatIdleAfter is how long sandbar may sit with no input from the user before
 	// it slows monitoring without closing the connections.
 	heartbeatIdleAfter = 5 * time.Minute
 
@@ -183,7 +183,7 @@ func guestScriptMode(every time.Duration, driven bool) string {
 // provider while retaining the same connection epoch.
 //
 // Every "Has" here earns its keep. A tile must be able to tell "this VM is idle"
-// from "sand does not know yet", because they look identical if the second one is
+// from "sandbar does not know yet", because they look identical if the second one is
 // rendered as a zero — and a zero is exactly what a naive struct would give it.
 type guestSample struct {
 	// CPUPct is the guest's busy share of all its vCPUs, 0–100. It is only
@@ -1025,7 +1025,7 @@ func (m model) shouldTick() bool {
 // DECLINING a quit costs a burst of prompts. Trading prompts-on-quit for
 // prompts-on-decline is not a fix.
 //
-// So this gates the start half only. While the answer is pending, sand holds
+// So this gates the start half only. While the answer is pending, sandbar holds
 // exactly the connections it already had: it opens nothing (the burst cannot
 // move one keystroke earlier and be orphaned by the 'y' a second later) and
 // closes nothing (a declined quit resumes with no handshake at all). 'y' sets
