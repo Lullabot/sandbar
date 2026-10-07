@@ -1238,7 +1238,7 @@ func TestSSHRemoteLock(t *testing.T) {
 		// A macOS/busybox Lima host ships no util-linux flock: the shell reports
 		// command-not-found and exits 127, with no sentinel. TryLock MUST surface
 		// that as an error so lockBase degrades to unserialized — returning
-		// (false,nil) here would hang the first `sand create` polling a lock that
+		// (false,nil) here would hang the first `sandbar create` polling a lock that
 		// nothing will ever hold.
 		rec := &recordingExec{stub: func(ctx context.Context, argv []string) *exec.Cmd {
 			return sh(ctx, "echo 'sh: flock: not found' >&2; exit 127")

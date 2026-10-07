@@ -119,7 +119,7 @@ func resetPreserveCandidates(reg *checkouts.Registry, scope registry.Scope, name
 
 // guessGuestHome is the conventional home for a guest user, used ONLY to shorten
 // a path for display and to spot the project's own org directory. Every guest
-// sand builds is a Debian cloud image where /home/<user> is where the user role
+// sandbar builds is a Debian cloud image where /home/<user> is where the user role
 // puts the account, so the guess is right in practice — but it is a guess, and
 // the reset itself resolves the real home from the guest's passwd entry rather
 // than trusting this.

@@ -23,7 +23,7 @@ type vmLookup interface {
 	Get(name string) (vm.VM, error)
 }
 
-// runPasteImage implements the `sand paste-image <name>` subcommand: it reads
+// runPasteImage implements the `sandbar paste-image <name>` subcommand: it reads
 // the host clipboard image and stages it on the named VM's guest clipboard,
 // mirroring runShell's exact argument contract (one explicit VM name +
 // --profile) and Running guard, then delegates the clipboard read + guest
@@ -33,13 +33,13 @@ func runPasteImage(args []string) error {
 	fs := flag.NewFlagSet("paste-image", flag.ContinueOnError)
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand paste-image NAME [--profile <name>]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar paste-image NAME [--profile <name>]
 
 Read the host clipboard image and stage it on NAME's guest clipboard at
 <guest-home>/.sand/clip/latest.png, ready for Ctrl-V inside the guest.
 
-The named VM must already exist and be running (see 'sand' to list instances,
-or 'sand create' to make one). If NAME is managed under more than one
+The named VM must already exist and be running (see 'sandbar' to list instances,
+or 'sandbar create' to make one). If NAME is managed under more than one
 connection profile, --profile picks which one to target.
 
 If the host clipboard holds no image, nothing is staged and the command
@@ -59,7 +59,7 @@ exits non-zero.
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("sand paste-image: need exactly one VM name")
+		return errors.New("sandbar paste-image: need exactly one VM name")
 	}
 	name := fs.Arg(0)
 
@@ -74,7 +74,7 @@ exits non-zero.
 
 	p, err := resolveShellProvider(store, reg, name, *profileFlag)
 	if err != nil {
-		return fmt.Errorf("sand paste-image: %w", err)
+		return fmt.Errorf("sandbar paste-image: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -87,7 +87,7 @@ exits non-zero.
 
 	result, err := paste.PasteImage(context.Background(), p, target)
 	if err != nil {
-		return fmt.Errorf("sand paste-image: %w", err)
+		return fmt.Errorf("sandbar paste-image: %w", err)
 	}
 
 	switch result.Status {
@@ -106,7 +106,7 @@ exits non-zero.
 
 // pasteImageTarget looks up name in the live instance list and returns a
 // clear, actionable error for an unknown instance or one that is not
-// running — the same guard shellAttachArgv applies for `sand shell`, since
+// running — the same guard shellAttachArgv applies for `sandbar shell`, since
 // internal/paste's PasteImage deliberately does not check Running itself
 // (see that package's doc comment). Factored out from runPasteImage so it can
 // be tested with a stub vmLookup instead of a real provider.
@@ -114,12 +114,12 @@ func pasteImageTarget(l vmLookup, name string) (vm.VM, error) {
 	found, err := l.Get(name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
-			return vm.VM{}, fmt.Errorf("sand paste-image: no VM named %q (run 'sand' to list instances)", name)
+			return vm.VM{}, fmt.Errorf("sandbar paste-image: no VM named %q (run 'sandbar' to list instances)", name)
 		}
-		return vm.VM{}, fmt.Errorf("sand paste-image: %w", err)
+		return vm.VM{}, fmt.Errorf("sandbar paste-image: %w", err)
 	}
 	if found.Status != limaRunning {
-		return vm.VM{}, fmt.Errorf("sand paste-image: VM %q is not running (status: %s); start it first", name, found.Status)
+		return vm.VM{}, fmt.Errorf("sandbar paste-image: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 	return found, nil
 }

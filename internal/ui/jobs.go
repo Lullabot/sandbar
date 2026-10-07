@@ -1,6 +1,6 @@
 package ui
 
-// jobs.go is the job registry: sand's only concurrent subsystem, and the source
+// jobs.go is the job registry: sandbar's only concurrent subsystem, and the source
 // of the board's Building and Failed statuses.
 //
 // Before it, one reader/output/cancel triple on the model served exactly one job
@@ -352,7 +352,7 @@ func (r *jobRegistry) addOutput(key jobKey, chunk string) bool {
 }
 
 // progressToPublish reports whether this job's build has crossed into a new
-// coarse position (a new sand phase, Ansible role, or task total) since the last
+// coarse position (a new sandbar phase, Ansible role, or task total) since the last
 // republish, and if so hands back everything the caller needs to write it to the
 // VM's provenance marker — the create config the marker is rebuilt from, and the
 // progress to stamp on it.

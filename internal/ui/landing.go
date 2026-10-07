@@ -16,7 +16,7 @@ package ui
 // drupal.org-with-no-PAT, or other-non-GitHub-forge row.
 //
 // Every action — including "Open draft PR" and "Publish to drupal.org" —
-// runs through the SAME job registry every other sand action does
+// runs through the SAME job registry every other sandbar action does
 // (jobs.go/progress.go): it streams into the viewport and is retained as a
 // reopenable ledger entry ('L' reopens it — see commandreg.go; the retention
 // mechanism itself is job-registry native and needs no change here). Most of
@@ -289,7 +289,7 @@ func classifyLandRow(c checkouts.Checkout, pr *landgh.PR, check prCheck, tokenAv
 		// pane's usual priority order is deliberately inverted, so the reason
 		// belongs here rather than in a commit message.
 		//
-		// A sand guest holds NO drupal.org credential — that is the whole
+		// A sandbar guest holds NO drupal.org credential — that is the whole
 		// point of host-side publication, not an oversight — so the "commit
 		// and push" the at-risk arm would otherwise offer CANNOT succeed
 		// against drupal.org. Worse, the local-commits state that arm claims
@@ -569,7 +569,7 @@ type landingPane struct {
 // the done channel on the pane therefore meant a perfectly ordinary sequence —
 // review a checkout, press enter on another row (which switches to the
 // progress view), come back, reopen Landing — silently dropped both handles
-// with no cancel ever called. The quit path then read nil for both and let `sand`
+// with no cancel ever called. The quit path then read nil for both and let `sandbar`
 // exit immediately, leaving the guest `node` server listening inside the VM
 // and, on the remote-Lima and Proxmox backends, an `ssh -N -L` child still
 // holding the workstation port. That is precisely the orphan the CLI path's
@@ -607,7 +607,7 @@ type activeReview struct {
 	//
 	// This is load-bearing, proven wrong the naive way first: on a real Lima
 	// VM, calling cancel() from the quit path and then immediately returning
-	// tea.Quit() let the whole `sand` PROCESS exit (main() returns right after
+	// tea.Quit() let the whole `sandbar` PROCESS exit (main() returns right after
 	// Run() does) while the goroutine doing the actual guest-side kill was
 	// still mid-flight, orphaning the guest `node` server. Cancelling a
 	// context only asks a goroutine to stop; it is not a wait. That Cmd blocks
@@ -880,7 +880,7 @@ func landOpenBrowserRun(gh ghActions, orgRepo string, pr *landgh.PR) streamFunc 
 
 // runLandingAction dispatches whichever ONE action the row under the pane's
 // cursor exposes (classifyLandRow's Action), as a JOB (jobs.go/progress.go) —
-// exactly like every other sand action — so its output streams into the
+// exactly like every other sandbar action — so its output streams into the
 // viewport and is retained as a reopenable ledger entry. A row with no
 // action (at-risk, local-only, other-forge, drupal.org-with-no-PAT) does
 // nothing.
@@ -936,7 +936,7 @@ var landingRefreshKey = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "res
 
 // landingReviewKey opens the selected checkout's diff in a browser-based
 // review UI served from inside the VM (internal/landreview), reaching this
-// pane parity with `sand land NAME PATH --review`. It has NO precondition on
+// pane parity with `sandbar land NAME PATH --review`. It has NO precondition on
 // the row's Kind/Action the way the act key does — reviewing uncommitted or
 // unpushed work, with no remote at all, is the primary use case (see the
 // plan's Component 4 note) — so runLandingReview fires for any selected row.
@@ -968,7 +968,7 @@ var landingCleanReviewKey = key.NewBinding(key.WithKeys("V"), key.WithHelp("V", 
 // landingReviewRangeKey reviews a slice of the checkout rather than the whole
 // local branch: it opens a one-line prompt for git diff arguments (HEAD~2,
 // HEAD~2...HEAD, --staged) that are handed to the review server unchanged, the
-// way `sand land NAME PATH --review -- <args>` does. After a round of review
+// way `sandbar land NAME PATH --review -- <args>` does. After a round of review
 // feedback the last commit or two are what needs reading, and the default base
 // otherwise re-presents everything not yet on a remote.
 //
@@ -1536,7 +1536,7 @@ type landingPublish struct {
 // upstream ref, then its change set — go through internal/drupalorg's
 // BuildRemoteInfoCommand/ParseRemoteInfo and BuildCollectCommand/ParseCollect,
 // executed by provider.RunCaptured. All three used to be private copies here,
-// duplicating cmd/sand/publish.go's, and the two copies had already drifted in
+// duplicating cmd/sandbar/publish.go's, and the two copies had already drifted in
 // their error text; the plan requires resolution logic to live once so the two
 // surfaces cannot derive a destination differently. drupalorg builds and parses
 // but never execs, which is what keeps that package free of process plumbing.
@@ -1594,7 +1594,7 @@ func (m *model) startLandingPublish(c checkouts.Checkout) tea.Cmd {
 // zero width renders a 23-character placeholder as its first character alone
 // — the prompt read "> d", the first letter of "drupal.org issue number",
 // which looks for all the world like a stray keystroke sitting in the field.
-// Every other text input in sand (form.go, profilesview.go) sets a width for
+// Every other text input in sandbar (form.go, profilesview.go) sets a width for
 // this reason; this one is no different.
 func newIssueInput() textinput.Model {
 	ti := textinput.New()
@@ -2131,7 +2131,7 @@ func writePublishResult(out io.Writer, res drupalorg.Result) {
 
 // landingPublishHelp returns the footer bindings for the publish flow's
 // current stage — the SAME app-wide Submit/Back and Confirm/Cancel bindings
-// every other prompt and confirmation in sand uses (transfer.go's
+// every other prompt and confirmation in sandbar uses (transfer.go's
 // destination prompt, m.confirm's overlay), so the publish flow's idiom is
 // never a bespoke one.
 func (m model) landingPublishHelp() []key.Binding {
@@ -2183,7 +2183,7 @@ func (m model) clipPublishText(text string) string {
 		lines[i] = m.clipLine(l)
 	}
 	if elided > 0 {
-		lines = append(lines, statusStyle.Render(fmt.Sprintf("… %d more line(s) not shown — run `sand publish` to review the full confirmation", elided)))
+		lines = append(lines, statusStyle.Render(fmt.Sprintf("… %d more line(s) not shown — run `sandbar publish` to review the full confirmation", elided)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2215,7 +2215,7 @@ func (m model) landingPublishView() string {
 		if p.err != "" {
 			// WRAPPED, not clipped. Every other long string this pane shows
 			// is a change set it can honestly truncate, because the full
-			// text is one `sand publish` away. A resolve failure is the
+			// text is one `sandbar publish` away. A resolve failure is the
 			// opposite: it is the only account the user gets of why nothing
 			// happened, and the actionable half is at the END of it — the
 			// merge-commit refusal spends its first line naming SHAs and its
@@ -2267,7 +2267,7 @@ b=$(git symbolic-ref --short HEAD)
 r=$(git config --get "branch.$b.remote") || true
 [ -n "$r" ] || r=$(git remote | head -n 1)
 if [ -z "$r" ]; then
-  echo "sand: this checkout has no remote configured — nothing to push to" >&2
+  echo "sandbar: this checkout has no remote configured — nothing to push to" >&2
   exit 1
 fi
 git push -u "$r" HEAD`
@@ -2636,7 +2636,7 @@ func (m *model) handleLandReviewDone(msg landReviewDoneMsg) {
 	// only (scope, vm) — as this did — let a previous review's completion
 	// clear the teardown handles of a newer, still-running one started for the
 	// same VM, after which quitting cancelled nothing and the guest server and
-	// its forwarder child both outlived `sand`. path is what distinguishes
+	// its forwarder child both outlived `sandbar`. path is what distinguishes
 	// them, so it is part of the identity.
 	if msg.scope != m.review.scope || msg.vm != m.review.vm || msg.path != m.review.path {
 		return // stale: an older review's result, or none is running
@@ -2675,7 +2675,7 @@ var quitTeardownTimeout = 15 * time.Second
 //
 // Cancelling the context is NOT enough by itself, and that is measured, not
 // assumed: on a real Lima VM, calling m.review.cancel and returning tea.Quit()
-// immediately let the whole `sand` process exit — main() returns the instant
+// immediately let the whole `sandbar` process exit — main() returns the instant
 // tea.Program.Run() does — while the goroutine actually killing the guest
 // server was still mid-flight (waiting on a `limactl shell` round trip),
 // orphaning it every time. So this BLOCKS on m.review.done (bounded by

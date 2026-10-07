@@ -70,7 +70,7 @@ type CreateConfig struct {
 	Domain   string
 
 	// TimezoneExplicit distinguishes a timezone the USER asked for
-	// (`sand create --timezone`) from one sand detected off the host, and the
+	// (`sandbar create --timezone`) from one sand detected off the host, and the
 	// guest treats the two differently when the zone turns out not to exist in
 	// its tzdata.
 	//
@@ -78,7 +78,7 @@ type CreateConfig struct {
 	// stopping for — the user named a zone and would otherwise get a VM that is
 	// silently not in it. A DETECTED name that the guest lacks must not stop
 	// anything: the user asked for nothing, and failing there would turn a
-	// `sand create` that worked before sand set timezones at all into a hard
+	// `sandbar create` that worked before sand set timezones at all into a hard
 	// mid-provision failure on any host carrying a legacy alias or a right/
 	// zone that canonicalZone could not resolve. That case degrades to the
 	// guest's existing zone with a warning instead.
@@ -127,7 +127,7 @@ func DefaultCreateConfig() CreateConfig {
 		// result depend on the developer's /etc in every test that touches it.
 		//
 		// The host's real zone is resolved at the two entrypoints that actually
-		// provision (cmd/sand/create.go's runCreate and the TUI's buildConfig),
+		// provision (cmd/sandbar/create.go's runCreate and the TUI's buildConfig),
 		// which is the same place --locale's host default (`$LANG`) and the git
 		// identity are resolved. Anything that skips both gets Etc/UTC, i.e.
 		// exactly the behaviour that predates this field.
@@ -143,7 +143,7 @@ func DefaultCreateConfig() CreateConfig {
 // ToolPtrs maps each dependency's canonical name — the name that appears in the base
 // image's version stamp, and in the --with-<name> flag — to the field holding
 // its selection. It is the ONE place the tool names live: ToolsetKey renders
-// from it, ApplyToolset assigns through it, and `sand create` adopts the base's
+// from it, ApplyToolset assigns through it, and `sandbar create` adopts the base's
 // recorded selection through it. Adding a tool means adding a field, a line
 // here, and its flag; nothing else has to learn the name.
 func (c *CreateConfig) ToolPtrs() map[string]*bool {
@@ -311,7 +311,7 @@ func HostUser() string {
 
 // HostGitConfig reads a single value from the host git config, best-effort: any
 // error (git missing, key unset) yields an empty string. Both the headless
-// `sand create` path and the TUI form seed the git identity from here so
+// `sandbar create` path and the TUI form seed the git identity from here so
 // --git-name/--git-email may be omitted when the host already has an identity;
 // it is the single source of truth for that default (mirroring HostUser).
 func HostGitConfig(key string) string {

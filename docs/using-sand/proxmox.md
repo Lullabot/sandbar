@@ -1,20 +1,20 @@
 # Proxmox VE Setup
 
-`sand` can run VMs on a [Proxmox VE](https://www.proxmox.com/) host through its
+`sandbar` can run VMs on a [Proxmox VE](https://www.proxmox.com/) host through its
 REST API. Once it's set up, a Proxmox host is just another place VMs can run —
 same board, same commands, same keybindings as a VM on your own machine (see
 [Where VMs Run](connection-profiles.md)). What it needs first is some one-time
 setup on the Proxmox side, and that setup is what this page is about.
 
-The design goal is a **least-privilege, pool-scoped** token: `sand` gets exactly
+The design goal is a **least-privilege, pool-scoped** token: `sandbar` gets exactly
 the permissions it needs to run its create/clone/delete workflow, confined to a
 dedicated [resource pool](https://pve.proxmox.com/wiki/User_Management#pveum_pools),
 so it **cannot see or touch any VM outside that pool** — not by accident, not by
 a bug, not at all. That isolation is structural (Proxmox enforces it), not a
-matter of `sand` behaving well.
+matter of `sandbar` behaving well.
 
 !!! info "What you'll set up"
-    1. A dedicated **pool** for `sand`'s VMs.
+    1. A dedicated **pool** for `sandbar`'s VMs.
     2. A custom **role** holding the minimum privileges.
     3. A dedicated **user** and an **API token** that inherits the user's rights.
     4. **ACLs** binding the role to the **user** at the pool — plus three
@@ -27,17 +27,17 @@ cluster access) as a full admin — usually `root@pam`.
 
 ## Prerequisites
 
-- **Proxmox VE 9.0 or newer.** `sand` checks the version at preflight and
+- **Proxmox VE 9.0 or newer.** `sandbar` checks the version at preflight and
   refuses an older host. The minimum-privilege role below is expressed in PVE 9's
   privilege vocabulary — it relies on the `VM.GuestAgent.*` privileges introduced
   in PVE 9, and PVE 9 removed the old `VM.Monitor` privilege — so it cannot be
   created on an 8.x host.
 - **A storage that supports `images` content** for VM disks (e.g. `local-lvm`, a
   ZFS pool, or a directory storage with *Disk image* enabled). The built-in
-  `local` storage does **not** hold disk images by default, so `sand` cannot put
+  `local` storage does **not** hold disk images by default, so `sandbar` cannot put
   a VM disk or a cloud-init drive there.
 - **A file-based storage that supports `import` content** for the one-time
-  cloud-image download — a **directory**, **NFS**, or **CIFS** storage. `sand`
+  cloud-image download — a **directory**, **NFS**, or **CIFS** storage. `sandbar`
   downloads the base image with PVE's `download-url` (content type `import`),
   which **block** storages (`zfspool`, `lvm-thin`, RBD) reject with *"not a file
   based storage"*. This is a **separate** storage from the disk storage above and
@@ -51,18 +51,18 @@ cluster access) as a full admin — usually `root@pam`.
         `pvesm set local --content iso,vztmpl,backup,import` (keep whatever it
         already lists), or point `image_storage` at another file-based storage.
 - **A Linux bridge** for VM networking (usually `vmbr0`).
-- **Network reachability from the machine running `sand` to the VM subnet.**
-  `sand` talks to guests over SSH once they boot (it discovers each VM's IP from
+- **Network reachability from the machine running `sandbar` to the VM subnet.**
+  `sandbar` talks to guests over SSH once they boot (it discovers each VM's IP from
   the guest agent), so your workstation must be able to reach the addresses the
   VMs get on that bridge.
-- **An SSH key pair.** `sand` installs your public key into each guest via
+- **An SSH key pair.** `sandbar` installs your public key into each guest via
   cloud-init and then connects with the private key, so the profile's
   `identity_path` must point to a private key whose `.pub` sits beside it
   (`ssh-keygen -t ed25519` if you need one). Unlike a `remote-ssh` profile, a
   Proxmox profile cannot fall back to the SSH agent — it needs the `.pub` file to
   hand to cloud-init.
-- **The `qemu-guest-agent`** is installed by `sand`'s provisioning into the base
-  image, so you don't need to prepare an image yourself — `sand` builds its base
+- **The `qemu-guest-agent`** is installed by `sandbar`'s provisioning into the base
+  image, so you don't need to prepare an image yourself — `sandbar` builds its base
   template from a cloud image the first time you create a VM.
 
 ## All of it in one script
@@ -115,7 +115,7 @@ or if your host differs enough that you'd rather drive it yourself.
 
 ## Step 1 — Create a dedicated pool
 
-Every VM `sand` creates is placed in this pool automatically, and the token is
+Every VM `sandbar` creates is placed in this pool automatically, and the token is
 scoped to it. That membership is the whole isolation boundary.
 
 ```bash
@@ -124,7 +124,7 @@ pveum pool add sandbar --comment "sandbar-managed VMs"
 
 ## Step 2 — Create the minimum-privilege role
 
-This is the exact set of privileges `sand`'s workflow needs — create a base VM
+This is the exact set of privileges `sandbar`'s workflow needs — create a base VM
 from a cloud image, clone it, resize, configure cloud-init, power on and off,
 snapshot, read node stats, and run a guest-agent command. Nothing more.
 
@@ -140,20 +140,20 @@ Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Pool.Audit"
 Some of these are non-obvious, and if you trim them further you'll get confusing
 failures — so, for the record, why each of the less-obvious ones is here:
 
-| Privilege | Why `sand` needs it |
+| Privilege | Why `sandbar` needs it |
 | --- | --- |
-| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of `lsi` — `sand` uses `virtio-scsi-single` (see [How `sand` configures a VM's disk](#how-sand-configures-a-vms-disk)). |
+| `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of `lsi` — `sandbar` uses `virtio-scsi-single` (see [How `sandbar` configures a VM's disk](#how-sandbar-configures-a-vms-disk)). |
 | `VM.Config.Options` | Setting `agent`, `name`, `ostype`, and `onboot`. |
 | `VM.Config.Disk` | Covers disk devices **and** the `boot` order. |
 | `VM.Config.Cloudinit` | Injecting the SSH key, user, and network config. |
 | `Datastore.AllocateTemplate` | Downloading the cloud image into storage via the `download-url` endpoint (content type `import`). PVE gates that endpoint on this privilege specifically — `Datastore.AllocateSpace` alone is not enough, and its absence fails the very first base-build step with a 403. |
-| `Pool.Audit` | So the pool name appears in listings — without it `sand` can't tell which VMs are its own. |
-| `VM.GuestAgent.Unrestricted` | Only needed for guest-agent `exec`. It's the broadest privilege in the set; drop it if you never need `sand` to run a command via the agent (it uses SSH for shells regardless). |
+| `Pool.Audit` | So the pool name appears in listings — without it `sandbar` can't tell which VMs are its own. |
+| `VM.GuestAgent.Unrestricted` | Only needed for guest-agent `exec`. It's the broadest privilege in the set; drop it if you never need `sandbar` to run a command via the agent (it uses SSH for shells regardless). |
 
 !!! warning "Do not add `VM.Monitor` or `VM.Console`"
     `VM.Monitor` was **removed in PVE 9** — including it makes `pveum role add`
     reject the whole command. `VM.Console` is only for the VNC/SPICE console,
-    which `sand` never uses. Leaving both out is deliberate.
+    which `sandbar` never uses. Leaving both out is deliberate.
 
 ## Step 3 — Create a user and an API token
 
@@ -184,7 +184,7 @@ the token carries exactly those. Because this user has no password and no other
 roles, its permissions *are* the confined set — there is nothing broader for the
 token to inherit. **Save the value now**; it cannot be retrieved again.
 
-`sand` authenticates with the token's **full identity**, which is the two fields
+`sandbar` authenticates with the token's **full identity**, which is the two fields
 above joined by an `=`:
 
 ```
@@ -192,8 +192,8 @@ above joined by an `=`:
 sandbar@pve!prov=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-Write exactly that one line into a file `sand` will read (referenced as
-`token_file` in [Step 6](#step-6-point-sand-at-the-host)):
+Write exactly that one line into a file `sandbar` will read (referenced as
+`token_file` in [Step 6](#step-6-point-sandbar-at-the-host)):
 
 ```bash
 mkdir -p ~/.config/sandbar
@@ -204,7 +204,7 @@ chmod 600 ~/.config/sandbar/pve1.token
 ```
 
 The file holds **one line** and nothing else — the identity, an `=`, and the
-value. `sand` refuses to read it unless it is mode `600` (owner-only).
+value. `sandbar` refuses to read it unless it is mode `600` (owner-only).
 
 ## Step 4 — Bind the role to the user at the pool
 
@@ -228,13 +228,13 @@ pveum pool modify sandbar --storage local-lvm
     state — because reading, attaching, or reassigning a volume owned by another
     guest requires access to that guest or the `Datastore.Allocate` privilege,
     neither of which this token has. If you want the storage boundary as tight as
-    the VM one, give `sand` a **dedicated storage** (its own LVM-thin pool or
+    the VM one, give `sandbar` a **dedicated storage** (its own LVM-thin pool or
     dataset) rather than one shared with other VMs.
 
 ## Step 5 — Grant the three privileges that can't be pool-scoped
 
 Proxmox implements pool permissions by *projecting* a role onto the pool's
-members, and a pool can only contain **VMs and storage**. Three things `sand`
+members, and a pool can only contain **VMs and storage**. Three things `sandbar`
 needs are therefore not grantable at the pool, and have to be granted at the
 narrowest path that does work. None of them grants any access to another VM —
 that's exactly why they're named individually here instead of reaching for a
@@ -252,7 +252,7 @@ pveum acl modify /sdn/zones/localnetwork/vmbr0 --roles SandbarNet --users sandba
 pveum role add SandbarNode --privs "Sys.AccessNetwork Sys.Audit"
 pveum acl modify /nodes/pve1 --roles SandbarNode --users sandbar@pve
 
-# 3. Storage privileges on BOTH storages sand uses:
+# 3. Storage privileges on BOTH storages sandbar uses:
 #    - the DISK storage, so it can allocate VM disks (Datastore.AllocateSpace);
 #    - the IMAGE storage, so it can download the cloud image with content=import
 #      (Datastore.AllocateTemplate). These are the same command when a single
@@ -296,7 +296,7 @@ grant.
     holds no ACLs gets nothing. Recreate it with `--privsep 0` (Step 3) and grant
     the ACLs to `--users sandbar@pve` (Steps 4–5).
 
-## Step 6 — Point `sand` at the host
+## Step 6 — Point `sandbar` at the host
 
 !!! info "Proxmox profiles can be created in the TUI or by editing `profiles.yaml`"
     A Proxmox profile can be created in the TUI by pressing `p` → `n`, choosing
@@ -331,7 +331,7 @@ profiles:
     #                             # project golden image (see note below)
     bridge: vmbr0                 # the Linux bridge
     token_file: ~/.config/sandbar/pve1.token
-    identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sand installs + connects with
+    identity_path: ~/.ssh/id_ed25519   # REQUIRED: the SSH key sandbar installs + connects with
     # user: dev                   # the guest login user; defaults to your host username
     # insecure: true              # only if the PVE cert is self-signed
     # ca_file: /etc/pve/pve-root-ca.pem   # or pin the CA instead
@@ -343,14 +343,14 @@ The profile fields:
 | --- | --- |
 | `host` | Hostname or IP the API answers on. A bare host uses port `8006`; append `:port` only if you've changed it. |
 | `node` | The PVE **node name** (the identifier in `/nodes/<node>/…` paths) — often the same string as the host, but not always. |
-| `pool` | The dedicated pool. Every VM `sand` creates lands here, and the token is scoped to it. |
+| `pool` | The dedicated pool. Every VM `sandbar` creates lands here, and the token is scoped to it. |
 | `storage` | **Required.** The images-capable storage backing VM disks and the cloud-init drive. May be block (zfspool, lvm-thin) or file-based. |
 | `image_storage` | Optional. The **file-based** storage (dir/NFS/CIFS) the cloud image is downloaded to with content `import` — block storages reject it. Defaults to `local`. The disk is then imported onto `storage` from here. |
 | `base_image` | Optional. URL of the cloud image the base template is built from. Defaults to the **project golden image** (Debian genericcloud with `qemu-guest-agent` preinstalled, checksum-verified). Override only to use your own image — which must also ship the agent (see below). The download filename is derived from the URL. |
 | `bridge` | **Required.** The Linux bridge `net0` attaches to. Omitting it does not mean "no network": QEMU falls back to user-mode NAT, so the guest boots and is simply unreachable over SSH. |
 | `token_file` | Path to a file holding `user@realm!tokenid=value`. |
-| `identity_path` | **Required.** Path to an SSH **private** key. `sand` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
-| `user` | Optional. The guest login user `sand`'s cloud-init creates (and SSHes in as). Defaults to your host username. |
+| `identity_path` | **Required.** Path to an SSH **private** key. `sandbar` installs the matching `<identity_path>.pub` into the guest via cloud-init and then connects over SSH with the private key — so the `.pub` must exist beside it. Generate one with `ssh-keygen -t ed25519` if you don't have it. |
+| `user` | Optional. The guest login user `sandbar`'s cloud-init creates (and SSHes in as). Defaults to your host username. |
 | `insecure` | Optional. Skip TLS verification (PVE ships a self-signed cert by default). |
 | `ca_file` | Optional. Pin a CA certificate instead of disabling verification. |
 
@@ -358,11 +358,11 @@ The profile fields:
     Like `identity_path` for a remote profile, `token_file` is a **path**, never
     the credential itself — `profiles.yaml` stays
     [secret-free](connection-profiles.md#profilesyaml) and safe to check into
-    dotfiles. `sand` **refuses to read** a token file that is readable by group
+    dotfiles. `sandbar` **refuses to read** a token file that is readable by group
     or other; a leaked API token is not a recoverable mistake. Create it with
     `umask 077` (as in Step 3) or run `chmod 600` on it.
 
-That's it. `sand` builds its base template from a cloud image the first time you
+That's it. `sandbar` builds its base template from a cloud image the first time you
 create a VM (this takes a few minutes — it downloads the image, runs the same
 Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
@@ -371,13 +371,13 @@ real CPU, memory, and storage usage, sampled from the API.
 Each running VM tile also uses Proxmox's host-side memory reading for its main
 memory number. A patterned portion of the gauge identifies Linux filesystem
 cache measured inside the guest. If that cache has grown large, focus the tile
-and press `m` (**Reclaim memory**). Sand syncs pending writes, asks the guest
+and press `m` (**Reclaim memory**). Sandbar syncs pending writes, asks the guest
 kernel to release its filesystem caches over the existing SSH connection, and
 then refreshes both readings. This needs no additional Proxmox API permission
 and does not change the VM's configured memory or balloon settings.
 
 !!! note "Why the default image is a project-built one, not stock Debian"
-    `sand` learns a VM's IP address only from the QEMU guest agent (it is the
+    `sandbar` learns a VM's IP address only from the QEMU guest agent (it is the
     only IP a pure-API client can read from PVE), and it needs that IP to SSH in
     and provision the base. So the base image must boot with `qemu-guest-agent`
     **already running** — but stock cloud images (including Debian genericcloud)
@@ -404,8 +404,8 @@ and does not change the VM's configured memory or balloon settings.
 
 ## MAC addresses survive a rebuild
 
-A reset (`sand reset NAME`, `sand create --recreate`, or `R` in the TUI)
-tries to keep the VM's network interface MAC addresses. `sand` reads them
+A reset (`sandbar reset NAME`, `sandbar create --recreate`, or `R` in the TUI)
+tries to keep the VM's network interface MAC addresses. `sandbar` reads them
 before deleting the VM and restores them to the new clone before its first
 boot. This preserves the addresses used by DHCP reservations, firewall
 rules, and other network settings.
@@ -428,21 +428,21 @@ To get a new MAC address, delete the VM and create another one.
 
 ## VM names in DNS
 
-If your router creates DNS records from DHCP hostnames, a `sand` VM can
+If your router creates DNS records from DHCP hostnames, a `sandbar` VM can
 appear as `<name>.<your domain>`.
 
 The base template has no hostname, so a clone's first DHCP request does not
 announce the base image's name. `cloud-init` then sets the VM's Proxmox name,
-the playbook applies its configured hostname, and `sand` requests a DHCP
+the playbook applies its configured hostname, and `sandbar` requests a DHCP
 renewal to send that name to the server.
 
 Stale DNS entries can remain in your DHCP server's lease database until the
 lease expires. Clear them there if needed. Networks that do not create DNS
 records from DHCP hostnames need their own DNS configuration.
 
-## How `sand` configures a VM's disk
+## How `sandbar` configures a VM's disk
 
-`sand` configures the disk for development work that reads and writes many
+`sandbar` configures the disk for development work that reads and writes many
 small files, including builds, tests, and reset backups:
 
 | Setting | Purpose |
@@ -461,12 +461,12 @@ Inside the guest, `noatime` avoids updating file access times on reads.
 `fstrim.timer` periodically requests reclamation of unused disk space.
 
 Existing VMs keep the disk settings they were created with. To apply these
-settings, rebuild the base template with `sand create --rebuild`, then reset
+settings, rebuild the base template with `sandbar create --rebuild`, then reset
 or recreate the VM from it.
 
 ## A separate pool for automated tests
 
-If you run `sand`'s opt-in end-to-end test suite (or otherwise want a throwaway
+If you run `sandbar`'s opt-in end-to-end test suite (or otherwise want a throwaway
 pool that can never touch your day-to-day VMs), set up a **second** pool and
 token exactly as above but with different names — `sandbar-test`, its own user,
 and its own token. The two pools are fully isolated from each other, so
@@ -522,10 +522,10 @@ token can't see the VM at all, which is the point.
 
 ## Start at host boot
 
-Proxmox VMs created or reset by sand start automatically when the Proxmox
+Proxmox VMs created or reset by sandbar start automatically when the Proxmox
 host boots. Uncheck **Start at boot** in the creation or reset form to disable
 this. A reset retains the VM's saved choice.
 
-From the CLI, pass `--no-start-at-boot` to `sand create` or `sand reset` to
+From the CLI, pass `--no-start-at-boot` to `sandbar create` or `sandbar reset` to
 disable startup. Pass `--no-start-at-boot=false` to re-enable it on reset.
 This setting applies to Proxmox VMs only.

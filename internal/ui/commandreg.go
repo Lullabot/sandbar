@@ -1,6 +1,6 @@
 package ui
 
-// commandreg.go is the single command registry for every verb sand offers on a
+// commandreg.go is the single command registry for every verb sandbar offers on a
 // focused VM: one entry carries its key binding, its help text, the enabledFor
 // predicate that gates whether it applies to that VM, and the action it runs.
 // updateBoard (the dispatcher) and boardHelp (the footer) both derive from this
@@ -14,7 +14,7 @@ package ui
 // no VM screen to open first — it was deleted, because the tile already showed
 // everything it did.
 //
-// This file stays narrow on purpose: it is exactly the verbs sand has today,
+// This file stays narrow on purpose: it is exactly the verbs sandbar has today,
 // nothing more. It is not a fuzzy command palette or a general plugin
 // framework — see the task's scope note before adding to it.
 
@@ -206,7 +206,7 @@ var vmCommands = []vmCommand{
 			"The name and repo are fixed — a reset gives you THIS VM again; a different repo is a new VM (n).",
 		// Reset clones from the shared base, so it is only offered for VMs we
 		// created — otherwise it would replace an unrelated VM with a sandbox.
-		// Shared with the headless `sand create` path (internal/manage) so the
+		// Shared with the headless `sandbar create` path (internal/manage) so the
 		// two entrypoints cannot drift on the gate. This used to be an in-action
 		// check that explained itself via the status line when it declined, but
 		// that is exactly the "advertise it, then no-op with an explanation"

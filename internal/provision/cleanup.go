@@ -41,7 +41,7 @@ import (
 // temporary directory first and prints where they went, which is the difference
 // between reading a log and reproducing a failure.
 
-// cleanupInstance removes an instance sand created but did not finish creating.
+// cleanupInstance removes an instance sandbar created but did not finish creating.
 // Best-effort by design: it runs on a path that is ALREADY failing, so it reports
 // what it did and never replaces the error that brought us here.
 //

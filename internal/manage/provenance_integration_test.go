@@ -126,7 +126,7 @@ func TestAdoptOnceIntegration(t *testing.T) {
 }
 
 // TestRecordSuccessWritesRealMarkerRecreateBaseReadsIt exercises the
-// create -> recreate cycle exactly as cmd/sand/create.go and the TUI drive
+// create -> recreate cycle exactly as cmd/sandbar/create.go and the TUI drive
 // it, but against a REAL local Provenancer instead of manage_test.go's
 // fakeProvenancer: RecordSuccess writes BOTH the registry entry and the
 // marker (its documented "warm legacy cache + authoritative marker"

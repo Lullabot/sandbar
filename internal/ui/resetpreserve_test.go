@@ -35,7 +35,7 @@ func repoAt(path, branch string) checkouts.Checkout {
 }
 
 // TestResetFormOffersSweptCheckouts: every git checkout the last sweep found in
-// the VM gets a row of its own, INCLUDING the ones sand never cloned and the
+// the VM gets a row of its own, INCLUDING the ones sandbar never cloned and the
 // linked worktrees an agent made — the case the old form had no way to express,
 // where the only preservable thing was the repo named in the VM's recorded clone
 // URL.

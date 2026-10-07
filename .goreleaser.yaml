@@ -1,9 +1,9 @@
 version: 2
 
 builds:
-  - id: sand
-    main: ./cmd/sand
-    binary: sand
+  - id: sandbar
+    main: ./cmd/sandbar
+    binary: sandbar
     env:
       - CGO_ENABLED=0
     goos:
@@ -16,8 +16,15 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - id: sand
+  - id: sandbar
     formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG.md
+      - src: packaging/sand
+        dst: .
+        strip_parent: true
 
 # release-please owns the tag and the GitHub Release (with the generated
 # changelog as its notes); GoReleaser runs after it in the same workflow and
@@ -46,11 +53,14 @@ release:
 # GoReleaser removes `brews` (Linux Homebrew distribution would then need a
 # different mechanism).
 brews:
-  - name: sand
+  - name: sandbar
     repository:
       owner: lullabot
       name: homebrew-sandbar
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    install: |
+      bin.install "sandbar"
+      bin.install_symlink "sandbar" => "sand"
     dependencies:
       - name: lima
     description: "Headless + TUI manager for Claude Code development VMs (Lima)"

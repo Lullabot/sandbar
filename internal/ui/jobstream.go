@@ -67,7 +67,7 @@ const jobReadChunk = 32 << 10
 // leave a log that reads as complete and is not — the one outcome worse than a
 // truncated log. It is fenced in newlines so it lands on its own line, and so the
 // Ansible progress parser (ansible.go) sees a clean line boundary either side of it.
-const jobElisionNotice = "\n… earlier output dropped: this run produced more than sand would hold …\n"
+const jobElisionNotice = "\n… earlier output dropped: this run produced more than sandbar would hold …\n"
 
 // jobStream is one run's output buffer: an io.Writer for the provisioner and an
 // io.Reader for readNextCmd. The writer never blocks; the reader blocks until there

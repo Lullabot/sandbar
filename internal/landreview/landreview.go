@@ -11,14 +11,14 @@
 // must start the server first, parse the port out of the banner the server
 // prints, and only then build the bridge.
 //
-// It lives in internal/ rather than beside `sand land` because BOTH entry
-// points need it: the CLI action (cmd/sand/land.go's --review) and the TUI's
+// It lives in internal/ rather than beside `sandbar land` because BOTH entry
+// points need it: the CLI action (cmd/sandbar/land.go's --review) and the TUI's
 // Landing pane, which cannot import a main package. Everything the session
 // touches that is not pure — the backend, the browser, the port, the
 // readiness probe, the forwarder child — arrives as a field, so the whole
 // orchestration (including its teardown guarantees) is exercised with no VM,
 // no ssh, no browser and no listening socket, following the same injection
-// discipline as cmd/sand/land.go's landPR/landWeb.
+// discipline as cmd/sandbar/land.go's landPR/landWeb.
 //
 // Two rules here are security properties, not style:
 //
@@ -254,7 +254,7 @@ var errServerGone = errors.New("the review server exited before it was reachable
 // advice a user could act on and the advice that worked were different
 // sentences.
 const missingToolHint = "\n(if this VM's base image predates the review tool, " + ServeBinary +
-	" does not exist in the guest — the next `sand create` brings the base up to date and installs it)"
+	" does not exist in the guest — the next `sandbar create` brings the base up to date and installs it)"
 
 // serveReadyRe matches the line @self-review/serve prints once its listener
 // is up, which is the ONLY way to learn the port: upstream binds an ephemeral
@@ -271,7 +271,7 @@ var serveReadyRe = regexp.MustCompile(`Review ready at http://127\.0\.0\.1:([0-9
 // review was written to.
 //
 // It takes its context and its writer as parameters and installs no signal
-// handler of its own, because the TUI calls it too: `sand land` supplies the
+// handler of its own, because the TUI calls it too: `sandbar land` supplies the
 // context from its existing signal.NotifyContext and os.Stdout, while the
 // Landing pane supplies a Bubble Tea command's context and a job log. Nothing
 // here may write to os.Stdout directly or the board's frame would be
@@ -813,7 +813,7 @@ func (s *Session) diffBase(ctx context.Context) diffBaseInfo {
 	// ReadyTimeout, probeHTTP's probeTimeout, stopGuestServer's
 	// guestStopTimeout) — and this one needs it most. It runs BEFORE Run has
 	// printed a single line, so on a guest whose sshd accepts the connection
-	// and then stalls, an unbounded ShellOut left `sand land --review` hanging
+	// and then stalls, an unbounded ShellOut left `sandbar land --review` hanging
 	// forever having produced no output at all: no port, no URL, no hint that
 	// anything was happening. Its own contract already degrades every failure
 	// to "review the working tree", so a timeout costs nothing but the

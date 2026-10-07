@@ -391,7 +391,7 @@ func TestBaseStale_ReselectingAfterDeselectDoesNotPingPong(t *testing.T) {
 	noGo := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: false, WithJava: true}
 	all := vm.CreateConfig{BaseName: "sandbar-base", WithDDEV: true, WithGo: true, WithJava: true}
 
-	// `sand create --with-go=false`: go stays installed, nothing to converge.
+	// `sandbar create --with-go=false`: go stays installed, nothing to converge.
 	if _, stale := p.baseStale(noGo, io.Discard); stale {
 		t.Fatal("--with-go=false against a base that already has go must not re-converge it")
 	}

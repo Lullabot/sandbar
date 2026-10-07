@@ -6,7 +6,7 @@ import "testing"
 // sizing offset this task deletes (the old viewport/table/secrets-editor
 // terminal-size subtractions and contentWidth's floor-20). classify is a pure
 // function of two ints, so the whole responsive contract — "there is no
-// terminal size at which sand shows a too-small wall" — is checkable without
+// terminal size at which sandbar shows a too-small wall" — is checkable without
 // a terminal at all.
 func TestClassifySizeSweep(t *testing.T) {
 	sizes := []struct{ w, h int }{

@@ -59,7 +59,7 @@ func liveConnections(m model) int {
 
 // THE KEY THAT QUITS MUST NOT OPEN CONNECTIONS. This is the regression this file
 // exists for, reported from the field as several 1Password prompts arriving AFTER
-// sand had already exited: the quit key refreshes lastInput like any other, which
+// sandbar had already exited: the quit key refreshes lastInput like any other, which
 // reopens the idle gate, and the reconcile at the bottom of that same Update
 // starts a shell per running VM — unmultiplexed, one agent prompt each, and all of
 // them abandoned mid-handshake when the process exits a moment later.
@@ -77,7 +77,7 @@ func TestQuittingOpensNoConnections(t *testing.T) {
 		idle bool
 		busy string // a VM with a build in flight, which makes 'q' confirm first
 	}{
-		// The idle window (heartbeatIdleAfter) is the classic way in: sand sits
+		// The idle window (heartbeatIdleAfter) is the classic way in: sandbar sits
 		// untouched, the gate shuts and drops everything, and the keypress that
 		// wakes it is the same one that ends it.
 		{"gone idle", true, ""},
@@ -130,7 +130,7 @@ func TestQuittingOpensNoConnections(t *testing.T) {
 				t.Fatalf("quitting opened %d fresh SSH connection(s) — each is an unmultiplexed handshake and an agent prompt, and every one is orphaned when the process exits", opened)
 			}
 			if live := liveConnections(l.m); live != 0 {
-				t.Fatalf("quitting left %d connection(s) open to be orphaned on exit — they must be cancelled in sand's own last Update", live)
+				t.Fatalf("quitting left %d connection(s) open to be orphaned on exit — they must be cancelled in sandbar's own last Update", live)
 			}
 		})
 	}
@@ -169,12 +169,12 @@ func TestCtrlCQuitOpensNoConnections(t *testing.T) {
 }
 
 // QUITTING MUST CLOSE WHAT IT FINDS OPEN, which is the other half of the same bug
-// and the half that made the prompts arrive after sand was gone.
+// and the half that made the prompts arrive after sandbar was gone.
 //
 // shouldTick gates on the active view as well as the idle window, so ANY trip to
 // another screen tears every connection down and returning rebuilds them —
 // legitimately: the user is on the board again and the gauges are theirs to watch.
-// No five-minute wait is needed anywhere in this. Quit a keystroke later and sand
+// No five-minute wait is needed anywhere in this. Quit a keystroke later and sandbar
 // used to simply exit, leaving those ssh clients parked on the agent socket.
 func TestQuitClosesTheConnectionsItFindsOpen(t *testing.T) {
 	names := []string{"web", "api"}
@@ -203,7 +203,7 @@ func TestQuitClosesTheConnectionsItFindsOpen(t *testing.T) {
 		t.Fatalf("precondition: returning to the board should hold %d connections, got %d", 2*len(names), got)
 	}
 
-	// And now 'q'. Every live connection must be cancelled here, in sand's own
+	// And now 'q'. Every live connection must be cancelled here, in sandbar's own
 	// last Update — not left to a process exit that will not touch them.
 	l.send(runeKey('q'))
 	for _, n := range names {

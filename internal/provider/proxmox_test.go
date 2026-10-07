@@ -1255,7 +1255,7 @@ func TestProxmoxGuestPathAndCopy(t *testing.T) {
 	}
 }
 
-// TestProxmoxAttachArgvWrapsTheGuestTmuxExpression proves `sand shell` and the
+// TestProxmoxAttachArgvWrapsTheGuestTmuxExpression proves `sandbar shell` and the
 // TUI's S verb get an ssh -t wrapper around the SAME guest expression Lima uses.
 // The expression is compared against lima's own so a future edit to either
 // cannot drift them apart — a copy that set destroy-unattached on `main` would

@@ -68,10 +68,10 @@ func seededRegistry(t *testing.T) *registry.Registry {
 	return reg
 }
 
-// TestResetConfigUsesTheVMsOwnSettings is the contract of the verb: `sand reset
+// TestResetConfigUsesTheVMsOwnSettings is the contract of the verb: `sandbar reset
 // web` means "give me this VM back". Every setting comes from the VM's own
 // record — not from this command's defaults, which would hand back a different
-// VM wearing the same name (the exact bug `sand create --recreate` shipped
+// VM wearing the same name (the exact bug `sandbar create --recreate` shipped
 // with: memory 24→8GiB, disk 300→100GiB, and the project gone).
 func TestResetConfigUsesTheVMsOwnSettings(t *testing.T) {
 	got, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
@@ -85,7 +85,7 @@ func TestResetConfigUsesTheVMsOwnSettings(t *testing.T) {
 }
 
 // TestResetConfigAppliesExplicitFlags: a flag you DO pass still wins, which is
-// what makes `sand reset web --disk 400GiB` the way to resize on the way
+// what makes `sandbar reset web --disk 400GiB` the way to resize on the way
 // through. Everything else stays as recorded.
 func TestResetConfigAppliesExplicitFlags(t *testing.T) {
 	explicit := map[string]bool{"cpus": true, "memory": true, "disk": true, "timezone": true}
@@ -117,14 +117,14 @@ func TestResetConfigKeepsTheRecordedRepo(t *testing.T) {
 	// Against the command's OWN flag set, not a restatement of it.
 	fs := newResetFlagSet(&resetOptions{})
 	if fs.Lookup("clone-url") != nil {
-		t.Error("sand reset must not offer --clone-url: a reset rebuilds the project the VM already has (a different repo is a different VM)")
+		t.Error("sandbar reset must not offer --clone-url: a reset rebuilds the project the VM already has (a different repo is a different VM)")
 	}
 	if fs.Lookup("clone-token") == nil {
-		t.Error("sand reset must still offer --clone-token: re-cloning a private repo needs one, and tokens are never stored in the index")
+		t.Error("sandbar reset must still offer --clone-token: re-cloning a private repo needs one, and tokens are never stored in the index")
 	}
 	for _, gone := range []string{"name", "base-name", "recreate", "rebuild"} {
 		if fs.Lookup(gone) != nil {
-			t.Errorf("sand reset must not offer --%s", gone)
+			t.Errorf("sandbar reset must not offer --%s", gone)
 		}
 	}
 
@@ -208,7 +208,7 @@ func TestDoResetFailureIsNotRecorded(t *testing.T) {
 
 // TestReorderFlagsPutsFlagsBeforeTheName covers the parse plumbing that makes
 // the natural spelling work. flag.FlagSet stops at the first non-flag token, so
-// without this `sand reset web --preserve-agents` would silently drop the
+// without this `sandbar reset web --preserve-agents` would silently drop the
 // preserve flag — a reset that discards the data the user asked to keep.
 func TestReorderFlagsPutsFlagsBeforeTheName(t *testing.T) {
 	newSet := func() *flag.FlagSet {
@@ -314,13 +314,13 @@ func TestResetHelpDocumentsEveryPreserveFlag(t *testing.T) {
 			return
 		}
 		if !strings.Contains(help, "--"+f.Name) {
-			t.Errorf("sand reset's help never mentions --%s:\n%s", f.Name, help)
+			t.Errorf("sandbar reset's help never mentions --%s:\n%s", f.Name, help)
 		}
 	})
 
 	// flag.PrintDefaults takes the first BACKQUOTED run of a usage string as the
 	// argument's display name, so a usage string that quotes anything else
-	// renders as nonsense ("-preserve sand land NAME"). Pin the one flag here
+	// renders as nonsense ("-preserve sandbar land NAME"). Pin the one flag here
 	// that takes a value and has prose worth quoting.
 	if !strings.Contains(help, "-preserve PATH") {
 		t.Errorf("--preserve's argument is not named PATH in the generated flag list:\n%s", help)
@@ -337,7 +337,7 @@ func TestRunResetNeedsExactlyOneName(t *testing.T) {
 	}
 }
 
-// TestRecreateRefusesToChangeTheCloneURL: `sand create --recreate` is a reset,
+// TestRecreateRefusesToChangeTheCloneURL: `sandbar create --recreate` is a reset,
 // and a reset keeps the VM's project. Asking for both at once used to leave the
 // old org directory behind and clone the new repo beside it.
 func TestRecreateRefusesToChangeTheCloneURL(t *testing.T) {
@@ -345,7 +345,7 @@ func TestRecreateRefusesToChangeTheCloneURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("--recreate --clone-url should be refused")
 	}
-	for _, want := range []string{"sand reset web", "--name"} {
+	for _, want := range []string{"sandbar reset web", "--name"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal should name a way forward (%q); got %q", want, err.Error())
 		}
@@ -362,7 +362,7 @@ func TestRecreateRefusesToChangeTheCloneURL(t *testing.T) {
 }
 
 // TestResetValidationBlamesTheRightValue: a validation failure must point at
-// whoever supplied the bad value. Observed against a real VM: `sand reset web
+// whoever supplied the bad value. Observed against a real VM: `sandbar reset web
 // --disk 10GiB` reported "web's recorded config is unusable" about a number the
 // user had just typed, sending them to fix an index file that was fine.
 func TestResetValidationBlamesTheRightValue(t *testing.T) {

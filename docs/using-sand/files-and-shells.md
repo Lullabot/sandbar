@@ -2,19 +2,19 @@
 
 ## Shells
 
-`S` on a tile in the [Board](tui.md), and `sand shell NAME` from the command
+`S` on a tile in the [Board](tui.md), and `sandbar shell NAME` from the command
 line, both attach you to the same thing: the VM's **persistent tmux
 session** inside the guest, prefixed with `C-a`. They share one attach path,
 so they are two doors onto one session, not two different mechanisms — and
 that holds wherever the VM runs. A VM on another machine or on Proxmox is
-reached over SSH instead, which `sand` sets up for you; nothing about the
+reached over SSH instead, which `sandbar` sets up for you; nothing about the
 session changes.
 
 Because the session is persistent, detaching — with `C-a d`, or by just
 closing your terminal — does **not** kill what's running in it. Attach
-again later with either `S` or `sand shell NAME` and it's all still there.
+again later with either `S` or `sandbar shell NAME` and it's all still there.
 
-Useful bindings once you're attached (tmux's own, with `sand`'s default
+Useful bindings once you're attached (tmux's own, with `sandbar`'s default
 `C-a` prefix):
 
 | Keys | Action |
@@ -30,7 +30,7 @@ one — so two terminals can look at two different windows of the same VM at
 once.
 
 The VM must be running before you can shell into it; a stopped VM won't
-offer `S` on its tile, and `sand shell` refuses cleanly with an error
+offer `S` on its tile, and `sandbar shell` refuses cleanly with an error
 telling you to start it first.
 
 ### Copying text out of the guest
@@ -51,14 +51,14 @@ to be true on your side for it to arrive:
   clipboard", xterm's `allowWindowOps`) because a program that can write
   your clipboard can also clobber it. If a copy silently does nothing,
   that's the first thing to check.
-- **If you run `sand` inside your own tmux**, configure the host tmux with
+- **If you run `sandbar` inside your own tmux**, configure the host tmux with
   `set -s set-clipboard on`. Its default, `external`, allows its own copies
   but blocks clipboard writes from the guest tmux. The host tmux also needs
   the clipboard capability for your terminal; see the configuration below.
 
-A VM created before sand shipped this doesn't need rebuilding: the setting
+A VM created before sandbar shipped this doesn't need rebuilding: the setting
 is applied at attach time as well as baked into the guest's `~/.tmux.conf`,
-so the next `S` or `sand shell` has it.
+so the next `S` or `sandbar shell` has it.
 
 ### Claude Code and host tmux settings
 
@@ -66,10 +66,10 @@ The guest configuration includes
 [Claude Code's recommended tmux settings](https://code.claude.com/docs/en/terminal-config#configure-tmux)
 for Shift+Enter, notifications and terminal progress updates. It also enables
 focus events and recognizes a host tmux as an extended-key terminal. These
-settings are applied on every `S` or `sand shell` attachment, including to
+settings are applied on every `S` or `sandbar shell` attachment, including to
 an existing VM's running tmux server, without restarting its sessions.
 
-If you run sand inside tmux on your workstation, add the following to your
+If you run sandbar inside tmux on your workstation, add the following to your
 **host's** `~/.tmux.conf` too (tmux 3.3 or newer):
 
 ```tmux
@@ -101,7 +101,7 @@ $ tmux source-file ~/.tmux.conf
 ```
 
 Detach and reattach the host tmux client after changing terminal features,
-then reattach to the guest. sand configures only guest tmux; it does not
+then reattach to the guest. sandbar configures only guest tmux; it does not
 modify your host configuration.
 
 If the host also uses `C-a` as its prefix, ensure it has
@@ -120,12 +120,12 @@ still applies.
 
 ### What the board does while you're attached
 
-If sand is itself running inside a host tmux session, `S` opens the shell in
+If sandbar is itself running inside a host tmux session, `S` opens the shell in
 a **new host window** and leaves the board on screen beside it, still live.
 Otherwise `S` **suspends** the board for as long as you're attached, and it
 returns on detach.
 
-Either way, a build already in flight keeps building: sand buffers the output
+Either way, a build already in flight keeps building: sandbar buffers the output
 of a board nobody is looking at rather than making the provisioner wait for a
 screen to draw on. On detach the tile shows where that build has actually got
 to — not a replay of every step it took while you were away.
@@ -135,13 +135,13 @@ to — not a replay of every step it took while you were away.
 Some terminals can render a tmux session's windows as **native tabs** rather
 than letting tmux draw them itself. You run tmux in *control mode*
 (`tmux -CC`), tmux speaks a line protocol instead of painting a screen, and
-the terminal turns each tmux window into a real tab. sand has two ways to use
+the terminal turns each tmux window into a real tab. sandbar has two ways to use
 that, and they are not interchangeable — one gives you a tab per **VM**, the
 other a tab per **window inside one VM**.
 
 #### Which terminals speak control mode
 
-Nothing in sand looks at which terminal you are running. `--cc` starts an
+Nothing in sandbar looks at which terminal you are running. `--cc` starts an
 ordinary `tmux -CC` client and the two recipes below are plain tmux commands,
 so what you get is whatever your terminal does with the protocol. **This list
 is not exhaustive** and support moves; at the time of writing:
@@ -154,15 +154,15 @@ is not exhaustive** and support moves; at the time of writing:
 | **Alacritty, Windows Terminal, Terminal.app** | No. Each has an open feature request. |
 
 A terminal that does not speak control mode prints the protocol into your
-window as scrolling text rather than failing cleanly — sand cannot tell the
+window as scrolling text rather than failing cleanly — sandbar cannot tell the
 difference, so if that is what you see, drop `--cc` and attach normally.
 
 #### A tab per VM, with the board still live
 
-Start sand inside a control-mode tmux session:
+Start sandbar inside a control-mode tmux session:
 
 ```console
-$ tmux -CC new-session -s sandbar sand
+$ tmux -CC new-session -s sandbar sandbar
 ```
 
 `$TMUX` is now set, so `S` takes the new-window path described above instead
@@ -174,11 +174,11 @@ This is the setup to use if you spend the day in the board.
 
 #### A tab per window inside one VM
 
-`sand shell --cc NAME` attaches to the **guest's** tmux in control mode, so
+`sandbar shell --cc NAME` attaches to the **guest's** tmux in control mode, so
 the windows `C-a c` makes inside the VM become native tabs:
 
 ```console
-$ sand shell --cc web
+$ sandbar shell --cc web
 ```
 
 Run this from a plain terminal window, not from the board.
@@ -193,12 +193,12 @@ reaches the terminal at all. Turning on `allow-passthrough` does not change
 this; that option forwards a specific `tmux;`-prefixed wrapper, not the
 handshake tmux emits on its own.
 
-Rather than print raw protocol into your pane, `sand shell --cc` refuses
+Rather than print raw protocol into your pane, `sandbar shell --cc` refuses
 when `$TMUX` is set:
 
 ```console
-$ sand shell --cc web
-sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode
+$ sandbar shell --cc web
+sandbar shell: --cc does not work inside tmux — a tmux pane strips the control-mode
 handshake before your terminal can see it; detach (C-a d) and run this from a
 plain terminal window
 ```
@@ -211,7 +211,7 @@ inside one VM, take the second.
 
     The first time you press `S` outside a host tmux session, and only if
     tmux is installed on this machine, the board logs a one-line reminder of
-    both commands to its Messages strip. It appears once per run of `sand`,
+    both commands to its Messages strip. It appears once per run of `sandbar`,
     not once per shell — quit and relaunch to see it again.
 
 ## Uploading and downloading files: data, not code
@@ -236,14 +236,14 @@ below is for.
   guest for a source, then pick a destination on the host.
 
 In the source picker, paste a path or drag a file or folder into the terminal
-window to select it directly. Sand checks that it exists, then opens the
+window to select it directly. Sandbar checks that it exists, then opens the
 destination prompt. A pasted or dropped destination replaces the prefilled
 path. Quoted paths, escaped spaces, and local `file://` URLs are accepted;
 choose one file or folder at a time. Press **ctrl+s** to start the copy.
 
 A drop from your desktop supplies a **local** path: use it for an upload source
 or a download destination. For a download source or upload destination, paste
-a path inside the guest instead. Sand does not translate local paths to guest
+a path inside the guest instead. Sandbar does not translate local paths to guest
 paths.
 
 If your terminal sends drops as ordinary keystrokes rather than a bracketed
@@ -266,7 +266,7 @@ reaching a web server listening inside the guest, see
 
 ## Pasting Images
 
-`v` (paste image) on a running VM's tile, and `sand paste-image NAME` from
+`v` (paste image) on a running VM's tile, and `sandbar paste-image NAME` from
 the command line, both stage the host clipboard's image on the guest so you
 can press Ctrl-V inside Claude Code, Codex, OpenCode, or Pi to attach it to
 your message.
@@ -274,20 +274,20 @@ your message.
 ### The workflow
 
 1. Copy an image on your host (screenshot, photo, graphic, etc.).
-2. In the `sand` TUI, press `v` on the VM's tile; or from a terminal, run
-   `sand paste-image NAME` (where `NAME` is the VM's name).
+2. In the `sandbar` TUI, press `v` on the VM's tile; or from a terminal, run
+   `sandbar paste-image NAME` (where `NAME` is the VM's name).
 3. You'll see a status message: **"staged image on NAME — press Ctrl-V in the
    guest"**.
 4. In your coding agent inside the guest, press Ctrl-V to attach the image to
    your message.
 
 The image is held in a single-slot clipboard on the guest, persisting until
-you run `sand paste-image` again (overwriting it with a new image).
+you run `sandbar paste-image` again (overwriting it with a new image).
 
 ### How it's secure
 
 The feature is designed to prevent clipboard **text** from leaking into the
-guest. sand reads the clipboard **image-only** on your workstation, verifying
+guest. sandbar reads the clipboard **image-only** on your workstation, verifying
 an image type is advertised before fetching any bytes. If you have text on
 your clipboard instead, the command reports "no image on clipboard" and
 nothing is staged. Inside the guest, read-only command shims serve the image
@@ -295,7 +295,7 @@ to agents that probe `xclip`/`wl-paste`; a private headless X display serves
 agents such as Codex that use the X11 API directly. Neither path exposes
 clipboard text.
 
-The image is read on the machine running `sand` (your workstation), never on
+The image is read on the machine running `sandbar` (your workstation), never on
 the machine the VM runs on. Only the image bytes themselves are sent across
 the network.
 
@@ -311,7 +311,7 @@ disappears from its tile until the VM runs again.
 
 ## Landing
 
-`l` on a focused tile (or `sand land NAME [<path>]` from the command line)
+`l` on a focused tile (or `sandbar land NAME [<path>]` from the command line)
 opens the **Landing pane**: a listing of that VM's git checkouts, swept live
 from the guest, with each one's branch, push state, and PR state. This is
 how code — as opposed to the data `u`/`g` move above — leaves the VM: not by
@@ -328,7 +328,7 @@ The sweep finds repositories up to six directories below the guest's home
 itself for each repository's linked worktrees — so a worktree is listed
 however deep it sits, including outside the home directory entirely. A
 repository cloned deeper than six levels below the home directory is not
-found at all, and so has no row — `sand land NAME PATH` cannot reach one
+found at all, and so has no row — `sandbar land NAME PATH` cannot reach one
 either, since it selects from the same sweep.
 
 Each checkout lands in one of a few states, and the pane offers the action
@@ -337,13 +337,13 @@ that state calls for:
 - **Pushed, no PR** — open a one-shot **draft PR** for that checkout's
   pushed branch.
 - **PR already open** — open it in a browser.
-- **PR state unknown** — the branch is pushed, but sand could not confirm
+- **PR state unknown** — the branch is pushed, but sandbar could not confirm
   whether a PR exists, because host `gh` is unusable or the lookup failed.
   Opening a draft PR still works (it falls back to the compare URL).
 - **Never pushed, unpushed, or dirty** — work that exists only in this VM:
   a branch you have never pushed, commits absent from all remote-tracking
   branches in the guest, uncommitted changes, or a combination. Acting on this row
-  **commits and pushes it**: sand drops you into the guest with your editor
+  **commits and pushes it**: sandbar drops you into the guest with your editor
   open on `git commit -a`, and pushes the branch when you save (setting its
   upstream if it has none). Quit the editor without saving and nothing is
   committed or pushed.
@@ -352,7 +352,7 @@ that state calls for:
 - **Local-only** — the checkout has no remote configured, so there is
   nowhere for Landing to push. This is the only state with nothing to offer.
   If such a checkout holds uncommitted or unpushed work, the row still says
-  so (`local only · 2 uncommitted`) — there is nothing sand can do about it,
+  so (`local only · 2 uncommitted`) — there is nothing sandbar can do about it,
   but you should know it is there before deleting the VM.
 - **On drupal.org** — the checkout's remote is a drupal.org project rather
   than GitHub. Either of drupal.org's two git hosts counts:
@@ -388,7 +388,7 @@ problems:
 - **`gh: not installed`** — no `gh` on your `PATH`.
 - **`gh: not authenticated`** — `gh` is there, but `gh auth status` failed.
   Run `gh auth login`, or export `GH_TOKEN` in the environment you start
-  `sand` from.
+  `sandbar` from.
 - **`gh: 1Password did not authorize`** — you use the 1Password `gh` shell
   plugin (below) and the vault did not hand over the token. Unlock 1Password
   and reopen the pane.
@@ -396,34 +396,34 @@ problems:
 ### 1Password shell plugin
 
 The [1Password `gh` shell plugin](https://developer.1password.com/docs/cli/shell-plugins/github/)
-is supported directly — no configuration needed. If you have it set up, sand
+is supported directly — no configuration needed. If you have it set up, sandbar
 runs `op plugin run -- gh …` instead of bare `gh`, so your token comes from
 the vault exactly as it does at your own prompt.
 
-sand detects it by reading `~/.config/op/plugins.sh` (the file `op plugin init`
+sandbar detects it by reading `~/.config/op/plugins.sh` (the file `op plugin init`
 generates) and checking for `op` on your `PATH`. Detection is **file-only** —
-sand never runs `op` to find out, precisely because that could pop an
+sandbar never runs `op` to find out, precisely because that could pop an
 authorization prompt underneath the full-screen UI.
 
 Two things worth knowing:
 
-- **`GH_TOKEN` wins.** If `GH_TOKEN` or `GITHUB_TOKEN` is set in sand's
-  environment, sand uses plain `gh` and ignores the plugin entirely. That is
-  the escape hatch if you would rather sand not touch `op`.
+- **`GH_TOKEN` wins.** If `GH_TOKEN` or `GITHUB_TOKEN` is set in sandbar's
+  environment, sandbar uses plain `gh` and ignores the plugin entirely. That is
+  the escape hatch if you would rather sandbar not touch `op`.
 - **1Password may need to authorize.** The first Landing action in a while can
-  require unlocking 1Password. sand gives the `op` process no terminal, so a
+  require unlocking 1Password. sandbar gives the `op` process no terminal, so a
   prompt can never corrupt the display — but it does mean an authorization
   that can only be answered in the terminal will time out. Unlock 1Password
   first and reopen the pane.
 
-Why any of this is needed: sand runs `gh` **directly, never through a shell**,
+Why any of this is needed: sandbar runs `gh` **directly, never through a shell**,
 because the branch names and repo slugs it passes come from inside the VM and
 must not be able to reach a shell interpreter. The plugin's usual `gh` alias
-is therefore invisible to sand — but `op plugin run -- gh …` is a plain
+is therefore invisible to sandbar — but `op plugin run -- gh …` is a plain
 command, not a shell trick, so supporting it costs nothing in safety.
 
 The token needs **`Pull requests: write`** (fine-grained), or `repo` /
-`public_repo` (classic) — sand resolves the base branch and the head commit's
+`public_repo` (classic) — sandbar resolves the base branch and the head commit's
 message, then POSTs the draft PR. Note this is the **workstation's** token,
 which is a different thing from the token you provisioned into the VM: the
 guest's token only ever pushes branches and never needs pull-request
@@ -443,5 +443,5 @@ The pane's own ledger of what it did (which PR it opened, when) is
 reopenable later with `L` (Log), the same key that reopens a build's or
 transfer's log.
 
-For `sand land`'s full CLI flags (`--pr`, `--web`), see the
-[CLI Reference](cli-reference.md#sand-land-name).
+For `sandbar land`'s full CLI flags (`--pr`, `--web`), see the
+[CLI Reference](cli-reference.md#sandbar-land-name).

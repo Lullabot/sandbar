@@ -31,7 +31,7 @@ const limaRunning = "Running"
 //
 // Get, not List, and that is the fix for a real bug: `limactl list` with no name
 // fails outright while ANY instance is mid-clone (lima#5236), so scanning the full
-// listing to find one VM made `sand shell web` die instantly for the 40-60s a
+// listing to find one VM made `sandbar shell web` die instantly for the 40-60s a
 // create of some OTHER VM was cloning — and from a host tmux, the new window it
 // died in closed before the error could be read. See provider.Provider.Get.
 type vmGetter interface {
@@ -55,10 +55,10 @@ type registryOwnership interface {
 	IsManagedInScope(name string, scope registry.Scope) bool
 }
 
-// runShell implements the `sand shell <name>` subcommand: it resolves the named
+// runShell implements the `sandbar shell <name>` subcommand: it resolves the named
 // VM's status and instance dir together, refuses cleanly when the VM is unknown
 // or not running, and otherwise execs the attach argv built by the provider's
-// AttachArgv — the one place in sand that knows tmux exists, and which the
+// AttachArgv — the one place in sandbar that knows tmux exists, and which the
 // TUI's `S` verb builds on too, so the two entrypoints cannot drift. stdio is
 // inherited because a tmux client needs the real terminal.
 //
@@ -71,7 +71,7 @@ func runShell(args []string) error {
 	profileFlag := fs.String("profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	ccFlag := fs.Bool("cc", false, "Attach in tmux control mode, so a terminal that speaks it (iTerm2, WezTerm, ...) shows each guest window as a native tab")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand shell NAME [--profile <name>] [--cc]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar shell NAME [--profile <name>] [--cc]
 
 Attach a shell to NAME's persistent tmux session in the guest.
 
@@ -91,12 +91,12 @@ same VM.
 protocol, each guest window becomes a native tab, so C-a c opens a real tab
 rather than a window drawn inside this one. iTerm2 is the reference
 implementation; WezTerm implements a subset; the list is not exhaustive and
-sand does not detect your terminal, it just starts a tmux -CC client.
+sandbar does not detect your terminal, it just starts a tmux -CC client.
 Run it from a plain terminal window: a host tmux pane strips the control-mode
 handshake, so --cc refuses when $TMUX is set.
 
-The named VM must already exist and be running (see 'sand' to list instances,
-or 'sand create' to make one). If NAME is managed under more than one
+The named VM must already exist and be running (see 'sandbar' to list instances,
+or 'sandbar create' to make one). If NAME is managed under more than one
 connection profile, --profile picks which one to attach to.
 `)
 	}
@@ -111,7 +111,7 @@ connection profile, --profile picks which one to attach to.
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("sand shell: need exactly one VM name")
+		return errors.New("sandbar shell: need exactly one VM name")
 	}
 	name := fs.Arg(0)
 
@@ -126,7 +126,7 @@ connection profile, --profile picks which one to attach to.
 
 	p, err := resolveShellProvider(store, reg, name, *profileFlag)
 	if err != nil {
-		return fmt.Errorf("sand shell: %w", err)
+		return fmt.Errorf("sandbar shell: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -165,7 +165,7 @@ connection profile, --profile picks which one to attach to.
 			}
 			os.Exit(code)
 		}
-		return fmt.Errorf("sand shell: %w", err)
+		return fmt.Errorf("sandbar shell: %w", err)
 	}
 	return nil
 }
@@ -187,18 +187,18 @@ func shellAttachArgv(l vmGetter, name string, controlMode bool) ([]string, error
 	// protocol lands in the pane as scrolling gibberish. There is no configuration
 	// that fixes it, so an error naming the fix beats a warning above the noise.
 	if controlMode && os.Getenv("TMUX") != "" {
-		return nil, errors.New("sand shell: --cc does not work inside tmux — a tmux pane strips the control-mode handshake before your terminal can see it; detach (C-a d) and run this from a plain terminal window")
+		return nil, errors.New("sandbar shell: --cc does not work inside tmux — a tmux pane strips the control-mode handshake before your terminal can see it; detach (C-a d) and run this from a plain terminal window")
 	}
 
 	found, err := l.Get(name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
-			return nil, fmt.Errorf("sand shell: no VM named %q (run 'sand' to list instances)", name)
+			return nil, fmt.Errorf("sandbar shell: no VM named %q (run 'sandbar' to list instances)", name)
 		}
-		return nil, fmt.Errorf("sand shell: %w", err)
+		return nil, fmt.Errorf("sandbar shell: %w", err)
 	}
 	if found.Status != limaRunning {
-		return nil, fmt.Errorf("sand shell: VM %q is not running (status: %s); start it first", name, found.Status)
+		return nil, fmt.Errorf("sandbar shell: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 
 	if controlMode {
@@ -208,8 +208,8 @@ func shellAttachArgv(l vmGetter, name string, controlMode bool) ([]string, error
 }
 
 // reorderShellFlags moves every recognised flag token (and, for --profile,
-// its value) ahead of the positional arguments in args, so `sand shell NAME
-// --profile work` parses the same as `sand shell --profile work NAME` under
+// its value) ahead of the positional arguments in args, so `sandbar shell NAME
+// --profile work` parses the same as `sandbar shell --profile work NAME` under
 // flag.FlagSet, which otherwise stops parsing flags at the first non-flag
 // token. Only the flags this subcommand defines (-h/--help, --profile) are
 // recognised (-h/--help, --profile, --cc); anything else is left as positional
@@ -223,7 +223,7 @@ func reorderShellFlags(args []string) []string {
 			flagArgs = append(flagArgs, a)
 		case a == "--cc" || a == "-cc":
 			// A bool flag: unlike --profile it consumes no following value, so
-			// `sand shell NAME --cc` must not swallow whatever comes next.
+			// `sandbar shell NAME --cc` must not swallow whatever comes next.
 			flagArgs = append(flagArgs, a)
 		case a == "--profile" || a == "-profile":
 			flagArgs = append(flagArgs, a)
@@ -256,7 +256,7 @@ var listForProfile = func(p profiles.Profile) ([]vm.VM, error) {
 }
 
 // probeUnmanagedOwners is resolveShellProvider's fallback for when the
-// managed-VM registry reports ZERO owners for name: before this task, `sand
+// managed-VM registry reports ZERO owners for name: before this task, `sandbar
 // shell NAME` attached to ANY VM the (single) configured backend listed,
 // managed or not (the base image `sand-base`, a hand-made limactl VM, ...).
 // Now that ownership with more than one enabled profile is resolved from the
@@ -339,14 +339,14 @@ func probeProvenanceOwners(enabled []profiles.Profile, name string) []profiles.P
 // resolveShellProvider resolves which connection profile NAME lives on and
 // constructs its provider. An explicit profile name is used directly (a hard
 // error if it does not name an enabled profile). With no explicit profile:
-// a store with only one enabled profile always uses it (preserving `sand
+// a store with only one enabled profile always uses it (preserving `sandbar
 // shell`'s original behaviour of attaching to any VM the one configured
 // backend knows about, managed or not); with more than one enabled profile,
 // ownership is resolved provenance-first: each candidate profile's marker is
 // consulted via probeProvenanceOwners (one ProvenanceOf per candidate). If
 // NO profile's marker names NAME, the registry's managed-VM index is
 // consulted next — LEGACY, remove after one release: it exists only so a VM
-// recorded by a pre-provenance sand (or a controller that has not upgraded
+// recorded by a pre-provenance sandbar (or a controller that has not upgraded
 // yet) does not lose shell routing the moment this ships. If THAT also comes
 // up empty, probeUnmanagedOwners is tried before giving up (an UNMANAGED vm,
 // e.g. the base image or a hand-made instance, has no marker or registry
@@ -364,7 +364,7 @@ func resolveShellProvider(store *profiles.Store, reg registryOwnership, name, pr
 
 // resolveVMProfile is resolveShellProvider's decision proper: WHICH connection
 // profile an existing VM name lives on. It is split out because a caller that
-// acts on the VM's registry entry — `sand reset`, which reads its recorded
+// acts on the VM's registry entry — `sandbar reset`, which reads its recorded
 // config and records the rebuilt one — needs that profile's registry.Scope as
 // well as its provider, and the two must be derived from the SAME answer.
 func resolveVMProfile(store *profiles.Store, reg registryOwnership, name, profileFlag string) (profiles.Profile, error) {
@@ -391,14 +391,14 @@ func resolveVMProfile(store *profiles.Store, reg registryOwnership, name, profil
 	case len(enabled) == 0:
 		return profiles.Profile{}, fmt.Errorf("no enabled connection profile found (not even %q)", profiles.LocalProfileID)
 	case len(enabled) == 1:
-		// Only one profile is enabled: use it directly, exactly as `sand shell`
+		// Only one profile is enabled: use it directly, exactly as `sandbar shell`
 		// always has, regardless of whether NAME is a sand-managed VM — there is
 		// no other profile it could possibly be on.
 		target = enabled[0]
 	default:
 		// Registry FIRST — a pure in-memory lookup. The common case (NAME is a VM
 		// in this controller's managed index) resolves with ZERO network I/O, so
-		// `sand shell localvm` never hangs behind an unreachable/slow OTHER profile.
+		// `sandbar shell localvm` never hangs behind an unreachable/slow OTHER profile.
 		// Only on a registry miss do we pay the network: the authoritative
 		// provenance marker per profile, then a List probe for an unmanaged VM.
 		var owners []profiles.Profile
@@ -419,7 +419,7 @@ func resolveVMProfile(store *profiles.Store, reg registryOwnership, name, profil
 		}
 		switch len(owners) {
 		case 0:
-			return profiles.Profile{}, fmt.Errorf("no such VM %q (run 'sand' to list instances, or pass --profile if it is on a specific connection profile)", name)
+			return profiles.Profile{}, fmt.Errorf("no such VM %q (run 'sandbar' to list instances, or pass --profile if it is on a specific connection profile)", name)
 		case 1:
 			target = owners[0]
 		default:

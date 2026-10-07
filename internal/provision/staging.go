@@ -216,7 +216,7 @@ func (g *StageGuard) Fail(err error) error {
 		return err
 	}
 	if g.name != "" {
-		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w\n\nTo finish this reset once the cause is fixed: sand reset %s --from-backup %s", g.dir, err, g.name, g.dir)
+		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w\n\nTo finish this reset once the cause is fixed: sandbar reset %s --from-backup %s", g.dir, err, g.name, g.dir)
 	}
 	return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", g.dir, err)
 }

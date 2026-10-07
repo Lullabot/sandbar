@@ -18,7 +18,7 @@
 //
 // Run (needs limactl + nested virt/KVM; downloads the Debian 13 image once,
 // then builds a full base image — this is comparatively slow, matching
-// cmd/sand/create_e2e_test.go's own shared-base build):
+// cmd/sandbar/create_e2e_test.go's own shared-base build):
 //
 //	LIMA_E2E=1 go test -tags limae2e -timeout 30m -run TestTemplateRoundTrip ./internal/provision/
 package provision
@@ -85,7 +85,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 		Locale:   "en_US.UTF-8",
 		// Every optional tool-set flag left at its zero value (false): this
 		// test exercises the template mechanics, never the base's installed
-		// tooling — see cmd/sand/create_e2e_test.go's ensureCmdE2EBase for the
+		// tooling — see cmd/sandbar/create_e2e_test.go's ensureCmdE2EBase for the
 		// same reasoning.
 	}
 	var buildLog bytes.Buffer

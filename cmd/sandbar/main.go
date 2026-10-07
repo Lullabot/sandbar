@@ -1,10 +1,10 @@
-// Command sand is the interactive TUI for managing development VMs for coding
+// Command sandbar is the interactive TUI for managing development VMs for coding
 // agents: list/inspect instances, create new ones (streaming the provisioner), and
 // run lifecycle actions (start/stop/restart/delete/reset).
 //
-// Its headless subcommands are the same verbs under the same names — `sand
-// create` is the form's `n`, `sand reset` is the board's `R`, `sand shell` is
-// `S`, `sand land` is `l`, `sand paste-image` is `v` — because a verb that
+// Its headless subcommands are the same verbs under the same names — `sandbar
+// create` is the form's `n`, `sandbar reset` is the board's `R`, `sandbar shell` is
+// `S`, `sandbar land` is `l`, `sandbar paste-image` is `v` — because a verb that
 // exists in only one of the two entrypoints is a verb users have to discover
 // twice. Each shares the TUI's implementation rather than reimplementing it
 // (internal/manage's gates and bookkeeping, provider.AttachArgv, internal/
@@ -13,7 +13,9 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
@@ -23,14 +25,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// version is the sand release version. It defaults to "dev" for local/source
+// version is the sandbar release version. It defaults to "dev" for local/source
 // builds; GoReleaser stamps the real value at build time via
 // `-ldflags "-X main.version={{.Version}}"`.
 var version = "dev"
 
+// warnLegacyCommand uses argv[0], since resolving the executable follows the
+// compatibility symlink and loses the name the user invoked.
+func warnLegacyCommand(w io.Writer, argv0 string) {
+	if filepath.Base(argv0) == "sand" {
+		fmt.Fprintln(w, "Warning: sand has been renamed to sandbar. The sand compatibility symlink will be removed in a future release; use sandbar instead.")
+	}
+}
+
 func main() {
-	// Subcommand dispatch: bare `sand` (no args) launches the TUI, unchanged;
-	// `sand create ...` runs the headless, non-interactive provisioning path
+	warnLegacyCommand(os.Stderr, os.Args[0])
+	// Subcommand dispatch: bare `sandbar` (no args) launches the TUI, unchanged;
+	// `sandbar create ...` runs the headless, non-interactive provisioning path
 	// (see create.go); any other first argument is an unknown subcommand.
 	// `--version`/`version` is handled first so it works without limactl.
 	if len(os.Args) > 1 {
@@ -77,7 +88,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "sand: unknown subcommand %q\n\nUsage:\n  sand              interactive TUI\n  sand create ...   headless create (see 'sand create -h')\n  sand reset NAME   rebuild a VM from its base image (see 'sand reset -h')\n  sand shell NAME   attach a shell to a VM (see 'sand shell -h')\n  sand land NAME    list/land a VM's git checkouts (see 'sand land -h')\n  sand publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sand publish -h')\n  sand paste-image NAME   stage the clipboard image on a VM (see 'sand paste-image -h')\n  sand template ... manage golden VM templates (see 'sand template -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sandbar: unknown subcommand %q\n\nUsage:\n  sandbar              interactive TUI\n  sandbar create ...   headless create (see 'sandbar create -h')\n  sandbar reset NAME   rebuild a VM from its base image (see 'sandbar reset -h')\n  sandbar shell NAME   attach a shell to a VM (see 'sandbar shell -h')\n  sandbar land NAME    list/land a VM's git checkouts (see 'sandbar land -h')\n  sandbar publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sandbar publish -h')\n  sandbar paste-image NAME   stage the clipboard image on a VM (see 'sandbar paste-image -h')\n  sandbar template ... manage golden VM templates (see 'sandbar template -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}
@@ -86,7 +97,7 @@ func main() {
 }
 
 // runTUI launches the interactive Bubble Tea program: the original (and still
-// default) `sand` entrypoint. Unlike the single-provider `sand create`/`sand
+// default) `sandbar` entrypoint. Unlike the single-provider `sandbar create`/`sandbar
 // shell` paths (which resolve ONE profile — see resolveSingle), the TUI builds
 // the WHOLE fleet: one sub-state per enabled connection profile, aggregated into
 // one board. Each member preflights and lists ASYNCHRONOUSLY inside the model

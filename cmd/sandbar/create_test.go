@@ -39,7 +39,7 @@ func (s *stubProvisioner) RecreateWithOptions(_ context.Context, _ vm.CreateConf
 }
 
 // TestHeadlessCreateRecordsManagedVM is the load-bearing parity
-// guarantee: a headless `sand create` must record the VM as
+// guarantee: a headless `sandbar create` must record the VM as
 // managed with its CreateConfig, exactly like the interactive TUI does on a
 // successful provision (internal/ui/model.go's provisionDoneMsg handling,
 // shared via internal/manage), so a headless-created VM is flagged managed
@@ -134,7 +134,7 @@ func TestHeadlessRecreatePassesRebuildDownToTheProvisioner(t *testing.T) {
 // TestHeadlessRecreateRefusedForUnmanagedVM is the CLI half of the recreate
 // gate in internal/manage: recreate clones from the shared base image and would
 // replace ANY instance it is pointed at, so --recreate must be refused for a
-// VM sand did not create — and refused BEFORE the provisioner is ever
+// VM sandbar did not create — and refused BEFORE the provisioner is ever
 // touched, not just reported as an error after a clone already ran.
 func TestHeadlessRecreateRefusedForUnmanagedVM(t *testing.T) {
 	cfg := vm.CreateConfig{Name: "claude", BaseName: "sandbar-base", GitName: "A", GitEmail: "a@b.c", CPUs: 2}

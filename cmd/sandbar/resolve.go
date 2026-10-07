@@ -22,7 +22,7 @@ func loadStore() *profiles.Store {
 }
 
 // resolveProfileName picks the ONE profile a headless CLI command
-// (`sand create`, `sand shell`) should act on: an explicit name takes
+// (`sandbar create`, `sandbar shell`) should act on: an explicit name takes
 // precedence and is a hard error if it does not name an enabled profile (no
 // fallback — the user asked for THIS profile). With no explicit name, it
 // falls back to the store's last-used profile, and finally to the permanent
@@ -118,7 +118,7 @@ func providerForProfile(p profiles.Profile) (provider.Provider, registry.Scope, 
 }
 
 // scopeForProfile derives the registry.Scope a profile's managed-VM entries
-// are owned by, WITHOUT constructing its provider — used by `sand shell`'s
+// are owned by, WITHOUT constructing its provider — used by `sandbar shell`'s
 // cross-profile ownership lookup, which only needs each enabled profile's
 // scope to query the registry, not a live connection to every remote.
 func scopeForProfile(p profiles.Profile) registry.Scope {

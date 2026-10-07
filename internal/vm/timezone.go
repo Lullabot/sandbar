@@ -134,7 +134,7 @@ func zoneFromLinkTarget(target string) string {
 }
 
 // canonicalZone rewrites a detected name into the one the GUEST is most likely
-// to have, and is the difference between "sand create suddenly fails on a host
+// to have, and is the difference between "sandbar create suddenly fails on a host
 // that worked yesterday" and it just working.
 //
 // Two host-side spellings are shape-valid, in daily use, and absent from a

@@ -3,7 +3,7 @@ package ui
 import "testing"
 
 // THE REFRESH TICK SHARES shouldTick WITH THE HEARTBEAT (heartbeat.go): an
-// idle sand on a backgrounded terminal must not poll. tickRefresh is the
+// idle sandbar on a backgrounded terminal must not poll. tickRefresh is the
 // gate's starting/stopping half — it must start exactly one loop while
 // shouldTick holds, refuse to stack a second one (the same problem
 // tickSpinner's m.spinning guards against for the spinner), and stop

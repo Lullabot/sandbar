@@ -53,9 +53,9 @@ func (a providerProvisioner) RecreateWithOptions(ctx context.Context, cfg vm.Cre
 	return a.p.Recreate(ctx, cfg, opts, out)
 }
 
-// runCreate implements the headless `sand create` subcommand: it parses a
+// runCreate implements the headless `sandbar create` subcommand: it parses a
 // flag surface mirroring the original bash provisioner's (minus --ref — the
-// playbook is embedded in the sand binary, so there is no ref left to pin),
+// playbook is embedded in the sandbar binary, so there is no ref left to pin),
 // builds and validates a vm.CreateConfig, and drives the provisioner +
 // managed-registry bookkeeping shared with the TUI. It never prompts; missing
 // required fields are a validation error.
@@ -70,20 +70,20 @@ func runCreateWithBinding(args []string, bind createBinder) error {
 
 	fs := flag.NewFlagSet("create", flag.ContinueOnError)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand create [flags]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar create [flags]
 
 Headlessly provision a development VM for coding agents: no TUI, no prompts. Every
 flag has a default: --git-name/--git-email fall back to the host's git config
-(user.name/user.email), so on a machine with git configured `+"`sand create`"+`
+(user.name/user.email), so on a machine with git configured `+"`sandbar create`"+`
 needs no flags. If neither the flags nor the host git config supply an
-identity, sand errors rather than fabricate a commit author. Flags mirror the
+identity, sandbar errors rather than fabricate a commit author. Flags mirror the
 original bash provisioner's, minus --ref (the playbook is embedded in this
 binary, so there is no ref to pin).
 
 Examples:
-  sand create                                                   # host git identity
-  sand create --git-name "Your Name" --git-email you@example.com
-  sand create --profile work                                    # create on the "work" connection profile
+  sandbar create                                                   # host git identity
+  sandbar create --git-name "Your Name" --git-email you@example.com
+  sandbar create --profile work                                    # create on the "work" connection profile
 
 Flags:
 `)
@@ -104,7 +104,7 @@ Flags:
 	// bound straight to cfg.Timezone like --locale above. cfg.Timezone already
 	// holds this host's zone (vm.HostTimezone, via DefaultCreateConfig), and
 	// binding it directly would make the flag package print that value as the
-	// default — so `sand create --help` would read "(default
+	// default — so `sandbar create --help` would read "(default
 	// "America/Toronto")" on one machine and "(default "Europe/Berlin")" on the
 	// next, and the copy of that help text in docs/using-sand/cli-reference.md
 	// would be wrong for almost every reader. Same reason --git-name describes
@@ -126,14 +126,14 @@ Flags:
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithOpenCode, "with-opencode", cfg.WithOpenCode, "Install OpenCode when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
-	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
+	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sandbar reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
 	fs.BoolVar(&cfg.DisableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
-	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sand template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
+	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sandbar template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
 	// NOTE: --ref is deliberately NOT a flag here. The original bash provisioner's
 	// --ref pinned the git ref of a checked-out playbook in standalone mode;
-	// sand's playbook is
+	// sandbar's playbook is
 	// embedded in the binary at build time (see playbook_embed.go), so there is
 	// no ref left to pin at create time. This is deliberate, not a gap.
 
@@ -144,7 +144,7 @@ Flags:
 		return err // flag package already printed usage
 	}
 	if *recreate && *templateFlag != "" {
-		return fmt.Errorf("sand create: --template cannot be combined with --recreate; recreate uses the VM's recorded clone source")
+		return fmt.Errorf("sandbar create: --template cannot be combined with --recreate; recreate uses the VM's recorded clone source")
 	}
 
 	// Which flags the user ACTUALLY passed. It decides two things: the refusal
@@ -173,7 +173,7 @@ Flags:
 	// DefaultCreateConfig deliberately does not do (it is a hot, pure accessor —
 	// see the comment there). TimezoneExplicit rides along so the guest knows
 	// whether an unknown zone is worth failing the run over: a name the USER
-	// named is, a name sand guessed is not.
+	// named is, a name sandbar guessed is not.
 	//
 	// Validate rejects a malformed value before any of it reaches the playbook;
 	// whether the zone actually EXISTS is a question only the guest can answer,
@@ -185,9 +185,9 @@ Flags:
 	} else {
 		// Say so rather than quietly handing over a UTC VM: the documented
 		// promise is that the guest matches this host, and on a machine that
-		// will not reveal its zone sand cannot keep it. Without this line the
+		// will not reveal its zone sandbar cannot keep it. Without this line the
 		// only symptom is a VM with the wrong clock and nothing to explain it.
-		fmt.Fprintf(os.Stderr, "sand: could not determine this host's timezone; using %s. Pass --timezone to set it explicitly.\n", cfg.Timezone)
+		fmt.Fprintf(os.Stderr, "sandbar: could not determine this host's timezone; using %s. Pass --timezone to set it explicitly.\n", cfg.Timezone)
 	}
 
 	// Resolve the backend before anything that reads or defaults host-derived
@@ -203,7 +203,7 @@ Flags:
 	store := loadStore()
 	p, scope, profile, err := bind(store, *profileFlag)
 	if err != nil {
-		return fmt.Errorf("sand create: %w", err)
+		return fmt.Errorf("sandbar create: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -223,7 +223,7 @@ Flags:
 
 	// Git identity falls back to the host's git config when the flags are
 	// omitted, mirroring how the TUI form seeds those fields. If the host has no
-	// identity either, Validate below errors — sand never fabricates an author.
+	// identity either, Validate below errors — sandbar never fabricates an author.
 	if cfg.GitName == "" {
 		cfg.GitName = vm.HostGitConfig("user.name")
 	}
@@ -249,7 +249,7 @@ Flags:
 	// instead of the shared base image).
 	templateInstance, err := resolveTemplateCreate(reg, scope, *templateFlag, *rebuild, explicit["base-name"])
 	if err != nil {
-		return fmt.Errorf("sand create: %w", err)
+		return fmt.Errorf("sandbar create: %w", err)
 	}
 	if templateInstance != "" {
 		cfg.BaseName = templateInstance
@@ -263,14 +263,14 @@ Flags:
 		preAdoption.CloneToken = ""
 	}
 	if err := preAdoption.Validate(); err != nil {
-		return fmt.Errorf("sand create: %w", err)
+		return fmt.Errorf("sandbar create: %w", err)
 	}
 	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
-		return fmt.Errorf("sand create: %w", err)
+		return fmt.Errorf("sandbar create: %w", err)
 	}
 
 	// Reconcile against the live instance list before acting, exactly like the
-	// TUI does on every list load — so a VM deleted outside sand isn't wrongly
+	// TUI does on every list load — so a VM deleted outside sandbar isn't wrongly
 	// treated as managed (and gated recreate-able). scope confines this to the
 	// resolved provider's own entries, so it can never prune (or be confused
 	// with) another provider's VMs — see resolveSingle and registry.Scope.
@@ -282,9 +282,9 @@ Flags:
 		fmt.Fprintln(os.Stderr, "warning: could not update managed index:", err)
 	}
 
-	// --recreate rebuilds a VM sand ALREADY KNOWS, so every setting the user did
+	// --recreate rebuilds a VM sandbar ALREADY KNOWS, so every setting the user did
 	// not restate on the command line comes from that VM's own recorded config
-	// rather than from this flag set's defaults. Without this, `sand create
+	// rather than from this flag set's defaults. Without this, `sandbar create
 	// --recreate --name mybox` — the obvious spelling of "give me this VM back" —
 	// silently returned a DIFFERENT VM: memory and disk reset to the flag
 	// defaults, and the clone URL dropped entirely, so the project checkout the
@@ -309,13 +309,13 @@ Flags:
 			// The record was valid when it was written, but it is a file on disk
 			// and this is the last point anything checks it.
 			if err := cfg.Validate(); err != nil {
-				return fmt.Errorf("sand create: %s's recorded config is unusable (%w); pass the settings explicitly", cfg.Name, err)
+				return fmt.Errorf("sandbar create: %s's recorded config is unusable (%w); pass the settings explicitly", cfg.Name, err)
 			}
 		}
 	}
 	if *recreate {
 		if err := cfg.Validate(); err != nil {
-			return fmt.Errorf("sand create: %w", err)
+			return fmt.Errorf("sandbar create: %w", err)
 		}
 	}
 
@@ -407,7 +407,7 @@ Flags:
 	return nil
 }
 
-// refuseRecreateWithCloneURL rejects `sand create --recreate --clone-url ...`.
+// refuseRecreateWithCloneURL rejects `sandbar create --recreate --clone-url ...`.
 //
 // --recreate rebuilds the VM it names; --clone-url says which project a VM is
 // for. Together they asked for a rebuild that is a different VM, and what
@@ -423,8 +423,8 @@ func refuseRecreateWithCloneURL(recreate bool, explicit map[string]bool, name st
 	if !recreate || !explicit["clone-url"] {
 		return nil
 	}
-	return fmt.Errorf("sand create: --recreate cannot change --clone-url — a rebuild keeps the VM's project. "+
-		"Run 'sand reset %s' to rebuild it as it is, or 'sand create --name <new-name> --clone-url ...' for the other repo", name)
+	return fmt.Errorf("sandbar create: --recreate cannot change --clone-url — a rebuild keeps the VM's project. "+
+		"Run 'sandbar reset %s' to rebuild it as it is, or 'sandbar create --name <new-name> --clone-url ...' for the other repo", name)
 }
 
 // adoptRecordedConfig copies rec's settings into cfg for every field whose flag
@@ -496,7 +496,7 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 // checkBackendName asks the backend whether it will accept name for a NEW VM,
 // before anything is built. Proxmox rejects a name that is not DNS-shaped and
 // Lima one that is not a valid identifier; without this the rejection arrives
-// from inside the clone, minutes in, after sand has already announced the VM —
+// from inside the clone, minutes in, after sandbar has already announced the VM —
 // and is then followed by a cleanup delete that fails in its own right, because
 // the instance the failure is about was never created. See
 // provider.Provider.ValidateName.
@@ -525,7 +525,7 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 // independent of --recreate (which targets the clone, not the base); both may
 // be combined. --recreate is gated on the target already being a sand-managed
 // VM — recreate clones from the shared base image and would replace ANY
-// instance it is pointed at, so it must never be offered for a VM sand did
+// instance it is pointed at, so it must never be offered for a VM sandbar did
 // not create.
 //
 // IT DOES NOT DELETE THE BASE IMAGE. It used to: --rebuild force-deleted the base
@@ -568,7 +568,7 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 	if recreate {
 		base, ok := manage.RecreateBase(reg, cfg.Name, scope, provenancer...)
 		if !ok {
-			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sand create' first, or delete it manually and retry without --recreate)", cfg.Name)
+			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sandbar create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
 		cfg.BaseName = base
 		// If the VM being recreated was itself cloned from a golden template

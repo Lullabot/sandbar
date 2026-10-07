@@ -16,7 +16,7 @@ var hostFiles HostFiles = LocalFiles()
 
 // The guest home is read from Lima's generated files rather than guessed, and it
 // lives here rather than in one caller because BOTH shell entrypoints need it:
-// the TUI's `S` verb and `sand shell` each pass it to AttachArgv as --workdir.
+// the TUI's `S` verb and `sandbar shell` each pass it to AttachArgv as --workdir.
 // Duplicating it would be the same drift AGENTS.md warns about for the create
 // paths, and getting it wrong is not cosmetic — a --workdir pointing at a
 // directory that does not exist in the guest reintroduces the exact

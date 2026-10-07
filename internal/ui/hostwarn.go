@@ -105,7 +105,7 @@ func (m *model) checkHostMemWarn(mem *fleetMember) {
 
 // checkHostDiskWarn is checkHostMemWarn's disk twin (rule 2) — applies to any
 // CONNECTED member, local included: a full local disk is exactly what a user
-// running sand on their own laptop wants to hear about.
+// running sandbar on their own laptop wants to hear about.
 func (m *model) checkHostDiskWarn(mem *fleetMember) {
 	if !hostDiskHasReading(mem.host) {
 		return

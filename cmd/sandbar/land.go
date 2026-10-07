@@ -57,12 +57,12 @@ func requireRunningVM(g vmRunningChecker, name string) (vm.VM, error) {
 	found, err := g.Get(name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
-			return vm.VM{}, fmt.Errorf("sand land: no VM named %q (run 'sand' to list instances)", name)
+			return vm.VM{}, fmt.Errorf("sandbar land: no VM named %q (run 'sandbar' to list instances)", name)
 		}
-		return vm.VM{}, fmt.Errorf("sand land: %w", err)
+		return vm.VM{}, fmt.Errorf("sandbar land: %w", err)
 	}
 	if found.Status != limaRunning {
-		return vm.VM{}, fmt.Errorf("sand land: VM %q is not running (status: %s); start it first", name, found.Status)
+		return vm.VM{}, fmt.Errorf("sandbar land: VM %q is not running (status: %s); start it first", name, found.Status)
 	}
 	return found, nil
 }
@@ -99,22 +99,22 @@ func confirmOpenPrompt() bool {
 	return reply == "y" || reply == "yes"
 }
 
-// landUsage writes `sand land`'s help text to w. It is a function taking an
+// landUsage writes `sandbar land`'s help text to w. It is a function taking an
 // io.Writer rather than an inline closure over fs.Output() so the help can be
 // asserted in a test without capturing the process's real stderr — the same
 // reason landPR takes its stdout as a parameter.
 func landUsage(w io.Writer) {
-	fmt.Fprint(w, `Usage: sand land NAME [PATH] [--pr | --web | --review [--clean] [-- DIFF-ARGS...]] [--profile <name>]
+	fmt.Fprint(w, `Usage: sandbar land NAME [PATH] [--pr | --web | --review [--clean] [-- DIFF-ARGS...]] [--profile <name>]
 
 List NAME's git checkouts and their branch/push/PR state, or act on one:
 
-  sand land NAME                list checkouts + branch/push/PR state
-  sand land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
-  sand land NAME PATH --web     open PATH's branch (or PR) in a browser
-  sand land NAME PATH --review  review PATH's changes in a browser, served from the VM
-  sand land NAME PATH --review --clean
+  sandbar land NAME                list checkouts + branch/push/PR state
+  sandbar land NAME PATH --pr      open a one-shot draft PR for PATH's pushed branch
+  sandbar land NAME PATH --web     open PATH's branch (or PR) in a browser
+  sandbar land NAME PATH --review  review PATH's changes in a browser, served from the VM
+  sandbar land NAME PATH --review --clean
                                 the same, discarding any review already saved there
-  sand land NAME PATH --review -- HEAD~2
+  sandbar land NAME PATH --review -- HEAD~2
                                 review the range you name after -- instead of the
                                 default (here, the working tree against HEAD~2)
 
@@ -129,11 +129,11 @@ server inside the VM against PATH, opens it in a browser on this machine, and
 blocks until you finish the review — which writes review.xml into PATH inside
 the VM, where the agent can read it. Nothing leaves the VM. The review tool is
 part of every base image; a base older than the tool itself picks it up on the
-next 'sand create'.
+next 'sandbar create'.
 
 Everything after -- is handed to the review server as its diff arguments, so
 you choose what is reviewed: 'HEAD~2...HEAD' for just the last two commits,
-'--staged' for only what is staged. Without it, sand picks the range itself.
+'--staged' for only what is staged. Without it, sandbar picks the range itself.
 A saved review is still carried in, whatever range you choose.
 
 A review.xml already in PATH is carried into the new review, so comments you
@@ -144,14 +144,14 @@ has the review tool's assistant skills. For a repository cloned later, run
 'self-review-install-skills PATH' inside the VM; it installs the skills and
 keeps them and the review files out of 'git status'.
 
-The named VM must already exist and be running (see 'sand' to list
-instances, or 'sand create' to make one). If NAME is managed under more than
+The named VM must already exist and be running (see 'sandbar' to list
+instances, or 'sandbar create' to make one). If NAME is managed under more than
 one connection profile, --profile picks which one to act on.
 `)
 }
 
-// runLand implements the `sand land NAME [PATH] [--pr|--web|--review]` subcommand,
-// mirroring `create`/`shell`'s single-profile dispatch (cmd/sand/main.go's
+// runLand implements the `sandbar land NAME [PATH] [--pr|--web|--review]` subcommand,
+// mirroring `create`/`shell`'s single-profile dispatch (cmd/sandbar/main.go's
 // switch calls this the same way it calls runCreate/runShell).
 //
 // With no PATH/flags it lists NAME's checkouts and their branch/push/PR
@@ -179,7 +179,7 @@ func runLand(args []string) error {
 	cleanFlag := fs.Bool("clean", false, "With --review: discard any review already saved in PATH and start over")
 	fs.Usage = func() { landUsage(fs.Output()) }
 	// --profile/--pr/--web/--review may appear before or after the positional
-	// arguments (e.g. "sand land NAME PATH --pr"); reorder so all flags
+	// arguments (e.g. "sandbar land NAME PATH --pr"); reorder so all flags
 	// precede them, which is what flag.FlagSet.Parse requires (it stops
 	// parsing flags at the first non-flag token) — mirrors shell.go's
 	// reorderShellFlags.
@@ -197,24 +197,24 @@ func runLand(args []string) error {
 	}
 	if fs.NArg() < 1 || fs.NArg() > 2 {
 		fs.Usage()
-		return errors.New("sand land: need a VM NAME, and optionally a checkout PATH")
+		return errors.New("sandbar land: need a VM NAME, and optionally a checkout PATH")
 	}
 	// The three actions are mutually exclusive: each is a different thing to
 	// do with ONE checkout, so asking for two is a mistake, not a request to
 	// do both.
 	if countTrue(*prFlag, *webFlag, *reviewFlag) > 1 {
-		return errors.New("sand land: --pr, --web and --review cannot be used together")
+		return errors.New("sandbar land: --pr, --web and --review cannot be used together")
 	}
 	// --clean modifies --review and means nothing without it. Refused rather
 	// than ignored: a user who typed it meant to discard a saved review, and
 	// silently not doing that is the one outcome they would not forgive.
 	if *cleanFlag && !*reviewFlag {
-		return errors.New("sand land: --clean only applies to --review")
+		return errors.New("sandbar land: --clean only applies to --review")
 	}
 	// Refused rather than ignored, like --clean: a range the user typed that
 	// nothing reads would leave them believing a different diff was reviewed.
 	if len(diffArgs) > 0 && !*reviewFlag {
-		return errors.New("sand land: diff arguments after -- only apply to --review")
+		return errors.New("sandbar land: diff arguments after -- only apply to --review")
 	}
 	name := fs.Arg(0)
 	var path string
@@ -222,10 +222,10 @@ func runLand(args []string) error {
 		path = fs.Arg(1)
 	}
 	if (*prFlag || *webFlag || *reviewFlag) && path == "" {
-		return errors.New("sand land: --pr/--web/--review require a checkout PATH (run 'sand land NAME' to list them)")
+		return errors.New("sandbar land: --pr/--web/--review require a checkout PATH (run 'sandbar land NAME' to list them)")
 	}
 	if path != "" && !*prFlag && !*webFlag && !*reviewFlag {
-		return errors.New("sand land: PATH was given but neither --pr nor --web nor --review was set")
+		return errors.New("sandbar land: PATH was given but neither --pr nor --web nor --review was set")
 	}
 
 	store := loadStore()
@@ -239,7 +239,7 @@ func runLand(args []string) error {
 
 	p, err := resolveShellProvider(store, reg, name, *profileFlag)
 	if err != nil {
-		return fmt.Errorf("sand land: %w", err)
+		return fmt.Errorf("sandbar land: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -257,7 +257,7 @@ func runLand(args []string) error {
 
 	out, err := p.ShellOut(ctx, name, "sh", "-c", checkouts.BuildSweepCommand())
 	if err != nil {
-		return fmt.Errorf("sand land: sweep %q: %w", name, err)
+		return fmt.Errorf("sandbar land: sweep %q: %w", name, err)
 	}
 	vc := checkouts.ParseSweep(string(out))
 
@@ -316,8 +316,8 @@ func splitLandDiffArgs(args []string) (before, diff []string) {
 }
 
 // reorderLandFlags moves every recognised flag token (and, for --profile,
-// its value) ahead of the positional arguments, so "sand land NAME PATH
-// --pr" parses the same as "sand land --pr NAME PATH" under flag.FlagSet,
+// its value) ahead of the positional arguments, so "sandbar land NAME PATH
+// --pr" parses the same as "sandbar land --pr NAME PATH" under flag.FlagSet,
 // which otherwise stops parsing flags at the first non-flag token. Mirrors
 // shell.go's reorderShellFlags, extended with the boolean --pr/--web/--review
 // tokens.
@@ -369,7 +369,7 @@ func findCheckout(vc checkouts.VMCheckouts, path string) (checkouts.Checkout, er
 			return co, nil
 		}
 	}
-	return checkouts.Checkout{}, fmt.Errorf("sand land: no checkout at %q (run 'sand land NAME' to list them)", path)
+	return checkouts.Checkout{}, fmt.Errorf("sandbar land: no checkout at %q (run 'sandbar land NAME' to list them)", path)
 }
 
 // prLabel renders a *landgh.PR (or its absence) as the listing's PR column:
@@ -477,16 +477,16 @@ func listCheckouts(ctx context.Context, w io.Writer, gh ghActions, vc checkouts.
 //     on stderr") with no extra plumbing.
 func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confirmOpen func() bool, co checkouts.Checkout) error {
 	if co.PushState != checkouts.PushStatePushed {
-		return fmt.Errorf("sand land: checkout %q has no pushed branch to open a PR for (state: %s)", co.Path, co.PushState)
+		return fmt.Errorf("sandbar land: checkout %q has no pushed branch to open a PR for (state: %s)", co.Path, co.PushState)
 	}
 	if co.OrgRepo == "" {
-		return fmt.Errorf("sand land: checkout %q has no recognized remote to open a PR against", co.Path)
+		return fmt.Errorf("sandbar land: checkout %q has no recognized remote to open a PR against", co.Path)
 	}
 
 	if gh.Availability(ctx).OK() {
 		pr, err := gh.CreateDraftPR(ctx, co.OrgRepo, co.Branch)
 		if err != nil {
-			return fmt.Errorf("sand land: %w", err)
+			return fmt.Errorf("sandbar land: %w", err)
 		}
 		fmt.Fprintf(stdout, "draft PR opened: %s\n", pr.URL)
 		return nil
@@ -494,7 +494,7 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 
 	url, err := landgh.CompareURL(co.OrgRepo, co.Branch)
 	if err != nil {
-		return fmt.Errorf("sand land: %w", err)
+		return fmt.Errorf("sandbar land: %w", err)
 	}
 
 	if !tty {
@@ -507,7 +507,7 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 	fmt.Fprintf(stdout, "gh is not available on this workstation; open the compare URL to create the PR:\n  %s\n", url)
 	if confirmOpen() {
 		if err := gh.OpenInBrowser(ctx, url); err != nil {
-			return fmt.Errorf("sand land: opening browser: %w", err)
+			return fmt.Errorf("sandbar land: opening browser: %w", err)
 		}
 	}
 	return nil
@@ -520,14 +520,14 @@ func landPR(ctx context.Context, stdout io.Writer, gh ghActions, tty bool, confi
 // is also why the session takes its context and writer as parameters rather
 // than reaching for os.Stdout.
 //
-// What stays here is what belongs to the CLI: the "sand land:" error prefix
+// What stays here is what belongs to the CLI: the "sandbar land:" error prefix
 // every other action uses, and reporting the result the way landPR reports a
 // created PR's URL. Unlike --pr/--web there is no pushed-branch or known-remote
 // precondition to check — reviewing uncommitted, unpushed work is the point.
 func landReview(ctx context.Context, stdout io.Writer, sess *landreview.Session) error {
 	written, err := sess.Run(ctx, stdout)
 	if err != nil {
-		return fmt.Errorf("sand land: %w", err)
+		return fmt.Errorf("sandbar land: %w", err)
 	}
 	fmt.Fprintf(stdout, "review written to %s in %s\n", written, sess.VM.Name)
 	return nil
@@ -543,18 +543,18 @@ func landReview(ctx context.Context, stdout io.Writer, sess *landreview.Session)
 // needed to get the right result.
 func landWeb(ctx context.Context, gh ghActions, co checkouts.Checkout) error {
 	if co.PushState != checkouts.PushStatePushed {
-		return fmt.Errorf("sand land: checkout %q has no pushed branch to open (state: %s)", co.Path, co.PushState)
+		return fmt.Errorf("sandbar land: checkout %q has no pushed branch to open (state: %s)", co.Path, co.PushState)
 	}
 	if co.OrgRepo == "" {
-		return fmt.Errorf("sand land: checkout %q has no recognized remote to open", co.Path)
+		return fmt.Errorf("sandbar land: checkout %q has no recognized remote to open", co.Path)
 	}
 
 	url, err := landgh.CompareURL(co.OrgRepo, co.Branch)
 	if err != nil {
-		return fmt.Errorf("sand land: %w", err)
+		return fmt.Errorf("sandbar land: %w", err)
 	}
 	if err := gh.OpenInBrowser(ctx, url); err != nil {
-		return fmt.Errorf("sand land: opening browser: %w", err)
+		return fmt.Errorf("sandbar land: opening browser: %w", err)
 	}
 	return nil
 }

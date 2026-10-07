@@ -11,7 +11,7 @@ package ui
 // Before this, the model held a single `p provider.Provider` + `scope`. Every
 // VM lifecycle call, every reconcile, every heartbeat keyed off that one scope,
 // and the board rendered exactly one provider's `limactl list`. A remote profile
-// was a whole separate `sand` process. This file replaces that with `members` —
+// was a whole separate `sandbar` process. This file replaces that with `members` —
 // one fleetMember per ENABLED profile (from provider.BuildFleet) — and threads
 // the OWNING scope through every per-VM operation so two profiles that both have
 // a VM named "web" can never prune, delete, or sample each other's (the

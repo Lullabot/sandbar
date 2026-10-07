@@ -1,11 +1,11 @@
 # Troubleshooting
 
-Common problems with `sand` and how to resolve them.
+Common problems with `sandbar` and how to resolve them.
 
-## Sand or Claude Code behaves oddly in Warp
+## Sandbar or Claude Code behaves oddly in Warp
 
-Sand detects Warp through `TERM_PROGRAM=WarpTerminal` and displays a warning
-on its onboarding screen: Sand and Claude Code can have terminal compatibility
+Sandbar detects Warp through `TERM_PROGRAM=WarpTerminal` and displays a warning
+on its onboarding screen: Sandbar and Claude Code can have terminal compatibility
 issues in Warp. If keys or rendering misbehave, try another terminal and
 compare. Reopen onboarding from the TUI's `?` help screen with `o`.
 
@@ -16,16 +16,16 @@ the terminal supports them. Onboarding also provides `n` for the installed
 version's release notes and `r` for feature and bug requests; the `?` help
 screen provides `n` for the latest available release notes. These keyboard
 actions ask the operating system to open your default browser. If that fails,
-open the [Sand issue tracker](https://github.com/Lullabot/sandbar/issues/new) or
-[Sand releases](https://github.com/Lullabot/sandbar/releases) directly in a
+open the [Sandbar issue tracker](https://github.com/Lullabot/sandbar/issues/new) or
+[Sandbar releases](https://github.com/Lullabot/sandbar/releases) directly in a
 browser.
 
 ## A stale base image
 
-`sand` builds shared dependencies (packages, Docker, Node,
+`sandbar` builds shared dependencies (packages, Docker, Node,
 and other development tools) into a stopped base image (`sandbar-base` by default),
 then clones every VM from it. Each base is stamped with the playbook version
-it was built from, and `sand` rebuilds it automatically the next time you
+it was built from, and `sandbar` rebuilds it automatically the next time you
 create a VM if the current playbook has moved on — so most staleness is
 self-healing.
 
@@ -35,7 +35,7 @@ that case, delete the base yourself and let the next create rebuild it, or
 pass `--rebuild` to force the rebuild-then-create in one step:
 
 ```bash
-sand create --rebuild
+sandbar create --rebuild
 ```
 
 `--rebuild` deletes and recreates the base image first, then makes the VM.
@@ -49,10 +49,10 @@ task, where it hangs indefinitely with no output. On the guest, the
 `claude … install` process sits pegged at ~100% CPU (state `R`) with no network
 sockets and making almost no syscalls.
 
-Current sand installs Claude Code during per-VM finalize; older versions
+Current sandbar installs Claude Code during per-VM finalize; older versions
 ran this task while building the base.
 
-**Why:** it is not `sand`, apt, or the network — it is a Claude Code bug
+**Why:** it is not `sandbar`, apt, or the network — it is a Claude Code bug
 ([anthropics/claude-code#77208](https://github.com/anthropics/claude-code/issues/77208)).
 Proxmox's default CPU model, `kvm64`, masks modern x86-64 instruction
 extensions (no SSE4.2/POPCNT/AVX2) from the guest, and Claude Code ≥ 2.1.205 —
@@ -64,11 +64,11 @@ way to the `claude install` step before wedging. It bites Proxmox specifically
 because Lima runs guests with host-CPU passthrough, so the Lima backends never
 see a feature-masked CPU.
 
-**Fix:** `sand` now creates its Proxmox VMs with the CPU type set to `host`
+**Fix:** `sandbar` now creates its Proxmox VMs with the CPU type set to `host`
 (full host-CPU passthrough), which exposes the real instruction set and is the
 fix the upstream issue confirms. You get this automatically once the base is
-rebuilt on a current `sand` — delete the base and recreate, or `sand create
---rebuild`. If you provision VMs outside `sand`, set their CPU type to `host`
+rebuilt on a current `sandbar` — delete the base and recreate, or `sandbar create
+--rebuild`. If you provision VMs outside `sandbar`, set their CPU type to `host`
 (or any model exposing SSE4.2/POPCNT/AVX2, e.g. `x86-64-v2-AES`) rather than
 leaving the `kvm64` default. A quick check on a guest: `lscpu | grep -i sse4_2`
 — if it prints nothing, that VM has the feature-masked CPU that triggers the
@@ -79,9 +79,9 @@ hang.
 **Symptom:** a create dies part-way through provisioning with an error ending in
 `exit status 255`, and the streamed output simply stops — the last thing shown is
 an Ansible `TASK [...]` banner, with no `fatal:` line, no `PLAY RECAP`, and no
-error from the task itself. `sand` then removes the partial VM.
+error from the task itself. `sandbar` then removes the partial VM.
 
-**Why:** 255 is `ssh`'s own status, not Ansible's. `sand` runs each provisioning
+**Why:** 255 is `ssh`'s own status, not Ansible's. `sandbar` runs each provisioning
 phase as a single ssh session to the guest, and a playbook that genuinely fails a
 task exits 2 (or 4 for unreachable, 250 for an internal error) — statuses you
 would see reported verbatim. 255 means the layer underneath failed instead: the
@@ -89,25 +89,25 @@ connection to the guest dropped, or the remote command was killed by a signal.
 The task banner on screen is simply the last one printed before the channel went
 away; it is not the task that failed.
 
-Whether `ssh` printed anything of its own is a useful first split. `sand` merges
+Whether `ssh` printed anything of its own is a useful first split. `sandbar` merges
 ssh's stderr into the same stream as the guest's output, and ssh reports a
 connection it *noticed* failing (`connect to host … failed`, `client_loop: send
 disconnect: Broken pipe`, `Connection reset by peer`) even at the quiet log level
-`sand` uses. A 255 with one of those lines is a connection that broke. A 255 with
+`sandbar` uses. A 255 with one of those lines is a connection that broke. A 255 with
 no ssh message at all points instead at the remote command being killed by a
 signal, which OpenSSH reports as 255 and says nothing about.
 
-Since `sand` deletes a partially-built VM, the guest's own logs — the best
+Since `sandbar` deletes a partially-built VM, the guest's own logs — the best
 evidence for which of those happened — go with it. Two opt-ins change that:
 
 ```bash
 # Keep the failed VM instead of purging it, so you can inspect the guest.
-SAND_KEEP_FAILED=1 sand create …
+SAND_KEEP_FAILED=1 sandbar create …
 
 # Write ssh's own protocol log to a file (one per target, appended across every
 # connection to it) instead of to the output stream.
-SAND_SSH_DEBUG=1 sand create …                 # ~/.cache/sandbar/ssh-debug/
-SAND_SSH_DEBUG=/path/to/dir sand create …      # or a directory you choose
+SAND_SSH_DEBUG=1 sandbar create …                 # ~/.cache/sandbar/ssh-debug/
+SAND_SSH_DEBUG=/path/to/dir sandbar create …      # or a directory you choose
 ```
 
 With both set, the failure names the log file it wrote, and the guest is still
@@ -123,10 +123,10 @@ destroy it once you're done rather than leaving it around.
 
 `SAND_KEEP_FAILED` applies to a create's finalize — everything from the moment
 the clone exists. A failure earlier than that (the base template build, or the
-clone itself) has no VM to keep. `sand reset` already leaves its VM in place when
+clone itself) has no VM to keep. `sandbar reset` already leaves its VM in place when
 the finalize fails, so it needs no opt-in.
 
-`SAND_SSH_DEBUG` is not Proxmox-specific: it logs every ssh `sand` runs, on any
+`SAND_SSH_DEBUG` is not Proxmox-specific: it logs every ssh `sandbar` runs, on any
 backend. It does not change scp transfers, which have nowhere to put a log but
 the payload stream.
 
@@ -137,7 +137,7 @@ alternating `lost the guest connection to <vm>; retrying in 5s` lines, every
 few seconds, forever. One VM alone is fine. You may also see the explicit
 refusal: `<a> and <b> both report the guest address <ip>`.
 
-**Why:** the VMs were cloned from a base template built before `sand` reset
+**Why:** the VMs were cloned from a base template built before `sandbar` reset
 the template's machine identity. Clones inherited its `/etc/machine-id`,
 systemd-networkd derives the DHCP client identifier from that id (the MAC
 plays no part), and a DHCP server keyed on client identity hands every clone
@@ -149,8 +149,8 @@ to a coin flip.
 
 **Fix:** the template build now strips the machine identity before
 templatizing, and the old template is recognized as stale automatically — the
-next `sand create` rebuilds it. Existing VMs keep the old identity. Reset them from the updated base with
-`sand reset NAME` or `R` on the tile. A reset deletes guest files unless you
+next `sandbar create` rebuilds it. Existing VMs keep the old identity. Reset them from the updated base with
+`sandbar reset NAME` or `R` on the tile. A reset deletes guest files unless you
 [choose what to preserve](../using-sand/tui.md#choosing-what-survives).
 Alternatively, fix each VM in place:
 
@@ -163,7 +163,7 @@ On its next boot the guest generates a fresh identity and gets its own lease.
 ## `limactl list` fails while a VM is being cloned or deleted
 
 **Symptom:** the fleet briefly disappears from the board, or a headless
-`sand` command reports it can't list instances — even though nothing is
+`sandbar` command reports it can't list instances — even though nothing is
 actually broken.
 
 **Why:** this is an upstream Lima behavior
@@ -177,7 +177,7 @@ mid-clone or mid-delete. The window is roughly 40–60 seconds for a clone of a
 large base image (i.e. most of a create or reset) and sub-second for a
 delete.
 
-**Fix:** none needed. `sand` recognizes this specific failure and keeps
+**Fix:** none needed. `sandbar` recognizes this specific failure and keeps
 showing the fleet it already has, with a one-time notice, instead of
 flashing empty or reporting every VM as failed. If you see a message about a
 VM being cloned or deleted, it's transient — wait for the clone or delete to
@@ -215,7 +215,7 @@ Also note the bar reaching 100% does **not** mean the build is done — it track
 which task the run is on, and the last task still has to finish. A full bar with
 a climbing timer is a run working on its final task.
 
-The most common cause of a genuinely slow clone is submodules: `sand` clones
+The most common cause of a genuinely slow clone is submodules: `sandbar` clones
 recursively, so a small project can pull in a very large one. `rtl_433` is 5 MB
 and its test-data submodule is 1.2 GB — a multi-minute clone, all of it under a
 single silent task banner.
@@ -235,8 +235,8 @@ or lower the `--disk` size on future creates.
 
 ## Lima is too old to support `clone`
 
-`sand` depends on `limactl clone` to make cloning a base image fast. If your
-installed Lima predates that command, `sand` detects it up front and refuses
+`sandbar` depends on `limactl clone` to make cloning a base image fast. If your
+installed Lima predates that command, `sandbar` detects it up front and refuses
 with an explicit "your Lima is too old" error rather than failing partway
 through a build. Upgrade Lima and try again:
 

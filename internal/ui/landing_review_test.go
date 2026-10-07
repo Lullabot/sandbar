@@ -607,7 +607,7 @@ func runBatchedCmd(cmd tea.Cmd, out chan<- tea.Msg) {
 // prevent: reopening the Landing pane (for the same VM or any other) replaces
 // the landingPane value wholesale, and while the review's cancel func and done
 // channel lived on that struct, reopening silently discarded both without ever
-// calling cancel. The quit path then had nothing to cancel or wait for, so `sand`
+// calling cancel. The quit path then had nothing to cancel or wait for, so `sandbar`
 // exited while the guest `node` server was still listening.
 func TestOpenLandingPaneKeepsAnInFlightReviewsTeardownHandles(t *testing.T) {
 	m, v := landingTestVM(t, "web")

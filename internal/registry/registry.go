@@ -317,7 +317,7 @@ func LoadFrom(path string) (*Registry, error) {
 		// Best-effort persist of the migration. The in-memory registry is already
 		// correctly migrated, so this write is only about durability — and it must
 		// NOT be fatal to a load. A read-only or full data dir would otherwise make
-		// EVERY `sand`/`sand create` invocation surface a migration error, where
+		// EVERY `sand`/`sandbar create` invocation surface a migration error, where
 		// the old (pure-read) LoadFrom loaded the same file silently; the next
 		// successful mutating save persists the version bump instead.
 		_ = r.mutate(nil)
@@ -567,11 +567,11 @@ func (r *Registry) AddScoped(cfg vm.CreateConfig, scope Scope) error {
 // cloned from templateSource — the user-facing name of a golden Template
 // (see Template.Name), not its Lima instance name — rather than the shared
 // base image. This is what lets DependentsOfTemplate find the VM again, and
-// what lets a later `sand create --recreate` (via TemplateSourceInScope)
+// what lets a later `sandbar create --recreate` (via TemplateSourceInScope)
 // discover that it should re-clone from the template instead of silently
 // falling back to the base image. cfg.BaseName is expected to already be the
 // template's OWN instance name (vm.TemplateInstanceName(templateSource)) by
-// the time this is called — see the `sand create --template` flow.
+// the time this is called — see the `sandbar create --template` flow.
 func (r *Registry) AddScopedWithTemplate(cfg vm.CreateConfig, scope Scope, templateSource string) error {
 	cfg.CloneToken = ""
 	return r.mutate(func(vms map[scopedKey]entry, _ map[scopedKey]Template) bool {
@@ -620,7 +620,7 @@ func (r *Registry) RemoveScoped(scope Scope, name string) error {
 // of live instance names. It returns the names that were dropped (nil if none
 // were), so a caller with its own per-VM state keyed by that name (the TUI's
 // secrets store) can prune it in step — this is the single shared place the
-// TUI and headless `sand create` path agree on reconciliation, so it must
+// TUI and headless `sandbar create` path agree on reconciliation, so it must
 // carry enough information for both to stay in sync, not just the TUI's
 // original bool. This keeps a stale entry from lingering after a VM is
 // deleted outside the TUI. It cannot detect a name being *reused* by an
@@ -645,7 +645,7 @@ func (r *Registry) ReconcileScoped(scope Scope, present map[string]bool) ([]stri
 	// whatever the re-read under the lock turns up (see mutate). present is a
 	// listing taken before this call; an entry another process added since then
 	// is not in it and is not evidence of a VM that has gone away — pruning it
-	// would delete a VM's index entry moments after a concurrent `sand create`
+	// would delete a VM's index entry moments after a concurrent `sandbar create`
 	// recorded it, which is precisely the lost update the lock exists to stop.
 	known := make(map[string]bool)
 	for key := range r.vms {

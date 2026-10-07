@@ -26,17 +26,17 @@ package ui
 //
 //  1. A SELF-IDENTIFYING pid file. Each loop records its shell's pid, and a new
 //     loop kills the recorded one first — but only after confirming, through
-//     /proc/<pid>/cmdline, that the pid really is a sand probe of the same kind
+//     /proc/<pid>/cmdline, that the pid really is a sandbar probe of the same kind
 //     and not whatever unrelated process has since inherited that number.
 //  2. A BOUNDED lifetime. The loop counts its passes and exits after
 //     guestLoopTTL, so even a loop nothing ever reaps is gone within the hour,
 //     and the host's ordinary reconnect brings a fresh one back.
 //
-// Two sand processes watching the SAME guest will take turns killing each
+// Two sandbar processes watching the SAME guest will take turns killing each
 // other's probe (each reconnect kills the incumbent), costing each side a
 // reconnect delay. That is deliberate: cleaning up real strays is worth more
 // than a rare double-watcher's churn, and the alternative — a per-process pid
-// file — would make sand unable to clean up after its own previous run, which
+// file — would make sandbar unable to clean up after its own previous run, which
 // is the common case.
 
 import (

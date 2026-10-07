@@ -18,7 +18,7 @@ import (
 // the scope's Provenancer; an earlier revision omitted it, so TUI-created VMs
 // got a registry entry but no marker and were therefore invisible to every
 // OTHER controller of the same host (a second laptop, or the host's own local
-// sand) — defeating target-attached provenance for the primary workflow.
+// sandbar) — defeating target-attached provenance for the primary workflow.
 //
 // newTestModel wires a real local limaProvider (a Provenancer) over a fake
 // runner, and isolateHostState points LIMA_HOME at a temp dir, so a successful

@@ -160,7 +160,7 @@ type CreateVMOptions struct {
 //
 // None of these takes effect on a VM that already exists: the disk options live
 // in the VM's config, clones inherit them from the template, and the template is
-// built once. A base image rebuild (`sand create --rebuild`) is what puts them
+// built once. A base image rebuild (`sandbar create --rebuild`) is what puts them
 // on new VMs.
 const diskPerfOptions = ",iothread=1,cache=writeback,discard=on,ssd=1"
 

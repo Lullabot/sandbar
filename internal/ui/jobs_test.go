@@ -807,7 +807,7 @@ func TestACompletedCopyIsNotRecordedAsABuild(t *testing.T) {
 	m = resized(m, 100, 30)
 	l := newTeaLoop(t, m)
 
-	// web was built by sand, with a clone token, and the build has finished.
+	// web was built by sandbar, with a clone token, and the build has finished.
 	build := newFakeJob()
 	cfg := vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 2, CloneToken: "ghp_secret"}
 	l.exec(l.m.beginProvision("Creating web", build.run, cfg))
@@ -975,7 +975,7 @@ func TestNoVerbCanDisruptABuild(t *testing.T) {
 
 // A VM DELETED OUTSIDE SAND MUST LOSE ITS TILE. The job registry retains every run
 // for the whole session, and the roster admitted any VM with a provision job — so a
-// VM created in sand and then deleted with `limactl delete` kept its tile forever:
+// VM created in sandbar and then deleted with `limactl delete` kept its tile forever:
 // Reconcile dropped it from the managed index, but the retained SUCCEEDED job kept
 // re-admitting it. The tile rendered from a synthetic record ("○ Stopped · disk ?/?
 // · never used") and every verb on it failed with "instance not found", with no way
@@ -1005,7 +1005,7 @@ func TestAVMDeletedOutsideSandLosesItsTile(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: []vm.VM{}})
 
 	if got := boardNames(l.m); len(got) != 0 {
-		t.Fatalf("a VM deleted outside sand must lose its tile, got %v (the retained succeeded job re-admitted it)", got)
+		t.Fatalf("a VM deleted outside sandbar must lose its tile, got %v (the retained succeeded job re-admitted it)", got)
 	}
 	// The run's log is still retained — that is not what was wrong.
 	if _, ok := l.m.jobs.snapshot(provisionKey(registry.LocalScope, "web")); !ok {
@@ -1080,7 +1080,7 @@ func TestAListRacingACloneKeepsTheBoardAndIsSaidOnce(t *testing.T) {
 // AND THE SUPPRESSION IS BOUNDED. The signature is an error string; it cannot tell a
 // clone in flight from an instance directory that is permanently broken — a killed
 // clone leaves exactly the same half-written directory, and `limactl list` then fails
-// forever. Suppressed, that would leave sand on an empty board with one stale line
+// forever. Suppressed, that would leave sandbar on an empty board with one stale line
 // about a clone that finished hours ago, and no way to find out why.
 func TestAPermanentListFailureIsNotHiddenAsACloneWindow(t *testing.T) {
 	m := newTestModel(t)
@@ -1095,7 +1095,7 @@ func TestAPermanentListFailureIsNotHiddenAsACloneWindow(t *testing.T) {
 		t.Fatalf("the pause itself should still be said once, got %d", n)
 	}
 	if countMessages(m, "STILL failing") != 1 {
-		t.Fatalf("after %d consecutive failures sand must stop believing it is a clone window:\n%v", listRaceLimit, m.messages)
+		t.Fatalf("after %d consecutive failures sandbar must stop believing it is a clone window:\n%v", listRaceLimit, m.messages)
 	}
 	// And the surfaced message carries limactl's own diagnosis, not just a shrug.
 	if countMessages(m, "unable to load instance ghost") != 1 {

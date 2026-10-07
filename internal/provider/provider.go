@@ -138,7 +138,7 @@ type Provider interface {
 	// AttachArgvControl is AttachArgv's control-mode twin: the same guest tmux
 	// session, joined by a `tmux -CC` client so a terminal that speaks the
 	// protocol (iTerm2 is the reference implementation; see lima.AttachControl)
-	// renders each guest window as a native tab. It backs `sand shell --cc`
+	// renders each guest window as a native tab. It backs `sandbar shell --cc`
 	// and nothing else.
 	//
 	// It is deliberately NOT reachable from the TUI. The board owns its
@@ -223,7 +223,7 @@ type Provider interface {
 	// prevent) or refuse a name it would have taken, which for Lima would mean
 	// VMs that already exist could no longer be reset or recreated.
 	//
-	// It is called at the point a name is TYPED — the create form, `sand create`
+	// It is called at the point a name is TYPED — the create form, `sandbar create`
 	// — so the answer arrives while the user can still edit it. A name that gets
 	// past the backend's own check is out of scope here; this is the cheap gate,
 	// not a second implementation of the backend's parser.
@@ -278,7 +278,7 @@ type HostResources struct {
 
 // RunCaptured runs one read-only guest command through p.RunArgv and returns
 // its stdout, folding any stderr into the error. It exists because the two
-// host-side surfaces that read a guest non-interactively — `sand publish` and
+// host-side surfaces that read a guest non-interactively — `sandbar publish` and
 // the Landing pane's drupal.org publish flow — each grew their own identical
 // copy of this, and the pair had already drifted apart before either shipped.
 //

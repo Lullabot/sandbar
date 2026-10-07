@@ -1,6 +1,6 @@
 # Secrets
 
-`sand` keeps a per-VM store of `KEY=VALUE` secrets on your host and applies
+`sandbar` keeps a per-VM store of `KEY=VALUE` secrets on your host and applies
 them into each VM's guest environment as it starts.
 
 ## Where secrets live on the host
@@ -86,7 +86,7 @@ its disk.
 ## GitHub and GitLab tokens
 
 A key named `GH_TOKEN` gets special handling on top of the generic scope
-mechanism above: for any **non-empty** (directory) scope, `sand` also wires
+mechanism above: for any **non-empty** (directory) scope, `sandbar` also wires
 `git`/`gh` credentials for that subtree, via a git `includeIf
 "gitdir:~/<scope>/"` stanza that points at a generated credential helper.
 Put a token under `[github.com/acme]` and `git`/`gh` authenticate
@@ -102,7 +102,7 @@ not a feature of the secrets store itself — the store only ever holds
 `(scope, KEY, VALUE)` triples.
 
 Scopes remain **directories relative to the guest home**, for every project.
-Sand clones into `~/<host>/<group>/<repo>` (including nested groups), so the
+Sandbar clones into `~/<host>/<group>/<repo>` (including nested groups), so the
 top-level directory is `github.com`, `gitlab.com`, a self-hosted instance
 such as `git.example.internal`, or `git.drupalcode.org` for a Drupal.org
 HTTPS clone.
@@ -161,24 +161,24 @@ in the damage it can do. See further details in the
 ### Supplying it and where it lands
 
 Provide the token at VM-create time — the TUI's `Clone token` field or
-`sand create --clone-token` — alongside a repository URL. GitHub URLs select
+`sandbar create --clone-token` — alongside a repository URL. GitHub URLs select
 GitHub automatically; `gitlab.com` selects GitLab automatically. For a
 self-hosted GitLab URL, choose GitLab in the form or pass
 `--clone-forge gitlab`. `--clone-forge` also accepts `auto` (the default) and
 `github`.
 
-For GitHub, `sand` saves the token as `GH_TOKEN` in the host secrets store's
+For GitHub, `sandbar` saves the token as `GH_TOKEN` in the host secrets store's
 **global** scope, and writes it to the cloned repository's per-org `.env` for
 Git and `gh`. Global scope does not configure the credential helper for
 other directories; add `GH_TOKEN` to a `[host/org]` section to do that.
 
-For GitLab, `sand` saves the token as `GITLAB_TOKEN` in the non-empty
+For GitLab, `sandbar` saves the token as `GITLAB_TOKEN` in the non-empty
 repository-parent scope. For example,
 `https://gitlab.example.internal/platform/tools/app.git` stores it in
 `[gitlab.example.internal/platform/tools]`. This gives the initial clone
 and future Git commands in that directory the right credential.
 
-After creating or resetting the VM, and on every start, `sand` applies saved
+After creating or resetting the VM, and on every start, `sandbar` applies saved
 secrets to the guest. Git credentials are supplied by the generated
 host-specific helper. Treat scoped `.env` files as secrets. Edit or remove the
 GitLab token in its scope (or the GitHub global token) in the secrets editor
@@ -204,7 +204,7 @@ old token in the forge's settings.
 ### Reset and the token
 
 The token survives a reset because it is saved in the host secrets store.
-Both the TUI and [`sand reset`](cli-reference.md#sand-reset-name) apply it
+Both the TUI and [`sandbar reset`](cli-reference.md#sandbar-reset-name) apply it
 to the rebuilt guest, and the Git credential helper is restored for fresh
 shells.
 
@@ -228,7 +228,7 @@ Legacy personal access tokens use the separate `read_repository` and
 ## drupal.org: a notable exception
 
 [Publishing a checkout's commits to drupal.org](drupalorg-publishing.md) is
-the one write-capable integration `sand` offers that needs **no secret in
+the one write-capable integration `sandbar` offers that needs **no secret in
 this store at all**, and no `.env` entry in the guest either. Everything
 above this section exists to get a `KEY=VALUE` pair from your host into a
 VM; drupal.org publication deliberately does the opposite — the credential

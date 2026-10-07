@@ -156,7 +156,7 @@ type Provisioner struct {
 	// PlaybookDir is the host directory mounted into the guest at /mnt/playbook.
 	// It may be left empty at construction: playbookDir() locates it lazily (and
 	// caches it here) the first time a provisioning flow actually needs it. That
-	// laziness is deliberate — a transport-only entrypoint like `sand shell`
+	// laziness is deliberate — a transport-only entrypoint like `sandbar shell`
 	// constructs a Provisioner but never provisions, and must not pay for (or fail
 	// on) embedded-playbook extraction just to attach to a running VM.
 	PlaybookDir string
@@ -173,7 +173,7 @@ type Provisioner struct {
 
 // playbookDir returns the host playbook directory, locating it on first use when
 // it was not supplied at construction. Resolving it here rather than at provider
-// construction keeps `sand shell` from triggering playbook extraction, and keeps
+// construction keeps `sandbar shell` from triggering playbook extraction, and keeps
 // the "limactl preflight before playbook location" error ordering the CLI relies
 // on (a user without limactl gets the actionable install-Lima message, not a
 // playbook-extraction failure).
@@ -888,7 +888,7 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 		// converge branch would mean the plain `--with-go=false` case, where nothing
 		// else changed and nothing is re-applied, said nothing at all.
 		if lost := shrunkTools(readBaseVersionFn(p.hostFiles(), cfg.BaseName), cfg.ToolsetKey()); len(lost) > 0 {
-			step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sand create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
+			step(out, "Note: %s were de-selected but remain installed on the base image.\n    Ansible cannot uninstall them. Rebuild the base to remove them\n    (sandbar create --rebuild, or the \"Rebuild base image\" toggle in the form).", strings.Join(lost, ", "))
 		}
 		if want, stale := p.baseStale(cfg, out); stale {
 			// Ansible is idempotent, so a playbook edit only needs its DELTA applied:
@@ -1303,7 +1303,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 				return stage.Fail(err)
 			}
 			// Recorded while the guest is still intact, so a failure that strands
-			// the archives can be resumed with `sand reset --from-backup`.
+			// the archives can be resumed with `sandbar reset --from-backup`.
 			if err := stage.WriteManifest(NewResetManifest(cfg, plan, opts)); err != nil {
 				return stage.Fail(err)
 			}
@@ -1323,7 +1323,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// golden template, from that template instance instead (see
 	// ResetOptions.TemplateSource). A plain reset never asks for a base rebuild
 	// (CreateOptions zero value), it just takes the base as the base lock finds
-	// it. Reset does not surface a per-phase timing summary (only "sand create"
+	// it. Reset does not surface a per-phase timing summary (only "sandbar create"
 	// does; see phaseTimer's doc comment) — prepareBaseAndClone still needs a
 	// timer to share its signature with createVM, so give it one whose readings
 	// are simply discarded here.
@@ -1381,7 +1381,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// Unlike createVM's clone, this VM is the one this VERY call just finalized —
 	// nothing has had a chance to attach to it yet, so hasLiveTmux should read
 	// false in the overwhelmingly common case. It is checked anyway, on
-	// principle: `sand reset` also runs against a VM whose name/identity a
+	// principle: `sandbar reset` also runs against a VM whose name/identity a
 	// caller could reuse for an already-attached session in edge cases we do not
 	// fully control from here (e.g. a script driving Reset directly rather than
 	// through the CLI/TUI paths that always operate on a freshly (re)created
@@ -1433,7 +1433,7 @@ func (p *Provisioner) Recreate(ctx context.Context, cfg vm.CreateConfig, out io.
 
 // RecreateWithOptions is Recreate with the per-run intent (CreateOptions). The
 // two flags are independent — --recreate targets the CLONE, --rebuild the BASE —
-// and `sand create --recreate --rebuild` asks for both, so the recreate path has
+// and `sandbar create --recreate --rebuild` asks for both, so the recreate path has
 // to carry the base intent down as well.
 //
 // The delete here is of the TARGET VM, not the base image, so it needs no base

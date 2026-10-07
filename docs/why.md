@@ -118,9 +118,9 @@ to make it easier (and faster!) to use.
   over SSH, or on a [Proxmox](using-sand/proxmox.md) host — so heavy
   agent work can live on a server while you drive it from a laptop.
   See [Where VMs Run](using-sand/connection-profiles.md).
-- **A board and a CLI.** Run `sand` for a
+- **A board and a CLI.** Run `sandbar` for a
   [terminal board](using-sand/tui.md) where every action fires from the
-  focused tile, or script `sand create` and `sand shell` headlessly for
+  focused tile, or script `sandbar create` and `sandbar shell` headlessly for
   CI. Builds keep running when you navigate away, and tmux sessions
   survive a disconnect because systemd linger is on.
 - **Secrets stay off argv.** Clone tokens and

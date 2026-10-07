@@ -168,7 +168,7 @@ func TestAttachArgvDestroyUnattachedOnGroupedSessionOnly(t *testing.T) {
 
 // TestAttachArgvGroupedSessionNamedInTheGuest: the grouped session's name must be
 // chosen by the guest at attach time, not computed on the host, or two concurrent
-// `sand shell` invocations can pick the same name and the second one fails.
+// `sandbar shell` invocations can pick the same name and the second one fails.
 func TestAttachArgvGroupedSessionNamedInTheGuest(t *testing.T) {
 	argv := AttachArgv("claude", "/home/debian.guest", "")
 	_, grouped, _ := splitGuestExpr(t, argv)
