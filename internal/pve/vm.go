@@ -18,15 +18,18 @@ import (
 // reads "qemu" or "lxc" (both report through type=vm). ListVMs keeps only the
 // "qemu" ones.
 type VMResource struct {
-	VMID    int     `json:"vmid"`
-	Name    string  `json:"name"`
-	Node    string  `json:"node"`
-	Pool    string  `json:"pool"`
-	Status  string  `json:"status"`
-	Type    string  `json:"type"`
-	MaxMem  int64   `json:"maxmem"`
-	MaxDisk int64   `json:"maxdisk"`
-	CPUs    float64 `json:"cpus"`
+	VMID    int    `json:"vmid"`
+	Name    string `json:"name"`
+	Node    string `json:"node"`
+	Pool    string `json:"pool"`
+	Status  string `json:"status"`
+	Type    string `json:"type"`
+	MaxMem  int64  `json:"maxmem"`
+	MaxDisk int64  `json:"maxdisk"`
+	// The cluster listing calls the allocated CPU count maxcpu; only the
+	// per-VM status endpoint calls it cpus. A missing count zeros the header's
+	// guest-to-host CPU utilization calculation even when the guest is busy.
+	CPUs float64 `json:"maxcpu"`
 	// Tags is PVE's semicolon-separated tag list for the VM. This listing
 	// endpoint carries it even though it does NOT carry the description —
 	// see internal/provider/proxmoxprovenance.go's Provenance, which reads

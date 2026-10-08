@@ -331,8 +331,8 @@ func TestProxmoxHostResourcesDegradesToZeroOnAPIFailure(t *testing.T) {
 // VM in the configured pool, an LXC container in the same pool, a qemu VM in
 // ANOTHER pool, and a qemu VM in the pool but on another node.
 const clusterResources = `[
-  {"vmid":100,"name":"web","node":"pve1","pool":"sandbar","status":"running","type":"qemu","maxmem":8589934592,"maxdisk":107374182400,"cpus":4},
-  {"vmid":101,"name":"api","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","maxmem":4294967296,"maxdisk":53687091200,"cpus":2},
+  {"vmid":100,"name":"web","node":"pve1","pool":"sandbar","status":"running","type":"qemu","maxmem":8589934592,"maxdisk":107374182400,"maxcpu":4},
+  {"vmid":101,"name":"api","node":"pve1","pool":"sandbar","status":"stopped","type":"qemu","maxmem":4294967296,"maxdisk":53687091200,"maxcpu":2},
   {"vmid":102,"name":"ct","node":"pve1","pool":"sandbar","status":"running","type":"lxc","maxmem":1073741824},
   {"vmid":103,"name":"other","node":"pve1","pool":"tenants","status":"running","type":"qemu"},
   {"vmid":104,"name":"elsewhere","node":"pve2","pool":"sandbar","status":"running","type":"qemu"}
@@ -364,7 +364,10 @@ func TestProxmoxListReturnsOnlyPoolQemuOnThisNode(t *testing.T) {
 		t.Errorf("stopped VM Status = %q; want %q", vms[1].Status, "Stopped")
 	}
 	if web.CPUs != 4 {
-		t.Errorf("CPUs = %d; want 4", web.CPUs)
+		t.Errorf("CPUs = %d; want 4 from cluster/resources maxcpu", web.CPUs)
+	}
+	if vms[1].CPUs != 2 {
+		t.Errorf("stopped VM CPUs = %d; want 2 from cluster/resources maxcpu", vms[1].CPUs)
 	}
 	if web.Memory != "8589934592" || web.Disk != "107374182400" {
 		t.Errorf("Memory/Disk = %q/%q; want the decimal byte strings the UI humanizes", web.Memory, web.Disk)
