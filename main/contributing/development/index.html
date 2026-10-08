@@ -1647,8 +1647,10 @@ build on any broken link or nav entry pointing at a missing page — and it
 runs on every pull request. A contributor changing docs should run it
 locally before pushing.</p>
 <h2 id="ci">CI</h2>
-<p><code>.github/workflows/test.yml</code> triggers on <code>push</code> to <code>main</code>, on
-<code>pull_request</code>, and on <code>workflow_dispatch</code>. A plain feature-branch push runs
+<p><code>.github/workflows/test.yml</code> triggers on <code>pull_request</code> (including release PRs),
+on <code>workflow_dispatch</code>, and on a weekly schedule. Main pushes run release
+automation without repeating the test suite; see <a href="../releases/#release-ci">Release CI</a>.
+A plain feature-branch push runs
 <strong>no</strong> CI by itself — only once a pull request exists, or via an explicit
 dispatch:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>gh workflow run test.yml --ref &lt;branch&gt;
