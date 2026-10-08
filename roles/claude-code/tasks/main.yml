@@ -15,6 +15,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool
 
 # The SessionStart/CwdChanged hooks in the template load direnv's exports
 # (scoped .env secrets, see roles/project and docs/using-sand/secrets.md)
@@ -27,19 +28,18 @@
 # `direnv allow`ed (direnv exits non-zero there) from surfacing as a failing
 # hook on every cwd change; that directory just loads no scoped secret.
 - name: Deploy ~/.claude/settings.json from template
-  ansible.builtin.template:
-    src: claude-settings.json.j2
-    dest: "{{ user_home }}/.claude/settings.json"
-    force: false
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.claude/settings.json', user_name, '0644'] + (['--preserved-home'] if (sand_preserved_home | default(false) | bool) or (sand_preserved_agents | default(false) | bool) else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'claude-settings.json.j2') }}"
+    stdin_add_newline: false
+  register: sand_claude_settings_install
+  changed_when: sand_claude_settings_install.stdout is search('^changed:')
 
 # Older sand releases provisioned remoteControlAtStartup=true and predate Claude
-# Code's cross-machine session messaging. The template is create-only, so merge
-# the safe defaults into an existing settings file without destroying user
-# customizations. Cross-machine sends always require approval; Remote Control is
-# forced off only until the user has answered its separate opt-in prompt.
+# Code's cross-machine session messaging. Only settings the safe installer
+# accepted as sand-owned reach this merge; edited or unknown settings remain
+# untouched with the new template offered separately. Cross-machine sends
+# require approval; Remote Control remains opt-in until onboarding is answered.
 # The workstation notification channel is explicit because SSH and guest tmux
 # hide terminal identity. Unknown terminals leave the existing choice intact.
 - name: Check for prior Claude remote-control onboarding
@@ -51,6 +51,7 @@
   ansible.builtin.slurp:
     src: "{{ user_home }}/.claude/settings.json"
   register: claude_settings_content
+  when: not (sand_preserved_home | default(false) | bool) and not (sand_preserved_agents | default(false) | bool) and sand_claude_settings_install.stdout is search('installed default')
 
 - name: Isolate peer machines and keep Remote Control opt-in
   ansible.builtin.copy:
@@ -58,6 +59,7 @@
     dest: "{{ user_home }}/.claude/settings.json"
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
+  when: not (sand_preserved_home | default(false) | bool) and not (sand_preserved_agents | default(false) | bool) and sand_claude_settings_install.stdout is search('installed default')
 
 # Claude Code only honors --dangerously-skip-permissions after its first-run
 # onboarding has completed: with a fresh ~/.claude.json the very first
@@ -65,17 +67,15 @@
 # permissions until the user quits and relaunches
 # (anthropics/claude-code#25503, #52501). Seeding hasCompletedOnboarding makes
 # the first launch start in bypass mode immediately; the user still runs
-# /login in-session. create-only (force: false) so a re-provision never
-# clobbers a real config holding the OAuth account.
+# /login in-session. The safe installer keeps a real config holding the OAuth
+# account when it differs from its recorded baseline or has unknown history.
 - name: Seed ~/.claude.json so the first launch honors bypass permissions
-  ansible.builtin.copy:
-    content: |
-      {"hasCompletedOnboarding": true}
-    dest: "{{ user_home }}/.claude.json"
-    force: false
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0600"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.claude.json', user_name, '0600'] + (['--preserved-home'] if (sand_preserved_home | default(false) | bool) or (sand_preserved_agents | default(false) | bool) else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{\"hasCompletedOnboarding\": true}\n"
+    stdin_add_newline: false
+  register: sand_claude_seed_install
+  changed_when: sand_claude_seed_install.stdout is search('^changed:')
 
 - name: Install Claude Code using the official installer
   ansible.builtin.shell:
@@ -95,6 +95,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: sand_bashrc_writable | default(false) | bool
 
 - name: Ensure ~/.config/sandbar directory exists for Claude
   ansible.builtin.file:
@@ -103,14 +104,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0700"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install Claude first-run remote-control wrapper
-  ansible.builtin.copy:
-    src: claude-shell-wrapper.sh
-    dest: "{{ user_home }}/.config/sandbar/claude-shell-wrapper.sh"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/sandbar/claude-shell-wrapper.sh', user_name, '0644'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.file', 'claude-shell-wrapper.sh') }}"
+    stdin_add_newline: false
+  register: sand_claude_wrapper_install
+  changed_when: sand_claude_wrapper_install.stdout is search('^changed:')
 
 - name: Configure the Claude Code interactive launcher
   ansible.builtin.blockinfile:
@@ -122,3 +124,4 @@
     mode: "0644"
     block: |
       . "$HOME/.config/sandbar/claude-shell-wrapper.sh"
+  when: sand_bashrc_writable | default(false) | bool

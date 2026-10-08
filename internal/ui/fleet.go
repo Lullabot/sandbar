@@ -129,6 +129,7 @@ type fleetMember struct {
 	// Provenancer, or when the batched read itself failed — either way every VM
 	// simply falls through to the legacy gate.
 	provenance map[string]provider.Provenance
+	updates    map[string]provider.UpdateStatus
 
 	// provenanceWarned is the edge-trigger for the ONE message logged when this
 	// member's batched provenance read fails. That failure is not fatal — every

@@ -6,6 +6,8 @@ There are nine entry points:
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand reset NAME`](#sand-reset-name) — rebuild an existing VM from its base
   image, optionally preserving selected directories or the whole guest home.
+- [`sand updates NAME`](#sand-updates-name) — inspect independent base and setup
+  revisions without changing the VM; `--json` is available for scripts.
 - [`sand template`](#sand-template) — snapshot, list, and delete golden VM
   templates.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
@@ -377,8 +379,14 @@ Run [`sand land NAME`](#sand-land-name) to list cached checkout paths. Paths
 outside the guest home are rejected before the VM is deleted.
 
 Use `--preserve-home` to keep your files while updating a working VM. The
-home is copied back before the provisioning playbook runs, so Ansible can
-update the files it manages. The rebuilt VM keeps its new
+home is copied back before the provisioning playbook runs. Sand replaces a
+provisioned home file only when it still matches the recorded baseline.
+Edited, untracked, deleted, or symlinked destination files stay as the user left them;
+new defaults are [saved separately](../reference/files-and-state.md#guest-paths).
+A symlink in a parent directory prevents a safe write, so the reset fails
+and retains its recovery archives.
+A reset without a preserve option
+deliberately deletes guest files. The rebuilt VM keeps its new
 `~/.ssh/authorized_keys` so `sand` can still connect. Preserving the whole
 home copies more data than preserving individual directories.
 
@@ -534,10 +542,10 @@ Everything inside the guest is lost unless you ask for it back:
                        Repeatable. Run 'sand land NAME' to list what this VM
                        holds. Paths may be absolute (/home/you/src/app), tilde
                        (~/src/app) or home-relative (src/app).
-  --preserve-home      keep the WHOLE home directory, then re-run the playbook
-                       on top of it. This is the one to use when the VM is fine
-                       and you only want an up-to-date build; it implies every
-                       flag above.
+  --preserve-home      keep the WHOLE home directory during the rebuild.
+                       Sand replaces only unchanged tracked home configs;
+                       edited or unknown files keep their content and new
+                       defaults are saved separately. Implies every flag above.
 
 All of these copy data out of the VM to this host and back in afterwards. Do NOT
 preserve anything from a VM you believe is compromised.
@@ -607,6 +615,33 @@ Flags:
   -user string
     	Primary VM user (default: whatever this VM has)
 ```
+
+## `sand updates NAME`
+
+Inspect the VM's base and setup revisions separately, including VMs created
+by older sand versions with no comparable history. The command reads provider
+metadata and does not start the guest, provision it, or change its records.
+
+```sh
+sand updates web
+sand updates web --profile work --json
+```
+
+Each field is `current`, `update_available`, or `unknown` in JSON. The text
+view says “update available” or “version unknown” and offers an explicit
+`sand reset NAME --profile PROFILE --preserve-home` command. Reset rebuilds
+the VM; it never runs merely because an update was detected. If the VM was
+cloned from a golden template, reset uses that same template, so refresh the
+template before resetting to receive a newer base. `current` means the
+recorded source or setup recipe matches this build. It does not mean user
+files are unchanged or that upstream packages and agents have their latest
+releases. Setup can be current even when a preserved-home reset kept your
+edits and saved new defaults separately for review.
+
+| Flag | Meaning |
+| --- | --- |
+| `--profile NAME` | Select the connection profile that owns the VM. Otherwise sand resolves it from its managed record, marker, or live listing. |
+| `--json` | Output one JSON object with `name`, `profile`, `base`, and `setup`. |
 
 ## `sand template`
 

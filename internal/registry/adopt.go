@@ -38,7 +38,7 @@ import (
 // (internal/manage), which decodes an adopted marker as a provider.Provenance
 // and compares — a hand-maintained mirror needs a test that fails when the hand
 // forgets, not a comment asking it not to.
-const adoptSchemaVersion = 3
+const adoptSchemaVersion = 4
 
 // AdoptProvenance is the marker payload Adopt writes, mirroring the
 // provenance-relevant fields of provider.Provenance without this package

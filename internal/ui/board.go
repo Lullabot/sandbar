@@ -40,6 +40,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 
@@ -1060,8 +1061,11 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 	// which profile this VM actually runs through — never guessed from the VM
 	// itself, since two profiles can share a name.
 	var profileLabel string
+	var update provider.UpdateStatus
+	var hasUpdate bool
 	if mem, ok := m.memberByScope(v.scope); ok {
 		profileLabel = mem.profile.Name
+		update, hasUpdate = mem.updates[v.Name]
 	}
 	// The unlanded-work badge is purely registry-derived (badge.go) and never
 	// grows the tile's fixed row budget — it rides the footer row,
@@ -1089,6 +1093,8 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 		Now:                now,
 		ProfileLabel:       profileLabel,
 		Badge:              badge,
+		Update:             update,
+		HasUpdate:          hasUpdate,
 	})
 }
 
