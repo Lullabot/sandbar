@@ -1886,3 +1886,20 @@ func TestExecSSHTreatsAHeldPipeSuccessAsSuccess(t *testing.T) {
 		t.Fatalf("execSSH error = %v; want the child's own exit status 7 — the held-pipe mapping must never mask a real failure", err)
 	}
 }
+
+func TestProxmoxIndexOwnsSnapshot(t *testing.T) {
+	p := &proxmoxProvider{ips: map[string]string{"removed": "192.0.2.1"}}
+	snapshot := map[string]int{"web": 101}
+	p.setIndex(snapshot)
+	p.setVMID("api", 102)
+	if _, ok := snapshot["api"]; ok {
+		t.Fatal("cache write mutated caller's listing snapshot")
+	}
+	snapshot["web"] = 999
+	if got, _ := p.cachedVMID("web"); got != 101 {
+		t.Fatalf("caller mutated cache: VMID = %d", got)
+	}
+	if _, ok := p.cachedGuestIP("removed"); ok {
+		t.Fatal("stale address survived listing refresh")
+	}
+}

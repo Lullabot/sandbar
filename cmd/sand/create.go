@@ -127,6 +127,7 @@ Flags:
 	fs.BoolVar(&cfg.WithOpenCode, "with-opencode", cfg.WithOpenCode, "Install OpenCode when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
 	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sand reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
+	fs.BoolVar(&cfg.DisableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sand template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
@@ -469,6 +470,9 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	}
 	if !explicit["domain"] && rec.Domain != "" {
 		cfg.Domain = rec.Domain
+	}
+	if !explicit["no-start-at-boot"] {
+		cfg.DisableStartAtBoot = rec.DisableStartAtBoot
 	}
 	if !explicit["docker-proxy-host"] {
 		cfg.DockerProxyHost = rec.DockerProxyHost

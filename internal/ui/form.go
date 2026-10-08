@@ -297,6 +297,7 @@ func (m *model) openForm() tea.Cmd {
 	m.toolPi = cfg.WithPi
 	m.agentsEdited = [4]bool{}
 	m.formGeneration++
+	m.formDisableStartAtBoot = false
 	m.toolRebuild = false
 	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
 	// The clone source always reopens on "base" (formTemplateName == "") — a
@@ -391,6 +392,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	}
 
 	m.hostDiskFree = freeDiskBytes()
+	m.formDisableStartAtBoot = cfg.DisableStartAtBoot
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
@@ -860,10 +862,21 @@ func (m model) selectedPreservePaths() []string {
 
 // toggles returns the active toggle list for the current form mode.
 func (m model) toggles() []formToggle {
+	var t []formToggle
 	if m.resetMode {
-		return m.resetToggles()
+		t = m.resetToggles()
+	} else {
+		t = m.createToggles()
 	}
-	return m.createToggles()
+	if i, ok := m.memberIndex(m.formScope); ok && m.members[i].profile.Type == profiles.TypeProxmox {
+		t = append(t, formToggle{
+			label: "Start at boot",
+			help:  "Start this VM automatically when the Proxmox host boots. Enabled by default.",
+			get:   func(m *model) bool { return !m.formDisableStartAtBoot },
+			set:   func(m *model, v bool) { m.formDisableStartAtBoot = !v },
+		})
+	}
+	return t
 }
 
 // focusNext / focusPrev move the cursor between fields in create mode,
@@ -1080,6 +1093,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.CloneURL = m.field(fCloneURL)
 	cfg.CloneForge = m.formCloneForge
 	cfg.CloneToken = m.field(fCloneToken)
+	cfg.DisableStartAtBoot = m.formDisableStartAtBoot
 	if m.resetMode {
 		// Reset mode shows no tool-set toggles, so it has to REPLAY the VM's
 		// recorded selection (captured in openResetForm). cfg starts life as

@@ -351,7 +351,12 @@ func (p *proxmoxProvider) forget(name string) {
 func (p *proxmoxProvider) setIndex(index map[string]int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.vmids = index
+	// Keep the listing snapshot private to its caller: setVMID mutates the
+	// shared cache while lookupVMID and List still read their snapshot.
+	p.vmids = make(map[string]int, len(index))
+	for name, id := range index {
+		p.vmids[name] = id
+	}
 	for name := range p.ips {
 		if _, ok := index[name]; !ok {
 			delete(p.ips, name)

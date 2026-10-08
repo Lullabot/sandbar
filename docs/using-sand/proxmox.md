@@ -143,7 +143,7 @@ failures — so, for the record, why each of the less-obvious ones is here:
 | Privilege | Why `sand` needs it |
 | --- | --- |
 | `VM.Config.HWType` | Setting `scsihw`, `vga`, and `machine` on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of `lsi` — `sand` uses `virtio-scsi-single` (see [How `sand` configures a VM's disk](#how-sand-configures-a-vms-disk)). |
-| `VM.Config.Options` | Setting `agent`, `name`, and `ostype`. |
+| `VM.Config.Options` | Setting `agent`, `name`, `ostype`, and `onboot`. |
 | `VM.Config.Disk` | Covers disk devices **and** the `boot` order. |
 | `VM.Config.Cloudinit` | Injecting the SSH key, user, and network config. |
 | `Datastore.AllocateTemplate` | Downloading the cloud image into storage via the `download-url` endpoint (content type `import`). PVE gates that endpoint on this privilege specifically — `Datastore.AllocateSpace` alone is not enough, and its absence fails the very first base-build step with a 403. |
@@ -519,3 +519,13 @@ the live proof of the guarantee this whole page is built around. To confirm the
 other half by hand — that the foreign VM is *unchanged* afterward — check its
 status as an admin before and after; the test deliberately can't, because its
 token can't see the VM at all, which is the point.
+
+## Start at host boot
+
+Proxmox VMs created or reset by sand start automatically when the Proxmox
+host boots. Uncheck **Start at boot** in the creation or reset form to disable
+this. A reset retains the VM's saved choice.
+
+From the CLI, pass `--no-start-at-boot` to `sand create` or `sand reset` to
+disable startup. Pass `--no-start-at-boot=false` to re-enable it on reset.
+This setting applies to Proxmox VMs only.

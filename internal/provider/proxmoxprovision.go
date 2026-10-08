@@ -616,7 +616,7 @@ func (p *proxmoxProvider) cloneFromTemplate(ctx context.Context, templateVMID in
 // size, boot it, and run the finalize playbook. It runs OUTSIDE the base lock, so
 // concurrent creates overlap here.
 func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
-	if err := p.applyCloudInitIdentity(ctx, vmid, out); err != nil {
+	if err := p.applyCloudInitIdentity(ctx, vmid, cfg, out); err != nil {
 		return err
 	}
 	if err := p.resizeDisk(ctx, vmid, "scsi0", cfg.Disk, out); err != nil {
@@ -636,9 +636,14 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 // never take effect. The SSH key itself is inherited from the template (baked in
 // at base-create time, where its double-encoding is handled), so it is not
 // rewritten here.
-func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, out io.Writer) error {
+func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
 	progress(out, "Applying cloud-init identity to VMID %d\n", vmid)
+	onboot := "1"
+	if cfg.DisableStartAtBoot {
+		onboot = "0"
+	}
 	form := url.Values{
+		"onboot":    {onboot},
 		"ciuser":    {p.ciUser},
 		"ipconfig0": {"ip=dhcp"},
 	}
@@ -919,7 +924,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	// in PVE's *pending* config rather than the live one, so it would not take
 	// effect until something rebooted the guest anyway.
 	p.applyNICMACs(ctx, cloneVMID, macs, out)
-	if err := p.applyCloudInitIdentity(ctx, cloneVMID, out); err != nil {
+	if err := p.applyCloudInitIdentity(ctx, cloneVMID, cfg, out); err != nil {
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
 		return stage.Fail(err)
 	}
