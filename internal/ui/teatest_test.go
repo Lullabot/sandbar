@@ -468,3 +468,19 @@ func finalModel(t *testing.T, tm *teatest.TestModel) model {
 	}
 	return m
 }
+
+func TestTUIShutdownConfirm(t *testing.T) {
+	tm := newTeaProgram(t)
+	waitForText(t, tm, "claude")
+	tm.Send(runeKey('x'))
+	waitForText(t, tm, "Shut down \"claude\"?")
+	teatest.RequireEqualOutput(t, finalScreen(t, tm))
+}
+
+func TestTUIRestartConfirm(t *testing.T) {
+	tm := newTeaProgram(t)
+	waitForText(t, tm, "claude")
+	tm.Send(runeKey('r'))
+	waitForText(t, tm, "Restart \"claude\"?")
+	teatest.RequireEqualOutput(t, finalScreen(t, tm))
+}

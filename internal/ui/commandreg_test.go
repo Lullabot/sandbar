@@ -70,8 +70,8 @@ func TestStoppedVMOffersNoStop(t *testing.T) {
 	}
 }
 
-// The mirror case: a RUNNING VM's help bar offers Stop, and pressing 'x' does
-// fire it (marking an action in flight and dispatching a command).
+// The mirror case: a RUNNING VM's help bar offers Stop, and pressing 'x'
+// requests confirmation before firing it.
 func TestRunningVMOffersStopAndFiresIt(t *testing.T) {
 	m := newTestModel(t)
 	m = focusTile(t, m, vm.VM{Name: "claude", Status: "Running", CPUs: 2})
@@ -83,6 +83,11 @@ func TestRunningVMOffersStopAndFiresIt(t *testing.T) {
 
 	after, cmd := m.Update(runeKey('x'))
 	m2 := after.(model)
+	if cmd != nil || m2.confirm == nil || m2.acting {
+		t.Fatal("pressing 'x' must request confirmation before stopping")
+	}
+	after, cmd = m2.Update(runeKey('y'))
+	m2 = after.(model)
 	if cmd == nil {
 		t.Fatal("pressing 'x' on a running VM should dispatch a command")
 	}

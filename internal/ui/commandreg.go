@@ -20,6 +20,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/manage"
@@ -164,21 +165,33 @@ var vmCommands = []vmCommand{
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
-		about:      "Shut the VM down cleanly. Its disk and its secrets are kept.",
+		about:      "Shut the VM down cleanly, after a confirmation. Its disk and its secrets are kept.",
 		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
 		action: func(m *model, v boardVM) tea.Cmd {
-			m.logMsg("stopping " + v.Name + "…")
-			return m.beginAction(stopCmd(m.provFor(v.scope), v.scope, v.Name))
+			m.confirm = &confirmState{
+				prompt:  fmt.Sprintf("Shut down %q?", v.Name),
+				run:     stopCmd(m.provFor(v.scope), v.scope, v.Name),
+				working: "stopping " + v.Name + "…",
+				scope:   v.scope,
+				vmName:  v.Name,
+			}
+			return nil
 		},
 	},
 	{
 		binding:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
-		about:      "Stop the VM and start it again, applying any secrets you have changed since it booted.",
+		about:      "After a confirmation, stop the VM and start it again, applying any secrets you have changed since it booted.",
 		enabledFor: notBuilding,
 		action: func(m *model, v boardVM) tea.Cmd {
-			m.logMsg("restarting " + v.Name + "…")
 			user, scopes := m.secretsFor(v.scope, v.Name)
-			return m.beginAction(restartCmd(m.provFor(v.scope), v.scope, v.Name, user, scopes))
+			m.confirm = &confirmState{
+				prompt:  fmt.Sprintf("Restart %q?", v.Name),
+				run:     restartCmd(m.provFor(v.scope), v.scope, v.Name, user, scopes),
+				working: "restarting " + v.Name + "…",
+				scope:   v.scope,
+				vmName:  v.Name,
+			}
+			return nil
 		},
 	},
 	{

@@ -113,7 +113,8 @@ func TestBoardOrderIsAlphabeticalAndStableAcrossAStateChange(t *testing.T) {
 	// Focus the middle tile and stop it — the verb whose side effect would
 	// teleport the tile if the board sorted by status.
 	m.focusVM.Name = "db"
-	m, cmd := press(t, m, runeKey('x'))
+	m, _ = press(t, m, runeKey('x'))
+	m, cmd := press(t, m, runeKey('y'))
 	if done := actionDone(t, cmd); done.name != "db" {
 		t.Fatalf("'x' acted on %q, want the focused VM db", done.name)
 	}
@@ -244,7 +245,8 @@ func TestVerbAfterARefreshReachesTheVMUnderTheRing(t *testing.T) {
 		vm.VM{Name: "web", Status: "Running"},
 	)
 
-	m, cmd := press(t, m, runeKey('x')) // stop
+	m, _ = press(t, m, runeKey('x')) // request stop
+	m, cmd := press(t, m, runeKey('y'))
 	done := actionDone(t, cmd)
 	if done.action != "stop" || done.name != "web" {
 		t.Fatalf("'x' after a refresh dispatched %s on %q, want stop on web (the VM under the ring)", done.action, done.name)
@@ -841,7 +843,8 @@ func TestBoardFooterUpdatesAsTheFocusedVMsStateChanges(t *testing.T) {
 	}
 
 	// Stop it for real, through the dispatcher — not by hand-setting a field.
-	m, cmd := press(t, m, runeKey('x'))
+	m, _ = press(t, m, runeKey('x'))
+	m, cmd := press(t, m, runeKey('y'))
 	done := actionDone(t, cmd)
 	if done.action != "stop" || done.name != "web" {
 		t.Fatalf("'x' dispatched %s on %q, want stop on web", done.action, done.name)
@@ -887,6 +890,10 @@ func TestBoardVerbsFireOnlyWhenEnabledForTheFocusedVM(t *testing.T) {
 
 	m.focusVM.Name = "on"
 	after, cmd = press(t, m, runeKey('x'))
+	if cmd != nil || after.confirm == nil {
+		t.Fatal("stop must request confirmation")
+	}
+	after, cmd = press(t, after, runeKey('y'))
 	if cmd == nil || !after.acting {
 		t.Fatal("'x' on a running focused VM should dispatch a stop")
 	}
@@ -1248,5 +1255,74 @@ func TestFocusRingDisambiguatesSameNameAcrossScopes(t *testing.T) {
 	target, ok := m.focusedVM()
 	if !ok || target.scope != registry.LocalScope {
 		t.Fatalf("the delete verb's target must be the focused (local) scope's VM, got ok=%v scope=%v", ok, target.scope)
+	}
+}
+
+func TestBoardPowerCommandsRequireConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		key     rune
+		prompt  string
+		restart bool
+	}{
+		{'x', "Shut down", false},
+		{'r', "Restart", true},
+	} {
+		t.Run(tc.prompt, func(t *testing.T) {
+			for _, answer := range []string{"n", "esc", "y"} {
+				t.Run(answer, func(t *testing.T) {
+					m := resized(newTestModel(t), 120, 40)
+					var calls []string
+					p := &providerfake.Provider{
+						StopFunc:  func(name string) error { calls = append(calls, "stop "+name); return nil },
+						StartFunc: func(name string) error { calls = append(calls, "start "+name); return nil },
+					}
+					m = resized(New(provider.Fleet{{
+						Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true},
+						Prov:    p, Scope: registry.LocalScope,
+					}}).(model), 120, 40)
+					m = loadManaged(t, m, vm.VM{Name: "web", Status: "Running"})
+					m.focusVM.Name = "web"
+					m, cmd := press(t, m, runeKey(tc.key))
+					if cmd != nil || m.confirm == nil || m.acting || len(calls) != 0 {
+						t.Fatal("power command must only raise a confirmation")
+					}
+					if !strings.Contains(ansi.Strip(m.boardView()), tc.prompt+" \"web\"?  [y] yes   [n] cancel") {
+						t.Fatalf("missing yes/no prompt: %s", m.boardView())
+					}
+					m, cmd = press(t, m, runeKey(tc.key))
+					if cmd != nil || len(calls) != 0 {
+						t.Fatal("repeated action key must not execute the power command")
+					}
+					// A refreshed roster and changed focus must not retarget the pending action.
+					m = loadManaged(t, m, vm.VM{Name: "api", Status: "Running"}, vm.VM{Name: "web", Status: "Running"})
+					m.focusVM.Name = "api"
+					if answer == "esc" {
+						m, cmd = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+					} else {
+						m, cmd = press(t, m, runeKey(rune(answer[0])))
+					}
+					if m.confirm != nil {
+						t.Fatal("answer must dismiss confirmation")
+					}
+					if answer != "y" {
+						if cmd != nil || m.acting || len(calls) != 0 {
+							t.Fatal("cancelling must not execute a power command")
+						}
+						return
+					}
+					if !m.acting {
+						t.Fatal("confirmation must show an action in progress")
+					}
+					done := actionDone(t, cmd)
+					want := "stop web"
+					if tc.restart {
+						want += ",start web"
+					}
+					if done.name != "web" || done.scope != registry.LocalScope || done.err != nil || strings.Join(calls, ",") != want {
+						t.Fatalf("confirmed action = %+v, provider calls = %v; want %s", done, calls, want)
+					}
+				})
+			}
+		})
 	}
 }
