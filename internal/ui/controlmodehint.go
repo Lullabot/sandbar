@@ -9,15 +9,15 @@ import "os/exec"
 // long as the user is attached. The suspend branch is the one users notice, and
 // there are two ways out of it that nothing in the UI otherwise mentions:
 //
-//   - Start sand inside `tmux -CC new-session`. $TMUX is then set, so `S` takes
+//   - Start sandbar inside `tmux -CC new-session`. $TMUX is then set, so `S` takes
 //     the fast path — and in a terminal that renders a control-mode client's
 //     windows as native tabs (iTerm2 being the reference one), each shell lands
 //     in a real tab beside a still-live board.
-//   - Run `sand shell --cc NAME` from a separate window, which attaches to the
+//   - Run `sandbar shell --cc NAME` from a separate window, which attaches to the
 //     GUEST's tmux in control mode, so the guest's own windows become native tabs.
 //
 // Why a log line and not a permanent footer item or a `?`-screen entry: this is
-// advice about how to LAUNCH sand, which is useless at the moment the user is
+// advice about how to LAUNCH sandbar, which is useless at the moment the user is
 // reading the footer and actionable only next time they start it. It is worth
 // saying once, when they have just felt the cost, and never again.
 //
@@ -44,7 +44,7 @@ var hostHasTmux = func() bool {
 //
 // It stays silent when $TMUX is already set: that user is on the fast path
 // ALREADY, so the first half of the advice is redundant, and the second half is
-// something `sand shell --cc` would refuse from inside tmux anyway (a tmux pane
+// something `sandbar shell --cc` would refuse from inside tmux anyway (a tmux pane
 // strips the control-mode handshake — see lima.AttachControl).
 //
 // The caller logs its own "attaching…" line first, so the two arrive in reading
@@ -54,6 +54,6 @@ func (m *model) controlModeHint(name string) {
 		return
 	}
 	m.ccHintShown = true
-	m.logMsg("tip (iTerm2 or another control-mode terminal): `sand shell --cc " + name + "` opens native tabs; " +
-		"or start sand inside `tmux -CC new-session` so S never suspends this board")
+	m.logMsg("tip (iTerm2 or another control-mode terminal): `sandbar shell --cc " + name + "` opens native tabs; " +
+		"or start sandbar inside `tmux -CC new-session` so S never suspends this board")
 }

@@ -417,8 +417,8 @@ func TestE2ELastUsedAfterRealStopAndNeverStarted(t *testing.T) {
 	// `limactl start --name …` and always boots) makes the instance directory
 	// WITHOUT booting it — the real Lima operation the "no ha.stderr.log yet"
 	// codepath in lastUsed exists for. There is no wrapper for this on
-	// lima.Client (sand never needs a create-without-start), so this drives
-	// limactl directly, exactly as sand's own runner ultimately does.
+	// lima.Client (sandbar never needs a create-without-start), so this drives
+	// limactl directly, exactly as sandbar's own runner ultimately does.
 	const neverName = "sand-e2e-neverstarted"
 	_ = cli.Delete(neverName, true)
 	t.Cleanup(func() { _ = cli.Delete(neverName, true) })

@@ -200,7 +200,7 @@ func TestTUIOnboardingOrdinary80x24(t *testing.T) {
 	m := freshOnboardingModel(t)
 	pinVersion(t, "v1.2.3")
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
-	waitForText(t, tm, "Welcome to sand")
+	waitForText(t, tm, "Welcome to sandbar")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }
 
@@ -209,6 +209,6 @@ func TestTUIOnboardingWarpConstrained(t *testing.T) {
 	m := freshOnboardingModel(t)
 	pinVersion(t, "v1.2.3")
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(60, 12))
-	waitForText(t, tm, "Welcome to sand")
+	waitForText(t, tm, "Welcome to sandbar")
 	teatest.RequireEqualOutput(t, finalScreen(t, tm))
 }

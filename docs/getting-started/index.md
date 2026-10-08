@@ -1,9 +1,9 @@
-# About sand
+# About sandbar
 
-`sand` is a small Go CLI and terminal UI that manages disposable development
+`sandbar` is a small Go CLI and terminal UI that manages disposable development
 VMs for coding agents. Run it with no
 arguments for an interactive board of your VMs, or drive it headlessly
-(`sand create`, `sand shell`) from scripts and CI.
+(`sandbar create`, `sandbar shell`) from scripts and CI.
 
 Each VM is a fresh, isolated Debian environment with a specific, opinionated
 stack: common dev tools, your git identity, and your choice of Claude Code,
@@ -14,12 +14,12 @@ done.
 
 ## Locally or remotely
 
-A VM doesn't have to run on the machine in front of you. `sand` runs VMs in
+A VM doesn't have to run on the machine in front of you. `sandbar` runs VMs in
 three places, and the commands and keybindings are the same in all three:
 
 | Where | What it uses | What you need |
 | --- | --- | --- |
-| Your own machine | [Lima](https://lima-vm.io) | Nothing beyond installing `sand` |
+| Your own machine | [Lima](https://lima-vm.io) | Nothing beyond installing `sandbar` |
 | Another machine, over SSH | Lima on that machine | Passwordless SSH and Lima on the far end |
 | A [Proxmox VE](https://www.proxmox.com/) host | The Proxmox REST API | A pool-scoped API token ([setup](../using-sand/proxmox.md)) |
 
@@ -29,17 +29,17 @@ side by side. See [Where VMs Run](../using-sand/connection-profiles.md).
 
 ## What it is not
 
-`sand` is not a general-purpose VM manager. It doesn't manage arbitrary
+`sandbar` is not a general-purpose VM manager. It doesn't manage arbitrary
 guest OSes, arbitrary provisioning recipes, or long-lived infrastructure. It
 manages one kind of thing — a development VM for coding agents — well, and leaves
 everything else to the tools underneath it.
 
-`sand` is the Go successor to what used to be a shell script plus a
+`sandbar` is the Go successor to what used to be a shell script plus a
 standalone Ansible playbook.
 
 ## Where to go next
 
-- [Installation](installation.md) — install `sand` and its one prerequisite.
+- [Installation](installation.md) — install `sandbar` and its one prerequisite.
 - [Your First VM](first-vm.md) — the 30-second path to a running VM.
 - [How Provisioning Works](how-it-works.md) — the base-image/clone/finalize
   model that makes each VM fast to create.

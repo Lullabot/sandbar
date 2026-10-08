@@ -405,13 +405,13 @@ func TestShellCmdFastPathDoesNotSuspend(t *testing.T) {
 		t.Fatalf("actionDoneMsg = %+v, want {action: shell, name: claude, err: nil}", done)
 	}
 	if !strings.Contains(gotShellCommand, "shell") || !strings.Contains(gotShellCommand, "claude") {
-		t.Fatalf("host tmux new-window shell-command = %q, want it to re-enter via `sand shell claude`", gotShellCommand)
+		t.Fatalf("host tmux new-window shell-command = %q, want it to re-enter via `sandbar shell claude`", gotShellCommand)
 	}
 }
 
 // hostTmuxShellCommand is the pure argv-shaped builder behind the fast
 // path's `tmux new-window` call: tmux hands its shell-command string to
-// $SHELL -c, so both the resolved sand path and the VM name are quoted as
+// $SHELL -c, so both the resolved sandbar path and the VM name are quoted as
 // single POSIX shell words rather than joined with a bare space — a
 // resolved binary path is not guaranteed to be space-free.
 func TestHostTmuxShellCommandQuotesArguments(t *testing.T) {

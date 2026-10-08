@@ -45,7 +45,7 @@ var pveCloneProgressRE = regexp.MustCompile(`^transferred .+ \(([0-9]+(?:\.[0-9]
 const (
 	taskPrefix    = "TASK ["            // TASK [base : Set hostname] ****
 	handlerPrefix = "RUNNING HANDLER [" // RUNNING HANDLER [base : Reload sshd] ****
-	stepPrefix    = "==> "              // sand's own phase banner (see provision.step)
+	stepPrefix    = "==> "              // sandbar's own phase banner (see provision.step)
 
 	// totalPrefix is the marker the in-guest script echoes immediately before each
 	// ansible-playbook run, carrying the number of TASK banners that run will
@@ -64,7 +64,7 @@ const (
 // ansibleProgress is one job's parsed position in its provisioning run. It is a
 // plain value: it is copied out of the registry into every jobSnapshot.
 type ansibleProgress struct {
-	// Step is sand's own phase banner ("Cloning "web" from base image…"), which
+	// Step is sandbar's own phase banner ("Cloning "web" from base image…"), which
 	// the provisioner writes precisely because the long stretches before Ansible
 	// starts — the Debian download, the boot, the clone — are otherwise silent.
 	// It is the tile's only signal during those minutes.
@@ -186,7 +186,7 @@ func (p *ansibleParser) line(l string) {
 		p.progress.TaskStarted = time.Time{}
 
 	case strings.HasPrefix(l, stepPrefix):
-		// A sand phase banner supersedes whatever Ansible was last doing: the
+		// A sandbar phase banner supersedes whatever Ansible was last doing: the
 		// previous run's last task is over, and this phase may not run Ansible at all.
 		p.progress = ansibleProgress{Step: strings.TrimSpace(strings.TrimPrefix(l, stepPrefix))}
 

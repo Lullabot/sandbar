@@ -11,7 +11,7 @@ import (
 // TestConcurrentWritersDoNotLoseEntries is the regression test for a silent,
 // long-standing data loss: two sand processes each hold their own in-memory
 // copy of the index, and every save rewrote the WHOLE file from it. A TUI open
-// since before a `sand create` therefore erased that create's entry the next
+// since before a `sandbar create` therefore erased that create's entry the next
 // time it saved anything at all — the VM stayed real, but sand no longer knew
 // it was managed (no reset, and no tile on a managed-only board).
 //
@@ -24,7 +24,7 @@ func TestConcurrentWritersDoNotLoseEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	cli, err := LoadFrom(path) // a second process, e.g. `sand create`
+	cli, err := LoadFrom(path) // a second process, e.g. `sandbar create`
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

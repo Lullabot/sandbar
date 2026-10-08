@@ -1,6 +1,6 @@
 // Package providerfake is a backend-agnostic test double for provider.Provider:
 // one struct with a function field per interface method, so a consumer test
-// (internal/ui, internal/browse, cmd/sand — anything that depends on
+// (internal/ui, internal/browse, cmd/sandbar — anything that depends on
 // provider.Provider rather than a concrete backend) drives exactly the
 // behaviour it cares about without composing a real lima.Client over a fake
 // lima.Runner (the heavier route internal/ui's testProvider/newTestModelWithCli

@@ -141,7 +141,7 @@ var ErrNoSuchInstance = errors.New("no such instance")
 // (lima-vm/lima#5236; see ErrListRacedInstanceDir), a window that lasts 40-60s
 // for a clone of a large base image. So a caller that scans the full listing to
 // find one VM is broken for the whole time any OTHER VM is being created: that is
-// what made `sand shell web` die instantly — and, from a host tmux, close its new
+// what made `sandbar shell web` die instantly — and, from a host tmux, close its new
 // window before the error could be read — whenever a create was running.
 //
 // `limactl list <name>` loads only that instance, so a half-written sibling cannot

@@ -345,7 +345,7 @@ func TestHeartbeatNeverOpensForAnUnmanagedVM(t *testing.T) {
 }
 
 // THE IDLE GATE, which is a hard requirement and not a polish item. Every heartbeat
-// is an open SSH connection into a guest; sand in a backgrounded terminal, over SSH,
+// is an open SSH connection into a guest; sandbar in a backgrounded terminal, over SSH,
 // on battery, must not quietly hold them all open for nobody.
 func TestHeartbeatIsIdleGated(t *testing.T) {
 	sh := newFakeShell()
@@ -410,7 +410,7 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")}) // any message re-evaluates it
 	sh.await(t, "close:web")
 
-	// And ANY KEY wakes it: no timer runs while sand is idle — that is what idle
+	// And ANY KEY wakes it: no timer runs while sandbar is idle — that is what idle
 	// means — so the keypress that says "I'm back" is the thing that reopens it.
 	l.send(runeKey('j'))
 	sh.await(t, "open:web")
@@ -446,7 +446,7 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 		t.Fatalf("the gauge is stuck at the reading the VM died on: %+v", s)
 	}
 
-	// And sand does not now throw a fresh `limactl shell` at a VM it cannot reach on
+	// And sandbar does not now throw a fresh `limactl shell` at a VM it cannot reach on
 	// every single refresh: a heartbeat that died on its own earns a cooldown.
 	for i := 0; i < 5; i++ {
 		l.send(vmsLoadedMsg{vms: vms("web", "Running")})
@@ -606,7 +606,7 @@ func TestStaleSampleIsDroppedAndItsReadLoopEnds(t *testing.T) {
 
 // A transport that flaps must be VISIBLE. Before this, a lost guest connection
 // showed up only as the gauges quietly emptying — which reads as "the VM is
-// idle", not "sand cannot reach it" — so a control master dying every few minutes
+// idle", not "sandbar cannot reach it" — so a control master dying every few minutes
 // and taking every session with it was undiagnosable without SAND_SSH_DEBUG.
 //
 // The line is gated on the connection having WORKED: a stream that never produced

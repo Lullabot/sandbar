@@ -75,7 +75,7 @@ const writeScript = `mkdir -p -- "$1"; chmod 700 "$1"; cat > "$2"; chmod 600 "$2
 // home directory. provider.Provider satisfies this today (its Shell and
 // GuestHome methods), so any caller already holding a provider.Provider can
 // pass it in directly — this package does not import internal/provider itself,
-// which keeps it free to be imported by both cmd/sand and internal/ui without
+// which keeps it free to be imported by both cmd/sandbar and internal/ui without
 // risking a cycle through provider.
 //
 // It is narrowed (rather than depending on provider.Provider's full interface)

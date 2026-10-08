@@ -172,7 +172,7 @@ func TestShellAttachArgvRefusesControlModeInsideTmux(t *testing.T) {
 }
 
 // TestReorderShellFlagsHoistsCC covers --cc's one parsing hazard: it is a BOOL
-// flag, so unlike --profile it must not consume the token after it. `sand shell
+// flag, so unlike --profile it must not consume the token after it. `sandbar shell
 // --cc web` has to keep `web` as the VM name.
 func TestReorderShellFlagsHoistsCC(t *testing.T) {
 	tests := []struct {

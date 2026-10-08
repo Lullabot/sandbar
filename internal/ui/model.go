@@ -1,4 +1,4 @@
-// Package ui holds the Bubble Tea model, views, and commands for the sand
+// Package ui holds the Bubble Tea model, views, and commands for the sandbar
 // TUI. It is a thin interactive surface over the provider.Provider (VM
 // lifecycle, guest transport, and create/reset — the local Lima backend by
 // default), registry.Registry (which VMs are ours), and secrets.Store (per-VM
@@ -61,7 +61,7 @@ import (
 const maxFooterHelpLines = 2
 
 // listRaceLimit is how many consecutive refreshes may fail as an apparent clone
-// window before sand stops believing it. A clone of a large base takes 40-60s and
+// window before sandbar stops believing it. A clone of a large base takes 40-60s and
 // the refresh ticks every refreshInterval, so this is generously past any real one:
 // beyond it, the instance directory is broken rather than busy, and saying so is the
 // only thing that can help the user. See the vmsLoadedMsg handler.
@@ -287,7 +287,7 @@ type model struct {
 	landingPublishEpoch uint64
 
 	// lastInput is when the user last touched a key. Together with the active view
-	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
+	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sandbar may
 	// hold SSH connections open into the guests. Terminal focus is deliberately NOT
 	// part of that gate — see shouldTick for why blur turned out to be the wrong
 	// signal — but a FocusMsg still refreshes this, because returning to the terminal
@@ -307,7 +307,7 @@ type model struct {
 	// (1Password, a hardware key), its own approval prompt. Worse, the process
 	// exits moments later while they are still handshaking — nothing kills them,
 	// their contexts are rooted at context.Background() — so they are orphaned
-	// mid-authentication and the prompts outlive sand itself. Reported from the
+	// mid-authentication and the prompts outlive sandbar itself. Reported from the
 	// field as "several 1Password prompts after quitting".
 	//
 	// WHY A FLAG AND NOT A CHOKEPOINT, precisely — because the obvious objection
@@ -331,11 +331,11 @@ type model struct {
 	// THE FLAG COVERS EVERY QUIT THE USER TYPES, WHICH IS NOT EVERY WAY SAND ENDS.
 	// Bubble Tea's own signal handler pushes InterruptMsg on SIGINT and QuitMsg on
 	// SIGTERM (tea.go:671-673), and the loop returns on either without calling
-	// Update — so `kill <pid>`, or a supervisor stopping sand, exits with this
+	// Update — so `kill <pid>`, or a supervisor stopping sandbar, exits with this
 	// never set and no stopAll. That is not a regression (in raw mode ctrl+c
 	// arrives as a KeyPressMsg, which IS covered, and it is the same state every
 	// quit used to leave behind); it is the residue. Closing it is exactly what a
-	// WithFilter teardown in cmd/sand/main.go is good for — it catches both signal
+	// WithFilter teardown in cmd/sandbar/main.go is good for — it catches both signal
 	// messages — and it would make forgetting the flag cost only the burst rather
 	// than the burst AND the orphans.
 	quitting bool
@@ -433,7 +433,7 @@ type model struct {
 	// reset a VM that has nothing wrong with it.
 	preserveHome bool
 	// resetCheckouts are the git checkouts and worktrees the last sweep found in
-	// the VM being reset, offered as one toggle each — including the ones sand
+	// the VM being reset, offered as one toggle each — including the ones sandbar
 	// never cloned. Built in openResetForm from the host-side checkout registry,
 	// which means NO guest contact when the form opens (resetpreserve.go).
 	// resetCheckoutsHidden is how many the row cap left out.
@@ -443,7 +443,7 @@ type model struct {
 	toggleFocus            int // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
 	// Agent choices belong to individual VMs; DDEV/Go/Java configure the base.
-	// toolRebuild carries the same intent as `sand create --rebuild`.
+	// toolRebuild carries the same intent as `sandbar create --rebuild`.
 	// preserveAgents above instead controls keeping all agents' user state.
 	toolClaude     bool
 	toolCodex      bool
@@ -682,7 +682,7 @@ func New(fleet provider.Fleet) tea.Model {
 	// job/registry work correctly: default the form target to the active member.
 	m.formScope = m.activeScope()
 	// Announce each REMOTE connection attempt in the session log. The local
-	// member is deliberately silent here: it is the machine sand runs on, not a
+	// member is deliberately silent here: it is the machine sandbar runs on, not a
 	// connection — logging "connecting to local" at every startup would be
 	// noise, and would break the zero-config board's bit-parity with the
 	// pre-profiles TUI. (Deliberate user actions like disable still log for
@@ -1033,7 +1033,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok {
 			// A LIVE heartbeat ending is worth a line in the log. Until now the
 			// only trace of it was the gauges quietly emptying, which reads as
-			// "the VM is idle" rather than "sand lost the connection" — and a
+			// "the VM is idle" rather than "sandbar lost the connection" — and a
 			// transport that flaps every few minutes (a control master dying and
 			// taking every session with it) was therefore invisible unless the
 			// user happened to be running with SAND_SSH_DEBUG. ended() reports
@@ -1066,7 +1066,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The channel closed: this VM's sweep stream ended — most commonly a
 		// `limactl stop` underneath it, exactly like a heartbeat's stream
 		// ending (see heartbeatSampleMsg above). ended() drops the connection
-		// and starts a cooldown so a VM sand cannot shell into does not get a
+		// and starts a cooldown so a VM sandbar cannot shell into does not get a
 		// fresh `limactl shell` thrown at it by every single message.
 		if !msg.ok {
 			// Not logged, unlike the heartbeat's: the two connections die
@@ -1243,7 +1243,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// ten times over would bury the build the user is actually watching under
 			// errors about a VM that is coming up exactly as intended.
 			//
-			// The listing sand already has stays on screen — the other VMs have not
+			// The listing sandbar already has stays on screen — the other VMs have not
 			// changed, and the building VM's own tile comes from the job registry, not
 			// from Lima — and the condition is stated ONCE, when it starts. The clone
 			// window is per MEMBER: a clone in flight on one profile must not suppress
@@ -1265,7 +1265,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.logMsg("VM list paused while another instance is cloned or deleted (lima#5236)")
 				case mem.listRace == listRaceLimit:
 					m.logMsg("VM list STILL failing — this is no longer a clone window. " +
-						"An instance directory is broken; remove it and sand will recover: " + msg.err.Error())
+						"An instance directory is broken; remove it and sandbar will recover: " + msg.err.Error())
 				}
 				return m, nil
 			}
@@ -1361,7 +1361,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reconcile this member's managed index against reality so a VM deleted
 		// outside the TUI stops being flagged managed (and recreate-able) — but a VM
 		// the registry just vouched for counts as present. Shared with the headless
-		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
+		// `sandbar create` path (internal/manage) so the two entrypoints cannot drift.
 		live := msg.vms
 		for _, name := range protected {
 			live = append(live, vm.VM{Name: name})
@@ -1383,7 +1383,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// One-time (per process, per scope) provenance-adoption migration: stamp
 		// markers onto VMs the registry already recorded as managed under sc but
 		// that have not picked one up yet (e.g. created by a pre-provenance
-		// sand). This is the "first board load" trigger AdoptOnce's own doc
+		// sandbar). This is the "first board load" trigger AdoptOnce's own doc
 		// comment calls for — it is a cheap map lookup after the first
 		// successful run for this scope. `live` already includes protected
 		// mid-build names, matching the Reconcile call above.
@@ -1641,7 +1641,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A successful create/recreate yields a sand-managed VM; record it
 		// (with its config, for a faithful future recreate) so the list marks it
 		// and recreate stays available for it. Shared with the headless
-		// `sand create` path (internal/manage) so the two entrypoints cannot drift.
+		// `sandbar create` path (internal/manage) so the two entrypoints cannot drift.
 		//
 		// A COPY IS NOT A BUILD, and the KIND is what says so — not the presence of a
 		// config, which is a property of the VM's build and outlives it. A copy
@@ -1688,7 +1688,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// registry, which strips CloneToken by design (registry.Add). Seeding
 			// it here — in the TUI, on provisionDoneMsg — rather than inside
 			// internal/provision keeps the host secrets store a TUI concern and
-			// needs no new provision→secrets import; the headless `sand create`
+			// needs no new provision→secrets import; the headless `sandbar create`
 			// path has no store to seed from, so doing this in the provisioner
 			// would silently diverge the two entrypoints (Option A, rejected).
 			// m.sec.Get already returns a defensive copy, so mutating pairs here
@@ -1782,7 +1782,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		// Any key is proof someone is still there, which is half of the idle gate (see
 		// shouldTick). It is also what WAKES a session that went idle: no timer runs
-		// while sand is idle — that is the point of being idle — so the keypress that
+		// while sandbar is idle — that is the point of being idle — so the keypress that
 		// says "I'm back" is the message that reopens the heartbeats.
 		m.lastInput = time.Now()
 
@@ -1915,7 +1915,7 @@ func (m model) forward(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// bubbles' textinput handles that message itself — but only if it is
 		// ever handed one. Until the Landing pane joined this switch, every
 		// paste into the issue field was silently dropped on the floor here,
-		// while the same paste worked in every other text field in sand
+		// while the same paste worked in every other text field in sandbar
 		// purely because those views were already listed above.
 		if p := m.landing.publish; p != nil && p.stage == publishAskIssue {
 			p.issueInput, cmd = p.issueInput.Update(msg)
@@ -1993,7 +1993,7 @@ func (m model) confirmView() string {
 
 // View renders the active screen. v2 moved the alt-screen toggle from a
 // program option (tea.WithAltScreen(), the v1 entrypoint) into this View
-// field, so it is set here instead of in cmd/sand/main.go.
+// field, so it is set here instead of in cmd/sandbar/main.go.
 func (m model) View() tea.View {
 	var content string
 	switch m.view {

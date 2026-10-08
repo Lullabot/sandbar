@@ -150,7 +150,7 @@ func NewProvenance(cfg vm.CreateConfig, provisioning bool) Provenance {
 //   - A TUI-driven build republishes Progress into the marker at every Ansible
 //     role boundary (ui.publishProgressCmd), so its stamp is at most one role
 //     old — minutes.
-//   - A HEADLESS `sand create` has no republisher at all; that code lives in the
+//   - A HEADLESS `sandbar create` has no republisher at all; that code lives in the
 //     TUI. Its marker is stamped once, when the clone lands and the in-flight
 //     marker is written (provider.limaProvider.Create), and then not touched
 //     again until the build finishes. Its stamp therefore ages by the whole

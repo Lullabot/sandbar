@@ -159,7 +159,7 @@ func TestReconcile_DoesNotCrossProviders(t *testing.T) {
 
 // TestRecordSuccess verifies a successful create/recreate is recorded as
 // managed with its CreateConfig retrievable from the registry — the
-// bookkeeping shared between the TUI and the headless `sand create` path.
+// bookkeeping shared between the TUI and the headless `sandbar create` path.
 func TestRecordSuccess(t *testing.T) {
 	reg := registry.NewEmpty()
 	cfg := vm.CreateConfig{

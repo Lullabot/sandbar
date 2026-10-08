@@ -1,13 +1,13 @@
 package ui
 
-// help.go is the `?` screen: every key sand has, with a sentence saying what it
+// help.go is the `?` screen: every key sandbar has, with a sentence saying what it
 // does.
 //
 // It exists because the footer cannot say it. The footer is a reminder — "u upload"
 // tells you which key, not what it copies, in which direction, or that it will ask
 // you where to put it. And the footer only shows the verbs that apply to the tile
 // under the ring right now, which is the correct thing for a footer to do and the
-// wrong thing for a reference: a user who wants to know whether sand can do a thing
+// wrong thing for a reference: a user who wants to know whether sandbar can do a thing
 // at all should not have to first arrange for a VM to be in the state where it can.
 //
 // So this screen lists EVERY verb, whether or not it currently applies, and says
@@ -42,8 +42,8 @@ func (m model) boardKeys() []struct {
 		{label(m.keys.Enter), "The obvious thing for the tile it is on: create a VM on the empty slot; show the log of one that is building; shell into one that is running; start one that is stopped. The footer names which."},
 		{label(m.keys.New), "Create a VM. Opens the form from anywhere on the board."},
 		{label(m.keys.Search), "Filter the tiles by name as you type. esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
-		{label(m.keys.StopAll), "Stop every running sand VM, after a confirmation. Base images and VMs sand did not create are never touched."},
-		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sand runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sand."},
+		{label(m.keys.StopAll), "Stop every running sandbar VM, after a confirmation. Base images and VMs sandbar did not create are never touched."},
+		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sandbar runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sand."},
 		{label(m.keys.Quit), "Quit. If a build or a file transfer is still running, it confirms first rather than orphaning it."},
 		{label(m.keys.Help), "This screen."},
 		{label(m.keys.Onboarding), "Reopen the onboarding guide for tmux, release notes, and feature or bug requests."},

@@ -13,7 +13,7 @@ import (
 // The middle case is the one that earns the test. baselock.go treats a TryLock
 // error as "give up on serializing, build unserialized", so an implementation
 // that reported contention as an error would not fail loudly -- it would
-// quietly let two concurrent `sand create` runs prepare the same base image at
+// quietly let two concurrent `sandbar create` runs prepare the same base image at
 // once. flock(2) reports contention as EWOULDBLOCK, and translating that to
 // (false, nil) rather than letting it surface as an error is the whole job.
 //

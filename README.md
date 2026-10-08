@@ -1,6 +1,6 @@
 # sandbar
 
-`sand` is a single Go binary that provisions disposable development VMs for
+`sandbar` is a single Go binary that provisions disposable development VMs for
 coding agents. Choose Claude Code, Codex, OpenCode, and Pi, point your
 agents at a repository, and throw the VM away when you're done.
 
@@ -14,11 +14,11 @@ board shows every location at once.
 ## Install
 
 ```bash
-brew install lullabot/sandbar/sand
+brew install lullabot/sandbar/sandbar
 ```
 
 That's it — no Ansible, no Go toolchain, and no clone of this repository
-required. Homebrew also pulls in [Lima](https://lima-vm.io), which `sand`
+required. Homebrew also pulls in [Lima](https://lima-vm.io), which `sandbar`
 uses to run VMs on your own machine and on remote machines over SSH. A
 Proxmox host needs no Lima at all, just a scoped API token.
 
@@ -27,15 +27,15 @@ Proxmox host needs no Lima at all, just a scoped API token.
 Open the interactive TUI board:
 
 ```bash
-sand
+sandbar
 ```
 
 Press `n` to create a VM, then `S` on its tile for a shell. Or drive it
 headlessly:
 
 ```bash
-sand create
-sand shell claude
+sandbar create
+sandbar shell claude
 ```
 
 See [Getting Started](https://lullabot.github.io/sandbar/latest/getting-started/)
@@ -45,7 +45,7 @@ for every command and flag.
 
 ## Where VMs run
 
-Out of the box, `sand` runs VMs on the machine you launched it from. Add a
+Out of the box, `sandbar` runs VMs on the machine you launched it from. Add a
 **Connection Profile** and it runs them somewhere else instead — or as well:
 
 - **Local** — Lima on your own machine. Always present, nothing to configure.
@@ -64,16 +64,16 @@ for the one-time host setup.
 
 ## Reviewing what Claude wrote
 
-Use `sand land NAME PATH --review` (or the Landing pane, `l`, then `v`) to
+Use `sandbar land NAME PATH --review` (or the Landing pane, `l`, then `v`) to
 review uncommitted or unpushed changes in your browser. The review server
 runs inside the VM, sends the diff to your browser through a loopback
 connection, and saves your comments in the checkout for the agent to read.
 See [Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
 
-`sand` also supports **golden templates** — named, reusable clone sources you
+`sandbar` also supports **golden templates** — named, reusable clone sources you
 can snapshot from an existing VM. Once you've set up a VM with project-specific
 or team-specific tools and configuration, press `t` on its tile to save it as a
-template, then create new VMs from that template with `sand create --template <name>`
+template, then create new VMs from that template with `sandbar create --template <name>`
 or via the TUI's Source selector. Every clone starts from your saved setup instead
 of rebuilding the shared base, then receives the normal finalize pass. See
 [Golden Templates](https://lullabot.github.io/sandbar/latest/using-sand/golden-templates/)
@@ -81,7 +81,7 @@ for details.
 
 ## Development
 
-Building from a checkout, running tests, and how `sand` embeds and runs
+Building from a checkout, running tests, and how `sandbar` embeds and runs
 its Ansible provisioner are covered in [AGENTS.md](AGENTS.md) and the
 [Contributing](https://lullabot.github.io/sandbar/latest/contributing/development/)
 docs.
@@ -96,7 +96,7 @@ go test -tags proxmoxe2e ./...      # real-VM e2e on Proxmox — needs a configu
 ```
 
 **Coverage.** CI's `unit` job measures coverage over `./internal/...` (the
-`cmd/sand` entrypoint glue is excluded) and fails if it drops below a floor
+`cmd/sandbar` entrypoint glue is excluded) and fails if it drops below a floor
 committed in `.github/workflows/test.yml` (`COVERAGE_FLOOR`). It's a manual
 ratchet — no third-party service; the run uploads an HTML report as a build
 artifact. To reproduce the gate locally:

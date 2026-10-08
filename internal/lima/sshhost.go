@@ -1213,7 +1213,7 @@ func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
 //
 // Note what control mode means over ssh: the DCS handshake rides the ssh
 // connection to the LOCAL terminal, which is fine — ssh is a transparent byte
-// pipe, unlike a tmux pane (see AttachControl). So `sand shell --cc` works
+// pipe, unlike a tmux pane (see AttachControl). So `sandbar shell --cc` works
 // against a remote-profile VM exactly as it does against a local one.
 func (h *SSHHost) AttachArgvMode(name, guestHome, colorterm string, mode AttachMode) []string {
 	// The `ssh -t <target> <shell-quoted local argv>` construction IS sshCommand
@@ -1360,7 +1360,7 @@ func (l *sshLock) TryLock() (bool, error) {
 		// ERROR so lockBase degrades to unserialized (baselock.go treats a TryLock
 		// error as "continue without the lock"); returning (false,nil) there would
 		// make the caller poll a lock nothing will ever hold, hanging the very first
-		// `sand create` against such a host — the exact opposite of OpenLock's
+		// `sandbar create` against such a host — the exact opposite of OpenLock's
 		// documented promise to degrade rather than fail.
 		_ = stdin.Close()
 		cancel()

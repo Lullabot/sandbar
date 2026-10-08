@@ -1,8 +1,8 @@
 # VHS tape to regenerate the home-page board screenshot (docs/images/board.png)
-# from a REAL sand board, so the tiles show your own live host/VM stats and
+# from a REAL sandbar board, so the tiles show your own live host/VM stats and
 # whatever VMs you actually have.
 #
-# Requires: charmbracelet/vhs  (brew install vhs), and `sand` on your PATH with
+# Requires: charmbracelet/vhs  (brew install vhs), and `sandbar` on your PATH with
 # at least one or two managed VMs so the board isn't empty. Run from this dir:
 #
 #     vhs board.tape
@@ -27,7 +27,7 @@ Set WindowBar Colorful
 Set Theme "Github Dark"
 
 Hide
-Type "sand"
+Type "sandbar"
 Enter
 Sleep 4s
 Show

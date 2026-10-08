@@ -3,7 +3,7 @@ name: test
 # Two jobs:
 #   * lint     — fast, no VM: ansible syntax check. Runs on every push so most
 #                mistakes fail in ~30s.
-#   * lima-e2e — the real thing: build `sand` from the checkout and run it
+#   * lima-e2e — the real thing: build `sandbar` from the checkout and run it
 #                end to end on a Lima VM. GitHub's hosted ubuntu runners expose
 #                /dev/kvm (nested virt for Linux guests), so Lima runs under
 #                QEMU+KVM here — this is the only place the Lima orchestration
@@ -66,7 +66,7 @@ jobs:
       #
       # -race: the last two release cycles were race fixes; the suite is
       # -race-clean and CI must enforce it. -covermode=atomic is required under
-      # -race. Coverage is measured over ./internal/... only (the cmd/sand main
+      # -race. Coverage is measured over ./internal/... only (the cmd/sandbar main
       # glue is excluded so it doesn't distort the number) and gated against a
       # repo-committed floor — self-contained, no third-party coverage service.
       # Bump COVERAGE_FLOOR by hand in a PR as coverage rises.
@@ -94,7 +94,7 @@ jobs:
 
   lima-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60 # +15 for the cmd/sand limae2e create/recreate tests
+    timeout-minutes: 60 # +15 for the cmd/sandbar limae2e create/recreate tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -124,11 +124,11 @@ jobs:
           restore-keys: |
             lima-
 
-      # Persist sand's host-side apt-archives cache across runs. buildBase
+      # Persist sandbar's host-side apt-archives cache across runs. buildBase
       # seeds the guest's /var/cache/apt/archives from this directory before
       # the base playbook runs and harvests it back afterwards (see
       # internal/provision/aptcache.go), so with a restored cache the cold
-      # `--rebuild` build below — and the minimal base the cmd/sand limae2e
+      # `--rebuild` build below — and the minimal base the cmd/sandbar limae2e
       # tests build — is CPU-bound (unpack/configure) instead of re-downloading
       # every .deb from Debian/NodeSource/Docker/etc. on each run. Keyed on the
       # playbook content so a playbook change saves the freshly harvested set;
@@ -146,22 +146,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build sand from the checkout
-        run: go build -o sand ./cmd/sand
+      - name: Build sandbar from the checkout
+        run: go build -o sandbar ./cmd/sandbar
 
       # This isolated SSH-only VM is deleted before the base-building tests.
       # Check both receiving filesystems after dropped-path uploads/downloads.
       - name: Dropped-path file transfers end-to-end
         run: LIMA_E2E=1 go test -tags limae2e -timeout 15m -run '^TestE2EDroppedTransferPathsMoveContents$' ./internal/ui/
 
-      # The cmd/sand limae2e tests build their own minimal base
+      # The cmd/sandbar limae2e tests build their own minimal base
       # (sand-cmde2e-base, all tool flags off) and tear it and their tiny
       # clones down in TestMain/Cleanup, so they run FIRST — on maximum free
       # disk — and reclaim everything before the heavy claude-ci provision
       # below. They assert the headless create records a managed VM and that
       # the --recreate managed-gate holds against a real registry.
-      - name: cmd/sand end-to-end (headless create + --recreate gate)
-        run: LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sand/
+      - name: cmd/sandbar end-to-end (headless create + --recreate gate)
+        run: LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sandbar/
 
       # Run the actual entrypoint, non-interactively, forcing a true
       # from-scratch base build with --rebuild. Base reuse/re-apply is the
@@ -179,7 +179,7 @@ jobs:
           # pipefail`). The whole point of this job is to go red when the base
           # build breaks; without this it goes red later, somewhere confusing.
           set -o pipefail
-          ./sand create --rebuild \
+          ./sandbar create --rebuild \
             --name claude-ci \
             --clone-url https://github.com/Lullabot/sandbar.git \
             --with-claude --with-codex --with-opencode --with-pi \
@@ -331,7 +331,7 @@ jobs:
       # No browser is involved: xdg-open does not exist on the runner, and
       # landreview treats an opener failure as non-fatal (it prints the URL and
       # keeps serving), which is exactly the headless path this drives.
-      - name: Drive `sand land --review` end to end (serve, submit, tear down)
+      - name: Drive `sandbar land --review` end to end (serve, submit, tear down)
         run: |
           set -euo pipefail
           GUEST_HOME=$(limactl shell claude-ci bash -lc 'printf %s "$HOME"')
@@ -340,16 +340,16 @@ jobs:
 
           # The explicit installer above, not review startup, must install the
           # skills in a repository cloned later. Assert this before launching
-          # `sand land --review` so the old late-install behaviour cannot pass.
+          # `sandbar land --review` so the old late-install behaviour cannot pass.
           limactl shell claude-ci test -f "$REPO/.agents/skills/self-review-apply/SKILL.md" \
             || { echo "::error::the installer did not add the assistant skills to the later checkout"; exit 1; }
 
-          ./sand land claude-ci "$REPO" --review > review.log 2>&1 &
+          ./sandbar land claude-ci "$REPO" --review > review.log 2>&1 &
           SAND_PID=$!
 
           # Poll for the readiness line rather than sleeping a fixed amount.
           # The port is NOT predictable: @self-review/serve binds an ephemeral
-          # port and announces it, and sand reports whatever it was told — so
+          # port and announces it, and sandbar reports whatever it was told — so
           # reading it back out of the log here is the same contract the
           # feature itself depends on.
           PORT=""
@@ -407,11 +407,11 @@ jobs:
           # with `git ls-files --others --exclude-standard`, which honours the
           # guest's global excludes. So this asserts the excludes
           # the installer writes are really taking effect — without them
-          # every review would open with seven files of sand's own tooling
+          # every review would open with seven files of sandbar's own tooling
           # sitting in the diff, and the check for their absence alone would
           # have passed vacuously on a VM where they were never installed.
           if grep -q '\.agents/skills/' <<<"$DIFF"; then
-            echo "::error::the review contains the skills sand installed; the guest's global git excludes are not taking effect"
+            echo "::error::the review contains the skills sandbar installed; the guest's global git excludes are not taking effect"
             exit 1
           fi
 
@@ -447,10 +447,10 @@ jobs:
 
           # Submitting IS the completion signal: the guest server writes the
           # file and exits 0, and that exit is what unblocks the session. A
-          # sand still running here means that signal never propagated.
+          # sandbar still running here means that signal never propagated.
           for _ in $(seq 1 60); do kill -0 "$SAND_PID" 2>/dev/null || break; sleep 1; done
           if kill -0 "$SAND_PID" 2>/dev/null; then
-            echo "::error::sand did not exit after the review was submitted"
+            echo "::error::sandbar did not exit after the review was submitted"
             cat review.log
             kill "$SAND_PID" 2>/dev/null || true
             exit 1
@@ -458,11 +458,11 @@ jobs:
           rc=0
           wait "$SAND_PID" || rc=$?
           cat review.log
-          [ "$rc" -eq 0 ] || { echo "::error::sand land --review exited $rc"; exit 1; }
+          [ "$rc" -eq 0 ] || { echo "::error::sandbar land --review exited $rc"; exit 1; }
           grep -qF "review written to $REPO/review.xml in claude-ci" review.log \
-            || { echo "::error::sand did not report the written review path"; exit 1; }
+            || { echo "::error::sandbar did not report the written review path"; exit 1; }
 
-          # Teardown, both ends — guest first, because that is the end sand is
+          # Teardown, both ends — guest first, because that is the end sandbar is
           # actually responsible for and the only one that fails instantly.
           #
           # No guest-side server may survive the session. An orphan here is the
@@ -488,10 +488,10 @@ jobs:
           # backend: with local Lima there is no ssh child, because Lima
           # already forwards guest loopback ports itself (Provider.ForwardArgv
           # returns nil here). The listener therefore belongs to Lima's
-          # HOSTAGENT, not to sand — and the hostagent learns the guest port is
+          # HOSTAGENT, not to sandbar — and the hostagent learns the guest port is
           # gone by polling the guest, so it withdraws the forward on its own
           # interval rather than the instant the guest server exits. Demanding
-          # immediate release asserted something sand does not control and
+          # immediate release asserted something sandbar does not control and
           # cannot make true; it passed once on timing and then failed. What is
           # worth asserting is that the port does not stay bound indefinitely.
           still=""
@@ -557,7 +557,7 @@ jobs:
         run: |
           # See the cold create above: `| tee` without pipefail hides a failure.
           set -o pipefail
-          ./sand create \
+          ./sandbar create \
             --name claude-ci-warm \
             --git-name "CI Bot" --git-email ci@example.com \
             --cpus 2 --memory 6GiB --disk 30GiB 2>&1 | tee warm.log
@@ -595,8 +595,8 @@ jobs:
             exit 1
           fi
 
-      # On failure, surface the captured `sand create` output for debugging.
-      # (Provisioning is not logged inside the guest — it streams to sand's
+      # On failure, surface the captured `sandbar create` output for debugging.
+      # (Provisioning is not logged inside the guest — it streams to sandbar's
       # own stdout, which is what cold.log/warm.log captured above.)
       - name: Dump provisioning logs on failure
         if: failure()

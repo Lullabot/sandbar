@@ -153,7 +153,7 @@ func (p *limaProvider) Copy(ctx context.Context, out io.Writer, recursive bool, 
 // AttachArgv resolves the guest home from v.Dir itself (via lima.GuestHome) and
 // hands both to lima.AttachArgv — the one place in sand that knows tmux exists —
 // so the caller passes only the vm.VM and never constructs the Lima-shaped
-// command. Reproduces exactly what the `S` verb and `sand shell` do today.
+// command. Reproduces exactly what the `S` verb and `sandbar shell` do today.
 func (p *limaProvider) AttachArgv(v vm.VM) []string {
 	return lima.AttachArgv(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"))
 }

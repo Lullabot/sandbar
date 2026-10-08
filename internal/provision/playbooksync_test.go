@@ -45,7 +45,7 @@ func fakeCheckout(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	for _, f := range []string{".git/config", "cmd/sand/main.go", "go.mod", ".agents/skills/st-plan/SKILL.md"} {
+	for _, f := range []string{".git/config", "cmd/sandbar/main.go", "go.mod", ".agents/skills/st-plan/SKILL.md"} {
 		p := filepath.Join(dir, f)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatalf("mkdir for %s: %v", f, err)

@@ -1,6 +1,6 @@
 # Available Tools
 
-Every sand VM clones a shared base containing development tools and runtimes.
+Every sandbar VM clones a shared base containing development tools and runtimes.
 The selected coding agents are then installed at their current releases
 inside that individual VM, including on reset.
 
@@ -26,7 +26,7 @@ covers how to reach it from your browser — locally and on a remote profile.
 
 The create form offers four independent checkboxes: **Install Claude Code**,
 **Install OpenAI Codex**, **Install OpenCode**, and **Install Pi**. Select any combination, including none.
-All four start unselected; after creating a VM, sand remembers your choices
+All four start unselected; after creating a VM, sandbar remembers your choices
 across connection profiles. See [Files and State](../reference/files-and-state.md#coding-agent-preferences-and-migration)
 for persistence and migration details.
 
@@ -38,14 +38,14 @@ the defaults for new VMs.
 
 ### Claude Code terminal notifications
 
-When creating or resetting a VM with Claude Code selected, sand detects the
+When creating or resetting a VM with Claude Code selected, sandbar detects the
 workstation terminal and sets Claude's native notification channel for iTerm2,
 Kitty, or Ghostty. Detection also checks terminal identifiers retained inside
-host tmux and its saved `TERM_PROGRAM`. If sand cannot identify a supported
+host tmux and its saved `TERM_PROGRAM`. If sandbar cannot identify a supported
 terminal, it leaves your existing notification preference unchanged.
 
 The guest tmux configuration enables notification passthrough. If you also run
-sand inside **host tmux**, enable `set -g allow-passthrough on` in the host's
+sandbar inside **host tmux**, enable `set -g allow-passthrough on` in the host's
 `~/.tmux.conf` and reload it with `tmux source-file ~/.tmux.conf`.
 iTerm2 additionally needs **Notification Center Alerts** and **Send escape
 sequence-generated alerts** enabled under its profile's Terminal settings.
@@ -62,13 +62,13 @@ connect from a different terminal, change `preferredNotifChannel` in the guest's
 - The [GitLab CLI (`glab`)](https://gitlab.com/gitlab-org/cli)
 
 The `--with-*` flags configure the **shared base image**. Changing a tool
-selection makes the next `sand create` update the base before cloning a VM.
-See the [CLI reference](../using-sand/cli-reference.md#sand-create).
+selection makes the next `sandbar create` update the base before cloning a VM.
+See the [CLI reference](../using-sand/cli-reference.md#sandbar-create).
 
 ## Browser reviews
 
 Every base image includes [`@self-review/serve`](https://www.npmjs.com/package/@self-review/serve).
-Run `sand land NAME PATH --review` to review a checkout's diff in your browser
+Run `sandbar land NAME PATH --review` to review a checkout's diff in your browser
 and save comments where the agent can read them. The server runs inside the
 VM and starts only when you open a review. See
 [Reviewing changes in a browser](../using-sand/review.md).

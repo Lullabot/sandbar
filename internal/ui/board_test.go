@@ -24,7 +24,7 @@ var errAnsibleBoom = errors.New("ansible: task failed")
 // point of the filter. Registering BEFORE the load also matters: the
 // vmsLoadedMsg handler reconciles the managed index against the list it is
 // given, so a managed VM missing from that list is dropped from the index (which
-// is how a VM deleted outside sand stops being managed).
+// is how a VM deleted outside sandbar stops being managed).
 func loadManaged(t *testing.T, m model, vms ...vm.VM) model {
 	t.Helper()
 	for _, v := range vms {
@@ -373,7 +373,7 @@ func TestBuildingVMGetsATileBeforeLimaKnowsIt(t *testing.T) {
 // so reading its arch/base/managed straight off those sources reports an unknown
 // as a DISAGREEMENT — and the whole board sprouts "arch … · base … · managed"
 // badges the moment a build starts, with the building tile itself labelled
-// "external": sand calling the VM it is building somebody else's.
+// "external": sandbar calling the VM it is building somebody else's.
 func TestABuildInFlightDoesNotSproutBadgesOnEveryTile(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
@@ -399,20 +399,20 @@ func TestABuildInFlightDoesNotSproutBadgesOnEveryTile(t *testing.T) {
 		t.Fatalf("a VM whose arch is UNKNOWN must not read as a fleet that disagrees about arch, got:\n%s", after)
 	}
 	if strings.Contains(after, "external") {
-		t.Fatalf("the VM sand is building right now is not external, got:\n%s", after)
+		t.Fatalf("the VM sandbar is building right now is not external, got:\n%s", after)
 	}
 	if strings.Contains(after, "base ") {
 		t.Fatalf("the build clones the same base as the rest of the fleet, so no base badge is warranted, got:\n%s", after)
 	}
 }
 
-// A VM sand built is sand's, whether or not the managed index has caught up.
+// A VM sandbar built is sandbar's, whether or not the managed index has caught up.
 // A FAILED build is the sharp case: Lima knows its half-built VM (so it VOTES in
 // the fleet-uniformity test) while the index never records it — RecordSuccess only
 // runs on success. Read its traits blindly off the index and it votes "not
 // managed, no base", which makes the whole board disagree with itself: every tile
 // grows managed/base badges, and the failed tile — the one the user has to act on
-// — is labelled "external", sand calling its own wreckage somebody else's.
+// — is labelled "external", sandbar calling its own wreckage somebody else's.
 func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 	m := newTestModel(t)
 	m = resized(m, 120, 40)
@@ -438,10 +438,10 @@ func TestASandBuiltVMIsNeverLabelledExternal(t *testing.T) {
 		t.Fatal("precondition: a failed build must NOT be recorded managed (the test proves nothing otherwise)")
 	}
 	if strings.Contains(grid, "external") {
-		t.Fatalf("the VM sand built is not external, whatever the index says, got:\n%s", grid)
+		t.Fatalf("the VM sandbar built is not external, whatever the index says, got:\n%s", grid)
 	}
 	if strings.Contains(grid, "managed") {
-		t.Fatalf("every tile on this board is sand's, so the managed field is uniform and must not badge, got:\n%s", grid)
+		t.Fatalf("every tile on this board is sandbar's, so the managed field is uniform and must not badge, got:\n%s", grid)
 	}
 	if strings.Contains(grid, "base ") {
 		t.Fatalf("the failed build cloned the fleet's base, so no base badge is warranted, got:\n%s", grid)

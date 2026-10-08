@@ -242,7 +242,7 @@ func TestSameNameCoexistenceAcrossProfilesSecretsHeartbeatsSurviveProfileDelete(
 // migration through the model's OWN boot path (New), not just
 // secrets.LoadFrom directly (internal/secrets/secrets_test.go's
 // TestLoadFrom_V2FixtureMigratesToLocalScope already pins the package-level
-// contract) — proving a real pre-fleet secrets.json, written by a sand build
+// contract) — proving a real pre-fleet secrets.json, written by a sandbar build
 // that predates connection profiles entirely, is readable through the fleet
 // model exactly where it lived before: under LocalScope.
 func TestBootLoadsPreFleetV2SecretsFileAsLocalScoped(t *testing.T) {

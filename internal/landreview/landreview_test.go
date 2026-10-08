@@ -24,7 +24,7 @@ import (
 )
 
 // This file covers the pieces a Session test cannot: the seams that are
-// injected away in cmd/sand's --review tests precisely because they touch the
+// injected away in cmd/sandbar's --review tests precisely because they touch the
 // real world. The orchestration's branching and teardown guarantees are
 // asserted there, over fakes; what is asserted here is that the production
 // defaults those fakes stand in for actually behave as claimed.

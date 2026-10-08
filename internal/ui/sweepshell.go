@@ -31,10 +31,10 @@ package ui
 //   - A VM stopped underneath the stream ends the shell on its own within
 //     ~300ms (`exit status 255`); the sweep needs no separate detection for
 //     that, exactly like the heartbeat.
-//   - Quitting sand DOES need a teardown of its own, and this line used to say
+//   - Quitting sandbar DOES need a teardown of its own, and this line used to say
 //     the reverse. Process exit closing the read ends only reaches a connection
 //     that is far enough along to write; one still waiting on an ssh agent is
-//     not, and outlives sand parked on the agent socket. The quit closes the
+//     not, and outlives sandbar parked on the agent socket. The quit closes the
 //     idle gate (model.quitting), so the last reconcile opens nothing and runs
 //     a stopAll — the first half unconditionally, the second best-effort, for
 //     the reasons heartbeat.go's header sets out.
@@ -590,7 +590,7 @@ func (m model) syncSweeps() tea.Cmd {
 			// NOT while this VM has a run in flight. A sweep pass is a recursive
 			// find over $HOME plus a git read per checkout, and a provisioning
 			// run is both the busiest the guest's disk ever gets and the moment
-			// sand can least afford to compete with itself for it — an Ansible
+			// sandbar can least afford to compete with itself for it — an Ansible
 			// task starved of I/O is a task whose ssh session can miss enough
 			// keepalives to be declared dead. The badge and the delete guard read
 			// the last completed pass meanwhile, and catch up within one

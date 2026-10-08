@@ -5,10 +5,10 @@ the project evolves.
 
 ## What this is
 
-`sand` is a tool for spinning up disposable development VMs for coding agents. It has
+`sandbar` is a tool for spinning up disposable development VMs for coding agents. It has
 two halves that share one repo:
 
-- **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that drives [Lima](https://lima-vm.io)
+- **A Go TUI/CLI** (`cmd/sandbar`, `internal/…`) that drives [Lima](https://lima-vm.io)
   to create, clone, reset, and manage VMs, plus a host-side secrets store.
 - **An Ansible provisioner** (`site.yml`, `roles/…`, `group_vars/`) that
   configures a VM once it boots. The Go side embeds and runs it.
@@ -49,11 +49,11 @@ it is not where prose belongs.
   env-var selection (`Resolve()`) is **removed** — profiles are the only
   configuration surface now. The `lima` package exports a host-access seam
   (`Host` = `Runner` + `HostFiles`, local vs SSH) that the two providers
-  differ on; the local provider is behaviourally identical to sand's
+  differ on; the local provider is behaviourally identical to sandbar's
   previous direct use of `*lima.Client`.
 - `profiles` — the persisted, secret-free Connection Profile model
   (`profiles.yaml`) that is now the single source of truth for every
-  location `sand` can run VMs on: a permanent Local profile plus any number
+  location `sandbar` can run VMs on: a permanent Local profile plus any number
   of named `remote-ssh` profiles (host/user/port/key-path/Lima-home, no
   secrets) or `proxmox` profiles (host/node/pool/storage/bridge + a
   `token_file` **path**, still no secrets — the token value lives in the file,
@@ -155,7 +155,7 @@ it is not where prose belongs.
   `/api/config` and check its JSON to identify the server; probing `/` could
   accept an unrelated application on a colliding port. The server writes
   `review.xml` and exits to signal completion. Keep this shared operation
-  here so both the CLI and TUI can use it; the TUI cannot import `cmd/sand`.
+  here so both the CLI and TUI can use it; the TUI cannot import `cmd/sandbar`.
   `Session.DiffArgs` replaces the resolved base commit and skips the file-count
   refusal when a caller provides custom git diff arguments. The resumable-review
   probe is independent and runs regardless. Assistant skills are installed
@@ -192,16 +192,21 @@ GitLab token after changing into the matching project directory.
 Landing's `--pr` and `--web` actions remain GitHub-only; drupal.org publishing
 is separate.
 
-Entrypoint: `cmd/sand/main.go`. Keep CLI operations consistent with their
-TUI equivalents: `sand create` is `n`, `sand reset` is `R`, `sand shell` is
-`S`, `sand template snapshot` is `t`, `sand land` is `l`, and
-`sand paste-image` is `v`. Publishing is also
+The executable is `sandbar`. Release archives and Homebrew temporarily install
+a `sand → sandbar` symlink; invoking it warns on stderr before dispatch.
+Keep existing on-disk paths, VM markers, and environment names stable when
+changing command branding.
+
+Entrypoint: `cmd/sandbar/main.go`. Keep CLI operations consistent with their
+TUI equivalents: `sandbar create` is `n`, `sandbar reset` is `R`, `sandbar shell` is
+`S`, `sandbar template snapshot` is `t`, `sandbar land` is `l`, and
+`sandbar paste-image` is `v`. Publishing is also
 available from the Landing pane. The CLI previously lacked the TUI's reset
 preserve options; shared operations prevent this kind of drift.
 
 Create/reset checks and bookkeeping belong in `internal/manage`
 (`RecreateBase`, `RecordSuccess`, `Reconcile`). After a build,
-`cmd/sand/secrets.go`'s `settleSecrets` must match the TUI's
+`cmd/sandbar/secrets.go`'s `settleSecrets` must match the TUI's
 `provisionDoneMsg` handling. Both shell entrypoints must use
 `provider.AttachArgv()` to construct their guest attach command.
 
@@ -213,8 +218,8 @@ owning profile through the marker, registry, then live listing.
 
 **A reset keeps the target VM's identity and project.** Its name, base image,
 clone URL, and Git service come from its recorded configuration. The TUI locks
-the name, repository, and Git service rows (`fieldLocked` in `internal/ui/form.go`); `sand reset`
-has no `--clone-url`; `sand create --recreate --clone-url` is rejected.
+the name, repository, and Git service rows (`fieldLocked` in `internal/ui/form.go`); `sandbar reset`
+has no `--clone-url`; `sandbar create --recreate --clone-url` is rejected.
 Allowing the URL to change could make a preserve option name the old
 project while cloning a different one. Create another VM for a different
 repository.
@@ -222,8 +227,8 @@ repository.
 ## Build, run, format
 
 ```
-go build ./cmd/sand      # build the binary
-go run ./cmd/sand        # run the TUI
+go build ./cmd/sandbar      # build the binary
+go run ./cmd/sandbar        # run the TUI
 gofmt -l .               # must be empty; format before committing
 go vet ./...
 ```
@@ -263,7 +268,7 @@ Conventions:
   field per interface method, so a test drives the exact behaviour it cares
   about and never panics on a forgotten mock. See the package doc for the
   defaulting contract (unset fields return sensible zero values). The TUI,
-  browse, and entrypoint tests (`internal/ui`, `internal/browse`, `cmd/sand`)
+  browse, and entrypoint tests (`internal/ui`, `internal/browse`, `cmd/sandbar`)
   all depend on `provider.Provider`, so this is the primary test seam.
 - **For tests that genuinely need limactl-shaped provisioner plumbing
   underneath**, the local provider still offers runner-level fakes: use a fake
@@ -317,16 +322,16 @@ Five jobs:
   (`PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s tests -p '*_test.py'`).
 - `unit` — `go vet ./...` and `go test ./... -race -covermode=atomic` (fast, no
   VM). It also enforces a **self-contained coverage gate**: coverage is measured
-  over `./internal/...` only (the `cmd/sand` main glue is excluded so it doesn't
+  over `./internal/...` only (the `cmd/sandbar` main glue is excluded so it doesn't
   distort the number) and the job fails if the total drops below the
   `COVERAGE_FLOOR` env value committed in the workflow. The floor is a **manual
   ratchet** — bump it by hand in a PR as coverage rises; never auto-committed
   from CI, and no third-party coverage service. The run uploads `coverage.out` +
   `coverage.html` as an artifact.
-- `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
+- `lima-e2e` — builds `sandbar` and provisions a real Lima VM end to end under
   QEMU+KVM on the hosted runner. First runs the isolated UI dropped-path
   upload/download test, checking contents on both receiving filesystems.
-  Also runs the `cmd/sand` `limae2e` tests
+  Also runs the `cmd/sandbar` `limae2e` tests
   (headless create + `--recreate` gate) first, on max free disk. (It does not
   run the fast Go suite — that's the `unit` job.) It checks all four agent
   executables in a clone, their absence from the base, and remembered choices
@@ -570,7 +575,7 @@ every bullet, not the constraint itself.
   user-visible string, in this subsystem or elsewhere in the repo.
 - **The checkout registry (`internal/checkouts`) is populated ONLY by a
   sweep of a RUNNING guest, and is otherwise a passive, host-side cache.**
-  The unlanded-work badge and `sand land`'s listing read this cached data and
+  The unlanded-work badge and `sandbar land`'s listing read this cached data and
   never re-sweep on their own — the badge in particular runs on the render
   path, where any guest contact is forbidden outright. A stopped or
   never-swept VM's entry can only get staler, never fresher.
@@ -594,7 +599,7 @@ every bullet, not the constraint itself.
   VM that is already up — and it is hard-bounded by `sweepOnceTimeout` so a
   wedged guest degrades to the cached answer plus "(could not re-check just
   now)" rather than freezing the overlay. Cancel is always accepted.
-- **Landing (`l` / `sand land`) never copies code to the host.** It moves PR
+- **Landing (`l` / `sandbar land`) never copies code to the host.** It moves PR
   metadata only — branch name, compare URL, PR number/state — via the
   workstation's own `gh` (a two-token split: the guest pushes with its own
   least-privilege token, the host opens the PR with the workstation's `gh`
@@ -622,22 +627,22 @@ every bullet, not the constraint itself.
   — and those values come from a sweep of the GUEST, the lowest-trust
   source in the system. The visible consequence is that a credential held
   only in a shell alias or wrapper function (the 1Password `gh` plugin and
-  similar injectors) is invisible to sand, which reports `gh: not
+  similar injectors) is invisible to sandbar, which reports `gh: not
   authenticated` even though the same command works at the user's prompt.
   That is the documented trade, not a bug: do NOT "fix" it by re-invoking
   `gh` through `sh -c` or the user's login shell.
   The 1Password shell plugin specifically IS supported (`internal/landgh/
   opplugin.go`), and supporting it cost nothing here: `op plugin run -- gh
-  <args...>` is an ordinary argv invocation, so sand simply prepends those
+  <args...>` is an ordinary argv invocation, so sandbar simply prepends those
   elements — no shell is introduced and every argument still arrives as its
   own element. Detection is FILE-ONLY (`~/.config/op/plugins.sh` plus `op` on
   PATH): probing by running `op` could raise an authorization prompt
   underneath the full-screen TUI, so it must stay a pure filesystem read. An
-  explicit `GH_TOKEN`/`GITHUB_TOKEN` in sand's environment bypasses the
+  explicit `GH_TOKEN`/`GITHUB_TOKEN` in sandbar's environment bypasses the
   plugin path entirely.
 - **No drupal.org credential ever belongs in a guest, full stop
   (`internal/drupalorg`).** Publishing a checkout's commits to drupal.org
-  (`sand publish`, and the Landing pane's `publish to drupal.org` row) does
+  (`sandbar publish`, and the Landing pane's `publish to drupal.org` row) does
   NOT reuse the GitHub two-token pattern above by giving the guest its own
   drupal.org push token — it is host-side by design: the guest only ever
   clones and reads drupal.org anonymously, and produces an inert
@@ -658,7 +663,7 @@ every bullet, not the constraint itself.
   the secrets store — that is the one thing this design forbids. A manual,
   narrower fine-grained token bounded to a single issue fork does exist as
   something a developer can set up by hand through drupal.org's web UI, but
-  `sand` deliberately automates none of it. Keep the reason straight,
+  `sandbar` deliberately automates none of it. Keep the reason straight,
   because two different mechanisms get conflated here and the distinction
   decides the design: GitLab exposes **no API whatsoever** that can create a
   *fine-grained* token (`POST /user/personal_access_tokens` takes only the
@@ -730,7 +735,7 @@ now a **cache + known-targets list + one-release legacy fallback**, NOT the sour
 `Scope` (profile identity, e.g. `user@host:22`) groups the UI and keys known targets; it
 no longer decides ownership. The authority is the marker. Because the marker lives with the
 VM on its host, EVERY controller that can reach the host sees the same managed set — two
-laptops driving one Mac mini, or a host's own local sand and a remote client, converge with
+laptops driving one Mac mini, or a host's own local sandbar and a remote client, converge with
 no sync protocol.
 
 **Marker contract** (for future Proxmox/cloud implementers):
@@ -780,7 +785,7 @@ description (no sidecar file), reads the whole fleet's provenance from one tag-f
 job — i.e. one another controller is building — renders as **Building**, not Running
 (`deriveStatus`'s `remoteProvisioning` input, fed from the member's provenance map). The
 `lima_home` connection-profile field also scopes the remote `limactl` (discovery), not just
-sand's file reads, so discovery and marker reads always resolve the same instance directory.
+sandbar's file reads, so discovery and marker reads always resolve the same instance directory.
 
 **Batched read:** Both local and remote providers read all instance markers in one host
 round trip via `lima.HostFiles.ReadInstanceMarkers` — no per-instance syscall. The local
@@ -788,9 +793,9 @@ implementation scans the filesystem directly; the remote implementation (SSH) wa
 remote Lima home with a shell script and length-frames the results over stdin so JSON
 with embedded newlines survives intact (see `internal/lima/sshhost.go`'s `ReadInstanceMarkers`).
 
-## The `sand paste-image` feature: IMAGE-ONLY invariant (read before extending clipboard handling)
+## The `sandbar paste-image` feature: IMAGE-ONLY invariant (read before extending clipboard handling)
 
-The `sand paste-image` command and TUI verb (`v`) stage a host clipboard
+The `sandbar paste-image` command and TUI verb (`v`) stage a host clipboard
 image on a guest's single-slot file (`~/.sand/clip/latest.png`) so supported
 agents' native Ctrl-V paste works. **This feature is IMAGE-ONLY by contract
 and by construction.** Do not weaken or remove this guarantee:
@@ -815,7 +820,7 @@ Codex reads the X11 selection through arboard instead of invoking a command.
 the guest write path publishes only the already-gated PNG to that selection
 through `/usr/bin/xclip`. `/usr/local/bin/xclip` remains the read-only shim.
 
-The clipboard read is one-shot and runs on the machine executing `sand`, not
+The clipboard read is one-shot and runs on the machine executing `sandbar`, not
 the remote host (for remote-Lima deployments). Only the image bytes cross
 the network.
 
@@ -1009,7 +1014,7 @@ shared rules.
   plan that decides what goes back before or after finalize exists only in
   memory. So `StagePreserve`'s caller writes `reset.json` beside the archives,
   while the guest is still intact: the VM's config (never `CloneToken`) and the
-  `PreservePlan`. `sand reset NAME --from-backup DIR` (`ResetOptions.RestoreFrom`)
+  `PreservePlan`. `sandbar reset NAME --from-backup DIR` (`ResetOptions.RestoreFrom`)
   reads it back and skips the stage-out and the delete. It takes the config from
   the manifest, not the managed index, because the index prunes a VM that no
   longer exists. A resume refuses a live instance of that name, and its guard
@@ -1086,9 +1091,9 @@ shared rules.
   is absent. Exclude length from that comparison: limactl's limit depends
   on the length of `<LIMA_HOME>/<name>/ssh.sock.<16 digits>` relative to
   `UNIX_PATH_MAX`. `lima.MaxInstanceNameLen` provides a fixed cap in sand.
-- **Validate only new VM names.** `submitForm` and `sand create`'s
-  `checkBackendName` run the check. `submitReset`, `sand reset`, and
-  `sand create --recreate` skip it because the VM exists and its name
+- **Validate only new VM names.** `submitForm` and `sandbar create`'s
+  `checkBackendName` run the check. `submitReset`, `sandbar reset`, and
+  `sandbar create --recreate` skip it because the VM exists and its name
   cannot be edited. Rechecking would prevent rebuilding older VMs whose
   names no longer pass. Keep `checkBackendName` separately testable so
   tests cover this exception.

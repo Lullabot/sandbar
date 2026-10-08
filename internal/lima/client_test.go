@@ -242,7 +242,7 @@ func (r errRunner) StreamOut(context.Context, io.Reader, io.Writer, ...string) e
 // any instance directory is mid-clone (lima#5236: clone creates the directory
 // before it writes lima.yaml), a window lasting 40-60s for a large base. A caller
 // that scans the full listing to find one VM is therefore broken for the whole
-// time a create of some OTHER VM is running: that is what made `sand shell web`
+// time a create of some OTHER VM is running: that is what made `sandbar shell web`
 // die instantly, and from a host tmux, close its new window before the error could
 // be read. A scoped list loads only that instance and survives the sibling.
 func TestGetAsksAboutOneInstanceNotTheWholeListing(t *testing.T) {

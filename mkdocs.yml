@@ -61,13 +61,13 @@ extra:
 nav:
   - Home: index.md
   - Getting Started:
-    - About sand: getting-started/index.md
+    - About sandbar: getting-started/index.md
     - Installation: getting-started/installation.md
     - Your First VM: getting-started/first-vm.md
     - How Provisioning Works: getting-started/how-it-works.md
     - Available Tools: getting-started/available-tools.md
     - Security Model: reference/security-model.md
-  - Using sand:
+  - Using sandbar:
     - The Board (TUI): using-sand/tui.md
     - CLI Reference: using-sand/cli-reference.md
     - Where VMs Run: using-sand/connection-profiles.md

@@ -43,7 +43,7 @@ func newKeyMap() keyMap {
 		// ghostEnter, because there it means something else entirely.
 		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
 		New:   key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-		// There is no managed-only TOGGLE any more: the board shows sand's managed
+		// There is no managed-only TOGGLE any more: the board shows sandbar's managed
 		// clones and nothing else, unconditionally (see board.go). 'f' is gone with
 		// it — a filter you can turn off is a filter that can show a base image, and
 		// a base image is not a workspace.

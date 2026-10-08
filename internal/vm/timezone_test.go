@@ -221,7 +221,7 @@ func TestParseLocaltimeLinkLayouts(t *testing.T) {
 }
 
 // The Go fallback and the playbook's own default have to be the SAME zone, or a
-// direct `ansible-playbook` run and a `sand create` on an undetectable host
+// direct `ansible-playbook` run and a `sandbar create` on an undetectable host
 // would put the guest in two different places. Read the YAML rather than
 // restate the constant: comparing a Go literal to a Go constant would stay
 // green while roles/base/defaults/main.yml drifted, which is precisely the

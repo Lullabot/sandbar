@@ -3,7 +3,7 @@ package lima
 import "regexp"
 
 // This file is the ONLY place in sand that knows tmux exists. Both entrypoints
-// into a guest shell — the TUI's `S` verb and `sand shell` — build their command
+// into a guest shell — the TUI's `S` verb and `sandbar shell` — build their command
 // from AttachArgv and neither constructs a tmux command of its own, for the same
 // reason the two create paths both go through provision/registry: two hand-rolled
 // copies of this drift, and the ways this one can drift are ugly (see below).
@@ -51,7 +51,7 @@ import "regexp"
 // session evaporates on detach while `main` and its processes live on.
 //
 // **The grouped session's name is chosen in the guest** ($$, the attaching shell's
-// PID) so two concurrent `sand shell` invocations cannot collide on it. A
+// PID) so two concurrent `sandbar shell` invocations cannot collide on it. A
 // host-computed counter would race; a PID is allocated by the same kernel that owns
 // the tmux server it is naming a session in.
 //
@@ -108,7 +108,7 @@ const (
 	// AttachControl starts a control-mode client (`tmux -CC`). tmux then speaks
 	// a line protocol on stdout instead of drawing, and a terminal that
 	// understands it renders each tmux window as a NATIVE tab. This is what
-	// `sand shell --cc` asks for.
+	// `sandbar shell --cc` asks for.
 	//
 	// Nothing here detects the terminal, and nothing should: this is stock
 	// tmux, so which emulators cooperate is their business and changes without
@@ -125,7 +125,7 @@ const (
 	// `allow-passthrough` both off and on: text either side of the sequence
 	// reaches the client and the sequence itself never does. So an emulator
 	// sitting outside a host tmux never sees the handshake and the user gets
-	// the raw control protocol printed as gibberish. cmd/sand's shell
+	// the raw control protocol printed as gibberish. cmd/sandbar's shell
 	// subcommand warns when $TMUX is set for exactly this reason.
 	AttachControl
 )

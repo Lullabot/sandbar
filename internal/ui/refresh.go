@@ -4,7 +4,7 @@ package ui
 // list` and re-renders, on the exact same idle-gating discipline as the guest
 // heartbeats (heartbeat.go) and the spinner. Without it the board is a
 // snapshot from whenever the screen was last touched, and every claim about
-// it being "live" is false; with it, an idle `sand` left open in a
+// it being "live" is false; with it, an idle `sandbar` left open in a
 // backgrounded terminal, over ssh, on battery, still does not poll.
 //
 // shouldTick (heartbeat.go) is deliberately named for the general question,
@@ -22,7 +22,7 @@ import (
 
 // refreshInterval is how often the board re-lists the fleet while it is live.
 // Long enough that a `limactl list` call every tick is not worth thinking
-// about; short enough that a VM started or stopped from outside sand (another
+// about; short enough that a VM started or stopped from outside sandbar (another
 // terminal, another tool) shows up without the user having to touch a key. It
 // is also backoffSteps[0] (fleet.go): a healthy member and a member on its
 // first errored retry poll at the same rate; only a persistent failure slows.

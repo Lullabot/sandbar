@@ -26,7 +26,7 @@ import (
 // temporary stop, and that stop must always be undone.
 
 // SnapshotResult carries what a successful SnapshotTemplate captured, so a
-// caller (the `sand template snapshot` CLI, task 4) can build the
+// caller (the `sandbar template snapshot` CLI, task 4) can build the
 // registry.Template record without recomputing either field: PlaybookVersion
 // and ToolsetKey are read from — or fall back to matching — the same fields
 // registry.Template stores them under.

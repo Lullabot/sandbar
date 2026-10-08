@@ -3,7 +3,7 @@ package ui
 // boardshot_test.go is the home-page screenshot GENERATOR. It is not an
 // assertion — it exists so the marketing/docs board image (docs/images/board.png)
 // can be regenerated deterministically whenever the TUI's colours or layout
-// change, instead of being hand-captured from a live `sand` and lost the moment
+// change, instead of being hand-captured from a live `sandbar` and lost the moment
 // the palette moves.
 //
 // It builds the board white-box (this is package ui) with a fixed, hand-seeded

@@ -185,9 +185,9 @@ func e2eCloneAndStart(t *testing.T, cli *lima.Client, name string) {
 }
 
 // e2eAttachArgv resolves name's guest home off the real Lima instance dir and
-// builds the exact argv the TUI's `S` verb and `sand shell` both use —
+// builds the exact argv the TUI's `S` verb and `sandbar shell` both use —
 // lima.AttachArgv, the one seam that knows guest tmux exists. Building it
-// straight from lima.AttachArgv (rather than shelling out to the sand binary)
+// straight from lima.AttachArgv (rather than shelling out to the sandbar binary)
 // keeps these tests focused on the attach mechanism itself.
 func e2eAttachArgv(t *testing.T, cli *lima.Client, name string) []string {
 	t.Helper()

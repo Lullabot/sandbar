@@ -1,12 +1,12 @@
 # Reviewing changes in a browser
 
-Use `sand land NAME PATH --review` to review a checkout's diff in your
+Use `sandbar land NAME PATH --review` to review a checkout's diff in your
 browser, including uncommitted and unpushed changes. The review server runs
 inside the VM. Your browser displays the diff, and your comments are saved
 back into the checkout for the agent to read.
 
 The browser interface comes from [`@self-review/serve`][serve], part of the
-[self-review][upstream] project. `sand` starts the server, forwards its port,
+[self-review][upstream] project. `sandbar` starts the server, forwards its port,
 opens your browser, and stops the session when you finish.
 
 [serve]: https://www.npmjs.com/package/@self-review/serve
@@ -17,17 +17,17 @@ opens your browser, and stops the session when you finish.
 The review tool is included in every base image and runs only when you open
 a review. There is no installation flag to enable.
 
-If your base image predates the tool, the next `sand create` updates the base
+If your base image predates the tool, the next `sandbar create` updates the base
 before cloning a new VM. Existing VMs need to be reset from an updated base
 or replaced to get it.
 
 ## Opening a review
 
-The VM must be running. Run `sand land NAME` to list its known checkouts,
+The VM must be running. Run `sandbar land NAME` to list its known checkouts,
 then use a path from that list:
 
 ```sh
-sand land NAME PATH --review
+sandbar land NAME PATH --review
 ```
 
 In the TUI, press `l` on the VM's tile to open the
@@ -37,20 +37,20 @@ row `reviewing…` and adds the URL when the server is ready.
 
 A review does not require a pushed branch, a configured remote, or `gh`.
 
-1. `sand` chooses the diff's base commit. It uses the parent of the oldest
+1. `sandbar` chooses the diff's base commit. It uses the parent of the oldest
    commit absent from all remote-tracking branches in the guest. If it
    cannot use that parent, it tries the nearest common ancestor with `main`,
    `master`, or the checkout's recorded default branch. If neither method
    finds a base, the review server uses its default range. The diff also
    includes uncommitted and untracked files.
 
-    Before starting the server, `sand` prints the base commit, its date,
+    Before starting the server, `sandbar` prints the base commit, its date,
     and the number of commits and files to review. For example:
     `everything since 6ac1f20b1e77 (2026-09-18, 5 commits, 12 files)`.
-    If the range is too large for the review tool, `sand` stops and names
+    If the range is too large for the review tool, `sandbar` stops and names
     the base commit so you can check it.
-2. `sand` starts the server in the checkout. The server chooses a free port
-   inside the VM. `sand` makes that port reachable from your workstation
+2. `sandbar` starts the server in the checkout. The server chooses a free port
+   inside the VM. `sandbar` makes that port reachable from your workstation
    (see [Reachability](#reachability)), waits for a response, and opens your
    default browser.
 3. The browser displays the checkout's file tree and diff.
@@ -64,7 +64,7 @@ session log.
 
 ## Reviewing only part of a branch
 
-By default, `sand` chooses a base commit for the review and includes all
+By default, `sandbar` chooses a base commit for the review and includes all
 changes since that commit plus any uncommitted work. You can instead review
 just the commits or staged changes you specify, with precise control over the
 reviewed range.
@@ -74,7 +74,7 @@ reviewed range.
 Add `--` followed by `git diff` arguments after the `--review` flag:
 
 ```sh
-sand land NAME PATH --review -- HEAD~2
+sandbar land NAME PATH --review -- HEAD~2
 ```
 
 This reviews the working tree against the last two commits (equivalent to
@@ -82,11 +82,11 @@ This reviews the working tree against the last two commits (equivalent to
 
 | Command | What it reviews |
 | ------- | --------------- |
-| `sand land NAME PATH --review -- HEAD~2...HEAD` | Only the last two commits, no uncommitted changes |
-| `sand land NAME PATH --review -- --staged` | Only the changes you have staged for commit |
-| `sand land NAME PATH --review -- HEAD~10` | The last ten commits plus uncommitted work |
+| `sandbar land NAME PATH --review -- HEAD~2...HEAD` | Only the last two commits, no uncommitted changes |
+| `sandbar land NAME PATH --review -- --staged` | Only the changes you have staged for commit |
+| `sandbar land NAME PATH --review -- HEAD~10` | The last ten commits plus uncommitted work |
 
-When you provide a range, `sand` skips its automatic base selection and the
+When you provide a range, `sandbar` skips its automatic base selection and the
 file-count guard. A saved review is still carried in, so comments you wrote
 earlier are there to keep, edit, or drop, and `--clean` still discards it
 first.
@@ -128,13 +128,13 @@ stops the session without saving them.
 In the TUI, **leaving the Landing pane does not end the review**. You can
 press `esc`, open a shell with `S`, or visit another VM while the browser
 review stays open. To cancel, return to the checkout's row and press `v`;
-the footer reads `v cancel review`. Quitting `sand` also stops the review,
+the footer reads `v cancel review`. Quitting `sandbar` also stops the review,
 with a confirmation naming the checkout.
 
 ## Picking up where you left off
 
 A finished review leaves `review.xml` in the checkout. When you open another
-review there, `sand` loads the saved comments and viewed-file markers:
+review there, `sandbar` loads the saved comments and viewed-file markers:
 
 ```
 carrying in the comments already in review.xml
@@ -149,7 +149,7 @@ To discard the saved review and start over:
 | Where | How |
 | ----- | --- |
 | TUI's Landing pane | Press `V` (shift-V) on the checkout's row, labelled `clean review` in the footer. |
-| CLI | Run `sand land NAME PATH --review --clean`. |
+| CLI | Run `sandbar land NAME PATH --review --clean`. |
 
 Both delete `review.xml` and the accompanying `review.guide.xml` before
 starting the server. The TUI asks for confirmation, even if neither file
@@ -157,7 +157,7 @@ exists. The CLI deletes them without a prompt.
 
 ## The assistant skills
 
-When provisioning includes an initial project clone, `sand` installs three
+When provisioning includes an initial project clone, `sandbar` installs three
 self-review skills into that checkout before you start an agent session:
 
 | Skill | What it does |
@@ -198,7 +198,7 @@ Press `v` in the Landing pane to review and edit those comments, then run:
 !!! note "Skills tracked by your project are kept"
 
     If the repository already tracks its own `.agents/skills/self-review-*` or
-    `.claude/skills/self-review-*` files in Git, `sand` leaves those paths
+    `.claude/skills/self-review-*` files in Git, `sandbar` leaves those paths
     unchanged.
 
 <a id="none-of-it-shows-up-in-git-status"></a>
@@ -221,7 +221,7 @@ where the agent is working. You do not need to download or copy it.
 
 ## Reachability
 
-The server listens on the VM's loopback address, `127.0.0.1`. `sand` makes
+The server listens on the VM's loopback address, `127.0.0.1`. `sandbar` makes
 it reachable at a loopback address on your workstation:
 
 - **Local Lima** automatically forwards the guest port to the same port
@@ -233,7 +233,7 @@ it reachable at a loopback address on your workstation:
 
 The guest server and any SSH tunnel stop when you finish or cancel the
 review. The diff and your comments travel between the VM and your browser.
-`sand` does not copy a checkout onto your workstation or push it to a forge.
+`sandbar` does not copy a checkout onto your workstation or push it to a forge.
 
 !!! warning "Other users of a shared remote Lima host can read the review"
 
@@ -251,7 +251,7 @@ review. The diff and your comments travel between the VM and your browser.
 
 Local Lima must use the same port number on the guest and workstation. If
 another application on your workstation already uses the port the guest
-selected, forwarding fails and the review times out. `sand` reports the
+selected, forwarding fails and the review times out. `sandbar` reports the
 port. Run the review again to select another port; the review server has no
 option to request a specific one.
 
@@ -259,7 +259,7 @@ option to request a specific one.
 
 Automatic resumption uses only the default `review.xml` path. If you set
 `output-file` in `.self-review.yaml` or
-`~/.config/self-review/config.yaml`, `sand` does not load the saved review
+`~/.config/self-review/config.yaml`, `sandbar` does not load the saved review
 automatically. A clean review also deletes only the default `review.xml`
 and `review.guide.xml` files.
 

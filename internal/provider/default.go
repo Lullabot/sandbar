@@ -10,9 +10,9 @@ import (
 // execRunner, and a Provisioner over that same core with the embedded
 // playbook located and extracted.
 //
-// This is the ONE place all three entrypoints (the TUI in cmd/sand/main.go,
-// the headless `sand create` in cmd/sand/create.go, and `sand shell` in
-// cmd/sand/shell.go) construct their provider, replacing what used to be
+// This is the ONE place all three entrypoints (the TUI in cmd/sandbar/main.go,
+// the headless `sandbar create` in cmd/sandbar/create.go, and `sandbar shell` in
+// cmd/sandbar/shell.go) construct their provider, replacing what used to be
 // three separate `lima.New(lima.NewExecRunner())` + `&provision.Provisioner{}`
 // call sites — one per entrypoint, free to drift from each other. Centralising
 // construction here is what makes AGENTS.md's "keep the three entrypoints
@@ -29,7 +29,7 @@ func NewDefault() (Provider, error) {
 	core := lima.New(lima.NewExecRunner())
 	// PlaybookDir is left empty: the Provisioner locates the embedded playbook
 	// lazily, the first time a create/reset actually needs it. Locating it here
-	// would make `sand shell` — which constructs a provider but never provisions
+	// would make `sandbar shell` — which constructs a provider but never provisions
 	// — pay for (and fail on) playbook extraction just to attach to a VM.
 	prov := &provision.Provisioner{Lima: core}
 	return NewLocalLima(core, prov), nil

@@ -1,16 +1,16 @@
 # Publishing to drupal.org
 
-How a change set you made in a `sand` VM gets from a guest checkout to a
+How a change set you made in a `sandbar` VM gets from a guest checkout to a
 merge request against a canonical drupal.org project — for someone who
-knows Drupal contribution, not `sand` internals.
+knows Drupal contribution, not `sandbar` internals.
 
 ## What this is
 
-A `sand` guest can clone and work against a drupal.org issue fork exactly
+A `sandbar` guest can clone and work against a drupal.org issue fork exactly
 as you would on your own machine, using plain `git`. What it cannot do is
 push: no guest ever holds a drupal.org credential (see
 [Security Model](../reference/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
-for why). Instead, `sand` reads the guest's already-committed local commits
+for why). Instead, `sandbar` reads the guest's already-committed local commits
 and **publishes them from your workstation**, one commit at a time, using a
 drupal.org personal access token (PAT) that never leaves your machine.
 
@@ -22,9 +22,9 @@ You reach this two ways:
   once a workstation PAT is on file. If no PAT is on file, the row instead
   says `on drupal.org · no PAT on file, publish disabled` — see
   [setup](#setup) below.
-- **`sand publish NAME PATH [ISSUE]`** from the command line, for scripting or
+- **`sandbar publish NAME PATH [ISSUE]`** from the command line, for scripting or
   for a bigger confirmation than the TUI's pane can show at once (see
-  [`sand publish`](cli-reference.md#sand-publish-name-path-issue) in the CLI
+  [`sandbar publish`](cli-reference.md#sandbar-publish-name-path-issue) in the CLI
   reference).
 
 Both surfaces do exactly the same thing: they share one implementation of
@@ -39,7 +39,7 @@ Publication needs a drupal.org account PAT on your workstation, at:
 ${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token
 ```
 
-Create it yourself — `sand` never writes this file — with the token as its
+Create it yourself — `sandbar` never writes this file — with the token as its
 only content, and make sure it's mode `0600`:
 
 ```console
@@ -48,14 +48,14 @@ $ vi ~/.config/sandbar/drupalorg.token   # paste your token, save
 $ chmod 600 ~/.config/sandbar/drupalorg.token
 ```
 
-`sand` refuses to read a file that's readable by group or other, and
+`sandbar` refuses to read a file that's readable by group or other, and
 refuses to publish at all — before touching the VM, the checkout, or
 drupal.org — if the file doesn't exist. See
 [Files and State](../reference/files-and-state.md#host-paths) for why this
 path is a fixed convention rather than something you configure.
 
 The token must be a real drupal.org account PAT, created the same way you'd
-create one for pushing from your own machine. `sand` does not (and, for
+create one for pushing from your own machine. `sandbar` does not (and, for
 reasons covered [below](#why-publication-is-host-side), cannot easily) issue
 you a narrower one.
 
@@ -68,13 +68,13 @@ For a checkout `PATH`, publication:
    [Where the issue number comes from](#where-the-issue-number-comes-from).
 2. Looks up the issue fork (`issue/<module>-<nid>`) anonymously on drupal.org.
    The fork's `forked_from_project` identifies the canonical parent project,
-   such as `project/<module>`. By default, `sand` refuses to write outside
+   such as `project/<module>`. By default, `sandbar` refuses to write outside
    the `issue/` namespace. The CLI flag `--allow-outside-issue-namespace`
    explicitly overrides that restriction.
 3. Collects local commits, oldest first, excluding commits already in the
    checkout's upstream branch or the canonical project's base branch. The
    collected data contains commit messages, authors, and file changes,
-   including their content. If the range contains a **merge commit**, `sand`
+   including their content. If the range contains a **merge commit**, `sandbar`
    names it and stops without publishing anything. See
    [Rebase onto the base branch](#rebase-onto-the-base-branch-dont-merge-it-in).
 4. Shows you a **confirmation**: the destination and branch, the merge
@@ -110,7 +110,7 @@ straight out of that remote, and neither surface asks you for it:
 
 - **The Landing pane** resolves the remote first and goes directly to the
   confirmation. The issue prompt appears only if the remote cannot answer.
-- **`sand publish NAME PATH`** takes no `ISSUE` argument in this case, and
+- **`sandbar publish NAME PATH`** takes no `ISSUE` argument in this case, and
   prints the number it derived (`issue 3619578, read from this checkout's
   remote`) above the confirmation.
 
@@ -120,7 +120,7 @@ is nothing to derive:
 
 - **The Landing pane** shows its issue prompt. A bare number, a `#`-prefixed
   one, and a pasted drupal.org issue URL are all accepted.
-- **`sand publish`** needs the `ISSUE` argument, and says so rather than
+- **`sandbar publish`** needs the `ISSUE` argument, and says so rather than
   guessing.
 
 Deriving the issue removes a **question**, never a **confirmation**. The
@@ -179,7 +179,7 @@ work at all. But your checkout doesn't know, and left alone it goes wrong in
 the usual way: `git log origin/<branch>` shows a stale picture, and a later
 `git pull` merges the two histories into a pile of duplicated commits.
 
-So after every successful publish, `sand` **fetches** the fork branch in the
+So after every successful publish, `sandbar` **fetches** the fork branch in the
 guest and tells you where you stand:
 
 ```
@@ -202,7 +202,7 @@ When — and only when — all three of these hold:
 - their **content is identical**, **and**
 - your working tree is **clean**,
 
-`sand` offers to reset your branch onto the published commits:
+`sandbar` offers to reset your branch onto the published commits:
 
 ```
 Reset this checkout onto the published commits? [y/N]
@@ -218,7 +218,7 @@ objects whose changes are already public under other SHAs.
 
 Say no and nothing happens. This is a **separate decision from the publish**,
 with its own answer — `--yes` confirms the publish and never the reset, and
-without a terminal `sand publish` prints the command instead of running it.
+without a terminal `sandbar publish` prints the command instead of running it.
 
 The offer is withheld, with the reason printed, when:
 
@@ -260,11 +260,11 @@ $ git fetch https://git.drupalcode.org/project/<module>.git 2.x
 $ git rebase FETCH_HEAD
 ```
 
-`sand publish` uses an API that creates commits from file changes and cannot
+`sandbar publish` uses an API that creates commits from file changes and cannot
 represent a merge commit's second parent. If the commits to publish include
-a merge, `sand` names it and stops before writing anything.
+a merge, `sandbar` names it and stops before writing anything.
 
-To select your work, `sand` excludes commits already in the checkout's
+To select your work, `sandbar` excludes commits already in the checkout's
 upstream branch and the canonical project's base branch. This keeps
 upstream commits introduced by a rebase out of your publication. It reads
 the base branch from `project/<module>` because the issue fork's copy may
@@ -272,7 +272,7 @@ be out of date.
 
 The guest must have the canonical base branch's latest commit locally.
 The fetch above supplies it. If it is missing, publication stops with an
-explanation; `sand` does not fetch it during collection.
+explanation; `sandbar` does not fetch it during collection.
 
 Once you have published, keep that history and add new commits. Rebasing
 published commits can prevent publication from resuming correctly. See
@@ -301,7 +301,7 @@ names exactly what landed, what failed and why, and what was never
 attempted, so you know precisely where things stand.
 
 **Recovery is re-running the publish**, not manually fixing up the fork.
-`sand publish` (or the Landing row) resumes automatically: it reads what's
+`sandbar publish` (or the Landing row) resumes automatically: it reads what's
 already on the branch, recognizes the commits that already landed, and
 sends only the remainder — whether the failure was transient (a network
 blip, a rate limit) or you fixed something in the guest first. You do not
@@ -309,10 +309,10 @@ need to, and should not try to, repair the fork by hand.
 
 ### There is no force push — the fork branch only ever grows
 
-`sand publish` never pushes a ref. Every commit goes through drupal.org's
+`sandbar publish` never pushes a ref. Every commit goes through drupal.org's
 content API, which can only **append** a commit to a branch: there is no
 non-fast-forward update, no rewind, and no branch deletion anywhere in this
-mechanism. Nothing `sand` can do will rewrite or remove something already
+mechanism. Nothing `sandbar` can do will rewrite or remove something already
 published.
 
 That is deliberate — one human `y` authorizes the writes in front of it, and
@@ -339,7 +339,7 @@ So: **tidy your history in the guest before the first publish, not after**
 Once commits are public on the fork, treat that history as fixed and add to
 it rather than rewriting it.
 
-If published history needs to change, you must repair it outside `sand`.
+If published history needs to change, you must repair it outside `sandbar`.
 For example, you may need to remove an unrelated commit before resuming a
 publish. Two recovery options are:
 
@@ -355,7 +355,7 @@ publish. Two recovery options are:
     its discussion.
 
 - **Delete the fork branch through drupal.org's web UI and publish again.**
-  `sand` recreates `<module>-<nid>` from the canonical project's base branch
+  `sandbar` recreates `<module>-<nid>` from the canonical project's base branch
   and replays your local change set. Deleting the source branch closes the
   old merge request; the next publish opens a new one, leaving its review
   discussion on the old request.
@@ -364,7 +364,7 @@ publish. Two recovery options are:
 
 ### When publication cannot resume
 
-To resume, `sand` matches the first commits in your change set against the
+To resume, `sandbar` matches the first commits in your change set against the
 most recent commits on the fork branch. If it finds previously published
 commits but cannot match that sequence at the branch tip, it stops before
 writing. For example, an unrelated commit added after your last publish can
@@ -392,9 +392,9 @@ yourself remains the only way to get a signed commit onto drupal.org.
 drupal.org's PAT policy permits automation "of an individual action a user
 could already perform" — a single human, confirming a single publish, using
 their own credential, is squarely that. It is not a standing, unattended
-integration: nothing in `sand` runs a publish without the confirmation step
+integration: nothing in `sandbar` runs a publish without the confirmation step
 above, and the token is never used for anything but the one authenticated
-call a confirmed publish makes. That framing is `sand`'s own reading of the
+call a confirmed publish makes. That framing is `sandbar`'s own reading of the
 policy, offered so you can judge it against your own drupal.org account's
 standing — **the Drupal Association has not been formally consulted** about
 this specific tool, and this is not a claim that they have endorsed it.
@@ -409,11 +409,11 @@ single issue fork** through GitLab's web UI and place it in the guest
 yourself, the same way you'd hand-configure any other credential. That
 narrower token genuinely works for the one fork it names.
 
-`sand` does not automate that, for one concrete reason: **GitLab exposes no
+`sandbar` does not automate that, for one concrete reason: **GitLab exposes no
 API that can create a fine-grained token.** Its self-service endpoint,
 `POST /user/personal_access_tokens`, accepts only the `k8s_proxy` and
 `self_rotate` scopes and takes no access-boundary parameter at all, so there
-is nothing for `sand` to call. Creation is a web-UI act; only *rotation* is
+is nothing for `sandbar` to call. Creation is a web-UI act; only *rotation* is
 automatable. That is a property of GitLab itself, not of drupal.org.
 
 Two other routes to a narrow token are closed as well, and they are closed
@@ -431,7 +431,7 @@ for different reasons worth keeping straight:
 So a fine-grained token has to be made by hand, in the web UI, one issue
 fork at a time — and a manual web-UI trip per issue is exactly the friction
 publication exists to remove. Host-side publication, with no drupal.org
-credential in the guest at all, ever, is what `sand` builds instead.
+credential in the guest at all, ever, is what `sandbar` builds instead.
 
 This is worth stating precisely, because "the secure option exists but
 cannot be automated" is a much less obvious conclusion than "the secure

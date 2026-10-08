@@ -243,7 +243,7 @@ func TestSweepDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 		t.Fatalf("a VM whose sweep shell keeps dying had %d opened at it across 5 refreshes — must not retry every tick", n)
 	}
 
-	// The cooldown lapses: sand tries again.
+	// The cooldown lapses: sandbar tries again.
 	l.m.sweeps.mu.Lock()
 	l.m.sweeps.cooldown[vmHandle{Scope: registry.LocalScope, Name: "web"}] = time.Now().Add(-time.Second)
 	l.m.sweeps.mu.Unlock()
@@ -441,7 +441,7 @@ func TestGuestSweepScriptShape(t *testing.T) {
 	}
 }
 
-// A sweep pass is the heaviest thing sand asks a guest to do in the background —
+// A sweep pass is the heaviest thing sandbar asks a guest to do in the background —
 // a recursive find over $HOME plus a git read per checkout — and a provisioning
 // run is the moment that competition costs the most: an Ansible task starved of
 // I/O is a task whose ssh session can miss enough keepalives to be declared dead.

@@ -1,6 +1,6 @@
 // Package manage holds the managed-VM ownership bookkeeping shared by the
-// interactive TUI (internal/ui) and the headless `sand create` subcommand
-// (cmd/sand), so the two entrypoints cannot drift on how a VM becomes
+// interactive TUI (internal/ui) and the headless `sandbar create` subcommand
+// (cmd/sandbar), so the two entrypoints cannot drift on how a VM becomes
 // "managed", how the index is kept in sync with the live `limactl list`, or
 // when a recreate is permitted.
 //

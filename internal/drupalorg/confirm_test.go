@@ -174,7 +174,7 @@ func TestRenderConfirmation_TrailingNewlineIsNotAPhantomLine(t *testing.T) {
 // TestRenderConfirmation_UnknownEncodingNotDumpedAsText proves content whose
 // encoding this package does not know is named rather than dumped. Nothing
 // guarantees ValidateFileAction ran before RenderConfirmation (it is
-// documented as usable on its own by cmd/sand and the TUI), so an empty or
+// documented as usable on its own by cmd/sandbar and the TUI), so an empty or
 // unrecognised Encoding is reachable, and rendering it as text would present
 // bytes of an unknown shape as if they had been read and vouched for.
 func TestRenderConfirmation_UnknownEncodingNotDumpedAsText(t *testing.T) {

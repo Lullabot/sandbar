@@ -1,13 +1,13 @@
 # The Embedded Playbook
 
-`sand` provisions each VM's software with an Ansible playbook — the same
+`sandbar` provisions each VM's software with an Ansible playbook — the same
 `site.yml`, `roles/`, `ansible.cfg`, and `group_vars/` this repository has
 carried since before its conversion to a Go CLI. That playbook is not a
-separate tool you run: it is baked into the `sand` binary and driven
-entirely by `sand` itself. This page documents the mechanism for
+separate tool you run: it is baked into the `sandbar` binary and driven
+entirely by `sandbar` itself. This page documents the mechanism for
 contributors who need to touch `roles/` or `site.yml`. **It is not a guide
 to running Ansible by hand** — nothing here should be read as an
-instruction to install Ansible or invoke `ansible-playbook`; `sand` does
+instruction to install Ansible or invoke `ansible-playbook`; `sandbar` does
 both, inside the guest, on your behalf.
 
 ## The fileset is embedded in the binary
@@ -15,7 +15,7 @@ both, inside the guest, on your behalf.
 `playbook_embed.go` at the repository root `go:embed`s the whole fileset —
 `site.yml`, `ansible.cfg`, `inventory`, `roles/`, and `group_vars/` — into
 the `sandbar` module as `PlaybookFS`. This is what lets a Homebrew-installed
-`sand` provision without a repository checkout anywhere on disk: the
+`sandbar` provision without a repository checkout anywhere on disk: the
 playbook travels inside the compiled binary.
 
 ## How the playbook directory is resolved
@@ -31,7 +31,7 @@ picks the directory to mount into the VM in two tiers:
    `PlaybookFS` to a fresh private temp directory and uses that.
 
 This is the single most useful fact on this page for a contributor: **if
-you run `go run ./cmd/sand` from inside this checkout, your uncommitted
+you run `go run ./cmd/sandbar` from inside this checkout, your uncommitted
 edits to `roles/` or `site.yml` take effect on the very next provision.**
 There is no rebuild-and-reinstall step to remember.
 
@@ -45,7 +45,7 @@ the backend:
 - **On Lima** (local or remote), the resolved directory is mounted into the
   guest as its **only** mount, and that mount is **read-only**.
 - **On Proxmox**, there is no mount at all — there's no shared filesystem to
-  make one from. `sand` packages the fileset into a gzipped tar
+  make one from. `sandbar` packages the fileset into a gzipped tar
   (`buildPlaybookTar`) and streams it to the guest over the SSH connection's
   stdin, where it's unpacked. Same fileset, no mount.
 
@@ -73,7 +73,7 @@ values:
 | `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `project` | Against each clone; agents install current releases here |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
-This split is what lets `sand` build one expensive base image and clone it
+This split is what lets `sandbar` build one expensive base image and clone it
 cheaply for every subsequent VM, installing current agent releases alongside
 identity-specific work against each clone.
 
@@ -83,10 +83,10 @@ identity-specific work against each clone.
 `claude-code`, `codex`, `opencode`, `pi`, and `project`.
 `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
-`internal/provision/vars.go` sets `samba_enabled: false` on every `sand`
+`internal/provision/vars.go` sets `samba_enabled: false` on every `sandbar`
 run (files move with `limactl copy` or `scp` instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
-does not execute on the `sand` path.
+does not execute on the `sandbar` path.
 
 ## CI coverage
 
@@ -95,14 +95,14 @@ The `lint` job in `.github/workflows/test.yml` runs
 on every push and pull request, so a syntax error anywhere in the playbook
 fails CI fast — this is the one place in the pipeline where
 `ansible-playbook` runs directly, and it exists purely to validate the
-fileset that `sand` embeds.
+fileset that `sandbar` embeds.
 
 ## `inventory` is vestigial
 
 `inventory` still contains a single placeholder host
 (`ansible_host=CHANGE_ME`), and it is part of the embedded fileset. It is a
 holdover from before the Go conversion, when the playbook was run directly
-against a real inventory. On the `sand` path it is unused: `sand` invokes
+against a real inventory. On the `sandbar` path it is unused: `sandbar` invokes
 Ansible with `-i localhost,` inside the guest and never reads this file.
 It stays in the tree because it is embedded and harmless, not because
-anything on the `sand` path consults it.
+anything on the `sandbar` path consults it.

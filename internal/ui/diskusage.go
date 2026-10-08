@@ -15,7 +15,7 @@ import (
 // member samples on the host its VMs actually run on (refreshCmd hands it the
 // owning profile's hostFiles), so a local VM and a remote VM are measured on
 // their own hosts in the same refresh. The old ui.hostFiles global + SetHostFiles
-// setter were retired with the fleet: one sand process no longer runs exactly one
+// setter were retired with the fleet: one sandbar process no longer runs exactly one
 // provider. The allocated-block probe itself is platform-specific and lives in the
 // seam (lima.HostFiles.DiskAllocBytes); here we only join the instance-relative
 // path and guard the empty-dir case.

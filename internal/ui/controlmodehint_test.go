@@ -44,7 +44,7 @@ func TestControlModeHintLogsOncePerRun(t *testing.T) {
 
 // TestControlModeHintSilentInsideTmux: a user whose $TMUX is set is already on
 // the branch that keeps the board live, so half the advice is redundant — and
-// `sand shell --cc` would refuse from inside tmux anyway (a tmux pane strips the
+// `sandbar shell --cc` would refuse from inside tmux anyway (a tmux pane strips the
 // control-mode handshake), so the other half is advice to run a command that
 // errors.
 func TestControlModeHintSilentInsideTmux(t *testing.T) {

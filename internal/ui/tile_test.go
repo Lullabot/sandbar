@@ -650,7 +650,7 @@ func TestBuildingTileShowsProgressAndRoleTaskCount(t *testing.T) {
 }
 
 // Before Ansible starts (the long silent clone/boot stretch), the tile falls
-// back to sand's own phase banner (Step) rather than showing a blank role
+// back to sandbar's own phase banner (Step) rather than showing a blank role
 // line.
 func TestBuildingTileFallsBackToStepBeforeAnsibleStarts(t *testing.T) {
 	in := baseTileInput()

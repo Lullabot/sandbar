@@ -202,7 +202,7 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 	case cfg.Node == "":
 		return nil, errors.New("proxmox: profile has no node (PVE's own name for the node, e.g. \"pve\" — not the hostname you connect to)")
 	case cfg.Pool == "":
-		return nil, errors.New("proxmox: profile has no pool (the resource pool that scopes both the token and every VM sand creates)")
+		return nil, errors.New("proxmox: profile has no pool (the resource pool that scopes both the token and every VM sandbar creates)")
 	case cfg.TokenFile == "":
 		return nil, errors.New("proxmox: profile has no token_file (a path to a 0600 file holding the API token; the token itself is never stored in the profile)")
 	}
@@ -1382,7 +1382,7 @@ func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr
 // --- interactive attach & guest identity ----------------------------------------
 
 // AttachArgv wraps the SAME guest tmux expression the Lima providers use in an
-// `ssh -t` to the VM, so `sand shell` and the TUI's S verb behave identically on
+// `ssh -t` to the VM, so `sandbar shell` and the TUI's S verb behave identically on
 // every backend. The expression comes from lima.GuestAttachArgv rather than
 // being retyped here — see that function and internal/lima/attach.go for why a
 // second copy of it is the most destructive drift in the codebase.
@@ -1508,7 +1508,7 @@ func (p *proxmoxProvider) GuestHome(vm.VM) string {
 // identity, ~/.tmux.conf, secrets) while the user logs into another. For local
 // Lima that account happens to mirror the host user, and for remote Lima it is
 // the remote host's — but for Proxmox there is no "host limactl runs on" at all:
-// sand creates the account itself as the cloud-init ciuser. Returning that same
+// sandbar creates the account itself as the cloud-init ciuser. Returning that same
 // value here is what keeps the account sand provisions and the account sand logs
 // into the same account.
 func (p *proxmoxProvider) HostUser() string { return p.ciUser }

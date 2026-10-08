@@ -393,7 +393,7 @@ func tileBadges(t vmTraits, u fleetUniformity) []string {
 	// An UNKNOWN value is never rendered. A backend that could not read a field
 	// (a Proxmox token without Sys.Audit on the node, a VM Lima has not reported
 	// yet) leaves it empty, and "arch " with nothing after it states a fact about
-	// the VM that sand does not have — the same refusal every gauge in this file
+	// the VM that sandbar does not have — the same refusal every gauge in this file
 	// already makes. computeFleetUniformity keeps an unknown from turning the
 	// badge on across the whole board, so this is the second half of one rule.
 	if u.ShowArch && t.Arch != "" {
@@ -450,7 +450,7 @@ type fleetUniformity struct {
 // flag comes back false.
 //
 // Arch compares only the values it KNOWS (fleetAgreesOnKnown). An unknown is not
-// a disagreement: before this, one VM whose architecture sand could not read
+// a disagreement: before this, one VM whose architecture sandbar could not read
 // disagreed with every VM that had one, which turned the badge on for the whole
 // board and printed a bare "arch " on the tile that caused it — a missing reading
 // masquerading as a foreign architecture.
@@ -464,7 +464,7 @@ func computeFleetUniformity(fleet []vmTraits) fleetUniformity {
 
 // fleetAgreesOnKnown is fleetAgrees over the VMs whose value is KNOWN (non-empty),
 // for a field a backend may legitimately fail to read. It is deliberately NOT the
-// default: Base and Managed are facts sand always holds for a managed clone, so an
+// default: Base and Managed are facts sandbar always holds for a managed clone, so an
 // empty one there is a real difference worth showing, while an unreadable
 // architecture is an absence.
 func fleetAgreesOnKnown(fleet []vmTraits, get func(vmTraits) string) bool {
@@ -736,7 +736,7 @@ const taskTimerAfter = 10 * time.Second
 // role and task count (e.g. "ansible: docker · 7/19"), with the current task's
 // elapsed time right-aligned once it passes taskTimerAfter. Ansible has not
 // necessarily started yet — the clone and the boot take most of a build's
-// wall time — so this falls back through Task, then to sand's own phase
+// wall time — so this falls back through Task, then to sandbar's own phase
 // banner (Step), which is the tile's only signal during those otherwise
 // silent minutes (see ansible.go's Step doc).
 //

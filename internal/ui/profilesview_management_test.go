@@ -799,7 +799,7 @@ func TestProxmoxFormRequiredFieldValidation(t *testing.T) {
 		// The three the store does NOT check.
 		//
 		// identity path: the provider cannot build a guest it can log into
-		// without the key sand installs via cloud-init.
+		// without the key sandbar installs via cloud-init.
 		{"identity path", ppIdentityPath},
 		// storage and bridge: pve.CreateVMOptions rejects either outright
 		// (internal/pve/vm.go). Bridge is the subtle one — an omitted bridge

@@ -9,7 +9,7 @@ import (
 )
 
 // TestCheckBackendNameRefusesANewVM is the CLI half of the create form's name
-// check: `sand create --name test_vm` against a Proxmox profile must fail on
+// check: `sandbar create --name test_vm` against a Proxmox profile must fail on
 // stderr, immediately, rather than minutes later inside a clone task.
 func TestCheckBackendNameRefusesANewVM(t *testing.T) {
 	var asked []string
