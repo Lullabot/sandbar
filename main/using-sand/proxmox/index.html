@@ -994,6 +994,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#start-at-host-boot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start at host boot
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1634,6 +1645,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#start-at-host-boot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start at host boot
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2152,7 +2174,7 @@ failures — so, for the record, why each of the less-obvious ones is here:</p>
 </tr>
 <tr>
 <td><code>VM.Config.Options</code></td>
-<td>Setting <code>agent</code>, <code>name</code>, and <code>ostype</code>.</td>
+<td>Setting <code>agent</code>, <code>name</code>, <code>ostype</code>, and <code>onboot</code>.</td>
 </tr>
 <tr>
 <td><code>VM.Config.Disk</code></td>
@@ -2576,6 +2598,13 @@ the live proof of the guarantee this whole page is built around. To confirm the
 other half by hand — that the foreign VM is <em>unchanged</em> afterward — check its
 status as an admin before and after; the test deliberately can't, because its
 token can't see the VM at all, which is the point.</p>
+<h2 id="start-at-host-boot">Start at host boot</h2>
+<p>Proxmox VMs created or reset by sand start automatically when the Proxmox
+host boots. Uncheck <strong>Start at boot</strong> in the creation or reset form to disable
+this. A reset retains the VM's saved choice.</p>
+<p>From the CLI, pass <code>--no-start-at-boot</code> to <code>sand create</code> or <code>sand reset</code> to
+disable startup. Pass <code>--no-start-at-boot=false</code> to re-enable it on reset.
+This setting applies to Proxmox VMs only.</p>
 
 
 
