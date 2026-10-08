@@ -286,12 +286,8 @@ type model struct {
 	// increases for the life of the process.
 	landingPublishEpoch uint64
 
-	// lastInput is when the user last touched a key. Together with the active view
-	// it is the idle gate (shouldTick, heartbeat.go) that decides whether sand may
-	// hold SSH connections open into the guests. Terminal focus is deliberately NOT
-	// part of that gate — see shouldTick for why blur turned out to be the wrong
-	// signal — but a FocusMsg still refreshes this, because returning to the terminal
-	// is the user saying "I'm back".
+	// lastInput controls monitoring cadence. Idle sessions retain SSH connections;
+	// a key or terminal focus resumes frequent work over the existing streams.
 	lastInput time.Time
 
 	// quitting marks the Update that is on its way out, and it exists because the
@@ -976,6 +972,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	nm.syncBoard()
+	nm.heartbeats.activity(nm.lastInput)
+	nm.sweeps.activity(nm.lastInput)
 	// The batch is built into a LOCAL before nm is returned. tickRefresh takes a
 	// POINTER receiver and sets nm.refreshing = true; Go orders the function calls in
 	// a return statement but not the copy of the plain `nm` operand sitting beside
@@ -1013,9 +1011,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.FocusMsg:
-		// The terminal came back to the foreground: the user is here, so the idle
-		// window restarts and syncHeartbeats (above) reopens the connections without
-		// waiting for a keypress.
+		// Returning to the foreground wakes monitoring over the existing SSH
+		// streams without waiting for a keypress.
 		//
 		// There is no BlurMsg case. Blur used to close the gate, on the theory that a
 		// blurred terminal is a backgrounded one — but a terminal beside an editor is
@@ -1780,10 +1777,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		// Any key is proof someone is still there, which is half of the idle gate (see
-		// shouldTick). It is also what WAKES a session that went idle: no timer runs
-		// while sand is idle — that is the point of being idle — so the keypress that
-		// says "I'm back" is the message that reopens the heartbeats.
+		// Any key resumes frequent monitoring over the existing SSH streams.
 		m.lastInput = time.Now()
 
 		if msg.String() == "ctrl+c" {

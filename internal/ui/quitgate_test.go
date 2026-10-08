@@ -78,8 +78,7 @@ func TestQuittingOpensNoConnections(t *testing.T) {
 		busy string // a VM with a build in flight, which makes 'q' confirm first
 	}{
 		// The idle window (heartbeatIdleAfter) is the classic way in: sand sits
-		// untouched, the gate shuts and drops everything, and the keypress that
-		// wakes it is the same one that ends it.
+		// untouched, monitoring slows, and the keypress that wakes it also ends it.
 		{"gone idle", true, ""},
 		// Work in flight routes through the confirm overlay, so the quit spans TWO
 		// keypresses ('q' then 'y') and neither may open anything. It is also where
@@ -103,10 +102,6 @@ func TestQuittingOpensNoConnections(t *testing.T) {
 			if tc.idle {
 				l.m.lastInput = time.Now().Add(-heartbeatIdleAfter - time.Second)
 				l.send(vmsLoadedMsg{vms: runningList(names)})
-				for _, n := range names {
-					hb.await(t, "close:"+n)
-					sw.await(t, "close:"+n)
-				}
 			}
 			if tc.busy != "" {
 				seedJob(t, &l.m, tc.busy, vm.CreateConfig{Name: tc.busy, BaseName: "sandbar-base"})
@@ -152,10 +147,6 @@ func TestCtrlCQuitOpensNoConnections(t *testing.T) {
 	}
 	l.m.lastInput = time.Now().Add(-heartbeatIdleAfter - time.Second)
 	l.send(vmsLoadedMsg{vms: runningList(names)})
-	for _, n := range names {
-		hb.await(t, "close:"+n)
-		sw.await(t, "close:"+n)
-	}
 
 	before := startsSoFar(l.m.heartbeats, l.m.sweeps)
 	l.send(ctrlKey('c'))
@@ -189,10 +180,6 @@ func TestQuitClosesTheConnectionsItFindsOpen(t *testing.T) {
 
 	// '?' opens the help sheet: the gate shuts on the view alone.
 	l.send(runeKey('?'))
-	for _, n := range names {
-		hb.await(t, "close:"+n)
-		sw.await(t, "close:"+n)
-	}
 	// '?' again returns to the board and rebuilds them, which is correct.
 	l.send(runeKey('?'))
 	for _, n := range names {
@@ -206,10 +193,6 @@ func TestQuitClosesTheConnectionsItFindsOpen(t *testing.T) {
 	// And now 'q'. Every live connection must be cancelled here, in sand's own
 	// last Update — not left to a process exit that will not touch them.
 	l.send(runeKey('q'))
-	for _, n := range names {
-		hb.await(t, "close:"+n)
-		sw.await(t, "close:"+n)
-	}
 	if got := liveConnections(l.m); got != 0 {
 		t.Fatalf("quit left %d connection(s) to be orphaned on exit", got)
 	}

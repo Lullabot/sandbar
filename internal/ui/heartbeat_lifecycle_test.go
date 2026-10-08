@@ -268,8 +268,8 @@ func TestStoppedVMGetsNoHeartbeatAndNoSample(t *testing.T) {
 	}
 	// And it is the dumb loop, run through `sh -c`, exactly as verified against a
 	// real VM.
-	if argv := sh.argvFor("up"); len(argv) != 3 || argv[0] != "sh" || argv[1] != "-c" || !strings.Contains(argv[2], "/proc/stat") {
-		t.Fatalf("argv = %q, want the in-guest /proc loop under `sh -c`", argv)
+	if argv := sh.argvFor("up"); len(argv) != 3 || argv[0] != "bash" || argv[1] != "-c" || !strings.Contains(argv[2], "/proc/stat") {
+		t.Fatalf("argv = %q, want the in-guest /proc loop under `bash -c`", argv)
 	}
 }
 
@@ -344,9 +344,7 @@ func TestHeartbeatNeverOpensForAnUnmanagedVM(t *testing.T) {
 	}
 }
 
-// THE IDLE GATE, which is a hard requirement and not a polish item. Every heartbeat
-// is an open SSH connection into a guest; sand in a backgrounded terminal, over SSH,
-// on battery, must not quietly hold them all open for nobody.
+// Leaving the board closes streams; terminal blur and inactivity preserve them.
 func TestHeartbeatIsIdleGated(t *testing.T) {
 	sh := newFakeShell()
 	l := newTeaLoop(t, heartbeatModel(t, sh, "web"))
@@ -378,8 +376,7 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 	// 2. BLUR DOES NOT CLOSE THE GATE, and must not. A terminal beside an editor is
 	//    blurred and fully visible — which is exactly when a user watches a build —
 	//    so tearing the heartbeats down on blur blanked the gauges of someone who was
-	//    looking straight at them. The scenario blur was defending against (a window
-	//    nobody is looking at) is already covered by the idle window in step 3.
+	//    looking straight at them. Inactivity now slows work over the same stream.
 	closesBefore := sh.closed("web") // step 1 (leaving the board) already closed it once
 	l.send(tea.BlurMsg{})
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")}) // a message, so the gate is re-evaluated
@@ -390,33 +387,21 @@ func TestHeartbeatIsIdleGated(t *testing.T) {
 		t.Fatalf("blur must not close web's heartbeat, got %d new close(s)", n)
 	}
 
-	// A FocusMsg still counts as the user being here: it refreshes the idle window,
-	// so returning to a long-idle terminal revives the gauges without a keypress.
+	// Idle monitoring retains the same connection; focus and keys resume work.
 	l.m.lastInput = time.Now().Add(-2 * heartbeatIdleAfter)
-	if l.m.shouldTick() {
-		t.Fatal("precondition: a stale-input session should have the gate shut")
+	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
+	if !l.m.shouldTick() {
+		t.Fatal("idle board must retain monitoring connections")
+	}
+	if sh.closed("web") != closesBefore {
+		t.Fatal("idle closed the connection")
 	}
 	l.send(tea.FocusMsg{})
-	if !l.m.shouldTick() {
-		t.Fatal("returning to the terminal should reopen the gate without a keypress")
-	}
-
-	// 3. NOBODY IS THERE. The idle window is the real signal: input older than
-	//    heartbeatIdleAfter closes everything down, focused or not.
-	l.m.lastInput = time.Now().Add(-2 * heartbeatIdleAfter)
-	if l.m.shouldTick() {
-		t.Fatal("an idle session must close the gate")
-	}
-	l.send(vmsLoadedMsg{vms: vms("web", "Running")}) // any message re-evaluates it
-	sh.await(t, "close:web")
-
-	// And ANY KEY wakes it: no timer runs while sand is idle — that is what idle
-	// means — so the keypress that says "I'm back" is the thing that reopens it.
 	l.send(runeKey('j'))
-	sh.await(t, "open:web")
-	if !l.m.shouldTick() {
-		t.Fatal("a keypress must reopen the gate")
+	if sh.closed("web") != closesBefore {
+		t.Fatal("resuming replaced the connection")
 	}
+
 }
 
 // THE VM IS STOPPED UNDERNEATH THE STREAM. Observed on a real VM: `limactl stop`
@@ -678,61 +663,18 @@ func TestConsecutiveHeartbeatDeathsBackOffAndAReadingResetsThem(t *testing.T) {
 	}
 }
 
-// The guest loop BOUNDS its own lifetime: it counts passes and exits after
-// guestLoopTTL, and the host's ordinary reconnect brings the next one
-// (guestloop.go). That scheduled exit used to be indistinguishable from a
-// loss, so every VM put a "lost the guest connection" warning in the log twice
-// an hour and paid a retry cooldown for a stream that did exactly what it was
-// built to do. A connected stream about as old as the TTL is a ROTATION: no
-// announcement, no failure count, no cooldown — the next sync reopens it at
-// once. A young stream dying is still a loss, with everything a loss earns.
-func TestHeartbeatTTLRotationIsNotALoss(t *testing.T) {
-	r := newHeartbeats(nil) // no shell: drive the registry directly
+// Healthy host-driven streams never rotate: a connection's death is
+// a real loss, and retries must still back off.
+func TestMonitoringConnectionLossStillBacksOff(t *testing.T) {
 	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
-
-	r.beats[key] = &heartbeat{epoch: 1, seen: true, started: time.Now().Add(-guestLoopTTL)}
-	lost, wait := r.ended(registry.LocalScope, "web", 1)
-	if lost {
-		t.Fatal("a TTL-old stream's end was reported as a loss; the log would cry wolf twice an hour per VM")
+	hb := newHeartbeats(nil)
+	hb.beats[key] = &heartbeat{epoch: 1, seen: true}
+	if lost, wait := hb.ended(registry.LocalScope, "web", 1); !lost || wait != heartbeatRetry {
+		t.Fatalf("old heartbeat loss: %v, %v", lost, wait)
 	}
-	if wait != 0 {
-		t.Fatalf("a rotation asked for a %s retry delay; want none", wait)
-	}
-	if _, ok := r.cooldown[key]; ok {
-		t.Fatal("a rotation started a cooldown; the reconnect must be immediate")
-	}
-	if r.fails[key] != 0 {
-		t.Fatalf("a rotation counted %d failures; a later real loss would start its backoff inflated", r.fails[key])
-	}
-
-	// A young connected stream dying is a genuine loss and keeps its warning,
-	// its failure count, and its cooldown.
-	r.beats[key] = &heartbeat{epoch: 2, seen: true, started: time.Now()}
-	lost, wait = r.ended(registry.LocalScope, "web", 2)
-	if !lost {
-		t.Fatal("a young connected stream's death must still be reported as a loss")
-	}
-	if wait != heartbeatRetry {
-		t.Fatalf("a first loss waited %s; want the base %s", wait, heartbeatRetry)
-	}
-}
-
-// The sweep shares the guest loop's TTL, so it earns the same rotation
-// treatment: a scheduled exit must not put the VM in a retry cooldown.
-func TestSweepTTLRotationSkipsTheCooldown(t *testing.T) {
-	r := newSweeps(nil)
-	key := vmHandle{Scope: registry.LocalScope, Name: "web"}
-
-	r.sweeps[key] = &sweepConn{epoch: 1, started: time.Now().Add(-guestLoopTTL)}
-	if _, wait := r.ended(registry.LocalScope, "web", 1); wait != 0 {
-		t.Fatalf("a rotation asked for a %s retry delay; want none", wait)
-	}
-	if _, ok := r.cooldown[key]; ok {
-		t.Fatal("a sweep rotation started a cooldown; the reconnect must be immediate")
-	}
-
-	r.sweeps[key] = &sweepConn{epoch: 2, started: time.Now()}
-	if _, wait := r.ended(registry.LocalScope, "web", 2); wait != sweepRetry {
-		t.Fatalf("a young sweep stream's death waited %s; want the base %s", wait, sweepRetry)
+	sw := newSweeps(nil)
+	sw.sweeps[key] = &sweepConn{epoch: 1}
+	if _, wait := sw.ended(registry.LocalScope, "web", 1); wait != sweepRetry {
+		t.Fatalf("old sweep loss: %v", wait)
 	}
 }

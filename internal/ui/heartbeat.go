@@ -130,7 +130,7 @@ const (
 	heartbeatRetryMax = 30 * time.Second
 
 	// heartbeatIdleAfter is how long sand may sit with no input from the user before
-	// it decides nobody is watching and drops the connections. See shouldTick.
+	// it slows monitoring without closing the connections.
 	heartbeatIdleAfter = 5 * time.Minute
 
 	// carryLimit caps the partial line the parser holds across reads, so a guest
@@ -162,6 +162,10 @@ const (
 // guestloop.go's, shared with the sweep. Read its header for why a long-lived
 // guest probe needs one.
 func guestScript(every time.Duration) string {
+	return guestScriptMode(every, false)
+}
+
+func guestScriptMode(every time.Duration, driven bool) string {
 	return guestLoop{
 		marker:  heartbeatDelim,
 		pidFile: "sand-heartbeat.pid",
@@ -169,7 +173,8 @@ func guestScript(every time.Duration) string {
 			"echo -n 'DISK '\n" +
 			"df -kP / | tail -n 1\n" +
 			"echo '" + heartbeatDelim + "'\n",
-		every: every,
+		every:  every,
+		driven: driven,
 	}.script()
 }
 
@@ -594,6 +599,7 @@ type guestShell interface {
 // heartbeat is one VM's live connection. Like a job, it lives only inside the
 // registry, always behind a pointer, and is never handed out.
 type heartbeat struct {
+	requests *probeRequests
 	// epoch identifies THIS connection, and it is what makes a stale message
 	// harmless. A heartbeat can be stopped and restarted for the same VM (the user
 	// leaves the board and comes back), and a sample already in flight from the old
@@ -602,11 +608,6 @@ type heartbeat struct {
 	epoch  uint64
 	cancel context.CancelFunc
 	ch     chan guestSample
-
-	// started is when this connection opened, and is what lets ended tell the
-	// guest loop's scheduled TTL exit (a stream about guestLoopTTL old) from a
-	// genuine loss.
-	started time.Time
 
 	last guestSample
 	seen bool
@@ -639,12 +640,11 @@ type heartbeatRegistry struct {
 	nextEpoch uint64
 
 	// shell resolves the backend seam for a heartbeat's scope (fleet.go's
-	// per-member provider); interval, retry and rotateAfter are settable so the
+	// per-member provider); interval and retry are settable so the
 	// lifecycle tests need not sleep for real seconds (or half-hours).
-	shell       shellFor
-	interval    time.Duration
-	retry       time.Duration
-	rotateAfter time.Duration
+	shell    shellFor
+	interval time.Duration
+	retry    time.Duration
 }
 
 // newHeartbeats builds a registry whose heartbeats all open through the SAME
@@ -657,13 +657,12 @@ func newHeartbeats(shell guestShell) *heartbeatRegistry {
 
 func newHeartbeatsResolver(resolve shellFor) *heartbeatRegistry {
 	return &heartbeatRegistry{
-		beats:       make(map[vmHandle]*heartbeat),
-		cooldown:    make(map[vmHandle]time.Time),
-		fails:       make(map[vmHandle]int),
-		shell:       resolve,
-		interval:    heartbeatInterval,
-		retry:       heartbeatRetry,
-		rotateAfter: guestLoopRotateAfter,
+		beats:    make(map[vmHandle]*heartbeat),
+		cooldown: make(map[vmHandle]time.Time),
+		fails:    make(map[vmHandle]int),
+		shell:    resolve,
+		interval: heartbeatInterval,
+		retry:    heartbeatRetry,
 	}
 }
 
@@ -740,7 +739,8 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
-	r.beats[key] = &heartbeat{epoch: epoch, cancel: cancel, ch: ch, started: time.Now()}
+	requests := newProbeRequests(ctx, r.interval)
+	r.beats[key] = &heartbeat{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
 
@@ -755,7 +755,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 		// has no /proc — means the same thing to the board: this VM has no reading any
 		// more. Surfacing it on the status line would spam the user with a message
 		// about a subsystem they never asked for, every time they stopped a VM.
-		_ = shell.ShellStreamOut(ctx, name, nil, w, "sh", "-c", guestScript(interval))
+		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestScriptMode(interval, true))
 	}()
 
 	return epoch, ch, true
@@ -789,9 +789,7 @@ func (r *heartbeatRegistry) stop(scope registry.Scope, name string) {
 	}
 }
 
-// stopAll ends every heartbeat. This is the idle gate slamming shut — the user
-// backgrounded the terminal, or walked away — and it is the whole reason sand can
-// be left open over SSH without holding N connections into N guests.
+// stopAll closes monitoring streams when leaving the board or quitting.
 func (r *heartbeatRegistry) stopAll() {
 	if r == nil {
 		return
@@ -884,16 +882,7 @@ func (r *heartbeatRegistry) ended(scope registry.Scope, name string, epoch uint6
 		return false, 0
 	}
 	delete(r.beats, key)
-	// A CONNECTED stream about as old as the guest loop's TTL did not fail: the
-	// in-guest loop counts its passes and exits on schedule (guestLoopTTL), and
-	// the very next syncHeartbeats reopens it. No warning, no failure count, no
-	// cooldown — a planned rotation announced as "lost the guest connection"
-	// (with a retry gap behind it) is a twice-hourly false alarm per VM.
-	// The started guard is not decorative: an unknown start time must read as
-	// "not provably old", never as ancient.
-	if hb.seen && !hb.started.IsZero() && r.rotateAfter > 0 && time.Since(hb.started) >= r.rotateAfter {
-		return false, 0
-	}
+
 	r.fails[key]++
 	wait := backoff(r.retry, r.fails[key], heartbeatRetryMax)
 	r.cooldown[key] = time.Now().Add(wait)
@@ -1018,48 +1007,10 @@ func heartbeatReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan
 	}
 }
 
-// shouldTick IS THE IDLE GATE: the single predicate deciding whether sand's
-// recurring background work may run at all. Today that is the guest heartbeat.
-// The background list poller wants exactly this predicate too — it is deliberately
-// named for the general question, not one specific caller.
-//
-// This is a hard requirement, not a polish item. Every heartbeat is an open SSH
-// connection into a guest. sand left running in a backgrounded terminal, over SSH,
-// on a laptop on battery, must not quietly hold N of them open and keep N guests
-// spinning in a cat/sleep loop for nobody. Two conditions, and both must hold:
-//
-//   - THE BOARD IS THE SCREEN THE USER IS ON. Gauges nobody can see are not worth an
-//     SSH connection. The tile grid (viewBoard, board.go) is the only screen that
-//     draws them, so it is the only screen that may hold the connections open.
-//   - SOMEONE IS STILL THERE. Input older than heartbeatIdleAfter closes everything
-//     down. The very next keypress reopens it: any key is a message, every message
-//     re-evaluates this gate, and lastInput is fresh again.
-//
-// TERMINAL FOCUS IS DELIBERATELY NOT A CONDITION, and it used to be. The reasoning
-// was "a blurred terminal is a backgrounded one" — and that is simply false. A
-// terminal sitting beside an editor is blurred and FULLY VISIBLE, which is exactly
-// when a user watches a build's gauges. Every alt-tab tore down the heartbeats and
-// dropped the samples, so cpu and mem fell back to "no reading" (an em dash on a
-// dotted bar) while the user was looking straight at them.
-//
-// It also bought almost nothing. The scenario it was defending against — sand left
-// running in a window nobody is looking at — is already covered by the idle window
-// below: no input for heartbeatIdleAfter closes every connection whether the
-// terminal is focused or not. Blur only ever made that happen sooner, at the cost of
-// blanking the gauges of a user who was still watching. The bound is now "at most
-// heartbeatIdleAfter of connections after the user stops interacting", which is the
-// guarantee that was actually wanted.
-//
-// A THIRD CONDITION, AND IT IS THE QUIT: sand is leaving, so the last thing it
-// may do is open connections it will orphan on the way out. Without it the key
-// that quits refreshes lastInput like any other, reopens this gate, and the
-// reconcile at the bottom of that same Update starts a shell per running VM —
-// unmultiplexed, one agent prompt each, all abandoned mid-handshake when the
-// process exits a moment later. See model.quitting for the whole account.
+// shouldTick keeps monitoring sessions alive while the board is open. Inactivity
+// slows work over their stdin rather than discarding SSH authentication.
 func (m model) shouldTick() bool {
-	return !m.quitting &&
-		m.view == viewBoard &&
-		time.Since(m.lastInput) < heartbeatIdleAfter
+	return !m.quitting && m.view == viewBoard
 }
 
 // awaitingQuitAnswer reports that a quit confirmation is on screen and the user
@@ -1164,4 +1115,17 @@ func (m model) syncHeartbeats() tea.Cmd {
 // member's scope so two same-named VMs read from their own guests.
 func (m model) sampleOf(scope registry.Scope, name string) (guestSample, bool) {
 	return m.heartbeats.latest(scope, name)
+}
+
+func (r *heartbeatRegistry) activity(at time.Time) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.beats {
+		if c.requests != nil {
+			c.requests.activity(at)
+		}
+	}
 }

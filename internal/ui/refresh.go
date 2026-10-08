@@ -1,16 +1,8 @@
 package ui
 
-// refresh.go keeps the board LIVE: an interval timer that re-runs `limactl
-// list` and re-renders, on the exact same idle-gating discipline as the guest
-// heartbeats (heartbeat.go) and the spinner. Without it the board is a
-// snapshot from whenever the screen was last touched, and every claim about
-// it being "live" is false; with it, an idle `sand` left open in a
-// backgrounded terminal, over ssh, on battery, still does not poll.
-//
-// shouldTick (heartbeat.go) is deliberately named for the general question,
-// not its first caller — this file is the second, and reuses it rather than
-// writing a second copy of the rule. Three independent copies of "is anyone
-// watching" is exactly how the defaultKeys/viewHelp drift happened.
+// refresh.go re-lists the fleet while the board is open. Inactivity reduces
+// polling to once per minute while preserving authenticated monitoring streams.
+// shouldTick is shared with both guest probes to stop work off the board or on quit.
 
 import (
 	"time"
@@ -67,7 +59,11 @@ func (m *model) tickRefresh() tea.Cmd {
 			continue
 		}
 		mem.arming = true
-		cmds = append(cmds, refreshTickCmd(mem.scope, mem.refreshDelay()))
+		delay := mem.refreshDelay()
+		if time.Since(m.lastInput) >= heartbeatIdleAfter && delay < idleProbeInterval {
+			delay = idleProbeInterval
+		}
+		cmds = append(cmds, refreshTickCmd(mem.scope, delay))
 	}
 	return tea.Batch(cmds...)
 }

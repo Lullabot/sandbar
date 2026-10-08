@@ -28,9 +28,9 @@ package ui
 //     loop kills the recorded one first — but only after confirming, through
 //     /proc/<pid>/cmdline, that the pid really is a sand probe of the same kind
 //     and not whatever unrelated process has since inherited that number.
-//  2. A BOUNDED lifetime. The loop counts its passes and exits after
-//     guestLoopTTL, so even a loop nothing ever reaps is gone within the hour,
-//     and the host's ordinary reconnect brings a fresh one back.
+//  2. Host-driven loops exit on stdin EOF or 120 seconds without a request.
+//     Healthy streams stay authenticated indefinitely. Legacy autonomous loops
+//     instead count passes and exit after guestLoopTTL.
 //
 // Two sand processes watching the SAME guest will take turns killing each
 // other's probe (each reconnect kills the incumbent), costing each side a
@@ -40,8 +40,11 @@ package ui
 // is the common case.
 
 import (
+	"context"
+	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -87,6 +90,9 @@ type guestLoop struct {
 	// whose pass is heavy enough to be worth yielding to real work (the sweep's
 	// `find`). The heartbeat's two /proc reads are not.
 	lowPrio bool
+
+	// driven waits for host requests instead of polling independently.
+	driven bool
 }
 
 // script renders the loop as a POSIX sh program for `sh -c`.
@@ -122,6 +128,12 @@ func (l guestLoop) script() string {
 		b.WriteString("renice 10 $$ >/dev/null 2>&1\n")
 		b.WriteString("ionice -c3 -p $$ >/dev/null 2>&1\n")
 	}
+	if l.driven {
+		b.WriteString("while IFS= read -r -t 120 request; do\n")
+		b.WriteString(l.body)
+		b.WriteString("done")
+		return b.String()
+	}
 	b.WriteString("n=0\n")
 	b.WriteString("while [ \"$n\" -lt " + strconv.Itoa(passes) + " ]; do\n")
 	b.WriteString(l.body)
@@ -154,4 +166,59 @@ func backoff(base time.Duration, n int, max time.Duration) time.Duration {
 		wait = max
 	}
 	return wait
+}
+
+// probeRequests paces guest work over the existing SSH stdin. EOF or a two-minute
+// gap reaps an abandoned guest loop without rotating healthy SSH connections.
+// Read is called by the subprocess stdin copier; activity is updated by Update.
+type probeRequests struct {
+	ctx       context.Context
+	lastInput atomic.Int64
+	wake      chan struct{}
+	every     time.Duration
+	first     bool
+}
+
+const idleProbeInterval = time.Minute
+
+func newProbeRequests(ctx context.Context, every time.Duration) *probeRequests {
+	p := &probeRequests{ctx: ctx, every: every, wake: make(chan struct{}, 1), first: true}
+	p.lastInput.Store(time.Now().UnixNano())
+	return p
+}
+
+func (p *probeRequests) activity(at time.Time) {
+	old := p.lastInput.Swap(at.UnixNano())
+	if time.Since(time.Unix(0, old)) >= heartbeatIdleAfter && time.Since(at) < heartbeatIdleAfter {
+		select {
+		case p.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (p *probeRequests) Read(buf []byte) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	if !p.first {
+		delay := p.every
+		if time.Since(time.Unix(0, p.lastInput.Load())) >= heartbeatIdleAfter {
+			delay = idleProbeInterval
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-p.ctx.Done():
+			return 0, io.EOF
+		case <-p.wake:
+		case <-timer.C:
+		}
+	}
+	p.first = false
+	if p.ctx.Err() != nil {
+		return 0, io.EOF
+	}
+	buf[0] = '\n'
+	return 1, nil
 }

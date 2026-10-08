@@ -428,8 +428,7 @@ every bullet, not the constraint itself.
   the guest reading with an explicit `guest mem` label. Never sum guest use as
   though it were host-resident memory.
 - **A metric with no reading renders as an em dash, never as 0.** A running VM
-  whose heartbeat has not reported yet — or whose heartbeat the idle gate tore
-  down — has an UNKNOWN cpu, not an idle one. `tileGaugeNoReading` (tile.go) and
+  whose heartbeat has not reported yet — or whose monitoring connection failed — has an UNKNOWN cpu, not an idle one. `tileGaugeNoReading` (tile.go) and
   the header both refuse the zero. Relatedly, **every gauge row is fixed**: cpu,
   mem and disk each own a row on a running tile whether or not there is a reading.
   Packing them from the top made disk slide up into a missing gauge's slot, so
@@ -1121,3 +1120,10 @@ shared rules.
   explanatory comments on the *why*, not the *what*.
 - When you change TUI rendering, update the affected goldens (`-update`) and
   confirm the text diff is the change you intended.
+
+Dashboard monitoring retains its authenticated SSH streams after five minutes
+of inactivity and requests guest metrics and checkout scans once per minute.
+Focus or keyboard input wakes the existing streams. Host-driven Bash loops
+read requests from SSH stdin and exit on EOF or 120 seconds without a request;
+they do not rotate healthy connections on a fixed TTL. The legacy autonomous
+loop wrapper remains bounded for callers without host-driven pacing.
