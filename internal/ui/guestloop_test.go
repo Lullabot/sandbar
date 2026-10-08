@@ -7,6 +7,10 @@ package ui
 // guestloop.go's header for the failure they were written against.
 
 import (
+	"bufio"
+	"context"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -118,5 +122,83 @@ func TestBackoffDoublesToACeiling(t *testing.T) {
 	}
 	if got := backoff(0, 3, max); got != 0 {
 		t.Errorf("backoff with no base = %s, want 0 (a registry with no retry delay)", got)
+	}
+}
+
+// Exercise the actual shell/stdin boundary: inactivity suppresses work, waking
+// resumes the same process, and cancellation releases the stdin copier.
+func TestDrivenProbeIdlesAndWakesWithoutReplacingProcess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := newProbeRequests(ctx, time.Hour)
+	requests.activity(time.Now().Add(-2 * heartbeatIdleAfter))
+	script := guestLoop{marker: "sand-test-driven", pidFile: "driven.pid", body: "echo $$\n", driven: true}.script()
+	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+t.TempDir())
+	cmd.Stdin = requests
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 2)
+	go func() {
+		scanner := bufio.NewScanner(out)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	read := func() string {
+		t.Helper()
+		select {
+		case line := <-lines:
+			return line
+		case <-time.After(3 * time.Second):
+			t.Fatal("probe did not respond")
+			return ""
+		}
+	}
+	pid := read()
+	select {
+	case line := <-lines:
+		t.Fatalf("idle probe did unsolicited work: %q", line)
+	case <-time.After(30 * time.Millisecond):
+	}
+	requests.activity(time.Now())
+	if next := read(); next != pid || pid == "" {
+		t.Fatalf("process changed: %q -> %q", pid, next)
+	}
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled probe retained stdin copier")
+	}
+}
+
+func TestDrivenGuestLoopReapsAnAbandonedInputStream(t *testing.T) {
+	script := guestLoop{marker: "sand-test-abandoned", pidFile: "abandoned.pid", body: "echo hi\n", driven: true}.script()
+	script = strings.ReplaceAll(script, "-t 120", "-t 0.05")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "-c", script)
+	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+t.TempDir())
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	cmd.Stdin = reader // an open stream that never supplies a request
+	if output, err := cmd.CombinedOutput(); err != nil || len(output) != 0 {
+		t.Fatalf("abandoned probe: %v, %q", err, output)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("guest failed to reap an abandoned stream")
 	}
 }

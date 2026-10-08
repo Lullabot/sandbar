@@ -2,13 +2,7 @@ package ui
 
 import "testing"
 
-// THE REFRESH TICK SHARES shouldTick WITH THE HEARTBEAT (heartbeat.go): an
-// idle sand on a backgrounded terminal must not poll. tickRefresh is the
-// gate's starting/stopping half — it must start exactly one loop while
-// shouldTick holds, refuse to stack a second one (the same problem
-// tickSpinner's m.spinning guards against for the spinner), and stop
-// re-arming once the board is no longer the active, focused, recently-used
-// screen.
+// Fleet refresh arms one timer per member and stops when leaving the board.
 func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 	m := newTestModel(t)
 	if !m.shouldTick() {
@@ -72,11 +66,3 @@ func TestRefreshTickMsgRelistsWhileOnBoard(t *testing.T) {
 		t.Fatalf("the refresh tick's command produced %T, want vmsLoadedMsg (listCmd)", msg)
 	}
 }
-
-// The idle gate's other two conditions (unfocused terminal, stale input) are
-// already exercised end-to-end for the heartbeat in
-// TestHeartbeatIsIdleGated (heartbeat_lifecycle_test.go) against the SAME
-// shouldTick predicate this file reuses rather than re-implements — so they
-// are not re-proven here for the refresh tick specifically. What IS specific
-// to this feature, and worth its own test, is that leaving the board (rather
-// than losing focus or going idle) also closes the gate.

@@ -131,11 +131,16 @@ const (
 // recursive `find` over $HOME plus a git read per checkout, which is exactly the
 // work that should yield to whatever the developer is actually doing in there.
 func guestSweepScript(every time.Duration) string {
+	return guestSweepScriptMode(every, false)
+}
+
+func guestSweepScriptMode(every time.Duration, driven bool) string {
 	return guestLoop{
 		marker:  sweepEndMarker,
 		pidFile: "sand-sweep.pid",
 		body:    checkouts.BuildSweepCommand() + "echo '" + sweepEndMarker + "'\n",
 		every:   every,
+		driven:  driven,
 		lowPrio: true,
 	}.script()
 }
@@ -248,6 +253,7 @@ func (w *sweepWriter) publish(vc checkouts.VMCheckouts) {
 // sweepConn is one VM's live sweep connection. Like a heartbeat, it lives
 // only inside the registry, always behind a pointer, and is never handed out.
 type sweepConn struct {
+	requests *probeRequests
 	// epoch identifies THIS connection — see heartbeat's epoch doc for why: a
 	// sweep stopped and restarted for the same VM must not let a sample in
 	// flight from the old connection get folded into (or restart a second
@@ -255,11 +261,6 @@ type sweepConn struct {
 	epoch  uint64
 	cancel context.CancelFunc
 	ch     chan checkouts.VMCheckouts
-
-	// started is when this connection opened — what lets ended tell the guest
-	// loop's scheduled TTL exit from a genuine loss, exactly as the heartbeat's
-	// started does.
-	started time.Time
 }
 
 // sweepRegistry owns every live sweep connection, mirroring heartbeatRegistry
@@ -283,12 +284,11 @@ type sweepRegistry struct {
 	// shell resolves the backend seam for a sweep's scope — the SAME
 	// shellFor/guestShell seam the heartbeat uses (fleetShellResolver), so a
 	// remote-profile VM's sweep opens into the remote host exactly like its
-	// heartbeat does. interval, retry and rotateAfter are settable for the
+	// heartbeat does. interval and retry are settable for the
 	// same test reasons the heartbeat's are.
-	shell       shellFor
-	interval    time.Duration
-	retry       time.Duration
-	rotateAfter time.Duration
+	shell    shellFor
+	interval time.Duration
+	retry    time.Duration
 }
 
 // newSweeps builds a registry whose sweeps all open through the SAME shell,
@@ -301,13 +301,12 @@ func newSweeps(shell guestShell) *sweepRegistry {
 
 func newSweepsResolver(resolve shellFor) *sweepRegistry {
 	return &sweepRegistry{
-		sweeps:      make(map[vmHandle]*sweepConn),
-		cooldown:    make(map[vmHandle]time.Time),
-		fails:       make(map[vmHandle]int),
-		shell:       resolve,
-		interval:    sweepInterval,
-		retry:       sweepRetry,
-		rotateAfter: guestLoopRotateAfter,
+		sweeps:   make(map[vmHandle]*sweepConn),
+		cooldown: make(map[vmHandle]time.Time),
+		fails:    make(map[vmHandle]int),
+		shell:    resolve,
+		interval: sweepInterval,
+		retry:    sweepRetry,
 	}
 }
 
@@ -364,7 +363,8 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.
 	ch := make(chan checkouts.VMCheckouts, 1)
-	r.sweeps[key] = &sweepConn{epoch: epoch, cancel: cancel, ch: ch, started: time.Now()}
+	requests := newProbeRequests(ctx, r.interval)
+	r.sweeps[key] = &sweepConn{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
 
@@ -378,7 +378,7 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 		// every way this returns (VM stopped, context cancelled, no /bin/sh)
 		// means the same thing to the registry — this VM has no sweep
 		// connection any more.
-		_ = shell.ShellStreamOut(ctx, name, nil, w, "sh", "-c", guestSweepScript(interval))
+		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestSweepScriptMode(interval, true))
 	}()
 
 	return epoch, ch, true
@@ -465,13 +465,7 @@ func (r *sweepRegistry) ended(scope registry.Scope, name string, epoch uint64) (
 		return false, 0
 	}
 	delete(r.sweeps, key)
-	// A stream about as old as the guest loop's TTL exited on its own schedule
-	// (guestLoopTTL) — a planned rotation, not a failure, so no failure count
-	// and no cooldown; the next syncSweeps reopens it at once. Mirrors the
-	// heartbeat's ended exactly.
-	if !sc.started.IsZero() && r.rotateAfter > 0 && time.Since(sc.started) >= r.rotateAfter {
-		return false, 0
-	}
+
 	r.fails[key]++
 	wait := backoff(r.retry, r.fails[key], sweepRetryMax)
 	r.cooldown[key] = time.Now().Add(wait)
@@ -542,29 +536,8 @@ func sweepReadCmd(scope registry.Scope, name string, epoch uint64, ch <-chan che
 	}
 }
 
-// syncSweeps reconciles the open sweep connections against the VMs that
-// should have one, and is called after EVERY message (see Update) — mirroring
-// syncHeartbeats' call site, its running-status + board-roster gate, AND its
-// shouldTick idle gate, exactly.
-//
-// The plan's own clarification reads "always, for every running VM" — and a
-// sweep gated on nothing but Status == limaRunning was this file's first
-// draft — but that turned out to be a real behavioral change disguised as a
-// narrow one: shouldTick's "gauges nobody can see are not worth an SSH
-// connection" reasoning applies just as literally to a SECOND connection.
-// Reusing shouldTick here (the task's explicitly offered alternative to
-// running unconditionally) keeps the sweep's footprint identical to the
-// heartbeat's — one extra idle-aware SSH connection per visible, running VM,
-// never one held open behind a screen nobody is on or a session nobody is
-// driving — and, concretely, avoids a real regression this file's first draft
-// produced: any test (or real session) that drives a Running managed VM
-// through a screen OTHER than the board (the secrets editor, the file
-// browser, profile management) would otherwise pick up an extra background
-// guest-shell connection outside the one screen that actually reads the
-// registry. Since the badge/guard only ever render on the board anyway, a
-// sweep that runs only while shouldTick holds loses nothing a user watching
-// the board would notice — the registry catches back up within one
-// sweepInterval of returning, exactly as the heartbeat's gauges do.
+// syncSweeps keeps one authenticated stream per running board VM. Idle
+// work is paced over stdin; leaving the board or quitting closes the stream.
 func (m model) syncSweeps() tea.Cmd {
 	if m.sweeps == nil {
 		return nil
@@ -661,4 +634,17 @@ func (r *sweepRegistry) sweepOnce(ctx context.Context, scope registry.Scope, nam
 		return checkouts.VMCheckouts{}, err
 	}
 	return checkouts.ParseSweep(buf.String()), nil
+}
+
+func (r *sweepRegistry) activity(at time.Time) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.sweeps {
+		if c.requests != nil {
+			c.requests.activity(at)
+		}
+	}
 }

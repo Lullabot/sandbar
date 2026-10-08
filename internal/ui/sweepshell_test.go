@@ -81,9 +81,9 @@ func TestSweepFollowsTheRunningTransitionOnItsOwnConnection(t *testing.T) {
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
 	sh.await(t, "open:web")
 
-	if argv := sh.argvFor("web"); len(argv) != 3 || argv[0] != "sh" || argv[1] != "-c" ||
+	if argv := sh.argvFor("web"); len(argv) != 3 || argv[0] != "bash" || argv[1] != "-c" ||
 		!strings.Contains(argv[2], "find") || !strings.Contains(argv[2], sweepEndMarker) {
-		t.Fatalf("argv = %q, want the sweep loop (find + sweepEndMarker) under `sh -c`", argv)
+		t.Fatalf("argv = %q, want the sweep loop (find + sweepEndMarker) under `bash -c`", argv)
 	}
 
 	// ONE shell per VM. A second refresh while it is already Running must not
@@ -160,13 +160,14 @@ func TestSweepIsIdleGatedLikeTheHeartbeat(t *testing.T) {
 	}
 	sh.await(t, "open:web")
 
-	// A long-idle session closes it too, even while nominally on the board.
+	// Idle retains the authenticated sweep stream.
+	before := sh.closed("web")
 	l.m.lastInput = time.Now().Add(-2 * heartbeatIdleAfter)
-	if l.m.shouldTick() {
-		t.Fatal("precondition: the idle gate should be shut")
-	}
 	l.send(vmsLoadedMsg{vms: vms("web", "Running")})
-	sh.await(t, "close:web")
+	if !l.m.shouldTick() || sh.closed("web") != before {
+		t.Fatal("idle closed the sweep stream")
+	}
+
 }
 
 // The core message-plumbing contract: a completed sweep pass reaches the
