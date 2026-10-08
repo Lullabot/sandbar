@@ -12,11 +12,9 @@ name: test
 #                intentionally not covered; the driver is Lima's concern, not
 #                this repo's.
 
-# push only on main (post-merge); feature branches run once via pull_request,
-# not twice from a matching push event.
+# Feature and release PRs both run the full suite before merging. Main pushes
+# run release automation without repeating the tests after each merge.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
   # Heavy, advisory jobs (mutation, molecule) run weekly, not per-PR, so the
@@ -30,7 +28,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:

@@ -47,6 +47,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Feature and release PRs run the full test workflow before merging. Start
+  # release automation immediately instead of repeating that suite on main.
   release-please:
     runs-on: ubuntu-24.04
     outputs:
