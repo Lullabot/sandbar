@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.15.0](https://github.com/Lullabot/sandbar/compare/v0.14.0...v0.15.0) (2026-10-10)
+
+
+### Features
+
+* enable Proxmox VM startup at host boot by default ([#260](https://github.com/Lullabot/sandbar/issues/260)) ([87edb0d](https://github.com/Lullabot/sandbar/commit/87edb0d81f07c24373a46ef7ace95b41a5bbb4db))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to ad85c59 ([#258](https://github.com/Lullabot/sandbar/issues/258)) ([034efa7](https://github.com/Lullabot/sandbar/commit/034efa786efdfb5eff9a7793a9b17b66130e4364))
+* **deps:** update module golang.org/x/sys to v0.49.0 ([#267](https://github.com/Lullabot/sandbar/issues/267)) ([4ac4683](https://github.com/Lullabot/sandbar/commit/4ac4683c58879fa318db8706d4bc1608815860e9))
+* **proxmox:** decode VM CPU allocation from maxcpu ([#264](https://github.com/Lullabot/sandbar/issues/264)) ([0e3f24a](https://github.com/Lullabot/sandbar/commit/0e3f24a2881cad3b553652e028189fa827cb57c9))
+* **ui:** confirm board restart and shutdown actions ([#265](https://github.com/Lullabot/sandbar/issues/265)) ([58bf77e](https://github.com/Lullabot/sandbar/commit/58bf77e97005987a221f184f882880285f926b39))
+* **ui:** retain SSH monitoring connections while idle ([#263](https://github.com/Lullabot/sandbar/issues/263)) ([d97b36d](https://github.com/Lullabot/sandbar/commit/d97b36dcc1032a25d6140a0be568cd90df38ad6d))
+
 ## [0.14.0](https://github.com/Lullabot/sandbar/compare/v0.13.0...v0.14.0) (2026-10-01)
 
 
