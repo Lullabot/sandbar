@@ -173,7 +173,7 @@ func (h *reviewHarness) session(p *providerfake.Provider, gh *fakeGh, co checkou
 		Checkout: co,
 		Open:     gh.OpenInBrowser,
 		PickPort: func() (int, error) { return 45123, nil },
-		Probe: func(context.Context, string) error {
+		Probe: func(context.Context, string, string) error {
 			h.mu.Lock()
 			ready := h.probeReady
 			h.mu.Unlock()

@@ -1363,7 +1363,10 @@ func (m model) landingView() string {
 			// headless workstation, so promising a browser that never appeared
 			// — with no URL anywhere — left the session unreachable.
 			if m.review.url != "" {
-				label = "reviewing… " + m.review.url
+				// The visible URL may be clipped at narrow widths, but an OSC 8
+				// target must retain the complete session key. reviewURLWriter
+				// accepts only the session's locally validated loopback URL.
+				label = "reviewing… " + osc8Link(m.review.url, m.review.url)
 			} else {
 				label = "reviewing…"
 			}
@@ -2562,15 +2565,15 @@ type reviewURLWriter struct {
 }
 
 // reviewURLPattern matches the URL Session.Run reports ("review UI ready at
-// http://127.0.0.1:<port>"). Anchored on the loopback host the session always
-// binds, so no other URL in the output could match.
-var reviewURLPattern = regexp.MustCompile(`http://127\.0\.0\.1:\d+`)
+// http://127.0.0.1:<port>/#cap=<key>" on 2.x guests). Match the session's
+// readiness line, keeping the fragment needed to reopen the authenticated UI.
+var reviewURLPattern = regexp.MustCompile(`review UI ready at (http://127\.0\.0\.1:\d+(?:/#cap=[A-Za-z0-9_-]+)?)\n`)
 
 func (w *reviewURLWriter) Write(p []byte) (int, error) {
-	if u := reviewURLPattern.Find(p); u != nil {
+	if u := reviewURLPattern.FindSubmatch(p); u != nil {
 		// Once: Run prints the URL once, but a short write or a retry must
 		// never send twice — the channel holds exactly one.
-		w.once.Do(func() { w.urls <- string(u) })
+		w.once.Do(func() { w.urls <- string(u[1]) })
 	}
 	return len(p), nil
 }
