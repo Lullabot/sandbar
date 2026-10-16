@@ -60,7 +60,7 @@ jobs:
       # GITHUB_TOKEN deliberately do NOT trigger other workflows, so a
       # GITHUB_TOKEN-opened PR would never run the test workflow. The token is
       # minted per-run and expires in ~1h. Reuses the org's release-please App.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
@@ -91,7 +91,7 @@ jobs:
       # `brews:` publisher can push the formula there. Replaces a long-lived PAT:
       # the dedicated App is installed only on homebrew-sandbar with
       # contents:write, so this workflow's cross-repo reach is exactly that.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: tap-token
         with:
           app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
