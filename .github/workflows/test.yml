@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -48,7 +48,7 @@ jobs:
         run: /usr/bin/python3 -m unittest discover -s tests -p '*_test.py'
 
   unit:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -93,7 +93,7 @@ jobs:
             coverage.html
 
   lima-e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60 # +15 for the cmd/sand limae2e create/recreate tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -614,7 +614,7 @@ jobs:
   # non-interactive PATH, HostFiles over ssh, remote base build — without
   # needing a second machine.
   remote-lima-e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -758,7 +758,7 @@ jobs:
   # view layer is excluded (mutating it against goldens yields mostly
   # equivalent/timeout mutants for little signal).
   mutation:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     continue-on-error: true # advisory: never blocks a merge
     timeout-minutes: 45
@@ -799,7 +799,7 @@ jobs:
     # matrix when the job runs, and shows a single clean `molecule`
     # check when it is skipped on a PR. An explicit templated name would render
     # the raw `${{ matrix.scenario }}` on skipped runs (matrix never expands).
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     # Advisory: KNOWN idempotence failure on the samba scenario — roles/samba's
     # "Set Samba password" task is unconditionally changed_when: true (smbpasswd
