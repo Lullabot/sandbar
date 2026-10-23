@@ -151,6 +151,38 @@ func TestRecordSuccessWritesRealMarkerRecreateBaseReadsIt(t *testing.T) {
 	}
 }
 
+func TestRecordSuccessPreservesOnlyCompletedRevisionHistory(t *testing.T) {
+	prov, home := realLocalProvenancerIn(t)
+	seedInstance(t, home, "claude")
+	cfg := vm.CreateConfig{Name: "claude", BaseName: "base"}
+	for _, tc := range []struct {
+		name                string
+		inFlight            bool
+		wantBase, wantSetup string
+	}{
+		{"completed provider stamp", false, "actual-base", "actual-setup"},
+		{"failed in-flight stamp", true, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := provider.NewProvenance(cfg, tc.inFlight)
+			marker.BaseRevision, marker.SetupRevision = "actual-base", "actual-setup"
+			if err := prov.MarkManaged(context.Background(), cfg.Name, marker); err != nil {
+				t.Fatal(err)
+			}
+			if err := RecordSuccess(registry.NewEmpty(), cfg, registry.LocalScope, prov); err != nil {
+				t.Fatal(err)
+			}
+			got, ok, err := prov.ProvenanceOf(context.Background(), cfg.Name)
+			if err != nil || !ok {
+				t.Fatalf("read completed marker: ok=%v err=%v", ok, err)
+			}
+			if got.BaseRevision != tc.wantBase || got.SetupRevision != tc.wantSetup {
+				t.Fatalf("revision history = base %q setup %q, want %q %q", got.BaseRevision, got.SetupRevision, tc.wantBase, tc.wantSetup)
+			}
+		})
+	}
+}
+
 // TestRecreateBaseWithRealProvenancer_MarkerAloneDrivesItAndRefusalOnUnmark
 // proves, against a REAL local Provenancer (no fake), the two ends of the
 // marker-only resolution path RecreateBase's doc comment describes: with NO

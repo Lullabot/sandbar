@@ -13,6 +13,13 @@ type varItem struct {
 	value any
 }
 
+// PreservationVars carries per-run finalize options.
+type PreservationVars struct {
+	// OnSetupRevision is called after a successful finalize with the revision
+	// computed before the guest run began.
+	OnSetupRevision func(string)
+}
+
 // BuildExtraVars renders the Ansible extra-vars (all.yml) for one provisioning
 // phase, mirroring the original bash provisioner's build_allyml. The phase
 // (base/finalize/full) drives which tasks site.yml runs.

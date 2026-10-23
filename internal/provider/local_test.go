@@ -19,6 +19,35 @@ import (
 // return type is the load-bearing check; this restates it at the seam boundary.
 var _ provider.Provider = provider.NewLocalLima(nil, nil)
 
+func TestLocalTemplateCarriesActualSourceRevision(t *testing.T) {
+	for _, source := range []string{"published-v1", ""} {
+		t.Run("source="+source, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("LIMA_HOME", home)
+			seedInstance(t, home, "web")
+			seedInstance(t, home, "template-web") // fake clone runner does not create its directory
+			f := &fakeRunner{outputs: map[string][]byte{"list": []byte("Stopped\n")}}
+			core := lima.New(f)
+			p := provider.NewLocalLima(core, &provision.Provisioner{Lima: core})
+			if source != "" {
+				marker := provider.NewProvenance(vm.CreateConfig{Name: "web", BaseName: "base"}, false)
+				marker.BaseRevision = source
+				if err := p.(provider.Provenancer).MarkManaged(context.Background(), "web", marker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := p.SnapshotTemplate(context.Background(), "web", "template-web", io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stamp := provision.ReadBaseVersion(lima.LocalFiles(), "template-web")
+			if result.PlaybookVersion != source || stamp != source {
+				t.Fatalf("template result/stamp = %q/%q, want actual source %q", result.PlaybookVersion, stamp, source)
+			}
+		})
+	}
+}
+
 // fakeRunner records the argv of every call and returns canned bytes/errors, so
 // the local provider is exercised over a FAKE host-access/runner seam and never
 // spawns a real limactl (AGENTS.md, hard rule). It mirrors the fakeRunner style

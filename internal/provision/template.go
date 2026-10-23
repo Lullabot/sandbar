@@ -19,26 +19,20 @@ import (
 //
 // The mechanics mirror prepareBaseAndClone (see provision.go): serialize under
 // the base/template lock (baselock.go), consistent-clone via limactl (which
-// needs a stopped, idle source disk), and stamp the result exactly like a base
-// image is stamped (baseversion.go) so a later create/reset can detect drift.
+// needs a stopped, idle source disk). The provider copies the source's recorded
+// revision onto the snapshot only when that history is known.
 // Unlike the base-build path, a template's SOURCE is a live, user-owned VM —
 // nothing here may destroy or mutate it beyond the strictly necessary,
 // temporary stop, and that stop must always be undone.
 
 // SnapshotResult carries what a successful SnapshotTemplate captured, so a
 // caller (the `sand template snapshot` CLI, task 4) can build the
-// registry.Template record without recomputing either field: PlaybookVersion
-// and ToolsetKey are read from — or fall back to matching — the same fields
-// registry.Template stores them under.
+// registry.Template record without recomputing either field. The provider
+// fills these from source provenance; this low-level clone returns them empty.
 type SnapshotResult struct {
-	// PlaybookVersion is the version stamp recorded on the template instance
-	// (provision.PlaybookVersion's content-hash scheme), or "" when it could
-	// not be determined — the template is then unstamped and reads as stale on
-	// every later comparison, the same posture an unstamped base image takes.
+	// PlaybookVersion is the source base revision, or "" when it is unknown.
 	PlaybookVersion string
-	// ToolsetKey is the canonical tool-set string embedded in PlaybookVersion
-	// (vm.CreateConfig.ToolsetKey's own rendering), or "" when it could not be
-	// determined.
+	// ToolsetKey is the source VM's canonical tool selection.
 	ToolsetKey string
 }
 
@@ -49,8 +43,8 @@ const templateRestoreTimeout = 15 * time.Minute
 
 // SnapshotTemplate captures source (a managed VM) into templateInstance (the
 // reserved Lima instance name a golden template is stored under — see
-// vm.TemplateInstanceName), via `limactl clone`, and stamps the result with the
-// playbook version it was captured from.
+// vm.TemplateInstanceName), via `limactl clone`. Provider code records known
+// source provenance after this low-level clone succeeds.
 //
 // Power-state preservation is the load-bearing contract here: source's status is
 // read BEFORE anything else, it is stopped only if it was actually running (a
@@ -115,31 +109,9 @@ func (p *Provisioner) SnapshotTemplate(ctx context.Context, source, templateInst
 		return SnapshotResult{}, fmt.Errorf("clone %q into template %q: %w", source, templateInstance, err)
 	}
 
-	// Stamp the template with the playbook version it was captured from. Prefer
-	// a version already stamped against the source's own instance name (present
-	// when the source is itself a template/base-derived instance that carries
-	// one); a plain managed VM carries no stamp of its own (only a base image is
-	// ever stamped), so the common case falls back to the CURRENT playbook
-	// version — the closest available signal for "what this snapshot contains".
-	ver := readBaseVersionFn(hf, source)
-	if ver == "" {
-		dir, dirErr := p.playbookDir()
-		if dirErr != nil {
-			step(out, "Note: could not locate the playbook to stamp template %q (%v); it will show as stale.", templateInstance, dirErr)
-		} else if v, vErr := playbookVersionFn(dir, ""); vErr != nil {
-			step(out, "Note: could not determine the current playbook version for template %q (%v); it will show as stale.", templateInstance, vErr)
-		} else {
-			ver = v
-		}
-	}
-	toolset := toolsetFromStamp(ver)
-	if ver != "" {
-		if err := writeBaseVersionFn(hf, templateInstance, ver, time.Now()); err != nil {
-			step(out, "Note: could not record template %q's playbook version (%v); it will show as stale.", templateInstance, err)
-		}
-	}
-
-	return SnapshotResult{PlaybookVersion: ver, ToolsetKey: toolset}, nil
+	// Only the provider's provenance can identify what this managed source VM
+	// was cloned from. A host-side stamp under the VM name is not its history.
+	return SnapshotResult{}, nil
 }
 
 // DeleteTemplate removes a template's Lima instance (`limactl delete --force`),

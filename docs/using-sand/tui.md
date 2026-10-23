@@ -220,6 +220,17 @@ is recorded when the VM is created.
 
 The CLI equivalent is [`sand reset NAME`](cli-reference.md#sand-reset-name).
 
+Each settled VM tile can show **base update available**, **setup update
+available**, or **version unknown**. Base and setup are checked separately, so
+both notices can appear together. Missing history on an older VM remains
+unknown. These are notices only: sand keeps the VM running as it is and never
+reruns provisioning automatically. Press `R` for an explicit reset, and choose
+what to preserve. [`sand updates NAME`](cli-reference.md#sand-updates-name)
+reports the same states from the CLI. A VM cloned from a golden template keeps
+using that template on reset; refresh the template first if its base is old.
+“Current” compares recorded revisions with this build, not user edits or
+upstream package versions.
+
 ### Choosing what survives
 
 Preserve options follow the settings. **All default off.** Press space or

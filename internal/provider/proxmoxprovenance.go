@@ -317,6 +317,12 @@ func (p *proxmoxProvider) ProvenanceOf(ctx context.Context, name string) (Proven
 // nowhere legitimate to land is a bug at the call site, not something to
 // paper over by inventing config for a VMID sand never created.
 func (p *proxmoxProvider) MarkManaged(ctx context.Context, name string, pv Provenance) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
+	return p.markManagedUnlocked(ctx, name, pv)
+}
+
+func (p *proxmoxProvider) markManagedUnlocked(ctx context.Context, name string, pv Provenance) error {
 	vmid, _, err := p.resolve(ctx, name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
@@ -350,6 +356,25 @@ func (p *proxmoxProvider) MarkManaged(ctx context.Context, name string, pv Prove
 	return nil
 }
 
+func (p *proxmoxProvider) MarkProgress(ctx context.Context, name string, progress Provenance) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
+	stored, ok, err := p.ProvenanceOf(ctx, name)
+	if err != nil {
+		return err
+	}
+	if ok && !stored.Provisioning {
+		return nil
+	}
+	progress.Provisioning = true
+	progress.SchemaVersion = MarkerSchemaVersion
+	progress.BaseRevision, progress.SetupRevision = "", ""
+	if ok {
+		progress.BaseRevision = stored.BaseRevision
+	}
+	return p.markManagedUnlocked(ctx, name, progress)
+}
+
 // Unmark clears any provenance marker for name: the sandbar tag and the
 // fenced description block, both in the SAME PUT, while leaving any
 // operator-authored tags or description text exactly as it was. An instance
@@ -358,6 +383,8 @@ func (p *proxmoxProvider) MarkManaged(ctx context.Context, name string, pv Prove
 // contract; any other resolve failure (notably a permission error) is the
 // caller's to see verbatim.
 func (p *proxmoxProvider) Unmark(ctx context.Context, name string) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
 	vmid, _, err := p.resolve(ctx, name)
 	if err != nil {
 		if errors.Is(err, lima.ErrNoSuchInstance) {
@@ -389,3 +416,4 @@ func (p *proxmoxProvider) Unmark(ctx context.Context, name string) error {
 // anticipated when it said a future Proxmox backend could do this "with no
 // redesign".
 var _ Provenancer = (*proxmoxProvider)(nil)
+var _ ProgressProvenancer = (*proxmoxProvider)(nil)
