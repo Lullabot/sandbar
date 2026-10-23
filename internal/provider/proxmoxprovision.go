@@ -132,20 +132,8 @@ func (p *proxmoxProvider) recreateInstance(ctx context.Context, cfg vm.CreateCon
 // half-built VM occupying a VMID on the cluster — unless the host asked to keep
 // it for inspection (see keepFailedVM).
 func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	var sourceRevision, setupRevision string
-	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
-	opts.OnSourceRevision = func(v string) {
-		sourceRevision = v
-		if previousSource != nil {
-			previousSource(v)
-		}
-	}
-	opts.OnSetupRevision = func(v string) {
-		setupRevision = v
-		if previousSetup != nil {
-			previousSetup(v)
-		}
-	}
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, opts, out)
 	if err != nil {
 		return err
@@ -158,7 +146,7 @@ func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfi
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
 		return fmt.Errorf("proxmox: creating %s (removed the partial VM): %w", cfg.Name, err)
 	}
-	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	progress(out, "%s is ready\n", cfg.Name)
 	return nil
 }

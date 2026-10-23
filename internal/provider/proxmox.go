@@ -1710,24 +1710,12 @@ func (p *proxmoxProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opt
 }
 
 func (p *proxmoxProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
-	var sourceRevision, setupRevision string
-	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
-	opts.OnSourceRevision = func(v string) {
-		sourceRevision = v
-		if previousSource != nil {
-			previousSource(v)
-		}
-	}
-	opts.OnSetupRevision = func(v string) {
-		setupRevision = v
-		if previousSetup != nil {
-			previousSetup(v)
-		}
-	}
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	if err := p.resetInstance(ctx, cfg, opts, out); err != nil {
 		return err
 	}
-	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	return nil
 }
 
