@@ -70,9 +70,16 @@ jobs:
       # glue is excluded so it doesn't distort the number) and gated against a
       # repo-committed floor — self-contained, no third-party coverage service.
       # Bump COVERAGE_FLOOR by hand in a PR as coverage rises.
+      #
+      # The number depends on the toolchain's statement counting, not just the
+      # tests. go1.27.1's cmd/cover split blocks at blank and comment lines and
+      # gave each piece the whole block's statement count, inflating the total
+      # to 91.1%; go1.27.3 fixed that, and the same suite measures 90.0% (as it
+      # does under go1.26). Re-base the floor whenever a toolchain bump moves
+      # the total with no test change.
       - name: Go tests (race) + coverage gate
         env:
-          COVERAGE_FLOOR: "91.1"
+          COVERAGE_FLOOR: "90.0"
         run: |
           go test ./... -race -covermode=atomic \
             -coverpkg=./internal/... -coverprofile=coverage.out
