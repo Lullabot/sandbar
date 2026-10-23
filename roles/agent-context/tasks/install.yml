@@ -1,0 +1,97 @@
+---
+# Check both destinations before writing anything. A pre-existing skill under
+# this name may be personal content; only a prior Sandbar install is refreshed.
+- name: Inspect shared skill destination
+  ansible.builtin.stat:
+    path: "{{ agent_context_skill_path }}"
+    follow: false
+  register: _sand_context_shared
+
+- name: Inspect shared skill entrypoint
+  ansible.builtin.stat:
+    path: "{{ agent_context_skill_path }}/SKILL.md"
+    follow: false
+  register: _sand_context_entry
+
+- name: Read existing shared skill entrypoint
+  ansible.builtin.slurp:
+    src: "{{ agent_context_skill_path }}/SKILL.md"
+  register: _sand_context_existing
+  when: _sand_context_entry.stat.isreg | default(false)
+
+- name: Reject a shared skill name collision
+  ansible.builtin.assert:
+    that:
+      - not _sand_context_shared.stat.exists or (_sand_context_shared.stat.isdir | default(false))
+      - not _sand_context_shared.stat.exists or (_sand_context_entry.stat.isreg | default(false))
+      - not _sand_context_entry.stat.exists or ('<!-- Sandbar-managed environment skill -->' in (_sand_context_existing.content | default('') | b64decode))
+    fail_msg: "sandbar-environment skill collision in ~/.agents/skills; move the user-owned entry before provisioning"
+
+- name: Inspect Claude skill destination
+  ansible.builtin.stat:
+    path: "{{ agent_context_claude_skill_path }}"
+    follow: false
+  register: _sand_context_claude
+  when: toolset_claude | default(false) | bool
+
+- name: Reject a Claude skill name collision
+  ansible.builtin.assert:
+    that:
+      - not _sand_context_claude.stat.exists or ((_sand_context_claude.stat.islnk | default(false)) and _sand_context_claude.stat.lnk_source == agent_context_skill_path)
+    fail_msg: "sandbar-environment skill collision in ~/.claude/skills; move the user-owned entry before provisioning"
+  when: toolset_claude | default(false) | bool
+
+- name: Ensure selected agent instruction directories exist
+  ansible.builtin.file:
+    path: "{{ item.path | dirname }}"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  loop: "{{ agent_context_targets }}"
+  when: item.enabled | bool
+
+- name: Add selected agent global instructions
+  ansible.builtin.blockinfile:
+    path: "{{ item.path }}"
+    create: true
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    marker: "<!-- {mark} SANDBAR ENVIRONMENT CONTEXT -->"
+    block: "{{ lookup('ansible.builtin.file', role_path + '/files/global-instructions.md') }}"
+  loop: "{{ agent_context_targets }}"
+  when: item.enabled | bool
+
+- name: Ensure shared skill directories exist
+  ansible.builtin.file:
+    path: "{{ agent_context_skill_path }}/references"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+
+- name: Deploy the shared environment skill
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ agent_context_skill_path }}/{{ item }}"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  loop:
+    - SKILL.md
+    - references/terminal.md
+    - references/tools.md
+
+- name: Ensure Claude skill directory exists
+  ansible.builtin.file:
+    path: "{{ user_home }}/.claude/skills"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  when: toolset_claude | default(false) | bool
+
+- name: Expose the shared environment skill to Claude
+  ansible.builtin.file:
+    src: "{{ agent_context_skill_path }}"
+    dest: "{{ agent_context_claude_skill_path }}"
+    state: link
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  when: toolset_claude | default(false) | bool
