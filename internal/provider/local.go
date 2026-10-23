@@ -76,20 +76,8 @@ func (p *limaProvider) StopStreaming(ctx context.Context, name string, out io.Wr
 // --- Provisioning lifecycle ---
 
 func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	var sourceRevision, setupRevision string
-	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
-	opts.OnSourceRevision = func(v string) {
-		sourceRevision = v
-		if previousSource != nil {
-			previousSource(v)
-		}
-	}
-	opts.OnSetupRevision = func(v string) {
-		setupRevision = v
-		if previousSetup != nil {
-			previousSetup(v)
-		}
-	}
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	// Write a PROVISIONAL (in-flight) provenance marker the moment the clone
 	// exists, so another controller of this same host sees the VM as a managed,
 	// building tile while the (long) finalize step runs — not only after it
@@ -113,58 +101,34 @@ func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts pro
 			// (that lives in the TUI), so the stamp taken here is the only one it will
 			// ever get. See Provenance.BuildAbandoned.
 			pv := NewProvenance(cfg, true)
-			pv.BaseRevision = sourceRevision
+			pv.BaseRevision = rev.source
 			return p.MarkManaged(ctx, name, pv)
 		}
 	}
 	if err := p.prov.CreateVMWithOptions(ctx, cfg, opts, out); err != nil {
 		return err
 	}
-	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	return nil
 }
 
 func (p *limaProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	var sourceRevision, setupRevision string
-	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
-	opts.OnSourceRevision = func(v string) {
-		sourceRevision = v
-		if previousSource != nil {
-			previousSource(v)
-		}
-	}
-	opts.OnSetupRevision = func(v string) {
-		setupRevision = v
-		if previousSetup != nil {
-			previousSetup(v)
-		}
-	}
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	if err := p.prov.RecreateWithOptions(ctx, cfg, opts, out); err != nil {
 		return err
 	}
-	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	return nil
 }
 
 func (p *limaProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
-	var sourceRevision, setupRevision string
-	previousSource, previousSetup := opts.OnSourceRevision, opts.OnSetupRevision
-	opts.OnSourceRevision = func(v string) {
-		sourceRevision = v
-		if previousSource != nil {
-			previousSource(v)
-		}
-	}
-	opts.OnSetupRevision = func(v string) {
-		setupRevision = v
-		if previousSetup != nil {
-			previousSetup(v)
-		}
-	}
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	if err := p.prov.Reset(ctx, cfg, opts, out); err != nil {
 		return err
 	}
-	p.markCompleted(ctx, cfg, sourceRevision, setupRevision)
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	return nil
 }
 
