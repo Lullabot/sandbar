@@ -2,11 +2,13 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
@@ -18,6 +20,55 @@ import (
 // as an error rather than as a missing path, so a fake that answered with a
 // plain errors.New would be testing the wrong branch.
 var errAbsent = exec.Command("sh", "-c", "exit 1").Run()
+
+func TestRestoreFailuresKeepRecoveryArchives(t *testing.T) {
+	for _, tc := range []struct {
+		name, fail, want string
+		before           bool
+		plan             PreservePlan
+	}{
+		{"baseline safety check", "refusing to clear home baselines", "clear fresh home baselines", true, PreservePlan{WholeHome: true}},
+		{"home extraction", "sudo tar", "restore the home directory", true, PreservePlan{WholeHome: true}},
+		{"agent extraction", "sudo tar", "restore agent state", true, PreservePlan{Agents: true}},
+		{"project extraction", "sudo tar", "restore the project", false, PreservePlan{Project: ProjectPlan{Staged: true, OrgRel: "github.com/org"}}},
+		{"extra checkout extraction", "sudo tar", "restore preserved checkouts", false, PreservePlan{Extras: []string{"github.com/other/repo"}}},
+		{"restored secrets approval", "direnv allow", "approve the restored .env", false, PreservePlan{WholeHome: true, Project: ProjectPlan{OrgRel: "github.com/org"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stage := &StageGuard{dir: t.TempDir(), name: "dev"}
+			stage.DestroyingGuest()
+			archiveBytes := []byte("preserved user data")
+			for _, archive := range []string{homeArchive, agentsArchive, projectArchive, extrasArchive} {
+				if err := os.WriteFile(stage.Path(archive), archiveBytes, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f := &stagingFakeRunner{failSubstr: tc.fail}
+			cli := lima.New(f)
+			restore := RestoreAfterFinalize
+			if tc.before {
+				restore = RestoreBeforeFinalize
+			}
+			err := restore(context.Background(), cli, "dev", "/home/tester", "tester", tc.plan, stage, io.Discard)
+			if !errors.Is(err, errNoSuchCommand) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("restore failure = %v, want wrapped cause and %q", err, tc.want)
+			}
+			recovery := stage.Fail(err)
+			if !errors.Is(recovery, errNoSuchCommand) || !strings.Contains(recovery.Error(), "--from-backup "+stage.Dir()) {
+				t.Fatalf("missing recovery command or cause: %v", recovery)
+			}
+			for _, archive := range []string{homeArchive, agentsArchive, projectArchive, extrasArchive} {
+				body, err := os.ReadFile(stage.Path(archive))
+				if err != nil || string(body) != string(archiveBytes) {
+					t.Fatalf("recovery archive %s was lost or changed: %q, %v", archive, body, err)
+				}
+			}
+			if tc.name == "baseline safety check" && len(f.calls) != 1 {
+				t.Fatalf("unsafe baseline check did not stop before extraction: %v", f.calls)
+			}
+		})
+	}
+}
 
 func TestAncestorDirs(t *testing.T) {
 	cases := []struct {

@@ -230,7 +230,7 @@ func step(out io.Writer, format string, args ...any) {
 // base self-refresh run (see reapplyBase), never for a cold base build and
 // never for finalize.
 func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, aptUpgrade bool, out io.Writer, preservation ...PreservationVars) error {
-	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade)
+	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade, preservation...)
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
@@ -597,7 +597,7 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 	// (The in-flight provenance marker was stamped earlier, the moment the clone
 	// landed — see prepareBaseAndClone's caller above.)
 	if err := timer.time("finalize playbook", func() error {
-		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out, PreservationVars{OnSetupRevision: opts.OnSetupRevision})
+		return p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), cfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", OnSetupRevision: opts.OnSetupRevision})
 	}); err != nil {
 		return err
 	}
@@ -1386,7 +1386,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 

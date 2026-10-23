@@ -1003,7 +1003,14 @@ shared rules.
 
 - **Restore before or after finalize according to what Ansible should
   update.** Restore the Claude login and whole home before finalize so
-  Ansible can update its configuration files. Restore the project and
+  the home-file safety policy can compare provisioned files against their
+  recorded baselines. It replaces only unchanged tracked files; it retains
+  edited, unknown, deleted, and symlinked destination files and writes new defaults under
+  `~/.config/sandbar/proposed-defaults/`. Baselines live under
+  `~/.config/sandbar/home-baselines/`. Preserve-agents is a distinct option,
+  and a reset without preservation still deliberately wipes guest files.
+  Symlinked parent directories abort the reset with recovery archives retained.
+  Restore the project and
   individually selected checkouts after finalize to avoid overwriting them.
   Omit `project_clone_url` when a checkout will be restored. Reversing this
   order can leave stale configuration or overwrite a preserved checkout.

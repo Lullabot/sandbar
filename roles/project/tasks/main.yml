@@ -59,6 +59,7 @@
       when:
         - project_clone_token | length > 0
         - _clone_forge in ["github", "gitlab"]
+        - not sand_preserved_home | default(false) | bool
 
     - name: Approve the .env with direnv
       ansible.builtin.command:
@@ -71,6 +72,7 @@
       when:
         - project_clone_token | length > 0
         - _clone_forge in ["github", "gitlab"]
+        - not sand_preserved_home | default(false) | bool
 
     # Store auth independently of the current shell: a new agent or shell can
     # fetch immediately, and the host-specific helper never serves another host.
@@ -87,7 +89,7 @@
         group: "{{ user_name }}"
         mode: "0700"
       loop: [git-credentials, gitconfig.d]
-      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab' and not sand_preserved_home | default(false) | bool
 
     - name: Write host-bound clone credentials
       ansible.builtin.copy:
@@ -97,7 +99,7 @@
         group: "{{ user_name }}"
         mode: "0600"
       no_log: true
-      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab' and not sand_preserved_home | default(false) | bool
 
     - name: Write scoped credential helper
       ansible.builtin.copy:
@@ -109,7 +111,7 @@
         owner: "{{ user_name }}"
         group: "{{ user_name }}"
         mode: "0644"
-      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab' and not sand_preserved_home | default(false) | bool
 
     - name: Enable credentials for the project directory
       ansible.builtin.blockinfile:
@@ -122,7 +124,28 @@
         block: |
           [includeIf "gitdir:{{ _clone_org_dir }}/"]
               path = {{ user_home }}/.config/sandbar/gitconfig.d/{{ _clone_cred_slug }}
-      when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab' and not sand_preserved_home | default(false) | bool and (sand_gitconfig_install is not defined or sand_gitconfig_install.stdout is search('installed default'))
+
+    # A preserved home may hold a user-managed credential at the usual path.
+    # Give the clone a temporary token instead of replacing that file.
+    - name: Reserve temporary clone credential for a preserved home
+      ansible.builtin.tempfile:
+        state: file
+        prefix: sand-clone-
+        path: /dev/shm
+      register: _clone_temp_credential
+      no_log: true
+      when: project_clone_token | length > 0 and _clone_forge == 'gitlab' and sand_preserved_home | default(false) | bool
+
+    - name: Write temporary clone credential
+      ansible.builtin.copy:
+        dest: "{{ _clone_temp_credential.path }}"
+        content: "https://oauth2:{{ project_clone_token | urlencode | replace('/', '%2F') }}@{{ _clone_host }}\n"
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0600"
+      no_log: true
+      when: _clone_temp_credential.path is defined
 
     - name: Clone the project with a safe failure reason
       block:
@@ -141,7 +164,7 @@
             GIT_CONFIG_KEY_0: "credential.https://{{ _clone_host }}.helper"
             GIT_CONFIG_VALUE_0: ""
             GIT_CONFIG_KEY_1: "credential.https://{{ _clone_host }}.helper"
-            GIT_CONFIG_VALUE_1: "store --file={{ user_home }}/.config/sandbar/git-credentials/{{ _clone_cred_slug | default('unused') }}"
+            GIT_CONFIG_VALUE_1: "store --file={{ _clone_temp_credential.path if _clone_temp_credential.path is defined else user_home ~ '/.config/sandbar/git-credentials/' ~ (_clone_cred_slug | default('unused')) }}"
           # Git can echo credentials in its error. Keep the raw result out of
           # the log, then report only a fixed, credential-free reason below.
           no_log: "{{ project_clone_token | length > 0 }}"
@@ -169,6 +192,13 @@
         - name: Report another clone failure
           ansible.builtin.fail:
             msg: "SAND_CLONE_ERROR_OTHER: Project clone failed. Check the clone URL, token access, and the VM log."
+      always:
+        - name: Remove temporary clone credential
+          ansible.builtin.file:
+            path: "{{ _clone_temp_credential.path }}"
+            state: absent
+          no_log: true
+          when: _clone_temp_credential.path is defined
 
     # This happens before the user starts their first agent session, so the
     # skills are discoverable for a critique that precedes the browser review.

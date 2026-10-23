@@ -237,12 +237,16 @@ Preserve options follow the settings. **All default off.** Press space or
 enter to toggle the focused option; its help text describes what it copies.
 
 - **Preserve the entire home directory** keeps your files while updating the
-  VM. The home is restored before the playbook runs, so Ansible can update
-  its configuration files. It includes the options below, which appear
+  VM. The home is restored before the playbook runs. Provisioned home files
+  are replaced only when they still match sand's recorded baseline. Edited,
+  untracked, deleted, or symlinked destination files are kept; new defaults are
+  [saved separately](../reference/files-and-state.md#guest-paths). It includes the
+  options below, which appear
   checked and locked while this option is on. It copies the most data and
   excludes `~/.ssh/authorized_keys`, so the rebuilt VM keeps its new access
   key. Directories named `.cache` are also left behind and rebuilt in the new
-  VM.
+  VM. A symlink in a parent directory stops the reset and retains the recovery
+  archives.
 - **Preserve agent settings and files** keeps settings, credentials, sessions,
   and history for Claude Code, Codex, OpenCode, and Pi together, including
   state from manual installs. Selected agents are installed fresh; restored
