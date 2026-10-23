@@ -163,16 +163,10 @@ jobs:
       - name: cmd/sand end-to-end (headless create + --recreate gate)
         run: LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sand/
 
-      # Run the actual entrypoint, non-interactively, forcing a true
-      # from-scratch base build with --rebuild. Base reuse/re-apply is the
-      # default path now (a stale base converges in place rather than
-      # rebuilding — see internal/provision/provision.go), so the cold build
-      # must be requested explicitly to be exercised by intent rather than
-      # merely because this runner happens to start with no base image.
-      # This builds the base image, clones it to `claude-ci`, finalizes, and
-      # restarts — the full path that can't run inside the nested-virt-less
-      # dev VM. Modest resources to fit the hosted runner (4 vCPU / 16 GB).
-      - name: Create a VM (cold — force a from-scratch base build)
+      # --rebuild recreates the base from the published image; it does not
+      # execute the checkout's base roles. The self-review upgrade step below
+      # exercises that role separately. Keep the normal image path covered.
+      - name: Create a VM (cold — recreate the published base)
         run: |
           # pipefail, or `| tee` swallows the exit status and a failed provision
           # sails past this step (GitHub's default shell is `bash -e`, not `-eo
@@ -260,11 +254,28 @@ jobs:
             done
           '
 
-      # The review tool is not a tool-set selection at all, so the create above
-      # could not have asked for it: its presence here is the role running
-      # unconditionally, which is the whole point of it not being a flag.
-      #
+      # Create intentionally uses a published image, whose base tools may be
+      # older than this checkout. Exercise the checkout's role before the
+      # review round-trip so dependency PRs test their new server and skills.
+      # Keep the published-image creation/reuse checks above and below intact.
+      - name: Upgrade self-review with the checkout's provisioning role
+        run: |
+          set -euo pipefail
+          limactl shell claude-ci bash -lc '
+            set -euo pipefail
+            play=$(mktemp --suffix=.yml)
+            trap '\''rm -f "$play"'\'' EXIT
+            printf "%s\n" \
+              "- hosts: localhost" \
+              "  become: true" \
+              "  gather_facts: false" \
+              "  roles: [self-review]" > "$play"
+            sudo env ANSIBLE_ROLES_PATH=/mnt/playbook/roles \
+              ansible-playbook -i localhost, --connection=local "$play"
+          '
+
       # The size check is the dependency substitution's own regression test.
+      #
       # roles/self-review replaces @self-review/serve's declared (but unused)
       # @self-review/react dependency with @self-review/types, which is the
       # difference between a ~17MB install and a ~310MB one. A threshold
@@ -274,6 +285,13 @@ jobs:
       - name: Assert the review tool is installed, lean, and runnable
         run: |
           set -euo pipefail
+          expected=$(sed -n 's/^selfreview_version: "\([^"]*\)"$/\1/p' roles/self-review/defaults/main.yml)
+          test -n "$expected"
+          actual=$(limactl shell claude-ci bash -lc 'self-review-serve --version 2>&1')
+          echo "review version: $actual (expected v$expected)"
+          test "$actual" = "self-review-serve v$expected" \
+            || { echo "::error::the review test is not using the checkout version"; exit 1; }
+          limactl shell claude-ci test -f "/opt/sandbar/self-review/skills/.sandbar-$expected"
           limactl shell claude-ci bash -lc '
             set -e
             test -x /opt/sandbar/self-review/node_modules/.bin/self-review-serve
@@ -328,9 +346,13 @@ jobs:
       # reaches disk — everything else about --review is unit-tested against
       # fakes.
       #
-      # No browser is involved: xdg-open does not exist on the runner, and
-      # landreview treats an opener failure as non-fatal (it prints the URL and
-      # keeps serving), which is exactly the headless path this drives.
+      # xdg-open's failure exercises sand's headless URL reporting. Playwright
+      # then opens that exact URL to cover the shipped client and session key.
+      - name: Install the browser smoke-test driver
+        run: |
+          npm install --prefix "$RUNNER_TEMP/review-browser" --no-audit --no-fund playwright@1.56.1
+          "$RUNNER_TEMP/review-browser/node_modules/.bin/playwright" install --with-deps chromium
+
       - name: Drive `sand land --review` end to end (serve, submit, tear down)
         run: |
           set -euo pipefail
@@ -365,6 +387,12 @@ jobs:
             exit 1
           fi
           echo "review UI on port $PORT"
+          URL=$(sed -n 's/^review UI ready at //p' review.log | head -1)
+          CAPABILITY=$(node -e 'console.log(new URLSearchParams(new URL(process.argv[1]).hash.slice(1)).get("cap") || "")' "$URL")
+          test -n "$CAPABILITY" \
+            || { echo "::error::sand discarded the session key from the launch URL"; exit 1; }
+          echo "::add-mask::$CAPABILITY"
+          NODE_PATH="$RUNNER_TEMP/review-browser/node_modules" node tests/self-review-browser.cjs "$URL"
 
           # A SECURITY PROPERTY, not a nicety. internal/landreview's package
           # doc commits to unfinished work never becoming reachable from the
@@ -381,7 +409,11 @@ jobs:
             exit 1
           fi
 
-          DIFF=$(curl -sS --max-time 60 "http://127.0.0.1:$PORT/api/diff")
+          status=$(curl -sS --max-time 60 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/config")
+          test "$status" = 401 \
+            || { echo "::error::the API accepted a request without the session key"; exit 1; }
+          DIFF=$(curl --fail-with-body -sS --max-time 60 "http://127.0.0.1:$PORT/api/diff" \
+            -H "Authorization: Bearer $CAPABILITY")
           jq -r '.diff.files[] | "  \(.newPath // .oldPath) hunks=\(.hunks | length)"' <<<"$DIFF"
 
           # All three working-tree states must be present in ONE response.
@@ -441,9 +473,13 @@ jobs:
           }' > review-state.json
 
           echo "=== POST /api/review ==="
-          curl -sS --max-time 60 -X POST "http://127.0.0.1:$PORT/api/review" \
-            -H 'content-type: application/json' --data-binary @review-state.json
-          echo
+          RESULT=$(curl --fail-with-body -sS --max-time 60 -X POST "http://127.0.0.1:$PORT/api/review" \
+            -H "Authorization: Bearer $CAPABILITY" \
+            -H 'content-type: application/json' --data-binary @review-state.json)
+          jq -e --arg output "$REPO/review.xml" '.ok == true and .outputPath == $output' <<<"$RESULT" \
+            || { echo "::error::the submission did not acknowledge the written review path"; exit 1; }
+          # 2.x acknowledges only after the file has been published.
+          limactl shell claude-ci test -s "$REPO/review.xml"
 
           # Submitting IS the completion signal: the guest server writes the
           # file and exits 0, and that exit is what unblocks the session. A
@@ -510,6 +546,8 @@ jobs:
           # comment that was actually submitted — not merely a file that
           # appeared.
           limactl shell claude-ci cat "$REPO/review.xml" > review.xml
+          limactl shell claude-ci xmllint --noout \
+            --schema "$REPO/.agents/skills/self-review-apply/assets/self-review-v3.xsd" "$REPO/review.xml"
           wc -c review.xml
           python3 -c 'import xml.etree.ElementTree as ET; ET.parse("review.xml")' \
             || { echo "::error::review.xml is not well-formed XML"; exit 1; }

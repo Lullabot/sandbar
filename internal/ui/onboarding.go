@@ -78,7 +78,7 @@ func saveOnboardingAcknowledged() error {
 
 func isWarpTerminal() bool { return os.Getenv("TERM_PROGRAM") == "WarpTerminal" }
 
-// osc8Link is used only with fixed or locally validated GitHub URLs.
+// osc8Link is used only with fixed or locally validated URLs.
 func osc8Link(label, target string) string {
 	return "\x1b]8;;" + target + "\x1b\\" + label + "\x1b]8;;\x1b\\"
 }
