@@ -30,6 +30,19 @@ func newFakeProvenancer() *fakeProvenancer {
 	return &fakeProvenancer{markers: map[string]provider.Provenance{}}
 }
 
+func TestRecordSuccessDoesNotEraseUnreadableRevisionHistory(t *testing.T) {
+	cfg := vm.CreateConfig{Name: "web", BaseName: "base"}
+	prov := newFakeProvenancer()
+	marker := provider.NewProvenance(cfg, false)
+	marker.BaseRevision, marker.SetupRevision = "actual-base", "actual-setup"
+	prov.markers[cfg.Name] = marker
+	prov.readErr = errors.New("temporary provider read failure")
+	err := RecordSuccess(registry.NewEmpty(), cfg, registry.LocalScope, prov)
+	if err == nil || len(prov.markCalls) != 0 || prov.markers[cfg.Name] != marker {
+		t.Fatalf("read failure erased provider history: err=%v calls=%v marker=%+v", err, prov.markCalls, prov.markers[cfg.Name])
+	}
+}
+
 func (f *fakeProvenancer) Provenance(context.Context) (map[string]provider.Provenance, error) {
 	return f.markers, nil
 }

@@ -16,7 +16,7 @@ When you snapshot a VM into a template, `sand` captures:
 
 - **The guest disk:** everything installed or changed inside the VM — toolchains, configs, cloned repos, and any credentials written to disk. Creation finalization overwrites settings such as hostname and git identity, but authors should otherwise assume the disk is copied verbatim. Secrets propagation is detailed below.
 - **Sizing and settings:** vCPUs, memory, disk size, locale, domain suffix, docker-proxy-host, and the clone URL (but not the token).
-- **Provisioning metadata:** which playbook version the template was built from, and which toolsets (Claude Code, DDEV, Go, Java) were installed in its base.
+- **Provisioning metadata:** the actual source base revision recorded on the source VM, and its selected toolsets.
 
 Templates are **per-connection-profile** — a template saved under one profile never leaks into another. Lima providers store reserved stopped instances under their own `${LIMA_HOME}`; Proxmox stores native PVE templates in the configured pool.
 
@@ -26,11 +26,15 @@ When you snapshot a running VM, `sand` stops it, clones it (capturing the state 
 
 ### Staleness
 
-A template's `status` in `sand template list` reflects whether its playbook predates the playbook embedded in the current `sand` binary:
+A template's `status` in `sand template list` compares its recorded source base
+revision with the revision the selected provider would use now:
 
-- **`current`:** built with the same playbook version as this binary.
-- **`stale`:** built with an older playbook. A stale template still works, but new VMs cloned from it miss playbook updates (new base packages, role changes, etc.). Snapshot a fresh VM to get a current template.
-- **`unknown`:** the template lacks comparable version metadata. It can still be cloned, but `sand` cannot promise it contains the current playbook.
+- **`current`:** its recorded base revision matches the provider's desired revision.
+- **`stale`:** its recorded base revision differs. The template still works. Snapshot a fresh VM after updating its base to capture a current one.
+- **`unknown`:** source or desired revision metadata is missing. It can still be cloned, but sand cannot claim it is current.
+
+Resetting a VM created from a template reuses that template. Updating the
+shared base alone does not update an existing template.
 
 ## Snapshot: save a VM as a template
 

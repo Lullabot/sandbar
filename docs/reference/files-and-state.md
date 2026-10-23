@@ -28,7 +28,7 @@ Each template is stored by its provider under the reserved name
 `sandbar-tmpl-<name>`. For Lima that is an instance directly under
 `${LIMA_HOME}`; Proxmox stores a real PVE template. Do not delete the backing
 instance directly: use `sand template delete <name>` so the scoped registry is
-updated as well. Template playbook-version metadata is used to report
+updated as well. Template source-base-revision metadata is used to report
 `current`, `stale`, or `unknown` status.
 
 ### Two different "scope" dimensions

@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/lipgloss/v2"
@@ -115,7 +116,9 @@ type tileInput struct {
 	// already-bordered string meant diffing rows byte-wise to re-find the
 	// border, which could cut an ANSI escape in half and corrupt the row's
 	// measured width.
-	Badge string
+	Badge     string
+	Update    provider.UpdateStatus
+	HasUpdate bool
 
 	// Spinner is the current animation frame for a Building tile's glyph. ""
 	// falls back to a static glyph — what every test not driving a real
@@ -218,6 +221,11 @@ func renderTile(in tileInput) string {
 		// on the same row.
 		lines[4] = tileDiskLine(in.VM, status, in.Sample, in.HasSample, width)
 		lines[5] = tileFooterLine(in.VM, in.Now, in.Badge, width)
+		if in.HasUpdate && status != statusFailed {
+			if notice := tileUpdateNotice(in.Update); notice != "" {
+				lines[5] = tileUpdateFooter(in.Update, notice, in.Badge, width)
+			}
+		}
 	}
 
 	for i, l := range lines {
@@ -232,6 +240,70 @@ func renderTile(in tileInput) string {
 		style = tileFocusedFrameStyle
 	}
 	return style.Render(strings.Join(lines, "\n"))
+}
+
+func tileUpdateFooter(status provider.UpdateStatus, notice, badge string, width int) string {
+	badgeWidth := ansi.StringWidth(badge)
+	budget := width
+	if badgeWidth > 0 {
+		budget -= badgeWidth + 1
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	if ansi.StringWidth(notice) > budget {
+		// The reset key remains visible even when an unlanded-work badge shares
+		// this row. The expanded state remains available through sand updates.
+		notice = strings.ReplaceAll(notice, " update available", " update")
+		notice = strings.ReplaceAll(notice, " and setup updates", "/setup updates")
+		notice = strings.ReplaceAll(notice, " version unknown", " unknown")
+		notice = strings.ReplaceAll(notice, " · R reset", " · R")
+	}
+	if ansi.StringWidth(notice) > budget {
+		// Tiny tiles with a work badge need compact symbols. The CLI offers
+		// the full words and independent machine-readable states.
+		var parts []string
+		for _, item := range []struct {
+			kind  string
+			value provider.UpdateState
+		}{{"base", status.Base}, {"setup", status.Setup}} {
+			switch item.value {
+			case provider.UpdateAvailable:
+				parts = append(parts, item.kind+"↑")
+			case provider.UpdateUnknown:
+				parts = append(parts, item.kind+"?")
+			}
+		}
+		notice = strings.Join(parts, " ") + " · R reset"
+		if ansi.StringWidth(notice) > budget {
+			notice = ansi.Truncate(notice, budget, "…")
+		}
+	}
+	return tileRowSplit(warnStyle.Render(notice), ansi.StringWidth(notice), badge, width, 0,
+		func(s string) string { return s })
+}
+
+func tileUpdateNotice(s provider.UpdateStatus) string {
+	switch {
+	case s.Base == provider.UpdateAvailable && s.Setup == provider.UpdateAvailable:
+		return "base and setup updates · R reset"
+	case s.Base == provider.UpdateAvailable && s.Setup == provider.UpdateUnknown:
+		return "base update, setup unknown · R reset"
+	case s.Base == provider.UpdateUnknown && s.Setup == provider.UpdateAvailable:
+		return "base unknown, setup update · R reset"
+	case s.Base == provider.UpdateAvailable:
+		return "base update available · R reset"
+	case s.Setup == provider.UpdateAvailable:
+		return "setup update available · R reset"
+	case s.Base == provider.UpdateUnknown && s.Setup == provider.UpdateUnknown:
+		return "versions unknown · R reset"
+	case s.Base == provider.UpdateUnknown:
+		return "base version unknown · R reset"
+	case s.Setup == provider.UpdateUnknown:
+		return "setup version unknown · R reset"
+	default:
+		return ""
+	}
 }
 
 // guestMemoryLowFree uses MemAvailable-derived guest usage for the warning

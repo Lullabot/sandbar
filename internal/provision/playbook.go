@@ -32,6 +32,16 @@ func LocatePlaybook() (string, error) {
 	return extractEmbedded(sandbar.PlaybookFS)
 }
 
+// CurrentPlaybookFS returns the source fileset for read-only revision checks.
+// A packaged binary hashes its embedded files directly, without extracting a
+// fresh temp directory each time a board or CLI inspection asks for updates.
+func CurrentPlaybookFS() fs.FS {
+	if top, err := gitCheckoutPlaybookDir(); err == nil {
+		return os.DirFS(top)
+	}
+	return sandbar.PlaybookFS
+}
+
 // gitCheckoutPlaybookDir resolves the current git checkout's toplevel and
 // returns it when it contains site.yml.
 func gitCheckoutPlaybookDir() (string, error) {
