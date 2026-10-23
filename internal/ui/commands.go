@@ -67,6 +67,7 @@ type (
 		// does not implement Provenancer or the batched read failed; either way
 		// the board falls back to the legacy registry gate for every VM.
 		provenance map[string]provider.Provenance
+		updates    map[string]provider.UpdateStatus
 		// provenanceErr is WHY the batched read failed, when it did. It never
 		// fails the refresh — provenance simply stays nil and the legacy gate
 		// answers — it exists so that degradation is SAID rather than silently
@@ -225,11 +226,19 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 				provenanceErr = pErr
 			}
 		}
+		updates := make(map[string]provider.UpdateStatus, len(vms))
+		for _, v := range vms {
+			if marker, ok := provenance[v.Name]; ok {
+				updates[v.Name] = provider.CheckUpdates(context.Background(), prov, marker)
+			} else {
+				updates[v.Name] = provider.UpdateStatus{Base: provider.UpdateUnknown, Setup: provider.UpdateUnknown}
+			}
+		}
 		return vmsLoadedMsg{
 			scope: sc, vms: vms, err: err,
 			hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser(),
 			hostMemAvail: memAvail, hostDiskTotal: diskTotal,
-			provenance: provenance, provenanceErr: provenanceErr,
+			provenance: provenance, provenanceErr: provenanceErr, updates: updates,
 		}
 	}
 }
