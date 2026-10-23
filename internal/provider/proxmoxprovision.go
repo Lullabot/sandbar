@@ -138,7 +138,7 @@ func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfi
 	if err != nil {
 		return err
 	}
-	if err := p.finalizeClone(ctx, cloneVMID, cfg, out, finalizeCapture{OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	if err := p.finalizeClone(ctx, cloneVMID, cfg, out, finalizeCapture{FreshClone: opts.TemplateSource == "", OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		if keepFailedVM() {
 			reportKeptVM(cloneVMID, cfg.Name, out)
 			return fmt.Errorf("proxmox: creating %s (kept the partial VM, VMID %d, for inspection): %w", cfg.Name, cloneVMID, err)
@@ -630,6 +630,7 @@ func (p *proxmoxProvider) cloneFromTemplate(ctx context.Context, templateVMID in
 // size, boot it, and run the finalize playbook. It runs OUTSIDE the base lock, so
 // concurrent creates overlap here.
 type finalizeCapture struct {
+	FreshClone      bool
 	OnSetupRevision func(string)
 }
 
@@ -645,6 +646,7 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 	}
 	vars := provision.PreservationVars{}
 	if len(capture) > 0 {
+		vars.FreshClone = capture[0].FreshClone
 		vars.OnSetupRevision = capture[0].OnSetupRevision
 	}
 	return p.runPlaybookPhase(ctx, cfg.Name, cfg, "finalize", cfg.EffectiveHostname(), out, vars)
@@ -738,7 +740,7 @@ func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg
 	// aptUpgrade is false: the finalize phase never asks for an apt upgrade
 	// (only the Lima flow's 30-day in-place refresh does, and
 	// there is no in-place refresh for a template).
-	vars, err := provision.BuildExtraVars(cfg, phase, hostname, false)
+	vars, err := provision.BuildExtraVars(cfg, phase, hostname, false, preservation...)
 	if err != nil {
 		return fmt.Errorf("proxmox: building extra-vars (%s phase): %w", phase, err)
 	}
@@ -976,7 +978,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = ""
 	}
-	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out, provision.PreservationVars{OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out, provision.PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 

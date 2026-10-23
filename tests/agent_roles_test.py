@@ -39,6 +39,9 @@ class AgentRolesTest(unittest.TestCase):
             play = yaml.safe_load((ROOT / "site.yml").read_text())
             play[0]["become"] = False
             play[0]["gather_facts"] = False
+            # This fixture substitutes every role body, so it does not create
+            # the user_home fact consumed by the real final baseline task.
+            play[0].pop("post_tasks", None)
             # Only role bodies are replaced; production role selection and its
             # phase conditions are evaluated by Ansible itself.
             for entry in play[0]["roles"]:
@@ -106,7 +109,11 @@ class AgentRolesTest(unittest.TestCase):
                     settings.write_text(json.dumps(original))
                     settings.chmod(0o600)
                     variables = {"user_home": str(home), "user_name": getpass.getuser(),
-                                 "claude_notification_channel": channel}
+                                 "claude_notification_channel": channel,
+                                  # This fixture exercises the communication merge
+                                  # after the installer has accepted a sand default.
+                                  "sand_claude_settings_install": {
+                                      "stdout": "unchanged: installed default current"}}
                     self.run_play(directory, play, variables)
                     result = json.loads(settings.read_text())
                     self.assertEqual(result["theme"], "dark")
@@ -116,7 +123,7 @@ class AgentRolesTest(unittest.TestCase):
                     output = self.run_play(directory, play, variables)
                     self.assertIn("changed=0", output)
 
-    def test_claude_remote_control_migration_requires_opt_in(self):
+    def test_legacy_claude_settings_are_preserved_with_new_defaults_offered(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             home = directory / "guest"
@@ -134,27 +141,31 @@ class AgentRolesTest(unittest.TestCase):
                 "Isolate peer machines and keep Remote Control opt-in",
             }
             tasks = [task for task in all_tasks if task["name"] in names]
-            template = next(task for task in tasks if "ansible.builtin.template" in task)
-            template["ansible.builtin.template"]["src"] = str(
-                role / "templates/claude-settings.json.j2"
-            )
+            installer = next(task for task in tasks if task["name"] == "Deploy ~/.claude/settings.json from template")
+            installer["ansible.builtin.command"]["argv"] = installer["ansible.builtin.command"]["argv"].replace(
+                "/usr/local/libexec/sandbar-safe-home-file", str(ROOT / "roles/user/files/safe_home_file.py"))
+            installer["ansible.builtin.command"]["stdin"] = installer["ansible.builtin.command"]["stdin"].replace(
+                "claude-settings.json.j2", str(role / "templates/claude-settings.json.j2"))
             group = grp.getgrgid(os.getgid()).gr_name
             for task in tasks:
-                module = task.get("ansible.builtin.template") or task.get("ansible.builtin.copy")
+                module = task.get("ansible.builtin.copy")
                 if module:
                     module["group"] = group
 
-            variables = {"user_home": str(home), "user_name": getpass.getuser()}
+            variables = {"user_home": str(home), "user_name": getpass.getuser(), "sand_preserved_home": True, "claude_notification_channel": "kitty"}
             play = [{"hosts": "all", "gather_facts": False, "tasks": tasks}]
             self.run_play(directory, play, variables)
             migrated = json.loads(settings.read_text())
-            self.assertIs(migrated["remoteControlAtStartup"], False)
-            self.assertIs(migrated["isolatePeerMachines"], True)
+            self.assertIs(migrated["remoteControlAtStartup"], True)
             self.assertEqual(migrated["theme"], "dark")
+            self.assertNotIn("preferredNotifChannel", migrated)
             self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
+            proposal = json.loads((home / ".config/sandbar/proposed-defaults/.claude/settings.json").read_text())
+            self.assertIs(proposal["remoteControlAtStartup"], False)
+            self.assertIs(proposal["isolatePeerMachines"], True)
 
             marker = home / ".config/sandbar/claude-remote-control-onboarding-complete"
-            marker.parent.mkdir(parents=True)
+            marker.parent.mkdir(parents=True, exist_ok=True)
             marker.touch()
             migrated["remoteControlAtStartup"] = True
             migrated["isolatePeerMachines"] = False
@@ -162,7 +173,7 @@ class AgentRolesTest(unittest.TestCase):
             self.run_play(directory, play, variables)
             opted_in = json.loads(settings.read_text())
             self.assertIs(opted_in["remoteControlAtStartup"], True)
-            self.assertIs(opted_in["isolatePeerMachines"], True)
+            self.assertIs(opted_in["isolatePeerMachines"], False)
 
     def test_agent_clipboard_shims_are_image_only(self):
         role = ROOT / "roles" / "agent-clipboard"
@@ -196,24 +207,29 @@ class AgentRolesTest(unittest.TestCase):
             directory = Path(temporary)
             home = directory / "guest"
             home.mkdir()
-            variables = {"user_home": str(home), "user_name": getpass.getuser()}
+            variables = {"user_home": str(home), "user_name": getpass.getuser(), "sand_fresh_clone": True}
             for role, relative in (("claude-code", ".claude/settings.json"), ("codex", ".codex/config.toml")):
+                variables.update(sand_fresh_clone=True, sand_preserved_agents=False)
                 target = home / relative
                 target.parent.mkdir(parents=True)
                 source = ROOT / "roles" / role
                 tasks = yaml.safe_load((source / "tasks/main.yml").read_text())
-                templates = [task for task in tasks if "ansible.builtin.template" in task]
-                for task in templates:
-                    task["ansible.builtin.template"]["src"] = str(source / "templates" / task["ansible.builtin.template"]["src"])
-                    task["ansible.builtin.template"]["group"] = grp.getgrgid(os.getgid()).gr_name
-                play = [{"hosts": "all", "gather_facts": False, "tasks": templates}]
+                setting_task = next(task for task in tasks if task["name"].startswith("Deploy ~/"))
+                command = setting_task["ansible.builtin.command"]
+                command["argv"] = command["argv"].replace(
+                    "/usr/local/libexec/sandbar-safe-home-file", str(ROOT / "roles/user/files/safe_home_file.py"))
+                template_name = "claude-settings.json.j2" if role == "claude-code" else "codex-config.toml.j2"
+                command["stdin"] = command["stdin"].replace(template_name, str(source / "templates" / template_name))
+                play = [{"hosts": "all", "gather_facts": False, "tasks": [setting_task]}]
                 self.run_play(directory, play, variables)
                 self.assertTrue(target.read_text())
                 target.write_text("preserved custom settings\n")
                 target.chmod(0o600)
+                variables.update(sand_fresh_clone=False, sand_preserved_agents=True)
                 self.run_play(directory, play, variables)
                 self.assertEqual(target.read_text(), "preserved custom settings\n")
                 self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+                self.assertTrue((home / ".config/sandbar/proposed-defaults" / relative).is_file())
                 # Execute the real installer shell against a fake download
                 # boundary. A restored binary must not suppress release fetching.
                 installers = [task for task in tasks if "ansible.builtin.shell" in task]
@@ -280,6 +296,7 @@ class AgentRolesTest(unittest.TestCase):
             launcher = next(task for task in tasks if task["name"] == "Configure the Claude Code interactive launcher")
             launcher["ansible.builtin.blockinfile"]["group"] = grp.getgrgid(os.getgid()).gr_name
             variables["user_name"] = getpass.getuser()
+            variables["sand_bashrc_writable"] = True
             self.run_play(directory, [{"hosts": "all", "gather_facts": False,
                                        "tasks": [launcher]}], variables)
             self.assertIn("claude-shell-wrapper.sh", bashrc.read_text())

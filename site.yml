@@ -61,3 +61,23 @@
         - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'
+
+  # These files receive deliberate sand block/line edits after the user role
+  # installs its defaults. Capture the final bytes on fresh guests only, so a
+  # later preserve-home reset can distinguish those defaults from user edits.
+  post_tasks:
+    - name: Record final sand home defaults
+      ansible.builtin.command:
+        argv: [python3, /usr/local/libexec/sandbar-safe-home-file, "{{ user_home }}", "{{ item.path }}", "{{ user_name }}", "0644", --record-current]
+      register: sand_recorded_home_default
+      changed_when: sand_recorded_home_default.stdout is search('^changed:')
+      loop:
+        - path: .bashrc
+          safe: "{{ provision_phase | default('full') == 'base' or sand_bashrc_writable | default(false) | bool }}"
+        - path: .profile
+          safe: "{{ provision_phase | default('full') == 'base' or sand_profile_writable | default(false) | bool }}"
+        - path: .gitconfig
+          safe: "{{ (sand_gitconfig_install.stdout | default('')) is search('installed default') }}"
+        - path: .claude/settings.json
+          safe: "{{ (sand_claude_settings_install.stdout | default('')) is search('installed default') and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool }}"
+      when: item.safe | bool

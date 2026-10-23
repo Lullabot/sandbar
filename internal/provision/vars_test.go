@@ -41,6 +41,38 @@ func parseVars(t *testing.T, data []byte) map[string]any {
 	return m
 }
 
+func TestBuildExtraVars_PreservationSignals(t *testing.T) {
+	cfg := fullConfig()
+	for _, tc := range []struct {
+		name                 string
+		opts                 PreservationVars
+		wantHome, wantAgents bool
+	}{
+		{"fresh", PreservationVars{FreshClone: true}, false, false},
+		{"preserved home and agents", PreservationVars{FreshClone: true, Home: true, Agents: true}, true, true},
+		{"preserved agents only", PreservationVars{FreshClone: true, Agents: true}, false, true},
+		{"golden template clone", PreservationVars{}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := BuildExtraVars(cfg, "finalize", cfg.Name, false, tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			vars := parseVars(t, data)
+			if (vars["sand_fresh_clone"] == true) != tc.opts.FreshClone || (vars["sand_preserved_home"] == true) != tc.wantHome || (vars["sand_preserved_agents"] == true) != tc.wantAgents {
+				t.Fatalf("preservation vars = %+v", vars)
+			}
+		})
+	}
+	data, err := BuildExtraVars(cfg, "full", cfg.Name, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars := parseVars(t, data); vars["sand_fresh_clone"] != nil || vars["sand_preserved_home"] != nil {
+		t.Fatalf("full reapply claimed a fresh clone: %+v", vars)
+	}
+}
+
 func TestBuildExtraVars_BasePhase(t *testing.T) {
 	cfg := fullConfig()
 	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)

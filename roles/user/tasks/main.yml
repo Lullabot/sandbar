@@ -3,6 +3,19 @@
 # the base image (skipped in the finalize phase). The exceptions are the
 # home-directory lookup, which both phases need, and ~/.gitconfig, which carries
 # the per-clone git identity and so runs in finalize (and the single-pass full).
+- name: Check whether a full run is creating a new account
+  ansible.builtin.command:
+    argv: [id, -u, "{{ user_name }}"]
+  register: sand_existing_user_probe
+  changed_when: false
+  failed_when: sand_existing_user_probe.rc not in [0, 1]
+  when: provision_phase | default('full') == 'full'
+
+- name: Remember a newly created full-run account
+  ansible.builtin.set_fact:
+    sand_new_user: "{{ sand_existing_user_probe.rc == 1 }}"
+  when: provision_phase | default('full') == 'full'
+
 - name: Generate a secure random password
   ansible.builtin.set_fact:
     user_password: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits', 'punctuation'], length=24) }}"
@@ -41,6 +54,39 @@
 - name: Set user home directory fact
   ansible.builtin.set_fact:
     user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+
+# Keep the installer outside the restored home. A preserved home may contain a
+# file with the same name as any of sand's config or metadata paths.
+- name: Ensure sand system helper directory exists
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install safe home default writer
+  ansible.builtin.copy:
+    src: safe_home_file.py
+    dest: /usr/local/libexec/sandbar-safe-home-file
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check whether preserved shell configuration is unchanged
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, item, user_name, '0644', '--check-managed'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+  loop: [.bashrc, .profile]
+  register: sand_shell_ownership
+  changed_when: false
+  failed_when: sand_shell_ownership.rc not in [0, 3]
+  when: provision_phase | default('full') != 'base'
+
+- name: Set preserved shell write permissions
+  ansible.builtin.set_fact:
+    sand_bashrc_writable: "{{ sand_shell_ownership.results[0].rc == 0 }}"
+    sand_profile_writable: "{{ sand_shell_ownership.results[1].rc == 0 }}"
+  when: provision_phase | default('full') != 'base'
 
 # The base playbook added its temporary user to docker, but the distributed
 # image removes that user. Apply this small per-login membership on finalize.
@@ -117,13 +163,12 @@
     - provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.ssh/rc
-  ansible.builtin.template:
-    src: ssh_rc.j2
-    dest: "{{ user_home }}/.ssh/rc"
-    mode: "0755"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-  when: provision_phase | default('full') != 'finalize'
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.ssh/rc', user_name, '0755'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'ssh_rc.j2') }}"
+    stdin_add_newline: false
+  register: sand_ssh_rc_install
+  changed_when: sand_ssh_rc_install.stdout is search('^changed:')
 
 # Deliberately UNGATED, unlike its identity-free neighbours above. Rendering a
 # small template is cheap enough to re-pay per clone, and paying it in finalize
@@ -131,23 +176,23 @@
 # the base image it was cloned from — a base can be up to 30 days old before its
 # self-refresh fires, and a stale ~/.tmux.conf is silently wrong rather than
 # broken (the template's clipboard block is what got noticed missing that way).
-# Nothing hand-edited is lost by re-rendering it: finalize only ever runs on a
-# guest that create or reset has just built.
+# The writer compares against the bytes previously installed by sand. A reset
+# restoring an edited or legacy home keeps that file and offers the new default.
 - name: Deploy ~/.tmux.conf
-  ansible.builtin.template:
-    src: tmux.conf.j2
-    dest: "{{ user_home }}/.tmux.conf"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.tmux.conf', user_name, '0644'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'tmux.conf.j2') }}"
+    stdin_add_newline: false
+  register: sand_tmux_install
+  changed_when: sand_tmux_install.stdout is search('^changed:')
 
 - name: Deploy ~/.gitconfig
-  ansible.builtin.template:
-    src: gitconfig.j2
-    dest: "{{ user_home }}/.gitconfig"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.gitconfig', user_name, '0644', '--preserve-git-credentials-block'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'gitconfig.j2') }}"
+    stdin_add_newline: false
+  register: sand_gitconfig_install
+  changed_when: sand_gitconfig_install.stdout is search('^changed:')
   when: provision_phase | default('full') != 'base'
 
 - name: Ensure ~/.local/bin directory exists
@@ -169,15 +214,12 @@
   when: provision_phase | default('full') != 'finalize'
 
 - name: Deploy ~/.config/direnv/direnv.toml
-  ansible.builtin.copy:
-    content: |
-      [global]
-      load_dotenv = true
-    dest: "{{ user_home }}/.config/direnv/direnv.toml"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
-  when: provision_phase | default('full') != 'finalize'
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/direnv/direnv.toml', user_name, '0644'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "[global]\nload_dotenv = true\n"
+    stdin_add_newline: false
+  register: sand_direnv_install
+  changed_when: sand_direnv_install.stdout is search('^changed:')
 
 - name: Ensure ~/.config/sandbar directory exists
   ansible.builtin.file:
@@ -202,7 +244,7 @@
       if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
         . "$HOME/.config/sandbar/secrets.env"
       fi
-  when: provision_phase | default('full') != 'finalize'
+  when: provision_phase | default('full') == 'base' or sand_bashrc_writable | default(false) | bool
 
 - name: Source the sandbar secrets file from ~/.profile (login shells)
   ansible.builtin.blockinfile:
@@ -217,7 +259,21 @@
       if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
         . "$HOME/.config/sandbar/secrets.env"
       fi
-  when: provision_phase | default('full') != 'finalize'
+  when: provision_phase | default('full') == 'base' or sand_profile_writable | default(false) | bool
+
+- name: Offer shell defaults for edited or unknown preserved files
+  ansible.builtin.command:
+    argv: [python3, /usr/local/libexec/sandbar-safe-home-file, "{{ user_home }}", "{{ item.path }}", "{{ user_name }}", "0644", --propose-only]
+    stdin: "{{ lookup('ansible.builtin.template', item.template) }}"
+    stdin_add_newline: false
+  register: sand_shell_proposal
+  changed_when: sand_shell_proposal.stdout is search('^changed:')
+  loop:
+    - {path: .bashrc, template: bashrc-additions.j2, writable: "{{ sand_bashrc_writable | default(false) | bool }}"}
+    - {path: .profile, template: profile-additions.j2, writable: "{{ sand_profile_writable | default(false) | bool }}"}
+  when:
+    - provision_phase | default('full') != 'base'
+    - not item.writable | bool
 
 - name: Display generated password for {{ user_name }}
   ansible.builtin.debug:
