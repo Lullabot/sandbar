@@ -89,7 +89,7 @@ func TestReset_RestoreFromRebuildsAndRestores(t *testing.T) {
 	}
 	restore := findCall(t, f.calls, 0, "the home restore", isTarIn)
 	finalize := findCall(t, f.calls, 0, "the finalize playbook", func(c []string) bool {
-		return hasTok(c, "shell") && hasTok(c, "bash")
+		return hasTok(c, "shell") && strings.Contains(strings.Join(c, " "), "ansible-playbook")
 	})
 	if restore > finalize {
 		t.Errorf("home restored at call %d, after finalize at %d", restore, finalize)

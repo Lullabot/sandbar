@@ -77,9 +77,11 @@ func TestTmuxConfDeployedInEveryPhase(t *testing.T) {
 				" silently, since a stale tmux config is wrong rather than broken. Rendering this template is cheap"+
 				" enough to re-pay per clone; that is why it is ungated.", name, tasksPath, when)
 		}
-		if src, _ := task["ansible.builtin.template"].(map[string]any)["src"]; src != "tmux.conf.j2" {
-			t.Errorf("the %q task no longer templates tmux.conf.j2 (src = %v); %s asserts on the wrong file",
-				name, src, tmuxConfPath)
+		command, ok := task["ansible.builtin.command"].(map[string]any)
+		if !ok || !strings.Contains(fmt.Sprint(command["argv"]), "sandbar-safe-home-file") ||
+			!strings.Contains(fmt.Sprint(command["argv"]), ".tmux.conf") ||
+			!strings.Contains(fmt.Sprint(command["stdin"]), "tmux.conf.j2") {
+			t.Errorf("%q must pass the rendered tmux template to the safe home installer: %v", name, command)
 		}
 	}
 	if !found {
