@@ -144,6 +144,17 @@ func RecordSuccessWithTemplate(reg *registry.Registry, cfg vm.CreateConfig, scop
 	// Create / provision OnCloned), flipping the VM from "building" to "ready"
 	// for every controller that reads it.
 	pv := provider.NewProvenance(cfg, false)
+	// Providers stamp the clone source while holding its clone lock and record
+	// setup only after finalize succeeds. Do not replace that history with a
+	// fresh guess from today's shared base or playbook here.
+	recorded, ok, err := p.ProvenanceOf(context.Background(), cfg.Name)
+	if err != nil {
+		return fmt.Errorf("read %s provenance before success record: %w", cfg.Name, err)
+	}
+	if ok && !recorded.Provisioning {
+		pv.BaseRevision = recorded.BaseRevision
+		pv.SetupRevision = recorded.SetupRevision
+	}
 	if err := p.MarkManaged(context.Background(), cfg.Name, pv); err != nil {
 		return fmt.Errorf("mark %s managed (provenance): %w", cfg.Name, err)
 	}

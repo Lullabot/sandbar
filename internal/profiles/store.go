@@ -51,6 +51,12 @@ func Load() (*Store, error) {
 	return LoadFrom(defaultPath())
 }
 
+// LoadReadOnly keeps the same parsed profiles and in-memory Local fallback
+// without seeding a file or quarantining a corrupt one.
+func LoadReadOnly() (*Store, error) {
+	return loadFrom(defaultPath(), true)
+}
+
 // LoadFrom reads the store from an explicit path. A missing or empty file
 // seeds a single enabled Local profile and persists it immediately, so an
 // unconfigured sand behaves as today. A corrupt (unparseable) file is moved
@@ -66,22 +72,37 @@ func Load() (*Store, error) {
 // failure degrades to "local-only, with a warning" rather than locking the
 // user out of even purely-local VMs.
 func LoadFrom(path string) (*Store, error) {
+	return loadFrom(path, false)
+}
+
+func loadFrom(path string, readOnly bool) (*Store, error) {
 	s := &Store{path: path, profiles: map[string]Profile{}}
+	seed := func() error {
+		if readOnly {
+			s.seedLocalInMemory()
+			return nil
+		}
+		return s.seedLocal()
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return s, s.seedLocal()
+			return s, seed()
 		}
 		s.seedLocalInMemory()
 		return s, fmt.Errorf("profiles file at %s could not be read: %w", path, err)
 	}
 	if len(data) == 0 {
-		return s, s.seedLocal()
+		return s, seed()
 	}
 
 	var parsed fileSchema
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		if readOnly {
+			s.seedLocalInMemory()
+			return s, fmt.Errorf("profiles file at %s was unreadable: %w", path, err)
+		}
 		_ = os.Rename(path, path+".corrupt")
 		seedErr := s.seedLocal()
 		wrapped := fmt.Errorf("profiles file at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
@@ -106,7 +127,7 @@ func LoadFrom(path string) (*Store, error) {
 	s.lastUsed = parsed.LastUsed
 
 	if len(s.profiles) == 0 {
-		return s, s.seedLocal()
+		return s, seed()
 	}
 	return s, nil
 }

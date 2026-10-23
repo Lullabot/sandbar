@@ -267,24 +267,16 @@ func doTemplateList(reg *registry.Registry, prov templateDiskSizer, scope regist
 		return nil
 	}
 
-	// currentVersionFor answers "would a snapshot taken right now, with this
-	// template's own tool-set, differ from what's recorded?" — the same
-	// staleness question the base image asks of itself (provision.PlaybookVersion).
-	// A playbook the binary cannot locate (a broken build) degrades to "unknown"
-	// rather than falsely marking every template stale.
-	dir, dirErr := provision.LocatePlaybook()
-
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSIZE\tCREATED\tSOURCE\tSTATUS")
 	for _, t := range templates {
 		size := humanizeTemplateBytes(prov.TemplateDiskBytes(vm.TemplateInstanceName(t.Name)))
-		status := "current"
-		if dirErr != nil || t.PlaybookVersion == "" {
-			status = "unknown"
-		} else if cur, err := provision.PlaybookVersion(os.DirFS(dir), t.ToolsetKey); err != nil || cur != t.PlaybookVersion {
-			if err != nil {
-				status = "unknown"
-			} else {
+		status := "unknown"
+		if p, ok := prov.(provider.Provider); ok {
+			switch provider.CheckUpdates(context.Background(), p, provider.Provenance{Config: t.Config, BaseRevision: t.PlaybookVersion}).Base {
+			case provider.UpdateCurrent:
+				status = "current"
+			case provider.UpdateAvailable:
 				status = "stale"
 			}
 		}

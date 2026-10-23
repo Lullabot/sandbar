@@ -122,6 +122,8 @@ func TestProxmoxProvenanceRoundTrip(t *testing.T) {
 		Config:         vm.CreateConfig{Name: "web", BaseName: "sandbar-base", CPUs: 4},
 		SandbarVersion: "0.6.0",
 		CreatedAt:      "2026-07-20T00:00:00Z",
+		BaseRevision:   "published-base-v1",
+		SetupRevision:  "setup-v1:abc123",
 	}
 	if err := p.MarkManaged(context.Background(), "web", want); err != nil {
 		t.Fatalf("MarkManaged: %v", err)
