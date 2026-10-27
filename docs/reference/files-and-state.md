@@ -113,6 +113,8 @@ Source: `internal/provision/preserve.go` (`AgentStatePaths`).
 | --- | --- |
 | `~/.config/sandbar/secrets.env` | The VM's **global**-scope secrets, one `export KEY='VALUE'` line per pair. Sourced from both `~/.profile` and `~/.bashrc` so it's available in every shell type. Removed on VM start if no global secrets are stored, so stale values don't linger. |
 | `~/<scope>/.env` | A **scoped** secret set for directory `<scope>`, auto-loaded by direnv when you `cd` into it and unloaded when you leave. |
+| `~/.config/sandbar/home-baselines/` | Copies of home files sand actually installed. A preserved-home reset compares their bytes to recognize unchanged provisioned files; missing baselines mean unknown ownership. |
+| `~/.config/sandbar/proposed-defaults/` | New defaults that could not safely replace an edited, untracked, deleted, or symlinked home path during a preserved-home reset. Review them manually. |
 
 Source: `internal/provision/secrets.go:37` (global scope sourced from `.profile`/`.bashrc`) and `internal/provision/secrets.go:78` (`RenderDotenv` for a scoped `~/<scope>/.env`).
 

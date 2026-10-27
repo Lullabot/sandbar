@@ -15,15 +15,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool
 
 - name: Deploy ~/.codex/config.toml from template
-  ansible.builtin.template:
-    src: codex-config.toml.j2
-    dest: "{{ user_home }}/.codex/config.toml"
-    force: false
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.codex/config.toml', user_name, '0644'] + (['--preserved-home'] if (sand_preserved_home | default(false) | bool) or (sand_preserved_agents | default(false) | bool) else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'codex-config.toml.j2') }}"
+    stdin_add_newline: false
+  register: sand_codex_config_install
+  changed_when: sand_codex_config_install.stdout is search('^changed:')
 
 - name: Install OpenAI Codex using the official installer
   ansible.builtin.shell:
@@ -44,6 +44,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: sand_bashrc_writable | default(false) | bool
 
 - name: Ensure ~/.config/sandbar directory exists
   ansible.builtin.file:
@@ -52,14 +53,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0700"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install Codex first-run remote-control wrapper
-  ansible.builtin.copy:
-    src: codex-shell-wrapper.sh
-    dest: "{{ user_home }}/.config/sandbar/codex-shell-wrapper.sh"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/sandbar/codex-shell-wrapper.sh', user_name, '0644'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.file', 'codex-shell-wrapper.sh') }}"
+    stdin_add_newline: false
+  register: sand_codex_wrapper_install
+  changed_when: sand_codex_wrapper_install.stdout is search('^changed:')
 
 - name: Ensure user systemd directory exists for Codex
   ansible.builtin.file:
@@ -68,14 +70,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install disabled Codex boot service
-  ansible.builtin.copy:
-    src: sandbar-codex-app-server.service
-    dest: "{{ user_home }}/.config/systemd/user/sandbar-codex-app-server.service"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/systemd/user/sandbar-codex-app-server.service', user_name, '0644'] + (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + (['--fresh-clone'] if sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else []) }}"
+    stdin: "{{ lookup('ansible.builtin.file', 'sandbar-codex-app-server.service') }}"
+    stdin_add_newline: false
+  register: sand_codex_service_install
+  changed_when: sand_codex_service_install.stdout is search('^changed:')
 
 # VMs that completed onboarding before the boot service was introduced already
 # have the marker, so their wrapper will not run the opt-in path again.
@@ -124,3 +127,4 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: sand_bashrc_writable | default(false) | bool
