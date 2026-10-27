@@ -93,6 +93,12 @@ func (p *limaProvider) ProvenanceOf(ctx context.Context, name string) (Provenanc
 // clone. An invariant that matters this much is enforced here rather than
 // assumed of every caller.
 func (p *limaProvider) MarkManaged(ctx context.Context, name string, pv Provenance) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
+	return p.markManagedUnlocked(ctx, name, pv)
+}
+
+func (p *limaProvider) markManagedUnlocked(ctx context.Context, name string, pv Provenance) error {
 	data, err := json.Marshal(pv)
 	if err != nil {
 		return fmt.Errorf("encode provenance marker for %s: %w", name, err)
@@ -107,10 +113,31 @@ func (p *limaProvider) MarkManaged(ctx context.Context, name string, pv Provenan
 	return nil
 }
 
+func (p *limaProvider) MarkProgress(ctx context.Context, name string, progress Provenance) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
+	stored, ok, err := p.ProvenanceOf(ctx, name)
+	if err != nil {
+		return err
+	}
+	if ok && !stored.Provisioning {
+		return nil
+	}
+	progress.Provisioning = true
+	progress.SchemaVersion = MarkerSchemaVersion
+	progress.BaseRevision, progress.SetupRevision = "", ""
+	if ok {
+		progress.BaseRevision = stored.BaseRevision
+	}
+	return p.markManagedUnlocked(ctx, name, progress)
+}
+
 // Unmark clears any provenance marker for name. RemoveAll's "missing path is
 // not an error" contract means unmarking an already-unmanaged instance is a
 // silent no-op, not a failure.
 func (p *limaProvider) Unmark(ctx context.Context, name string) error {
+	p.provenanceMu.Lock()
+	defer p.provenanceMu.Unlock()
 	hf := p.hostFiles
 	if err := hf.RemoveAll(lima.MarkerPath(hf, name)); err != nil {
 		return fmt.Errorf("remove provenance marker for %s: %w", name, err)
@@ -123,3 +150,4 @@ func (p *limaProvider) Unmark(ctx context.Context, name string) error {
 // *limaProvider and inherits these four methods unchanged, so it needs no
 // method of its own — only its own compile-time assertion (see remote.go).
 var _ Provenancer = (*limaProvider)(nil)
+var _ ProgressProvenancer = (*limaProvider)(nil)

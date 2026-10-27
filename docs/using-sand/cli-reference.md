@@ -6,6 +6,8 @@ There are nine entry points:
 - [`sand create`](#sand-create) — headless, non-interactive VM provisioning.
 - [`sand reset NAME`](#sand-reset-name) — rebuild an existing VM from its base
   image, optionally preserving selected directories or the whole guest home.
+- [`sand updates NAME`](#sand-updates-name) — inspect independent base and setup
+  revisions without changing the VM; `--json` is available for scripts.
 - [`sand template`](#sand-template) — snapshot, list, and delete golden VM
   templates.
 - [`sand shell NAME`](#sand-shell-name) — attach to a running VM's persistent
@@ -607,6 +609,32 @@ Flags:
   -user string
     	Primary VM user (default: whatever this VM has)
 ```
+
+## `sand updates NAME`
+
+Inspect the VM's base and setup revisions separately, including VMs created
+by older sand versions with no comparable history. The command reads provider
+metadata and does not start the guest, provision it, or change its records.
+
+```sh
+sand updates web
+sand updates web --profile work --json
+```
+
+Each field is `current`, `update_available`, or `unknown` in JSON. The text
+view says “update available” or “version unknown” and offers an explicit
+`sand reset NAME --profile PROFILE --preserve-home` command. Reset rebuilds
+the VM; it never runs merely because an update was detected. If the VM was
+cloned from a golden template, reset uses that same template, so refresh the
+template before resetting to receive a newer base. `current` means the
+recorded source or setup recipe matches this build. It does not mean user
+files are unchanged or that upstream packages and agents have their latest
+releases.
+
+| Flag | Meaning |
+| --- | --- |
+| `--profile NAME` | Select the connection profile that owns the VM. Otherwise sand resolves it from its managed record, marker, or live listing. |
+| `--json` | Output one JSON object with `name`, `profile`, `base`, and `setup`. |
 
 ## `sand template`
 
