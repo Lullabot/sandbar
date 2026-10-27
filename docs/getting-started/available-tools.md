@@ -55,6 +55,14 @@ The channel reflects the terminal used during provisioning. If you later
 connect from a different terminal, change `preferredNotifChannel` in the guest's
 `~/.claude/settings.json` to match it.
 
+### Lullabot agent-environment marker
+
+Every VM carries an empty `/etc/lullabot/agent-environment` file. Lullabot's
+Claude Code policy hooks treat a machine with this file as an approved agent
+environment, so sessions there do not need per-command approval. New VMs get
+it during provisioning. Older VMs get it the next time you open a shell with
+`S` or `sand shell`, with no rebuild or reset.
+
 ## Git
 
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git
