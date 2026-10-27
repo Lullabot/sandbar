@@ -88,8 +88,28 @@ import "regexp"
 // **terminalSetupCmds is prepended to BOTH new-session commands** — see its own comment
 // for what it does and why it is here rather than only in the shipped ~/.tmux.conf.
 func guestAttachExpr(colortermEnv, ccFlag string) string {
-	return `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -s main; fi`
+	return agentEnvironmentCmd + `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -s main; fi`
 }
+
+// agentEnvironmentMarker is the empty file Lullabot's Claude Code policy hooks
+// look for: its presence marks the machine as an approved, disposable agent
+// environment, where sessions may run without per-command approval.
+const agentEnvironmentMarker = "/etc/lullabot/agent-environment"
+
+// agentEnvironmentCmd creates agentEnvironmentMarker if it is missing. roles/base
+// writes the marker during provisioning; this command applies it to VMs
+// provisioned before that, which is every VM already in existence when this
+// landed, so they need no rebuild or reset. It works the way terminalSetupCmds
+// does for tmux settings. The hooks check the file on every tool call, so a
+// Claude session that was already running in `main` picks it up too.
+//
+// It must never stop the attach. `sudo -n` fails instead of prompting where
+// sudo needs a password, the error goes to /dev/null, and `;` (not `&&`) runs the
+// tmux branch either way. It prints nothing on stdout, which matters for
+// `-CC`, whose stdout is a protocol stream. Once the file exists, the `[ -e ]`
+// test is the only cost. It contains no single quote, so the ssh-transport
+// providers can wrap the expression unchanged (see terminalSetupCmds).
+const agentEnvironmentCmd = `[ -e ` + agentEnvironmentMarker + ` ] || sudo -n install -D -m 0644 /dev/null ` + agentEnvironmentMarker + ` 2>/dev/null; `
 
 // AttachMode selects which kind of tmux CLIENT the attach expression starts.
 // It changes ONE token — whether `-CC` precedes `new-session` — and nothing

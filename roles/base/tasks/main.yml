@@ -50,6 +50,29 @@
     group: root
     mode: "0644"
 
+# Lullabot's Claude Code policy hooks treat a machine carrying this file as an
+# approved, disposable agent environment, where sessions may run without
+# per-command approval. Its presence is the whole signal; it stays empty.
+#
+# Ungated by phase so every clone gets it whatever base it came from. VMs
+# provisioned before this task existed get it from the attach command instead
+# (internal/lima.agentEnvironmentCmd), so they need no rebuild or reset.
+- name: Ensure the Lullabot policy marker directory exists
+  ansible.builtin.file:
+    path: /etc/lullabot
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mark the VM as an approved agent environment
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/lullabot/agent-environment
+    owner: root
+    group: root
+    mode: "0644"
+
 # Renaming a guest does not tell its DHCP server, so a server that publishes
 # DNS from the hostname option keeps answering for whatever name the lease was
 # taken under — nothing, for a clone, whose template ships no /etc/hostname
