@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/Lullabot/sandbar/compare/v0.15.0...v0.16.0) (2026-10-27)
+
+
+### Features
+
+* mark every VM as a Lullabot agent environment ([#292](https://github.com/Lullabot/sandbar/issues/292)) ([1e73662](https://github.com/Lullabot/sandbar/commit/1e7366236c4bbdb802d88acffead3ce3270d214f))
+
 ## [0.15.0](https://github.com/Lullabot/sandbar/compare/v0.14.0...v0.15.0) (2026-10-23)
 
 
