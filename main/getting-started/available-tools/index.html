@@ -693,6 +693,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#lullabot-agent-environment-marker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lullabot agent-environment marker
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1464,6 +1475,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#lullabot-agent-environment-marker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lullabot agent-environment marker
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1569,6 +1591,12 @@ See <a href="https://code.claude.com/docs/en/terminal-config#get-a-terminal-bell
 <p>The channel reflects the terminal used during provisioning. If you later
 connect from a different terminal, change <code>preferredNotifChannel</code> in the guest's
 <code>~/.claude/settings.json</code> to match it.</p>
+<h3 id="lullabot-agent-environment-marker">Lullabot agent-environment marker</h3>
+<p>Every VM carries an empty <code>/etc/lullabot/agent-environment</code> file. Lullabot's
+Claude Code policy hooks treat a machine with this file as an approved agent
+environment, so sessions there do not need per-command approval. New VMs get
+it during provisioning. Older VMs get it the next time you open a shell with
+<code>S</code> or <code>sand shell</code>, with no rebuild or reset.</p>
 <h2 id="git">Git</h2>
 <ul>
 <li>The <a href="https://cli.github.com/">GitHub CLI (<code>gh</code>)</a>, configured as the git
