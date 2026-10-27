@@ -65,3 +65,27 @@
           /etc/default/locale, /etc/timezone + /etc/localtime) did not land as
           expected.
         success_msg: "base role foundational setup verified."
+
+    - name: Stat the Lullabot agent-environment marker
+      ansible.builtin.stat:
+        path: /etc/lullabot/agent-environment
+      register: _agent_environment
+
+    # Lullabot's Claude Code policy hooks only test that this file exists, so
+    # the check is that it is a plain, empty, root-owned file. Whether it
+    # survives being gated out of finalize cannot be checked here, because the
+    # base play has already written it by then.
+    # TestAgentEnvironmentMarkerDeployedInEveryPhase covers that instead.
+    - name: Assert the agent-environment marker landed
+      ansible.builtin.assert:
+        that:
+          - _agent_environment.stat.exists
+          - _agent_environment.stat.isreg
+          - _agent_environment.stat.size == 0
+          - _agent_environment.stat.pw_name == "root"
+          - _agent_environment.stat.gr_name == "root"
+          - _agent_environment.stat.mode == "0644"
+        fail_msg: >-
+          /etc/lullabot/agent-environment is missing or is not an empty,
+          root-owned 0644 file.
+        success_msg: "agent-environment marker verified."
