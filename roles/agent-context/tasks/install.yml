@@ -76,8 +76,22 @@
     group: "{{ user_name }}"
   loop:
     - SKILL.md
+    - references/host.md
+    - references/ports.md
+    - references/review.md
+    - references/secrets.md
     - references/terminal.md
     - references/tools.md
+
+# The one reference that differs per VM: the name host-side `sand` commands
+# take and the profile type that decides how a guest port is reached. Neither
+# is discoverable from inside the guest, so BuildExtraVars passes both.
+- name: Describe this VM to the environment skill
+  ansible.builtin.template:
+    src: references/this-vm.md.j2
+    dest: "{{ agent_context_skill_path }}/references/this-vm.md"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
 
 - name: Ensure Claude skill directory exists
   ansible.builtin.file:

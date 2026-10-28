@@ -1,0 +1,25 @@
+# This VM
+
+{% if sandbar_vm_name | default('') %}
+- VM name: `{{ sandbar_vm_name }}`. Host-side `sand` commands take this
+  name, which can differ from `hostname`.
+{% else %}
+- VM name: not recorded when this VM was provisioned. Ask the user, or try
+  `hostname`, which matches the name unless a custom hostname was set.
+{% endif %}
+{% if sandbar_profile_type | default('') %}
+- Connection profile type: `{{ sandbar_profile_type }}`.
+{% else %}
+- Connection profile type: not recorded. A `/mnt/lima-cidata` directory
+  suggests Lima (`local` or `remote-ssh`); ask the user which.
+{% endif %}
+
+Profile types:
+
+- `local`: Lima on the user's workstation. Guest ports appear on the
+  workstation's `localhost`.
+- `remote-ssh`: Lima on another machine the workstation reaches over SSH.
+  Guest ports appear on that machine's loopback, not the workstation's.
+- `proxmox`: a Proxmox VE VM with its own network address.
+
+See [ports.md](ports.md) for what each means for reaching a guest server.

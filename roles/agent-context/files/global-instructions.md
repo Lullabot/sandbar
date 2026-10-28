@@ -4,5 +4,8 @@ authorized, use passwordless `sudo` in the guest when system changes need it;
 sudo itself needs no additional confirmation. Keep changes within the requested
 task and do not assume access to the host.
 
-For Sandbar's tmux, clipboard, and installed tool conventions, use the
-`sandbar-environment` skill when those details matter.
+Use the `sandbar-environment` skill for this VM's name, host-side `sand`
+commands (shell, land, review, reset, upgrades), reaching guest ports from the
+workstation, secrets and tokens, browser review of changes, tmux keys, the
+clipboard, and installed tools. Prefer it over general knowledge for these:
+Sandbar's answers differ from the usual defaults.
