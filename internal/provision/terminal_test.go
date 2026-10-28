@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/profiles"
 )
 
 func TestDetectClaudeNotificationChannel(t *testing.T) {
@@ -44,7 +46,7 @@ func TestBuildExtraVarsClaudeNotifications(t *testing.T) {
 		for _, selected := range []bool{false, true} {
 			cfg := fullConfig()
 			cfg.WithClaude = selected
-			data, err := BuildExtraVars(cfg, phase, "guest", false)
+			data, err := BuildExtraVars(cfg, phase, "guest", profiles.TypeLocal, false)
 			if err != nil {
 				t.Fatal(err)
 			}

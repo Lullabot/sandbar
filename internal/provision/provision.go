@@ -13,6 +13,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -230,7 +231,7 @@ func step(out io.Writer, format string, args ...any) {
 // base self-refresh run (see reapplyBase), never for a cold base build and
 // never for finalize.
 func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname string, cfg vm.CreateConfig, aptUpgrade bool, out io.Writer) error {
-	vars, err := BuildExtraVars(cfg, phase, hostname, aptUpgrade)
+	vars, err := BuildExtraVars(cfg, phase, hostname, p.profileType(), aptUpgrade)
 	if err != nil {
 		return fmt.Errorf("build extra-vars (%s): %w", phase, err)
 	}
@@ -249,6 +250,16 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 // BuildBase creates a clone source from the verified published image.
 func (p *Provisioner) BuildBase(ctx context.Context, cfg vm.CreateConfig, out io.Writer) error {
 	return p.buildBase(ctx, cfg, out, newPhaseTimer(out))
+}
+
+// profileType reports which Lima-backed profile type this Provisioner serves:
+// a remote-Lima provider hands it an SSHHost, and every local construction
+// leaves HostFiles nil or local.
+func (p *Provisioner) profileType() profiles.Type {
+	if _, remote := p.HostFiles.(*lima.SSHHost); remote {
+		return profiles.TypeRemoteSSH
+	}
+	return profiles.TypeLocal
 }
 
 func (p *Provisioner) baseImageArch(ctx context.Context) (string, error) {
