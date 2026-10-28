@@ -71,8 +71,12 @@ passwordless `sudo` is available for guest system changes within work you have
 authorized, without asking again solely because a command uses `sudo`. It does
 not replace the agent's system prompt or grant access to your workstation.
 
-The block points to the shared `sandbar-environment` skill for details about
-Sandbar's tmux keys, persistent sessions, clipboard, and installed tools. The
+The block points to the shared `sandbar-environment` skill. Its references
+cover the VM's name and connection profile type, the `sand` commands you run
+on your workstation (including what `sand reset` deletes), reaching guest
+ports from your workstation, where secrets and tokens come from, browser
+review with `self-review-serve`, tmux keys, the clipboard, and installed
+tools. Each reference links the documentation page it summarizes. The
 skill and its local references live at `~/.agents/skills/sandbar-environment`.
 Claude Code discovers the same skill through a symlink at
 `~/.claude/skills/sandbar-environment`. The instruction blocks live at:

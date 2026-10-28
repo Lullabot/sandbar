@@ -22,7 +22,7 @@ INSTRUCTIONS = {
 
 
 class AgentContextTest(unittest.TestCase):
-    def run_role(self, directory, home, phase="finalize", selected=(), successful=True):
+    def run_role(self, directory, home, phase="finalize", selected=(), successful=True, extra=None):
         play = [{
             "hosts": "all", "gather_facts": False, "become": False,
             "roles": ["agent-context"],
@@ -33,6 +33,7 @@ class AgentContextTest(unittest.TestCase):
             "user_home": str(home), "user_name": getpass.getuser(),
             "provision_phase": phase,
             **{"toolset_" + agent: agent in selected for agent in INSTRUCTIONS},
+            **(extra or {}),
         }
         result = subprocess.run(
             ["ansible-playbook", "-i", "localhost,", "-c", "local", str(playbook),
@@ -72,10 +73,43 @@ class AgentContextTest(unittest.TestCase):
                     self.assertEqual(claude_skill.exists(), "claude" in installed)
                     if installed:
                         self.assertIn("sandbar-environment", skill.read_text())
-                        self.assertTrue((home / ".agents/skills/sandbar-environment/references/terminal.md").exists())
-                        self.assertTrue((home / ".agents/skills/sandbar-environment/references/tools.md").exists())
+                        for reference in ("host", "ports", "review", "secrets", "terminal", "tools", "this-vm"):
+                            self.assertTrue((home / f".agents/skills/sandbar-environment/references/{reference}.md").exists(), reference)
                     if "claude" in installed:
                         self.assertEqual(claude_skill.resolve(), skill.resolve())
+
+    def test_this_vm_reference_names_the_vm_and_profile_type(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            this_vm = Path(".agents/skills/sandbar-environment/references/this-vm.md")
+            known = directory / "known"
+            known.mkdir()
+            self.run_role(directory, known, selected=("codex",), extra={
+                "sandbar_vm_name": "web", "sandbar_profile_type": "remote-ssh"})
+            text = (known / this_vm).read_text()
+            self.assertIn("VM name: `web`", text)
+            self.assertIn("Connection profile type: `remote-ssh`", text)
+
+            # A playbook run by a sand that predates these vars still renders a
+            # usable file, telling the agent how to find out instead.
+            unknown = directory / "unknown"
+            unknown.mkdir()
+            self.run_role(directory, unknown, selected=("codex",))
+            text = (unknown / this_vm).read_text()
+            self.assertIn("not recorded", text)
+            self.assertNotIn("``", text)
+
+    def test_skill_links_resolve(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            home = directory / "guest"
+            home.mkdir()
+            self.run_role(directory, home, selected=("codex",))
+            skill = home / ".agents/skills/sandbar-environment"
+            for page in [skill / "SKILL.md", *sorted((skill / "references").glob("*.md"))]:
+                for target in re.findall(r"\]\(([^)#:]+\.md)\)", page.read_text()):
+                    with self.subTest(page=page.name, target=target):
+                        self.assertTrue((page.parent / target).is_file())
 
     def test_personal_content_modes_and_unrelated_skills_survive_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
