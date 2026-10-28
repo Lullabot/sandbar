@@ -1101,6 +1101,12 @@ shared rules.
 
 ## Conventions
 
+- **Update main before starting a new branch.** When branching from a local
+  `main` checkout, run `git pull --ff-only origin main` first. If `main` is
+  checked out in another worktree, run `git fetch origin main` and create the
+  new branch from the updated `origin/main` instead. This applies to every
+  coding agent, including Codex and Claude Code; do not start new work from a
+  stale main or an unrelated feature branch.
 - **Commits use [Conventional Commits](https://www.conventionalcommits.org)**
   (`feat:`, `fix:`, `test:`, `ci:`, `docs:`, `chore:`, scopes like
   `fix(reset):`). Releases are automated by release-please, which parses them.

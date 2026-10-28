@@ -63,6 +63,38 @@ environment, so sessions there do not need per-command approval. New VMs get
 it during provisioning. Older VMs get it the next time you open a shell with
 `S` or `sand shell`, with no rebuild or reset.
 
+### Global Sandbar environment context
+
+During provisioning of a new VM, each selected agent receives a short global
+instruction block identifying the Sandbar guest. It tells the agent that
+passwordless `sudo` is available for guest system changes within work you have
+authorized, without asking again solely because a command uses `sudo`. It does
+not replace the agent's system prompt or grant access to your workstation.
+
+The block points to the shared `sandbar-environment` skill. Its references
+cover the VM's name and connection profile type, the `sand` commands you run
+on your workstation (including what `sand reset` deletes), reaching guest
+ports from your workstation, where secrets and tokens come from, browser
+review with `self-review-serve`, tmux keys, the clipboard, and installed
+tools. Each reference links the documentation page it summarizes. The
+skill and its local references live at `~/.agents/skills/sandbar-environment`.
+Claude Code discovers the same skill through a symlink at
+`~/.claude/skills/sandbar-environment`. The instruction blocks live at:
+
+| Agent | Global instruction file |
+| --- | --- |
+| Claude Code | `~/.claude/CLAUDE.md` |
+| Codex | `~/.codex/AGENTS.md` |
+| Pi | `~/.pi/agent/AGENTS.md` |
+| OpenCode | `~/.config/opencode/AGENTS.md` |
+
+Provisioning preserves personal text in those files and unrelated skills. It
+refreshes only Sandbar's marked block and skill files; a user-owned skill at
+the same destination causes provisioning to stop with a collision error. A VM
+with no agents selected receives no agent context. Existing running VMs are
+not updated automatically. Start a fresh agent session after provisioning to
+load the global context.
+
 ## Git
 
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git

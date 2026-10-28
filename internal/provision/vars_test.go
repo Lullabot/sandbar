@@ -3,6 +3,8 @@ package provision
 import (
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/vm"
 	"gopkg.in/yaml.v3"
 )
@@ -43,7 +45,7 @@ func parseVars(t *testing.T, data []byte) map[string]any {
 
 func TestBuildExtraVars_BasePhase(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestBuildExtraVars_BasePhase(t *testing.T) {
 func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithJava = false
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -127,7 +129,7 @@ func TestBuildExtraVars_ToolsetReflectsConfig(t *testing.T) {
 func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithClaude = false
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -147,7 +149,7 @@ func TestBuildExtraVars_ClaudeCanBeDeselected(t *testing.T) {
 // source of drift at worst.
 func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -166,7 +168,7 @@ func TestBuildExtraVars_ToolsetOmittedOnFinalize(t *testing.T) {
 func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 	cfg := fullConfig()
 	cfg.WithCodex = true
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -183,7 +185,7 @@ func TestBuildExtraVars_CodexCanBeSelected(t *testing.T) {
 func TestBuildExtraVars_FinalizePhase(t *testing.T) {
 	cfg := fullConfig()
 	cfg.DockerProxyHost = "proxy.lan:5000"
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -224,7 +226,7 @@ func TestBuildExtraVars_FinalizePhase(t *testing.T) {
 
 func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 	cfg := fullConfig() // DockerProxyHost empty
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", false)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -242,7 +244,7 @@ func TestBuildExtraVars_NoDockerProxyByDefault(t *testing.T) {
 // cold base build never gets a second apt pass (the "one apt pass" property).
 func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -258,7 +260,7 @@ func TestBuildExtraVars_AptUpgradeOmittedByDefault(t *testing.T) {
 // on.
 func TestBuildExtraVars_AptUpgradeEmittedOnRefresh(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", true)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, true)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -273,7 +275,7 @@ func TestBuildExtraVars_AptUpgradeEmittedOnRefresh(t *testing.T) {
 // if a caller passed aptUpgrade=true by mistake.
 func TestBuildExtraVars_AptUpgradeIgnoredOnFinalize(t *testing.T) {
 	cfg := fullConfig()
-	data, err := BuildExtraVars(cfg, "finalize", "myhost", true)
+	data, err := BuildExtraVars(cfg, "finalize", "myhost", profiles.TypeLocal, true)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -291,7 +293,7 @@ func TestBuildExtraVars_AptUpgradeIgnoredOnFinalize(t *testing.T) {
 func TestBuildExtraVars_TimezoneEmittedInEveryPhase(t *testing.T) {
 	for _, phase := range []string{"base", "finalize", "full"} {
 		t.Run(phase, func(t *testing.T) {
-			data, err := BuildExtraVars(fullConfig(), phase, "claude", false)
+			data, err := BuildExtraVars(fullConfig(), phase, "claude", profiles.TypeLocal, false)
 			if err != nil {
 				t.Fatalf("BuildExtraVars: %v", err)
 			}
@@ -308,7 +310,7 @@ func TestBuildExtraVars_TimezoneEmittedInEveryPhase(t *testing.T) {
 func TestBuildExtraVars_TimezoneOmittedWhenUnset(t *testing.T) {
 	cfg := fullConfig()
 	cfg.Timezone = ""
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -325,7 +327,7 @@ func TestBuildExtraVars_DefaultConfigDoesNotDetectHostTimezone(t *testing.T) {
 	t.Setenv("TZ", "Australia/Sydney")
 	cfg := vm.DefaultCreateConfig()
 	cfg.User = "andrew"
-	data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 	if err != nil {
 		t.Fatalf("BuildExtraVars: %v", err)
 	}
@@ -341,7 +343,7 @@ func TestBuildExtraVars_TimezoneRequiredTracksExplicitFlag(t *testing.T) {
 	for _, explicit := range []bool{true, false} {
 		cfg := fullConfig()
 		cfg.TimezoneExplicit = explicit
-		data, err := BuildExtraVars(cfg, "base", "sandbar-base", false)
+		data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
 		if err != nil {
 			t.Fatalf("BuildExtraVars: %v", err)
 		}
@@ -352,5 +354,49 @@ func TestBuildExtraVars_TimezoneRequiredTracksExplicitFlag(t *testing.T) {
 		if b, ok := v.(bool); !ok || b != explicit {
 			t.Errorf("base_timezone_required = %v (%T), want bool %v", v, v, explicit)
 		}
+	}
+}
+
+// TestBuildExtraVars_VMIdentityOnlyOutsideBase: the agent-context role writes
+// the VM's name and profile type into a reference file, because neither is
+// discoverable from inside the guest. They are per-VM facts, so the shared,
+// identity-free base must never receive them.
+func TestBuildExtraVars_VMIdentityOnlyOutsideBase(t *testing.T) {
+	cfg := fullConfig()
+	cfg.Hostname = "custom-host"
+	for _, phase := range []string{"finalize", "full"} {
+		data, err := BuildExtraVars(cfg, phase, cfg.EffectiveHostname(), profiles.TypeProxmox, false)
+		if err != nil {
+			t.Fatalf("BuildExtraVars(%s): %v", phase, err)
+		}
+		m := parseVars(t, data)
+		if m["sandbar_vm_name"] != "claude" {
+			t.Errorf("%s: sandbar_vm_name = %v, want the VM name, not its hostname", phase, m["sandbar_vm_name"])
+		}
+		if m["sandbar_profile_type"] != "proxmox" {
+			t.Errorf("%s: sandbar_profile_type = %v, want proxmox", phase, m["sandbar_profile_type"])
+		}
+	}
+
+	data, err := BuildExtraVars(cfg, "base", "sandbar-base", profiles.TypeLocal, false)
+	if err != nil {
+		t.Fatalf("BuildExtraVars(base): %v", err)
+	}
+	m := parseVars(t, data)
+	for _, k := range []string{"sandbar_vm_name", "sandbar_profile_type"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("base phase unexpectedly emitted %q", k)
+		}
+	}
+}
+
+// TestProvisionerProfileType: the Lima provisioner serves both the local and
+// the remote-ssh profile, and only its host handle tells them apart.
+func TestProvisionerProfileType(t *testing.T) {
+	if got := (&Provisioner{}).profileType(); got != profiles.TypeLocal {
+		t.Errorf("local provisioner = %q, want %q", got, profiles.TypeLocal)
+	}
+	if got := (&Provisioner{HostFiles: &lima.SSHHost{}}).profileType(); got != profiles.TypeRemoteSSH {
+		t.Errorf("remote provisioner = %q, want %q", got, profiles.TypeRemoteSSH)
 	}
 }
