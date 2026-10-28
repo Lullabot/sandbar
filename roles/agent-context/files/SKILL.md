@@ -1,6 +1,6 @@
 ---
 name: sandbar-environment
-description: Use when working in a Sandbar development VM and the task involves this VM's name or connection type; host-side `sand` commands the user runs on their workstation (shell, land, browser review, reset, resizing, upgrading sand); reaching a guest port or web server from the workstation; where secrets and tokens come from; tmux keys or the clipboard; or the preinstalled tools.
+description: Use when working in a Sandbar development VM and the task involves this VM's name or connection type; host-side `sand` commands the user runs on their workstation (shell, land, browser review, reset, resizing, upgrading sand); reaching a guest port or web server from the workstation; where secrets and tokens come from; tmux usage (prefix key, bindings, sessions) or the clipboard; or the preinstalled tools.
 ---
 
 <!-- Sandbar-managed environment skill -->
