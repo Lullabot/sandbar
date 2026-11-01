@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.1](https://github.com/Lullabot/sandbar/compare/v0.16.0...v0.16.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to 835ad00 ([#294](https://github.com/Lullabot/sandbar/issues/294)) ([5474b56](https://github.com/Lullabot/sandbar/commit/5474b569f370ac1bfd6765f86bb5fe54a26a9de0))
+* **deps:** update module charm.land/bubbletea/v2 to v2.1.1 ([#298](https://github.com/Lullabot/sandbar/issues/298)) ([3856498](https://github.com/Lullabot/sandbar/commit/3856498202aaf1690706a28a8e46f43463c7bd4e))
+
 ## [0.16.0](https://github.com/Lullabot/sandbar/compare/v0.15.0...v0.16.0) (2026-10-27)
 
 
