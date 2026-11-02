@@ -1631,8 +1631,9 @@ pass <code>--rebuild</code> to force the rebuild-then-create in one step:</p>
 It always rebuilds, regardless of the staleness check.</p>
 <h2 id="proxmox-provisioning-hangs-at-install-claude-code">Proxmox: provisioning hangs at "Install Claude Code"</h2>
 <p><strong>Symptom:</strong> on the Proxmox backend, provisioning a VM runs the playbook
-fine until the <code>claude-code : Install Claude Code using the official installer</code>
-task, where it hangs indefinitely with no output. On the guest, the
+fine until the <code>agent-install : Install Claude Code using the official installer</code>
+task, where it waits with no output until the installer's timeout
+(<code>agent_install_timeout</code>, 15 minutes by default) fails it. On the guest, the
 <code>claude … install</code> process sits pegged at ~100% CPU (state <code>R</code>) with no network
 sockets and making almost no syscalls.</p>
 <p>Current sand installs Claude Code during per-VM finalize; older versions
