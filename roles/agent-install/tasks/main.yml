@@ -1,0 +1,137 @@
+---
+# Install every selected coding agent at once.
+#
+# Each installer is a network download with no dependency on the others, and
+# run one after another they were most of a clone's finalize time. So this role
+# starts them all as async jobs, then waits on each in turn: the finalize costs
+# the slowest installer, not the sum of them.
+#
+# This role runs AFTER claude-code, codex, opencode and pi, which now write only
+# configuration. That ordering is load-bearing, for two reasons:
+#
+#   * Nothing Ansible manages may be edited while an installer runs. The roles'
+#     lineinfile/blockinfile tasks read-modify-write ~/.bashrc, and so can an
+#     installer (Codex's rewrites its PATH block through a temp file and mv);
+#     run concurrently, either can silently drop the other's lines.
+#   * Claude Code's settings are seeded create-only (force: false). The seed must
+#     land before `claude install` runs, or a file the installer creates first
+#     would make the seed skip, and the first launch would come up without
+#     bypass permissions.
+#
+# ~/.local/bin is put on each installer's PATH because the agent roles have
+# already added it to ~/.bashrc; an installer that finds it on PATH leaves the
+# shell profiles alone, which keeps the installers from racing each other on
+# ~/.bashrc as well.
+#
+# OpenCode and Pi share one npm process: both install into the same
+# --prefix, and two concurrent npm runs writing one prefix are not safe.
+- name: Get home directory for {{ user_name }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ user_name }}"
+
+- name: Set user home directory fact
+  ansible.builtin.set_fact:
+    user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
+    agent_install_path: "{{ ansible_facts.getent_passwd[user_name][4] }}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+    # Where the async jobs below record their status. Pinned so every launch and
+    # every wait agree on it; see the waits.
+    ansible_async_dir: "{{ ansible_facts.getent_passwd[user_name][4] }}/.ansible_async"
+    agent_install_npm_packages: >-
+      {{ ([agent_install_opencode_package] if (toolset_opencode | default(false) | bool) else [])
+         + ([agent_install_pi_package] if (toolset_pi | default(false) | bool) else []) }}
+
+# --- Start every selected installer. ---
+
+- name: Start the Claude Code installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash -s -- latest
+    executable: /bin/bash
+  become: true
+  become_user: "{{ user_name }}"
+  environment:
+    HOME: "{{ user_home }}"
+    PATH: "{{ agent_install_path }}"
+  async: "{{ agent_install_timeout }}"
+  poll: 0
+  register: agent_install_claude_job
+  when: toolset_claude | default(false) | bool
+
+- name: Start the OpenAI Codex installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -fsSL https://chatgpt.com/codex/install.sh | sh
+    executable: /bin/bash
+  become: true
+  become_user: "{{ user_name }}"
+  environment:
+    HOME: "{{ user_home }}"
+    PATH: "{{ agent_install_path }}"
+    CODEX_NON_INTERACTIVE: "true"
+  async: "{{ agent_install_timeout }}"
+  poll: 0
+  register: agent_install_codex_job
+  when: toolset_codex | default(false) | bool
+
+- name: Start the npm install for OpenCode and Pi
+  ansible.builtin.command:
+    argv: "{{ ['npm', 'install', '--global', '--prefix', user_home ~ '/.local'] + agent_install_npm_packages }}"
+  become: true
+  become_user: "{{ user_name }}"
+  environment:
+    HOME: "{{ user_home }}"
+    PATH: "{{ agent_install_path }}"
+  async: "{{ agent_install_timeout }}"
+  poll: 0
+  register: agent_install_npm_job
+  when: agent_install_npm_packages | length > 0
+
+# --- Wait for each. ---
+#
+# The waits keep the installers' own task names, so a failure still reads as
+# the agent whose install broke, and async_status reports that job's rc,
+# stdout and stderr. async_status must run as the same user as the job it
+# waits on, and look in the same status directory: that is ansible_async_dir,
+# set explicitly above rather than left to `~` expansion, which differs between
+# a launch run with HOME overridden and a wait run without it.
+
+- name: Install Claude Code using the official installer
+  ansible.builtin.async_status:
+    jid: "{{ agent_install_claude_job.ansible_job_id }}"
+  become: true
+  become_user: "{{ user_name }}"
+  register: agent_install_claude_result
+  until: agent_install_claude_result.finished
+  retries: "{{ agent_install_timeout }}"
+  delay: 1
+  when: toolset_claude | default(false) | bool
+
+- name: Install OpenAI Codex using the official installer
+  ansible.builtin.async_status:
+    jid: "{{ agent_install_codex_job.ansible_job_id }}"
+  become: true
+  become_user: "{{ user_name }}"
+  register: agent_install_codex_result
+  until: agent_install_codex_result.finished
+  retries: "{{ agent_install_timeout }}"
+  delay: 1
+  when: toolset_codex | default(false) | bool
+
+- name: Install the latest OpenCode and Pi releases
+  ansible.builtin.async_status:
+    jid: "{{ agent_install_npm_job.ansible_job_id }}"
+  become: true
+  become_user: "{{ user_name }}"
+  register: agent_install_npm_result
+  until: agent_install_npm_result.finished
+  retries: "{{ agent_install_timeout }}"
+  delay: 1
+  when: agent_install_npm_packages | length > 0
+
+# The one agent step that needs its binary: a VM whose user already opted in
+# to Codex remote control (a reset preserving agent state) gets its boot
+# service started again, which runs `codex`.
+- name: Restart the Codex boot service for existing opt-ins
+  ansible.builtin.include_role:
+    name: codex
+    tasks_from: boot-service.yml
+  when: toolset_codex | default(false) | bool

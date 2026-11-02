@@ -1,0 +1,13 @@
+---
+# Seconds each installer may run before its wait fails. Generous on purpose: a
+# cold npm cache over a slow link takes minutes. The bound is what turns a
+# wedged installer (see docs/reference/troubleshooting.md, the kvm64 Claude
+# Code livelock) into an error instead of a provision that never ends.
+agent_install_timeout: 900
+
+# npm packages for the agents distributed that way. OpenCode's is the official
+# package from https://opencode.ai/download. Pi moved to @earendil-works in May
+# 2026; the former @mariozechner package is deprecated and no longer receives
+# releases (settings remain under ~/.pi/agent).
+agent_install_opencode_package: "@opencode/cli@latest"
+agent_install_pi_package: "@earendil-works/pi-coding-agent@latest"

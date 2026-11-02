@@ -54,7 +54,7 @@ class AgentRolesTest(unittest.TestCase):
                     selections.extend({role} for role in AGENTS)
                 for selected in selections:
                     with self.subTest(phase=phase, selected=sorted(selected)):
-                        for role in (*AGENTS, "agent-context", "agent-cleanup", "agent-clipboard"):
+                        for role in (*AGENTS, "agent-install", "agent-context", "agent-cleanup", "agent-clipboard"):
                             (directory / role).unlink(missing_ok=True)
                         variables = {"provision_phase": phase, **{
                             "toolset_" + ("claude" if role == "claude-code" else role): role in selected
@@ -62,16 +62,15 @@ class AgentRolesTest(unittest.TestCase):
                         self.run_play(directory, play, variables)
                         for role in AGENTS:
                             self.assertEqual((directory / role).exists(), role in selected and phase != "base", role)
+                        self.assertEqual((directory / "agent-install").exists(), bool(selected) and phase != "base")
                         self.assertEqual((directory / "agent-context").exists(), bool(selected) and phase != "base")
                         self.assertEqual((directory / "agent-cleanup").exists(), phase == "base")
                         self.assertEqual((directory / "agent-clipboard").exists(), phase != "finalize")
 
     def test_opencode_uses_current_official_npm_package(self):
-        tasks = yaml.safe_load((ROOT / "roles" / "opencode" / "tasks" / "main.yml").read_text())
-        install = next(task for task in tasks if task["name"] == "Install the latest OpenCode release")
-        argv = install["ansible.builtin.command"]["argv"]
-        self.assertIn("@opencode/cli@latest", argv)
-        self.assertNotIn("opencode-ai@latest", argv)
+        defaults = yaml.safe_load((ROOT / "roles/agent-install/defaults/main.yml").read_text())
+        self.assertEqual(defaults["agent_install_opencode_package"], "@opencode/cli@latest")
+        self.assertEqual(defaults["agent_install_pi_package"], "@earendil-works/pi-coding-agent@latest")
 
     def test_claude_remote_control_onboarding(self):
         result = subprocess.run(
@@ -192,7 +191,7 @@ class AgentRolesTest(unittest.TestCase):
             self.assertEqual(shim("sand-wl-paste", "--type", "image/png"), b"png-image-bytes")
             self.assertEqual(shim("sand-wl-paste", "--type", "text/plain"), b"")
 
-    def test_preserved_settings_and_installer_refresh(self):
+    def test_preserved_settings_survive_reprovisioning(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             home = directory / "guest"
@@ -215,28 +214,102 @@ class AgentRolesTest(unittest.TestCase):
                 self.run_play(directory, play, variables)
                 self.assertEqual(target.read_text(), "preserved custom settings\n")
                 self.assertEqual(target.stat().st_mode & 0o777, 0o600)
-                # Execute the real installer shell against a fake download
-                # boundary. A restored binary must not suppress release fetching.
-                installers = [task for task in tasks if "ansible.builtin.shell" in task]
-                self.assertTrue(installers)
-                fake_bin = directory / "bin"
-                fake_bin.mkdir(exist_ok=True)
-                curl = fake_bin / "curl"
-                curl.write_text('#!/bin/sh\nprintf \'printf refreshed >> "$INSTALLER_TRACE"\\n\'\n')
-                curl.chmod(0o755)
-                binary = home / ".local/bin" / ("claude" if role == "claude-code" else role)
-                binary.parent.mkdir(parents=True, exist_ok=True)
-                binary.write_text("restored old binary")
-                trace = directory / (role + "-installer-trace")
-                for task in installers:
-                    task["become"] = False
-                    task.setdefault("environment", {}).update({
-                        "PATH": str(fake_bin) + os.pathsep + os.defpath,
-                        "INSTALLER_TRACE": str(trace),
-                    })
-                self.run_play(directory, [{"hosts": "all", "gather_facts": False,
-                                           "tasks": installers}], variables)
-                self.assertEqual(trace.read_text(), "refreshed")
+
+    def agent_install_play(self, directory, home, fake_bin, selected):
+        """The real agent-install tasks, run locally as the current user.
+
+        Only the user lookup (getent) and the Codex boot-service include are
+        dropped; the installer commands, async launches, waits and the npm
+        package selection are the production tasks verbatim.
+        """
+        role = ROOT / "roles/agent-install"
+        defaults = yaml.safe_load((role / "defaults/main.yml").read_text())
+        tasks = yaml.safe_load((role / "tasks/main.yml").read_text())
+        kept = []
+        for task in tasks:
+            if "ansible.builtin.getent" in task or "ansible.builtin.include_role" in task:
+                continue
+            if "ansible.builtin.set_fact" in task:
+                task["ansible.builtin.set_fact"]["user_home"] = str(home)
+                task["ansible.builtin.set_fact"]["agent_install_path"] = str(fake_bin) + os.pathsep + os.defpath
+                task["ansible.builtin.set_fact"]["ansible_async_dir"] = str(home / ".ansible_async")
+            task.pop("become", None)
+            task.pop("become_user", None)
+            kept.append(task)
+        variables = {**defaults, "user_name": getpass.getuser(), "agent_install_timeout": 30, **{
+            "toolset_" + ("claude" if role == "claude-code" else role): role in selected
+            for role in AGENTS}}
+        return [{"hosts": "all", "gather_facts": False, "tasks": kept}], variables
+
+    def fake_installers(self, directory, behaviour):
+        """curl and npm stand-ins that run `behaviour` (a shell fragment) as
+        agent $1 instead of downloading anything."""
+        fake_bin = directory / "bin"
+        fake_bin.mkdir()
+        (fake_bin / "agent-fake").write_text("#!/bin/sh\nagent=$1\n" + behaviour)
+        (fake_bin / "curl").write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *claude.ai*) a=claude ;;\n"
+            "  *chatgpt.com*) a=codex ;;\n"
+            "  *) exit 2 ;;\n"
+            "esac\n"
+            f"printf '%s\\n' 'exec {fake_bin}/agent-fake '\"$a\"\n")
+        (fake_bin / "npm").write_text(
+            f"#!/bin/sh\nprintf '%s\\n' \"$*\" > {directory}/npm-argv\nexec {fake_bin}/agent-fake npm\n")
+        for name in ("agent-fake", "curl", "npm"):
+            (fake_bin / name).chmod(0o755)
+        return fake_bin
+
+    def test_agent_installers_run_concurrently(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            home = directory / "guest"
+            home.mkdir()
+            # A barrier, not a timer: each installer records that it started,
+            # then waits for all three to have started. Run one at a time, the
+            # first would wait out its 10 seconds alone and exit non-zero.
+            fake_bin = self.fake_installers(directory, (
+                f"touch {directory}/started-$agent\n"
+                "i=0\n"
+                f"while [ ! -e {directory}/started-claude ] || [ ! -e {directory}/started-codex ] "
+                f"|| [ ! -e {directory}/started-npm ]; do\n"
+                "  i=$((i+1)); [ $i -le 100 ] || exit 3; sleep 0.1\n"
+                "done\n"
+                f"touch {directory}/done-$agent\n"))
+            # A restored binary must not suppress the release fetch.
+            binary = home / ".local/bin/claude"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("restored old binary")
+            play, variables = self.agent_install_play(directory, home, fake_bin, set(AGENTS))
+            self.run_play(directory, play, variables)
+            for agent in ("claude", "codex", "npm"):
+                self.assertTrue((directory / ("done-" + agent)).exists(), agent)
+            # OpenCode and Pi share ONE npm process: two writing one prefix race.
+            argv = (directory / "npm-argv").read_text().split()
+            self.assertEqual(argv[:4], ["install", "--global", "--prefix", str(home / ".local")])
+            self.assertEqual(argv[4:], ["@opencode/cli@latest", "@earendil-works/pi-coding-agent@latest"])
+
+    def test_agent_install_failure_names_the_agent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            home = directory / "guest"
+            home.mkdir()
+            fake_bin = self.fake_installers(directory, (
+                'if [ "$agent" = codex ]; then echo "codex download broke" >&2; exit 7; fi\n'))
+            play, variables = self.agent_install_play(directory, home, fake_bin, {"codex", "pi"})
+            path = directory / "site.yml"
+            path.write_text(yaml.safe_dump(play))
+            result = subprocess.run(
+                ["ansible-playbook", "-i", "localhost,", "-c", "local", str(path), "-e", json.dumps(variables)],
+                cwd=directory, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env={**os.environ, "ANSIBLE_NOCOLOR": "1"})
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            failed = result.stdout.split("TASK [Install OpenAI Codex using the official installer]")[1]
+            self.assertIn("codex download broke", failed.split("TASK [")[0])
+            # Only Pi was selected for npm, and only its package was requested.
+            self.assertEqual((directory / "npm-argv").read_text().split()[4:],
+                             ["@earendil-works/pi-coding-agent@latest"])
 
     def test_base_migration_removes_only_agent_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -77,15 +77,9 @@
     group: "{{ user_name }}"
     mode: "0600"
 
-- name: Install Claude Code using the official installer
-  ansible.builtin.shell:
-    cmd: set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash -s -- latest
-    executable: /bin/bash
-  become: true
-  become_user: "{{ user_name }}"
-  environment:
-    HOME: "{{ user_home }}"
-
+# The Claude Code binary itself is installed by roles/agent-install, which runs
+# after every agent role so the installers can run concurrently without racing
+# this role's edits to ~/.bashrc and the agent's own configuration.
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:
     path: "{{ user_home }}/.bashrc"

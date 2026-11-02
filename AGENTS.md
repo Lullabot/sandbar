@@ -865,6 +865,17 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   v2 base stamp. Saved all-off is a real preference. Existing VM records keep
   their Claude/Codex booleans (including false); missing OpenCode/Pi means off.
   Reset starts from those recorded VM choices, not global preferences.
+- **Agent installers run concurrently, in `roles/agent-install`, after every
+  agent role.** The four agent roles write configuration only; `agent-install`
+  starts each selected installer as an async job and waits on each under its
+  own task name. Keep it after the agent roles: an installer may rewrite
+  `~/.bashrc` (Codex's does) and must not race the roles' `lineinfile`/
+  `blockinfile`, and Claude Code's create-only settings must be seeded before
+  `claude install` runs. Installers get `~/.local/bin` on `PATH` so they leave
+  shell profiles alone. OpenCode and Pi share one `npm install` because two npm
+  runs into one prefix are unsafe. `ansible_async_dir` is pinned so launches
+  and waits agree on the status directory. `tests/agent_roles_test.py`'s
+  barrier test fails if the installers stop overlapping.
 - **Claude's notification terminal is detected on the workstation.**
   `BuildExtraVars` emits `claude_notification_channel` only for selected Claude
   installs in finalize/full. `terminal.go` recognizes iTerm2, Kitty and Ghostty,
