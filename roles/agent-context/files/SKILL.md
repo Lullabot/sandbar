@@ -12,7 +12,7 @@ for authorized guest system changes when needed. Keep the guest/workstation
 boundary in mind: guest paths and processes are not host paths or processes.
 
 - For this VM's name and connection profile type, read [this-vm.md](references/this-vm.md). Read it first whenever a later answer depends on either.
-- For `sand` commands the user runs on their workstation, and what `sand reset` deletes, read [host.md](references/host.md).
+- For `sand` actions the user runs on their workstation, in the TUI or the CLI, and what a reset deletes, read [host.md](references/host.md).
 - For opening a guest port or web server in the workstation's browser, read [ports.md](references/ports.md).
 - For where secrets and Git tokens come from, read [secrets.md](references/secrets.md).
 - For showing the user a diff in their browser, read [review.md](references/review.md).
