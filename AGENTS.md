@@ -311,7 +311,8 @@ Conventions:
 
 ## CI (`.github/workflows/test.yml`)
 
-Five jobs:
+Seven jobs (three of them VM-booting, run in parallel so the slowest sets
+the wall-clock time rather than their sum):
 
 - `lint` — Ansible syntax and isolated agent lifecycle checks
   (`PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -m unittest discover -s tests -p '*_test.py'`).
@@ -326,11 +327,16 @@ Five jobs:
 - `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
   QEMU+KVM on the hosted runner. First runs the isolated UI dropped-path
   upload/download test, checking contents on both receiving filesystems.
-  Also runs the `cmd/sand` `limae2e` tests
-  (headless create + `--recreate` gate) first, on max free disk. (It does not
-  run the fast Go suite — that's the `unit` job.) It checks all four agent
-  executables in a clone, their absence from the base, and remembered choices
-  in the next create.
+  (It does not run the fast Go suite — that's the `unit` job.) It checks all
+  four agent executables in a clone, their absence from the base, and
+  remembered choices in the next create.
+- `cmd-e2e` — the `cmd/sand` `limae2e` tests (headless create + `--recreate`
+  gate) on their own minimal base, in their own job beside `lima-e2e`.
+- `remote-lima-e2e` — the `internal/provider` real-ssh E2E suite against a
+  loopback second user, as two matrix legs: `template` runs
+  `TestE2ERemoteLimaTemplateRoundTrip`, `lifecycle` runs every other `TestE2E`
+  test (via `-skip`). A new VM-booting test there lands in `lifecycle` by
+  default; give it its own leg if it is slow and independent.
 - `mutation` — **advisory** gremlins mutation testing over the core packages
   (`provision`, `registry`, `vm`, `lima`; `ui` is out of the initial scope).
   Non-blocking (`continue-on-error`).
@@ -339,6 +345,10 @@ Five jobs:
   **Advisory** (`continue-on-error`) because
   `roles/samba`'s `smbpasswd` task is unconditionally `changed_when: true`, so
   its idempotence stage fails until the role itself is revisited (follow-up).
+
+The VM jobs cache the published base image (`~/.lima/_sand/images`) keyed on
+`internal/baseimage/manifest_generated.go`. `lima-e2e` and `cmd-e2e` save it;
+the remote legs only restore it and copy it into the second user's Lima home.
 
 **Triggers:** `pull_request` (including release PRs), `workflow_dispatch`, and
 a weekly `schedule`. Main pushes run release automation without repeating the
